@@ -1,4 +1,5 @@
 import { findSettledPaymentReceiptRow } from '../../infra/repositories/payment-intents.js'
+import { withParties } from '../../openapi/party-model.js'
 import {
   RECEIPT_VERSION,
   verifyPaymentReceipt,
@@ -31,6 +32,8 @@ export interface PaymentReceiptRow {
   confirmed_at: string | null
   resource_url: string | null
   amount_sek: string | null
+  /** #2960: `machine_metadata.delegate_account_address` — absent (undefined) on rows read by older callers, null for intents authorized before #2960. */
+  delegate_account_address?: string | null
 }
 
 /**
@@ -47,23 +50,37 @@ export interface PaymentReceiptRow {
  * recovers the signer from the STORED `authorization.signHash` — it never
  * recomputes a hash over `payment`, so an additive field here changes nothing
  * about what a signature covers.
+ *
+ * #2960: `payment.parties` is additive the same way — `verifyPaymentReceipt`
+ * reads only `receipt.authorization`, never `payment`, so this changes
+ * nothing about what is verified. `delegate_account` is `row.delegate_account_address`
+ * (`machine_metadata.delegate_account_address`, written at authorize on both
+ * delegation-rail legs) — null on rows authorized before #2960.
  */
 export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
   return {
     version: RECEIPT_VERSION,
     paymentId: row.id,
-    payment: {
-      token: row.token_symbol,
-      tokenAddress: row.token_address,
-      amount: row.amount_human,
-      amountSek: row.amount_sek,
-      recipient: row.to_address,
-      safe: row.account_address,
-      account: row.account_address,
-      chainId: row.chain_id,
-      settledAt: row.confirmed_at,
-      resourceUrl: row.resource_url,
-    } as PaymentReceipt['payment'],
+    payment: withParties(
+      {
+        token: row.token_symbol,
+        tokenAddress: row.token_address,
+        amount: row.amount_human,
+        amountSek: row.amount_sek,
+        recipient: row.to_address,
+        safe: row.account_address,
+        account: row.account_address,
+        chainId: row.chain_id,
+        settledAt: row.confirmed_at,
+        resourceUrl: row.resource_url,
+      },
+      {
+        account_address: row.account_address,
+        delegate_address: row.delegate_address,
+        delegate_account_address: row.delegate_account_address ?? null,
+        merchant_address: row.to_address,
+      },
+    ) as PaymentReceipt['payment'],
     authorization: {
       delegate: row.delegate_address,
       signHash: row.sign_hash,

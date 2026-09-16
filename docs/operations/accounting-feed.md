@@ -57,6 +57,32 @@ Design history: `docs/research/accounting-data-feed.md` and
 mechanism live on 2026-07-16). The owner decisions of 2026-09-11 are in the
 [decision log](../archive/decision-log.md).
 
+## Party identity (#2960)
+
+Every entry the feed builds (`AccountingEntry`, `modules/accounting/entry.ts`)
+carries two addresses, and they are not symmetric:
+
+- `counterparty.address` is the **merchant** (`payTo`) — this is what every
+  exporter (SIE, Fortnox voucher/supplier) books as the supplier, and it is
+  the only address that reached a downstream ledger before #2960.
+- `treasuryAccount` is **our own side** — `machine_payment_evidence.payer_address`,
+  which is written from `intent.account_address` at settlement
+  (`modules/mpp/evidence.ts`) and is `parties.treasury_account` on every
+  other #2960 surface (receipts, payment status, the payment-receipt
+  bundle). Before #2960 this feed selected `merchant_address` only and
+  never read or exposed which address was "our side" anywhere in code —
+  the field existed nowhere on `AccountingEntry`, `AccountingEntrySourceRow`
+  or `ENTRY_SOURCE_SQL`. It is additive: no exporter (SIE, Fortnox) reads it
+  today, because the merchant is what a supplier invoice needs — it is
+  recorded here so a future consumer, or a reconciliation reading this feed
+  directly, does not have to re-derive "which account paid" from the intent
+  table.
+
+`delegate` / `delegate_account` (the agent identity) are deliberately absent
+from `AccountingEntry`: a bookkeeping entry books the OWNER's account against
+the merchant, never the agent's signing key, and `machine_payment_evidence`
+does not carry the agent's delegate address (only `agent_id`).
+
 ## Configuration
 
 | Variable | Meaning | dev | prod |

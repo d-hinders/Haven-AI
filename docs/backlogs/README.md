@@ -6,7 +6,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .github/CODEOWNERS
-last-verified: "2026-09-08"
+last-verified: "2026-09-15"
 ---
 
 # Backlogs moved to GitHub Issues
@@ -72,6 +72,7 @@ The retired tracks all completed (or moved to issues):
 - `address-validation-dedup` — PR1 (#529) merged; the money-path PR2 is open as
   PR #530; remaining money-path follow-ups were moved to GitHub Issues.
 
-The human-curated code-quality cadence ledger still lives at
-[`.agents/skills/quality-scan/references/discovery-method.md`](../../.agents/skills/quality-scan/references/discovery-method.md) —
-that is a discovery/priority record, separate from the loop's runtime queue.
+The [code-quality discovery method](../../.agents/skills/quality-scan/references/discovery-method.md)
+describes how to inspect the repo. The [scan ledger](../quality/scan-ledger.md)
+records historical findings, candidates, and decisions; GitHub holds the
+implementation queue.

@@ -18,7 +18,7 @@ covers:
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-last-verified: "2026-09-07"
+last-verified: "2026-09-15"
 ---
 
 # Haven AI UX Review
@@ -74,7 +74,9 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
 - Toast and Tooltip are used through shared primitives, not one-off floating elements.
 - Amounts, addresses, percentages, counters, step numbers, and numeric metadata
   use `.v2-tabular`.
-- No new gradient buttons, glow shadows, dark app surfaces, or one-off card styles were introduced.
+- No new gradient buttons, glow shadows, one-off card styles, or hard-coded
+  light-only colors were introduced. Dark styling comes from the v2 token set
+  flipping under the active theme (#2927), not from one-off dark classes.
 - Dense app surfaces use compact headings and readable spacing, not marketing hero typography.
 - No first-paint, staggered, or page-level decorative entrance motion was added.
   Allowed animation declarations/classes are gated by
@@ -94,10 +96,10 @@ Run these checks when relevant:
 
 ```sh
 rg -i "policy engine|safe deployed|relayer|allowance module|session key|owner type|enroll signer|generate credentials|hand the credential|drop the credential|Haven gave.*private key|Haven (signs|settles|signed)" packages/frontend/src/app packages/frontend/src/components
-rg -n "bg-gradient-to-r from-indigo|from-indigo-500 to-violet-600|bg-gray-|text-gray-|dark:" packages/frontend/src/app packages/frontend/src/components
+rg -n "bg-gradient-to-r from-indigo|from-indigo-500 to-violet-600|bg-gray-|text-gray-|dark:(bg|text|border)" packages/frontend/src/app packages/frontend/src/components
 ```
 
-Any remaining matches should be deliberate technical disclosure, developer copy, tests, or legacy content outside the touched surface.
+Any remaining matches should be deliberate technical disclosure, developer copy, tests, or legacy content outside the touched surface. (The `dark:` pattern targets one-off Tailwind dark-variant classes; since #2927 dark mode flips the v2 token set instead, and the token values themselves live in `globals.css`, not in component classes.)
 
 ## Responsive And States
 

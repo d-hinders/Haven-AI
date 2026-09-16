@@ -24,6 +24,7 @@ import type {
 } from './core.js'
 import {
   fetchX402SignContext,
+  HavenSignContextError,
   type HavenIdentity,
   type FetchedSignContext,
 } from './sign-context.js'
@@ -370,9 +371,17 @@ export interface ToolFailure {
   /**
    * #1309: precise recovery guidance as DATA, not just prose inside `message`
    * — the same text the hosted quote's advisory `signer_compatibility.fallback`
-   * carries when the refusal is an out-of-date signer.
+   * carries when the refusal is an out-of-date signer. #3001 reuses this same
+   * field for every sign-context refusal (`'typed_data_b64'`).
    */
   fallback?: string
+  /**
+   * #3001: present on `SIGN_CONTEXT_REFUSED` — the HTTP status the backend
+   * answered the `/x402/:id/sign-context` fetch with (404, 410, …).
+   */
+  http_status?: number
+  /** #3001: the backend's own `error_code` on `SIGN_CONTEXT_REFUSED` (`expired`, `already_executed`, `not_signable`, `sign_context_unavailable`). */
+  backend_error_code?: string
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
@@ -718,6 +727,23 @@ function normalizeError(err: unknown): ToolFailure {
       received_version: err.receivedVersion,
       fallback: err.fallback,
       next_action: AgentPaymentNextAction.StopAndTellUser,
+    }
+  }
+  if (err instanceof HavenSignContextError) {
+    // #3001: every fetchX402SignContext refusal (timeout, unreachable, a
+    // non-ok backend response, a malformed body) — structured the same way as
+    // the version-mismatch refusal below, instead of the generic
+    // `{ code: 'SIGNING_ERROR' }` a plain HavenSigningError produces. Checked
+    // BEFORE the `HavenSigningError` branch below since this class extends it.
+    return {
+      success: false,
+      code: err.code,
+      message: err.message,
+      next_action: err.next_action,
+      ...(err.fallback !== undefined ? { fallback: err.fallback } : {}),
+      ...(err.retry_with_new_quote ? { retry_with_new_quote: true } : {}),
+      ...(err.http_status !== undefined ? { http_status: err.http_status } : {}),
+      ...(err.backend_error_code !== undefined ? { backend_error_code: err.backend_error_code } : {}),
     }
   }
   if (err instanceof HavenSigningError) {

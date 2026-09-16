@@ -5,15 +5,15 @@ covers:
   - .agents/skills/quality-scan/SKILL.md
   - .agents/skills/quality-scan/references/dimensions.md
   - scripts/test-support/guard-cli.mjs
-last-verified: "2026-09-08"
+last-verified: "2026-09-15"
 ---
 
 # Quality-Scan Ledger
 
 Append-only record of every [`quality-scan`](../../.agents/skills/quality-scan/SKILL.md)
-run: date, scope, findings, and each finding's **disposition** — `shipped`,
+run: date, scope, structural findings, improvement candidates, and their **disposition** — `shipped`,
 `accepted-as-debt`, or `rejected`, with the reason. The skill reads this
-BEFORE scanning and excludes prior findings unless it can cite evidence of
+BEFORE scanning and excludes prior findings and candidates unless it can cite evidence of
 material worsening against the numbers recorded here. Never rewrite an old
 entry; a changed disposition gets a new dated line under the finding.
 
@@ -26,19 +26,26 @@ entries predate them and stand as written):
   one lives with its kind there — there is no `scripts/quality/`). This is
   what makes the
   exclusion rule's delta check a one-command re-measurement.
-- **Probed clean:** every entry ends with a `Probed clean:` section —
-  `dimension → command → number` for each dimension probed without a
-  qualifying finding. These are the next run's diff baselines.
-- **Disposition upkeep:** when a scan-born epic closes, the closer appends
+- **Probed clean:** retain this heading as a coverage record. New entries
+  follow the skill's examined / partial / not examined format, naming the
+  revision, command/result, sample boundaries, and missing verification/reason.
+  No unexecuted check supplies a clean result. Prior entries retain their
+  historical format.
+- **Disposition upkeep:** when a scan-born epic closes or a standalone
+  scan-candidate task merges, the closer appends
   the dated disposition line in the same pass — `ship-next`'s closeout names
-  this in its ready-to-close report, so the update is owned by the process,
+  this in its closeout, so the update is owned by the process,
   not by memory.
 - **Wave-dimension coverage (#2501, binding for entries from 2026-09-03
-  on):** `Probed clean:` names each of the seven blocks in the skill's
+  on):** `Probed clean:` names each current numbered block in the skill's
   `references/dimensions.md` by number — `block N → command → number` —
   including a block whose number became a finding. A block missing from the
-  section means the run did not take it; a reader must never have to guess
-  whether "no finding" meant "looked" or "did not look".
+  section in an older entry means the run did not take it; new entries name
+  even unexamined blocks explicitly. Never infer “clean” from missing evidence.
+- **Candidate decisions (#3025):** apply the same exclusions to both output
+  levels. Append pending owner decisions, later dispositions and approved
+  issue links without rewriting runs. Implementation progress belongs in
+  GitHub, not a parallel ledger queue.
 
 ---
 
@@ -511,3 +518,127 @@ the report; refused under the bar as epics (one-PR remedies).
 - block 7 (chain health) → not taken this run.
 The run was scoped to the owner's four areas and the live path; a full-repo
 run should take the seven blocks from the 2026-09-03 baselines.
+
+
+## 2026-09-15 — full repo (all seven wave blocks taken)
+
+Measured on `origin/dev` @ `89fadec0` by three read-only workers in detached
+worktrees (review-isolation guard ACCEPTED on the mutation worktree); `rg` is a
+shim on this machine, so every command below is `grep`/`git grep`.
+
+**Finding 1 — re-surfaced with its delta: the request edge of the API contract
+is the one boundary with neither runtime nor test enforcement.** The 2026-08-14
+finding named request validation ("0 zod imports, 181 `code(400)` sites, 42
+`typeof` checks") and epic #1442 shipped the coverage gate, response-shape
+assertions, generated types, spec backfill and the wire-shape ratchet without
+taking it. Since then every axis the August entry recorded has moved the wrong
+way, and the response side gained a validator, so the asymmetry is new state:
+
+- route handlers → split `packages/backend/src/routes/*.ts` on
+  `app.(get|post|put|patch|delete)(` → **137**; with a Fastify `schema:`
+  option → **0**; with any `typeof` check → **33**; with neither → **104**
+- hand-rolled idioms in the route layer → `grep -c "typeof "` → **95** (was 42);
+  `grep -rn "code(400)"` → **178** sites in 23 files (was 181)
+- the spec → `wc -l` on the OpenAPI module → **9,042** (was 3,470); whole-spec
+  constraints (requests and responses; 101 of the `required` are the OpenAPI
+  `required: true` boolean) → `grep -c` **397** / **121** / **121** / **54**;
+  **request-side** (the 60 `requestBody` blocks plus the 16 component schemas
+  reachable from them by `$ref`, bracket-balanced walk) → `required: [...]`
+  **56**, `enum` **12**, `additionalProperties: false` **28**, `pattern` **20**;
+  parameters → `in: 'query'` **60**, `in: 'path'` **45**
+- request-body-vs-spec checks anywhere → `grep -rn requestBody packages/backend/src | grep -v` the spec module → **0**
+- response-vs-spec checks → `grep -rl expectMatchesSpec | grep -c '\.test\.ts'`
+  → **26** test files; all ajv wiring (`Ajv2020|addFormats|compile`) lives in
+  the response-shape module and points one way — and it closes every object
+  schema (`closeObjects`), so it cannot be reused for requests as-is
+
+Demonstrated cost since the August entry, from the issue record: #1464
+(malformed UUID path params → 500, not a documented 4xx), #1469 (a null hole
+in `accepts[]` crashed x402 option selection instead of refusing), #2245 (a
+caller-supplied `settlementScheme` diverted a retired-rail account off its
+fail-closed path), #2282 (a snake-case request field passed through unchecked).
+In code: the "… is a 400" ordering rule is hand-restated in **6** non-test
+source files plus the spec (`git grep -l "is a 400"`). The spec is already
+wrong on the money path: `X402AuthorizeRequest` is `additionalProperties:
+false` without `settlementScheme`, which the current SDK sends at three call
+sites. Unlock, proven in-repo
+twice: the hosted MCP validates every tool input with zod strict and has a
+transport-level refusal test (#2312); the backend already compiles ajv against
+the spec for responses. Fastify 5's `onRoute` + `setValidatorCompiler` take the
+same spec's `requestBody` schemas with no new dependency. Risk stated up front: the
+spec was largely backfilled (#1446) and describes what routes were believed to
+accept, so enforcement lands behind a shadow mode that logs would-be refusals
+against dev traffic and the QA harness before it refuses anything; money-path
+routes go second, not first.
+
+**Disposition: approved by the owner 2026-09-15 → epic #3028**. Drive with
+`ship-next epic=#3028`. Becomes `shipped` when the epic closes.
+
+**Finding 2 — three mock families describe one frontend API; the parity gate
+pins two.** `grep -l "vi.mock('@/lib/api"` over frontend unit tests → **34**
+files with ad-hoc inline literals typed `unknown`; of those importing the typed
+e2e fixture → **1**; the fixture → `wc -l` → **1,597**; symbols the parity gate
+pins → **12**; hand-written wire shapes still baselined → **6 files / 11
+shapes**. Cost: the parity gate's own header names the 2026-07-12 `/accounts`
+error-boundary incident it exists for, and it covers two of the three families
+by construction. **Disposition: `accepted-as-debt` (owner, 2026-09-15)** — a
+typed mock builder exported from the fixture plus the parity gate extended to
+it is one PR (filed as a `new-task`), and the naming epic's frontend slice
+(#2913) converts tests to the builder as it touches them; no campaign.
+
+**Refused under the bar:** error-code vocabulary spelled two ways (29 literals,
+11 SCREAMING / 18 lower_snake, the spec enumerates 6) — no cost evidence, bar 3;
+env-example drift gate scoped to one of nine packages (20 of 28 non-backend vars
+absent) — one PR; `@tanstack/react-query` mounted with 0 call sites — one PR;
+5,862 issue-number references in backend non-test source — the code twin of the
+CLAUDE.md pattern, reading cost only, bar 3; `design-lint` silently skipping a
+vanished scan directory where `copy-lint` throws — one PR.
+
+**Excluded this run:** #1219, #1442, #1554, #2720, #2806 (all `shipped`; #2806
+closed 2026-09-15) and the 2026-09-13 agent-surface findings (#2960 and
+#2970/#2972 landed since; the third pending). Finding 1 above is the request
+half of #1442's finding, re-surfaced on the delta recorded, not re-filed.
+
+**Probed clean** (block → command → number):
+
+- block 1 **guard falsifiability** → the block's candidate script → **18**
+  candidates (control 9); 5 mutations (two hosted-MCP scheme gates, the signer's
+  `instanceof HavenSignContextError` gate, the sign-context 410 re-quote gate,
+  the SDK's in-flight `getAgent` guard) → **5 caught, 0 survivors**; 2 backend
+  candidates `could not run` (no local Postgres); every file restored,
+  `git status --porcelain` empty.
+- block 2 **`covers:` completeness** → the block's bash loop → 8 contract docs,
+  **47** cited-but-not-covered; worst: the runtime-compatibility contract 17 of
+  27, the docs-quality system 15 of 20, the CASP guardrails 6 of 17; over-wide:
+  the delegation security model declares 31, cites 1; `npm run docs:covers-gaps`
+  → **146** pairs across 37 docs (was 154 / 40).
+- block 3 **stale numbers** → 25 newest shards → **5** figure-bearing lines,
+  **0** with a command; re-derivations: `any` **18 → 23**, db-mock gauge
+  **58/312/61 → 54/280/57**, zod in backend **0 → 0**, guard scripts
+  **44 → 49**, non-spawning self-tests **19 → 20**.
+- block 4 **retired vocabulary** → the block's term list → **192** files
+  (176), **46** historical / **146** live (39/137); positive control 31+ shards;
+  live hits are enforcement tests and drop migrations; the three x402 exports
+  each have one non-test importer; `npm run lint:retired-rail-prose` → green,
+  34 hits / 32 files, below baseline.
+- block 5 **merge-method drift** → first-parent since 2026-09-03T00:00:00Z at
+  `89fadec0` → **17** merge-commit / **251** squash; all 17 before
+  2026-09-07T12:00Z, **0** after the squash-only `dev` ruleset (22449193);
+  two rulesets target `dev` with different allowances, intersection squash.
+- block 6 **nets with holes** → copy lint **75** unscanned / **6** with hits
+  (all in comments or a regex literal); money-path perimeter **20 of 29** verb
+  files outside every glob (unchanged); visual gate **8 of 24** routes (was 4);
+  docs boundary, pinned → **39** (was 36; `.claude/` 22, `.agents/skills` 16);
+  `qa-freshness` exit branches unchanged; `design-lint` skip-vs-throw asymmetry
+  refused above.
+- block 7 **chain health** → `grep -rl "^verified:"` outside the archive → **0**
+  after #2775; archive **586,040** bytes.
+- incident clustering → `search/issues.total_count` since 2026-08-19 → **718**
+  (sample 400): other 207, stale-doc 63, process 33; no open product-logic
+  cluster.
+- workflow archaeology → `gh run list --workflow ci.yml --limit 200` → **4**
+  re-attempted, **19** failures, **6** head SHAs with >1 run; **63** merged-PR
+  comments mention flake or rerun since 2026-08-19.
+- sizing → backend **69,517** source / **83,443** test lines; largest
+  non-generated file is the OpenAPI module at **9,042**; largest route file
+  1,379.

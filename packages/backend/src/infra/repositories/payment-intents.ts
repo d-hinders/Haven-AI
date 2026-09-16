@@ -656,7 +656,7 @@ export const FAIL_MACHINE_INTENT_SQL = `UPDATE payment_intents
 // ── Status projection (lib/agent-payment-status.ts) ──────────────────────────
 
 export const FIND_INTENT_STATUS_ROW_SQL = `SELECT pi.id, pi.chain_id, pi.token_symbol, pi.token_address, pi.amount_human, pi.amount_raw,
-            pi.status, pi.tx_hash, pi.expires_at, pi.delegate_address, pi.confirmed_at,
+            pi.status, pi.tx_hash, pi.expires_at, pi.delegate_address, pi.account_address, pi.confirmed_at, pi.created_at,
             pi.source, pi.payment_rail, pi.payment_resource_url, pi.x402_resource_url,
             pi.merchant_address, pi.x402_merchant_address, pi.x402_idempotency_key,
             pi.machine_challenge_id, pi.machine_idempotency_key, pi.machine_metadata,
@@ -684,6 +684,8 @@ export interface PaymentIntentStatusRow {
   tx_hash: string | null
   expires_at: string
   delegate_address: string
+  /** #2960: `parties.treasury_account` — the smart account the funds left. */
+  account_address: string
   source: string | null
   payment_rail: string | null
   payment_resource_url: string | null
@@ -696,6 +698,8 @@ export interface PaymentIntentStatusRow {
   machine_metadata: unknown
   /** When the funding leg confirmed on-chain; null before confirmation. */
   confirmed_at: string | null
+  /** #2970: authorize time — the origin of an erc7710 intent's settlement window. */
+  created_at: string
   /** True when an open merchant_retry_rejected_after_payment reconciliation event exists. */
   funded_but_unsettled: boolean
   /**
@@ -723,9 +727,13 @@ export async function findIntentStatusRow(
 
 // ── Receipt assembly (lib/receipt.ts) ────────────────────────────────────────
 
+// #2960: `delegate_account_address` is `pi.machine_metadata->>'delegate_account_address'`,
+// written at authorize on both delegation-rail legs — null on rows
+// authorized before #2960 and on the legacy rail.
 export const FIND_SETTLED_PAYMENT_RECEIPT_SQL = `SELECT pi.id, pi.account_address, pi.chain_id, pi.token_symbol, pi.token_address,
             pi.to_address, pi.amount_human, pi.delegate_address, pi.sign_hash,
             pi.signature, pi.tx_hash, pi.confirmed_at,
+            pi.machine_metadata->>'delegate_account_address' AS delegate_account_address,
             mpe.resource_url AS resource_url,
             mpe.amount_sek AS amount_sek
      FROM payment_intents pi
@@ -747,6 +755,8 @@ export interface PaymentReceiptRow {
   confirmed_at: string | null
   resource_url: string | null
   amount_sek: string | null
+  /** #2960: from `machine_metadata`; null on rows authorized before #2960. */
+  delegate_account_address: string | null
 }
 
 export async function findSettledPaymentReceiptRow(

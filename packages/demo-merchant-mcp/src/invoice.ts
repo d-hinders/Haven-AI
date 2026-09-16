@@ -1,6 +1,6 @@
 import type { MerchantLocale, ProductId } from './products.js'
 import { PRODUCTS, formatUsdc } from './products.js'
-import type { SettledPayment } from './x402.js'
+import type { SettledPayment, SettlementState } from './x402.js'
 
 // #1550: the invoice DOCUMENT (`InvoiceJson` + its Swedish text render) is a
 // Swedish bookkeeping artifact by design — it feeds the `x-receipt-json`
@@ -21,16 +21,28 @@ const MERCHANT = {
   crypto_address: process.env.MERCHANT_ADDRESS ?? '0x0000000000000000000000000000000000000000',
 }
 
-// Invoice counter seeded from Unix timestamp (seconds) at startup so restarts
-// don't produce the same sequence and collide with earlier invoices.
-// For production, persist this counter in a database.
-let invoiceSeq = Math.floor(Date.now() / 1000)
-
-function nextInvoiceNumber(): string {
-  invoiceSeq++
-  const year = new Date().getFullYear()
-  return `FAK-${year}-${String(invoiceSeq).padStart(5, '0')}`
+/**
+ * Invoice numbering. The demo merchant has no store, so the counter is
+ * seeded from the clock at startup and incremented per invoice. #2988: the
+ * seed is MILLISECONDS — a seconds seed collided after a restart whenever
+ * more invoices had been issued than seconds had elapsed since the previous
+ * start (a 100-invoice QA run, then a redeploy 30 s later, re-issued 70
+ * existing numbers — and, via `generateOcr`, 70 existing OCRs). A
+ * millisecond seed needs more than 1 000 invoices per second before a
+ * restart to collide. A persisted counter is still deliberately not used:
+ * this merchant is a demo with no database, and the accounting feed keys on
+ * the payment id, not on this number.
+ */
+export function createInvoiceNumberer(seedMs: number = Date.now()): () => string {
+  let invoiceSeq = seedMs
+  return () => {
+    invoiceSeq++
+    const year = new Date().getFullYear()
+    return `FAK-${year}-${invoiceSeq}`
+  }
 }
+
+const nextInvoiceNumber = createInvoiceNumberer()
 
 /** Luhn-based check digit for Swedish OCR. */
 function luhnCheck(digits: string): number {
@@ -61,10 +73,23 @@ export interface InvoiceParams {
   invoiceNumber: string
   productId: ProductId
   buyerAddress: string
+  /**
+   * #2960: which party `buyerAddress` actually is. The merchant only ever
+   * observes the address it verified the payment FROM — the delegate EOA on
+   * `eip3009`, the delegate SMART account (`delegator`) on `erc7710` — never
+   * the owner's treasury account, which is not knowable merchant-side (it
+   * never appears in the x402 payload on either scheme). This is what
+   * carries that distinction onto the invoice instead of an unqualified
+   * "buyer".
+   */
+  payerRole: 'agent_delegate' | 'agent_delegate_account'
   /** EIP-3009 authorization nonce (hex bytes32) */
   authorizationNonce: string
-  /** Tx hash if settled, otherwise undefined */
-  txHash?: string
+  /** The wire hash — rendered only when `settlement === 'settled_onchain'`
+   *  (the zero hash on the two non-settled states, never printed). */
+  txHash: string
+  /** #2969: explicit settlement truth — see `SettlementState`. */
+  settlement: SettlementState
 }
 
 export interface Invoice {
@@ -83,6 +108,13 @@ export interface InvoiceJson {
   kopare: {
     identifierare: string
     typ: 'blockkedjeadress'
+    /**
+     * #2960, additive — which party `identifierare` is (see
+     * `InvoiceParams.payerRole`). Never read by `buildInvoiceText` (the
+     * Swedish render stays byte-for-byte per #1550); the English render
+     * uses it to avoid calling a delegate address "the buyer".
+     */
+    roll: 'agent_delegate' | 'agent_delegate_account'
   }
   rader: InvoiceRow[]
   belopp_exkl_moms: string
@@ -91,8 +123,17 @@ export interface InvoiceJson {
   totalt_inkl_moms: string
   valuta: 'USDC'
   betalningssatt: 'Kryptovaluta (USDC på Base)'
-  blockkedje_referens: string
-  status: 'Betald'
+  /**
+   * #2969: `null` on both non-settled states — never the zero hash. Only
+   * `settlement === 'settled_onchain'` carries a real transaction reference.
+   */
+  blockkedje_referens: string | null
+  /**
+   * #2969: 'Betald' only for `settlement === 'settled_onchain'`. The other
+   * two `SettlementState`s each get their own honest status — 'already
+   * settled earlier, no reference' is distinct from 'delivered, unconfirmed'.
+   */
+  status: 'Betald' | 'Betald i tidigare transaktion — referens saknas' | 'Levererad — ej bekräftad på kedjan'
 }
 
 interface InvoiceRow {
@@ -102,6 +143,12 @@ interface InvoiceRow {
   moms_procent: number
   moms_belopp: string
   totalt_inkl_moms: string
+}
+
+const STATUS_BY_SETTLEMENT: Record<SettlementState, InvoiceJson['status']> = {
+  settled_onchain: 'Betald',
+  already_settled_earlier: 'Betald i tidigare transaktion — referens saknas',
+  settlement_unknown: 'Levererad — ej bekräftad på kedjan',
 }
 
 export function generateInvoice(params: InvoiceParams): Invoice {
@@ -116,9 +163,11 @@ export function generateInvoice(params: InvoiceParams): Invoice {
   const exklMoms = (totalInclMoms * 100n) / 125n
   const momsBelopp = totalInclMoms - exklMoms
 
-  const blockRef = params.txHash
-    ? `Tx: ${params.txHash}`
-    : `EIP-3009 nonce: ${params.authorizationNonce}`
+  // #2969: only a REAL on-chain settlement gets a reference. Both non-settled
+  // states get `null` — never the zero hash, and never a fallback nonce
+  // dressed up as a reference for a transaction that may not exist at all
+  // (`already_settled_earlier` names no hash this process observed).
+  const blockRef = params.settlement === 'settled_onchain' ? `Tx: ${params.txHash}` : null
 
   const ocr = generateOcr(params.invoiceNumber)
 
@@ -142,6 +191,7 @@ export function generateInvoice(params: InvoiceParams): Invoice {
     kopare: {
       identifierare: params.buyerAddress,
       typ: 'blockkedjeadress',
+      roll: params.payerRole,
     },
     rader: [row],
     belopp_exkl_moms: formatUsdc(exklMoms),
@@ -151,12 +201,25 @@ export function generateInvoice(params: InvoiceParams): Invoice {
     valuta: 'USDC',
     betalningssatt: 'Kryptovaluta (USDC på Base)',
     blockkedje_referens: blockRef,
-    status: 'Betald',
+    status: STATUS_BY_SETTLEMENT[params.settlement],
   }
 
   const text = buildInvoiceText(json, product.name)
 
   return { json, text }
+}
+
+/**
+ * #2969: the blockchain reference section is present only when there is a
+ * real one to show (`settlement === 'settled_onchain'`). Printing the zero
+ * hash for the other two states was the bug this issue exists to fix — the
+ * fix is to say nothing rather than print a fake reference, so the section
+ * (heading + value + trailing blank line) is omitted entirely when
+ * `blockkedje_referens` is `null`.
+ */
+function blockchainReferenceSection(inv: InvoiceJson, heading: string): string {
+  if (inv.blockkedje_referens === null) return ''
+  return `${heading}\n  ${inv.blockkedje_referens}\n\n`
 }
 
 function buildInvoiceText(inv: InvoiceJson, productName: string): string {
@@ -197,10 +260,7 @@ TJÄNSTER
   Betalningssätt:   ${inv.betalningssatt}
   Mottagaradress:   ${inv.saljare.crypto_address}
 
-BLOCKKEDJEREFERENS
-  ${inv.blockkedje_referens}
-
-  Status: ${inv.status}
+${blockchainReferenceSection(inv, 'BLOCKKEDJEREFERENS')}  Status: ${inv.status}
 
 ════════════════════════════════════════════════════════════
   Tack för ditt köp av ${productName}!
@@ -223,6 +283,12 @@ export function renderInvoiceText(
   return locale === 'sv' ? buildInvoiceText(inv, productName) : buildInvoiceTextEn(inv, productName)
 }
 
+const STATUS_EN: Record<InvoiceJson['status'], string> = {
+  Betald: 'Paid',
+  'Betald i tidigare transaktion — referens saknas': 'Paid in an earlier transaction — reference unavailable',
+  'Levererad — ej bekräftad på kedjan': 'Delivered — not confirmed on-chain',
+}
+
 function buildInvoiceTextEn(inv: InvoiceJson, productName: string): string {
   const row = inv.rader[0]
   return `
@@ -236,8 +302,9 @@ SELLER
   Org. no:      ${inv.saljare.org_nr}
   VAT reg. no:  ${inv.saljare.moms_nr}
 
-BUYER
+PAYER
   Blockchain address: ${inv.kopare.identifierare}
+  Role: ${inv.kopare.roll === 'agent_delegate_account' ? 'agent delegate account (erc7710 delegator) — paid on behalf of an owner treasury account not visible to this merchant' : 'agent delegate address (eip3009)'}
 
 ────────────────────────────────────────────────────────────
   Invoice number:  ${inv.fakturanummer}
@@ -261,10 +328,7 @@ SERVICES
   Payment method:    Cryptocurrency (USDC on Base)
   Recipient address: ${inv.saljare.crypto_address}
 
-BLOCKCHAIN REFERENCE
-  ${inv.blockkedje_referens}
-
-  Status: Paid
+${blockchainReferenceSection(inv, 'BLOCKCHAIN REFERENCE')}  Status: ${STATUS_EN[inv.status]}
 
 ════════════════════════════════════════════════════════════
   Thank you for purchasing ${productName}!
@@ -291,8 +355,13 @@ export function invoiceForPayment(payment: SettledPayment, productId: ProductId)
     invoiceNumber: nextInvoiceNumber(),
     productId,
     buyerAddress: payment.from,
+    // #2960: `payment.from` is the delegate EOA on `eip3009` and the
+    // delegate SMART account (`delegator`) on `erc7710` — see
+    // `verifyEip3009Payment`/`verifyErc7710Payment` in `x402.ts`.
+    payerRole: payment.settlementMethod === 'erc7710' ? 'agent_delegate_account' : 'agent_delegate',
     authorizationNonce: payment.nonce,
     txHash: payment.txHash,
+    settlement: payment.settlement,
   })
   invoicesByPayment.set(payment, invoice)
   return invoice

@@ -1,26 +1,26 @@
 ---
 name: quality-scan
-description: Repeatable structural code-quality scan — sweeps the repo for the one or two biggest structural weaknesses, reports them with measured evidence, and stops for a human decision. Never implements, never files on its own; approved findings hand off to new-task.
+description: Repeatable code-quality scan — reports up to two structural findings and up to five bounded improvement candidates, with measured evidence and explicit coverage limits, then stops for a human decision. Never implements, never files on its own; approved findings hand off to new-task.
 ---
 
 # Quality Scan
 
-Sweep the codebase for its **one or two biggest structural weaknesses**, report
-them with hard evidence, and stop. This skill exists to make an occasional,
+Sweep the codebase and report **Structural findings** (zero to two) and
+**Improvement candidates** (zero to five), with hard evidence and coverage
+limits, then stop. Neither section is a quota. This skill exists to make an occasional,
 high-altitude scan repeatable — same method every run, and a ledger that
 remembers what earlier runs found and what was decided, so standards escalate
 instead of resetting to whoever happens to run it.
 
 It does **not** implement anything, and it does **not** file issues on its own.
-On explicit approval of a finding, append the disposition to the ledger and
-hand off to [new-task](../new-task/SKILL.md) to create the epic and its slices —
-following its **Epics** section, which is what gets the `epic` label and the
-sub-issue links right. A finding filed without those is a tracking issue nothing
-can query and `ship-next` cannot pull from.
+On explicit approval, append the decision to the ledger and hand off to
+[new-task](../new-task/SKILL.md): one-PR candidates become standalone tasks;
+multi-PR structural work follows its **Epics** section for tracking and slices.
+Approval to file is not approval to implement or ship.
 
 ## References
 
-- [`references/dimensions.md`](references/dimensions.md) — the seven wave
+- [`references/dimensions.md`](references/dimensions.md) — the numbered wave
   dimensions a run probes, numbered. `Probed clean:` cites these by number.
 - [`references/discovery-method.md`](references/discovery-method.md) — the
   code-quality discovery method: how to run a pass, the discovery prompts, the
@@ -37,11 +37,12 @@ that surface, judged by the same bar.
 ## The ledger (read it FIRST)
 
 `docs/quality/scan-ledger.md` records every run: date, scope, findings, and
-each finding's **disposition** — `shipped`, `accepted-as-debt`, or `rejected`,
+each finding or candidate's **disposition** — `shipped`, `accepted-as-debt`, or `rejected`,
 with the reason. Before scanning:
 
-1. Read the ledger and collect every prior finding and its disposition.
-2. **Exclude prior findings from this run's report** — including
+1. Read the ledger and collect every prior finding and candidate, including
+   pending decisions, and each disposition.
+2. **Exclude prior findings and candidates from both output levels** — including
    `accepted-as-debt` ones. A conscious decision to live with something is a
    decision; re-surfacing it un-changed is nagging, not scanning.
 3. The one exception: evidence that a prior finding has **materially
@@ -49,8 +50,19 @@ with the reason. Before scanning:
    cite the delta against the ledger's recorded numbers ("was 1,059 positional
    mocks at 2026-07; now 1,730").
 
-After a run, append the new entry (date, scope, findings, dispositions once
-decided). The ledger is committed history — never rewrite old entries.
+After a run, append the new entry (date, revision, scope, both output levels,
+coverage, and dispositions once decided). Mark undecided items pending owner
+decision. Append later decisions and issue links; never maintain task progress
+or build-order queues here. GitHub owns implementation tracking. The ledger is committed history — never rewrite old entries.
+
+**The ledger is read back as prior art, not only by the next scan.**
+[new-task](../new-task/SKILL.md) sweeps it — and `docs/bug-reports/` — before
+filing, because a finding recorded here carries no issue number and no GitHub
+search can see it. Until someone files it, this entry is the only record that
+the defect is known; a reader who rediscovers it live will otherwise file a
+sibling. So name the surface precisely enough to be matched on: the file or
+tool at fault, not just the theme. (#2968 duplicated the 2026-09-13 scan's F2
+30 hours after it was recorded.)
 
 Two conventions make an entry re-measurable by a future run (the ledger header
 also records a third — disposition upkeep — owned by
@@ -67,23 +79,22 @@ also records a third — disposition upkeep — owned by
   first (`scripts/ci/*`, `scripts/docs/*`, a ratchet); a new script only when
   none exists, and then it lives with its kind under `scripts/ci/` or
   `scripts/docs/` — there is no `scripts/quality/`.
-- **Probed clean.** Every entry ends with a `Probed clean:` section —
-  `dimension → command → number` for each dimension probed that produced no
-  qualifying finding. These are the baselines the next run diffs against, and
-  together they map which dimensions are exhausted (where the next run should
-  dig deeper rather than re-probe from zero). The 2026-08-18 entry did this
-  informally; it is required from now on.
-- **Wave-dimension coverage (#2501).** `Probed clean:` names every block in
-  [`references/dimensions.md`](references/dimensions.md) by its number, each as
-  `block N → command → number`, including the blocks whose number was a
-  finding elsewhere in the entry. A block absent from the section means the
-  run did not take it, and the next reader must be able to tell that from
-  "took it and found nothing" — the distinction the 600-issue wave's
-  instruments kept collapsing (a green gate that had looked at nothing).
+- **Coverage record.** Keep the `Probed clean:` heading for continuity, but
+  treat it as a coverage record, not a blanket clean verdict. For each dimension
+  use `dimension → examined / partial / not examined → revision, command and
+  result → sample boundaries → missing verification and reason`. Do not invent
+  a zero for an unexecuted check. `examined` means the declared sample was
+  actually inspected; it never means the whole repository was proven clean.
+- **Wave-dimension coverage (#2501).** Name every current numbered block in
+  [the dimensions reference](references/dimensions.md), including blocks that
+  produced a finding or candidate. Record other probes in the same format.
+  Partial and unexamined areas remain visible in the final report. In
+  particular, “no new structural finding” says nothing about the candidate
+  section or an unexecuted mutation sample.
 
-## The bar (the core of the skill — say no to small things)
+## Structural findings — the existing strict bar
 
-A finding qualifies **only if all five hold**:
+A structural finding qualifies **only if all five hold**:
 
 1. **Structural, not a defect list.** It names a pattern; "N instances of a
    bug" is triage, not a finding.
@@ -97,10 +108,32 @@ A finding qualifies **only if all five hold**:
 5. **Splittable** into parallelisable, disjoint slices a partner can pick up
    cold.
 
-**Refuse and do not report:** lint-level nits, cosmetic refactors, dependency
-bumps, "add tests here" without a structural thesis, and anything whose remedy
-is one PR — that is a `new-task`, not an epic. State the refusals only if the
-scan would otherwise be empty, so the emptiness is explained.
+One-PR remedies do not qualify as structural findings; evaluate them under
+**Improvement candidates** instead.
+
+## Improvement candidates — bounded, evidence-backed opportunities
+
+Report at most five concrete opportunities. For each, state:
+
+- **Opportunity and evidence:** the affected surface, a named revision, and
+  reproducible commands/results or the existing instrument. Evidence must
+  demonstrate a failure mechanism or measurable contributor burden. A past
+  incident is not mandatory. Label any untested hypothesis and distinguish
+  it from what was observed; speculation alone does not qualify.
+- **Expected benefit:** the specific risk or contributor cost the change
+  reduces, not just how it would make the code look.
+- **Approximate scope:** likely files/boundaries and whether it fits one PR
+  or needs multiple PRs; do not manufacture an epic for a small improvement.
+- **Verification still needed:** the focused test, mutation, comparison or
+  review that would establish the benefit and preserve existing behavior.
+
+For both levels, exclude cosmetic preferences, lint-only nits, speculative
+abstractions, dependency bumps alone and generic “add tests” suggestions.
+An empty section is valid; do not pad it. Briefly explain refusals only when
+both sections are empty. Check existing GitHub tracking and local prior art
+(the ledger and bug reports, per new-task) before calling an opportunity new;
+link already-tracked work as context rather than presenting it as a new item.
+If tracking cannot be checked, disclose that limit and mark novelty unverified.
 
 ## Method
 
@@ -116,7 +149,7 @@ scan would otherwise be empty, so the emptiness is explained.
    archaeology** — rerun frequency per CI check, rerun/flake mentions in
    commits and PR comments, checks that pass only on retry. Runtime-UX stays
    out of scope: that class surfaces through external testing (epic #1585's
-   origin), not repo scanning. Then take the seven **wave dimensions** — the
+   origin), not repo scanning. Then take the numbered **wave dimensions** — the
    classes the 600-issue wave was measured to consist of — each as its
    numbered block in [`references/dimensions.md`](references/dimensions.md),
    which states the command, the sample and what clean looks like, so the
@@ -144,15 +177,19 @@ scan would otherwise be empty, so the emptiness is explained.
    repeated warning comments are where a codebase names its own recurring
    pain. A warning copy-pasted across files is a structural finding announcing
    itself.
-5. Filter every candidate through the bar. Discard the rest silently.
-6. Report the **top 1–2** findings: evidence tables, the demonstrated cost,
-   and a proposed slicing into disjoint sub-issues.
-7. **Stop.** Wait for the human decision. On approval: append the ledger
-   entry, then hand off to [new-task](../new-task/SKILL.md) § *Epics* for the
-   tracking issue and its slices — and end the handoff by stating the exact
-   drive command (`ship-next epic=#<n>`). An approved epic is not in any
-   queue by itself: the 2026-08-14 finding's slices sat approved but
-   undrivable until someone noticed (the ledger records this).
+5. Evaluate opportunities against the appropriate output level; preserve
+   the ledger exclusions for both. Check tracking before presenting new work.
+6. Report **Structural findings** (up to two): evidence, demonstrated cost,
+   and disjoint proposed slices. Report **Improvement candidates** (up to
+   five) using the fields above. Include the coverage record and qualify
+   conclusions to the sample actually examined.
+7. Append the run to the ledger, then **stop for the human decision**. On
+   explicit approval to file, append the decision and hand off to
+   [new-task](../new-task/SKILL.md), preserving its filing checks and backlog
+   default. Do not file an unverified defect as though it were reproduced.
+   Use a standalone task for one-PR work and **Epics** for multi-PR work.
+   Return the issue link and the appropriate drive command (`ship-next <n>`
+   or `ship-next epic=#<n>`); providing the command does not execute it.
 
 ## Worked example (the run that motivated this skill)
 
@@ -175,6 +212,34 @@ The scan that produced the real-DB testing epic, as the reference shape:
 
 That is the altitude: one pattern, four kinds of evidence, a cost the repo had
 already documented about itself, and a slicing a partner could execute cold.
+
+## Output examples
+
+These are hypothetical teaching examples, not findings about this repository.
+A real report must replace the fixture revision and results with its own evidence.
+
+- **Preventive one-PR candidate:** in a fixture at revision `example-A`,
+  `git grep -n 'retryDelay' example-A -- fixture/` identifies two independent
+  retry-delay implementations; reading both shows the same formula. A
+  comparison test at that revision agrees on ordinary and boundary inputs.
+  No outage is known. The observed burden is that one delay-policy change
+  requires editing and reviewing both implementations. Candidate: extract the
+  shared pure calculation, keeping caller-specific retry decisions local.
+  Scope: the two callers and a helper, one PR. Benefit: eliminate the second
+  policy edit. Verification still needed: run both callers' characterization
+  tests with the extraction and check that their differing stop conditions
+  remain unchanged. This qualifies on observed contributor burden; it does
+  not claim an unobserved production defect.
+- **Rejected cosmetic suggestion:** “rename the helper because the new name
+  reads better.” No failure mechanism or contributor burden is demonstrated;
+  it belongs in neither output level.
+- **Partial scan:** “Structural findings: none in the examined sample.
+  Improvement candidates: none established. Block 1 → partial → revision
+  `example-B`, the reference's candidate-census command identified tests →
+  latest first-parent money-path sample → mutation execution missing because
+  Vitest was unavailable.” Do not substitute “zero surviving mutations” or
+  describe the money path as clean. Other dimensions still need their own
+  examined/partial/not-examined rows.
 
 ## Cadence
 

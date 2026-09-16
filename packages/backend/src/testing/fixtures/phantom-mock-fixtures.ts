@@ -136,3 +136,11 @@ vi.mock("../../infra/chain/relayer-reads.js", () => ({
   executeAllowanceTransfer: vi.fn(),
 }))
 `
+
+/** #2997 (scan B10): the `vi.doMock` shape — invisible to the guard before. */
+export const DO_MOCK_WITH_PHANTOM = `
+vi.doMock('../../infra/chain/relayer-reads.js', () => ({
+  getProvider: vi.fn(),
+  executeAllowanceTransfer: vi.fn(),
+}))
+`

@@ -166,7 +166,7 @@ describe('runDoctor (#1589)', () => {
     expect(check?.detail).toContain('npx')
   })
 
-  it('unauthorized hosted probe: names the fresh-token recovery', async () => {
+  it('hosted MCP endpoint failure names URL/configuration recovery without claiming an auth verdict', async () => {
     const { homeDir } = await healthyHome()
     const report = await runDoctor({ runtime: 'codex-cli' }, {
       homeDir,
@@ -175,7 +175,56 @@ describe('runDoctor (#1589)', () => {
     })
     const check = report.checks.find((c) => c.id === 'hosted_mcp')
     expect(check?.ok).toBe(false)
-    expect(check?.repair).toContain('--setup <token>')
+    expect(check?.detail).toContain('MCP tools endpoint probe failed')
+    expect(check?.repair).toContain('hosted MCP URL')
+    expect(check?.repair).not.toContain('--setup <token>')
+  })
+
+  it('outdated-but-intact runtime (#2963): signer_runtime reports version drift naming both versions, not "stale or empty"', async () => {
+    // The install is complete — CLI present, both packages installed at a
+    // version that matches the sidecar — it is merely older than the
+    // connector's pin. Before #2963 intactness was checked against the
+    // MANIFEST, so this exact state was reported as "stale or empty" while
+    // the next check started the very same CLI and listed its tools.
+    const { homeDir, dir } = await healthyHome()
+    const oldVersion = '0.0.0-dev.202609040858.f4467bb'
+    const oldRuntimeDirectory = join(homeDir, '.haven', 'signer-runtime', oldVersion)
+    const oldCliPath = join(oldRuntimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist', 'cli.js')
+    await mkdir(join(oldRuntimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist'), { recursive: true })
+    await writeFile(oldCliPath, '// cli (older, intact)')
+    for (const pkg of ['signer', 'sdk']) {
+      const pkgDir = join(oldRuntimeDirectory, 'node_modules', '@haven_ai', pkg)
+      await mkdir(pkgDir, { recursive: true })
+      await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ version: oldVersion }))
+    }
+    const sidecarPath = join(dir, 'signer-runtime.json')
+    const sidecar = JSON.parse(await readFile(sidecarPath, 'utf8')) as Record<string, unknown>
+    await writeFile(sidecarPath, JSON.stringify({
+      ...sidecar,
+      signer_version: oldVersion,
+      sdk_version: oldVersion,
+      runtime_directory: oldRuntimeDirectory,
+      cli_path: oldCliPath,
+    }))
+    expect(oldVersion).not.toBe(MCP_RUNTIME_MANIFEST.signerVersion) // the drift is real
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'signer_runtime')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).not.toMatch(/stale or empty/i)
+    expect(check?.detail).toContain(oldVersion)
+    expect(check?.detail).toContain(MCP_RUNTIME_MANIFEST.signerVersion)
+    expect(check?.detail).toMatch(/does not match the connector's pinned/)
+    expect(check?.repair).toContain('--repair')
+  })
+
+  it('half-installed runtime (#2963): a sidecar-recorded version whose package is missing is still "stale or empty"', async () => {
+    const { homeDir, runtimeDirectory } = await healthyHome()
+    await rm(join(runtimeDirectory, 'node_modules', '@haven_ai', 'sdk'), { recursive: true, force: true })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'signer_runtime')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toMatch(/stale or empty/i)
   })
 
   it('emptied runtime dir: signer_runtime fails as stale/empty with the repair action', async () => {
@@ -308,10 +357,14 @@ describe('superseded agent credentials (#1688)', () => {
     return { homeDir, oldDir }
   }
 
-  function depsWithOldKeyProbing(oldStatus: 'ok' | 'unauthorized' | 'network_error') {
+  function depsWithOldKeyProbing(oldStatus: 'ok' | 'unauthorized' | 'network_error' | 'bad_response') {
     const deps = healthyDeps()
-    deps.probeHosted.mockImplementation(async (apiKey: string) =>
-      apiKey === OLD_KEY ? { status: oldStatus } : { status: 'ok' },
+    deps.probeHostedIdentity.mockImplementation(async (apiKey: string) =>
+      apiKey === OLD_KEY
+        ? oldStatus === 'ok'
+          ? { status: 'ok', agentId: 'agent-old', delegateAddress: DELEGATE_ADDRESS }
+          : { status: oldStatus }
+        : { status: 'ok', agentId: 'agent-1', delegateAddress: DELEGATE_ADDRESS },
     )
     return deps
   }
@@ -349,6 +402,17 @@ describe('superseded agent credentials (#1688)', () => {
     expect(check?.ok).toBe(true)
     expect(check?.detail).toContain('could not verify')
     expect(check?.detail).not.toMatch(/SPEND-CAPABLE/)
+  })
+
+  it('a malformed authenticated identity response is unverifiable, never a revocation verdict', async () => {
+    const { homeDir } = await homeWithSuperseded()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsWithOldKeyProbing('bad_response') })
+
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain('could not verify')
+    expect(check?.detail).toContain('bad_response')
+    expect(check?.detail).not.toMatch(/SPEND-CAPABLE|already revoked/)
   })
 
   it('the old cosmetic "N dirs found; examining the newest" note is gone — subsumed by the check', async () => {
@@ -389,9 +453,9 @@ describe('superseded agent credentials (#1688)', () => {
 
     const deps = healthyDeps()
     const probedKeys: string[] = []
-    deps.probeHosted.mockImplementation(async (apiKey: string) => {
+    deps.probeHostedIdentity.mockImplementation(async (apiKey: string) => {
       probedKeys.push(apiKey)
-      return { status: 'ok' as const }
+      return { status: 'ok' as const, agentId: 'agent-sibling', delegateAddress: DELEGATE_ADDRESS }
     })
 
     const report = await runDoctor(
@@ -401,7 +465,9 @@ describe('superseded agent credentials (#1688)', () => {
 
     const check = report.checks.find((c) => c.id === 'superseded_agents')
     expect(check?.detail).toContain('agent-sibling')
-    // The default root's OLD key must never have been probed.
+    // The custom-root sibling is checked, while the default root's OLD key is
+    // not even considered.
+    expect(probedKeys).toContain('sk_agent_sibsecret')
     expect(probedKeys).not.toContain(OLD_KEY)
     expect(check?.detail).not.toContain('agent-old')
   })
@@ -1139,8 +1205,10 @@ describe('an abandoned parked key elsewhere reaches the exit code (#1911, review
   /** Healthy deps, except the other directory's key reads as already revoked. */
   function depsWithRevokedOther() {
     const deps = healthyDeps()
-    deps.probeHosted = vi.fn(async (apiKey: string) => (
-      apiKey === OTHER_KEY ? { status: 'unauthorized' as const } : { status: 'ok' as const }
+    deps.probeHostedIdentity = vi.fn(async (apiKey: string) => (
+      apiKey === OTHER_KEY
+        ? { status: 'unauthorized' as const }
+        : { status: 'ok' as const, agentId: 'agent-1', delegateAddress: DELEGATE_ADDRESS }
     ))
     return deps
   }

@@ -4,6 +4,7 @@ import {
   AgentPaymentNextAction,
   HavenClient,
   MerchantTimeoutError,
+  encodeBase64Json,
   type AgentNextStep,
 } from '@haven_ai/sdk'
 import { createToolHandlers, toolDescriptions, type ToolSuccess, type ToolPayload } from './tools.js'
@@ -13,6 +14,7 @@ import {
   PAYMENT_REQUIRED,
   X402_INTENT_RESPONSE,
   clearCalls,
+  fail,
   handlers,
   installSharedFixtureLifecycle,
   mintPaymentHeaders,
@@ -374,6 +376,13 @@ describe('haven_pay_mcp_tool', () => {
     expect(payload.message).toMatch(/may still settle late/)
     expect(payload.message).toMatch(/haven_get_payment_status/)
     expect(payload.suggested_tool).toBe('haven_get_payment_status')
+    // #3011 review: this is the eip3009 side of the #3000 scheme split — the
+    // sweep guidance must STAY here (funds sit on the delegate). Forcing the
+    // erc7710 branch onto this path must go red.
+    expect(payload.message).toMatch(/sweep only if no settlement appears/)
+    expect(payload.message).not.toMatch(/ignore this code's sweep guidance/)
+    expect(payload.next_action).toBe(AgentPaymentNextAction.SweepStrandedFunds)
+    expect(payload.rail).toBe('x402')
   })
 
   it('haven_complete_mcp_tool fails with a typed sweep hint when the merchant rejects after funding', async () => {
@@ -1523,8 +1532,15 @@ describe('hosted erc7710 (#1456)', () => {
    * pending_signature, after_settle_refused=submitted.
    *
    * So this pins the REAL response, not a convenient one.
+   *
+   * #2970: the merchant here reports NO settlement transaction (`settlementTxHash:
+   * undefined`), same as the original #1508 fixture — that omission used to read
+   * as `settled: true` anyway (the merchant's bare HTTP 200 was the whole
+   * signal). It is now `delivered_unsettled`: the merchant leg still ran and the
+   * agent gets its result, but Haven has no verified settlement evidence for a
+   * payment nobody reported a hash for.
    */
-  it('#1508: settles even though the payment read 409s on the submitted intent', async () => {
+  it('#1508: the merchant leg still runs even though the payment read 409s on the submitted intent', async () => {
     stubFetch({
       'POST /x402/pay_7710/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
       // What the backend actually returns once settle has flipped the intent:
@@ -1567,14 +1583,458 @@ describe('hosted erc7710 (#1456)', () => {
       }),
     ) as { data: Record<string, any> }
 
-    expect(res.data.settled).toBe(true)
+    // #2970: no settlement hash was ever reported, so this is delivered but
+    // unverified — NOT settled. See the doc comment above.
+    expect(res.data.settled).toBe(false)
+    expect(res.data.code).toBe('DELIVERED_UNSETTLED')
+    expect(res.data.delivered).toBe(true)
     expect(res.data.settlement_scheme).toBe('erc7710')
+    expect(res.data.next_action).toBe('check_status_later')
+    expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
     expect(fundingSpy).not.toHaveBeenCalled()
     // The merchant leg still ran — the whole point of settling.
     expect(spy.mock.calls[0][0].paymentHeader).toBe('HEADER_FROM_HAVEN')
   })
+
+  // #2970: the hosted settlement gate — settled means Haven verified it.
+  describe('settlement gate (#2970)', () => {
+    function stubSettle() {
+      stubFetch({
+        'POST /x402/pay_7710/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+        'GET /payments/pay_7710': { status: 200, body: { payment_id: 'pay_7710', status: 'submitted' } },
+      })
+    }
+
+    it('a backend-confirmed settlement hash IS settled: true', async () => {
+      stubSettle()
+      const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+      vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+        status: 200,
+        ok: true,
+        body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } },
+        settlementTxHash: '0x' + 'ab'.repeat(32),
+        evidenceOutcome: { outcome: 'confirmed' },
+      })
+      vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+        allowance: null,
+        warnings: [],
+        payment: { status: 'settled' },
+      } as never)
+
+      const res = ok(
+        await createToolHandlers(haven).haven_settle_mcp_tool({
+          payment_id: 'pay_7710',
+          signature: SIG7710,
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+        }),
+      ) as { data: Record<string, any> }
+
+      expect(res.data.settled).toBe(true)
+      expect(res.data.code).toBeUndefined()
+      expect(res.data.next_action).toBe('none')
+    })
+
+    it('a ZERO settlement hash is delivered_unsettled WITHOUT waiting on a backend verdict', async () => {
+      stubSettle()
+      const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+      const spy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+        status: 200,
+        ok: true,
+        body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } },
+        settlementTxHash: `0x${'0'.repeat(64)}`,
+        // No evidenceOutcome — a zero hash is never reported to the backend
+        // in the first place (`completeX402MerchantCall` skips it).
+        evidenceOutcome: undefined,
+      })
+      vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+        allowance: null,
+        warnings: [],
+        payment: { status: 'submitted' },
+      } as never)
+
+      const res = ok(
+        await createToolHandlers(haven).haven_settle_mcp_tool({
+          payment_id: 'pay_7710',
+          signature: SIG7710,
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+        }),
+      ) as { data: Record<string, any> }
+
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(res.data.settled).toBe(false)
+      expect(res.data.code).toBe('DELIVERED_UNSETTLED')
+      expect(res.data.delivered).toBe(true)
+      expect(res.data.retryable).toBeUndefined()
+      expect(res.data.next_action).toBe('check_status_later')
+      // #2970 review: agent_summary.status is the BACKEND status, not a
+      // restatement of the gate's own label — that stays in `code`.
+      expect(res.data.agent_summary.status).toBe('submitted')
+      expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+      expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
+    })
+
+    it('a retryable backend refusal (RPC unreachable / not yet mined) is settlement_pending, retryable', async () => {
+      stubSettle()
+      const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+      vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+        status: 200,
+        ok: true,
+        body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } },
+        settlementTxHash: '0x' + 'ab'.repeat(32),
+        evidenceOutcome: { outcome: 'retryable', statusCode: 503 },
+      })
+      vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+        allowance: null,
+        warnings: [],
+        payment: { status: 'submitted' },
+      } as never)
+
+      const res = ok(
+        await createToolHandlers(haven).haven_settle_mcp_tool({
+          payment_id: 'pay_7710',
+          signature: SIG7710,
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+        }),
+      ) as { data: Record<string, any> }
+
+      expect(res.data.settled).toBe(false)
+      expect(res.data.code).toBe('SETTLEMENT_PENDING')
+      expect(res.data.retryable).toBe(true)
+      expect(res.data.agent_summary.status).toBe('submitted')
+      expect(res.data.next_action).toBe('check_status_later')
+      // #2972: the agent holds the merchant's real hash here, so next_tool is
+      // the evidence-report tool with that hash — not a bare status poll.
+      expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
+      expect(res.data.next_arguments).toEqual({
+        payment_id: 'pay_7710',
+        settlement_tx_hash: '0x' + 'ab'.repeat(32),
+      })
+    })
+
+    it('a terminal backend refusal (mismatch/reverted) is delivered_unsettled, not settlement_pending', async () => {
+      stubSettle()
+      const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+      vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+        status: 200,
+        ok: true,
+        body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } },
+        settlementTxHash: '0x' + 'ab'.repeat(32),
+        evidenceOutcome: { outcome: 'refused', statusCode: 409 },
+      })
+      vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+        allowance: null,
+        warnings: [],
+        payment: { status: 'submitted' },
+      } as never)
+
+      const res = ok(
+        await createToolHandlers(haven).haven_settle_mcp_tool({
+          payment_id: 'pay_7710',
+          signature: SIG7710,
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+        }),
+      ) as { data: Record<string, any> }
+
+      expect(res.data.settled).toBe(false)
+      expect(res.data.code).toBe('DELIVERED_UNSETTLED')
+      expect(res.data.retryable).toBeUndefined()
+      expect(res.data.agent_summary.status).toBe('submitted')
+      // #2972: a refused hash is not re-reported by next_tool — the status
+      // poll stays; the report tool is named in prose for a hash the agent
+      // may still obtain.
+      expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+      expect(res.data.reason).toContain('haven_report_settlement_evidence')
+    })
+  })
+
+  // #2970 review finding 3: the gate above is fully exercised only against
+  // MOCKED `completeX402MerchantCall` results — nothing runs the real SDK
+  // path (`completeX402MerchantCall` → `MerchantCompletion.reportEvidence`)
+  // through to the gate's verdict. These three drive that real path with a
+  // stubbed `fetch`, varying only what the backend's evidence endpoint
+  // answers.
+  describe('the real SDK evidence-report path drives the gate (#2970 review)', () => {
+    const SETTLEMENT_TX = '0x' + 'cd'.repeat(32)
+
+    function stubRealSettle(evidenceRoute: { status: number; body?: unknown }) {
+      stubFetch({
+        'POST /x402/pay_7710/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+        // resolveCompletionContext's readiness gate (noFundingLeg): kind
+        // payment_intent, status submitted, rail x402 — the real erc7710
+        // end state, not a transient one. Static for the whole call: the
+        // getPostPurchaseAllowanceSummary read after settle reuses this same
+        // route, so agent_summary.status reads 'submitted' in every branch
+        // here — the fixture cannot simulate the backend flipping the intent
+        // to 'confirmed' mid-call without a stateful mock, which this test
+        // does not need to make its point.
+        'GET /machine-payments/pay_7710/status': {
+          status: 200,
+          body: { payment_id: 'pay_7710', kind: 'payment_intent', status: 'submitted', rail: 'x402' },
+        },
+        // The merchant call itself: a real PAYMENT-RESPONSE header carrying
+        // the settlement tx, the way a real erc7710 merchant answers.
+        'POST /mcp': {
+          status: 200,
+          body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } },
+          responseHeaders: {
+            'PAYMENT-RESPONSE': encodeBase64Json({ transaction: SETTLEMENT_TX }),
+          },
+        },
+        // What MerchantCompletion.reportEvidence's POST actually sees.
+        'POST /machine-payments/evidence': evidenceRoute,
+      })
+    }
+
+    it('backend 202 (confirmed) settles: the real evidence report resolves settled: true', async () => {
+      stubRealSettle({ status: 202, body: {} })
+      const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+      const res = ok(
+        await createToolHandlers(haven).haven_settle_mcp_tool({
+          payment_id: 'pay_7710',
+          signature: SIG7710,
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+        }),
+      ) as { data: Record<string, any> }
+
+      expect(res.data.settled).toBe(true)
+      expect(res.data.code).toBeUndefined()
+      expect(res.data.settlement_tx_hash).toBe(SETTLEMENT_TX)
+    })
+
+    it('backend 409 (settlement_unverified) is DELIVERED_UNSETTLED', async () => {
+      stubRealSettle({ status: 409, body: { error: 'settlement_unverified' } })
+      const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+      const res = ok(
+        await createToolHandlers(haven).haven_settle_mcp_tool({
+          payment_id: 'pay_7710',
+          signature: SIG7710,
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+        }),
+      ) as { data: Record<string, any> }
+
+      expect(res.data.settled).toBe(false)
+      expect(res.data.code).toBe('DELIVERED_UNSETTLED')
+      expect(res.data.delivered).toBe(true)
+    })
+
+    it(
+      'backend 503 (settlement_unobservable, exhausted retries) is SETTLEMENT_PENDING',
+      async () => {
+        stubRealSettle({ status: 503, body: { error: 'settlement_unobservable' } })
+        const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+        const res = ok(
+          await createToolHandlers(haven).haven_settle_mcp_tool({
+            payment_id: 'pay_7710',
+            signature: SIG7710,
+            merchant_url: 'http://merchant.test/mcp',
+            tool_name: 'create_text',
+            arguments: { prompt: 'Hello' },
+          }),
+        ) as { data: Record<string, any> }
+
+        expect(res.data.settled).toBe(false)
+        expect(res.data.code).toBe('SETTLEMENT_PENDING')
+        expect(res.data.retryable).toBe(true)
+      },
+      // reportEvidence retries a 503 three times with real 1s/2s/4s backoff
+      // before giving up — this exercises that real timing, not a fake-timer
+      // stand-in, so it needs real wall-clock headroom.
+      15_000,
+    )
+  })
 })
 
+// #2972: the hosted haven_report_settlement_evidence tool — the remedy for
+// DELIVERED_UNSETTLED / SETTLEMENT_PENDING / awaiting_settlement_evidence
+// when the agent holds the merchant's real settlement hash. Same #2970
+// three-outcome contract, driven against the REAL SDK evidence-report path
+// (HavenClient.reportSettlementEvidence -> MerchantCompletion.reportEvidence)
+// with a stubbed fetch, the same pattern as "the real SDK evidence-report
+// path drives the gate" above.
+describe('hosted haven_report_settlement_evidence (#2972)', () => {
+  const SETTLEMENT_TX = '0x' + 'cd'.repeat(32)
+  const ZERO_TX = '0x' + '0'.repeat(64)
+
+  function stubReport(
+    evidenceRoute: { status: number; body?: unknown },
+    statusRoute?: { status: number; body?: unknown },
+  ) {
+    stubFetch({
+      'POST /machine-payments/evidence': evidenceRoute,
+      // #2973 review: on a refusal the tool READS the payment's status for the
+      // summary rather than asserting `submitted`.
+      'GET /machine-payments/pay_7710/status': statusRoute ?? {
+        status: 200,
+        body: { payment_id: 'pay_7710', kind: 'payment_intent', status: 'submitted', rail: 'x402' },
+      },
+    })
+  }
+
+  it('backend 202 (confirmed): settled: true, next_action none', async () => {
+    stubReport({ status: 202, body: {} })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+    const res = ok(
+      await createToolHandlers(haven).haven_report_settlement_evidence({
+        payment_id: 'pay_7710',
+        settlement_tx_hash: SETTLEMENT_TX,
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.settled).toBe(true)
+    expect(res.data.settlement_tx_hash).toBe(SETTLEMENT_TX)
+    expect(res.data.code).toBeUndefined()
+    expect(res.data.next_action).toBe('none')
+  })
+
+  it('backend 409 (settlement_unverified): DELIVERED_UNSETTLED, not retryable', async () => {
+    stubReport({ status: 409, body: { error: 'settlement_unverified' } })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+    const res = ok(
+      await createToolHandlers(haven).haven_report_settlement_evidence({
+        payment_id: 'pay_7710',
+        settlement_tx_hash: SETTLEMENT_TX,
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.settled).toBe(false)
+    expect(res.data.code).toBe('DELIVERED_UNSETTLED')
+    expect(res.data.retryable).toBeUndefined()
+    expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
+    expect(res.data.agent_summary.status).toBe('submitted')
+  })
+
+  it('a 409 on an already-confirmed intent (different hash) reports the status Haven holds, not "submitted"', async () => {
+    stubReport(
+      { status: 409, body: { error: 'settlement_unverified' } },
+      {
+        status: 200,
+        body: { payment_id: 'pay_7710', kind: 'payment_intent', status: 'confirmed', rail: 'x402' },
+      },
+    )
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+    const res = ok(
+      await createToolHandlers(haven).haven_report_settlement_evidence({
+        payment_id: 'pay_7710',
+        settlement_tx_hash: SETTLEMENT_TX,
+      }),
+    ) as { data: Record<string, any> }
+
+    expect(res.data.code).toBe('DELIVERED_UNSETTLED')
+    expect(res.data.agent_summary.status).toBe('confirmed')
+  })
+
+  it(
+    'backend 503 (settlement_unobservable, exhausted retries): SETTLEMENT_PENDING, retryable',
+    async () => {
+      stubReport({ status: 503, body: { error: 'settlement_unobservable' } })
+      const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+      const res = ok(
+        await createToolHandlers(haven).haven_report_settlement_evidence({
+          payment_id: 'pay_7710',
+          settlement_tx_hash: SETTLEMENT_TX,
+        }),
+      ) as { data: Record<string, any> }
+
+      expect(res.data.settled).toBe(false)
+      expect(res.data.code).toBe('SETTLEMENT_PENDING')
+      expect(res.data.retryable).toBe(true)
+    },
+    // reportEvidence retries a 503 three times with real 1s/2s/4s backoff
+    // before giving up — real wall-clock headroom, same as the settle-gate
+    // 503 test above.
+    15_000,
+  )
+
+  it('a foreign payment_id (backend 404, not this agent\'s payment) is a refusal, never a write', async () => {
+    // findIntentForEvidenceScoped is WHERE agent_id = $ — a payment this agent
+    // does not own resolves to null, and attachEvidenceHandler answers 404
+    // ("Payment not found") without writing anything. That is the ENTIRE
+    // enforcement: this tool carries no separate ownership check of its own.
+    stubFetch({
+      'POST /machine-payments/evidence': { status: 404, body: { error: 'Payment not found' } },
+      // The status read is scoped the same way — the same 404.
+      'GET /machine-payments/pay_not_mine/status': { status: 404, body: { error: 'Payment not found' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+    const res = ok(
+      await createToolHandlers(haven).haven_report_settlement_evidence({
+        payment_id: 'pay_not_mine',
+        settlement_tx_hash: SETTLEMENT_TX,
+      }),
+    ) as { data: Record<string, any> }
+
+    // A refusal, mapped through the same generic 'refused' branch as a 409 —
+    // never treated as confirmed, never retried indefinitely.
+    expect(res.data.settled).toBe(false)
+    expect(res.data.code).toBe('DELIVERED_UNSETTLED')
+    // The status read after the refusal 404s for the same reason (not this
+    // agent's payment) — reported as `unknown`, never invented.
+    expect(res.data.agent_summary.status).toBe('unknown')
+    // The one real WRITE attempt was the evidence report itself, which the
+    // backend refused with 404 — "never a write" means no SUCCESSFUL write,
+    // not "no attempt": the attempt is exactly what proves the backend (not
+    // this tool) is the enforcement boundary. The second call is the GET
+    // status read for the summary.
+    const posts = recordedCalls().filter((c) => c.method === 'POST')
+    expect(posts).toHaveLength(1)
+    expect(posts[0].url).toContain('/machine-payments/evidence')
+    expect(recordedCalls()).toHaveLength(2)
+  })
+
+  it('a zero settlement hash is refused at the boundary and never reaches the network', async () => {
+    stubReport({ status: 202, body: {} })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+    const failure = fail(
+      await createToolHandlers(haven).haven_report_settlement_evidence({
+        payment_id: 'pay_7710',
+        settlement_tx_hash: ZERO_TX,
+      }),
+    )
+
+    expect(failure.code).toBe('ZERO_SETTLEMENT_HASH')
+    // The load-bearing assertion: a zero hash never becomes an HTTP request,
+    // let alone one that could be mistaken for a real report.
+    expect(recordedCalls()).toEqual([])
+  })
+
+  it('an undeclared key is refused before the handler runs (strict input)', async () => {
+    stubReport({ status: 202, body: {} })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+
+    const failure = fail(
+      await createToolHandlers(haven).haven_report_settlement_evidence({
+        payment_id: 'pay_7710',
+        settlement_tx_hash: SETTLEMENT_TX,
+        rail: 'x402',
+      } as never),
+    )
+
+    expect(failure.message).toContain('rail')
+    expect(recordedCalls()).toEqual([])
+  })
+})
 
 describe('runtime-neutral tool naming (#1588)', () => {
   it('every tool description that spells mcp__… also carries the runtime-naming hedge', async () => {

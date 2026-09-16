@@ -25,6 +25,7 @@ import {
   AgentPaymentPhase,
   HavenApiError,
   HavenClient,
+  MerchantTimeoutError,
 } from '@haven_ai/sdk'
 import { createToolHandlers } from '../tools.js'
 import {
@@ -40,6 +41,7 @@ import {
   ok,
   recordedCalls,
   stubFetch,
+  keylessClient,
   VALID_PAYMENT_HEADER_REF,
   type RouteDefinition,
 } from '../test-support/hosted-mcp.js'
@@ -247,7 +249,7 @@ describe('haven_settle_mcp_tool', () => {
     expect(completeSpy).not.toHaveBeenCalled()
   })
 
-  it('fails with MERCHANT_REJECTED_AFTER_FUNDING when the merchant rejects post-funding', async () => {
+  it('fails with MERCHANT_REJECTED_AFTER_FUNDING when the merchant rejects post-funding — eip3009 KEEPS sweep guidance', async () => {
     stubFetch({
       'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
     })
@@ -268,7 +270,270 @@ describe('haven_settle_mcp_tool', () => {
 
     if (payload.success) throw new Error('expected a failure payload')
     expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
+    // eip3009 funded the delegate BEFORE this refusal — the delegate wallet
+    // genuinely may hold stranded funds, so the sweep guidance stays.
     expect(payload.suggested_tool).toBe('haven_sweep_delegate')
+    expect(payload.message).toMatch(/stranded funds/)
+  })
+
+  /**
+   * #2983 (follow-up from #2979's review): on erc7710 there is NO funding
+   * leg — the signature IS the settlement child (#1456), delivered straight
+   * to `POST /x402/:id/settle`. A merchant refusal at this point means
+   * NOTHING moved: no delegate balance was ever created, so there is nothing
+   * to strand and nothing to sweep. The eip3009 test above pins the case
+   * where the sweep guidance is TRUE; this one pins the case where it is not.
+   */
+  it('fails with MERCHANT_REJECTED_AFTER_FUNDING when the merchant rejects an erc7710 settle — NO sweep guidance, honest message', async () => {
+    const SIG7710 = '0x' + '33'.repeat(65)
+    stubFetch({
+      'POST /x402/pay_7710_reject/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 503,
+      ok: false,
+      body: { error: 'merchant_not_ready', reason_code: 'fail_floor_reached', retry_after_s: 45 },
+    })
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_7710_reject',
+      signature: SIG7710,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
+    // No stranded-funds claim and no sweep suggestion — nothing moved.
+    expect(payload.suggested_tool).toBeUndefined()
+    expect(payload.next_action).not.toBe(AgentPaymentNextAction.SweepStrandedFunds)
+    expect(payload.message).not.toMatch(/stranded/)
+    expect(payload.message).not.toMatch(/sweep_stranded|haven_sweep_delegate/)
+    // What IS true: no settlement, budget intact, honest re-quote guidance,
+    // and the merchant's own reason surfaced.
+    expect(payload.message).toMatch(/did not attempt settlement/i)
+    expect(payload.message).toMatch(/budget is intact/i)
+    expect(payload.message).toMatch(/ignore this code's sweep guidance/i)
+    expect(payload.message).toMatch(/reason_code: fail_floor_reached/)
+    expect(payload.message).toMatch(/after approximately 45s/i)
+    expect(payload.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(payload.retry_with_new_quote).toBe(true)
+  })
+
+  // #2987 review: a GENERIC non-2xx on erc7710 is not proof that nothing was
+  // settled — the merchant held a live settlement authorization and may have
+  // redeemed it before answering (an upstream 502/504 lands here as a
+  // response). So the guidance is verify-then-act, never "re-quote now".
+  it('a generic erc7710 merchant refusal is verify-then-act — no sweep, no "nothing moved" claim, status check first', async () => {
+    const SIG7710 = '0x' + '33'.repeat(65)
+    stubFetch({
+      'POST /x402/pay_7710_gateway/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 504,
+      ok: false,
+      body: { error: 'upstream timeout' },
+    })
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_7710_gateway',
+      signature: SIG7710,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
+    expect(payload.next_action).toBe(AgentPaymentNextAction.CheckStatusLater)
+    expect(payload.suggested_tool).toBe('haven_get_payment_status')
+    expect(payload.message).not.toMatch(/stranded|haven_sweep_delegate/)
+    expect(payload.message).not.toMatch(/no settlement occurred|nothing moved|budget is intact/i)
+    expect(payload.message).toMatch(/has NOT observed a settlement/)
+    expect(payload.message).toMatch(/may have redeemed it/i)
+    expect(payload.message).toMatch(/check haven_get_payment_status after that window/i)
+    expect(payload.message).toMatch(/ignore this code's sweep guidance/i)
+  })
+
+  // ── #2968 regression: the merchant answered 200 but Haven holds no verified
+  // on-chain settlement evidence. This is the response the live dev QA run
+  // caught (`settled: true` + the zero hash + `warnings: []` +
+  // `next_action: "none"` beside an agent_summary still saying submitted). The
+  // demo merchant's skip-settle fixture is the convenient trigger, not the
+  // bug: any merchant that answers 2xx without a redeemable settlement — e.g.
+  // the AuthorizationAlreadyUsedError path — lands here. RED/GREEN contract:
+  // revert the classify gate or the response-level zero-hash nulling and this
+  // test fails against the old body.
+  it('reports settled:false with an unconfirmed-settlement warning when the merchant returns 200 but no on-chain confirmation exists', async () => {
+    const ZERO_HASH = '0x' + '0'.repeat(64)
+    stubFetch({})
+    const haven = keylessClient()
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('No stored merchant call context for this intent', 409),
+    )
+    // No payment_header => erc7710 branch: the signature IS the settlement child.
+    vi.spyOn(haven, 'submitX402Erc7710').mockResolvedValue('HEADER_FROM_HAVEN')
+    // The merchant answered 200 and delivered the goods — but the settlement
+    // marker it returned is the ZERO hash ("delivered, not settled"), so the
+    // SDK's evidence report is refused: there is nothing on-chain to verify.
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: { result: { content: [{ type: 'text', text: 'storage unlocked' }] } },
+      settlementTxHash: ZERO_HASH,
+      evidenceOutcome: { outcome: 'refused', statusCode: 400 },
+    })
+    // Haven's own records: submitted, no tx, an expiry on the window.
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null,
+      warnings: [],
+      payment: {
+        paymentId: 'pay_7710_unsettled',
+        kind: 'payment_intent',
+        rail: 'erc7710',
+        status: 'submitted',
+        phase: 'payment_submitted',
+        nextAction: 'check_status_later',
+        amount: '500',
+        token: 'USDC',
+        resourceUrl: 'http://merchant.test/mcp',
+        merchantAddress: null,
+        txHash: null,
+        expiresAt: '2026-09-15T12:00:00.000Z',
+        chainId: 84532,
+        message: 'The payment was submitted and is waiting for confirmation.',
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710_unsettled',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_cloud_storage',
+        arguments: { tier: '50gb' },
+      }),
+    )
+    const data = result.data as Record<string, any>
+
+    // THE contract: an unverified settlement never claims settled.
+    expect(data.settled).toBe(false)
+    // The zero hash is never emitted as a transaction — null means "none known".
+    expect(data.settlement_tx_hash).toBeNull()
+    // Merchant delivery is its own fact: the goods are real, the money is not
+    // proven, and the two facts travel in separate fields.
+    expect(data.delivered).toBe(true)
+    expect(data.code).toBe('DELIVERED_UNSETTLED')
+    // agent_summary mirrors the payment intent (submitted = not confirmed), so
+    // the response agrees with itself: settled:false beside submitted. The
+    // forbidden pairing — settled:true + submitted — cannot be built.
+    expect(data.agent_summary.status).toBe('submitted')
+    expect(data.agent_summary.expires_at).toBe('2026-09-15T12:00:00.000Z')
+    // The most important fact in the response does not ride silently: a
+    // machine-readable warning carrying the intent's expiry.
+    const warnings = data.warnings as Array<{ code: string; message: string }>
+    expect(warnings.map((w) => w.code)).toContain('SETTLEMENT_UNCONFIRMED')
+    const unconfirmed = warnings.find((w) => w.code === 'SETTLEMENT_UNCONFIRMED')!
+    expect(unconfirmed.message).toContain('2026-09-15T12:00:00.000Z')
+    // The next action is actionable, and the reason describes what HAPPENED —
+    // not the per-scheme constant that is false in this outcome.
+    expect(data.next_action).toBe('check_status_later')
+    expect(data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(data.reason).toMatch(/no verified on-chain settlement/)
+    expect(data.reason).not.toMatch(/nothing to sweep/)
+  })
+
+  // The zero-hash ban lives at the SHARED response boundary
+  // (deliverMerchantPayment), not in the erc7710 branch: a facilitator that
+  // accepts but does not settle produces the same sentinel on the eip3009 arm
+  // (AuthorizationAlreadyUsedError shape). settled stays true there — funding
+  // DID confirm on-chain above, which is what 3009's settled means — but the
+  // sentinel is collapsed to null, never rendered as a transaction.
+  it('never emits the zero hash as settlement_tx_hash on the eip3009 arm either (#2968 response-level ban)', async () => {
+    const ZERO_HASH = '0x' + '0'.repeat(64)
+    stubFetch({
+      'POST /payments/pay_zero_hash/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = keylessClient()
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+      new HavenApiError('No stored merchant call context for this intent', 409),
+    )
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: true,
+      body: { result: 'ok' },
+      settlementTxHash: ZERO_HASH,
+    })
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null,
+      warnings: [],
+      payment: null,
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_zero_hash',
+        signature: SIG,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
+      }),
+    )
+    const data = result.data as Record<string, any>
+
+    expect(data.settled).toBe(true)
+    expect(data.settlement_tx_hash).toBeNull()
+  })
+
+  /**
+   * #3000 (follow-up from #2983's review): the timeout branch had the same
+   * defect as the rejection branch — verify-then-sweep guidance said
+   * unconditionally, even though erc7710 has no funding leg and nothing was
+   * ever staged in a delegate wallet to strand. This pins the erc7710 side;
+   * the eip3009 timeout test in `tools.test.ts` (#1300) pins the side where
+   * the sweep guidance stays true.
+   */
+  it('a merchant TIMEOUT after an erc7710 settle is verify-then-check — no sweep, no stranded claim', async () => {
+    const SIG7710 = '0x' + '33'.repeat(65)
+    stubFetch({
+      'POST /x402/pay_7710_timeout/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockRejectedValue(
+      new MerchantTimeoutError('Merchant request timed out after 300000ms: http://merchant.test/mcp'),
+    )
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_7710_timeout',
+      signature: SIG7710,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding)
+    expect(payload.statusCode).toBe(504)
+    expect(payload.paymentId).toBe('pay_7710_timeout')
+    expect(payload.next_action).toBe(AgentPaymentNextAction.CheckStatusLater)
+    expect(payload.suggested_tool).toBe('haven_get_payment_status')
+    expect(payload.message).not.toMatch(/stranded/)
+    expect(payload.message).not.toMatch(/sweep_stranded|haven_sweep_delegate/)
+    expect(payload.message).toMatch(/ignore this code's sweep guidance/i)
+    expect(payload.message).toMatch(/may still redeem it/)
+    expect(payload.message).toMatch(/haven_get_payment_status/)
+    // #3011 review: haven_complete_mcp_tool has no erc7710 branch (a submitted
+    // intent 409s there) — the guidance must not send the agent into it, and
+    // must name the window before re-quoting.
+    expect(payload.message).toMatch(/do NOT retry haven_complete_mcp_tool/)
+    expect(payload.message).toMatch(/after that window/)
+    expect(payload.rail).toBe('erc7710')
+    expect(payload.phase).toBe('not_delivered')
   })
 })
 

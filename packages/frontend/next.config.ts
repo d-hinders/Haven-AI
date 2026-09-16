@@ -58,6 +58,17 @@ const nextConfig: NextConfig = {
         destination: '/protocols/x402',
         permanent: true,
       },
+      // #3024: the custody page is deleted, not kept on disk as a redirect
+      // page — unlike the `/reporting` precedent, there is no directory left
+      // for `AUTH_MARKED_PREFIXES`' filesystem-pinned list to see, so the
+      // redirect lives here instead. Its two facts — the account's signer set
+      // and each agent's delegation terms — already render on `/accounts/:id`
+      // and `/agents/:id`; a bookmark just lands on the accounts overview.
+      {
+        source: '/custody',
+        destination: '/accounts',
+        permanent: true,
+      },
     ]
   },
   // Security response headers (scanner follow-up). The dashboard's JWT lives in

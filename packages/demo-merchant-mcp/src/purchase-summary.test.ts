@@ -22,7 +22,7 @@ function fakeInvoice(overrides: Partial<Invoice['json']> = {}): Invoice {
         bic: 'ESSESESS',
         crypto_address: '0x1111111111111111111111111111111111111111',
       },
-      kopare: { identifierare: '0x2222222222222222222222222222222222222222', typ: 'blockkedjeadress' },
+      kopare: { identifierare: '0x2222222222222222222222222222222222222222', typ: 'blockkedjeadress', roll: 'agent_delegate' },
       rader: [],
       belopp_exkl_moms: '0.0004',
       moms_procent: 25,
@@ -49,6 +49,7 @@ function fakeSettledPayment(overrides: Partial<SettledPayment> = {}): SettledPay
     txHash: TX_HASH,
     paymentResponse: { success: true, payer: '0x2222222222222222222222222222222222222222', transaction: TX_HASH, network: 'eip155:8453', amount: PRODUCTS.storage_50gb.price_usdc.toString() },
     paymentResponseHeader: 'irrelevant',
+    settlement: 'settled_onchain',
     ...overrides,
   }
 }
@@ -101,5 +102,24 @@ describe('buildPurchaseSummary (#1273) — display/reporting contract', () => {
   it('does not report funding_tx_hash when it is not known merchant-side', () => {
     const summary = buildPurchaseSummary(fakeSettledPayment(), fakeInvoice())
     expect(summary.funding_tx_hash).toBeUndefined()
+  })
+
+  // #2969: the two non-settled `SettlementState`s must be DISTINGUISHABLE from
+  // each other in the summary, and neither may leak a hash — real or zero.
+  // Mutation target: collapsing `already_settled_earlier` back into
+  // `delivered_unsettled` (or reporting `payment.txHash` unconditionally)
+  // must fail this.
+  it('reports already_settled_earlier with a null settlement_tx_hash, distinct from delivered_unsettled', () => {
+    const alreadyUsed = fakeSettledPayment({ settlement: 'already_settled_earlier' })
+    const unknown = fakeSettledPayment({ settlement: 'settlement_unknown' })
+
+    const alreadyUsedSummary = buildPurchaseSummary(alreadyUsed, fakeInvoice())
+    const unknownSummary = buildPurchaseSummary(unknown, fakeInvoice())
+
+    expect(alreadyUsedSummary.status).toBe('already_settled_earlier')
+    expect(alreadyUsedSummary.settlement_tx_hash).toBeNull()
+    expect(unknownSummary.status).toBe('delivered_unsettled')
+    expect(unknownSummary.settlement_tx_hash).toBeNull()
+    expect(alreadyUsedSummary.status).not.toBe(unknownSummary.status)
   })
 })

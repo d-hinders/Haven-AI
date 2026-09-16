@@ -85,9 +85,13 @@ shows up in your Haven dashboard activity feed.
 ## Step-by-Step API
 
 Discovery and listing: `discoverTools({ verified?: 'any' | 'verified' | 'operator' })` returns the merged
-catalog — operator-curated plus `verified_payable` directory entries (epic #1717), each with `source`,
-`domainVerified` and `verifiedPayable`. `submitCatalogEntry(resourceUrl)` submits a merchant endpoint to
-the Verified Payable Directory (queue-only; the seller still must prove domain ownership before listing),
+catalog — operator-curated rows plus self-submitted directory entries (epic #1717), each with `source`,
+`domainVerified` and `verifiedPayable`. `verified: 'verified'` (#2978) filters on the badge, not the
+source: it returns any entry, from either source, whose endpoint Haven watched answer a live quote
+probe (`verifiedPayable === true`); `domainVerified` stays true only for entries that also proved
+domain ownership. `verified: 'operator'` filters on provenance alone. `submitCatalogEntry(resourceUrl)`
+submits a merchant endpoint to the Verified Payable Directory (queue-only; the seller still must prove
+domain ownership before listing),
 and `getCatalogSubmissionStatus(id)` returns coarse status plus the ownership-proof instructions while
 the submission can still prove ownership.
 
@@ -358,7 +362,8 @@ Terminal from any non-confirmed phase:
 
 x402 tool-window failures:
    expired funding/quote window → PAYMENT_WINDOW_EXPIRED → re-quote with same idempotency_key
-   merchant rejection after funding → MERCHANT_REJECTED_AFTER_FUNDING → haven_sweep_delegate
+   merchant rejection after funding → MERCHANT_REJECTED_AFTER_FUNDING → haven_sweep_delegate (eip3009 only; erc7710: nothing to sweep, follow the message)
+   merchant timeout after funding → MERCHANT_UNRESPONSIVE_AFTER_FUNDING → check_status_later; eip3009: retry once, then haven_sweep_delegate; erc7710: no retry, check status after the window, re-quote only if unsettled
 ```
 
 ### `phase` reference
@@ -399,11 +404,13 @@ Hosted MCP and signer tools also return stable `code` values on recoverable x402
 
 | `code` | Meaning | Agent recovery |
 |--------|---------|----------------|
-| `PRICE_EXCEEDS_MAX` | The merchant-authoritative x402 price is above the caller's spending cap. No funding transfer was created. | Tell the user the live price exceeded the cap and retry only after they confirm a higher one. |
+| `PRICE_EXCEEDS_MAX` | The merchant-authoritative x402 price is above the caller's spending cap. No funding transfer was created. | Tell the user the live price exceeded the cap and retry only after they confirm a higher one. Payloads carry `next_action: stop_and_tell_user` and `retry_with_new_quote: true` — the latter means any retry needs a fresh quote, not that one should be attempted unattended. |
 | `AMBIGUOUS_MAX_AMOUNT` | Both `max_amount` (atomic units) and `max_amount_human` (whole tokens) were sent for one purchase. Nothing was contacted and nothing was spent. | Re-send with exactly one — `max_amount_human` for a cap the user stated in tokens, `max_amount` for an exact atomic figure. |
 | `MAX_AMOUNT_UNCONVERTIBLE` | `max_amount_human` could not be converted against this quote's asset — its decimals are unknown to Haven, or the cap has more decimal places than the asset supports. Nothing was spent. | Round the cap to the asset's decimals, or re-send it as an exact atomic `max_amount`. |
+| `MERCHANT_NOT_READY` | The merchant answered the quote probe with its own `503 { error: 'merchant_not_ready', reason_code, retry_after_s }` instead of a 402 — it cannot settle right now (e.g. its settlement wallet is out of gas). No payment was created. | Tell the user and retry later (`retry_after_s` in the message when given); do not treat it as a wrong endpoint. Payloads carry `next_action: stop_and_tell_user` and `retry_with_new_quote: true`. |
 | `PAYMENT_WINDOW_EXPIRED` | The funding/quote window closed before `haven_x402_sign_header`, `haven_submit`, or `haven_complete_mcp_tool` could finish. | Re-run `haven_pay_mcp_tool` with the same `idempotency_key`, then sign and complete the fresh quote. Payloads include `retry_with_new_quote: true`. |
-| `MERCHANT_REJECTED_AFTER_FUNDING` | Haven's funding leg succeeded, but the merchant rejected the paid retry. | Stop retrying the merchant and call `haven_sweep_delegate` so the user can recover stranded delegate USDC. |
+| `MERCHANT_REJECTED_AFTER_FUNDING` | The merchant rejected the paid retry. On eip3009 Haven's funding leg had succeeded; on erc7710 there is no funding leg (#2983). | eip3009: stop retrying the merchant and call `haven_sweep_delegate` so the user can recover stranded delegate USDC. erc7710: nothing to sweep — follow the message (re-quote later if the merchant declined to settle; otherwise check `haven_get_payment_status` after the payment window before re-quoting). |
+| `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` | The merchant did not answer the paid retry before the timeout — NOT proof of rejection, the merchant may still settle late. On eip3009 Haven's funding leg had succeeded; on erc7710 there is no funding leg (#3000). | eip3009: check `haven_get_payment_status`, retry `haven_complete_mcp_tool` once, and only then call `haven_sweep_delegate` if no settlement appears. erc7710: nothing to sweep and `haven_complete_mcp_tool` has no erc7710 branch — do not retry it; check `haven_get_payment_status` after the payment window and re-quote only if it shows no settlement. |
 
 ## Payments outside the agent's budget
 

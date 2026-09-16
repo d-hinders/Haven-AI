@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - scripts/docs/**
-last-verified: "2026-09-03"
+last-verified: "2026-09-15"
 ---
 
 # Docs playbook

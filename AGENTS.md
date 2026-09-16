@@ -4,11 +4,13 @@ status: current
 covers:
   - .github/workflows/publish.yml
   - .github/workflows/morning-report-note.yml
+  - .github/workflows/claim-assignee.yml
+  - scripts/ci/claim-assignee.mjs
   - scripts/release-bump.mjs
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-09-11"
+last-verified: "2026-09-15"
 ---
 
 # Haven Codex Instructions
@@ -145,7 +147,7 @@ More than one agent session works this repo (different users, different machines
 
 **Before building an issue** (any session, any agent):
 
-1. Check the issue's latest comments for a live `🔒 CLAIM`. An assignee records ownership, not a live build — treat it as context, never as a claim on its own.
+1. Check the issue's latest comments for a live `🔒 CLAIM`. The claim comment is the record; read it, not just the assignee field.
 2. Check for existing work: `gh pr list --search "<issue-nr>"` and `git ls-remote --heads origin | grep <issue-nr>`.
 3. Check the tail of #1289 for claims or FYIs touching the same surfaces.
 4. A live claim (posted < 24h ago, no contrary signal since) means: pick something else, or coordinate in #1289 first. Never silently duplicate a claimed build.
@@ -153,6 +155,14 @@ More than one agent session works this repo (different users, different machines
 **Claim before you build:** comment `🔒 CLAIM #<issue> — branch <name> — touches: <files/areas> — <session owner>` on the issue itself; ALSO post it to #1289 when the work touches shared surfaces (`packages/mcp-server/src/tools*` — the facade and everything under `tools/`, since #2807–#2809 split the hosted surface across several files — demo-merchant-mcp, migrations, release trains, `db-mock-baseline.json`, contract docs).
 
 **Release what you drop:** when the PR opens, or when you abandon the work, comment `🔓 RELEASE #<issue> — <landed as PR #N | abandoned: reason>`. An unreleased claim blocks the other session for a day.
+
+**The assignee field is an automated projection of your claim**, not a second thing to maintain. `.github/workflows/claim-assignee.yml` watches issue comments: a `🔒 CLAIM #n` line assigns its author to #n, a `🔓 RELEASE #n` line unassigns them. You do not set it by hand, and nothing breaks if it is wrong — the claim comment is still the record.
+
+Two consequences worth knowing. The projection reads only the LEADING run of issue numbers on a marker line, so `🔒 CLAIM #2044 — … the Red Line #4 suite` claims #2044 and not #4; put the issues you are claiming immediately after the keyword and everything else after. And a claim quoted inside a bullet or mid-sentence is deliberately ignored, so you can report someone else's claim in an FYI without stealing it.
+
+The projection only sees comments posted from the day it shipped, so it starts near-empty and fills as work is claimed. Until it has: **an empty assignee does not mean unowned** — read the thread. It is safe to trust a field that IS set, never a field that is not.
+
+The field is an index, never the protocol. It cannot carry the branch, and it cannot carry `touches:` — and `touches:` is what catches a collision between two DIFFERENT issues writing the same file, which is what actually went wrong in the #2968/#2970 overlap on 2026-09-14. Keep claiming in comments.
 
 **FYI cross-cutting changes** in #1289 (`📣 FYI — …`): release promotions, PRs that will conflict with in-flight branches, shared-surface refactors.
 

@@ -4,7 +4,7 @@ status: current
 covers:
   - .github/money-path-globs.json
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-08-25"
+last-verified: "2026-09-15"
 ---
 
 # Money / agent-authority playbook

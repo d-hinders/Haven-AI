@@ -132,6 +132,26 @@
       "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
     },
     {
+      "path": "scripts/lint-request-schemas.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:request-schemas"
+      ],
+      "reason": "The shrink-only ratchet over the request-validation rollout (#3029, epic #3028): per route file, whether any registered route is still shadowed and how many hand-rolled typeof request guards remain. It scans packages/backend routes but only backend_checks runs it."
+    },
+    {
+      "path": "scripts/lint-request-schemas.test.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:request-schemas:test"
+      ],
+      "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
+    },
+    {
       "path": "scripts/generate-api-types.mjs",
       "jobs": [
         "backend"
@@ -151,7 +171,7 @@
         "lint:db-mocks",
         "lint:wire-types"
       ],
-      "reason": "The shared ratchet ENGINE, backing SIX gates as of #2747: the backend db-mock and retired-rail-prose ratchets, the frontend wire-type ratchet (#1447), the frontend copy lint, packages/frontend/scripts/design-lint, and scripts/docs/ui-gate-wording. An earlier version of this sentence said two, which is what it backed at #1447. Routing it to one job would leave the other surface's gates unguarded, which is the whole reason two jobs are named here."
+      "reason": "The shared ratchet ENGINE, backing SEVEN gates as of #3029 (six as of #2747): the backend db-mock, retired-rail-prose and request-schema ratchets, the frontend wire-type ratchet (#1447), the frontend copy lint, packages/frontend/scripts/design-lint, and scripts/docs/ui-gate-wording. An earlier version of this sentence said two, which is what it backed at #1447. Routing it to one job would leave the other surface's gates unguarded, which is the whole reason two jobs are named here."
     },
     {
       "path": "scripts/lib/ratchet.test.mjs",
@@ -271,6 +291,30 @@
         "test -w packages/frontend"
       ],
       "reason": "The canonical generic payment skill, and the second SDK source with a cross-package pin. packages/frontend/src/lib/agent-skill-bundle.ts keeps a deliberately decoupled inline copy so the frontend deploys standalone, and packages/frontend/src/lib/__tests__/agent-skill-bundle.test.ts imports THIS file directly to assert byte-for-byte parity -- a test that runs only in frontend_checks. #2727 closed the same hole for agent-guidance.ts and left this one open (#2743): an SDK-only change here routed sdk but not frontend, so mutating a heading exited 0 on lint:runbook-parity (which reads only the two full-text runbook copies, and this is not one of them) while agent-skill-bundle.test.ts failed in a job that never ran. That copy is resolved text composed at build time, so no readable-back lint can cover it; the frontend's own suite is the check, which is why runsVia names it by workspace rather than inventing a second spelling of a check frontend_checks already runs."
+    },
+    {
+      "path": "packages/backend/src/infra/chain/x402-binding-signer.ts",
+      "jobs": [
+        "backend",
+        "mcp_server"
+      ],
+      "runsVia": [
+        "test -w packages/backend",
+        "test -w packages/mcp-server"
+      ],
+      "reason": "The producer of the Haven-signed x402 expected context. packages/mcp-server/src/x402-expected-wire-contract.test.ts imports THIS file across the package boundary to prove the hosted/signer/backend contract byte-for-byte -- the only runtime import of backend/src from any other package -- and that test runs only in mcp_server_checks. #3023 changed this file's import graph (config.ts, which requires DATABASE_URL at evaluation) on a backend-only PR; the MCP job did not run, dev runs skip it by surface, and the contract proof was absent until the next mcp-server PR failed (#3046). Same shape #2727/#2743 closed for the SDK's canonical sources."
+    },
+    {
+      "path": "packages/backend/src/config/boolean-flag.ts",
+      "jobs": [
+        "backend",
+        "mcp_server"
+      ],
+      "runsVia": [
+        "test -w packages/backend",
+        "test -w packages/mcp-server"
+      ],
+      "reason": "The only module x402-binding-signer.ts reaches inside the backend (#3046). It must stay dependency-free so the binding signer stays importable without the backend runtime env; an import added here re-creates the #3046 trap in the mcp-server job, so a change routes that job too."
     }
   ]
 }

@@ -21,6 +21,7 @@ import {
   INLINE_LITERAL_WITH_PHANTOM,
   AUTO_MOCK,
   DOUBLE_QUOTED_SPEC_WITH_PHANTOM,
+  DO_MOCK_WITH_PHANTOM,
   IMPORT_ACTUAL_RETURN_WITH_PHANTOM,
   REAL_MODULE_SOURCE,
   UNREADABLE_FACTORY,
@@ -90,7 +91,7 @@ describe('vi.mock factories may only name real exports', () => {
 
   it('leaves no mock factory unparsed — an unreadable factory is a failure, never a skip', () => {
     const detail = result.unparseable
-      .map((u) => `  ${path.relative(BACKEND_SRC, u.testFile)}\n    vi.mock('${u.moduleSpec}') — ${u.reason}`)
+      .map((u) => `  ${path.relative(BACKEND_SRC, u.testFile)}\n    vi.mock/doMock('${u.moduleSpec}') — ${u.reason}`)
       .join('\n')
     expect(
       result.unparseable,
@@ -106,7 +107,7 @@ describe('vi.mock factories may only name real exports', () => {
       .map(
         (p) =>
           `  ${path.relative(BACKEND_SRC, p.testFile)}\n` +
-          `    vi.mock('${p.moduleSpec}') declares \`${p.key}\`, which ` +
+          `    vi.mock/doMock('${p.moduleSpec}') declares \`${p.key}\`, which ` +
           `${path.relative(BACKEND_SRC, p.resolvedModule)} does not export`,
       )
       .join('\n')
@@ -250,6 +251,15 @@ describe('the guard itself is falsifiable', () => {
     )
     expect(found.phantoms.map((p) => p.key)).toEqual(['executeAllowanceTransfer'])
     expect(countRelativeMockCalls(DOUBLE_QUOTED_SPEC_WITH_PHANTOM)).toBe(1)
+  })
+
+  it('flags a phantom behind vi.doMock, and counts the call (#2997)', () => {
+    // Same two-sided proof as the double-quoted case: the detector sees the
+    // doMock factory AND the auditor counts it, so a regression to `vi.mock`
+    // only on both sides cannot pass the pin silently.
+    const found = withFixture(withRealModule(DO_MOCK_WITH_PHANTOM), scanForPhantomMockKeys)
+    expect(found.phantoms.map((p) => p.key)).toEqual(['executeAllowanceTransfer'])
+    expect(countRelativeMockCalls(DO_MOCK_WITH_PHANTOM)).toBe(1)
   })
 
   it('reports an unreadable factory instead of silently passing it', () => {

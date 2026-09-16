@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 contract: true
 covers:
+  - packages/backend/src/openapi/party-model.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
   - packages/backend/src/modules/payments/agent-payment-status.ts
@@ -37,6 +38,7 @@ covers:
   - packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts
   - packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
+  - packages/demo-merchant-mcp/src/invoice.ts
 # #1496: a casp-changelog shard satisfies this doc too — every money-path PR
 # already writes one, and mandatory note-prepends to last-verified caused three
 # merge conflicts in one day between PRs that were not otherwise in conflict.
@@ -1031,6 +1033,17 @@ The demo merchant's own receipt labels the address for what it is
 custody it does not have. Third-party merchants will print whatever they
 print — which is exactly why the API-side mapping exists.
 
+**#2960** names these four addresses on the API side as a shared vocabulary
+(`treasury_account` / `delegate` / `delegate_account` / `merchant`), additive
+on receipts, payment status and the payment-receipt bundle — see
+[`agent-payment-status.ts`](../../packages/backend/src/modules/payments/agent-payment-status.ts)
+and [`party-model.ts`](../../packages/backend/src/openapi/party-model.ts). It
+also closed the one place the demo merchant's OWN invoice document (as
+opposed to the confirmation text quoted above) still called this address "the
+buyer" without qualification —
+[`invoice.ts`](../../packages/demo-merchant-mcp/src/invoice.ts)'s `kopare.roll`
+now carries the same distinction the confirmation text already made.
+
 ## Differences From Direct Payments
 
 | Concern | Direct `/payments` | x402 |
@@ -1214,6 +1227,30 @@ turn a genuine settlement into a refusal — no stored child, no manager pinned
 for the chain, or no decodable log from it means check 8 is skipped and the
 verdict is checks 1–7 exactly as before. An absent log is "we learned nothing
 here", not evidence of a forgery.
+
+**Naming the two hashes (#2998).** `tx_hash` on a receipt (`GET
+/machine-payments/receipts`, `HavenPaymentReceipt.txHash`) means something
+different per scheme, and nothing on the receipt used to say which: on
+eip3009 it is Haven's own FUNDING transaction (treasury → delegate), while on
+erc7710 — one transaction, no funding leg — it IS the settlement. An agent
+reading `txHash` alone (or the merchant-reported settlement transaction in
+`protocolReceiptPayload.transaction`, present only on eip3009) could not tell
+which hash to cite as "the payment". The receipt now also carries
+`funding_tx_hash` / `settlement_tx_hash` (`fundingTxHash` / `settlementTxHash`
+in the SDK, the same spelling `AgentPurchaseSummary` already uses):
+`funding_tx_hash` is `tx_hash` on eip3009 (and on scheme-less retired-x402
+rows) and `null` on erc7710 and on scheme-less retired mpp-rail rows (one
+direct account → merchant transaction); `settlement_tx_hash` is `tx_hash`
+itself on erc7710 and on those retired mpp rows, and on eip3009 is
+`protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed
+32-byte hash, else `null` — the merchant has not reported a settlement, or
+reported the zero-hash "delivered, not settled" marker `isZeroSettlementTxHash`
+recognizes elsewhere in the SDK. The trust level differs: on erc7710 Haven
+verified the settlement hash on-chain before the receipt existed; on eip3009
+it is the merchant's claim as relayed in `PAYMENT-RESPONSE`, not verified
+on-chain by Haven — cite it as such. `tx_hash` /
+`txHash` are unchanged and kept for wire compatibility, marked deprecated in
+their OpenAPI/SDK description only.
 
 Deliberately NOT checked: the facilitator's DelegationManager **calldata**
 (facilitator-specific and opaque — the Transfer log is the settlement's
@@ -1564,6 +1601,45 @@ where it is accurate. Cap coherence is preserved by construction: the
 guaranteed-non-null selection removed the `?? quote.accepted` display
 fallbacks, so the quote shown, the cap checked (`priceSelectedOption`), and
 the amount authorized all read the SAME selected option (#2051's invariant).
+
+As of [#2991](https://github.com/d-hinders/Haven-AI/issues/2991) the two quote
+tools add `expected_settlement_scheme: 'erc7710' | 'eip3009' | null` and
+`expected_funding_leg: boolean | null` (plus `expected_settleable: boolean`
+whenever the rail is known — `false` when prepare/pay will refuse with
+`ERC7710_RAIL_REQUIRED`, i.e. an erc7710-only merchant and an account not
+on the delegation rail; the scheme is then what the merchant demands, not
+what Haven will do), computed by running the IDENTICAL
+`selectX402SettlementScheme` call `haven_prepare_catalog_purchase` /
+`haven_pay_mcp_tool` run at prepare/pay time — same function, same predicate
+shape — so a quote and the following prepare/pay disagree only if an INPUT
+moved between the two calls: the merchant's `accepts[]` on a fresh 402, or
+the account's rail (prepare re-reads it). `expected_settleable: false` also
+covers a non-delegation account at ANY merchant: the selector still names
+eip3009 there, but Haven's x402 entry points refuse every retired rail with
+410, so nothing will be settled. This closes a gap `accepted_scheme` left open:
+at a merchant advertising BOTH entries, a delegation-rail account is quoted
+`accepted_scheme: 'standard'` (the merchant's own offer), yet prepare/pay
+still PREFER erc7710 for that account — `expected_settlement_scheme` says so
+up front instead of leaving the agent to find out from a different signature
+shape after the cap decision. `null` (with an `X402_SCHEME_UNKNOWN` warning)
+replaces a guess when the agent's rail could not be read (prepare then
+re-reads the rail itself and refuses hard on failure; pay at a both-entries
+merchant selects eip3009 — pre-existing), the same no-guess stance as
+`requireSettleableSelection` treats an unknown rail at prepare/pay. Read-only:
+the quote still reserves no price and creates no intent.
+
+[#2999](https://github.com/d-hinders/Haven-AI/issues/2999) gives the plain-HTTP
+`haven_quote_x402` — the third and last hosted quote surface — the same four
+fields, built through the identical `settlementPredictionFields` support
+helper the two MCP quote tools now call (`predictSettlementScheme` itself
+stayed private; the helper is the exported, single seam). `haven_quote_x402`
+prefetches the agent with the same non-throwing convention its own pay
+sibling `haven_pay_x402_quote` already used at prepare time, so the quote can
+never predict a scheme that pay then disagrees with. All three hosted quote
+tools now carry `expected_settlement_scheme` / `expected_funding_leg` /
+`expected_settleable` / a possible `X402_SCHEME_UNKNOWN` warning; only the
+signing/funding tools remain outside this contract, because they no longer
+need to predict — they select.
 
 **Still unproven end to end, and worth stating rather than assuming.** The
 nightly `x402-erc7710-settle` QA leg exercises the RAW API and deliberately

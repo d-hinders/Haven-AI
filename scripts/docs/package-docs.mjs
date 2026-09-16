@@ -90,7 +90,17 @@ export const GOVERNED_PACKAGE_DOCS = [
     // still sent X-PAYMENT alone; corrected to both names, matching the #2289
     // paragraph this same doc already carries two sections below. The rest of
     // the README was NOT re-verified in this pass.
-    'last-verified': '2026-09-01',
+    // #2966 (weekly staleness audit): re-verified, NOT edited — the drift
+    // candidates since 2026-09-01 all checked out. The #2933 naming-P1 window
+    // and #2908 credential readers are described in the sdk.md playbook, not
+    // here; #2965's `parties` is additive beside the documented state fields
+    // (types.ts #2960 comments); #2973's `haven_report_settlement_evidence` is
+    // in HavenClient and the hosted MCP surface, while this page's five-tool
+    // Claude/OpenAI table still matches `havenTools` in src/tools.ts (its
+    // sixth entry, `haven_sweep_delegate`, is deliberately absent from the
+    // table — the sweep is native, not a tool schema). Exports, header-name
+    // rule, idempotency and resume sections re-read against src/client.ts.
+    'last-verified': '2026-09-15',
   },
   {
     doc: 'packages/signer/README.md',
@@ -302,7 +312,14 @@ export const GOVERNED_PACKAGE_DOCS = [
     // The sequence diagram and the signer paragraph both named X-PAYMENT alone
     // while the hosted server has relayed both wire names since #2289. Scope:
     // those two lines; the rest of the README was NOT re-verified.
-    'last-verified': '2026-08-31',
+    // #2966 (weekly staleness audit): re-verified and EDITED — the x402 paid
+    // MCP tool flow (sequence diagram + step 3) now records the #2971
+    // fail-closed settlement-evidence gate ("settled" means verified on
+    // erc7710) and the #2972 `haven_report_settlement_evidence` remedy, which
+    // the tool table already listed. Tool names checked against the registered
+    // set in src/tools/**; Run env names and endpoints checked against
+    // src/cli.ts and src/http.ts. Rest of the README re-read, unchanged.
+    'last-verified': '2026-09-15',
   },
   {
     // The #1992 file. Its prose is mostly about BACKEND behaviour — which

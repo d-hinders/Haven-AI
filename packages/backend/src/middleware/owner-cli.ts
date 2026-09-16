@@ -150,6 +150,9 @@ export const OWNER_CLI_ALLOWED_ROUTES: readonly AllowedRoute[] = [
   { method: 'POST', path: '/contacts' },
   { method: 'DELETE', path: '/contacts/{id}' },
   { method: 'GET', path: '/auth/me' },
+  // #2946 (epic #2944 slice B): read-only owner data, same class as the
+  // dashboard and agent-activity reads above — no authority, no write.
+  { method: 'GET', path: '/analytics/overview' },
 ] as const
 
 /** Is this route one an `owner_cli` token may reach? Default: no. */

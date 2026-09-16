@@ -101,6 +101,13 @@ one agent and sign as another, and it fails hard. This is the half of that
 hazard a local tool can know — the doctor still cannot see inside an
 already-running host, which is why the restart guidance below matters.
 
+The hosted MCP `tools/list` row is an endpoint-reachability handshake, not a
+credential-authentication result. When doctor classifies a superseded
+directory, it uses the same authenticated, read-only identity endpoint: a
+401/403 means the stored key is already revoked; a successful identity read
+means it remains spend-capable; and network or malformed responses remain
+unverifiable.
+
 ## Retiring an old agent directory
 
 Re-running setup without `--replace` creates a NEW agent and retires nothing

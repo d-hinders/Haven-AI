@@ -607,7 +607,7 @@ describe('machine payment routes', () => {
       AUTH,
       [/FROM machine_payment_evidence e/, () => ({
         rows: [{
-          id: 'evidence-1',
+          id: '44444444-4444-4444-4444-444444444444',
           payment_intent_id: PAYMENT_ID,
           approval_request_id: null,
           agent_id: AGENT.id,
@@ -638,6 +638,12 @@ describe('machine payment routes', () => {
           created_at: '2026-05-15T12:00:01.000Z',
           updated_at: '2026-05-15T12:00:01.000Z',
           settlement_scheme: 'eip3009',
+          // #2960: `pi.delegate_address AS intent_delegate_address` /
+          // `pi.machine_metadata->>'delegate_account_address'`, joined by
+          // `LIST_EVIDENCE_RECEIPTS_SQL` — the delegate that PAID this
+          // intent, not the calling agent's current delegate.
+          intent_delegate_address: AGENT.delegate_address,
+          intent_delegate_account_address: null,
         }],
       })],
     )
@@ -651,7 +657,7 @@ describe('machine payment routes', () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({
       receipts: [{
-        id: 'evidence-1',
+        id: '44444444-4444-4444-4444-444444444444',
         settlement_scheme: 'eip3009',
         budget_delegation_hash: null,
         payment_id: PAYMENT_ID,
@@ -660,6 +666,11 @@ describe('machine payment routes', () => {
         rail: 'mpp_demo',
         proof_status: 'payment_confirmed',
         tx_hash: TX_HASH,
+        // #2998: eip3009 — `tx_hash` is Haven's funding leg;
+        // `protocol_receipt_payload` here has no `transaction` field, so
+        // there is no reported merchant settlement.
+        funding_tx_hash: TX_HASH,
+        settlement_tx_hash: null,
         chain_id: 8453,
         resource_url: challenge.resource,
         merchant_address: RECIPIENT.toLowerCase(),
@@ -680,9 +691,92 @@ describe('machine payment routes', () => {
         confirmed_at: '2026-05-15T12:00:00.000Z',
         created_at: '2026-05-15T12:00:01.000Z',
         updated_at: '2026-05-15T12:00:01.000Z',
+        // #2960: additive alongside `payer_address` above (`treasury_account` only).
+        parties: {
+          treasury_account: AGENT.account_address.toLowerCase(),
+          delegate: AGENT.delegate_address,
+          delegate_account: null,
+          merchant: RECIPIENT.toLowerCase(),
+        },
       }],
     })
+    expectMatchesSpec('GET', '/machine-payments/receipts', response.json())
     expect(JSON.stringify(response.json())).not.toContain('secret-proof-header')
+  })
+
+  // #2960 finding 3: the erc7710 case was missing here — receipts had only
+  // an eip3009 fixture, so a CASP shard claim that this file "tests both
+  // schemes on both surfaces" was false. This closes the gap and also
+  // covers finding 2/6: `parties.delegate_account` reading back
+  // `machine_metadata.delegate_account_address` through the live route.
+  it('lists recent receipts on the erc7710 scheme with parties.delegate_account populated', async () => {
+    const delegateAccount = '0xdddddddddddddddddddddddddddddddddddddddd'
+    primeDb(
+      AUTH,
+      [/FROM machine_payment_evidence e/, () => ({
+        rows: [{
+          id: '55555555-5555-5555-5555-555555555555',
+          payment_intent_id: PAYMENT_ID,
+          approval_request_id: null,
+          agent_id: AGENT.id,
+          user_id: AGENT.user_id,
+          rail: 'x402',
+          proof_status: 'payment_confirmed',
+          tx_hash: TX_HASH,
+          chain_id: 8453,
+          resource_url: challenge.resource,
+          merchant_address: RECIPIENT.toLowerCase(),
+          payer_address: AGENT.account_address.toLowerCase(),
+          settlement_address: RECIPIENT.toLowerCase(),
+          token_symbol: 'USDC',
+          token_address: USDC,
+          amount_raw: '10000',
+          amount_human: '0.01',
+          challenge_id: null,
+          idempotency_key: 'x402:test',
+          challenge_payload: null,
+          selected_payment: null,
+          payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
+          payment_proof_header: 'secret-proof-header',
+          protocol_receipt_header_name: 'Payment-Receipt',
+          protocol_receipt_header: 'receipt-header',
+          protocol_receipt_payload: { ok: true },
+          merchant_status: 200,
+          confirmed_at: '2026-05-15T12:00:00.000Z',
+          created_at: '2026-05-15T12:00:01.000Z',
+          updated_at: '2026-05-15T12:00:01.000Z',
+          settlement_scheme: 'erc7710',
+          intent_delegate_address: AGENT.delegate_address,
+          intent_delegate_account_address: delegateAccount,
+        }],
+      })],
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?limit=10',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json() as {
+      receipts: Array<{
+        parties: { treasury_account: string; delegate: string; delegate_account: string | null; merchant: string }
+        funding_tx_hash: string | null
+        settlement_tx_hash: string | null
+      }>
+    }
+    expect(body.receipts[0].parties).toEqual({
+      treasury_account: AGENT.account_address.toLowerCase(),
+      delegate: AGENT.delegate_address,
+      delegate_account: delegateAccount,
+      merchant: RECIPIENT.toLowerCase(),
+    })
+    // #2998: erc7710 — one transaction, `tx_hash` IS the settlement, no
+    // funding leg.
+    expect(body.receipts[0].funding_tx_hash).toBeNull()
+    expect(body.receipts[0].settlement_tx_hash).toBe(TX_HASH)
+    expectMatchesSpec('GET', '/machine-payments/receipts', response.json())
   })
 
   // #993 (review finding on #1120): /send never consulted the seam — a
@@ -823,7 +917,81 @@ describe('machine payment routes', () => {
         idempotency_key: 'mpp_demo:test',
         challenge_id: challenge.challengeId,
       },
+      // #2960: additive alongside `payer_address` above (`delegate` only).
+      parties: {
+        treasury_account: AGENT.account_address,
+        delegate: AGENT.delegate_address,
+        delegate_account: null,
+        merchant: RECIPIENT.toLowerCase(),
+      },
     })
+    expectMatchesSpec('GET', '/machine-payments/{id}/status', response.json())
+  })
+
+  // #2970: a submitted erc7710 intent past its settlement window with no
+  // verified evidence answers awaiting_settlement_evidence, not
+  // check_status_later, which promised a resolution nothing would produce.
+  it('returns awaiting_settlement_evidence for a submitted erc7710 intent past its settlement window', async () => {
+    primeDb(
+      AUTH,
+      intentStatusRow({
+        ...confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' }),
+        status: 'submitted',
+        tx_hash: null,
+        confirmed_at: null,
+        created_at: '2020-01-01T00:00:00.000Z',
+        payment_rail: 'x402',
+        source: 'x402',
+        machine_metadata: JSON.stringify({ settlement_scheme: 'erc7710' }),
+      }),
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expect(body.next_action).toBe('awaiting_settlement_evidence')
+    expect(body.status).toBe('submitted')
+    // #2970 review: the honest remedy is the settlement sweep's own residual
+    // attribution window, not a hash-report tool that does not exist for
+    // this scheme (`haven_report_x402_outcome` takes no hash).
+    expect(body.message).toMatch(/settlement sweep/i)
+    expect(body.message).not.toMatch(/haven_report_x402_outcome/)
+    // #2970 review: expectMatchesSpec('GET', '/machine-payments/{id}/status', body)
+    // surfaces a PRE-EXISTING spec drift unrelated to this change (the route's
+    // real response carries `fee` and `mpp.challenge_id`, which openapi/spec.ts
+    // does not declare) — reported, not silently fixed here; see the final report.
+  })
+
+  // Inside the window the same shape still answers check_status_later — the
+  // predicate is time-gated, not scheme-gated alone.
+  it('still returns check_status_later for a submitted erc7710 intent INSIDE its settlement window', async () => {
+    primeDb(
+      AUTH,
+      intentStatusRow({
+        ...confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' }),
+        status: 'submitted',
+        tx_hash: null,
+        confirmed_at: null,
+        created_at: new Date().toISOString(),
+        payment_rail: 'x402',
+        source: 'x402',
+        machine_metadata: JSON.stringify({ settlement_scheme: 'erc7710' }),
+      }),
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().next_action).toBe('check_status_later')
   })
 
   it('returns funded_but_unsettled phase when merchant retry was rejected after funding', async () => {
@@ -1072,6 +1240,11 @@ describe('machine payment routes', () => {
         rail: 'mpp_demo',
         proof_status: 'protocol_receipt_attached',
         tx_hash: TX_HASH,
+        // #2998 (#3006 review): scheme-less mpp_demo row — the retired mpp
+        // rail moved account → merchant in ONE transaction, so `tx_hash` IS
+        // the settlement and there was no funding leg.
+        funding_tx_hash: null,
+        settlement_tx_hash: TX_HASH,
         payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
         protocol_receipt_header_name: 'Payment-Receipt',
         protocol_receipt_payload: { status: 'settled' },

@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/openapi/**
-last-verified: "2026-08-29"
+last-verified: "2026-09-15"
 ---
 
 # Backend / API playbook

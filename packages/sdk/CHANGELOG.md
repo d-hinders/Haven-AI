@@ -1,10 +1,48 @@
 # @haven_ai/sdk
 
-Release headers are written **by hand at release time**. `release-bump.mjs`
-does not touch this file — it owns versions, cross-package pins, source version
-constants and the Supported Runtime Manifest table, and nothing else. This line
-used to claim the opposite, and all five package changelogs consequently still
-read `## Unreleased` at the 0.1.37-alpha.0 release commit.
+Release headers are written by the release bump (`npm run release:bump`), never by
+hand — true since the changelog-heading gap, and stated here only because it was asserted for a long
+time while being false. The bump rewrites the `## Unreleased` heading below into
+`## <version> — <date>`; add entries under `## Unreleased` and leave the heading
+alone.
+
+## Unreleased
+
+## 0.2.1-alpha.0 — 2026-09-16
+
+### Added
+
+- `reportSettlementEvidence(paymentId, settlementTxHash)` on `MerchantCompletion` — an
+  erc7710 agent hands Haven the merchant's settlement hash, which Haven verifies
+  on-chain before the payment counts as settled (#2973).
+- `HavenPaymentReceipt.fundingTxHash` and `.settlementTxHash` name the two legs the
+  single unlabeled `txHash` conflated; `txHash` is now `@deprecated` but still emitted
+  (#2998).
+- `parties` on `HavenPaymentReceipt` and `AgentPaymentSummary` —
+  `{ treasury_account, delegate, delegate_account, merchant }` (#2965). Optional.
+- `EvidenceReportOutcome`, `HavenZeroSettlementHashError`, `isZeroSettlementTxHash`.
+
+### Changed — read this before upgrading
+
+- **`settled` now means verified.** An erc7710 payment where the merchant returned 200
+  without an on-chain confirmation reports `settled: false` where it previously
+  reported `true`, and a zero transaction hash never rides out (#2968, #2971). If you
+  branch on `settled`, this is a behaviour change, not only a type change.
+- **Two exported unions widened**, which is a compile-time break for consumers doing an
+  exhaustive `switch` with a `never` check, or building their own
+  `Record<AgentPaymentFailureCode, string>`:
+  `AGENT_PAYMENT_NEXT_ACTION_VALUES` gains `"awaiting_settlement_evidence"`, and
+  `AGENT_PAYMENT_FAILURE_CODE_VALUES` gains `"MERCHANT_NOT_READY"`. No value was
+  removed; runtime behaviour for existing values is unchanged.
+- `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` on erc7710 no longer advises a sweep — there is
+  no funding leg to sweep on that scheme — and says to check status instead (#3000).
+
+### Known gap
+
+- `PaymentParties` is declared but **not re-exported from the package barrel**, so the
+  type named by the two `parties` fields above cannot be imported by name yet. The
+  fields are structurally usable. Tracked for a follow-up; not fixed in this release,
+  which is a version bump.
 
 ## 0.2.0-alpha.0 — 2026-09-14
 

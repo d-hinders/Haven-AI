@@ -3,10 +3,15 @@
  * out of `tools.ts` (which stays the compatibility facade `index.ts`,
  * `server.ts`, tests and embedders import).
  *
- * Two tools, one owner:
+ * Three tools, one owner:
  *
- *   complete   haven_complete_mcp_tool   (decomposed flow: deliver a signed header)
- *   settle     haven_settle_mcp_tool     (fast flow: fund AND deliver in one call)
+ *   complete   haven_complete_mcp_tool             (decomposed flow: deliver a signed header)
+ *   settle     haven_settle_mcp_tool               (fast flow: fund AND deliver in one call)
+ *   report     haven_report_settlement_evidence    (#2972: hand Haven a settlement hash the
+ *                                                    agent holds out of band, for the erc7710
+ *                                                    settlement classification the two tools
+ *                                                    above already use — see
+ *                                                    `classifySettlementEvidenceReport`)
  *
  * This is the FINAL capability slice of the #2806 chain. It moves the two
  * handlers AND their merchant delivery / context-rehydration helpers —
@@ -45,11 +50,14 @@ import { randomUUID } from 'node:crypto'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  AgentPaymentWarningCode,
   HavenApiError,
   HavenClient,
   MerchantTimeoutError,
   X402PaymentHeaderValidationError,
+  isZeroSettlementTxHash,
   validateStandardX402PaymentHeader,
+  type EvidenceReportOutcome,
   type X402McpTransport,
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
@@ -162,6 +170,26 @@ export async function resolveMerchantCallContext(
  * via haven_sweep_delegate. The X-PAYMENT header is a signed authorization the
  * edge signer produced — Haven relays it but never holds the key.
  */
+/**
+ * #2983: the merchant may refuse the paid retry with its OWN
+ * `merchant_not_ready` capacity signal (same shape `merchantNotReadyErrorFor`
+ * in `support/mcp-context.ts` reads on the quote path) rather than a generic
+ * rejection. Best-effort: any other shape (or a non-JSON body) yields `null`,
+ * and the caller falls back to the generic refusal message.
+ */
+function merchantNotReadyBodyFor(
+  body: unknown,
+): { reasonCode?: string; retryAfterS?: number } | null {
+  if (!body || typeof body !== 'object' || (body as Record<string, unknown>).error !== 'merchant_not_ready') {
+    return null
+  }
+  const { reason_code, retry_after_s } = body as Record<string, unknown>
+  return {
+    reasonCode: typeof reason_code === 'string' ? reason_code : undefined,
+    retryAfterS: typeof retry_after_s === 'number' ? retry_after_s : undefined,
+  }
+}
+
 export async function deliverMerchantPayment(
   haven: HavenClient,
   // Parsed haven_complete_mcp_tool / haven_settle_mcp_tool args (Zod-validated).
@@ -172,7 +200,14 @@ export async function deliverMerchantPayment(
   // #1508: a scheme with NO funding leg (erc7710) must skip the funding wait
   // ENTIRELY. Omitting fundingTxHash above does NOT achieve that — see below.
   options?: { noFundingLeg?: boolean; context?: ResolvedMerchantCallContext },
-): Promise<{ status: number; ok: boolean; result: unknown; settlement_tx_hash: string | null }> {
+): Promise<{
+  status: number
+  ok: boolean
+  result: unknown
+  settlement_tx_hash: string | null
+  /** #2970: what `haven.completeX402MerchantCall`'s evidence report learned, when it made one. */
+  evidence_outcome?: EvidenceReportOutcome
+}> {
   // #1307: resolve merchant_url/tool_name/arguments/mcp_transport BEFORE
   // waiting on funding confirmation — a version-skew refusal (no stored
   // context) should surface immediately, not after a pointless wait.
@@ -232,6 +267,36 @@ export async function deliverMerchantPayment(
     // its own guidance (verify-then-sweep), never the bare 504 and never a
     // blind sweep that could race a late settlement.
     if (err instanceof MerchantTimeoutError) {
+      // #3000: same scheme split as #2983's rejection branch, applied to the
+      // timeout branch — erc7710 has no funding leg, so there is never a
+      // delegate balance to strand or sweep here either. `next_action:
+      // check_status_later` is honest on BOTH schemes (the merchant may still
+      // settle late), but eip3009 additionally has a real stranded-funds risk
+      // the sweep guidance below describes; erc7710 does not, so that
+      // guidance is dropped rather than branched around, mirroring the
+      // rejection message's "ignore this code's sweep guidance" framing.
+      if (options?.noFundingLeg) {
+        throw new HostedToolError({
+          code: AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding,
+          message:
+            `The settlement authorization was submitted, but the merchant did not answer the ` +
+            `paid retry before the timeout. erc7710 has no funding leg, so there is no delegate ` +
+            `balance to sweep — ignore this code's sweep guidance. The merchant held a single-use ` +
+            `settlement authorization valid for up to the payment window (typically 300s) and may ` +
+            `still redeem it: do NOT retry haven_complete_mcp_tool (it has no erc7710 branch and ` +
+            `refuses a submitted intent). Check haven_get_payment_status after that window and ` +
+            `re-quote only if it shows no settlement. ${err.message}`,
+          statusCode: 504,
+          paymentId: args.payment_id,
+          status: 'merchant_unresponsive_after_funding',
+          // #3011 review: nothing was funded on erc7710 — same phase the
+          // erc7710 rejection branch uses.
+          phase: 'not_delivered',
+          nextAction: AgentPaymentNextAction.CheckStatusLater,
+          rail: 'erc7710',
+          suggestedTool: 'haven_get_payment_status',
+        })
+      }
       throw new HostedToolError({
         code: AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding,
         message:
@@ -257,6 +322,59 @@ export async function deliverMerchantPayment(
     } catch {
       // Preserve the merchant rejection even if status lookup is unavailable.
     }
+    // #2983: `noFundingLeg` (set true ONLY on the erc7710 call sites, above)
+    // is the same scheme signal `ensureFundingConfirmed`'s gate reads — reuse
+    // it rather than re-deriving "which scheme is this" a second way.
+    if (options?.noFundingLeg) {
+      // On erc7710 the signature IS the settlement child (#1456): there is no
+      // funding leg, so a merchant refusal at this point means NOTHING moved
+      // — no delegate balance to strand, nothing to sweep. The eip3009
+      // guidance below is false here and would tell the agent to "reconcile"
+      // a balance that was never created. Say what is true instead.
+      // #2987 review: the categorical "nothing moved, re-quote" is only
+      // safe when the merchant SAID it did not attempt settlement — the
+      // `merchant_not_ready` body. On any other non-2xx the merchant still
+      // holds a single-use settlement authorization valid for the window
+      // (`maxTimeoutSeconds`, default 300 s) and may have redeemed it before
+      // answering (an upstream 502/504 lands here as a response, not a
+      // timeout) — telling the agent to re-quote NOW could pay twice. So a
+      // generic refusal is verify-then-act, the same discipline
+      // MERCHANT_UNRESPONSIVE_AFTER_FUNDING uses; in neither case is there a
+      // delegate balance to sweep, and the skill's code-keyed
+      // "stop-and-sweep" advice is overridden explicitly in the message.
+      const notReady = merchantNotReadyBodyFor(result.body)
+      const message = notReady
+        ? `Merchant refused to deliver the resource (HTTP ${result.status}) and reported it ` +
+          `cannot settle right now` +
+          (notReady.reasonCode ? ` (reason_code: ${notReady.reasonCode})` : '') +
+          `. erc7710 has no funding leg and the merchant did not attempt settlement, so no ` +
+          `funds moved — the agent's budget is intact. Ignore this code's sweep guidance: there ` +
+          `is no delegate balance to sweep. Re-quote` +
+          (notReady.retryAfterS ? ` after approximately ${notReady.retryAfterS}s` : ' later') +
+          `. Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`
+        : `Merchant refused to deliver the resource (HTTP ${result.status}). erc7710 has no ` +
+          `funding leg, so there is no delegate balance to sweep — ignore this code's sweep ` +
+          `guidance. Haven has NOT observed a settlement, but the merchant held a single-use ` +
+          `settlement authorization valid for up to the payment window (typically 300s) and ` +
+          `may have redeemed it before answering: check haven_get_payment_status after that ` +
+          `window and re-quote only if it shows no settlement. ` +
+          `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`
+      throw new HostedToolError({
+        code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
+        message,
+        statusCode: result.status,
+        paymentId: args.payment_id,
+        status: status?.status ?? 'merchant_rejected_after_funding',
+        phase: status?.phase ?? 'not_delivered',
+        nextAction: notReady
+          ? AgentPaymentNextAction.StopAndTellUser
+          : AgentPaymentNextAction.CheckStatusLater,
+        ...(notReady ? {} : { suggestedTool: 'haven_get_payment_status' }),
+        rail: status?.rail ?? 'erc7710',
+        idempotencyKey: status?.idempotencyKey,
+        retryWithNewQuote: true,
+      })
+    }
     throw new HostedToolError({
       code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
       message:
@@ -277,7 +395,123 @@ export async function deliverMerchantPayment(
     status: result.status,
     ok: result.ok,
     result: result.body,
-    settlement_tx_hash: result.settlementTxHash ?? null,
+    // #2968: the response-level zero-hash ban. `settlementTxHash` here is the
+    // MERCHANT's word (the PAYMENT-RESPONSE header), and the demo merchant's
+    // own "delivered, not settled" marker is `0x00…00` — a value shaped like a
+    // hash gets rendered like one by every consumer downstream, so a sentinel
+    // is collapsed to null at this boundary instead of being handed out as a
+    // transaction. `null` says "no transaction known"; the settlement gate
+    // (`classifyErc7710Settlement`) already refuses to treat null as proof.
+    // Same recognizer #2970 landed in the SDK (`isZeroSettlementTxHash`), so
+    // every surface that touches this value accepts and refuses the same set.
+    settlement_tx_hash:
+      result.settlementTxHash != null && !isZeroSettlementTxHash(result.settlementTxHash)
+        ? result.settlementTxHash
+        : null,
+    evidence_outcome: result.evidenceOutcome,
+  }
+}
+
+/**
+ * #2970: what "settled" means for the erc7710 branch — an on-chain transfer
+ * Haven verified, never the merchant's bare HTTP 200. Three outcomes:
+ *
+ *  - `settled`: the backend confirmed the reported hash (`evidenceOutcome:
+ *    { outcome: 'confirmed' }`, from the SAME `reportEvidence` call the 3009
+ *    branch makes — see `HavenClient.completeX402MerchantCall`).
+ *  - `delivered_unsettled`: the merchant returned no hash, a zero hash, or the
+ *    backend refused it as unverifiable (409 `settlement_unverified`, or any
+ *    other terminal refusal). Nothing will resolve this by waiting; the
+ *    remedy is reporting a real hash.
+ *  - `settlement_pending`: the backend could not yet tell (503
+ *    `settlement_unobservable`, exhausted its own retry budget) — the chain
+ *    was unreachable or the transaction is not mined yet. This one IS worth
+ *    asking about again.
+ *
+ * A zero/missing hash is decided HERE, before trusting `evidenceOutcome` at
+ * all: `completeX402MerchantCall` already treats a zero hash as "no hash to
+ * report" (`isZeroSettlementTxHash`) and skips the report entirely, so
+ * `evidenceOutcome` is `undefined` in that case — indistinguishable, from
+ * this function's INPUT alone, from "there was nothing to report for some
+ * other reason". Checking the hash directly makes the zero-hash case
+ * unconditional rather than depending on that implementation detail staying
+ * true.
+ */
+export function classifyErc7710Settlement(
+  settlementTxHash: string | null,
+  evidenceOutcome: EvidenceReportOutcome | undefined,
+): { outcome: 'settled' } | { outcome: 'delivered_unsettled' } | { outcome: 'settlement_pending' } {
+  if (!settlementTxHash || isZeroSettlementTxHash(settlementTxHash)) {
+    return { outcome: 'delivered_unsettled' }
+  }
+  if (evidenceOutcome?.outcome === 'confirmed') return { outcome: 'settled' }
+  if (evidenceOutcome?.outcome === 'retryable') return { outcome: 'settlement_pending' }
+  // `refused`, or no report was ever made for a hash that IS present and
+  // non-zero (should not happen — `completeX402MerchantCall` reports whenever
+  // it has a real hash — but fail to the honest answer, not the confident one).
+  return { outcome: 'delivered_unsettled' }
+}
+
+/**
+ * #2972: the `haven_report_settlement_evidence` tool's response shape — the
+ * SAME three outcomes `classifyErc7710Settlement` classifies for the settle/
+ * complete gate, built directly from `MerchantCompletion.reportEvidence`'s
+ * `EvidenceReportOutcome` rather than derived from a merchant HTTP call (there
+ * is none here — the agent is handing Haven a hash it already holds).
+ *
+ * `confirmed` -> settled: true. `retryable` -> SETTLEMENT_PENDING (the chain
+ * could not be read yet, or the transaction is not mined — worth reporting
+ * again). Everything else (`refused`, at any status code — a 409 mismatch, a
+ * 404 for a payment this agent does not own, a validation error) ->
+ * DELIVERED_UNSETTLED: a settled no, never a write. `next_tool` is always
+ * `haven_get_payment_status` on the two unsettled branches, exactly as the
+ * settle/complete gate points there — this tool does not retry itself.
+ */
+export function classifySettlementEvidenceReport(
+  paymentId: string,
+  settlementTxHash: string,
+  outcome: EvidenceReportOutcome,
+  // #2973 review: the payment's status as Haven READ it after the refusal —
+  // a 409 may sit on an already-confirmed intent with a different hash, so
+  // the summary must not assert `submitted`. `null` when the read itself
+  // failed (a foreign payment 404s here too).
+  observedStatus: string | null = null,
+): Record<string, unknown> {
+  if (outcome.outcome === 'confirmed') {
+    return {
+      payment_id: paymentId,
+      settled: true,
+      settlement_tx_hash: settlementTxHash,
+      ...buildAgentGuidance({
+        nextAction: AgentPaymentNextAction.None,
+        safeToContinue: true,
+        reason:
+          'Haven verified this settlement transaction on-chain against the payment and ' +
+          'confirmed it — the payment now has verified settlement evidence.',
+        summary: { payment_id: paymentId, status: 'settled' },
+      }),
+    }
+  }
+  const pending = outcome.outcome === 'retryable'
+  return {
+    payment_id: paymentId,
+    settled: false,
+    code: pending ? 'SETTLEMENT_PENDING' : 'DELIVERED_UNSETTLED',
+    ...(pending ? { retryable: true } : {}),
+    settlement_tx_hash: settlementTxHash,
+    ...buildAgentGuidance({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      nextTool: 'mcp__haven__haven_get_payment_status',
+      nextArguments: { payment_id: paymentId },
+      safeToContinue: true,
+      reason: pending
+        ? 'Haven could not yet verify this transaction on-chain — the RPC was unreachable, or ' +
+          'the transaction is not mined yet. Report the same hash again shortly, or poll next_tool.'
+        : 'Haven could not verify this transaction against this payment on-chain — it does not ' +
+          "match this payment's transfer shape or window, or the payment could not be found for " +
+          'this agent. Reporting it again will not change that; poll next_tool for the current status.',
+      summary: { payment_id: paymentId, status: observedStatus ?? 'unknown' },
+    }),
   }
 }
 
@@ -339,6 +573,7 @@ export async function preflightMcpPaymentHeader(haven: HavenClient, args: Record
 export const PAID_MCP_COMPLETION_TOOLS = [
   'haven_complete_mcp_tool',
   'haven_settle_mcp_tool',
+  'haven_report_settlement_evidence',
 ] as const satisfies readonly HostedToolName[]
 
 export type PaidMcpCompletionToolName = (typeof PAID_MCP_COMPLETION_TOOLS)[number]
@@ -362,7 +597,24 @@ export function createPaidMcpCompletionHandlers(
         // `createToolHandlers` directly, where no MCP SDK validation runs.
         // Both layers read their refusal text from STRICT_INPUT_TOOLS.
         const args = parseStrict('haven_complete_mcp_tool', input)
-        return deliverMerchantPayment(haven, args)
+        // #2970 review: pick explicit fields rather than spreading
+        // `deliverMerchantPayment`'s result verbatim — that result now also
+        // carries `evidence_outcome` (which can be `{outcome:'refused',
+        // statusCode:0}` on a transport failure) on BOTH schemes, and this
+        // tool's contract (`COMPLETE_MCP_TOOL_DESCRIPTION`) never documented
+        // it. Drop it here rather than document a field nothing downstream
+        // needs — `haven_settle_mcp_tool`'s erc7710 branch already turns the
+        // same evidence outcome into `code`/`settled`/agent guidance, and
+        // `haven_complete_mcp_tool` has no erc7710 branch of its own to
+        // classify (see `deliverMerchantPayment`'s `noFundingLeg` gate — a
+        // `submitted` erc7710 intent 409s here today, pre-existing).
+        const delivered = await deliverMerchantPayment(haven, args)
+        return {
+          status: delivered.status,
+          ok: delivered.ok,
+          result: delivered.result,
+          settlement_tx_hash: delivered.settlement_tx_hash,
+        }
       }),
 
     haven_settle_mcp_tool: async (input) =>
@@ -427,28 +679,119 @@ export function createPaidMcpCompletionHandlers(
             { noFundingLeg: true, context: merchantContext },
           )
           const summary7710 = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
+          // #2970: "settled" means Haven VERIFIED the settlement on-chain, not
+          // that the merchant answered 2xx — by this point a non-2xx merchant
+          // response has already thrown (MERCHANT_REJECTED_AFTER_FUNDING,
+          // above in `deliverMerchantPayment`), so `merchant7710.ok` is always
+          // true here and was never the right signal for "settled" in the
+          // first place. See `classifyErc7710Settlement`.
+          const gate = classifyErc7710Settlement(
+            merchant7710.settlement_tx_hash,
+            merchant7710.evidence_outcome,
+          )
+          if (gate.outcome === 'settled') {
+            return {
+              payment_id: args.payment_id,
+              settlement_scheme: 'erc7710',
+              funding_tx_hash: null,
+              settled: true,
+              // #2968: the delivery half of the vocabulary rides on the settled
+              // arm too — settled:true implies the merchant handed over the
+              // goods, and the qa-agent scenarios assert the two fields AGREE
+              // (settled:true without delivered:true is the #2968 contradiction
+              // in reverse). Absence of `code` remains the settled marker.
+              delivered: true,
+              settlement_tx_hash: merchant7710.settlement_tx_hash,
+              result: merchant7710.result,
+              allowance: summary7710.allowance,
+              ...buildAgentGuidance({
+                // Same terminal value the 3009 success path uses (#1308) — one
+                // vocabulary, not a parallel one per scheme.
+                nextAction: AgentPaymentNextAction.None,
+                safeToContinue: true,
+                reason:
+                  'Settled directly from the treasury through the budget delegation — no funding ' +
+                  'leg, so the delegate wallet never held these funds and there is nothing to sweep.',
+                summary: {
+                  payment_id: args.payment_id,
+                  status: summary7710.payment?.status ?? 'settled',
+                  product: args.tool_name,
+                },
+                warnings: summary7710.warnings,
+              }),
+            }
+          }
+          const pending = gate.outcome === 'settlement_pending'
+          // #2968: the unconfirmed settlement is the most important fact in
+          // this response, so it does not ride silently — a machine-readable
+          // warning travels with it, carrying the intent's expiry so the agent
+          // can say how long "later" still means. After that instant the
+          // settlement can no longer land at all.
+          const expiresAt =
+            typeof summary7710.payment?.expiresAt === 'string' && summary7710.payment.expiresAt.length > 0
+              ? summary7710.payment.expiresAt
+              : null
+          const settlementUnconfirmedWarning = {
+            code: AgentPaymentWarningCode.SettlementUnconfirmed,
+            message:
+              `No on-chain confirmation for payment ${args.payment_id}: the merchant delivered, ` +
+              'but Haven holds no verified settlement evidence. ' +
+              (expiresAt
+                ? `Check haven_get_payment_status again before this payment expires at ${expiresAt}. `
+                : 'Check haven_get_payment_status again later. ') +
+              'Report the delivered goods to the user, but do not report the payment as settled.',
+          }
+          // #2972: on the pending branch the agent demonstrably holds the
+          // merchant's real hash (it is echoed right here), so the machine-
+          // readable remedy is to hand it back through
+          // `haven_report_settlement_evidence` once the chain is readable —
+          // not merely to poll. DELIVERED_UNSETTLED keeps the status poll as
+          // next_tool: the hash was missing, zero, or already refused, and
+          // the sweep is the remaining passive path.
+          const heldHash = merchant7710.settlement_tx_hash
+          const canReport =
+            pending && typeof heldHash === 'string' && !isZeroSettlementTxHash(heldHash)
           return {
             payment_id: args.payment_id,
             settlement_scheme: 'erc7710',
             funding_tx_hash: null,
-            settled: merchant7710.ok,
+            settled: false,
+            code: pending ? 'SETTLEMENT_PENDING' : 'DELIVERED_UNSETTLED',
+            delivered: true,
+            ...(pending ? { retryable: true } : {}),
             settlement_tx_hash: merchant7710.settlement_tx_hash,
             result: merchant7710.result,
             allowance: summary7710.allowance,
             ...buildAgentGuidance({
-              // Same terminal value the 3009 success path uses (#1308) — one
-              // vocabulary, not a parallel one per scheme.
-              nextAction: AgentPaymentNextAction.None,
+              nextAction: AgentPaymentNextAction.CheckStatusLater,
+              nextTool: canReport
+                ? 'mcp__haven__haven_report_settlement_evidence'
+                : 'mcp__haven__haven_get_payment_status',
+              nextArguments: canReport
+                ? { payment_id: args.payment_id, settlement_tx_hash: heldHash }
+                : { payment_id: args.payment_id },
               safeToContinue: true,
-              reason:
-                'Settled directly from the treasury through the budget delegation — no funding ' +
-                'leg, so the delegate wallet never held these funds and there is nothing to sweep.',
+              reason: pending
+                ? 'The merchant delivered the result and reported a settlement transaction, but ' +
+                  'Haven could not yet verify it on-chain (the RPC was unreachable, or the ' +
+                  'transaction is not mined yet). This is worth checking again — call next_tool ' +
+                  'with next_arguments shortly (it hands the same settlement_tx_hash back to ' +
+                  'Haven for verification); haven_get_payment_status shows the current status.'
+                : 'The merchant delivered the result, but Haven has no verified on-chain settlement ' +
+                  'evidence for this payment — the reported settlement hash was missing, zero, or ' +
+                  "could not be verified. Haven's settlement sweep may still attribute it within " +
+                  'about two minutes; poll next_tool once more after that. If you hold a real ' +
+                  'settlement transaction hash from the merchant, haven_report_settlement_evidence ' +
+                  'hands it to Haven for verification. If it still shows no evidence, tell the ' +
+                  'user the goods were delivered but Haven holds no verified settlement evidence ' +
+                  'for this payment.',
               summary: {
                 payment_id: args.payment_id,
-                status: summary7710.payment?.status ?? 'settled',
+                status: summary7710.payment?.status ?? (pending ? 'settlement_pending' : 'delivered_unsettled'),
                 product: args.tool_name,
+                ...(expiresAt ? { expires_at: expiresAt } : {}),
               },
-              warnings: summary7710.warnings,
+              warnings: [...summary7710.warnings, settlementUnconfirmedWarning],
             }),
           }
         }
@@ -532,5 +875,42 @@ export function createPaidMcpCompletionHandlers(
         }
       }),
 
+    // #2972: report a settlement hash the agent holds out of band — see the
+    // module header and `classifySettlementEvidenceReport`. Agent-authenticated,
+    // own payments only: `HavenClient.reportSettlementEvidence` posts to the
+    // SAME backend route (`POST /machine-payments/evidence`) the settle/
+    // complete gate above already calls, scoped `WHERE agent_id = $` there —
+    // a foreign payment_id 404s and is classified DELIVERED_UNSETTLED, never
+    // written. The zero hash never reaches that call at all: the SDK refuses
+    // it client-side (`HavenZeroSettlementHashError`), which `runTool`'s
+    // generic `HavenError` branch turns into a `ToolFailure` carrying `code:
+    // "ZERO_SETTLEMENT_HASH"` — no separate catch needed here.
+    haven_report_settlement_evidence: async (input) =>
+      runTool(async () => {
+        const args = parseStrict('haven_report_settlement_evidence', input)
+        const outcome = await haven.reportSettlementEvidence(
+          args.payment_id,
+          args.settlement_tx_hash,
+        )
+        if (outcome.outcome === 'confirmed') {
+          return classifySettlementEvidenceReport(args.payment_id, args.settlement_tx_hash, outcome)
+        }
+        // Refused or pending: read the status Haven actually holds rather than
+        // asserting one. A foreign/non-existent payment 404s on this read as
+        // well — reported as `unknown`, which is the truth from this agent's
+        // side.
+        let observedStatus: string | null = null
+        try {
+          observedStatus = (await haven.getPaymentStatus(args.payment_id)).status
+        } catch {
+          observedStatus = null
+        }
+        return classifySettlementEvidenceReport(
+          args.payment_id,
+          args.settlement_tx_hash,
+          outcome,
+          observedStatus,
+        )
+      }),
   }
 }

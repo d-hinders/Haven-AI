@@ -22,6 +22,7 @@ import {
   markIntentSubmittedForSettlement,
   recordX402Signature,
 } from '../x402-authorizations.js'
+import { expirePendingIntent } from '../payment-intents.js'
 
 let seq = 0
 
@@ -191,6 +192,115 @@ describeDb('x402-authorizations repository (#1222)', () => {
     // OTHER key column. (#2469: the same-scenario refresh-guard assertion went
     // with the deleted refreshStaleX402Intent.)
     expect((await findX402IntentByIdempotencyKey(agentId, 'rail-key-1'))?.id).toBe(x402)
+  })
+
+  // ── #3045: a duplicated key with the NEWEST row expired must not strand ──
+
+  it('#3045 two rows one key, newest expired: the OLDER live row wins the lookup (409-forever regression)', async () => {
+    // The #3045 trap state, seeded at the data layer exactly as dev holds it
+    // for `b2-probe-2026-09-16-k1` (rows 6866bc97 / 9835d550, both
+    // `pending_signature` at creation, newest now lazily expired): the insert
+    // fills BOTH key columns (machine_idempotency_key = x402_idempotency_key,
+    // payment-intents.ts), so the second row for the key rides the OTHER
+    // column and the partial unique index does not refuse it. Under the old
+    // `ORDER BY created_at DESC` the lookup always answered the newest row;
+    // with that row expired the key could never be freed or replayed — the
+    // insert conflicted with the older live row the lookup never reached.
+    const { agentId, userId } = await seedAgent()
+    const older = await seedIntent({
+      agentId,
+      userId,
+      x402Key: 'dup-key-1',
+      status: 'pending_signature',
+      createdAt: '2026-08-08T00:00:00Z', // older by created_at — the row the key really belongs to
+    })
+    const newer = await seedIntent({
+      agentId,
+      userId,
+      machineKey: 'dup-key-1', // the OTHER column — a legacy duplicate, not an insert the current tools could make
+      status: 'expired', // the NEWEST row (default created_at = NOW), already lazily expired
+    })
+    expect(newer).toBeTruthy()
+
+    // With the newest row dead, the lookup must surface the OLDER LIVE row —
+    // pre-fix `created_at DESC` alone returned the expired newest row here,
+    // which is the whole 409-forever mechanism.
+    const found = await findX402IntentByIdempotencyKey(agentId, 'dup-key-1')
+    expect(found?.id).toBe(older)
+    expect(found?.status).toBe('pending_signature')
+
+    // And that row is LIVE: re-inserting for the key must still violate the
+    // partial unique index — the exact 23505 the pre-fix retry hit after
+    // lazily expiring the newest row (the 409-forever mechanism).
+    await expect(seedIntent({ agentId, userId, x402Key: 'dup-key-1' })).rejects.toMatchObject({
+      code: '23505',
+    })
+  })
+
+  it('#3045 walking a duplicated key: each retry reaches a live row until the key is truly free', async () => {
+    // Two pending rows, the NEWER one past its quote window. First retry: the
+    // lookup finds the newer row (live beats live → newest first), the caller
+    // lazily expires it (delegationReplay's freeing path — the same
+    // expirePendingIntent the module calls). Second retry: the older live row
+    // is now the newest live match and is FOUND — under the pre-fix ordering
+    // the lookup would have returned the just-expired row again and the key
+    // would strand on 409 forever.
+    const { agentId, userId } = await seedAgent()
+    const older = await seedIntent({
+      agentId,
+      userId,
+      x402Key: 'dup-key-2',
+      createdAt: '2026-08-08T00:00:00Z', // older by created_at
+    })
+    const newer = await seedIntent({
+      agentId,
+      userId,
+      machineKey: 'dup-key-2',
+      // NEWEST row (default created_at = NOW), past its quote window: the
+      // retry lazily expires THIS one first — the #961 freeing path.
+      expiresAt: '2020-01-01T00:10:00Z',
+    })
+
+    const first = await findX402IntentByIdempotencyKey(agentId, 'dup-key-2')
+    expect(first?.id).toBe(newer)
+    expect(first?.status).toBe('pending_signature')
+    // The caller's freeing step: flip the stale pending row to expired.
+    await expirePendingIntent(newer, agentId)
+
+    // The NEXT retry (what pre-fix returned null to, then 409'd): the older
+    // row must surface so the caller can replay it — or lazily expire it in
+    // turn, after which the key is free for a fresh mint.
+    const second = await findX402IntentByIdempotencyKey(agentId, 'dup-key-2')
+    expect(second?.id).toBe(older)
+    expect(second?.status).toBe('pending_signature')
+    await expirePendingIntent(older, agentId)
+
+    // Both rows dead: the lookup still finds the newest EXPIRED row (the
+    // #961 lone-stale freeing path is unchanged — expired stays visible), the
+    // caller expires nothing, returns null, and the fresh insert succeeds.
+    const third = await findX402IntentByIdempotencyKey(agentId, 'dup-key-2')
+    expect(third?.id).toBe(newer)
+    expect(third?.status).toBe('expired')
+    await expect(seedIntent({ agentId, userId, x402Key: 'dup-key-2' })).resolves.toBeTruthy()
+  })
+
+  it('#3045 a lone expired row is still FOUND — the lazy-expiry freeing path is unchanged (#961)', async () => {
+    // The WHERE predicate was deliberately NOT touched: with only an expired
+    // row for the key, the lookup must still return it so delegationReplay
+    // can expire nothing and return null, freeing the key for a fresh create.
+    // (The CASE ordering only ranks expired BELOW live rows; with no live row
+    // the expired row is the match, exactly as before.)
+    const { agentId, userId } = await seedAgent()
+    const expired = await seedIntent({
+      agentId,
+      userId,
+      x402Key: 'lone-expired-1',
+      status: 'expired',
+    })
+
+    const found = await findX402IntentByIdempotencyKey(agentId, 'lone-expired-1')
+    expect(found?.id).toBe(expired)
+    expect(found?.status).toBe('expired')
   })
 
   // ── One-shot execute transitions ─────────────────────────────────────────

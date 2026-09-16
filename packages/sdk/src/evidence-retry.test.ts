@@ -59,7 +59,7 @@ describe('evidence reporting retries a retryable refusal (#2117)', () => {
     const post = vi.fn().mockRejectedValue(new HavenApiError('settlement_unobservable', 503))
     const { completion, sleep } = completionWith(post)
 
-    await expect(report(completion)).resolves.toBeUndefined()
+    await expect(report(completion)).resolves.toEqual({ outcome: 'retryable', statusCode: 503 })
 
     // Bounded: four attempts total, never an unbounded loop against a dead chain.
     expect(post).toHaveBeenCalledTimes(4)
@@ -72,7 +72,7 @@ describe('evidence reporting retries a retryable refusal (#2117)', () => {
     const post = vi.fn().mockRejectedValue(new HavenApiError('settlement_unverified', 409))
     const { completion, sleep } = completionWith(post)
 
-    await report(completion)
+    await expect(report(completion)).resolves.toEqual({ outcome: 'refused', statusCode: 409 })
 
     expect(post).toHaveBeenCalledTimes(1)
     expect(sleep).not.toHaveBeenCalled()
@@ -92,7 +92,7 @@ describe('evidence reporting retries a retryable refusal (#2117)', () => {
     const post = vi.fn().mockRejectedValue(new HavenApiError('refused', status))
     const { completion, sleep } = completionWith(post)
 
-    await report(completion)
+    await expect(report(completion)).resolves.toEqual({ outcome: 'refused', statusCode: status })
 
     expect(post).toHaveBeenCalledTimes(1)
     expect(sleep).not.toHaveBeenCalled()
@@ -112,7 +112,7 @@ describe('evidence reporting retries a retryable refusal (#2117)', () => {
       )
     const { completion, sleep } = completionWith(post)
 
-    await expect(report(completion)).resolves.toBeUndefined()
+    await expect(report(completion)).resolves.toEqual({ outcome: 'refused', statusCode: 0 })
 
     expect(post).toHaveBeenCalledTimes(1)
     expect(sleep).not.toHaveBeenCalled()
@@ -122,7 +122,7 @@ describe('evidence reporting retries a retryable refusal (#2117)', () => {
     const post = vi.fn().mockRejectedValue(new Error('socket hang up'))
     const { completion } = completionWith(post)
 
-    await expect(report(completion)).resolves.toBeUndefined()
+    await expect(report(completion)).resolves.toEqual({ outcome: 'refused', statusCode: 0 })
     expect(post).toHaveBeenCalledTimes(1)
   })
 
@@ -130,7 +130,7 @@ describe('evidence reporting retries a retryable refusal (#2117)', () => {
     const post = vi.fn().mockResolvedValue({ ok: true })
     const { completion, sleep } = completionWith(post)
 
-    await report(completion)
+    await expect(report(completion)).resolves.toEqual({ outcome: 'confirmed' })
 
     expect(post).toHaveBeenCalledTimes(1)
     expect(sleep).not.toHaveBeenCalled()

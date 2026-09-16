@@ -44,6 +44,15 @@ export interface AccountingEntry {
   settledAt: string
   /** out = expense (agent payment), in = income/refund. */
   direction: 'out' | 'in'
+  /**
+   * #2960: our own side of the entry — `machine_payment_evidence.payer_address`,
+   * which is `parties.treasury_account` on every other surface (written from
+   * `intent.account_address` at settlement, `modules/mpp/evidence.ts`). Named
+   * explicitly rather than left implicit: before #2960 this feed booked ONLY
+   * the merchant (`counterparty` below) and never stated which address was
+   * "our side" anywhere in code — see `docs/operations/accounting-feed.md`.
+   */
+  treasuryAccount: string | null
   counterparty: {
     address: string | null
     name: string | null
@@ -93,6 +102,8 @@ export interface AccountingEntrySourceRow {
   tx_hash: string
   chain_id: number
   merchant_address: string | null
+  /** #2960: our own side — `parties.treasury_account` on every other surface. */
+  payer_address: string | null
   token_symbol: string
   amount_raw: string
   amount_human: string | null
@@ -134,6 +145,7 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     chainId: row.chain_id,
     settledAt: row.confirmed_at ?? row.created_at,
     direction: 'out',
+    treasuryAccount: row.payer_address ?? null,
     counterparty: { address: row.merchant_address, name: null, country: row.country ?? null },
     token: row.token_symbol,
     amountAtomic: row.amount_raw,
@@ -159,7 +171,7 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
 /** Shared column + join body for the canonical entry source. */
 const ENTRY_SOURCE_SQL = `
   mpe.id, mpe.payment_intent_id, mpe.approval_request_id, mpe.tx_hash, mpe.chain_id,
-  mpe.merchant_address, mpe.token_symbol, mpe.amount_raw, mpe.amount_human,
+  mpe.merchant_address, mpe.payer_address, mpe.token_symbol, mpe.amount_raw, mpe.amount_human,
   mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at, mpe.fx_rates,
   mpe.resource_url, mpe.confirmed_at, mpe.created_at,
   mc.category AS category,

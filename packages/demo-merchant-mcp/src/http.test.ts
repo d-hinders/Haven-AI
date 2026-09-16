@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { BaseError, ContractFunctionExecutionError, InsufficientFundsError, TimeoutError } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
@@ -34,7 +35,10 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
-async function startServer(client: Partial<SettlementClient> = {}) {
+async function startServer(
+  client: Partial<SettlementClient> = {},
+  serverOptions: { readinessCacheMs?: number } = {},
+) {
   const submit = vi.fn<SettlementClient['submit']>().mockResolvedValue(TX_HASH)
   const waitForReceipt = vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined)
   const settlementClient: SettlementClient = {
@@ -51,6 +55,11 @@ async function startServer(client: Partial<SettlementClient> = {}) {
     // is still a client whose `readiness` is undefined, so /healthz omits the
     // settlement block exactly as before.
     settlementClient,
+    // #2979: `readinessCacheMs: 0` (default in these tests unless overridden)
+    // disables the gate's read cache, so each gate check in a test reflects
+    // the CURRENT stub return value instead of a value cached from an earlier
+    // call in the same test — no fake clock, no sleep.
+    readinessCacheMs: serverOptions.readinessCacheMs ?? 0,
   })
   servers.push(server)
   await new Promise<void>((resolve, reject) => {
@@ -568,6 +577,179 @@ describe('demo merchant MCP x402 flow', () => {
     })
   })
 
+  // #2979: /mcp must consult the same readiness signal /healthz already does,
+  // gated on every paid call — the unpaid challenge request and the signed retry alike —
+  // a wallet can drain between the two. `fail` refuses with 503 and never
+  // lets an agent sign an authorization the merchant already knows it cannot
+  // settle; `warn` and an `unknown` (throwing) read must both proceed
+  // unchanged, same as the pre-existing /healthz rule.
+  describe('/mcp settlement-readiness gate (#2979)', () => {
+    async function unpaidBuy(url: string) {
+      return postMcp(url, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      })
+    }
+
+    it('refuses a paid tool with 503 + reason_code + Retry-After when the wallet is in the fail band, before any 402 is issued', async () => {
+      const { url, submit } = await startServer({
+        readiness: () => Promise.resolve(settlementReadiness(MERCHANT, 255_000_000_000n)),
+      })
+
+      const res = await unpaidBuy(url)
+      const body = await res.json()
+
+      expect(res.status).toBe(503)
+      expect(body).toMatchObject({
+        error: 'merchant_not_ready',
+        reason_code: 'settlement_wallet_out_of_gas',
+        settlements_remaining: 0,
+        fail_floor: 12,
+      })
+      expect(typeof body.retry_after_s).toBe('number')
+      expect(res.headers.get('Retry-After')).toBe(String(body.retry_after_s))
+      // No 402 was ever issued, so nothing was ever signed or submitted.
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('refuses the paid retry (after a healthy 402) if the wallet drains into the fail band before settlement', async () => {
+      let balance = SETTLEMENT_COST_WEI * 30n // usable at challenge time
+      const { url, submit } = await startServer({
+        readiness: () => Promise.resolve(settlementReadiness(MERCHANT, balance)),
+      })
+
+      const unpaid = await unpaidBuy(url)
+      expect(unpaid.status).toBe(402)
+      const paymentRequired = (await unpaid.json()) as PaymentRequired
+      const paymentHeader = await signedHeader(paymentRequired)
+
+      // Drain the wallet between the challenge and the agent's signed retry.
+      balance = 255_000_000_000n
+
+      const paid = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader })
+      const body = await paid.json()
+
+      expect(paid.status).toBe(503)
+      expect(body).toMatchObject({ error: 'merchant_not_ready', reason_code: 'settlement_wallet_out_of_gas' })
+      // The agent signed an authorization, but it must never have been redeemed.
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('proceeds normally through the 402/200 flow when the wallet is only in the warn band', async () => {
+      const { url, submit } = await startServer({
+        readiness: () => Promise.resolve(settlementReadiness(MERCHANT, SETTLEMENT_COST_WEI * 24n)),
+      })
+
+      const unpaid = await unpaidBuy(url)
+      expect(unpaid.status).toBe(402)
+      const paymentRequired = (await unpaid.json()) as PaymentRequired
+      const paymentHeader = await signedHeader(paymentRequired)
+
+      const paid = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader })
+
+      expect(paid.status).toBe(200)
+      expect(submit).toHaveBeenCalledTimes(1)
+    })
+
+    it('proceeds normally when the readiness read throws — unknown never blocks', async () => {
+      const { url, submit } = await startServer({
+        readiness: () => Promise.reject(new Error('RPC unreachable')),
+      })
+
+      const unpaid = await unpaidBuy(url)
+      expect(unpaid.status).toBe(402)
+      const paymentRequired = (await unpaid.json()) as PaymentRequired
+      const paymentHeader = await signedHeader(paymentRequired)
+
+      const paid = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'buy_vpn', arguments: { plan: 'basic' } },
+      }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader })
+
+      expect(paid.status).toBe(200)
+      expect(submit).toHaveBeenCalledTimes(1)
+    })
+
+    it('leaves a free tool (list_products) unaffected by the fail band', async () => {
+      const { url } = await startServer({
+        readiness: () => Promise.resolve(settlementReadiness(MERCHANT, 255_000_000_000n)),
+      })
+
+      const res = await postMcp(url, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'list_products', arguments: {} },
+      })
+
+      expect(res.status).toBe(200)
+    })
+
+    // Review of #2982: every test above runs with the cache DISABLED. These
+    // pin the production configuration (a 15 s window) on a fake clock: a
+    // verdict is reused inside the window, re-read after it (so a `fail`
+    // cannot latch until restart), and a thrown read is cached as unknown
+    // for the window — the stated trade-off, pinned so it cannot drift.
+    describe('readiness cache (production window, fake clock)', () => {
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      it('reuses the verdict inside the window and re-reads after it — a fail band does not latch', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date('2026-09-14T20:00:00Z'))
+        let balance = 255_000_000_000n // fail
+        const readiness = vi.fn(() => Promise.resolve(settlementReadiness(MERCHANT, balance)))
+        const { url } = await startServer({ readiness }, { readinessCacheMs: 15_000 })
+
+        expect((await unpaidBuy(url)).status).toBe(503)
+        expect(readiness).toHaveBeenCalledTimes(1)
+
+        // Wallet topped up inside the window: the cached fail still answers,
+        // and the RPC is not hit again.
+        balance = SETTLEMENT_COST_WEI * 30n
+        vi.setSystemTime(new Date('2026-09-14T20:00:10Z'))
+        expect((await unpaidBuy(url)).status).toBe(503)
+        expect(readiness).toHaveBeenCalledTimes(1)
+
+        // Past the window: re-read, the top-up is honoured.
+        vi.setSystemTime(new Date('2026-09-14T20:00:16Z'))
+        expect((await unpaidBuy(url)).status).toBe(402)
+        expect(readiness).toHaveBeenCalledTimes(2)
+      })
+
+      it('caches a thrown read as unknown for the window (fails open, does not re-poll a dead RPC per request)', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date('2026-09-14T20:00:00Z'))
+        const readiness = vi.fn(() => Promise.reject(new Error('RPC unreachable')))
+        const { url } = await startServer({ readiness }, { readinessCacheMs: 15_000 })
+
+        expect((await unpaidBuy(url)).status).toBe(402)
+        vi.setSystemTime(new Date('2026-09-14T20:00:05Z'))
+        expect((await unpaidBuy(url)).status).toBe(402)
+        expect(readiness).toHaveBeenCalledTimes(1)
+
+        vi.setSystemTime(new Date('2026-09-14T20:00:16Z'))
+        expect((await unpaidBuy(url)).status).toBe(402)
+        expect(readiness).toHaveBeenCalledTimes(2)
+      })
+    })
+  })
+
   /**
    * A refusal and a breakage both leave the payer with a 402, but they are
    * opposite events: one is the merchant working, the other is the merchant
@@ -609,7 +791,7 @@ describe('demo merchant MCP x402 flow', () => {
       } catch {
         body = undefined
       }
-      return { status: paid.status, body: body ?? ({} as PaymentRequired & { error?: string }), text }
+      return { status: paid.status, body: body ?? ({} as PaymentRequired & { error?: string }), text, headers: paid.headers }
     }
 
     it('names the fault class and points at the logs, instead of "Payment failed"', async () => {
@@ -627,6 +809,9 @@ describe('demo merchant MCP x402 flow', () => {
       expect(body.error).toContain('merchant-side fault')
       expect(body.error).toContain('HttpRequestError')
       expect(body.error).not.toContain('ECONNREFUSED')
+      // #2979: reason catalog, additive to the prose above — a client
+      // branches on this instead of parsing the message.
+      expect((body as { reason_code?: string }).reason_code).toBe('settlement_rpc_unreachable')
 
       // And it is no longer silent in the merchant's own logs.
       expect(consoleError).toHaveBeenCalledTimes(1)
@@ -635,13 +820,75 @@ describe('demo merchant MCP x402 flow', () => {
       expect(context).toMatchObject({ productId: 'vpn_basic', error: rpcDown })
     })
 
+    // #2979: reason catalog — a settlement-time "insufficient funds" fault
+    // (the wallet ran out of gas mid-submit, as opposed to the pre-flight
+    // /mcp gate catching it before the challenge) maps to the SAME
+    // `settlement_wallet_out_of_gas` code the gate's 503 body uses.
+    it('classifies an insufficient-funds settlement fault as settlement_wallet_out_of_gas', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const outOfGas = Object.assign(new Error('insufficient funds for gas * price + value'), {
+        name: 'InsufficientFundsError',
+      })
+      const { status, body } = await payAndCaptureError({
+        submit: vi.fn<SettlementClient['submit']>().mockRejectedValue(outOfGas),
+      })
+
+      expect(status).toBe(402)
+      expect((body as { reason_code?: string }).reason_code).toBe('settlement_wallet_out_of_gas')
+    })
+
+    // Review of #2982: what viem's `writeContract` ACTUALLY throws is an outer
+    // ContractFunctionExecutionError with the cause nested — the classifier
+    // must walk the chain, not read the outer name. A timeout is the Base
+    // Sepolia RPC's most common real "unreachable" shape.
+    it('classifies a viem timeout nested under ContractFunctionExecutionError as settlement_rpc_unreachable', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const nested = new ContractFunctionExecutionError(
+        new TimeoutError({ body: {}, url: 'https://sepolia.base.org' }),
+        { abi: [], functionName: 'transferWithAuthorization' },
+      )
+      const { status, body } = await payAndCaptureError({
+        submit: vi.fn<SettlementClient['submit']>().mockRejectedValue(nested),
+      })
+
+      expect(status).toBe(402)
+      expect((body as { reason_code?: string }).reason_code).toBe('settlement_rpc_unreachable')
+    })
+
+    it('classifies a nested viem InsufficientFundsError as settlement_wallet_out_of_gas', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const nested = new ContractFunctionExecutionError(
+        new InsufficientFundsError({ cause: new BaseError('exceeds transaction sender account balance') }),
+        { abi: [], functionName: 'transferWithAuthorization' },
+      )
+      const { status, body } = await payAndCaptureError({
+        submit: vi.fn<SettlementClient['submit']>().mockRejectedValue(nested),
+      })
+
+      expect(status).toBe(402)
+      expect((body as { reason_code?: string }).reason_code).toBe('settlement_wallet_out_of_gas')
+    })
+
+    // An unrecognized fault class falls back to the generic code rather than
+    // guessing a specific one.
+    it('classifies an unrecognized fault as the generic merchant_fault code', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const mystery = Object.assign(new Error('something unexpected happened'), { name: 'WeirdError' })
+      const { status, body } = await payAndCaptureError({
+        submit: vi.fn<SettlementClient['submit']>().mockRejectedValue(mystery),
+      })
+
+      expect(status).toBe(402)
+      expect((body as { reason_code?: string }).reason_code).toBe('merchant_fault')
+    })
+
     it('serves the goods when the authorization already settled on-chain (#1519)', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       // The chain says this authorization already moved the money. The buyer
       // has PAID; answering 402 would charge them and deliver nothing — the
       // exact defect observed on dev on 2026-08-17, where a successful
       // settlement (0.001 USDC on-chain) was reported as a merchant fault.
-      const { status, body, text } = await payAndCaptureError({
+      const { status, body, text, headers } = await payAndCaptureError({
         submit: vi
           .fn<SettlementClient['submit']>()
           .mockRejectedValue(new AuthorizationAlreadyUsedError('nonce 0xdead already used')),
@@ -649,8 +896,37 @@ describe('demo merchant MCP x402 flow', () => {
 
       expect(status).toBe(200)
       expect(body.error).toBeUndefined()
-      // The goods, not a challenge.
-      expect(text).toContain('Purchase confirmed')
+      // The goods are delivered (#1519's own point stands).
+      //
+      // #2969: this is `already_settled_earlier`, NOT `settlement_unknown`
+      // (the skip-settle QA hook's state, covered separately) — the two are
+      // different facts (paid-in-an-earlier-tx vs never-attempted) and must
+      // render with DIFFERENT headings and DIFFERENT structuredContent
+      // statuses, distinguishable without ever comparing to the zero hash.
+      // Mutation target: collapsing both into `delivered_unsettled` (the old
+      // #2970 shape) must fail this.
+      expect(text).toContain('Paid in an earlier transaction — the settlement reference is unavailable')
+      expect(text).not.toContain('Purchase confirmed')
+      expect(text).not.toContain('Delivered — not confirmed on-chain')
+      expect(text).toContain('"status":"already_settled_earlier"')
+      expect(text).not.toContain('"status":"delivered_unsettled"')
+      // Neither the exact 'Paid'/'Betald' status nor the zero hash may appear
+      // anywhere in the rendered text (the longer "paid in an earlier
+      // transaction" status string, which itself contains the substring
+      // "Betald", is allowed and expected — checked above).
+      expect(text).not.toContain('Status: Paid\n')
+      expect(text).not.toContain('"status": "Betald"')
+      const zeroHash = `0x${'0'.repeat(64)}`
+      expect(text).not.toContain(zeroHash)
+
+      const receiptHeader = headers.get('x-receipt-json')
+      expect(receiptHeader).toBeTruthy()
+      const receipt = JSON.parse(Buffer.from(receiptHeader!, 'base64').toString('utf8'))
+      expect(receipt.status).toBe('Betald i tidigare transaktion — referens saknas')
+      expect(receipt.status).not.toBe('Betald')
+      expect(receipt.blockkedje_referens).toBeNull()
+      expect(JSON.stringify(receipt)).not.toContain(zeroHash)
+
       // A settled payment is not a fault, so nothing is logged as one.
       expect(consoleError).not.toHaveBeenCalled()
     })

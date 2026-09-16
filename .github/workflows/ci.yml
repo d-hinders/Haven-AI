@@ -30,6 +30,9 @@ jobs:
       mcp_server: ${{ steps.filter.outputs.mcp_server }}
       signer: ${{ steps.filter.outputs.signer }}
       cli: ${{ steps.filter.outputs.cli }}
+      demo_merchant: ${{ steps.filter.outputs.demo_merchant }}
+      core: ${{ steps.filter.outputs.core }}
+      qa_agent: ${{ steps.filter.outputs.qa_agent }}
       full: ${{ steps.filter.outputs.full }}
 
     steps:
@@ -217,6 +220,103 @@ jobs:
       - name: Build CLI
         run: npm run build -w packages/cli
 
+  demo_merchant_checks:
+    name: Demo merchant checks
+    needs: changes
+    if: needs.changes.outputs.demo_merchant == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check demo merchant
+        run: npm run typecheck -w packages/demo-merchant-mcp
+
+      - name: Run demo merchant unit tests
+        run: npm run test -w packages/demo-merchant-mcp
+
+      - name: Build demo merchant
+        run: npm run build -w packages/demo-merchant-mcp
+
+  core_checks:
+    name: Core checks
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check core
+        run: npm run typecheck -w packages/core
+
+      - name: Run core unit tests
+        # The DEFAULT_CHAIN_ID guard CLAUDE.md cites lives here (#3005). Until
+        # this job existed the suite ran in no workflow — a core change routed
+        # the full matrix, and no job in it ran this package's tests.
+        run: npm run test -w packages/core
+
+      - name: Build core
+        run: npm run build -w packages/core
+
+  qa_agent_checks:
+    name: QA agent checks
+    needs: changes
+    if: needs.changes.outputs.qa_agent == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The unit tests import the SDK (asserted fresh by the suite's own
+      # globalSetup, #1188) and run the real @haven_ai/signer in two scenario
+      # files — vitest resolves both through packages/*/dist, which npm ci
+      # does not create. Same reason mcp-server's test script chains sibling
+      # builds and qa-dev.yml builds both explicitly. core is needed by the
+      # sdk build's dts pass.
+      - name: Build SDK dependency
+        run: npm run build -w packages/sdk
+
+      - name: Build edge signer dependency
+        run: npm run build -w packages/signer
+
+      # Unit tests ONLY (#3005) — the live money-flow scenario runner is
+      # qa-dev.yml's job, on QA_* secrets against the deployed dev backend.
+      # Measured on a clean tree (2026-09-15, dev 9a6ee132): 24 files / 344
+      # tests pass with NO env, secrets, network or database — nothing reads
+      # QA_*, DATABASE_URL or a chain endpoint, so no HAVEN_SKIP_DB_TESTS is
+      # needed. vitest fails fast without the sibling dists above (2 files
+      # cannot resolve @haven_ai/signer), which is why the builds precede it.
+      - name: Run QA agent unit tests
+        run: npm run test -w packages/qa-agent
+
   backend_checks:
     name: Backend checks
     needs: changes
@@ -295,6 +395,19 @@ jobs:
           npm run lint:retired-rail-prose:test
           npm run lint:migration-constraint-scope
           npm run lint:migration-constraint-scope:test
+
+      - name: Request-schema ratchet (#3029)
+        # Blocking, shrink-only baseline over the request-validation rollout
+        # (epic #3028): per route file, whether any registered route is still
+        # SHADOWED by the request-validation plugin and how many hand-rolled
+        # `typeof` request guards remain. Slices 2-4 enforce modules and delete
+        # ladders, so the baseline only ever shrinks; removing the proof
+        # module's enforcedPrefixes wiring re-enters it in shadow and reddens
+        # this gate. Self-tested for the same reason as lint:deps above — the
+        # self-test SPAWNS the CLI (#2720's rule).
+        run: |
+          npm run lint:request-schemas
+          npm run lint:request-schemas:test
 
       - name: DB schema smoke (migrations + money-path query PREPARE, #773)
         # Applies every migration to the real Postgres service, then PREPAREs the
@@ -804,7 +917,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, cli_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ci_config_checks]
+    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ci_config_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -875,6 +988,21 @@ jobs:
 
           if [ "${{ needs.changes.outputs.cli }}" = "true" ] && [ "${{ needs.cli_checks.result }}" != "success" ]; then
             echo "CLI checks result: ${{ needs.cli_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.demo_merchant }}" = "true" ] && [ "${{ needs.demo_merchant_checks.result }}" != "success" ]; then
+            echo "Demo merchant checks result: ${{ needs.demo_merchant_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.core }}" = "true" ] && [ "${{ needs.core_checks.result }}" != "success" ]; then
+            echo "Core checks result: ${{ needs.core_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.qa_agent }}" = "true" ] && [ "${{ needs.qa_agent_checks.result }}" != "success" ]; then
+            echo "QA agent checks result: ${{ needs.qa_agent_checks.result }}"
             exit 1
           fi
 

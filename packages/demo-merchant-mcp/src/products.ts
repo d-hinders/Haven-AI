@@ -295,6 +295,21 @@ export function settlementMethodsForProduct(
 
 export type BillingPeriod = 'monthly'
 
+// ── QA fixture marker (#2989) ────────────────────────────────────────────────
+// The verify-without-settle QA hook (`MERCHANT_SKIP_SETTLE_PRODUCT`, see
+// x402.ts `isSkipSettleProduct`) makes ONE product hand out goods without ever
+// settling on-chain. Before this, `list_products`, the 402 challenge, and the
+// discovery document all presented that product exactly like one that
+// settles — an agent had no way to know the outcome was by design (quality
+// scan finding B6). This is the one shared shape all three surfaces attach,
+// so they can never describe the same fixture two different ways.
+export interface QaFixtureMetadata {
+  kind: 'skip_settle'
+  settles_on_chain: false
+}
+
+export const SKIP_SETTLE_QA_FIXTURE: QaFixtureMetadata = { kind: 'skip_settle', settles_on_chain: false }
+
 export interface ProductMetadata {
   product_id: ProductId
   display_name: string
@@ -318,11 +333,27 @@ export interface ProductMetadata {
   display: {
     price_formatted: string
   }
+  /**
+   * #2989: present ONLY for a product configured via
+   * `MERCHANT_SKIP_SETTLE_PRODUCT` (testnet-only, see x402.ts
+   * `isSkipSettleProduct`) — ABSENT, not `null` or `undefined`-valued, on
+   * every other product and on every other chain, so the prod metadata shape
+   * is byte-identical to before this field existed.
+   */
+  qa_fixture?: QaFixtureMetadata
 }
 
 export function buildProductMetadata(
   product: Product,
-  opts: { enabledSettlementMethods: readonly SettlementMethod[]; mcpUrl: string; chainId?: number },
+  opts: {
+    enabledSettlementMethods: readonly SettlementMethod[]
+    mcpUrl: string
+    chainId?: number
+    /** #2989: true only for the product(s) named by `MERCHANT_SKIP_SETTLE_PRODUCT`
+     *  on Base Sepolia. The caller decides this (`isSkipSettleProduct`) — this
+     *  module has no env/chain access of its own to re-derive it. */
+    qaFixture?: boolean
+  },
 ): ProductMetadata {
   const chainId = opts.chainId ?? CHAIN_ID
   const supportedSettlementMethods = settlementMethodsForProduct(product, opts.enabledSettlementMethods)
@@ -344,6 +375,7 @@ export function buildProductMetadata(
     display: {
       price_formatted: `$${formatUsdc(product.price_usdc)} USDC`,
     },
+    ...(opts.qaFixture ? { qa_fixture: SKIP_SETTLE_QA_FIXTURE } : {}),
   }
 }
 

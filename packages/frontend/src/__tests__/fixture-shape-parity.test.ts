@@ -25,7 +25,18 @@ import {
   FIXTURE_ACCOUNTING_FEED_COMING_SOON,
   FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
   FIXTURE_ACCOUNTING_FEED_ATTENTION,
+  FIXTURE_ANALYTICS_OVERVIEW,
+  FIXTURE_ANALYTICS_OVERVIEW_EMPTY,
+  httpError,
 } from '../../scripts/screenshot.mjs'
+// The visual gate's copies of the two overview fixtures (#3038). Pinned below,
+// because the spec that reads them cannot reach the harness itself — see the
+// `analytics-overview.ts` docblock for the measured reason.
+import {
+  analyticsOverview,
+  analyticsOverviewEmpty,
+  analyticsOverviewFailure,
+} from '../../e2e/fixtures/analytics-overview'
 import {
   testUser,
   testSafe,
@@ -39,6 +50,7 @@ import {
   accountingFeedSelfHosted,
   accountingFeedAttention,
 } from '../../e2e/fixtures/haven-api'
+import { API_MOCK_DEFAULTS } from '../../e2e/fixtures/api-mock'
 
 /** Sorted top-level keys of an object. */
 const keysOf = (o: unknown) => Object.keys(o as Record<string, unknown>).sort()
@@ -183,7 +195,8 @@ describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
  * The rail default (#2264, epic #1440).
  *
  * Until #2264 the e2e `testSafe` carried NO `account_type` at all, `railOf`
- * read that as the legacy Safe rail (`lib/custody-rail.ts`), and so
+ * read that as the legacy Safe rail (the retired custody page's rail helper,
+ * deleted with the page itself in #3024), and so
  * `browser_smoke` (28 spec files) and `design_visual` pinned the rendered
  * behaviour of a configuration that answers HTTP 410 in production (#1986).
  * Every green run was a true statement about a rail no user is on.
@@ -429,5 +442,106 @@ describe('allowance_amount on /agents is the human-decimal projection in BOTH ha
       // a file that stops carrying one has changed what this scan covers.
       expect([label, seen.allowances > 0, seen.agent_budget > 0]).toEqual([label, true, true])
     }
+  })
+})
+
+/**
+ * The THIRD family (#3027): `apiMock()`'s typed builder
+ * (`e2e/fixtures/api-mock.ts`) re-serves the SAME e2e constants above behind
+ * a route table checked against the generated OpenAPI types, but it is a
+ * SEPARATE object graph (`satisfies`-derived, with a handful of deprecated
+ * "twin" fields completed — see that file's header) — so a hand-edit to the
+ * builder that changes a default's shape drifts silently from both the e2e
+ * fixture and the screenshot harness unless something pins it. This pins the
+ * builder's defaults key-equal to the e2e constants they are built from, for
+ * every route the table covers.
+ */
+describe('fixture shape parity (apiMock builder ↔ e2e dataset, #3027)', () => {
+  it('/agents: the builder default carries the same top-level keys as testAgent, plus its schema completions', () => {
+    const agent = API_MOCK_DEFAULTS['/agents'].agents[0]!
+    // The builder completes `safe_chain_id` (a real e2e-fixture gap, see the
+    // builder's header) — every OTHER key must be exactly the e2e agent's.
+    expect(keysOf(agent)).toEqual(keysOf({ ...testAgent, safe_chain_id: null }))
+    expect(keysOf(agent.allowances[0])).toEqual(keysOf(testAgent.allowances[0]))
+  })
+
+  it('/dashboard/overview: the builder default aligns with dashboardOverview, plus its schema completions', () => {
+    const overview = API_MOCK_DEFAULTS['/dashboard/overview']
+    expect(keysOf(overview)).toEqual(keysOf(dashboardOverview))
+    expect(keysOf(overview.totals)).toEqual(keysOf(dashboardOverview.totals))
+    expect(keysOf(overview.metrics)).toEqual(keysOf(dashboardOverview.metrics))
+    // The builder completes `safeId` on the dashboard agent preview.
+    expect(keysOf(overview.agents[0])).toEqual(keysOf({ ...dashboardOverview.agents[0], safeId: null }))
+    // …and `safeId` / `safeAddress` on the transaction row.
+    expect(keysOf(overview.transactions[0])).toEqual(
+      keysOf({ ...dashboardTransaction, safeId: null, safeAddress: null }),
+    )
+  })
+
+  it('/accounting/providers, /accounting/connections, /accounting/feed/status align with the e2e constants', () => {
+    const providers = API_MOCK_DEFAULTS['/accounting/providers'].providers
+    expect(providers.map((p) => p.id)).toEqual(accountingProviders.map((p) => p.id))
+    for (const [i, p] of providers.entries()) {
+      expect(keysOf(p)).toEqual(keysOf(accountingProviders[i]))
+    }
+
+    const connection = API_MOCK_DEFAULTS['/accounting/connections'].connections[0]!
+    expect(keysOf(connection)).toEqual(keysOf(accountingConnection))
+
+    const feedStatus = API_MOCK_DEFAULTS['/accounting/feed/status']
+    expect(keysOf(feedStatus)).toEqual(keysOf(accountingFeedStatus))
+    expect(feedStatus.syncs.length).toBe(accountingFeedStatus.syncs.length)
+    for (const [i, row] of feedStatus.syncs.entries()) {
+      expect(keysOf(row)).toEqual(keysOf(accountingFeedStatus.syncs[i]))
+    }
+  })
+})
+
+/**
+ * The e2e visual-gate copies of the `/analytics` overview fixtures are the
+ * harness's OWN values, not a paraphrase of them (#3038).
+ *
+ * `analytics.visual.spec.ts` cannot import `scripts/screenshot.mjs` directly:
+ * the harness is a CLI that reads `import.meta.url` at module scope, and
+ * Playwright's own transform mis-compiles such a `.mjs` as CommonJS, so the
+ * spec dies at collect time on `ReferenceError: exports is not defined in ES
+ * module scope` (measured — a minimal `.mjs` with one `import.meta.url` read
+ * reproduces it and the same file without it does not). The visual gate
+ * therefore reads the two overviews from `e2e/fixtures/analytics-overview.ts`,
+ * which is a SECOND encoding of a Haven-API response — the exact thing this
+ * whole suite exists to police. The pin below is what makes that copy safe:
+ * deep equality against the harness's exported keys, so a change to the single
+ * declared shape reddens here instead of leaving the visual gate photographing
+ * a response no backend can serve. A copy without its pin is the #2968 drift
+ * class waiting to happen; this is the pin.
+ *
+ * Vitest transpiles `.mjs` itself, so this file can reach the harness keys the
+ * Playwright spec cannot — the pin lives on the side of the wall that can.
+ */
+describe('the /analytics overview fixtures are the harness’s, verbatim (#3038)', () => {
+  it('the populated overview is deep-equal to FIXTURE_ANALYTICS_OVERVIEW', () => {
+    expect(analyticsOverview).toEqual(FIXTURE_ANALYTICS_OVERVIEW)
+  })
+
+  it('the empty overview is deep-equal to FIXTURE_ANALYTICS_OVERVIEW_EMPTY', () => {
+    expect(analyticsOverviewEmpty).toEqual(FIXTURE_ANALYTICS_OVERVIEW_EMPTY)
+  })
+
+  it('the served failure is the harness’s httpError(503, …), status and body', () => {
+    // `httpError()` returns a ScenarioHttpError instance, so deep equality
+    // against a plain object would compare prototypes; compare the two fields
+    // the Playwright route actually fulfils, which is what must agree.
+    const harnessFailure = httpError(503, { error: 'Service Unavailable' })
+    expect(analyticsOverviewFailure.status).toBe(harnessFailure.status)
+    expect(analyticsOverviewFailure.body).toEqual(harnessFailure.body)
+  })
+
+  it('the error scenario is the 503 the analytics-error capture scenario sends', () => {
+    // The capture harness reaches the same page through its own scenario key;
+    // if this ever stops being true, the visual gate is photographing an
+    // outage the evidence run does not have.
+    const harnessFailure = httpError(503, { error: 'Service Unavailable' })
+    expect(analyticsOverviewFailure.status).toBe(503)
+    expect(harnessFailure.status).toBe(503)
   })
 })

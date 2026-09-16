@@ -140,8 +140,16 @@ export const RULES = [
     id: 'raw-svg',
     describe: 'inline <svg> — use Icon + a lucide glyph',
     regex: /<svg[\s>]/g,
-    // brand/marketing already exempt via isMarketingSurface; nothing else.
-    exempt: isMarketingSurface,
+    // brand/marketing already exempt via isMarketingSurface. The two chart
+    // primitives (#2948) are the one product exception: the hand-drawn,
+    // token-driven SVG IS the primitive — no chart library exists in the
+    // frontend and adding one is a dependency decision the epic does not
+    // make — so their home files are exempt the same way Table.tsx and
+    // Card.tsx are for their own structural rules.
+    exempt: (file) =>
+      isMarketingSurface(file) ||
+      file.includes('components/ui/StackedBarChart.tsx') ||
+      file.includes('components/ui/AreaChart.tsx'),
   },
   {
     id: 'address-truncation',

@@ -387,6 +387,9 @@ describe('agent info helpers', () => {
       rail: 'x402',
       proofStatus: 'payment_confirmed',
       txHash: `0x${'ab'.repeat(32)}`,
+      // #2998: additive, default to null when the wire response omits them.
+      fundingTxHash: null,
+      settlementTxHash: null,
       chainId: 8453,
       resourceUrl: 'https://paid.example/data',
       merchantAddress: '0xMerchant',

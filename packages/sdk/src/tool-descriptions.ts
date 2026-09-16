@@ -92,9 +92,9 @@ export const toolDescriptions = {
   // deleted `/demo/mpp/*` route. Use the x402 fragments above instead.
   getPaymentStatus: {
     summary:
-      'Fetch structured Haven payment status, including phase and nextAction taxonomy for agent recovery.',
+      'Fetch structured Haven payment status for agent recovery.',
     behavior:
-      'Accepts a payment intent id and returns the full state taxonomy (phase, nextAction, rail, amount, merchant, resource url, idempotency key, message).',
+      'State: phase, nextAction, rail, amount, merchant, resource, idempotency, message; parties: treasury/delegate/delegateAccount/merchant. awaiting_settlement_evidence: poll once, else unverified.',
     nextActionGuidance: '',
   },
   getResumeState: {
@@ -162,7 +162,7 @@ export const toolDescriptions = {
       'Step 1 of a purchase: discover payable services from Haven\'s curated merchant catalog — names, prices, and which pay tool to use next.',
     selectionGuidance:
       'Use this when the user asks what the agent can buy, pay for, or which paid services exist — or when you need a resource URL for a service the user described. ' +
-      'Use verified=verified to show only self-submitted directory entries that passed domain-ownership proof and a live quote probe — never treat those badges as proof of merchant honesty, quality, or reliability. ' +
+      'Use verified=verified for entries Haven watched pass a live quote probe (operator-curated or self-submitted) — domain_verified is the only ownership claim; never treat these badges as proof of merchant honesty, quality, or reliability. ' +
       'Do NOT use for balance, budget, or spend-limit questions — use haven_get_allowances. ' +
       'Do NOT use to pay — each returned entry names the pay tool to use next.',
     behavior:
@@ -221,6 +221,14 @@ export const toolDescriptions = {
     nextActionGuidance:
       'On a decline, report the reason to the user and ask them to grant or raise the budget in Haven — there is nothing to poll and no approval will arrive. ' +
       'After a successful send, poll haven_get_payment_status until nextAction=none.',
+  },
+  reportSettlementEvidence: {
+    summary:
+      'Report an erc7710 payment\'s real settlement transaction hash so Haven can verify it on-chain and confirm the payment.',
+    behavior:
+      'Pass payment_id and settlement_tx_hash (0x + 64 hex chars) — from PAYMENT-RESPONSE or a prior settlement_tx_hash. Haven verifies on-chain before confirming; a zero, mismatched, or reverted hash is refused. Your own payments only.',
+    nextActionGuidance:
+      'code DELIVERED_UNSETTLED: did not verify, do not retry — poll haven_get_payment_status. code SETTLEMENT_PENDING (retryable:true): not mined or RPC unreachable — report the same hash again shortly.',
   },
 } as const satisfies Record<string, ToolDescription>
 

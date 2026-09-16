@@ -27,6 +27,10 @@ import { Textarea } from '@/components/ui/Textarea'
 import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
+import { StackedBarChart } from '@/components/ui/StackedBarChart'
+import type { StackedBarDay } from '@/components/ui/StackedBarChart'
+import { AreaChart } from '@/components/ui/AreaChart'
+import type { AreaPoint } from '@/components/ui/AreaChart'
 import { CodeBlock } from '@/components/ui/CodeBlock'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ComingSoonModal from '@/components/ComingSoonModal'
@@ -35,6 +39,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { StatTile } from '@/components/ui/StatTile'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
@@ -88,6 +93,12 @@ const TOKEN_USE: Record<string, string> = {
   'warning-soft': 'Warning fill.',
   danger: 'Errors, destructive confirmations.',
   'danger-soft': 'Danger fill.',
+  'series-1': 'Chart series 1: the first agent, and the balance line.',
+  'series-2': 'Chart series 2: the second agent.',
+  'series-3': 'Chart series 3: the third agent.',
+  'series-4': 'Chart series 4: the fourth agent.',
+  'series-5': 'Chart series 5: the fifth agent.',
+  'series-6': 'Chart series 6: the sixth agent; a seventh wraps to 1.',
   'modal-backdrop': 'Modal scrim.',
   'chain-base': 'Base identity dot.',
   'chain-gnosis': 'Gnosis identity dot.',
@@ -151,6 +162,103 @@ const modalInfoPages: InfoPage[] = [
 const DS_HYBRID_ACCOUNT = '0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3'
 const DS_PASSKEY_KEY_ID = '0x1111111111111111111111111111111111111111111111111111111111111111'
 const NOOP = () => {}
+
+/**
+ * The chart samples (#2948). Deterministic demo data formatted through one
+ * caller-owned formatter, the division of labour the primitives fix: the
+ * chart never formats money itself, the page (or the analytics screen) does.
+ * The summary sentences are COMPUTED from the same arrays the charts draw, so
+ * the accessible name cannot drift from the pixels.
+ */
+const dsMoney = (n: number) =>
+  n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+const DS_CHART_DAYS: StackedBarDay[] = [
+  {
+    label: 'Mon 1',
+    refusals: 0,
+    series: [
+      { id: 'research', name: 'Research agent', amount: 140, seriesIndex: 0, tokens: [['USDC', 140]] },
+      { id: 'ops', name: 'Ops agent', amount: 60, seriesIndex: 1 },
+    ],
+  },
+  {
+    label: 'Tue 2',
+    refusals: 1,
+    series: [
+      {
+        id: 'research',
+        name: 'Research agent',
+        amount: 220,
+        seriesIndex: 0,
+        tokens: [
+          ['USDC', 160.4],
+          ['PYUSD', 59.6],
+        ],
+      },
+      { id: 'ops', name: 'Ops agent', amount: 45, seriesIndex: 1 },
+    ],
+  },
+  {
+    label: 'Wed 3',
+    refusals: 0,
+    series: [
+      { id: 'research', name: 'Research agent', amount: 95, seriesIndex: 0 },
+      { id: 'ops', name: 'Ops agent', amount: 310, seriesIndex: 1 },
+    ],
+  },
+  {
+    label: 'Thu 4',
+    refusals: 2,
+    series: [
+      { id: 'research', name: 'Research agent', amount: 180, seriesIndex: 0 },
+      { id: 'ops', name: 'Ops agent', amount: 70, seriesIndex: 1 },
+    ],
+  },
+  {
+    label: 'Fri 5',
+    refusals: 0,
+    series: [
+      { id: 'research', name: 'Research agent', amount: 260, seriesIndex: 0 },
+      { id: 'ops', name: 'Ops agent', amount: 55, seriesIndex: 1 },
+    ],
+  },
+  {
+    label: 'Sat 6',
+    refusals: 0,
+    series: [
+      { id: 'research', name: 'Research agent', amount: 60, seriesIndex: 0 },
+      { id: 'ops', name: 'Ops agent', amount: 40, seriesIndex: 1 },
+    ],
+  },
+  {
+    label: 'Sun 7',
+    refusals: 0,
+    series: [
+      { id: 'research', name: 'Research agent', amount: 150, seriesIndex: 0 },
+      { id: 'ops', name: 'Ops agent', amount: 90, seriesIndex: 1 },
+    ],
+  },
+]
+const DS_CHART_TOTAL = DS_CHART_DAYS.reduce(
+  (sum, day) => sum + day.series.reduce((s, x) => s + x.amount, 0),
+  0,
+)
+const DS_CHART_REFUSALS = DS_CHART_DAYS.reduce((sum, day) => sum + (day.refusals ?? 0), 0)
+const DS_CHART_SUMMARY = `Spend over 7 days: ${dsMoney(DS_CHART_TOTAL)} USD across 2 agents, ${DS_CHART_REFUSALS} refusals`
+
+const DS_BALANCE_POINTS: AreaPoint[] = [
+  { label: 'Mon 1', value: 1240 },
+  { label: 'Tue 2', value: 1100 },
+  { label: 'Wed 3', value: 1180 },
+  { label: 'Thu 4', value: 1050 },
+  { label: 'Fri 5', value: 1130 },
+  { label: 'Sat 6', value: 1090 },
+  { label: 'Sun 7', value: 1120 },
+]
+const DS_BALANCE_END = DS_BALANCE_POINTS[DS_BALANCE_POINTS.length - 1].value
+const DS_BALANCE_SPENT = DS_BALANCE_POINTS[0].value - DS_BALANCE_END
+const DS_BALANCE_SUMMARY = `Balance over 7 days: ends at ${dsMoney(DS_BALANCE_END)} USD, ${dsMoney(DS_BALANCE_SPENT)} USD spent across the range`
 
 function Section({
   title,
@@ -711,6 +819,52 @@ export default function DesignSystemPage() {
               choices are mutually exclusive. The group carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>{' '}
               so a screen reader names the question first; options are real buttons, so keyboard
               works without extra wiring. Never hand-roll a second control of this shape.
+            </p>
+          </Card>
+
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Stat tile</h3>
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <StatTile
+                label="Spent"
+                value="$324.75"
+                polarity="neutral"
+                delta={15.9}
+                deltaCaption="vs previous 30 days"
+                footnote="based on 5 payments · 1 awaiting settlement evidence is not counted"
+              />
+              <StatTile
+                label="Refused"
+                value="2"
+                polarity="higher-is-bad"
+                delta={100}
+                deltaCaption="vs previous 30 days"
+                footnote="2 refused payments · across 3 attempts · $3.00 attempted"
+              />
+              <StatTile
+                label="Budget used"
+                value="1/2"
+                polarity="higher-is-warning"
+                footnote="1 of 2 agents above 75% of their period budget"
+              />
+              <StatTile label="Fees paid to Haven" value="No fees yet" polarity="neutral" footnote="Haven is not charging fees. Haven sponsored 7 operations' gas." />
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              The figure with the sentence under it (<code className="rounded bg-[var(--v2-surface)] px-1">ui/StatTile</code>,
+              #2947): the four numbers the Analytics page answers with, so the fourth cannot drift from the first in
+              size, rhythm, or what its colour MEANS. A delta chip is a judgement, and the caller does not hand the
+              tile a tone — it declares what a <em>rising</em> value of that figure means via{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">polarity</code>: more refusals is worse
+              (<code className="rounded bg-[var(--v2-surface)] px-1">higher-is-bad</code>, so an increase is the danger
+              tone), spend and fees are activity rather than loss (<code className="rounded bg-[var(--v2-surface)] px-1">neutral</code>,
+              so neither direction is news), and a nearly-spent budget is the condition worth warning about
+              (<code className="rounded bg-[var(--v2-surface)] px-1">higher-is-warning</code>). A flat delta is neutral
+              under every reading. The rule that makes the whole thing checkable is that <em>the value never carries
+              colour</em>: the figure is ink in every state, because a reading that goes red with volume stops being a
+              reading. The judgement belongs to the chip alone. A delta without a{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">polarity</code> throws — there is no safe default
+              for a judgement. Values arrive already formatted, from the endpoint's own numeric strings; the tile does
+              not convert money.
             </p>
           </Card>
 
@@ -2295,6 +2449,34 @@ export default function DesignSystemPage() {
             </ApprovalRequiredBanner>
           </div>
         </div>
+      </Section>
+
+      <Section
+        title="StackedBarChart"
+        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the agents table's share column. Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail; on a narrow screen the tooltip becomes a panel pinned below the plot."
+      >
+        <Card hover={false} className="p-5">
+          <StackedBarChart
+            days={DS_CHART_DAYS}
+            currency="USD"
+            ariaLabel={DS_CHART_SUMMARY}
+            formatValue={dsMoney}
+          />
+        </Card>
+      </Section>
+
+      <Section
+        title="AreaChart"
+        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's spend annotated as the endpoint delta. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart."
+      >
+        <Card hover={false} className="p-5">
+          <AreaChart
+            points={DS_BALANCE_POINTS}
+            currency="USD"
+            ariaLabel={DS_BALANCE_SUMMARY}
+            formatValue={dsMoney}
+          />
+        </Card>
       </Section>
 
       <Section

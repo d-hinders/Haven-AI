@@ -1,6 +1,7 @@
 // config.ts loads dotenv and validates required env vars — import first
 import { config } from './config.js'
 import { httpErrorHandler } from './infra/http-error-handler.js'
+import { installRequestValidation } from './openapi/request-validation.js'
 
 import Fastify, { type FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
@@ -64,6 +65,7 @@ import { registerHealthRoutes } from './routes/health.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import analyticsRoutes from './routes/analytics.js'
+import analyticsOverviewRoutes from './routes/analytics-overview.js'
 import accountingRoutes from './routes/accounting.js'
 import accountingConnectionsRoutes from './routes/accounting-connections.js'
 import accountingFeedRoutes from './routes/accounting-feed.js'
@@ -93,6 +95,20 @@ const app = Fastify({
 
 // --- Global error handler (extracted for testability, #1464) ---
 app.setErrorHandler(httpErrorHandler)
+
+// --- Request validation (#3029, epic #3028 slice 1) ---
+// EVERY route's request is compiled against the OpenAPI spec from here down —
+// shadow mode logs would-be refusals and counts them (`request_validation` on
+// GET /health/ops) without changing any answer; the contacts proof module is
+// enforced via enforcedPrefixes. MUST sit after setErrorHandler (the enforced
+// route handler delegates non-validation errors to it) and before the first
+// app.register — it is a root-scope install, not an encapsulated plugin, so
+// its onRoute/compiler/formatter are the ones every child module inherits
+// (spiked: an encapsulated plugin's onRoute sees no later routes).
+installRequestValidation(app, {
+  mode: config.requestValidationMode,
+  enforcedPrefixes: ['/contacts'],
+})
 
 // --- Process-level error handlers ---
 process.on('unhandledRejection', (reason) => {
@@ -281,6 +297,13 @@ await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
+// #2946 (epic #2944, slice B): a SEPARATE module under the SAME prefix — the
+// internal onboarding funnel above owns `/analytics/funnel`, this owns
+// `/analytics/overview`. Two modules on one prefix are just two path
+// strings under one mount point (see `catalogRoutes` + `catalogSubmissionRoutes`
+// on `/catalog` above for the same pattern); neither declares the other's
+// sub-path, so there is nothing to register twice or fight over.
+await app.register(analyticsOverviewRoutes, { prefix: '/analytics' })
 await app.register(accountingRoutes, { prefix: '/accounting' })
 // #2862: provider-generic connections (`/accounting/providers`,
 // `/accounting/connections/*`) replaced the Fortnox-shaped router.

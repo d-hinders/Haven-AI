@@ -13,6 +13,7 @@ function row(over: Partial<AccountingEntrySourceRow> = {}): AccountingEntrySourc
     tx_hash: '0xabc',
     chain_id: 8453,
     merchant_address: '0xmerchant',
+    payer_address: '0xtreasury',
     token_symbol: 'USDC',
     amount_raw: '12500000',
     amount_human: '0.1',
@@ -50,6 +51,20 @@ describe('toAccountingEntry', () => {
       receiptRef: 'ev1',
     })
     expect(e.counterparty.address).toBe('0xmerchant')
+  })
+
+  // #2960: our own side — documented as `treasury_account` on every other
+  // surface — is `machine_payment_evidence.payer_address`, not the merchant.
+  it('maps payer_address to treasuryAccount, distinct from the merchant counterparty', () => {
+    const e = toAccountingEntry(row({ payer_address: '0xtreasury', merchant_address: '0xmerchant' }))
+    expect(e.treasuryAccount).toBe('0xtreasury')
+    expect(e.counterparty.address).toBe('0xmerchant')
+    expect(e.treasuryAccount).not.toBe(e.counterparty.address)
+  })
+
+  it('treasuryAccount is null when the evidence row carries no payer_address', () => {
+    const e = toAccountingEntry(row({ payer_address: null }))
+    expect(e.treasuryAccount).toBeNull()
   })
 
   it('keeps SEK amounts as strings (no float rounding)', () => {

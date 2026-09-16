@@ -3,6 +3,7 @@ import {
   AgentPaymentPhase,
   HavenApiError,
   HavenPaymentStateError,
+  HavenZeroSettlementHashError,
 } from './types.js'
 import type {
   PaymentStatusResult,
@@ -479,15 +480,25 @@ export class MerchantCompletion {
     paymentId: string
     rail: string
     txHash: string
-    resourceUrl: string
-    merchantStatus: number
+    /**
+     * #2972: OPTIONAL — `haven_report_settlement_evidence` reports a hash the
+     * agent holds out of band, with no fresh merchant HTTP exchange to read a
+     * resource URL or status from. Omitting it is safe: the backend only
+     * enforces a MATCH (`input.resourceUrl && input.resourceUrl !== resourceUrl`
+     * in `modules/mpp/evidence.ts`) when one is supplied, never that one is
+     * present. The funding-leg callers above keep passing the one Haven's own
+     * record already named.
+     */
+    resourceUrl?: string
+    /** #2972: OPTIONAL for the same reason as `resourceUrl` — see there. */
+    merchantStatus?: number
     challengePayload?: Record<string, unknown>
     selectedPayment?: Record<string, unknown>
     paymentProofHeaderName?: string
     paymentProofHeader?: string
     protocolReceiptHeaderName?: string
     protocolReceiptHeader?: string
-  }): Promise<void> {
+  }): Promise<EvidenceReportOutcome> {
     const body = {
         paymentId: input.paymentId,
         rail: input.rail,
@@ -511,18 +522,97 @@ export class MerchantCompletion {
     // swallowed identically to a terminal one. On erc7710 this report is the
     // only thing that produces an evidence row, and therefore the only thing
     // that puts the payment in the user's books.
+    //
+    // #2970: the RETURN value is now load-bearing too, not just the retry
+    // decision. The hosted erc7710 settle/complete gate reads this outcome to
+    // decide whether `settled: true` is honest — a caller that only awaited
+    // this for its side effect (the local retryRequest path, #1620) is
+    // unaffected: the resolved value is simply ignored there.
     for (let attempt = 0; ; attempt += 1) {
       try {
         await this.post('/machine-payments/evidence', body)
-        return
+        return { outcome: 'confirmed' }
       } catch (err) {
-        const retryable =
-          err instanceof HavenApiError && err.statusCode === EVIDENCE_RETRYABLE_STATUS
-        if (!retryable || attempt >= EVIDENCE_RETRY_DELAYS_MS.length) return
+        const statusCode = err instanceof HavenApiError ? err.statusCode : undefined
+        const retryable = statusCode === EVIDENCE_RETRYABLE_STATUS
+        if (!retryable) {
+          return { outcome: 'refused', statusCode: statusCode ?? 0 }
+        }
+        if (attempt >= EVIDENCE_RETRY_DELAYS_MS.length) {
+          return { outcome: 'retryable', statusCode }
+        }
         await this.sleep(EVIDENCE_RETRY_DELAYS_MS[attempt])
       }
     }
   }
+
+  /**
+   * #2972: report the merchant's REAL settlement transaction hash for an
+   * erc7710 x402 payment out of band — the remedy #2970's guidance could not
+   * name, because no hosted tool accepted a hash. An agent reaches this after
+   * `haven_settle_mcp_tool` / `haven_complete_mcp_tool` answered
+   * `DELIVERED_UNSETTLED` or `SETTLEMENT_PENDING`, or after
+   * `haven_get_payment_status` reports `awaiting_settlement_evidence` — in
+   * every one of those cases the agent may be holding the merchant's own
+   * `PAYMENT-RESPONSE.transaction` while Haven has nothing.
+   *
+   * Reuses `reportEvidence` — same backend seam
+   * (`POST /machine-payments/evidence` → `observeErc7710Settlement`,
+   * fail-closed — see `settlement-observed.ts`), same three-outcome contract.
+   * `resourceUrl` and `merchantStatus` are omitted: this call has no fresh
+   * merchant HTTP exchange to read either from, and both are optional at the
+   * backend (see the parameter doc on `reportEvidence`).
+   *
+   * The zero hash is refused HERE, client-side, before any network call —
+   * never posted. `isZeroSettlementTxHash` is the same recognizer the #2970
+   * gate uses, so a caller cannot "fix" a missing hash by reporting the demo
+   * merchant's own marker and getting a different verdict than the settle
+   * path already gave it.
+   */
+  async reportSettlementEvidence(
+    paymentId: string,
+    settlementTxHash: string,
+  ): Promise<EvidenceReportOutcome> {
+    if (isZeroSettlementTxHash(settlementTxHash)) {
+      throw new HavenZeroSettlementHashError(paymentId)
+    }
+    return this.reportEvidence({
+      paymentId,
+      rail: 'x402',
+      txHash: settlementTxHash,
+    })
+  }
+}
+
+/**
+ * #2970: what `reportEvidence` learned about the report it just made.
+ *
+ * `confirmed` mirrors the backend's 202 (`modules/mpp/evidence.ts`) — the
+ * intent is now `confirmed` (or was already, on the funding-leg path) with
+ * THIS hash recorded. `retryable` mirrors its 503 (`settlement_unobservable`,
+ * exhausted the retry budget above): the chain could not be read, or the
+ * transaction is not mined yet — ask again later. `refused` mirrors every
+ * terminal refusal (409 `settlement_unverified`, a validation error, an
+ * unknown payment id, or a transport failure with no HTTP status at all,
+ * reported as `statusCode: 0`) — reporting the same hash again will not
+ * change the answer.
+ */
+export type EvidenceReportOutcome =
+  | { outcome: 'confirmed' }
+  | { outcome: 'retryable'; statusCode: number | undefined }
+  | { outcome: 'refused'; statusCode: number }
+
+/**
+ * #2970: a hash of the form `0x00…00` is never a real transaction — it is the
+ * demo merchant's own "delivered, not settled" marker (`ZERO_TX_HASH` in
+ * `packages/demo-merchant-mcp/src/x402.ts`), reused rather than invented here
+ * so the hosted gate and any other consumer recognise it the same way. Treated
+ * as equivalent to "no hash was reported": there is nothing on-chain to verify,
+ * so asking the backend to look is a wasted round trip that can only ever
+ * resolve to a refusal.
+ */
+export function isZeroSettlementTxHash(hash: string | null | undefined): boolean {
+  return typeof hash === 'string' && /^0x0+$/i.test(hash)
 }
 
 export function parseMerchantSettlement(header: string | null): {

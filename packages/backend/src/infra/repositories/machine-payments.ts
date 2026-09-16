@@ -375,8 +375,14 @@ export async function attachEvidenceProof<R extends QueryRow>(
 
 // ── Receipts list + evidence echo (routes/machine-payments.ts) ───────────────
 
+// #2960: `intent_delegate_address` / `intent_delegate_account_address` are
+// the delegate that PAID this intent and its erc7710 delegate account,
+// captured at authorize time — NOT `agents.delegate_address`, which rotates
+// on rekey and would silently repaint a historical receipt's payer.
 export const LIST_EVIDENCE_RECEIPTS_SQL = `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
-              pi.budget_delegation_hash
+              pi.machine_metadata->>'delegate_account_address' AS intent_delegate_account_address,
+              pi.budget_delegation_hash,
+              pi.delegate_address AS intent_delegate_address
        FROM machine_payment_evidence e
        LEFT JOIN payment_intents pi ON pi.id = e.payment_intent_id
        WHERE e.agent_id = $1
@@ -392,12 +398,19 @@ export async function listEvidenceReceiptsForAgent<R extends QueryRow>(
   return result.rows
 }
 
-export const GET_INTENT_SETTLEMENT_FIELDS_SQL = `SELECT machine_metadata->>'settlement_scheme' AS settlement_scheme, budget_delegation_hash
+// #2960: same intent-captured delegate/delegate-account columns as
+// `LIST_EVIDENCE_RECEIPTS_SQL`, so the evidence-attach echo and the
+// receipts list report the same truth.
+export const GET_INTENT_SETTLEMENT_FIELDS_SQL = `SELECT machine_metadata->>'settlement_scheme' AS settlement_scheme, budget_delegation_hash,
+             delegate_address AS intent_delegate_address,
+             machine_metadata->>'delegate_account_address' AS intent_delegate_account_address
              FROM payment_intents WHERE id = $1`
 
 export interface IntentSettlementFields {
   settlement_scheme: string | null
   budget_delegation_hash: string | null
+  intent_delegate_address: string | null
+  intent_delegate_account_address: string | null
 }
 
 /** Echo enrichment for the evidence 202 (#1118 review NB2). */

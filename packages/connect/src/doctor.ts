@@ -37,7 +37,6 @@ import {
   type LocalMcpProbeResult,
 } from './probes.js'
 import {
-  installedRuntimeMatches,
   installedRuntimeMatchesVersions,
   prepareSignerRuntime,
   readRuntimeSidecar,
@@ -598,17 +597,28 @@ async function checksForAgent(
       ...(matches ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime} with the same HAVEN_*_SPEC variables set.` }),
     })
   } else {
-    const matches = await installedRuntimeMatches(sidecar.runtime_directory, sidecar.cli_path)
+    // #2963: two questions, two references. "Is the directory intact?" is
+    // answered against the SIDECAR — what npm actually laid down when this
+    // runtime was installed — and "is it current?" against the MANIFEST pin.
+    // Comparing intactness against the manifest (the pre-#2963 shape) made
+    // the drift message unreachable: an install that was merely older than
+    // the pin failed the intactness check and was reported as "stale or
+    // empty" while its CLI sat there, 64 kB, serving tools to the very next
+    // check.
+    const intact = await installedRuntimeMatchesVersions(sidecar.runtime_directory, sidecar.cli_path, {
+      signerVersion: sidecar.signer_version,
+      sdkVersion: sidecar.sdk_version,
+    })
     const versionOk = sidecar.signer_version === MCP_RUNTIME_MANIFEST.signerVersion
-    const ok = matches && versionOk
+    const ok = intact && versionOk
     checks.push({
       id: 'signer_runtime',
       label: 'Signer runtime (preinstalled wrapper)',
       ok,
       detail: ok
         ? `Installed ${sidecar.signer_package}@${sidecar.signer_version} at ${sidecar.runtime_directory}`
-        : matches
-          ? `Installed version ${sidecar.signer_version} does not match the connector's pinned ${MCP_RUNTIME_MANIFEST.signerVersion}.`
+        : intact
+          ? `Installed version ${sidecar.signer_version} does not match the connector's pinned ${MCP_RUNTIME_MANIFEST.signerVersion} — intact, but outdated.`
           : `Runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
       ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}` }),
     })
@@ -634,14 +644,12 @@ async function checksForAgent(
       label: 'Hosted Haven MCP',
       ok: probe.status === 'ok',
       detail: probe.status === 'ok'
-        ? `Reachable and authorized (${hostedUrl}).`
-        : `Probe failed: ${probe.status} (${hostedUrl}).`,
+        ? `MCP tools endpoint is reachable (${hostedUrl}).`
+        : `MCP tools endpoint probe failed: ${probe.status} (${hostedUrl}).`,
       ...(probe.status === 'ok'
         ? {}
         : {
-            repair: probe.status === 'unauthorized'
-              ? `The stored API key was rejected — re-run the full setup with a fresh token: ${RERUN} --setup <token>.`
-              : 'Check network access to the hosted MCP URL, then re-run --doctor.',
+            repair: 'Check network access and runtime configuration for the hosted MCP URL, then re-run --doctor.',
           }),
     })
   } else {
@@ -992,15 +1000,20 @@ export async function runDoctor(
       // so re-deriving would label the same directory by its slug here and by
       // its real agent id in the "Other agents" section, for the same entry.
       const otherAgent = entry.agentId ?? basename(entry.directory)
-      const otherUrl = identity?.hosted_mcp_url
-        ?? (identity?.api_url ? `${identity.api_url}/mcp` : undefined)
-      if (!identity?.api_key || !otherUrl) {
+      if (!identity?.api_key || !identity.api_url) {
         if (tombstone) retired.push(`${otherAgent} (retired ${tombstone.retired_at})`)
-        else unverifiable.push(`${otherAgent} (no stored key/URL to probe)`)
+        else unverifiable.push(`${otherAgent} (no stored key/API URL to probe)`)
         continue
       }
       const suffix = tombstone ? ' [tombstoned — key material still present]' : ''
-      const probe = await (deps.probeHosted ?? probeHostedMcpTools)(identity.api_key, otherUrl, deps.fetch)
+      // `tools/list` is intentionally static and does not authenticate its
+      // bearer. A spend-capability verdict therefore needs the authenticated
+      // agent-identity endpoint, not merely a reachable hosted MCP URL.
+      const probe = await (deps.probeHostedIdentity ?? probeHostedAgentIdentity)(
+        identity.api_key,
+        identity.api_url,
+        deps.fetch,
+      )
       if (probe.status === 'ok') live.push({ label: `${otherAgent}${suffix}`, entry })
       else if (probe.status === 'unauthorized') revoked.push(`${otherAgent}${suffix}`)
       // network_error / bad_response: neither a false "still live" failure

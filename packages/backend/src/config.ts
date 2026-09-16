@@ -4,6 +4,7 @@
  * Dotenv is loaded here so env vars are available before validation.
  */
 import dotenv from 'dotenv'
+import { parseBooleanFlag } from './config/boolean-flag.js'
 import path from 'path'
 
 const envPaths = [
@@ -290,6 +291,10 @@ export function parseConnectorChannel(raw: string | undefined | null): string {
   return value
 }
 
+// #3046: defined in a dependency-free module so the binding signer can
+// import it without evaluating `config` below; re-exported for the callers.
+export { parseBooleanFlag }
+
 // Validate on import — fail fast at startup
 export const RETRY_SWEEP_INTERVAL_DEFAULT_MS = 5 * 60 * 1000
 export const RETRY_SWEEP_INTERVAL_FLOOR_MS = 10_000
@@ -369,7 +374,7 @@ export const config = {
   // Merchant-catalog auto-discovery from the x402 Bazaar (#473). Off by
   // default — it calls an external catalog API and inserts rows, so it's
   // opt-in. The URL is overridable for testing/self-hosted facilitators.
-  catalogDiscoveryEnabled: process.env.CATALOG_DISCOVERY_ENABLED === 'true',
+  catalogDiscoveryEnabled: parseBooleanFlag('CATALOG_DISCOVERY_ENABLED', process.env.CATALOG_DISCOVERY_ENABLED),
   catalogDiscoveryUrl: optionalEnv(
     'CATALOG_DISCOVERY_URL',
     'https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources',
@@ -388,16 +393,16 @@ export const config = {
 
   // Platform fee module (#386). Dark by default — when false the fee is always
   // zero and no funds move. Real pricing + on-chain collection are deferred.
-  feeEnabled: process.env.HAVEN_FEE_ENABLED === 'true',
+  feeEnabled: parseBooleanFlag('HAVEN_FEE_ENABLED', process.env.HAVEN_FEE_ENABLED),
 
   // Legacy asserting bookkeeping (epic #462). Dark by default — superseded by
   // the non-asserting reporting feed (#491). Code retained; surfaces gated:
   // SIE export, finished voucher push, and any asserted-VAT output.
-  legacyBookkeepingEnabled: process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED === 'true',
+  legacyBookkeepingEnabled: parseBooleanFlag('HAVEN_LEGACY_BOOKKEEPING_ENABLED', process.env.HAVEN_LEGACY_BOOKKEEPING_ENABLED),
 
   // Managed-deployment marker — true only on Haven's hosted backend. The
   // accounting feed (#491) is a hosted-only add-on and never runs elsewhere.
-  hosted: process.env.HAVEN_HOSTED === 'true',
+  hosted: parseBooleanFlag('HAVEN_HOSTED', process.env.HAVEN_HOSTED),
   // Global kill-switch for the accounting feed; dark by default.
   //
   // #2859 renamed this from HAVEN_REPORTING_FEED_ENABLED. The old name is still
@@ -415,6 +420,12 @@ export const config = {
   // HAVEN_CONNECTOR_CHANNEL above: a typo must not silently fall back to
   // "granted" and look like the feature is off when it is merely misspelled.
   accountingEntitlementMode: parseAccountingEntitlementMode(process.env.HAVEN_ACCOUNTING_ENTITLEMENT_MODE),
+  // The request-validation plugin's mode (#3029). Default `shadow` — the
+  // observation harness — until slice 4 of epic #3028 flips the default to
+  // `enforce`. Boot-read on purpose: the injected schemas and attachValidation
+  // are fixed at route registration, so a mode change is a restart, not a
+  // live kill switch (documented in .env.example and the runbook).
+  requestValidationMode: parseRequestValidationMode(process.env.HAVEN_REQUEST_VALIDATION),
   // Cadence of the background retry sweep (#2866): every tick re-feeds the
   // failed / skipped / stale-pending sync rows whose backoff has elapsed. A
   // few minutes is the intended shape — the per-row backoff (1 min doubling
@@ -454,13 +465,13 @@ export function relayerPrivateKeyForChain(chainId: number): string {
 function readAccountingEnabled(): boolean {
   const current = process.env.HAVEN_ACCOUNTING_ENABLED
   const deprecated = process.env.HAVEN_REPORTING_FEED_ENABLED
-  if (current !== undefined) return current === 'true'
+  if (current !== undefined) return parseBooleanFlag('HAVEN_ACCOUNTING_ENABLED', current)
   if (deprecated !== undefined) {
     console.warn(
       '[config] HAVEN_REPORTING_FEED_ENABLED is deprecated (#2859) — rename it to ' +
         'HAVEN_ACCOUNTING_ENABLED. The old name is still honoured for now.',
     )
-    return deprecated === 'true'
+    return parseBooleanFlag('HAVEN_REPORTING_FEED_ENABLED', deprecated)
   }
   return false
 }
@@ -496,5 +507,44 @@ export function parseAccountingEntitlementMode(raw: string | undefined | null): 
       '(the account holds an entitlement row) or "all" (every account on this deployment). ' +
       'Refusing to start rather than falling back, because a misspelled "all" on dev would ' +
       'silently mean "granted" and look like the feed is off for everyone.',
+  )
+}
+
+/**
+ * The request-validation plugin's mode (#3029, epic #3028).
+ *
+ *   off     — nothing runs: no schema is injected, no route is observed
+ *   shadow  — every route's request is validated against the spec, a refusal
+ *             is logged and counted, and the request CONTINUES (no behaviour
+ *             change on any currently-accepted request)
+ *   enforce — a refused request gets the 400 envelope instead of the route
+ *
+ * Default `shadow` until slice 4 flips it (owner decision, epic #3028): the
+ * deployment that never heard of this variable gets the observation harness,
+ * not refusals — the spec was backfilled (#1446) and shadow-first is the
+ * owner's decision #2. Unset or empty → `shadow`; any other non-empty value
+ * that is not one of the three modes throws at import time and refuses the
+ * boot, on the `parseAccountingEntitlementMode` precedent above: a typo must
+ * not silently fall back and look like the gate is off when it is merely
+ * misspelled.
+ *
+ * RESTART-SCOPED (the runbook says so): `attachValidation` and the injected
+ * schema are fixed at route registration, so flipping this env is a redeploy,
+ * not a live kill switch.
+ */
+export type RequestValidationMode = 'off' | 'shadow' | 'enforce'
+
+export function parseRequestValidationMode(raw: string | undefined | null): RequestValidationMode {
+  if (raw === undefined || raw === null) return 'shadow'
+  const value = raw.trim()
+  if (value === '') return 'shadow'
+  if (value === 'off' || value === 'shadow' || value === 'enforce') return value
+  throw new Error(
+    `HAVEN_REQUEST_VALIDATION is set to ${JSON.stringify(raw)}; it must be "off" ` +
+      '(nothing runs), "shadow" (log and count would-be refusals, change nothing) ' +
+      'or "enforce" (refuse with the 400 envelope). Refusing to start rather than ' +
+      'falling back, because a misspelled "enforce" on prod would silently mean ' +
+      '"shadow" and look like the gate is on when it is merely misspelled. ' +
+      'A mode change is a RESTART: the schemas are fixed at route registration.',
   )
 }

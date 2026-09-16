@@ -18,7 +18,7 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
-last-verified: "2026-09-14"
+last-verified: "2026-09-16"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -40,6 +40,26 @@ backend's connector handout), [#2423](https://github.com/d-hinders/Haven-AI/issu
 unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
+
+> **Re-verification (0.2.1-alpha.0 release, 2026-09-16):** this doc is coupled
+> to the release because the bump rewrites `CONNECTOR_VERSION`
+> (`packages/connect/src/runtime.ts`), which is in this doc's `covers:` list.
+> **In THIS release the coupling is carried by that file alone**: an earlier
+> draft of this note also claimed `HAVEN_CONNECTOR_CHANNEL`
+> (`packages/sdk/src/connector-channel.ts`) was "re-pinned", and independent
+> review found that file is not in the commit at all — the channel was already
+> `alpha`, so the bump's write produced no diff. Verified rather than asserted:
+> channel `alpha` (unchanged, no diff),
+> version `0.2.1-alpha.0`, agreeing across the source, the built connect bundle,
+> and the SDK that bundle resolves. **No channel behaviour changed** — nothing in
+> this release touches `publish.yml`, `release-channel.mjs`,
+> `release-snapshot-version.mjs` or `release-version-order.mjs`, so the
+> `0.0.0-dev.*` snapshot path and the rule that the two channels cannot cross are
+> untouched. `last-verified` is deliberately NOT bumped: it already reads
+> 2026-09-16 from an earlier change today, and re-stamping it would assert a
+> whole-document re-verification this release did not perform. Scope of this
+> note: `CONNECTOR_VERSION` and the channel constant's unchanged value — nothing
+> else in this document was re-verified.
 
 ## What `@dev` is, and is not
 
@@ -102,6 +122,16 @@ and the `release` skill.
   0.1.35-alpha.0 release failed E401 ([#2647](https://github.com/d-hinders/Haven-AI/issues/2647)).
 
 ## The loop: test a package change on dev without a prod release
+
+> **Re-verification (changelog-heading gap, 2026-09-14):** `release-bump.mjs`
+> gained one responsibility — rewriting `## Unreleased` to
+> `## <version> — <date>` in each published package's CHANGELOG — and the
+> snapshot path deliberately does **not** take it. A `0.0.0-dev.*` snapshot is
+> not a release, so stamping a release heading for one would be false even
+> though the tree is throwaway and no CHANGELOG reaches a tarball; the bump
+> logs `CHANGELOG headings: skipped — a dev snapshot is not a release` instead,
+> and a test pins the `!snapshot` guard. Nothing about the snapshot version
+> format, the five guards, `HAVEN_CONNECTOR_CHANNEL` or the publish job moved.
 
 > **Re-verification (#2908, naming epic #2906 phase 1):** the connector's
 > covered files changed in what they WRITE and READ, not in how the channel
@@ -231,7 +261,9 @@ throughout.
 
    The doctor reports the installed signer and SDK versions (the snapshot),
    starts the local signer for a real stdio handshake and prints its advertised
-   compat versions. Every "re-run `npx @haven_ai/connect@<tag>`" hint the
+   compat versions. Its hosted MCP row proves endpoint reachability; the
+   `identity_match` row is the authenticated stored-credential check. Every
+   "re-run `npx @haven_ai/connect@<tag>`" hint the
    snapshot's packages print names **`@dev`**, because the tag is a build-time
    constant (`HAVEN_CONNECTOR_CHANNEL` in `packages/sdk/src/connector-channel.ts`)
    that the snapshot bump rewrote from the version — a snapshot telling its
@@ -276,6 +308,13 @@ contract — the three variables, what each replaces, the sidecar and wrapper
 records — is in the connector's own README:
 [`packages/connect/README.md` § *Installing an unpublished signer / SDK / MCP build*](../../packages/connect/README.md#installing-an-unpublished-signer--sdk--mcp-build-haven_signer_spec-2424).
 
+> **Re-verified #2963:** for a *pinned* (non-override) install `--doctor`'s
+> `signer_runtime` check compares intactness against the sidecar and currency
+> against the manifest — a dev-channel snapshot that is intact but behind the
+> pin now reads as version drift, not `stale or empty`; the override path
+> described above is unchanged (it already compared against the sidecar).
+
+
 The two loops compose: `@dev` picks the connector, the override picks the
 signer/SDK/MCP it installs. The connector package itself has no override — it
 is the process running — so a change to `packages/connect` takes the merge
@@ -314,9 +353,14 @@ the live state of an environment is read from the environment, not from prose.
       (`parseConnectorChannel`, `packages/backend/src/config.ts`); unrelated
       backend configuration such as `HAVEN_OPS_TOKEN` or the accounting feed's
       `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` (#2861, the same refuse-the-boot
-      shape for its own two values) and
+      shape for its own two values), the boolean flags `HAVEN_HOSTED` /
+      `HAVEN_FEE_ENABLED` / `HAVEN_LEGACY_BOOKKEEPING_ENABLED` /
+      `CATALOG_DISCOVERY_ENABLED` (#3015, that shape again — exactly `true` or
+      `false`, lower-case, anything else refuses the boot),
       `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` (#2866, a plain
-      `Number(...) || default`) does not affect this
+      `Number(...) || default`) and `HAVEN_REQUEST_VALIDATION` (#3029, that
+      shape a third time — `off`/`shadow`/`enforce`, default `shadow`, a mode
+      change is a restart) does not affect this
       package-selection path; anything else
       makes the backend **refuse to boot**, naming the variable, rather than
       fall back to `alpha`. Verify by creating a setup in the dev dashboard and
@@ -387,8 +431,8 @@ installed `@haven_ai/signer@0.0.0-dev.202609040858.f4467bb`, and every re-run
 hint it and `--doctor` printed named `@dev`: the connector's own next-steps, the
 tombstone advice, the repair advice. That is #2423 confirmed in the shipped
 artifact rather than in the source it was built from. `--doctor` additionally
-reported the hosted MCP reachable and authorized at the dev URL, the stored API
-key authenticating as the agent whose signing key is in that directory, and a
+reported the hosted MCP endpoint reachable at the dev URL, the stored API key
+authenticating as the agent whose signing key is in that directory, and a
 signer stdio handshake at that same snapshot version.
 
 Two checks are deliberately NOT claimed here, because they need a fresh client

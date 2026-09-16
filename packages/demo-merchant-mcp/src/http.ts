@@ -7,8 +7,11 @@ import {
   PAYMENT_REQUIRED_HEADER,
   PAYMENT_RESPONSE_HEADER,
   PAYMENT_SIGNATURE_HEADER,
+  QA_FIXTURE_DESCRIPTION_SUFFIX,
   PaymentError,
+  isSkipSettleProduct,
   type SettledPayment,
+  type SettlementReadiness,
   type X402PaymentProcessor,
 } from './x402.js'
 import {
@@ -16,6 +19,7 @@ import {
   DEFAULT_SETTLEMENT_METHOD,
   HOSTED_DEMO_MERCHANT_URLS,
   PRODUCTS,
+  SKIP_SETTLE_QA_FIXTURE,
   SUPPORTED_SETTLEMENT_METHODS,
   formatUsdc,
   isSettlementMethod,
@@ -25,7 +29,7 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
-import type { Address } from 'viem'
+import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
 import type { SettlementClient } from './x402.js'
 
 export interface DemoMerchantServerOptions {
@@ -41,6 +45,14 @@ export interface DemoMerchantServerOptions {
    * rather than guessing.
    */
   settlementClient?: Pick<SettlementClient, 'readiness'>
+  /**
+   * #2979: how long a `readiness()` read is trusted before the `/mcp`
+   * settlement-readiness gate reads again. Keeps the gate from hitting the
+   * settlement RPC on every request while still catching a wallet that drains
+   * mid-run. `0` disables caching (every gate check reads fresh) — used by
+   * tests that need a deterministic read without a fake clock.
+   */
+  readinessCacheMs?: number
 }
 
 interface MerchantSession {
@@ -57,12 +69,59 @@ interface PaymentToolInfo {
 
 const MAX_BODY_BYTES = 500_000
 
+// #2979: default readiness-cache window. Short enough that a wallet draining
+// mid-run is caught within one retry, long enough that a busy `/mcp` client
+// does not turn every tool call into an extra RPC read (the same balance-read
+// `/healthz` already makes, now on the hot path too).
+const DEFAULT_READINESS_CACHE_MS = 15_000
+
+// #2979: how long the merchant asks a refused agent to wait before retrying.
+// Not a promise the wallet will be topped up by then — just a sane default
+// poll interval so a client backs off instead of hot-looping a 503.
+const NOT_READY_RETRY_AFTER_SECONDS = 60
+
+type ReadinessReader = () => Promise<SettlementReadiness | undefined>
+
+/**
+ * #2979: cache one `readiness()` read for `cacheMs`, per server instance. A
+ * throwing read is `unknown` (`undefined`), same as `/healthz`'s rule — it
+ * must never be cached as a refusal, so a transient RPC blip cannot latch the
+ * gate shut for the whole window.
+ */
+function createReadinessReader(
+  client: Pick<SettlementClient, 'readiness'> | undefined,
+  cacheMs: number,
+): ReadinessReader {
+  let cached: { value: SettlementReadiness | undefined; expiresAt: number } | undefined
+  return async () => {
+    const now = Date.now()
+    if (cacheMs > 0 && cached && now < cached.expiresAt) return cached.value
+    let value: SettlementReadiness | undefined
+    try {
+      value = await client?.readiness?.()
+    } catch {
+      value = undefined
+    }
+    cached = { value, expiresAt: now + cacheMs }
+    return value
+  }
+}
+
+interface ResolvedServerOptions extends Omit<DemoMerchantServerOptions, 'path'> {
+  path: string
+  getReadiness: ReadinessReader
+}
+
 export function createDemoMerchantServer(options: DemoMerchantServerOptions): Server {
   const path = options.path ?? '/mcp'
   const sessions = new Map<string, MerchantSession>()
+  const getReadiness = createReadinessReader(
+    options.settlementClient,
+    options.readinessCacheMs ?? DEFAULT_READINESS_CACHE_MS,
+  )
 
   return createServer((req, res) => {
-    handle(req, res, { ...options, path }, sessions).catch((err) => {
+    handle(req, res, { ...options, path, getReadiness }, sessions).catch((err) => {
       writeJson(res, 500, {
         jsonrpc: '2.0',
         error: { code: -32603, message: err instanceof Error ? err.message : String(err) },
@@ -75,7 +134,7 @@ export function createDemoMerchantServer(options: DemoMerchantServerOptions): Se
 async function handle(
   req: IncomingMessage,
   res: ServerResponse,
-  options: Required<Pick<DemoMerchantServerOptions, 'path'>> & DemoMerchantServerOptions,
+  options: ResolvedServerOptions,
   sessions: Map<string, MerchantSession>,
 ): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost')
@@ -199,10 +258,22 @@ async function handle(
 async function handlePaymentGate(
   req: IncomingMessage,
   res: ServerResponse,
-  options: Required<Pick<DemoMerchantServerOptions, 'path'>> & DemoMerchantServerOptions,
+  options: ResolvedServerOptions,
   paymentToolInfo: PaymentToolInfo,
 ): Promise<SettledPayment | null> {
   const { productId, product, description, settlementMethod } = paymentToolInfo
+
+  // #2979: gate on settlement readiness. This runs on EVERY paid tool call —
+  // the unpaid one that would receive the 402 challenge AND the agent's
+  // signed retry, which enters this same function before its header is
+  // read — so a wallet that drains between the challenge and the retry is
+  // caught here too (the drain test in http.test.ts). Skip the QA fixture
+  // that settles nothing on-chain (`isSkipSettleProduct`) — a drained wallet
+  // cannot block a settlement that never runs.
+  if (!isSkipSettleProduct(productId) && (await refuseIfNotReady(res, options))) {
+    return null
+  }
+
   const paymentRequired = options.paymentProcessor.buildPaymentRequired({
     merchantAddress: options.merchantAddress,
     amountUsdc: product.price_usdc,
@@ -260,19 +331,88 @@ async function handlePaymentGate(
     // fault from a rejection and to say which kind, without putting internal
     // detail or addresses in a response any payer can read.
     const faultName = err instanceof Error && err.name ? err.name : 'UnknownError'
+    // #2979: reason catalog — additive to the #1517 fault-class message, so a
+    // client can branch on `reason_code` without parsing the prose above.
     writePaymentRequired(
       res,
       options,
-      withReason(paymentRequired, `Payment failed — merchant-side fault (${faultName}); see merchant logs`),
+      withReason(
+        paymentRequired,
+        `Payment failed — merchant-side fault (${faultName}); see merchant logs`,
+        classifyFaultReasonCode(err),
+      ),
     )
     return null
   }
 }
 
+/** #2979: the merchant-fault reason catalog referenced on the 402 body. */
+type FaultReasonCode = 'settlement_wallet_out_of_gas' | 'settlement_rpc_unreachable' | 'merchant_fault'
+
+/**
+ * Best-effort classification of an already-caught merchant-side FAULT (never
+ * a `PaymentError` — those are decisions, handled separately) into the
+ * reason catalog, so a client can branch on `reason_code` without parsing
+ * `err.message` prose. Unrecognized faults fall back to the generic
+ * `merchant_fault` code rather than guessing a specific one.
+ */
+function classifyFaultReasonCode(err: unknown): FaultReasonCode {
+  // Review of PR #2982: what `submit` actually throws is viem's outer
+  // `ContractFunctionExecutionError` with the real cause nested — a name
+  // match on the outer error never sees `TimeoutError`. Walk the cause chain
+  // with viem's own predicates first; the substring fallback stays for
+  // non-viem shapes (a plain `Error('fetch failed')` from a custom client).
+  if (err instanceof BaseError) {
+    if (err.walk((e) => e instanceof InsufficientFundsError)) return 'settlement_wallet_out_of_gas'
+    if (err.walk((e) => e instanceof HttpRequestError || e instanceof TimeoutError)) {
+      return 'settlement_rpc_unreachable'
+    }
+  }
+  const name = err instanceof Error && err.name ? err.name : ''
+  const message = err instanceof Error ? err.message : String(err)
+  const haystack = `${name} ${message}`.toLowerCase()
+  if (haystack.includes('insufficient funds')) {
+    return 'settlement_wallet_out_of_gas'
+  }
+  if (
+    name.includes('HttpRequestError') ||
+    name.includes('TimeoutError') ||
+    haystack.includes('econnrefused') ||
+    haystack.includes('fetch failed') ||
+    haystack.includes('network')
+  ) {
+    return 'settlement_rpc_unreachable'
+  }
+  return 'merchant_fault'
+}
+
+/**
+ * #2979: read cached settlement readiness and, when the wallet is in the
+ * `fail` band, refuse the request outright with a 503 — before an agent ever
+ * signs an authorization the merchant already knows it cannot settle. `warn`
+ * proceeds unchanged (a slow drain, not an incident); a readiness read that
+ * came back `unknown` (the underlying read threw) never blocks, same rule as
+ * `/healthz`. Returns whether the response was written (caller must return).
+ */
+async function refuseIfNotReady(res: ServerResponse, options: ResolvedServerOptions): Promise<boolean> {
+  const ready = await options.getReadiness()
+  if (!ready || ready.status !== 'fail') return false
+
+  res.setHeader('Retry-After', String(NOT_READY_RETRY_AFTER_SECONDS))
+  writeJson(res, 503, {
+    error: 'merchant_not_ready',
+    reason_code: 'settlement_wallet_out_of_gas',
+    settlements_remaining: ready.settlementsRemaining,
+    fail_floor: ready.failFloor,
+    retry_after_s: NOT_READY_RETRY_AFTER_SECONDS,
+  })
+  return true
+}
+
 async function getSession(
   req: IncomingMessage,
   body: unknown,
-  options: Required<Pick<DemoMerchantServerOptions, 'path'>> & DemoMerchantServerOptions,
+  options: ResolvedServerOptions,
   sessions: Map<string, MerchantSession>,
 ): Promise<MerchantSession> {
   const requestedSessionId = firstHeader(req.headers['mcp-session-id'])
@@ -329,9 +469,19 @@ function getPaymentHeader(req: IncomingMessage): string | undefined {
  * quote a payload that never says why — how the hosted QA legs reported a
  * rejection they could not explain.
  */
-function withReason<T extends { error?: string }>(paymentRequired: T, reason: string): T {
+function withReason<T extends { error?: string }>(
+  paymentRequired: T,
+  reason: string,
+  reasonCode?: FaultReasonCode,
+): T & { reason_code?: FaultReasonCode } {
   const { error: _default, ...rest } = paymentRequired
-  return { error: reason, ...rest } as T
+  return {
+    error: reason,
+    // #2979: additive only — absent for the decision (PaymentError) call
+    // sites, which keep their own specific message and no generic code.
+    ...(reasonCode ? { reason_code: reasonCode } : {}),
+    ...rest,
+  } as T & { reason_code?: FaultReasonCode }
 }
 
 function writePaymentRequired(
@@ -347,7 +497,7 @@ function writePaymentRequired(
 }
 
 function buildDiscovery(
-  options: Required<Pick<DemoMerchantServerOptions, 'path'>> & DemoMerchantServerOptions,
+  options: ResolvedServerOptions,
 ) {
   const environment = merchantEnvironmentForChain(CHAIN_ID)
   const settlementMethods = options.settlementMethods?.length ? [...options.settlementMethods] : ['eip3009']
@@ -388,6 +538,9 @@ function buildDiscovery(
         ? product.x402.defaultSettlementMethod
         : settlementMethods[0],
       tools: product.category === 'vpn' ? ['buy_vpn'] : ['buy_cloud_storage'],
+      // #2989: same shape list_products' structuredContent carries — see
+      // `isSkipSettleProduct` in x402.ts. Absent for every other product.
+      ...(isSkipSettleProduct(product.id) ? { qa_fixture: SKIP_SETTLE_QA_FIXTURE } : {}),
     })),
   }
 }
@@ -425,7 +578,13 @@ function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
 
   if (!productId) return null
   const product = PRODUCTS[productId]
-  return { productId, product, description: `${product.name} — ${descriptionSuffix}`, settlementMethod }
+  // #2989: the 402 `description` is what the hosted quote/prepare surfaces to
+  // the agent BEFORE it signs — the fixture must be disclosed here, not only
+  // in `list_products` prose the agent may never re-read at purchase time.
+  const description = isSkipSettleProduct(productId)
+    ? `${product.name} — ${descriptionSuffix}${QA_FIXTURE_DESCRIPTION_SUFFIX}`
+    : `${product.name} — ${descriptionSuffix}`
+  return { productId, product, description, settlementMethod }
 }
 
 function isInitializeRequest(body: unknown): boolean {

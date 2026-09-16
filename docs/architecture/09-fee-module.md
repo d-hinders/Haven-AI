@@ -11,7 +11,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/types.ts
   - packages/sdk/src/payment-fee.test.ts
-last-verified: "2026-08-12"
+last-verified: "2026-09-15"
 ---
 
 # Haven — Platform fee scaffold and target design

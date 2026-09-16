@@ -1024,6 +1024,47 @@ const paymentSignData = {
   additionalProperties: false,
 } as const
 
+/**
+ * #2960 — one party vocabulary for "who paid", additive alongside every
+ * existing lone `payer*` field (same discipline as #2907's dual-emit, but
+ * these four are not same-value twins of a single old field — they are
+ * DISTINCT addresses, so this is a new composite object, not an alias).
+ * Flat and closed (#2888 — no `$ref` inside `allOf`): a plain object of four
+ * nullable addresses.
+ *
+ *   treasury_account — the owner's smart account the funds actually left
+ *     (`smart_accounts.account_address` / `machine_payment_evidence.payer_address`).
+ *   delegate         — the agent's signing EOA (`agents.delegate_address`).
+ *   delegate_account — the agent's delegate SMART account, the erc7710
+ *     `delegator` / the merchant's `PAYMENT-RESPONSE.payer` and invoice buyer
+ *     on that scheme. Persisted at authorize time on
+ *     `payment_intents.machine_metadata.delegate_account_address` (both
+ *     delegation-rail legs write it). Null for rows authorized before #2960
+ *     and on the legacy rail, where no such account exists.
+ *   merchant         — `payTo`.
+ *
+ * On an EIP-3009 payment `delegate` is what the merchant calls "payer"; on
+ * an erc7710 payment it is `delegate_account` instead — the two schemes
+ * disagree about which of THESE FOUR the merchant-visible payer is, which is
+ * exactly the collision #2960 exists to name explicitly instead of leaving
+ * implicit in a single ambiguous `payer` field.
+ */
+const partiesSchema = {
+  type: 'object',
+  required: ['treasury_account', 'delegate', 'delegate_account', 'merchant'],
+  properties: {
+    treasury_account: { anyOf: [address, { type: 'null' }], description: 'The owner smart account the funds left.' },
+    delegate: { anyOf: [address, { type: 'null' }], description: "The agent's signing EOA." },
+    delegate_account: {
+      anyOf: [address, { type: 'null' }],
+      description:
+        "The agent's delegate smart account (erc7710 `delegator`), persisted at authorize time. Null for rows authorized before #2960 and on the legacy rail.",
+    },
+    merchant: { anyOf: [address, { type: 'null' }], description: '`payTo`.' },
+  },
+  additionalProperties: false,
+} as const
+
 const agentPaymentStatus = {
   type: 'object',
   required: [
@@ -1062,27 +1103,56 @@ const agentPaymentStatus = {
     token: { type: 'string' },
     resource_url: { type: ['string', 'null'], format: 'uri' },
     merchant_address: { anyOf: [address, { type: 'null' }] },
-    payer_address: { anyOf: [address, { type: 'null' }], description: 'Delegate EOA captured on a payment intent.' },
+    payer_address: {
+      anyOf: [address, { type: 'null' }],
+      deprecated: true,
+      description: 'Delegate EOA captured on a payment intent. Deprecated: same value as `parties.delegate`; prefer `parties`.',
+    },
+    // #2960: additive alongside `payer_address` above — the party quadruple,
+    // not a same-value twin of it (`payer_address` is `delegate` only).
+    parties: { $ref: '#/components/schemas/Parties' },
     tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
     expires_at: isoDateTime,
     chain_id: { type: 'integer' },
     message: { type: 'string' },
+    // Present when the fee module quotes a nonzero fee for this rail
+    // (`modules/fee/index.ts` — dark today: amount "0", applied false).
+    fee: {
+      type: ['object', 'null'],
+      properties: {
+        amount: { type: 'string' },
+        token: { type: 'string' },
+        basis_points: { type: 'integer' },
+        applied: { type: 'boolean' },
+      },
+      required: ['amount', 'token', 'basis_points', 'applied'],
+      additionalProperties: false,
+    },
     amount_atomic: { type: ['string', 'null'] },
     asset: { anyOf: [address, { type: 'null' }] },
     network: { type: ['string', 'null'] },
     description: { type: ['string', 'null'] },
     idempotency_key: { type: ['string', 'null'] },
     x402: { $ref: '#/components/schemas/RailContext' },
+    // #2888: flat and closed, NOT `allOf: [RailContext, {...}]` — an allOf
+    // member is validated independently, so a field this object needs
+    // (`challenge_id`) that only the second member declares fails the FIRST
+    // member's `additionalProperties: false` the moment both members close.
+    // Duplicates `RailContext`'s fields rather than referencing it.
     mpp: {
-      allOf: [
-        { $ref: '#/components/schemas/RailContext' },
-        {
-          type: 'object',
-          properties: {
-            challenge_id: { type: ['string', 'null'] },
-          },
-        },
-      ],
+      type: 'object',
+      required: ['amount_atomic', 'asset', 'network', 'resource_url', 'merchant_address', 'description', 'idempotency_key'],
+      properties: {
+        amount_atomic: { type: ['string', 'null'] },
+        asset: { anyOf: [address, { type: 'null' }] },
+        network: { type: ['string', 'null'] },
+        resource_url: { type: ['string', 'null'], format: 'uri' },
+        merchant_address: { anyOf: [address, { type: 'null' }] },
+        description: { type: ['string', 'null'] },
+        idempotency_key: { type: ['string', 'null'] },
+        challenge_id: { type: ['string', 'null'] },
+      },
+      additionalProperties: false,
     },
   },
   additionalProperties: false,
@@ -4604,6 +4674,207 @@ export const openapiSpec = {
         },
       },
     },
+    '/analytics/overview': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getAnalyticsOverview',
+        summary: 'One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.',
+        description:
+          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one \"based on N payments\" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz`. Delegation-rail accounts only.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          {
+            name: 'range',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', enum: ['7d', '30d', '90d'] },
+            description: 'Window length ending now.',
+          },
+          {
+            name: 'currency',
+            in: 'query',
+            schema: { type: 'string', enum: ['usd', 'eur'], default: 'usd' },
+            description: 'Display currency — a sum of already-booked values, never re-converted.',
+          },
+          {
+            name: 'tz',
+            in: 'query',
+            schema: { type: 'string', default: 'UTC' },
+            description: 'IANA time zone used to bucket `by_day`. Defaults to UTC; an unrecognized zone is a 400.',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The full analytics-overview aggregate for the requested window.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['range', 'currency', 'basis', 'totals', 'by_day', 'agents', 'merchants', 'balance_by_day'],
+                  properties: {
+                    range: {
+                      type: 'object',
+                      required: ['from', 'to', 'days', 'previous_from', 'previous_to'],
+                      properties: {
+                        from: { type: 'string', format: 'date-time' },
+                        to: { type: 'string', format: 'date-time' },
+                        days: { type: 'integer', enum: [7, 30, 90] },
+                        previous_from: { type: 'string', format: 'date-time' },
+                        previous_to: { type: 'string', format: 'date-time' },
+                      },
+                    },
+                    currency: { type: 'string', enum: ['usd', 'eur'] },
+                    basis: {
+                      type: 'object',
+                      required: [
+                        'payments_counted', 'unsettled_submitted', 'refusals_counted', 'refusal_attempts',
+                        'fee_rows', 'gas_sponsored_ops', 'snapshot_days', 'tz', 'refusals_recorded_from',
+                      ],
+                      properties: {
+                        payments_counted: { type: 'integer', description: 'CONFIRMED payments summed into `totals.spent`.' },
+                        unsettled_submitted: { type: 'integer', description: '`submitted` rows in range, not counted as spend.' },
+                        refusals_counted: { type: 'integer', description: 'Distinct `payment_refusals` rows (the dedupe makes rows != attempts).' },
+                        refusal_attempts: { type: 'integer' },
+                        fee_rows: { type: 'integer' },
+                        gas_sponsored_ops: { type: 'integer' },
+                        snapshot_days: { type: 'integer' },
+                        tz: { type: 'string', description: 'The zone actually used to bucket `by_day` — UTC when the request gave none.' },
+                        refusals_recorded_from: {
+                          type: ['string', 'null'],
+                          description:
+                            'The ledger floor (#3013): the earliest `payment_refusals` day (UTC `YYYY-MM-DD`) with rows, inside NO window bound — a property of the ledger, not of the requested range. `null` only when the ledger has no rows at all, so a window behind the floor reads a coverage caveat ("nothing was recorded"), not a clean zero.',
+                        },
+                      },
+                    },
+                    totals: {
+                      type: 'object',
+                      required: [
+                        'spent', 'spent_previous', 'refused_count', 'refused_attempts', 'refused_amount',
+                        'refused_previous_count', 'budget_bands', 'fees', 'gas_sponsored_ops',
+                      ],
+                      properties: {
+                        spent: { type: 'string', description: 'Sum of booked fiat, CONFIRMED only.' },
+                        spent_previous: { type: 'string' },
+                        refused_count: { type: 'integer' },
+                        refused_attempts: { type: 'integer' },
+                        refused_amount: { type: 'string', description: 'Attempted amount — never "saved". A numeric string like every other money field on this response.' },
+                        refused_previous_count: { type: 'integer' },
+                        budget_bands: {
+                          type: 'object',
+                          required: ['above_75', 'above_50', 'agents_with_budget'],
+                          properties: {
+                            above_75: { type: 'integer', description: "Agents whose worst active delegation's used/budget ratio exceeds 75%." },
+                            above_50: { type: 'integer' },
+                            agents_with_budget: { type: 'integer' },
+                          },
+                        },
+                        fees: {
+                          type: 'object',
+                          required: ['amount', 'previous', 'flag_on'],
+                          properties: {
+                            amount: { type: 'string', description: '"0" while the fee flag is off — honest, not a placeholder.' },
+                            previous: { type: 'string' },
+                            flag_on: { type: 'boolean' },
+                          },
+                        },
+                        gas_sponsored_ops: { type: 'integer', description: 'A COUNT on value-bearing chains only — never a fiat figure.' },
+                      },
+                    },
+                    by_day: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['date', 'spent_by_agent', 'refusals'],
+                        properties: {
+                          date: { type: 'string', description: 'YYYY-MM-DD in the `tz` zone.' },
+                          spent_by_agent: { type: 'object', additionalProperties: { type: 'string' } },
+                          refusals: { type: 'integer' },
+                        },
+                      },
+                    },
+                    agents: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: [
+                          'id', 'name', 'status', 'spent', 'share', 'payments', 'refusals', 'refusal_attempts',
+                          'budgets', 'top_merchant', 'last_payment_at',
+                        ],
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          name: { type: 'string' },
+                          status: { type: 'string' },
+                          spent: { type: 'string' },
+                          share: { type: 'number', description: 'This agent’s share of total spend across delegation-rail agents, in [0, 1].' },
+                          payments: { type: 'integer' },
+                          refusals: { type: 'integer' },
+                          refusal_attempts: { type: 'integer' },
+                          budgets: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              required: ['token', 'recipient', 'used_atomic', 'budget_atomic', 'remaining_from_chain', 'period_start', 'period_end'],
+                              properties: {
+                                token: { type: 'string' },
+                                recipient: { type: ['string', 'null'] },
+                                used_atomic: { type: 'string' },
+                                budget_atomic: { type: 'string' },
+                                remaining_from_chain: { type: 'boolean', description: 'False when the on-chain read fell back to the configured budget.' },
+                                period_start: { type: 'string', format: 'date-time' },
+                                period_end: { type: 'string', format: 'date-time' },
+                              },
+                            },
+                          },
+                          top_merchant: {
+                            type: ['object', 'null'],
+                            required: ['label', 'address'],
+                            properties: {
+                              label: { type: 'string' },
+                              address: address,
+                            },
+                          },
+                          last_payment_at: { type: ['string', 'null'], format: 'date-time' },
+                        },
+                      },
+                    },
+                    merchants: {
+                      type: 'array',
+                      description: 'Top 10 by spend.',
+                      items: {
+                        type: 'object',
+                        required: ['label', 'address', 'spent', 'payments', 'agent_ids', 'first_seen', 'last_seen'],
+                        properties: {
+                          label: { type: 'string', description: 'The user’s contact name where the address matches, else the receipt’s merchant name, else the address.' },
+                          address: address,
+                          spent: { type: 'string' },
+                          payments: { type: 'integer' },
+                          agent_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+                          first_seen: { type: 'string', format: 'date-time' },
+                          last_seen: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                    balance_by_day: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['date', 'value'],
+                        properties: {
+                          date: { type: 'string' },
+                          value: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'range/currency outside the enum, or tz is not a recognized IANA zone.' },
+          '401': errorResponse,
+        },
+      },
+    },
     // ── Routes previously excluded one by one (#1446, final slice) ──────────
     // These ten sat in KNOWN_UNDOCUMENTED_ROUTES rather than in a deferred
     // module. Two of their reasons no longer hold: GET /chains' own entry said
@@ -6607,17 +6878,17 @@ export const openapiSpec = {
             type: 'string',
             enum: ['operator', 'ingestion'],
             description:
-              'Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches; no verification badges). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.',
+              'Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches for the listing; no domain-ownership proof runs). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.',
           },
           domain_verified: {
             type: 'boolean',
             description:
-              'True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows, which have a different (operator) trust story.',
+              'True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows: no ownership proof ever runs for them, and this field must not claim one.',
           },
           verified_payable: {
             type: 'boolean',
             description:
-              'True only for `ingestion` entries that a leader-locked, SSRF-hardened, read-only probe watched answer a real x402 quote. The badge claims domain-control AND verified-payable — never merchant honesty, quality, or settlement reliability.',
+              'True when Haven watched this endpoint answer a real x402 (or MPP) quote in its periodic probe: for `ingestion` rows that is the SSRF-hardened directory probe; for `operator` rows it is the catalog refresh probe (`status === active && verified_at` set) — same observation, no domain-ownership claim attached. False for a degraded row, or an operator row with no `verified_at` (migration 058 seeds its demo rows with one, so on a fresh database those carry the badge before the first refresh tick). Never treat this badge as proof of merchant honesty, quality, or settlement reliability.',
           },
         },
       },
@@ -7657,6 +7928,7 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      Parties: partiesSchema,
       AgentPaymentStatus: agentPaymentStatus,
       X402PaymentOption: {
         type: 'object',
@@ -8097,11 +8369,38 @@ export const openapiSpec = {
             type: 'string',
             enum: ['payment_confirmed', 'merchant_response_observed', 'protocol_receipt_attached'],
           },
-          tx_hash: { type: 'string' },
+          tx_hash: {
+            type: 'string',
+            description:
+              'Deprecated (#2998) — kept for wire compatibility. Meaning depends on `settlement_scheme`: ' +
+              'the account → delegate funding transaction on eip3009, the (only) settlement transaction on erc7710. ' +
+              'Prefer `funding_tx_hash` / `settlement_tx_hash`, which name which is which.',
+          },
+          funding_tx_hash: {
+            type: ['string', 'null'],
+            description:
+              'The account → delegate funding transaction, relayed by Haven (#2998). Set on eip3009 and on ' +
+              'scheme-less retired-x402-rail rows; null on erc7710 (no funding leg) and on scheme-less retired ' +
+              'mpp-rail rows (one direct account → merchant transaction, which is the settlement).',
+          },
+          settlement_tx_hash: {
+            type: ['string', 'null'],
+            description:
+              'The delegate → merchant settlement transaction (#2998). On erc7710 this is `tx_hash` itself ' +
+              '(the one transaction). On eip3009 this is the merchant-reported ' +
+              '`protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed 32-byte hash, else null ' +
+              '— the merchant has not reported a settlement yet, or reported the zero-hash "delivered, not ' +
+              'settled" marker. Trust level differs by scheme: on erc7710 Haven verified this hash on-chain ' +
+              'before the receipt existed; on eip3009 it is the merchant\'s claim as relayed (PAYMENT-RESPONSE), ' +
+              'NOT verified on-chain by Haven. On scheme-less retired mpp-rail rows it is `tx_hash` itself.',
+          },
           chain_id: { type: 'integer' },
           resource_url: { type: 'string', format: 'uri' },
           merchant_address: { anyOf: [address, { type: 'null' }] },
-          payer_address: address,
+          payer_address: {
+            ...address,
+            description: 'The treasury account — same as `parties.treasury_account`; prefer `parties`.',
+          },
           settlement_address: address,
           token_symbol: { type: 'string' },
           token_address: address,
@@ -8113,6 +8412,9 @@ export const openapiSpec = {
           confirmed_at: { anyOf: [isoDateTime, { type: 'null' }] },
           created_at: isoDateTime,
           updated_at: isoDateTime,
+          // #2960: additive — `payer_address` above is `parties.treasury_account`
+          // only; this carries the other three.
+          parties: { $ref: '#/components/schemas/Parties' },
         },
         additionalProperties: true,
       },

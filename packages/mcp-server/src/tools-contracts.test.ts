@@ -30,7 +30,7 @@ import {
   type PermissiveInputToolName,
 } from './tools.js'
 
-/** The 22 hosted tool names, in `HostedToolName` declaration order. */
+/** The 23 hosted tool names, in `HostedToolName` declaration order. */
 const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_get_agent',
   'haven_get_allowances',
@@ -47,6 +47,7 @@ const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_pay_x402_quote',
   'haven_resume_x402_payment',
   'haven_report_x402_outcome',
+  'haven_report_settlement_evidence',
   'haven_get_payment_status',
   'haven_get_resume_state',
   'haven_list_receipts',
@@ -57,10 +58,10 @@ const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
 ]
 
 describe('hosted tool contract surface (#2807 characterization)', () => {
-  it('advertises exactly the 22 hosted tool names, each exactly once', () => {
+  it('advertises exactly the 23 hosted tool names, each exactly once', () => {
     const schemaKeys = Object.keys(toolSchemas)
-    expect(schemaKeys).toHaveLength(22)
-    expect(new Set(schemaKeys).size).toBe(22)
+    expect(schemaKeys).toHaveLength(23)
+    expect(new Set(schemaKeys).size).toBe(23)
     expect([...schemaKeys].sort()).toEqual([...HOSTED_TOOL_NAMES].sort())
   })
 
@@ -185,6 +186,6 @@ describe('hosted tool contract surface (#2807 characterization)', () => {
       expect(toolDescriptions[name as HostedToolName]).toBeTruthy()
       expect(toolInputSchema(name as HostedToolName)).toBeTruthy()
     }
-    expect(advertised.size).toBe(22)
+    expect(advertised.size).toBe(23)
   })
 })

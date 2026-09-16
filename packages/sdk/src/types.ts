@@ -740,6 +740,27 @@ export interface HavenAgentSummary extends HavenAgent {
   allowances: HavenAgentAllowanceSummary[]
 }
 
+/**
+ * #2960 — one party vocabulary for "who paid" a Haven payment, additive
+ * alongside every existing lone `payer*`/`*Address` field (same discipline
+ * as the #2907 `safe`/`account` dual-emit, except these four are DISTINCT
+ * addresses, not same-value twins of one old field).
+ */
+export interface PaymentParties {
+  treasuryAccount: string | null
+  delegate: string | null
+  delegateAccount: string | null
+  merchant: string | null
+}
+
+/** @internal wire shape of {@link PaymentParties}. */
+export interface RawPaymentParties {
+  treasury_account: string | null
+  delegate: string | null
+  delegate_account: string | null
+  merchant: string | null
+}
+
 export interface HavenPaymentReceipt {
   id: string
   paymentId: string
@@ -747,11 +768,28 @@ export interface HavenPaymentReceipt {
   approvalRequestId?: string | null
   rail: string
   proofStatus: string
+  /**
+   * @deprecated (#2998) meaning depends on the settlement scheme — the
+   * account → delegate funding transaction on eip3009, the (only) settlement
+   * transaction on erc7710. Prefer {@link fundingTxHash} / {@link settlementTxHash}, which
+   * name which is which.
+   */
   txHash: string
+  /** The account → delegate funding transaction, relayed by Haven (#2998); null on erc7710 (no funding leg) and on retired mpp-rail rows. */
+  fundingTxHash: string | null
+  /**
+   * The delegate → merchant settlement transaction (#2998). Trust level differs
+   * by scheme: on erc7710 it is `txHash` itself and Haven VERIFIED it on-chain
+   * before the receipt existed; on eip3009 it is the merchant's claim as relayed
+   * (PAYMENT-RESPONSE), NOT verified on-chain by Haven — cite it as such.
+   */
+  settlementTxHash: string | null
   chainId: number
   resourceUrl: string
   merchantAddress: string | null
   payerAddress: string
+  /** #2960: additive alongside `payerAddress` above (`parties.treasury_account` only). */
+  parties?: PaymentParties
   settlementAddress: string
   tokenSymbol: string
   tokenAddress: string
@@ -956,6 +994,25 @@ export const AgentPaymentNextAction = {
    * return those funds to the originating Safe.
    */
   SweepStrandedFunds: 'sweep_stranded_funds',
+  /**
+   * #2970: a `submitted` erc7710 x402 intent whose settlement window has
+   * passed with no on-chain settlement evidence Haven could verify. Distinct
+   * from {@link CheckStatusLater}, which this REPLACES once the window is
+   * past — but it is not futile: Haven's settlement sweep (120s tick) scans
+   * each candidate over its own window plus a 120s clock-skew allowance, so
+   * it can still attribute the settlement for a short while after this value
+   * first appears. Poll {@link CheckStatusLater}'s tool
+   * (`haven_get_payment_status`) once more, roughly two minutes later; if it
+   * still shows no evidence, tell the user the goods were delivered but
+   * Haven holds no verified settlement evidence for this payment. If the
+   * agent holds the merchant's real settlement transaction hash (from
+   * `PAYMENT-RESPONSE`'s `transaction` field, or a prior settle/complete
+   * result's `settlement_tx_hash`), report it with the hosted
+   * `haven_report_settlement_evidence` tool instead of waiting —
+   * `haven_report_x402_outcome` takes no hash and refuses a non-`confirmed`
+   * intent.
+   */
+  AwaitingSettlementEvidence: 'awaiting_settlement_evidence',
 } as const
 
 export type AgentPaymentNextAction = (typeof AgentPaymentNextAction)[keyof typeof AgentPaymentNextAction]
@@ -1016,12 +1073,14 @@ export const AgentPaymentFailureCode = {
   PriceExceedsMax: 'PRICE_EXCEEDS_MAX',
   /** The x402 funding/quote window expired before the signer or hosted settle step could finish. */
   PaymentWindowExpired: 'PAYMENT_WINDOW_EXPIRED',
-  /** The Haven funding leg succeeded, but the merchant rejected the paid retry. */
+  /** The merchant rejected the paid retry. On eip3009 the funding leg had succeeded (sweep);
+   *  on erc7710 there is no funding leg — nothing to sweep, follow the message (#2983). */
   MerchantRejectedAfterFunding: 'MERCHANT_REJECTED_AFTER_FUNDING',
   /** #1300 review: funding is on-chain but the merchant never ANSWERED the
    *  paid retry within the timeout. NOT proof of rejection — the merchant
-   *  holds a valid EIP-3009 authorization and may still settle late, so the
-   *  guidance is verify-then-sweep, never blind sweep. */
+   *  may still settle late, so the guidance is verify-then-act. On eip3009
+   *  the funding leg had succeeded (verify-then-sweep); on erc7710 there is
+   *  no funding leg — nothing to sweep, follow the message (#3000). */
   MerchantUnresponsiveAfterFunding: 'MERCHANT_UNRESPONSIVE_AFTER_FUNDING',
   /**
    * #1307: the caller omitted merchant_url/tool_name (asking Haven to
@@ -1048,6 +1107,16 @@ export const AgentPaymentFailureCode = {
    * The fallback is the exact atomic `max_amount`.
    */
   MaxAmountUnconvertible: 'MAX_AMOUNT_UNCONVERTIBLE',
+  /**
+   * #2979: the merchant answered a `tools/call` probe with its own
+   * machine-readable "cannot settle right now" refusal (HTTP 503,
+   * `{ error: 'merchant_not_ready', reason_code, ... }`) instead of a 402
+   * challenge — e.g. its settlement wallet is out of gas. No 402 was ever
+   * issued and no payment was created; this is honest and (per
+   * `retry_after_s`, when present) usually transient, unlike a permanent
+   * endpoint miss.
+   */
+  MerchantNotReady: 'MERCHANT_NOT_READY',
 } as const
 
 export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typeof AgentPaymentFailureCode]
@@ -1137,6 +1206,8 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
     'Retry the same tool call, this time passing merchant_url, tool_name, arguments, and mcp_transport explicitly — the server had no stored context to rehydrate for this payment id.',
   [AgentPaymentNextAction.SweepStrandedFunds]:
     'Tell the user that funds may be stranded in the delegate wallet and prompt them to initiate a sweep in Haven to return them to the originating account.',
+  [AgentPaymentNextAction.AwaitingSettlementEvidence]:
+    "The settlement window passed with no verified on-chain evidence yet. If you hold the merchant's real settlement transaction hash, report it with haven_report_settlement_evidence. Otherwise, Haven's settlement sweep may still attribute it within about two minutes — poll getPaymentStatus once more, then tell the user the goods were delivered but unverified if it still shows nothing.",
 }
 
 export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode, string> = {
@@ -1145,15 +1216,17 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
   [AgentPaymentFailureCode.PaymentWindowExpired]:
     'The x402 funding/quote window expired before the signer or hosted settle step could finish. Re-quote via haven_pay_mcp_tool with the same idempotency key to avoid duplicate funding.',
   [AgentPaymentFailureCode.MerchantRejectedAfterFunding]:
-    'The Haven funding leg succeeded, but the merchant rejected the paid retry. Stop retrying the merchant and reconcile stranded delegate funds with haven_sweep_delegate.',
+    'The merchant rejected the paid retry. eip3009: the funding leg succeeded — stop retrying the merchant and reconcile stranded delegate funds with haven_sweep_delegate. erc7710: no funding leg, nothing to sweep — follow the message (re-quote later, or check haven_get_payment_status after the window first).',
   [AgentPaymentFailureCode.MerchantUnresponsiveAfterFunding]:
-    'The Haven funding leg succeeded, but the merchant did not answer the paid retry before the timeout. The merchant may still settle late — check haven_get_payment_status (and retry haven_complete_mcp_tool once) BEFORE sweeping; sweep only if no settlement appears.',
+    'The merchant did not answer the paid retry before the timeout. The merchant may still settle late. eip3009: the funding leg succeeded — check haven_get_payment_status, retry haven_complete_mcp_tool once, sweep only if no settlement appears. erc7710: no funding leg, nothing to sweep, and haven_complete_mcp_tool has no erc7710 branch — do not retry it; check haven_get_payment_status after the payment window and re-quote only if it shows no settlement.',
   [AgentPaymentFailureCode.MerchantCallContextUnavailable]:
     'merchant_url/tool_name were omitted and no stored merchant call context is available for this payment_id. Re-send merchant_url, tool_name, arguments, and mcp_transport explicitly.',
   [AgentPaymentFailureCode.AmbiguousMaxAmount]:
     'Both max_amount (atomic units) and max_amount_human (whole tokens) were supplied for one purchase. Nothing was contacted and nothing was spent. Re-send with exactly ONE: max_amount_human for a cap the user stated in tokens, max_amount for an exact atomic figure.',
   [AgentPaymentFailureCode.MaxAmountUnconvertible]:
     "max_amount_human could not be converted to atomic units against this quote's asset — either its decimals are unknown to Haven or the cap has more decimal places than the asset supports. Nothing was spent. Round the cap, or re-send it as an exact atomic max_amount.",
+  [AgentPaymentFailureCode.MerchantNotReady]:
+    'The merchant refused the probe with its own "cannot settle right now" signal instead of a 402 challenge. No payment was created. Often transient — retry later (see retry_after_s in the message, if given) rather than treating this as a broken or wrong endpoint.',
 }
 
 /**
@@ -1193,6 +1266,23 @@ export const AgentPaymentWarningCode = {
    * guidance shown here may be optimistic.
    */
   AllowanceReadOptimistic: 'ALLOWANCE_READ_OPTIMISTIC',
+  /**
+   * #2991: the quote tools' `expected_settlement_scheme` prediction of what
+   * `haven_prepare_catalog_purchase` / `haven_pay_mcp_tool` will actually
+   * select could not be computed — the agent's execution rail could not be
+   * read from Haven, so `expected_settlement_scheme` is `null` rather than a
+   * guess. `accepted_scheme` (the merchant's offer) is unaffected.
+   */
+  X402SchemeUnknown: 'X402_SCHEME_UNKNOWN',
+  /**
+   * #2968: the merchant answered 200 and handed over goods, but Haven holds NO
+   * on-chain evidence that the payment moved. `settled: false` beside this code
+   * is not a failure — it is the absence of proof, and the two must travel
+   * together so an agent can tell "the user has the goods" apart from "the
+   * money moved". Carries the intent's `expires_at`: after that instant the
+   * settlement can no longer land at all.
+   */
+  SettlementUnconfirmed: 'SETTLEMENT_UNCONFIRMED',
 } as const
 
 export type AgentPaymentWarningCode =
@@ -1353,6 +1443,8 @@ export interface PaymentStatusResult {
   merchantAddress: string | null
   /** Delegate EOA captured on the payment intent when it was created. */
   payerAddress?: string | null
+  /** #2960: additive alongside `payerAddress` above (`parties.delegate` only). */
+  parties?: PaymentParties
   txHash: string | null
   expiresAt: string
   chainId: number
@@ -1595,6 +1687,8 @@ export interface RawPaymentStatusResult {
   resource_url: string | null
   merchant_address: string | null
   payer_address?: string | null
+  /** #2960: additive alongside `payer_address` above (`parties.delegate` only). */
+  parties?: RawPaymentParties
   tx_hash: string | null
   expires_at: string
   chain_id: number
@@ -1664,11 +1758,16 @@ export interface RawHavenPaymentReceipt {
   approval_request_id?: string | null
   rail: string
   proof_status: string
+  /** @deprecated (#2998) — see `funding_tx_hash` / `settlement_tx_hash`. */
   tx_hash: string
+  funding_tx_hash?: string | null
+  settlement_tx_hash?: string | null
   chain_id: number
   resource_url: string
   merchant_address: string | null
   payer_address: string
+  /** #2960: additive alongside `payer_address` above (`parties.treasury_account` only). */
+  parties?: RawPaymentParties
   settlement_address: string
   token_symbol: string
   token_address: string
@@ -1707,13 +1806,21 @@ export interface HavenCatalogEntry {
   verifiedAt: string | null
   /**
    * Where the entry came from. `operator` = curated in migrations/scripts
-   * (the operator vouches; no verification badges). `ingestion` = submitted
+   * (the operator vouches for the listing; the catalog refresh probe still
+   * checks the endpoint, see `verifiedPayable`). `ingestion` = submitted
    * through the Verified Payable Directory and passed domain-ownership proof
    * plus the read-only quote probe.
    */
   source: 'operator' | 'ingestion'
-  /** True only for `ingestion` entries. See the epic's trust claim (never merchant honesty or quality). */
+  /** True only for `ingestion` entries — the one ownership claim. See the epic's trust claim (never merchant honesty or quality). */
   domainVerified: boolean
+  /**
+   * True when Haven watched this endpoint answer a live quote (#2978): the
+   * directory probe for `ingestion` rows, the periodic catalog refresh probe
+   * for `operator` rows (`status === 'active'` with `verifiedAt` set). False
+   * for a degraded row of either source. `discoverTools({ verified:
+   * 'verified' })` filters on this field, not on `source`.
+   */
   verifiedPayable: boolean
 }
 
@@ -1828,8 +1935,18 @@ export class MerchantTimeoutError extends HavenApiError {
 
 export class X402UnexpectedStatusError extends HavenApiError {
   readonly x402ErrorCode = 'unexpected_non_402_status' as const
-  constructor(message: string, statusCode: number) {
-    super(message, statusCode)
+  /**
+   * #2979: `body` is the merchant's own JSON, when the non-402 response
+   * carried one — e.g. the demo merchant's `/mcp` readiness gate answers
+   * `503 { error: 'merchant_not_ready', reason_code, ... }`. Optional and
+   * best-effort: a non-JSON or unreadable body leaves this `undefined`, same
+   * as before this field existed. Consumers key on it (not on the message
+   * string) to distinguish an honest, machine-readable merchant refusal from
+   * a genuine "this is not the x402 endpoint" miss, which otherwise look
+   * identical — both are just "some non-402 status".
+   */
+  constructor(message: string, statusCode: number, body?: unknown) {
+    super(message, statusCode, body)
     this.name = 'X402UnexpectedStatusError'
   }
 }
@@ -1898,6 +2015,29 @@ export class HavenSigningError extends HavenError {
   constructor(message: string) {
     super(message, 'SIGNING_ERROR')
     this.name = 'HavenSigningError'
+  }
+}
+
+/**
+ * #2972: `MerchantCompletion.reportSettlementEvidence` /
+ * `HavenClient.reportSettlementEvidence` refuse a `0x00…00` settlement hash
+ * BEFORE any network call — see `isZeroSettlementTxHash`. That marker is
+ * never a real transaction (the demo merchant's own "delivered, not settled"
+ * value), so posting it to `POST /machine-payments/evidence` could only ever
+ * come back refused, at the cost of a real round trip. A typed error rather
+ * than a `HavenApiError`-shaped 400: no request was ever attempted, so there
+ * is no HTTP status or response body to carry.
+ */
+export class HavenZeroSettlementHashError extends HavenError {
+  constructor(paymentId: string) {
+    super(
+      'settlement_tx_hash is the zero hash (0x00…00), which is never a real settlement ' +
+        'transaction — refused before any report was sent.',
+      'ZERO_SETTLEMENT_HASH',
+      400,
+      paymentId,
+    )
+    this.name = 'HavenZeroSettlementHashError'
   }
 }
 

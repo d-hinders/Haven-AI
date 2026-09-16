@@ -156,6 +156,41 @@
   --v2-table-row-border: #e6ebf1;
   --v2-table-row-hover: #f0f4f9;
 
+  /* ── Categorical data-viz series (#2948, analytics slice D) ─────────────
+     The ordered categorical set the chart primitives (ui/StackedBarChart,
+     ui/AreaChart) paint their series from. The dataviz rule it encodes:
+     colour identifies the SERIES, never the meaning of a value — a refusal
+     is not red and an incoming payment is not green here; those semantics
+     stay with the ink scale and the semantic tokens outside the charts.
+
+     Order is the contract. Assign series by index, never by hash or by
+     name, so an agent that keeps the first slot keeps the same colour
+     across the chart, the legend, and the agents table's share column.
+     Series 1 deliberately opens on `--v2-brand` (the heaviest series —
+     typically the user's own agent — lands on the brand colour).
+
+     Both palettes are measured, not eyeballed (`theme-tokens.test.ts`
+     re-derives the ratios from these very declarations): every stop clears
+     WCAG 3:1 on both grounds it renders on in its own theme (light on
+     `--v2-bg`/`--v2-surface`, dark on the dark `--v2-bg`/`--v2-surface`),
+     and adjacent stops stay apart on the eye — the light set separates
+     brand indigo, teal, orange, sky, magenta and raspberry, and no pair
+     within 30 degrees of hue comes closer than a relative-luminance gap of
+     0.25. A stop that fails either bar reddens the suite. */
+  --v2-series-1: #4f46e5;
+  --v2-series-2: #0d7f63;
+  --v2-series-3: #b0500a;
+  --v2-series-4: #0369a1;
+  --v2-series-5: #8a1290;
+  --v2-series-6: #a01a63;
+
+  --v2-series-1-rgb: 79 70 229;
+  --v2-series-2-rgb: 13 127 99;
+  --v2-series-3-rgb: 176 80 10;
+  --v2-series-4-rgb: 3 105 161;
+  --v2-series-5-rgb: 138 18 144;
+  --v2-series-6-rgb: 160 26 99;
+
   /* ── Safe-area insets (#2730, epic #2736) ─────────────────────────────────
      The four `env(safe-area-inset-*)` readings, declared ONCE, so that every
      rule that clears the notch or the home indicator reads a variable instead
@@ -402,6 +437,25 @@
     --v2-table-header-ink: #97a3b6;
     --v2-table-row-border: #2b3140;
     --v2-table-row-hover: #20252f;
+
+    /* Categorical data-viz series (#2948) — the dark stops of the set
+       documented in `:root` above. Lightened against the dark grounds;
+       every stop clears 3:1 on both dark surfaces (measured by
+       `theme-tokens.test.ts`, not eyeballed). Byte-identical in both
+       dark blocks. */
+    --v2-series-1: #8f8ef5;
+    --v2-series-2: #59c9a3;
+    --v2-series-3: #f2c94a;
+    --v2-series-4: #59bdf2;
+    --v2-series-5: #c28fff;
+    --v2-series-6: #e878b5;
+
+    --v2-series-1-rgb: 143 142 245;
+    --v2-series-2-rgb: 89 201 163;
+    --v2-series-3-rgb: 242 201 74;
+    --v2-series-4-rgb: 89 189 242;
+    --v2-series-5-rgb: 194 143 255;
+    --v2-series-6-rgb: 232 120 181;
   }
 }
 
@@ -504,6 +558,25 @@
   --v2-table-header-ink: #97a3b6;
   --v2-table-row-border: #2b3140;
   --v2-table-row-hover: #20252f;
+
+  /* Categorical data-viz series (#2948) — the dark stops of the set
+     documented in `:root` above. Lightened against the dark grounds;
+     every stop clears 3:1 on both dark surfaces (measured by
+     `theme-tokens.test.ts`, not eyeballed). Byte-identical in both
+     dark blocks. */
+  --v2-series-1: #8f8ef5;
+  --v2-series-2: #59c9a3;
+  --v2-series-3: #f2c94a;
+  --v2-series-4: #59bdf2;
+  --v2-series-5: #c28fff;
+  --v2-series-6: #e878b5;
+
+  --v2-series-1-rgb: 143 142 245;
+  --v2-series-2-rgb: 89 201 163;
+  --v2-series-3-rgb: 242 201 74;
+  --v2-series-4-rgb: 89 189 242;
+  --v2-series-5-rgb: 194 143 255;
+  --v2-series-6-rgb: 232 120 181;
 }
 
 /*
@@ -718,10 +791,54 @@
   .v2-mesh-drift {
     animation: v2-mesh-drift 18s ease-in-out infinite alternate;
   }
+  /* The chart draw-in rules (#2948) share this gate, the idiom
+     .v2-mesh-drift established: an animation class lives inside a
+     prefers-reduced-motion: no-preference block, so the motion cannot render
+     un-gated. (Other animated classes gate in their own blocks further down —
+     pending-pulse, the theme swap — the invariant is the gate, not one shared
+     block.) The keyframes are documented with the chart section below. */
+  .v2-chart-draw {
+    animation: v2-chart-grow 0.45s ease-out both;
+  }
+  .v2-chart-draw-stroke {
+    /* The dash trick: 1 path-length, measured in the same units the
+       drawing uses; path-length units are the viewBox's. */
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: v2-chart-draw-stroke 0.6s ease-out 0.15s both;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .v2-mesh-drift { animation: none; }
+}
+
+/*
+ * The chart draw-in keyframes (#2948, analytics slice D).
+ *
+ * `ui/StackedBarChart` and `ui/AreaChart` stamp the gated classes (in the
+ * prefers-reduced-motion: no-preference block above) on the elements that
+ * grow in — the per-day bar groups (grow from the baseline, which is where a
+ * bar's story starts) and the area line (drawn along its path by the
+ * dash-offset companion, the `_stroke` variant).
+ *
+ * The gating lives with the `.v2-mesh-drift` animation above, which is why
+ * the primitives do not subscribe to the media list themselves: the media
+ * query lives with the animation, so the motion CANNOT render un-gated.
+ * Under `prefers-reduced-motion: reduce` the declarations never apply, the
+ * transforms never animate, the bars stand at full height and the line is
+ * fully drawn on mount — the reduced-motion branch of the acceptance list
+ * is satisfied by what is NOT here, and the unit tests assert exactly that
+ * much from jsdom (which implements neither keyframes nor animations).
+ */
+@keyframes v2-chart-grow {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+
+@keyframes v2-chart-draw-stroke {
+  from { stroke-dashoffset: 1; }
+  to   { stroke-dashoffset: 0; }
 }
 
 /* Custom scrollbar */

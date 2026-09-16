@@ -51,9 +51,9 @@ function tokenDecimalsForAllowance(allowance: AgentAllowance, chainId: number): 
  * This helper used to discriminate between those shapes BY EXCEPTION:
  * `BigInt('250.000000')` throws, and a bare `catch` returned the string
  * unformatted. That is what put `"250.000000 USDC per week"` on `/agents`
- * while `/dashboard` and `/custody` showed `250.00` for the same delegation —
- * a catch used as a type test, failing silently in the one direction the live
- * rail actually produces.
+ * while `/dashboard` and the custody page (retired in #3024) showed `250.00`
+ * for the same delegation — a catch used as a type test, failing silently in
+ * the one direction the live rail actually produces.
  *
  * The fix is the path those two surfaces already take. They call
  * `formatAllowanceForToken`, a one-line wrapper that resolves decimals and

@@ -142,6 +142,22 @@ The developer loop that *consumes* a snapshot — merge, wait for the run, poll 
 4. **Update** the `version` field of every lockstep package — the five published ones (`sdk`, `signer`, `mcp`, `connect`, `cli`) **plus `mcp-server`**, which is `private: true` and never published but version-locksteps for coherence with its `HOSTED_SERVER_VERSION` constant. Six in total (`VERSIONED_PACKAGES` = `PUBLISHED_PACKAGES` + `mcp-server`); only the five published ones are pin-managed.
 5. **Update** cross-package dep pins: `mcp → @haven_ai/sdk`, `connect → @haven_ai/sdk / @haven_ai/mcp / @haven_ai/signer`.
 6. **Update** `packages/mcp/src/server.ts` — the `MCP_VERSION` constant.
+7a. **Rewrite** each published package's `CHANGELOG.md` heading — `## Unreleased`
+   becomes `## <version> — <date>` (`scripts/release-changelog.mjs`). A package
+   with no `## Unreleased` section is skipped and said so in the log, because
+   "nothing to rewrite" and "rewrote it" must not look alike — that ambiguity is
+   how the gap below ran unnoticed. Added 2026-09-14: all five changelogs had
+   claimed the bump wrote this heading while it did not, so every release shipped
+   `## Unreleased` standing over the entry that had just gone out — had one gone
+   out. None did: the files were created by #2933 on 2026-09-13 and the next
+   release (0.2.0-alpha.0, 2026-09-14) hand-stamped the heading and corrected the
+   prose in the same commit, so the false assertion stood for about a day and
+   zero releases. An earlier draft of this paragraph named "the 0.1.37-alpha.0
+   release commit" as the instance; those files did not exist at it, having been
+   created ten hours later. The defect was real and the impact claim was
+   inferred — which is the habit the release skill's *Read State Directly*
+   section exists to stop, in the very change that added it. No CHANGELOG reaches a tarball (`files` is `dist` +
+   `README.md`), so this was a repository-record defect, not a published one.
 7. **Update** `packages/connect/src/runtime-manifest.ts` — `sdkVersion` and `signerVersion` string literals, then re-pin the *Supported Runtime Manifest* table in `docs/operations/mcp-runtime-compatibility.md` to match ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)). The table is verified in step 11 against the constants themselves, never against the value this run wrote — see *The manifest table writes itself*.
 7a. **Update** `packages/sdk/src/connector-channel.ts` — the `HAVEN_CONNECTOR_CHANNEL` constant ([#2423](https://github.com/d-hinders/Haven-AI/issues/2423)). Unlike every other constant here it does **not** carry the version: it carries the npm dist-tag *derived* from it, by the same rule `.github/workflows/publish.yml` uses to choose `npm publish --tag` (prerelease → its own label, so `0.1.34-alpha.0` → `alpha` and `0.0.0-dev.<ts>.<sha>` → `dev`; stable → `latest`). It is what every published package's "re-run `npx @haven_ai/connect@<tag>`" hint renders from, so a build published under one channel cannot tell its user to reinstall from another. The rule lives once, in `scripts/release-channel.mjs`; `npm run release:bump:test` **executes** publish.yml's own `case` block in `bash` and fails if the two ever disagree, and separately compares the constant on disk against `packages/sdk/package.json`'s version on every pull request — which is what catches a bump that stopped writing it.
 8. **Wipe** all `packages/*/dist` directories — required to prevent tsup from bundling a stale constant from the previous build's output.

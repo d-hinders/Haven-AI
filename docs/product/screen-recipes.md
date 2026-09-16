@@ -17,6 +17,10 @@ covers:
   - packages/frontend/src/components/ui/PageHeader.tsx
   - packages/frontend/src/components/ui/SegmentedControl.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx
+  - packages/frontend/src/components/ui/StatTile.tsx
+  - packages/frontend/src/components/analytics/AgentsTable.tsx
+  - packages/frontend/src/components/analytics/EmptyStates.tsx
+  - packages/frontend/src/components/analytics/RangeControl.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
@@ -26,7 +30,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-09-12"
+last-verified: "2026-09-15"
 ---
 
 # Haven Screen Recipes
@@ -419,6 +423,69 @@ Money and risk clarity:
 - On mobile, preserve direction, activity/movement, amount, and the
   external-details link. Secondary columns, including date and initiator, may
   hide.
+
+## Analytics
+
+Use for `/analytics`, the reporting surface of what the account's agents did
+with their money in a chosen window ([#2947](https://github.com/d-hinders/Haven-AI/issues/2947),
+epic [#2944](https://github.com/d-hinders/Haven-AI/issues/2944)). The page is
+read-only: it moves no money and changes no authority, so the review-moment
+rule above does not bind it, and it must not acquire controls that suggest it
+does. The sidebar entry sits after *Transactions*; the mobile tab bar stays
+five cells and the entry rides in the *More* sheet with the other secondary
+routes.
+
+Structure:
+1. PageHeader with title *Analytics* and the subtitle "What your agents did
+   with your money.", plus the window caption beside the range control. The
+   caption comes from the response's own resolved window, not from the control,
+   so a request answered for a different window than the one asked for is what
+   the reader is told.
+2. One `SegmentedControl` for the window (7d / 30d / 90d, default 30d),
+   persisted per device under `haven.analytics.range` — the same device-local
+   rule the theme key follows — and read in the initialiser, never in an
+   effect, so the first request already carries the stored choice. The display
+   currency is read from the Settings currency preference, the one owner of
+   that value; the page never re-asks it.
+3. Four `StatTile` figures, one request behind all four: *Spent* with its
+   basis ("based on N payments", plus how many submissions awaiting their
+   settlement evidence are not counted), *Refused* with the attempts behind
+   the count and the attempted amount, *Budget used* as a count of agents
+   above 75% of their period budget, and *Fees paid to Haven*, which while
+   Haven charges no fees says "No fees yet — Haven is not charging fees" in
+   words rather than rendering `$0.00`, because "nothing charged in this
+   window" is a different fact from "the product is not charging fees".
+4. The agents table: spend, share, payments, refusals, budget used, top
+   merchant, last payment, each row a link into the agent. Budget figures ride
+   in the delegation's own token units with a progress bar and the reset date.
+5. The chart band and the merchants section below the table, which arrive with
+   their own slices.
+
+Money and risk clarity:
+- A value is a reading, never a judgement: the figure is ink in every state,
+  and only the delta chip carries tone, derived from what a *rising* value of
+  that figure means (`StatTile`'s polarity prop owns the rule). More refusals
+  is worse; more spend is neither.
+- The refused figure is the *attempted* amount. Never "saved": a refused
+  payment is money that was not spent, not money that was kept. The count's
+  limit is said out — price-cap refusals in the agent's runtime are not
+  recorded.
+- A budget reading says where the measurement came from: from the chain, or
+  from Haven's last snapshot when the chain could not be read. The two are not
+  the same claim and the cell does not let the reader assume the stronger.
+- The states are mutually exclusive, because what they report about the
+  request is: empty says the endpoint answered and the window holds nothing;
+  error says it did not answer. A page of confident zeros is what an outage
+  is mistaken for, so the empty state replaces the tiles rather than filling
+  them, and the error state says the money has not stopped — the agents keep
+  spending under the rules the user set — with the one remedy the page has
+  evidence for, a retry.
+- Fewer than three days carrying data is a reading too short for a trend: the
+  tiles stay, and one line says what the charts need before they render.
+- The table's two layouts are the same data: below `lg` the row list carries
+  spend, refusals and budget on the face of the row and the rest in a
+  disclosure. The collapse is a layout decision, not a second source — no
+  figure is computed twice, so the two cannot disagree.
 
 ## Account Detail
 

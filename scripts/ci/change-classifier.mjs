@@ -10,7 +10,7 @@
 // logic that decides whether a guard runs is exactly the logic that must not
 // be untestable.
 //
-// The contract with ci.yml is the TEN output names below, emitted as
+// The contract with ci.yml is the THIRTEEN output names below, emitted as
 // `name=value` lines. Nothing here decides what a job does with a flag; this
 // only answers "was this surface touched, or does something it depends on
 // force it true".
@@ -46,6 +46,9 @@ export const OUTPUT_NAMES = Object.freeze([
   'mcp_server',
   'signer',
   'cli',
+  'demo_merchant',
+  'core',
+  'qa_agent',
   'full',
 ])
 
@@ -232,10 +235,26 @@ export const SURFACE_RULES = Object.freeze([
   { patterns: ['packages/mcp-server/*'], surfaces: ['code', 'mcp_server'] },
   { patterns: ['packages/signer/*'], surfaces: ['code', 'signer'] },
   { patterns: ['packages/cli/*'], surfaces: ['code', 'cli'] },
+  { patterns: ['packages/demo-merchant-mcp/*'], surfaces: ['code', 'demo_merchant'] },
   {
-    // Any other workspace — including packages/core, the shared kernel that
-    // backend and frontend both consume — is not individually routed, so it
-    // forces the full matrix.
+    // The shared kernel (#3005). It has its own job now, so it no longer falls
+    // to the catch-all below; frontend and backend fan out to it in reverse
+    // through the dependency table, which is what runs THEIR suites on a core
+    // change.
+    patterns: ['packages/core/*'],
+    surfaces: ['code', 'core'],
+  },
+  {
+    // The private QA harness (#3005). Its job runs the unit tests, not the
+    // qa-dev.yml money-flow runner; sdk and signer fan out to it through the
+    // table because the tests import both.
+    patterns: ['packages/qa-agent/*'],
+    surfaces: ['code', 'qa_agent'],
+  },
+  {
+    // Any other workspace is not individually routed, so it forces the full
+    // matrix. With #3005's two entries this is a residual arm again — every
+    // packages/* workspace is named above it.
     patterns: ['packages/*'],
     surfaces: ['code', 'full'],
   },
@@ -308,16 +327,16 @@ export const PROPAGATION_RULES = Object.freeze([
   ),
 ])
 
-/** All ten flags false. */
+/** All thirteen flags false. */
 const noSurfaces = () => Object.fromEntries(OUTPUT_NAMES.map((name) => [name, false]))
 
-/** All ten flags true — what `workflow_dispatch` forces. */
+/** All thirteen flags true — what `workflow_dispatch` forces. */
 export function allSurfaces() {
   return Object.fromEntries(OUTPUT_NAMES.map((name) => [name, true]))
 }
 
 /**
- * Classify an explicit list of changed paths into the ten output flags.
+ * Classify an explicit list of changed paths into the thirteen output flags.
  *
  * `propagationRules` is a seam for tests, not a runtime knob — CI always uses
  * the default. It exists so the characterization matrix can ask "would any

@@ -7,6 +7,7 @@ import {
 } from '../../domain/agent-payment-taxonomy.js'
 import { config } from '../../config.js'
 import { ethers } from 'ethers'
+import { withParties, type Parties } from '../../openapi/party-model.js'
 import {
   expireOverdueIntentById,
   findIntentStatusRow,
@@ -14,6 +15,7 @@ import {
 } from '../../infra/repositories/payment-intents.js'
 import { type AgentContext } from '../../middleware/agentAuth.js'
 import { quoteFee } from '../fee/index.js'
+import { MAX_SETTLEMENT_WINDOW_SECONDS } from '../x402/x402-delegation.js'
 
 /**
  * #2085: narrowed — this module constructs `'payment_intent'` and nothing
@@ -64,6 +66,8 @@ export interface AgentPaymentStatus {
   merchant_address: string | null
   /** Delegate captured with this intent; never inferred from a later agent rotation. */
   payer_address?: string | null
+  /** #2960: the party quadruple, additive alongside `payer_address` (`delegate` only). */
+  parties?: Parties
   tx_hash: string | null
   expires_at: string
   chain_id: number
@@ -445,21 +449,33 @@ export function merchantReportGraceElapsed(
   return Number.isFinite(confirmedAtMs) && now - confirmedAtMs >= graceMin * 60_000
 }
 
-/** `machine_metadata.settlement_scheme`, parsed the way `settlement-observed.ts` does. */
-function settlementSchemeOf(machineMetadata: unknown): string | null {
+/** Parse `machine_metadata` the way `settlement-observed.ts` does, once, for both keys read off it below. */
+function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown> | null {
   if (!machineMetadata) return null
-  let metadata: Record<string, unknown> | null = null
   if (typeof machineMetadata === 'string') {
     try {
-      metadata = JSON.parse(machineMetadata) as Record<string, unknown>
+      return JSON.parse(machineMetadata) as Record<string, unknown>
     } catch {
       return null
     }
-  } else {
-    metadata = machineMetadata as Record<string, unknown>
   }
-  const scheme = metadata?.settlement_scheme
+  return machineMetadata as Record<string, unknown>
+}
+
+/** `machine_metadata.settlement_scheme`, parsed the way `settlement-observed.ts` does. */
+function settlementSchemeOf(machineMetadata: unknown): string | null {
+  const scheme = parsedMachineMetadata(machineMetadata)?.settlement_scheme
   return typeof scheme === 'string' ? scheme : null
+}
+
+/**
+ * #2960: `machine_metadata.delegate_account_address`, written at authorize
+ * on both delegation-rail legs (`modules/x402/delegation-authorize.ts`).
+ * Null on rows authorized before #2960 and on the legacy rail.
+ */
+function delegateAccountAddressOf(machineMetadata: unknown): string | null {
+  const value = parsedMachineMetadata(machineMetadata)?.delegate_account_address
+  return typeof value === 'string' ? value : null
 }
 
 /**
@@ -489,6 +505,41 @@ export function isFundedX402AwaitingMerchantLeg(payment: PaymentIntentStatusRow)
     payment.confirmed_at !== null &&
     merchantReportGraceElapsed(payment.confirmed_at)
   )
+}
+
+/**
+ * #2970: true past its settlement window for a `submitted` erc7710 intent
+ * that never received verified evidence — the case `check_status_later`
+ * lied about, because nothing is watching for this settlement except a
+ * report (#2092's on-chain-verified confirm seam, `modules/mpp/evidence.ts`
+ * → `settlement-observed.ts`, runs only when the evidence endpoint is
+ * called; there is no passive success path for this row besides the
+ * sweeper's own best-effort scan). Mirrors the sweeper's own
+ * `isPastSettlementWindow` (`modules/x402/settlement-sweeper.ts`) — same
+ * anchor (`created_at`, the authorize time), same constant
+ * (`MAX_SETTLEMENT_WINDOW_SECONDS`), no clock-skew allowance added on top,
+ * because this is a UX cutover (stop promising a poll will resolve it), not
+ * the sweeper's own attribution boundary.
+ *
+ * `status === 'submitted'` alone is enough to know evidence never arrived:
+ * that same confirm seam moves the intent to `confirmed` the instant a
+ * verifiable hash is reported, so a still-`submitted` erc7710 intent has
+ * never had one. (Deliberately not naming the confirm function here by its
+ * identifier — `__tests__/erc7710-confirm-seam-census-pin.test.ts` greps
+ * production source for it and pins an exact three-file import census; a
+ * fourth textual hit would redden a pin about call sites, not comments.)
+ */
+export function isPastSettlementEvidenceWindowErc7710(payment: PaymentIntentStatusRow): boolean {
+  if (
+    payment.status !== 'submitted' ||
+    railFor(payment) !== AgentPaymentRail.X402 ||
+    settlementSchemeOf(payment.machine_metadata) !== 'erc7710'
+  ) {
+    return false
+  }
+  const createdMs = new Date(payment.created_at).getTime()
+  if (!Number.isFinite(createdMs)) return true
+  return Date.now() > createdMs + MAX_SETTLEMENT_WINDOW_SECONDS * 1000
 }
 
 /**
@@ -552,6 +603,20 @@ function intentStateFor(payment: PaymentIntentStatusRow): {
       phase: AgentPaymentPhase.FundedButUnsettled,
       nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
       message: "Haven's funding leg confirmed but no merchant response was ever recorded — the merchant has likely not been paid. Resume this payment to retry the original request; do not start a new payment for the same purchase. Report what the merchant answers, so Haven records the outcome instead of waiting out this window again.",
+    }
+  }
+  if (isPastSettlementEvidenceWindowErc7710(payment)) {
+    return {
+      phase: AgentPaymentPhase.PaymentSubmitted,
+      nextAction: AgentPaymentNextAction.AwaitingSettlementEvidence,
+      // #2972: if the agent holds the merchant's real settlement transaction
+      // hash (PAYMENT-RESPONSE.transaction, or a prior settle/complete
+      // result's settlement_tx_hash), report it with
+      // haven_report_settlement_evidence instead of waiting on the sweep —
+      // that tool posts to the SAME fail-closed on-chain verification door
+      // `modules/mpp/evidence.ts` already guards (see #2680's confirm-seam
+      // census). Otherwise poll haven_get_payment_status, unchanged.
+      message: "The settlement window passed with no verified on-chain evidence for this payment's settlement yet. If you hold the merchant's real settlement transaction hash, report it with haven_report_settlement_evidence. Otherwise, Haven's settlement sweep may still attribute it within about two minutes — poll haven_get_payment_status once more after that. If it still shows no evidence, the goods were delivered but Haven holds no verified settlement evidence for this payment; tell the user.",
     }
   }
   return paymentIntentState(payment.status)
@@ -766,34 +831,45 @@ export async function getAgentPaymentStatus(
     const rail = railFor(payment)
     const resourceUrl = payment.payment_resource_url ?? payment.x402_resource_url
     const merchantAddress = payment.merchant_address ?? payment.x402_merchant_address
-    return {
-      payment_id: payment.id,
-      kind: 'payment_intent',
-      rail,
-      status: payment.status,
-      phase: state.phase,
-      next_action: state.nextAction,
-      amount: payment.amount_human,
-      token: payment.token_symbol,
-      resource_url: resourceUrl,
-      merchant_address: merchantAddress,
-      payer_address: payment.delegate_address,
-      tx_hash: payment.tx_hash,
-      expires_at: payment.expires_at,
-      chain_id: payment.chain_id,
-      message: state.message,
-      fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
-      ...railContext({
+    return withParties(
+      {
+        payment_id: payment.id,
+        kind: 'payment_intent' as const,
         rail,
-        amountRaw: payment.amount_raw,
-        tokenAddress: payment.token_address,
-        resourceUrl,
-        merchantAddress,
-        idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
-        challengeId: payment.machine_challenge_id,
-        machineMetadata: payment.machine_metadata,
-      }),
-    }
+        status: payment.status,
+        phase: state.phase,
+        next_action: state.nextAction,
+        amount: payment.amount_human,
+        token: payment.token_symbol,
+        resource_url: resourceUrl,
+        merchant_address: merchantAddress,
+        payer_address: payment.delegate_address,
+        tx_hash: payment.tx_hash,
+        expires_at: payment.expires_at,
+        chain_id: payment.chain_id,
+        message: state.message,
+        fee: statusFee({ paymentId: payment.id, rail, amountRaw: payment.amount_raw, token: payment.token_symbol, userId: agent.user_id }),
+        ...railContext({
+          rail,
+          amountRaw: payment.amount_raw,
+          tokenAddress: payment.token_address,
+          resourceUrl,
+          merchantAddress,
+          idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
+          challengeId: payment.machine_challenge_id,
+          machineMetadata: payment.machine_metadata,
+        }),
+      },
+      {
+        account_address: payment.account_address ?? null,
+        delegate_address: payment.delegate_address,
+        // #2960: `machine_metadata.delegate_account_address`, written at
+        // authorize on both delegation-rail legs — null for rows authorized
+        // before #2960 and on the legacy rail, where no such account exists.
+        delegate_account_address: delegateAccountAddressOf(payment.machine_metadata),
+        merchant_address: merchantAddress,
+      },
+    )
   }
 
   // #2055: the approval_requests fallback that stood here is gone — the table

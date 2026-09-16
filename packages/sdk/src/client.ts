@@ -106,8 +106,8 @@ import {
 import { X402FundingLeg } from './x402-funding-leg.js'
 import { X402Erc7710 } from './x402-erc7710.js'
 import { toolError, toolX402PaymentRequired, x402ToolReceipt } from './tool-adapter.js'
-import { MerchantCompletion, parseMerchantSettlement } from './merchant-completion.js'
-import type { X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-completion.js'
+import { MerchantCompletion, isZeroSettlementTxHash, parseMerchantSettlement } from './merchant-completion.js'
+import type { EvidenceReportOutcome, X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-completion.js'
 
 const DEFAULT_POLLING_INTERVAL = 3_000
 
@@ -713,10 +713,13 @@ export class HavenClient {
       search?: string
       rail?: 'x402' | 'mpp'
       /**
-       * Filter on the entry's provenance (epic #1717): `'verified'` returns
-       * only self-submitted, domain-verified, probe-verified directory
-       * entries; `'operator'` only the operator-curated ones; `'any'` (the
-       * default) returns the merged listing.
+       * `'verified'` (epic #1717, #2978) returns entries whose endpoint Haven
+       * watched answer a live quote — `verifiedPayable === true` — from
+       * EITHER source: an operator-curated row that keeps passing its
+       * periodic 402 probe, or a self-submitted row that also passed
+       * domain-ownership proof. It is not a provenance filter; `'operator'`
+       * still filters on provenance (`source === 'operator'`) regardless of
+       * badge state, and `'any'` (the default) returns the merged listing.
        */
       verified?: 'any' | 'verified' | 'operator'
     } = {},
@@ -728,7 +731,7 @@ export class HavenClient {
     const query = params.size > 0 ? `?${params.toString()}` : ''
     const raw = await this.get<{ entries: RawCatalogEntry[] }>(`/catalog${query}`)
     let entries = raw.entries.map(mapCatalogEntry)
-    if (options.verified === 'verified') entries = entries.filter((e) => e.source === 'ingestion')
+    if (options.verified === 'verified') entries = entries.filter((e) => e.verifiedPayable === true)
     if (options.verified === 'operator') entries = entries.filter((e) => e.source === 'operator')
     return entries
   }
@@ -909,10 +912,22 @@ export class HavenClient {
     const response = await this.merchantTransport.fetch(url, initialInit)
 
     if (response.status !== 402) {
+      // #2979: best-effort JSON body, so a merchant answering with its own
+      // machine-readable refusal (e.g. `503 { error: 'merchant_not_ready' }`)
+      // is not reduced to a bare status code — `.clone()` because the caller
+      // never otherwise reads this response, but cloning before an unread
+      // body is a defensive habit, not a requirement here.
+      let body: unknown
+      try {
+        body = await response.clone().json()
+      } catch {
+        body = undefined
+      }
       // #1300: typed, so consumers key on the class instead of message text.
       throw new X402UnexpectedStatusError(
         `Expected an x402 quote response with HTTP 402, got HTTP ${response.status}.`,
         response.status || 400,
+        body,
       )
     }
 
@@ -1289,7 +1304,21 @@ export class HavenClient {
      * no-funding-leg path through both.
      */
     noFundingLeg?: boolean
-  }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string }> {
+  }): Promise<{
+    status: number
+    ok: boolean
+    body: unknown
+    settlementTxHash?: string
+    /**
+     * #2970: what the evidence report (below) learned, when one was made.
+     * `undefined` when there was no hash to report at all — no funding tx on
+     * the erc7710 branch and no (or a zero) merchant-reported settlement hash.
+     * The hosted erc7710 settle/complete gate reads this to decide whether
+     * `settled: true` is honest; the 3009 branch's `settled: true` does not
+     * need it — see `paid-mcp-completion.ts` for why.
+     */
+    evidenceOutcome?: EvidenceReportOutcome
+  }> {
     const evidenceContext = await this.merchantCompletion.resolveCompletionContext({
       paymentId: input.paymentId,
       url: input.url,
@@ -1323,6 +1352,11 @@ export class HavenClient {
     } catch {
       body = text
     }
+
+    // #2970: declared here (not inside the `else` below) so it survives to
+    // the `return` — `undefined` on the refusal branch and whenever there was
+    // no hash to report at all.
+    let evidenceOutcome: EvidenceReportOutcome | undefined
 
     if (!surfaced.ok) {
       // #1508: both evidence surfaces below require a txHash — the backend
@@ -1366,9 +1400,15 @@ export class HavenClient {
       // same call, so the backend and every consumer keep one code path. The
       // backend verifies the erc7710 hash on-chain before it confirms anything
       // (#2092), so reporting it is a claim, not an authority.
-      const evidenceTxHash = input.noFundingLeg
+      const rawEvidenceTxHash = input.noFundingLeg
         ? (settlement.settlementTxHash ?? undefined)
         : (fundingTxHash ?? undefined)
+      // #2970: a zero hash is never a real transaction (see
+      // `isZeroSettlementTxHash`) — reporting it can only ever come back
+      // refused, at the cost of a real round trip (and, on the retryable
+      // path, the SDK's own multi-second backoff). Treat it as no hash at all.
+      const evidenceTxHash =
+        rawEvidenceTxHash && !isZeroSettlementTxHash(rawEvidenceTxHash) ? rawEvidenceTxHash : undefined
       // #2117: when the merchant returned no settlement transaction there is
       // simply nothing to report, and inventing an anchor client-side is what
       // the backend's on-chain verification exists to prevent. That gap is
@@ -1377,7 +1417,7 @@ export class HavenClient {
       // this payment's own intent-unique delegation child. Do not "fix" this
       // branch by fabricating a hash.
       if (evidenceTxHash) {
-        await this.merchantCompletion.reportEvidence({
+        evidenceOutcome = await this.merchantCompletion.reportEvidence({
           paymentId: evidenceContext.paymentId,
           rail: 'x402',
           txHash: evidenceTxHash,
@@ -1399,6 +1439,7 @@ export class HavenClient {
       ok: surfaced.ok,
       body,
       settlementTxHash: settlement.settlementTxHash ?? undefined,
+      evidenceOutcome,
     }
   }
 
@@ -1418,6 +1459,23 @@ export class HavenClient {
     merchantBody?: string
   }): Promise<X402MerchantOutcomeReport> {
     return await this.merchantCompletion.reportMerchantOutcome(input)
+  }
+
+  /**
+   * #2972: report the merchant's real settlement transaction hash for an
+   * erc7710 x402 payment — the remedy for `DELIVERED_UNSETTLED` /
+   * `SETTLEMENT_PENDING` / `awaiting_settlement_evidence` when the agent
+   * holds the hash (`PAYMENT-RESPONSE.transaction`, or a prior settle/
+   * complete result's `settlement_tx_hash`) and Haven does not. See
+   * `MerchantCompletion.reportSettlementEvidence` for the fail-closed
+   * verification this posts into (`observeErc7710Settlement`) and the
+   * client-side zero-hash refusal.
+   */
+  async reportSettlementEvidence(
+    paymentId: string,
+    settlementTxHash: string,
+  ): Promise<EvidenceReportOutcome> {
+    return await this.merchantCompletion.reportSettlementEvidence(paymentId, settlementTxHash)
   }
 
   /**

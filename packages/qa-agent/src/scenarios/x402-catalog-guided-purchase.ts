@@ -481,8 +481,34 @@ export const x402CatalogGuidedPurchase: Scenario = {
         throw err
       }
 
-      if (!settle7710.settled) {
-        return fail('hosted erc7710 settle did not settle — the merchant leg never ran')
+      // #2968/#2970: the delivery half is the deterministic gate here, not the
+      // money half. `settled` now waits for Haven to VERIFY the redemption
+      // against the chain, and that verification is the backend's asynchronous
+      // job — gating on it at this instant would race it and red a run whose
+      // money really did move, which step 9's on-chain proof is there to
+      // settle. What can never race: the two fields must AGREE.
+      if (!settle7710.settled && !settle7710.delivered) {
+        return fail('hosted erc7710 settle reported neither settlement nor delivery — the merchant leg never ran')
+      }
+      if (settle7710.settled === true && !settle7710.delivered) {
+        return fail('settle reported settled:true without delivered:true — a settlement claim for goods nobody handed over')
+      }
+      if (
+        settle7710.settled !== true &&
+        settle7710.code != null &&
+        settle7710.code !== 'SETTLEMENT_PENDING' &&
+        settle7710.code !== 'DELIVERED_UNSETTLED'
+      ) {
+        return fail(
+          `settle reported an unverified settlement with unexpected code ${JSON.stringify(settle7710.code)} — ` +
+            'expected SETTLEMENT_PENDING or DELIVERED_UNSETTLED',
+        )
+      }
+      if (settle7710.settlement_tx_hash != null && /^0x0+$/i.test(settle7710.settlement_tx_hash)) {
+        return fail(
+          'settle emitted the 32-zero hash in settlement_tx_hash — the #2968 zero-hash ban regressed ' +
+            '(a sentinel shaped like a hash gets rendered like one)',
+        )
       }
       if (settle7710.settlement_scheme !== 'erc7710') {
         return fail(

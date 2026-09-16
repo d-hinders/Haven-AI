@@ -170,6 +170,70 @@ describe('payment result mappers', () => {
     expect(withOwners.approvalRequestId).toBe('ar_1')
     expect(withOwners.challengePayload).toBeUndefined()
   })
+
+  // #2998: additive alongside deprecated `txHash`/`tx_hash` — names which
+  // hash is funding and which is settlement, defaulting to null when the
+  // server omits either (older backend, or the field genuinely has no
+  // value on this row).
+  it('mapPaymentReceipt carries funding_tx_hash / settlement_tx_hash, defaulting to null when absent', () => {
+    const withoutEither = mapPaymentReceipt(rawReceipt())
+    expect(withoutEither.fundingTxHash).toBeNull()
+    expect(withoutEither.settlementTxHash).toBeNull()
+
+    const withBoth = mapPaymentReceipt(rawReceipt({
+      funding_tx_hash: '0xfunding',
+      settlement_tx_hash: '0xsettlement',
+    }))
+    expect(withBoth.fundingTxHash).toBe('0xfunding')
+    expect(withBoth.settlementTxHash).toBe('0xsettlement')
+
+    const erc7710Shape = mapPaymentReceipt(rawReceipt({
+      funding_tx_hash: null,
+      settlement_tx_hash: '0xsettlement',
+    }))
+    expect(erc7710Shape.fundingTxHash).toBeNull()
+    expect(erc7710Shape.settlementTxHash).toBe('0xsettlement')
+  })
+
+  // #2960: additive alongside `payerAddress`/`payer_address` — camelCases
+  // the wire `parties` object, absent when the server does not send it.
+  it('mapPaymentReceipt carries parties when present, undefined when absent', () => {
+    expect(mapPaymentReceipt(rawReceipt()).parties).toBeUndefined()
+
+    const withParties = mapPaymentReceipt(rawReceipt({
+      parties: {
+        treasury_account: '0xTreasury',
+        delegate: '0xDelegate',
+        delegate_account: null,
+        merchant: '0xMerchant',
+      },
+    }))
+    expect(withParties.parties).toEqual({
+      treasuryAccount: '0xTreasury',
+      delegate: '0xDelegate',
+      delegateAccount: null,
+      merchant: '0xMerchant',
+    })
+  })
+
+  it('mapPaymentStatusResult carries parties when present, undefined when absent', () => {
+    expect(mapPaymentStatusResult(paymentStatusResponse()).parties).toBeUndefined()
+
+    const withParties = mapPaymentStatusResult(paymentStatusResponse({
+      parties: {
+        treasury_account: '0xTreasury',
+        delegate: '0xDelegate',
+        delegate_account: '0xDelegateAccount',
+        merchant: '0xMerchant',
+      },
+    }))
+    expect(withParties.parties).toEqual({
+      treasuryAccount: '0xTreasury',
+      delegate: '0xDelegate',
+      delegateAccount: '0xDelegateAccount',
+      merchant: '0xMerchant',
+    })
+  })
 })
 
 describe('raw payment state mapping', () => {

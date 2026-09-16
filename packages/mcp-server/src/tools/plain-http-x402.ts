@@ -38,6 +38,14 @@
  * support per the retained set in
  * `tools/support/shared-helper-ownership.test.ts` — importing them from here
  * keeps the ownership map's single-slice declarations true.
+ *
+ * #2999 adds a seventh cross-slice import: `settlementPredictionFields`, the
+ * #2991 `expected_settlement_scheme` / `expected_funding_leg` /
+ * `expected_settleable` / `warnings` field set, now carried by ALL THREE
+ * hosted quote tools rather than the two MCP ones. `haven_quote_x402` prefetches
+ * the agent the same non-throwing way `haven_pay_x402_quote` already does and
+ * feeds it to the shared helper, so this quote can never predict a scheme its
+ * own sibling handler would select differently.
  */
 import {
   AgentPaymentFailureCode,
@@ -62,7 +70,12 @@ import {
 import { HostedToolError, normalizeError, runTool } from './support/errors.js'
 import { buildAgentGuidance } from './support/guidance.js'
 import { buildX402SigningContext, coerceJsonField } from './support/mcp-context.js'
-import { isPendingApproval, resolveResumeState, wrongTool } from './support/quote-response.js'
+import {
+  isPendingApproval,
+  resolveResumeState,
+  settlementPredictionFields,
+  wrongTool,
+} from './support/quote-response.js'
 
 /**
  * The tools this capability owns, as a tuple so the set is data rather than a
@@ -116,8 +129,31 @@ export function createPlainHttpX402Handlers(
       // was refusing rather than committing. No Content-Type is inferred —
       // the caller sends `headers` for that, exactly as locally.
       if (args.body !== undefined) init.body = args.body
+      // #2999: started BEFORE the quote fetch, same non-throwing
+      // `.then(a => a, () => undefined)` convention as haven_pay_x402_quote's
+      // own prefetch below — `undefined` means the read failed, not that the
+      // agent has no rail. This is one read-only GET per quote (the plain-HTTP
+      // quote made none before #2999); a `haven_pay_x402_quote` that follows
+      // as a separate tool call makes its own read — the SDK's in-flight
+      // dedupe (`AccountReads.agentInFlight`) only collapses reads issued
+      // within the same tick. The "exactly ONE agent fetch" pin on this file
+      // measures the pay tool alone and is unaffected.
+      const agentPromise = haven.getAgent().then(
+        (a) => a,
+        () => undefined,
+      )
       try {
         const quote: X402Quote = await haven.quoteX402(args.url, init)
+        const agent = await agentPromise
+        // #2999: the same #2991 prediction the two MCP quote tools carry,
+        // built from the identical selector via the shared support helper —
+        // never derived here, so this can never disagree with what
+        // haven_pay_x402_quote actually selects next.
+        const prediction = settlementPredictionFields(
+          quote.paymentRequired.accepts,
+          agent,
+          'haven_pay_x402_quote',
+        )
         // Return the full quote — the agent passes paymentRequired to haven_pay_x402_quote.
         // Omit the captured request snapshot (it's server-side context, not useful at the agent).
         return {
@@ -141,6 +177,7 @@ export function createPlainHttpX402Handlers(
             chain_id: quote.chainId,
             merchant_address: quote.merchantAddress,
             max_timeout_seconds: quote.maxTimeoutSeconds,
+            ...prediction,
           },
         }
       } catch (err) {

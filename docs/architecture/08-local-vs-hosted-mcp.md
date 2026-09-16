@@ -109,7 +109,7 @@ rather than from arguments (`haven_report_x402_outcome`, `haven_submit`,
 `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`,
 `haven_pay_x402_quote` — each with a refusal that NAMES the local spelling, so
 a caller holding `idempotencyKey` is told what to send instead. #2349 closed
-the list: **20 of the 22 hosted tools refuse**, and the two that do not are
+the list: **21 of the 23 hosted tools refuse**, and the two that do not are
 on a second, equally explicit list — `PERMISSIVE_INPUT_TOOLS`, beside
 `STRICT_INPUT_TOOLS` in `packages/mcp-server/src/tools/contracts.ts` (both
 have lived there since #2807 split the contracts out of `tools.ts`, which

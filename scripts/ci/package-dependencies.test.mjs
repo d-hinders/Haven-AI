@@ -15,12 +15,13 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   PACKAGE_DEPENDENCIES,
   PACKAGE_JOBS,
+  PACKAGE_DEPENDENCY_TABLE_PATH,
   PROPAGATION_RULES,
   OUTPUT_NAMES,
   dependentsOf,
@@ -29,11 +30,31 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const workflow = readFileSync(path.join(ROOT, '.github/workflows/ci.yml'), 'utf8')
 
-/** Job flag -> workspace directory. Only mcp_server differs. */
-const dirFor = (flag) => (flag === 'mcp_server' ? 'mcp-server' : flag)
+/**
+ * The RAW manifest, read directly rather than through PACKAGE_DEPENDENCIES —
+ * the classifier only re-exports the `packages` object, and `noOwnJob` is a
+ * sibling key next to it, not a package entry.
+ */
+const RAW_DEPENDENCY_MANIFEST = JSON.parse(readFileSync(PACKAGE_DEPENDENCY_TABLE_PATH, 'utf8'))
+
+/** @type {Record<string, string>} workspace directory -> reason it has no CI job */
+const NO_OWN_JOB = RAW_DEPENDENCY_MANIFEST.noOwnJob ?? {}
+
+/** Job flag -> workspace directory. mcp_server, demo_merchant and qa_agent differ. */
+const dirFor = (flag) => {
+  if (flag === 'mcp_server') return 'mcp-server'
+  if (flag === 'demo_merchant') return 'demo-merchant-mcp'
+  if (flag === 'qa_agent') return 'qa-agent'
+  return flag
+}
 
 /** Workspace directory -> job flag, for the internal deps we can route. */
-const flagFor = (dir) => (dir === 'mcp-server' ? 'mcp_server' : dir)
+const flagFor = (dir) => {
+  if (dir === 'mcp-server') return 'mcp_server'
+  if (dir === 'demo-merchant-mcp') return 'demo_merchant'
+  if (dir === 'qa-agent') return 'qa_agent'
+  return dir
+}
 
 /**
  * The @haven_ai/* packages this workspace declares, as job flags.
@@ -42,8 +63,9 @@ const flagFor = (dir) => (dir === 'mcp-server' ? 'mcp_server' : dir)
  * test, and its CI job runs its tests — a dependency that can redden the job
  * is a dependency for routing purposes, shipped or not.
  *
- * Internal packages with no job flag (core, qa-agent) are dropped: there is no
- * job to fan out to. They reach CI through the packages/* catch-all instead.
+ * Since #3005 every workspace with a `test` script has a job flag, so nothing
+ * is dropped here any more: core and qa_agent resolve from their real
+ * manifests like every other entry.
  */
 function declaredDeps(flag) {
   const manifest = JSON.parse(readFileSync(path.join(ROOT, 'packages', dirFor(flag), 'package.json'), 'utf8'))
@@ -174,12 +196,15 @@ describe('the fan-out the issue specifies', () => {
     const full = PROPAGATION_RULES.find((r) => r.when.includes('full'))
     assert.deepEqual(
       [...full.then].sort(),
-      ['backend', 'cli', 'connect', 'frontend', 'mcp', 'mcp_server', 'sdk', 'signer'],
+      ['backend', 'cli', 'connect', 'core', 'demo_merchant', 'frontend', 'mcp', 'mcp_server', 'qa_agent', 'sdk', 'signer'],
     )
   })
 
-  test('sdk fans out to backend, connect, mcp, mcp_server and signer — unchanged', () => {
-    assert.deepEqual(thenFor('sdk'), ['backend', 'connect', 'mcp', 'mcp_server', 'signer'])
+  test('sdk fans out to backend, connect, mcp, mcp_server, signer and qa_agent', () => {
+    // qa_agent joined in #3005 — the QA harness's tests import the SDK and its
+    // job runs those tests, exactly the shape that put mcp_server here in
+    // #2348.
+    assert.deepEqual(thenFor('sdk'), ['backend', 'connect', 'mcp', 'mcp_server', 'qa_agent', 'signer'])
   })
 
   test('mcp fans out to connect AND mcp_server', () => {
@@ -193,20 +218,42 @@ describe('the fan-out the issue specifies', () => {
     assert.deepEqual(thenFor('mcp'), ['connect', 'mcp_server'])
   })
 
-  test('signer fans out to connect AND mcp_server', () => {
+  test('signer fans out to connect, mcp_server AND qa_agent', () => {
     // The one deliberate routing CHANGE in #1625. mcp_server was missing:
     // packages/mcp-server/src/hosted-signer-integration.test.ts imports
     // @haven_ai/signer and mcp_server_checks runs it, so a signer change could
     // break that test with its job never running. Derived, not hand-added.
-    assert.deepEqual(thenFor('signer'), ['connect', 'mcp_server'])
+    // qa_agent joined in #3005 for the same reason — its scenario tests run
+    // the real signer in-process.
+    assert.deepEqual(thenFor('signer'), ['connect', 'mcp_server', 'qa_agent'])
     assert.ok(
       PACKAGE_DEPENDENCIES.mcp_server.dependsOn.includes('signer'),
       'the mcp_server fan-out must come from the declared dependency, not a special case',
     )
   })
 
-  test('frontend, backend and cli fan out to nothing', () => {
-    for (const pkg of ['frontend', 'backend', 'cli']) {
+  test('frontend and backend fan out to exactly their declared dependents', () => {
+    // Both are terminal consumers — nothing consumes them — but each declares
+    // @haven_ai/core (#3005), so a CORE change fans out to both. Their own
+    // changes still fan out to nothing, which is the leaf property asserted
+    // below.
+    assert.deepEqual(thenFor('frontend'), [], 'frontend still has no dependents')
+    assert.deepEqual(thenFor('backend'), [], 'backend still has no dependents')
+    assert.deepEqual(dependentsOf('core').sort(), ['backend', 'frontend'])
+  })
+
+  test('core fans out to frontend and backend; qa_agent to nothing', () => {
+    // core CONSUMES nothing (declares no @haven_ai/* dependency) but is
+    // CONSUMED BY frontend and backend, so a core change runs exactly those
+    // two suites — the replacement for the full matrix the packages/*
+    // catch-all forced before #3005. qa_agent consumes sdk and signer and is
+    // consumed by nobody, so it is a leaf.
+    assert.deepEqual(thenFor('core').sort(), ['backend', 'frontend'])
+    assert.deepEqual(thenFor('qa_agent'), [])
+  })
+
+  test('frontend, backend, cli and demo_merchant fan out to nothing', () => {
+    for (const pkg of ['frontend', 'backend', 'cli', 'demo_merchant']) {
       assert.deepEqual(thenFor(pkg), [], `${pkg} should have no dependents`)
     }
   })
@@ -271,5 +318,73 @@ describe('propagation is not duplicated in the workflow', () => {
       if (combined.size > 1) continued.push(`ci.yml:${here.line}-${next.line} names ${[...combined].join(' + ')}`)
     }
     assert.deepEqual(continued, [], 'a multi-line boolean re-states fan-out across lines')
+  })
+})
+
+// Found by #2996: packages/demo-merchant-mcp had a `test` script, 142 tests,
+// and NO entry anywhere — not in this table, not in ci.yml, not in the change
+// classifier. Every check above this line only validates a table entry AGAINST
+// itself or against ci.yml; none of them notice a workspace that is simply
+// absent from both. This describe block reads the real packages/ directory
+// and closes that blind spot directly.
+describe('every workspace with a test script has a CI job', () => {
+  const PACKAGES_DIR = path.join(ROOT, 'packages')
+
+  /** Workspace directories that declare a `test` script in package.json. */
+  function workspacesWithTestScript() {
+    return readdirSync(PACKAGES_DIR, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((dir) => existsSync(path.join(PACKAGES_DIR, dir, 'package.json')))
+      .filter((dir) => {
+        const manifest = JSON.parse(readFileSync(path.join(PACKAGES_DIR, dir, 'package.json'), 'utf8'))
+        return Boolean(manifest.scripts && manifest.scripts.test)
+      })
+  }
+
+  test('every such workspace has a table entry or a recorded exemption', () => {
+    const missing = workspacesWithTestScript()
+      .map((dir) => ({ dir, flag: flagFor(dir) }))
+      .filter(({ dir, flag }) => !PACKAGE_JOBS.includes(flag) && !(dir in NO_OWN_JOB))
+      .map(({ dir }) => dir)
+
+    assert.deepEqual(
+      missing,
+      [],
+      'these workspaces declare a `test` script but have no CI job (no entry in ' +
+        '.github/package-dependencies.json\'s `packages`, and no `noOwnJob` exemption): ' +
+        `${missing.join(', ')}. Either add a CI job for it (see #2996 for the ` +
+        'demo_merchant precedent) or record why it is deliberately unrun in `noOwnJob`.',
+    )
+  })
+
+  test('every `noOwnJob` exemption is a real workspace with a real test script', () => {
+    // The other direction: an exemption for a package that no longer exists,
+    // or that has since gained a job, is dead weight that hides a real gap
+    // the next time this check should have fired.
+    const withTests = new Set(workspacesWithTestScript())
+    for (const dir of Object.keys(NO_OWN_JOB)) {
+      assert.ok(
+        existsSync(path.join(PACKAGES_DIR, dir)),
+        `noOwnJob names "${dir}", which does not exist under packages/`,
+      )
+      assert.ok(
+        withTests.has(dir),
+        `noOwnJob names "${dir}", which has no \`test\` script — the exemption is stale`,
+      )
+      assert.ok(
+        !PACKAGE_JOBS.includes(flagFor(dir)),
+        `noOwnJob names "${dir}", which now HAS a CI job — remove the stale exemption`,
+      )
+    }
+  })
+
+  test('every noOwnJob exemption has a substantive reason', () => {
+    for (const [dir, reason] of Object.entries(NO_OWN_JOB)) {
+      assert.ok(
+        typeof reason === 'string' && reason.length >= 20,
+        `noOwnJob["${dir}"] needs a real reason, got: ${JSON.stringify(reason)}`,
+      )
+    }
   })
 })

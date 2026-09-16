@@ -455,6 +455,10 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.code).toBe(AgentPaymentFailureCode.PriceExceedsMax)
     expect(payload.message).toContain('1500000')
     expect(payload.message).toContain('1000000')
+    // #2975: the refusal is machine-readable, not prose-only — the agent must
+    // stop and confirm the higher amount, then re-quote before retrying.
+    expect(payload.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(payload.retry_with_new_quote).toBe(true)
     // The MCP lifecycle reads the public delegate address before quoting, but
     // the cap guard still fires before any funding intent is constructed.
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
@@ -897,6 +901,35 @@ describe('haven_prepare_catalog_purchase', () => {
       })
     })
 
+    // #3042 (scan B2): the catalog branch dropped the key too — live on dev,
+    // `haven_prepare_catalog_purchase` twice with the same explicit key gave
+    // `6866bc97…` and `9835d550…`, both pending_signature. See the
+    // haven_pay_mcp_tool twin of this test for the mechanism.
+    it('sends the caller idempotency_key on the erc7710 authorize (#3042)', async () => {
+      stubFetch({
+        'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': erc7710Header } },
+        'POST /x402': { status: 201, body: CHILD },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000', 'delegation') },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_1',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-7710-key-1',
+        }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(xBody().idempotencyKey).toBe('catalog-7710-key-1')
+    })
+
+    it('sends NO idempotencyKey on the erc7710 authorize when the caller gave none (#3042 review)', async () => {
+      const res = await prepare(erc7710Header, DELEGATION_AGENT_RESPONSE, true)
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(xBody()).not.toHaveProperty('idempotencyKey')
+    })
+
     it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
       const res = await prepare(erc7710Header, AGENT_RESPONSE)
       expect(res.data.settlement_scheme).toBeUndefined()
@@ -1321,7 +1354,10 @@ describe('haven_discover_tools verified directory (#1716)', () => {
         price_atomic: '10000',
         asset: 'USDC',
         network: 'eip155:8453',
-        status: 'active',
+        // #2978: an active operator row with verified_at set now carries the
+        // badge, so this fixture models the shape that stays UNbadged — a
+        // degraded operator row — rather than one the backend can no longer emit.
+        status: 'degraded',
         verified_at: '2026-08-01T00:00:00.000Z',
         source: 'operator',
         domain_verified: false,
@@ -1358,6 +1394,30 @@ describe('haven_discover_tools verified directory (#1716)', () => {
       await handlers().haven_discover_tools({ verified: 'operator' }),
     )
     expect(operator.data.map((e) => e.id)).toEqual(['cat_cur_1'])
+  })
+
+  it('verified=verified returns a probe-verified operator entry at the hosted boundary (#2978)', async () => {
+    const probedOperator = {
+      ...(directoryFixture.entries[1] as Record<string, unknown>),
+      id: 'cat_cur_probed',
+      status: 'active',
+      verified_payable: true,
+    }
+    stubFetch({
+      'GET /catalog': { status: 200, body: { entries: [...directoryFixture.entries, probedOperator] } },
+    })
+
+    const verified = ok<Array<Record<string, unknown>>>(
+      await handlers().haven_discover_tools({ verified: 'verified' }),
+    )
+    // The badge decides, not provenance: the probed operator row is in, the
+    // degraded one is out.
+    expect(verified.data.map((e) => e.id).sort()).toEqual(['cat_cur_probed', 'cat_dir_1'])
+    expect(verified.data.find((e) => e.id === 'cat_cur_probed')).toMatchObject({
+      source: 'operator',
+      domain_verified: false,
+      verified_payable: true,
+    })
   })
 })
 
@@ -1535,6 +1595,51 @@ describe('#2051 — cap binds the authorized option', () => {
       expect(res.data.settlement_scheme).toBe('erc7710')
       expect(x402Body()?.amount).toBe('500000')
       expect(x402Body()?.settlementScheme).toBe('erc7710')
+    })
+
+    /**
+     * #3042 (scan B2, measured live on dev 2026-09-16): four prepares, two
+     * of them with the SAME explicit key, minted four erc7710 settlement
+     * children — this branch never passed `idempotency_key` to the authorize,
+     * while its 3009 sibling always did and the backend has deduped on the
+     * key all along (`findX402IntentByIdempotencyKey` before the shape
+     * branch). On this scheme the signed child IS spend authority, so a
+     * retried prepare + sign is a second payment. Pinned per branch: dropping
+     * the key from this branch reddens THIS test and leaves the catalog one
+     * (below) green, so the failure names the branch.
+     */
+    it('sends the caller idempotency_key on the erc7710 authorize, so a retry replays instead of minting a second child (#3042)', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(merchant('3000000', '500000'))) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 201, body: CHILD },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '1',
+          idempotency_key: 'x402:pay-mcp-7710:k1',
+        }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.idempotencyKey).toBe('x402:pay-mcp-7710:k1')
+    })
+
+    // Review of #3043: `quote.idempotencyKey` is NEVER null on the MCP quote
+    // path (the SDK derives a 5-minute-bucket key), so the 3009 branches'
+    // `?? quote.idempotencyKey` would have switched bucket-dedupe on for
+    // every unkeyed erc7710 call. Pinned: no key in → no key on the wire.
+    it('sends NO idempotencyKey on the erc7710 authorize when the caller gave none (#3042 review)', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }, true),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()).not.toHaveProperty('idempotencyKey')
     })
 
     it('reports amount_atomic as the amount ACTUALLY authorized on the erc7710 branch', async () => {
@@ -2041,6 +2146,401 @@ describe('#2054 — erc7710-only merchants', () => {
       expect(res.success).toBe(false)
       expect((res as { message?: string }).message).toContain('No compatible payment option')
     })
+  })
+})
+
+// #2979: what the hosted tools return when a merchant answers its `/mcp`
+// `tools/call` probe with its OWN machine-readable "cannot settle right now"
+// refusal (demo-merchant-mcp's settlement-readiness gate: `503
+// { error: 'merchant_not_ready', reason_code, settlements_remaining,
+// fail_floor, retry_after_s }`) instead of a 402 challenge.
+//
+// BEFORE this slice, both `haven_quote_mcp_tool` and
+// `haven_prepare_catalog_purchase` treated ANY non-402 status — including
+// this one — as a "wrong endpoint" and ran the #1271 same-origin discovery
+// fallback, which (rightly, since the URL WAS correct) also found nothing,
+// and surfaced `code: 'API_ERROR'` with no `next_action` and a message
+// blaming a failed discovery probe — discarding the merchant's own, honest
+// reason entirely. That misleading shape is what these tests replace.
+describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint miss (#2979)', () => {
+  const MERCHANT_NOT_READY_BODY = {
+    error: 'merchant_not_ready',
+    reason_code: 'settlement_wallet_out_of_gas',
+    settlements_remaining: 0,
+    fail_floor: 12,
+    retry_after_s: 60,
+  }
+
+  describe('haven_quote_mcp_tool', () => {
+    async function quoteAgainstNotReadyMerchant() {
+      stubFetch({
+        'POST /mcp': {
+          status: 503,
+          body: MERCHANT_NOT_READY_BODY,
+          responseHeaders: { 'Retry-After': '60' },
+        },
+      })
+      return handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      })
+    }
+
+    it('refuses with MERCHANT_NOT_READY, a StopAndTellUser next_action, and the merchant reason surfaced', async () => {
+      const res = await quoteAgainstNotReadyMerchant()
+
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe(AgentPaymentFailureCode.MerchantNotReady)
+      expect((res as { code?: string }).code).not.toBe('UNKNOWN_ERROR')
+      expect((res as { code?: string }).code).not.toBe('API_ERROR')
+      expect((res as { next_action?: string }).next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+      const message = (res as { message?: string }).message ?? ''
+      expect(message).toContain('settlement_wallet_out_of_gas')
+      expect(message).toContain('60')
+      // The old, misleading text this replaces must be gone.
+      expect(message).not.toContain('discovery document')
+      expect((res as { retry_with_new_quote?: boolean }).retry_with_new_quote).toBe(true)
+    })
+
+    it('a bare 503 without the merchant_not_ready body is NOT reported as MERCHANT_NOT_READY (review of #2982)', async () => {
+      // A load balancer / outage page: the merchant said nothing about its
+      // capacity, so the mapping must not invent a capacity refusal — the
+      // request keeps going through the #1271 discovery path as before.
+      stubFetch({
+        'POST /mcp': { status: 503, body: { error: 'upstream unavailable' } },
+      })
+      const res = await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'buy_vpn',
+        arguments: { plan: 'basic' },
+      })
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).not.toBe(AgentPaymentFailureCode.MerchantNotReady)
+      expect((res as { message?: string }).message ?? '').not.toContain('cannot settle a payment right now')
+    })
+
+    it('never spends the bounded #1271 discovery retry on an honest 503', async () => {
+      await quoteAgainstNotReadyMerchant()
+      // The MCP session lifecycle (initialize, notifications/initialized,
+      // tools/call) all land on the same `/mcp` path for the ONE probe
+      // attempt; what matters is that no #1271 discovery document fetch ran
+      // and no SECOND round of the lifecycle was started against a
+      // discovered endpoint.
+      expect(recordedCalls().some((call) => new URL(call.url).pathname.includes('well-known'))).toBe(false)
+      expect(recordedCalls().filter((call) => call.body?.method === 'tools/call')).toHaveLength(1)
+    })
+  })
+
+  describe('haven_prepare_catalog_purchase', () => {
+    const CATALOG_ENTRY = {
+      id: 'cat_not_ready',
+      name: 'NordShield VPN Basic',
+      description: 'VPN subscription',
+      category: 'vpn',
+      resource_url: 'http://merchant.test/mcp',
+      rail: 'x402',
+      protocol: 'mcp',
+      tool_name: 'buy_vpn',
+      tool_arguments: { plan: 'basic' },
+      price_display: '$0.001 USDC',
+      price_atomic: '1000',
+      asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      network: 'eip155:8453',
+      status: 'active',
+      verified_at: '2026-06-16T08:50:39.772Z',
+    }
+
+    it('surfaces the same MERCHANT_NOT_READY refusal, not a wrong-endpoint miss', async () => {
+      stubFetch({
+        'GET /catalog/cat_not_ready': { status: 200, body: CATALOG_ENTRY },
+        'POST /mcp': {
+          status: 503,
+          body: MERCHANT_NOT_READY_BODY,
+          responseHeaders: { 'Retry-After': '60' },
+        },
+        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'GET /machine-payments/allowances': {
+          status: 200,
+          body: {
+            agent_id: 'agt_1',
+            safe_address: '0xSafe',
+            delegate_address: '0xDelegate',
+            chain_id: 8453,
+            allowances: [],
+          },
+        },
+      })
+
+      const res = await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_not_ready',
+        max_amount_human: '1',
+      })
+
+      expect(res.success).toBe(false)
+      expect((res as { code?: string }).code).toBe(AgentPaymentFailureCode.MerchantNotReady)
+      expect((res as { next_action?: string }).next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+      expect((res as { message?: string }).message ?? '').toContain('settlement_wallet_out_of_gas')
+    })
+  })
+})
+
+// ── #2991 — the quote's expected_settlement_scheme/expected_funding_leg
+// predict the SAME scheme haven_prepare_catalog_purchase / haven_pay_mcp_tool
+// will actually select, computed by the IDENTICAL selectX402SettlementScheme
+// call those tools run — so a delegation-rail agent quoted
+// accepted_scheme: 'standard' at a merchant advertising both entries (the
+// demo merchant's shape) is told up front that prepare/pay will still PREFER
+// erc7710, rather than being left to infer a settlement shape from a field
+// that only ever describes the merchant's offer.
+describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const LEGACY_AGENT = { ...AGENT_RESPONSE, execution_rail: 'legacy' }
+  const FACILITATORS = ['0x4444444444444444444444444444444444444444']
+
+  /** Both a standard AND an erc7710-tagged entry — the demo-merchant shape. */
+  function bothEntriesMerchant() {
+    const base = PAYMENT_REQUIRED.accepts[0]
+    return {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        { ...base },
+        { ...base, extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: FACILITATORS } },
+      ],
+    }
+  }
+
+  const ERC7710_ONLY_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: FACILITATORS },
+      },
+    ],
+  }
+
+  const CATALOG_ENTRY = {
+    id: 'cat_2991',
+    name: 'CloudNest 50GB',
+    description: 'Cloud storage tier',
+    category: 'compute',
+    resource_url: 'http://merchant.test/mcp',
+    rail: 'x402',
+    protocol: 'mcp',
+    tool_name: 'create_text',
+    tool_arguments: { prompt: 'Hello' },
+    price_display: '$1.50 USDC',
+    price_atomic: '1500000',
+    asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+    network: 'eip155:8453',
+    status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+
+  function allowances(remaining: string) {
+    return {
+      agent_id: 'agt_1',
+      safe_address: '0xSafe',
+      delegate_address: '0xDelegate',
+      chain_id: 8453,
+      allowances: [
+        {
+          id: 'delegation-1',
+          token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+          token_symbol: 'USDC',
+          allowance_amount: '5.000000',
+          reset_period_min: 1440,
+          onchain: { amount: '5000000', spent: '0', remaining, is_active: true },
+        },
+      ],
+    }
+  }
+
+  it('both entries + delegation rail: predicts erc7710 with no funding leg, even though accepted_scheme is "standard"', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+    })
+    const res = ok<{
+      accepted_scheme: string
+      expected_settlement_scheme: string | null
+      expected_funding_leg: boolean | null
+    }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(res.data.accepted_scheme).toBe('standard')
+    expect(res.data.expected_settlement_scheme).toBe('erc7710')
+    expect(res.data.expected_funding_leg).toBe(false)
+  })
+
+  it('same merchant + agent on the legacy/3009 rail: predicts eip3009 WITH a funding leg — and NOT settleable (Haven refuses retired rails with 410)', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: LEGACY_AGENT },
+    })
+    const res = ok<{ expected_settlement_scheme: string | null; expected_funding_leg: boolean | null; expected_settleable?: boolean }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(res.data.expected_settlement_scheme).toBe('eip3009')
+    expect(res.data.expected_funding_leg).toBe(true)
+    // The selector's answer — but Haven's x402 entry points 410 every retired
+    // rail, so the purchase is not settleable for this account.
+    expect(res.data.expected_settleable).toBe(false)
+  })
+
+  // #2993 review: the catalog quote — the tool B12 was filed against — carries
+  // the same prediction; severing `agent` on that site must go red here.
+  it('haven_quote_catalog_purchase carries the same prediction as the generic quote', async () => {
+    stubFetch({
+      'GET /catalog/cat_1': {
+        status: 200,
+        body: {
+          id: 'cat_1', name: 'Demo VPN', description: 'd', category: 'vpn',
+          resource_url: 'http://merchant.test/mcp', rail: 'x402', protocol: 'mcp',
+          tool_name: 'create_text', tool_arguments: { prompt: 'Hello' },
+          price_display: '$1.50 USDC', price_atomic: '1500000',
+          asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', network: 'eip155:8453',
+          status: 'active', verified_at: '2026-06-16T08:50:39.772Z',
+        },
+      },
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+    })
+    const res = ok<{
+      accepted_scheme: string
+      expected_settlement_scheme: string | null
+      expected_funding_leg: boolean | null
+      expected_settleable?: boolean
+      warnings?: unknown[]
+    }>(await handlers().haven_quote_catalog_purchase({ catalog_id: 'cat_1' }))
+    expect(res.data.accepted_scheme).toBe('standard')
+    expect(res.data.expected_settlement_scheme).toBe('erc7710')
+    expect(res.data.expected_funding_leg).toBe(false)
+    expect(res.data.expected_settleable).toBe(true)
+    expect(res.data.warnings).toBeUndefined()
+  })
+
+  it('an erc7710-only merchant predicts erc7710 regardless of the account rail — and says whether THIS agent can settle it', async () => {
+    // Legacy rail at an erc7710-only merchant: prepare will refuse with
+    // ERC7710_RAIL_REQUIRED, so the prediction names the scheme the merchant
+    // demands and `expected_settleable: false` (review of #2991) — a bare
+    // 'erc7710' would read as "prepare will settle it".
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(ERC7710_ONLY_PR)) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: LEGACY_AGENT },
+    })
+    const legacy = ok<{ expected_settlement_scheme: string | null; expected_funding_leg: boolean | null; expected_settleable?: boolean }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(legacy.data.expected_settlement_scheme).toBe('erc7710')
+    expect(legacy.data.expected_funding_leg).toBe(false)
+    expect(legacy.data.expected_settleable).toBe(false)
+
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(ERC7710_ONLY_PR)) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+    })
+    const delegation = ok<{ expected_settlement_scheme: string | null; expected_settleable?: boolean }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(delegation.data.expected_settlement_scheme).toBe('erc7710')
+    expect(delegation.data.expected_settleable).toBe(true)
+  })
+
+  it('a FAILED agent read yields expected_settlement_scheme: null with a warning, never a guess', async () => {
+    stubFetch({
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 500, body: {} },
+    })
+    const res = ok<{
+      expected_settlement_scheme: string | null
+      warnings?: Array<{ code: string }>
+    }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(res.data.expected_settlement_scheme).toBeNull()
+    expect(res.data.warnings?.some((w) => w.code === 'X402_SCHEME_UNKNOWN')).toBe(true)
+  })
+
+  it('a prepare run right after the quote selects the SAME scheme the quote predicted (agreement pin)', async () => {
+    stubFetch({
+      'GET /catalog/cat_2991': { status: 200, body: CATALOG_ENTRY },
+      'POST /mcp': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+      'GET /machine-payments/allowances': { status: 200, body: allowances('5000000000') },
+      'POST /x402': {
+        status: 201,
+        body: {
+          payment_id: 'pay_2991',
+          status: 'pending_signature',
+          sign_data: {
+            hash: '0x' + '33'.repeat(32),
+            signature_scheme: 'eip712_delegation',
+            typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+          },
+        },
+      },
+    })
+
+    const quote = ok<{ expected_settlement_scheme: string | null }>(
+      await handlers().haven_quote_mcp_tool({
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+      }),
+    )
+    expect(quote.data.expected_settlement_scheme).toBe('erc7710')
+
+    const prepared = ok<{ settlement_scheme: string }>(
+      await handlers().haven_prepare_catalog_purchase({
+        catalog_id: 'cat_2991',
+        max_amount_human: '3',
+      }),
+    )
+    // The point of this suite: quote and prepare must never disagree.
+    expect(prepared.data.settlement_scheme).toBe(quote.data.expected_settlement_scheme)
   })
 })
 

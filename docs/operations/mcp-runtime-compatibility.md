@@ -14,7 +14,7 @@ covers:
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/connect/src/installed-clients.test.ts
-last-verified: "2026-09-14"
+last-verified: "2026-09-16"
 ---
 
 # MCP Runtime Compatibility
@@ -22,6 +22,101 @@ last-verified: "2026-09-14"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Recent re-verification (#3000):** the hosted server's
+> `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` refusal (the merchant-timeout branch of
+> `deliverMerchantPayment` in `src/tools/paid-mcp-completion.ts`) now branches
+> on the settlement scheme the way #2983 made `MERCHANT_REJECTED_AFTER_FUNDING`
+> do: on erc7710 (no funding leg) it drops every sweep mention and points at
+> `haven_get_payment_status` (`next_action: check_status_later`); eip3009 keeps
+> verify-then-sweep. The code-keyed texts (`skill-content.ts`, its frontend
+> mirror, `AgentPaymentFailureCodeDescriptions`, the SDK README) branch on
+> scheme too. No tool added, renamed or re-shaped; the local runtime is not on
+> this path. Nothing else in this document was re-verified in this pass.
+>
+> **Recent re-verification (#3001):** the signer's `fetchX402SignContext`
+> (`packages/signer/src/sign-context.ts`, the authenticated
+> `GET /x402/:id/sign-context` read behind the `{ payment_id }` form of
+> `haven_sign` / `haven_sign_x402`) now throws a typed `HavenSignContextError`
+> at each of its four throw sites — timeout, unreachable host, a non-ok
+> backend response (404/410/…), a malformed body — instead of the generic
+> `HavenSigningError` #2985 described below. `normalizeError` in
+> `packages/signer/src/tools.ts` serialises it with `code`
+> (`SIGN_CONTEXT_TIMEOUT` / `SIGN_CONTEXT_UNREACHABLE` /
+> `SIGN_CONTEXT_REFUSED` / `SIGN_CONTEXT_MALFORMED`) and `next_action`, routed
+> per refusal class: transport failures and unreadable bodies carry
+> `fallback: 'typed_data_b64'` + `stop_and_tell_user`; a backend REFUSAL
+> carries `http_status` + `backend_error_code` and no fallback, with 410
+> `expired` → `payment_window_expired` + `retry_with_new_quote` (the signer's
+> existing `PAYMENT_WINDOW_EXPIRED` routing) and the rest `stop_and_tell_user`
+> — the same shape `HavenUnsupportedSignerVersionError` already carried, so a
+> caller can route on `code` instead of parsing `message`.
+> These codes are signer-local, never part of `@haven_ai/sdk`'s
+> `AgentPaymentFailureCode` taxonomy, and never reach the backend's
+> REST/OpenAPI surface. `message` text and every other refusal in this
+> document are unchanged; `instanceof HavenSigningError` still holds for the
+> new class. Nothing else in this document was re-verified in this pass.
+>
+> **Recent re-verification (#2983):** the local runtime (`packages/mcp/src/tools.ts`,
+> `haven_pay_mcp_tool`) now mirrors the hosted mapping below — a merchant
+> `503 { error: 'merchant_not_ready', … }` refusal on the quote path is
+> reported as `MERCHANT_NOT_READY` (on the local envelope the field is spelled
+> `nextAction: stop_and_tell_user` — its failure shape is camelCase, unlike
+> the hosted `next_action`; `retry_with_new_quote: true`; the merchant's `reason_code` / `retry_after_s`
+> in the message) BEFORE the #1301 same-origin discovery fallback, on both the
+> original probe and a retry against a discovered endpoint. A bare 503 (no
+> matching JSON body) still falls through to today's discovery-miss path
+> unchanged. The two runtimes are at parity on this refusal now; no tool
+> added, renamed or re-shaped, and the wire code is imported from
+> `@haven_ai/sdk`'s `AgentPaymentFailureCode`, never redefined locally.
+> Separately, the hosted paid-retry refusal (`MERCHANT_REJECTED_AFTER_FUNDING`,
+> `deliverMerchantPayment` in `packages/mcp-server/src/tools/paid-mcp-completion.ts`)
+> is now scheme-aware: on erc7710 (no funding leg — the signature IS the
+> settlement child) the refusal no longer carries `sweep_stranded_funds`
+> guidance or a stranded-funds claim, since nothing moved; it says the
+> merchant refused delivery, no settlement ran, and the budget is intact, and
+> surfaces the merchant's `reason_code` / `retry_after_s` when its body is
+> `merchant_not_ready`. The eip3009 branch is unchanged — the delegate wallet
+> genuinely may hold stranded funds there, and the sweep guidance stays.
+> Nothing else in this document was re-verified in this pass.
+>
+> **Recent re-verification (#2985):** the signer's one network call —
+> `fetchX402SignContext` (`packages/signer/src/sign-context.ts`, the
+> authenticated `GET /x402/:id/sign-context` read behind the `{ payment_id }`
+> form of `haven_sign` / `haven_sign_x402`) — now carries
+> `AbortSignal.timeout(SIGN_CONTEXT_TIMEOUT_MS = 15_000)`; a timeout surfaces
+> as the same `HavenSigningError` class as an unreachable host, naming the
+> timeout and the `typed_data_b64` fallback. No tool, argument, version
+> field, consent hash or signing logic changes; the local runtime and the
+> hosted server are not on this path. Nothing else in this document was
+> re-verified in this pass.
+>
+> **Recent re-verification (#2979):** the hosted server's shared MCP quote
+> probe (`src/tools/support/mcp-context.ts`, `quoteMcpToolCall`) now
+> recognises a merchant's own `503 { error: 'merchant_not_ready', … }`
+> refusal and reports it as the additive failure code `MERCHANT_NOT_READY`
+> (`next_action: stop_and_tell_user`, `retry_with_new_quote: true`, the
+> merchant's `reason_code` / `retry_after_s` in the message) BEFORE the #1271
+> same-origin discovery fallback, which used to report any non-402 status
+> as `API_ERROR` "no discovery document". The SDK's
+> `X402UnexpectedStatusError` now carries the merchant's JSON body. No tool
+> added, renamed or re-shaped; strict-input list, consent hash and
+> version-skew contract untouched. At the time of this pass the local runtime
+> (`packages/mcp`) was NOT on this path — since corrected to parity, see the
+> #2983 re-verification above. Nothing else in this document was re-verified
+> in this pass.
+>
+> **Recent re-verification (#2975):** the hosted server's two cap refusals
+> that still bypassed the guidance envelope — `PRICE_EXCEEDS_MAX` and
+> `INVALID_MAX_AMOUNT` in `src/tools/support/cap-price.ts` — now go through
+> `HostedToolError` like every other refusal in that module, so the wire
+> failure carries `next_action: stop_and_tell_user` (and, for
+> `PRICE_EXCEEDS_MAX`, `retry_with_new_quote: true`). Codes, messages, status
+> and the point of refusal (before any funding intent) are unchanged; no tool
+> added, renamed or re-shaped, so tool identity, the strict-input list, the
+> consent hash and the version-skew contract are untouched. The local
+> runtime (`packages/mcp`) has no cap contract at all — this is hosted-only.
+> Nothing else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#2908, naming epic #2906 phase 1):** the local
 > runtime's readers accept both the Safe-vocabulary and the account-vocabulary
@@ -155,6 +250,78 @@ last-verified: "2026-09-14"
 > strict-input, schemas and descriptions still come from the #2807 contracts
 > module, and the #2282 fail-closed ordering (merchant-call context resolved
 > BEFORE any funding relay, on both schemes) moved with the handlers verbatim.
+>
+> **Recent re-verification (#2970):** "settled means verified" — the erc7710
+> branch of `haven_settle_mcp_tool` (`paid-mcp-completion.ts`) now reports
+> `settled: true` only once the backend has confirmed the merchant's reported
+> settlement hash on-chain (reusing the SDK's existing evidence report,
+> `HavenClient.completeX402MerchantCall` → `MerchantCompletion.reportEvidence`),
+> and otherwise returns `code: 'DELIVERED_UNSETTLED'` or
+> `code: 'SETTLEMENT_PENDING'` with `next_action: check_status_later`.
+> `haven_complete_mcp_tool` has no erc7710 branch of its own: it always takes
+> the funding-leg path, and `deliverMerchantPayment`'s unconditional
+> funding-leg status read 409s on a `submitted` erc7710 intent before any
+> merchant call is made — pre-existing, unchanged here. This is an ADDITIVE
+> response-shape change on `haven_settle_mcp_tool`, same schemas, same strict-input policy, same
+> #2282 fail-closed ordering — nothing here changes tool identity, the local
+> signer contract, or version skew. `haven_get_payment_status` gains a new
+> additive `next_action` value, `awaiting_settlement_evidence`, for a
+> `submitted` erc7710 intent whose settlement window has passed with no
+> verified evidence — the local runtime forwards it unchanged, same as every
+> other `next_action` value.
+>
+> **Recent re-verification (#2972):** a new HOSTED-only tool,
+> `haven_report_settlement_evidence { payment_id, settlement_tx_hash }`, is
+> the remedy #2970's guidance could not name — an agent holding the
+> merchant's real erc7710 settlement transaction hash (from
+> `PAYMENT-RESPONSE.transaction`, or a prior settle/complete result's
+> `settlement_tx_hash`) can now hand it to Haven directly instead of only
+> waiting on the settlement sweep or the 3009-shaped `haven_report_x402_outcome`
+> (which takes no hash and refuses a non-`confirmed` intent). It reuses the
+> SAME backend seam (`POST /machine-payments/evidence` →
+> `observeErc7710Settlement`, fail-closed, #2092) and reports the same three
+> outcomes as the #2970 settle/complete gate: `settled: true` only once Haven
+> verified the hash on-chain, else `code: 'DELIVERED_UNSETTLED'` or
+> `code: 'SETTLEMENT_PENDING'`. Strict input (23rd hosted tool, in
+> `STRICT_INPUT_TOOLS`), agent-scoped (a foreign `payment_id` 404s and is
+> classified `DELIVERED_UNSETTLED`, never a write), a zero settlement hash is
+> refused client-side before any network call
+> (`HavenClient.reportSettlementEvidence` /
+> `MerchantCompletion.reportSettlementEvidence`). No local-runtime twin: this
+> is a hosted-only tool, so the version-skew contract, the consent hash, and
+> the local signer surface are all unchanged. `haven_get_payment_status`'s
+> `awaiting_settlement_evidence` message names this tool as the remedy when
+> the agent holds a hash; on the #2970 settle gate, `SETTLEMENT_PENDING` (the
+> agent demonstrably holds a non-zero hash — it is echoed in the same
+> response) points `next_tool` / `next_arguments` at this tool with that
+> hash, while `DELIVERED_UNSETTLED` keeps `haven_get_payment_status` as
+> `next_tool` and names this tool in prose for a hash the agent may still
+> obtain. On a refusal the tool reads the payment's status for its summary
+> rather than asserting one (`unknown` when the read itself is refused).
+>
+> **Recent re-verification (#2968):** the response vocabulary is completed at
+> the agent-facing surface, additively. `deliverMerchantPayment` now collapses
+> a zero/placeholder `settlementTxHash` (the demo merchant's `ZERO_TX_HASH`
+> "delivered, not settled" marker, recognised by the SDK's
+> `isZeroSettlementTxHash`) to `null` at the response boundary on BOTH
+> schemes — a sentinel shaped like a hash is never handed to an agent as one,
+> and `null` means "no transaction known". The erc7710 settled arm also emits
+> `delivered: true` (the delivery half of the vocabulary rides on every arm,
+> so `settled` and `delivered` cannot disagree in either direction), and an
+> unconfirmed erc7710 settlement additionally carries a machine-readable
+> `SETTLEMENT_UNCONFIRMED` warning — new additive
+> `AgentPaymentWarningCode.SettlementUnconfirmed` in `@haven_ai/sdk` types —
+> whose message carries the intent's `expires_at`; the summary gains an
+> additive `expires_at` on the same arm. Tool-contract wording on
+> `haven_settle_mcp_tool` and the hosted `instructions` state the rule
+> (settled = on-chain verified, never merchant 2xx; null hash rule), and the
+> hosted instructions' post-funding sweep line is now scheme-aware to match
+> #2983's erc7710 refusal guidance. Same tools, same schemas, same strict-
+> input policy, same fail-closed ordering; no route, migration, or signer
+> change, and the #2970 gate decides settlement exactly as before — these
+> changes only narrow what the response claims. Regression tests are
+> mutation-proven (removing the classify gate or the zero-hash nulling
+> re-fails them).
 
 Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
 Codex CLI, and Claude Code. The connector must not rely on `npx` at agent
@@ -166,12 +333,22 @@ surfaces, alongside the existing `category` and `rail` filters. `category`
 matching is case-insensitive after trim, `search` matches catalog `name`,
 `description`, or `category`, and omitting the new field preserves the older
 request shape exactly. Since #1716 both surfaces also accept the same optional
-`verified` (`any` | `verified` | `operator`) provenance filter and return the
-`source` / `domain_verified` / `verified_payable` badge fields on each entry —
-added to BOTH surfaces together, so the skew-flat claim holds unchanged. The
-result is still read-only discovery metadata: catalog prices are indicative
-hints, never payment authority, and the badges mean domain-controlled and
-verified-payable only.
+`verified` filter (`any` | `verified` | `operator`) and return the `source` /
+`domain_verified` / `verified_payable` badge fields on each entry — added to
+BOTH surfaces together, so the skew-flat claim holds unchanged. Since #2978,
+`verified` is not a pure provenance filter: `verified=verified` returns any
+entry, operator-curated or self-submitted, whose endpoint Haven watched
+answer a live quote probe (`verified_payable === true`); `verified=operator`
+still filters on provenance alone. The result is still read-only discovery
+metadata: catalog prices are indicative hints, never payment authority.
+`verified_payable` means the endpoint answered a live probe; `domain_verified`
+is the separate, stronger claim that ownership of the domain was proven —
+operator rows can carry the former without the latter. Version skew, stated:
+the filter runs in `@haven_ai/sdk`, so the hosted server (deployed from
+`dev`) applies the badge semantics as soon as #2978 lands, while a published
+local runtime keeps the older provenance semantics (`source === 'ingestion'`)
+until the next release bump republishes the sdk pin — the surface is
+skew-flat, the meaning of `verified=verified` is not, for that window.
 
 The default hosted MCP + local signer topology additionally exposes
 `haven_quote_mcp_tool` and `haven_quote_catalog_purchase` (#1397). They are
@@ -224,6 +401,24 @@ merchant's only compatible entry (or the rail could not be read). It is a
 argument changed, no capability handshake, no signer surface, and the Supported
 Runtime Manifest table is untouched.
 
+As of #2991 (the two MCP quote tools) and #2999 (the hosted plain-HTTP
+`haven_quote_x402`), all THREE **hosted** quote tools gain
+`expected_settlement_scheme: 'erc7710' | 'eip3009' | null` and
+`expected_funding_leg: boolean | null` (and `expected_settleable: boolean`
+when the rail is known — `false` where prepare/pay will refuse with
+`ERC7710_RAIL_REQUIRED`) — the scheme
+`haven_prepare_catalog_purchase` / `haven_pay_mcp_tool` / `haven_pay_x402_quote`
+will actually select for THIS account, computed by the identical selector,
+versus `accepted_scheme` which only ever describes the merchant's offer. All
+three now go through the same `settlementPredictionFields` support helper, so
+none can disagree with the others on an identical accepts[]/agent pair.
+Another deliberate local/hosted skew, same shape as the one above: this is
+response shaping specific to the hosted capability modules
+(`buildMcpToolQuoteResponse`, and the hosted `haven_quote_x402` handler
+directly), so the local stdio `haven_quote_x402` passthrough gains none of
+these fields — it has no server-side agent read to predict from, and a local
+caller already holds its own key/rail state.
+
 One **deliberate local/hosted skew**, recorded because this table exists to
 catch exactly that: the **local stdio** `haven_quote_x402` is a bare
 passthrough of the SDK's `X402Quote`, so it now also QUOTES an erc7710-only
@@ -254,6 +449,60 @@ The source of truth is `packages/connect/src/runtime-manifest.ts` (the SDK and
 signer versions are pinned there; `@haven_ai/mcp` tracks its own `MCP_VERSION`,
 and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 
+> **Re-verification (changelog-heading gap, 2026-09-14):** this doc's covered
+> trees changed only by a CHANGELOG heading — `release-bump.mjs` now rewrites
+> `## Unreleased` to `## <version> — <date>` in the five published packages.
+> No version constant, tool, capability or version-skew surface moved, so the
+> Supported Runtime Manifest table and every compatibility claim below stand
+> unchanged. Recorded rather than date-stamped because the table is what a
+> consumer reads to know which versions work together.
+
+> **Re-verification (0.2.1-alpha.0 release, 2026-09-16):** unlike the previous
+> release, this one DOES move runtime surfaces, and the table's four rows moving
+> to `0.2.1-alpha.0` is the smaller half of that. **Most of it is additive, but
+> NOT all of it — an earlier draft of this note said "additive in every case" and
+> independent review was right that this is the worst possible document in which
+> to be loose about that**, since it is what a consumer reads to decide whether
+> an upgrade is safe. Two changes alter existing behaviour:
+>
+> - **`merchant_not_ready` in the LOCAL runtime (#2983) changes a code, not just
+>   adds one.** A merchant's `503 { error: 'merchant_not_ready' }` now maps to
+>   `MERCHANT_NOT_READY`; it previously fell through to the discovery path and
+>   surfaced a different code. An unchanged caller gets a different code for the
+>   same merchant response. The same change, and #3000, also REMOVE sweep
+>   guidance from the erc7710 post-funding refusals — correctly, since erc7710
+>   has no funding leg to sweep, but the guidance text a client may surface has
+>   changed.
+> - **`settled` changes truth value (#2968, #2971).** An erc7710 payment where
+>   the merchant returned 200 without on-chain confirmation now reports
+>   `settled: false` where it reported `true`. This is the change most likely to
+>   surprise an existing integration, and it is deliberately fail-closed.
+>
+> The additive remainder: a new hosted tool `haven_report_settlement_evidence`
+> (#2973); `expected_settlement_scheme` / `expected_funding_leg` /
+> `expected_settleable` on quotes (#2991); `merchant_not_ready` parity in the
+> LOCAL runtime, which previously refused differently from hosted (#2983);
+> sign-context refusals carrying `code` / `fallback` / `next_action` like the
+> version-mismatch refusal already did (#3001); `next_action` on
+> `PRICE_EXCEEDS_MAX` / `INVALID_MAX_AMOUNT` (#2975) and on
+> `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` (#3000); and a 15-second abort on
+> `fetchX402SignContext` where it previously hung (#2985).
+>
+> **Each of those was documented in this file by the PR that shipped it** — the
+> coupling gate forces that, and a grep for every symbol above finds it here
+> already. This note does not re-state them; it records that the release
+> carries them as a set.
+>
+> **The version-skew contract itself is unchanged, with the two exceptions named
+> above stated rather than buried.** No refusal was REMOVED and no EXISTING field
+> became required, so an older signer paired with a 0.2.1 backend still
+> understands every refusal it understood before and ignores the added fields,
+> and a 0.2.1 signer against an older backend sees those fields absent — the same
+> window the contract below already describes. What an integration must
+> nonetheless re-read before upgrading is the `settled` semantics and the local
+> `merchant_not_ready` mapping: neither is a skew problem between signer and
+> backend, both are behaviour changes visible to a caller at any pairing.
+
 **Do not re-pin the four `@haven_ai/*` rows by hand.** Since
 [#1790](https://github.com/d-hinders/Haven-AI/issues/1790) `npm run release:bump`
 writes them, and a check compares each row against its own constant — on every
@@ -265,10 +514,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.2.0-alpha.0` |
-| `@haven_ai/mcp` | `0.2.0-alpha.0` |
-| `@haven_ai/sdk` | `0.2.0-alpha.0` |
-| `@haven_ai/signer` | `0.2.0-alpha.0` |
+| `@haven_ai/connect` | `0.2.1-alpha.0` |
+| `@haven_ai/mcp` | `0.2.1-alpha.0` |
+| `@haven_ai/sdk` | `0.2.1-alpha.0` |
+| `@haven_ai/signer` | `0.2.1-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -1035,7 +1284,7 @@ Read it as an argument-name mismatch, not an out-of-date package. Two things
 worth knowing before you reach for an upgrade:
 
 - **The affected tools are a declared list — and since #2353's switch that
-  list is 20 of the 22.** It is `STRICT_INPUT_TOOLS`, which since #2807 lives
+  list is 21 of the 23 (#2972 added `haven_report_settlement_evidence` to both counts).** It is `STRICT_INPUT_TOOLS`, which since #2807 lives
   in the hosted server's contracts module (`src/tools/contracts.ts`, behind
   the `tools.ts` facade). It began (#2312) with the money-path
   tools that read from the payment record rather than from arguments, #2348
@@ -1163,6 +1412,25 @@ ORIGINAL sign_data (#1207) with the full payload. This is a transport change
 only — the signer's verification is identical on both paths — but it converts
 "old signer silently relays bulk bytes" into "old signer asks for them
 explicitly", which is the observable difference an operator will see.
+
+That replay recipe was **false on the erc7710 scheme** for two of the three
+hosted entry points until #3042 (scan B2, measured live on dev 2026-09-16):
+`haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` never forwarded
+`idempotency_key` on their erc7710 branch — only `haven_pay_x402_quote` did
+(#2041) — so re-running with the same key minted a second, independently
+signable settlement child (`6866bc97…` and `9835d550…` from one key). The
+backend had deduplicated on the key all along; the hosted branches simply did
+not send it. Since #3042 all three entry points forward an explicitly given
+key (and none derives one — unkeyed erc7710 calls mint one child per call on
+all three), so a keyed retry replays the original child **while that child is
+still `pending_signature` and inside its quote window**: an expired child is
+lazily expired and a new one minted (cap and budget re-checked); a `submitted`
+child answers 409 (retry the original); a `confirmed` child answers with its
+`tx_hash` and no `sign_data`. This is hosted-only: no signer or connector
+version is involved, and a hosted server older than #3042 is the only runtime
+that still shows the double-child behaviour — recognisable by a second
+`payment_id` for the same key, with `haven_get_payment_status.idempotencyKey`
+reading `null`.
 
 One more skew row since #1307, on the SETTLE leg rather than the sign leg:
 `haven_settle_mcp_tool` / `haven_complete_mcp_tool` accept `merchant_url` /
@@ -1419,6 +1687,24 @@ what each server's instructions say and why they differ in length.
   printing one repair action per failure and exiting non-zero. `--repair`
   reinstalls the pinned runtime and rewrites wrapper + config from STORED
   credentials — no new setup token, keys untouched. `--json` for automation.
+
+  > **Re-verified #2963:** the `signer_runtime` check now asks its two
+  > questions against two references — *intact?* against the sidecar's record
+  > of what npm installed, *current?* against the connector's pinned manifest.
+  > A runtime that is merely older than the pin reports `Installed X does not
+  > match the connector's pinned Y — intact, but outdated`; only a directory
+  > whose CLI is missing, or whose installed package versions differ from what
+  > the sidecar recorded, reports `stale or empty`. The repair action is
+  > the same either way (`--doctor --repair`). Nothing else in this section
+  > re-read.
+
+  The hosted MCP `tools/list` check proves only that its endpoint responds; it
+  does not authenticate a bearer token. Credential verdicts instead use the
+  authenticated, read-only agent-identity endpoint: an accepted identity read
+  leaves a superseded key spend-capable, a 401/403 reports it already revoked,
+  and a network or malformed response remains explicitly unverifiable. This
+  prevents a static MCP capability listing from being mistaken for proof that
+  an old credential can still act.
 
   **`--repair` rewrites only the pair the directory owns (#1910).** It reads
   the wiring slug from that directory's own `signer-runtime.json` sidecar

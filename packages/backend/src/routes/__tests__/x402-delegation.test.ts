@@ -8,7 +8,7 @@ import Fastify, { type FastifyInstance } from 'fastify'
 
 const {
   mockQuery, mockSelect, mockCompute, mockCreateIntent, mockPrepareFunding, mockEnsureDeployed,
-  mockReadRemaining,
+  mockReadRemaining, mockRecordRefusal,
 } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockSelect: vi.fn(),
@@ -17,6 +17,7 @@ const {
   mockPrepareFunding: vi.fn(),
   mockEnsureDeployed: vi.fn(),
   mockReadRemaining: vi.fn(),
+  mockRecordRefusal: vi.fn(),
 }))
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 
@@ -72,6 +73,16 @@ vi.mock('../../infra/repositories/payment-intents.js', async (importOriginal) =>
   const actual = await importOriginal<typeof import('../../infra/repositories/payment-intents.js')>()
   return { ...actual, insertMachineIntent: mockCreateIntent }
 })
+// #2945: the refusal ledger is fire-and-forget from the route's point of
+// view — it can never throw into the handler (the real module swallows its
+// own write failures). Mocked here so the tests can assert WHICH refusal was
+// recorded (reason, source, detail allowlist) and that the response is
+// identical whether the ledger succeeds or its write fails; the write itself
+// is proven against real Postgres in the repository and ledger suites.
+vi.mock('../../modules/payments/refusal-ledger.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/payments/refusal-ledger.js')>()
+  return { ...actual, recordRefusalFireAndForget: (...a: unknown[]) => mockRecordRefusal(...a) }
+})
 
 const x402Routes = (await import('../x402.js')).default
 const { buildBudgetDelegation } = await import('../../rails/delegation-policy.js')
@@ -122,6 +133,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     mockPrepareFunding.mockReset()
     mockEnsureDeployed.mockReset()
     mockReadRemaining.mockReset()
+    mockRecordRefusal.mockReset()
     // #2082: default to a live enforcer read with the FULL 5 USDC budget
     // available — every existing case authorizes 0.1 USDC, so the pre-check
     // is a no-op for them and the erc7710 assertions below stay about what
@@ -819,6 +831,52 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
       metadata: expect.objectContaining({
         payment_required: expect.objectContaining({ x402Version: 2 }),
+      }),
+    }))
+  })
+
+  it('persists delegate_account_address into machine_metadata on BOTH delegation branches (#2960 write path)', async () => {
+    // Same discipline as the #1307/#1355 write-path tests above: prove the
+    // authorize call STORES the delegate account, or dropping the metadata
+    // line regresses receipts/status `parties.delegate_account` silently.
+    // `payTo === agent.delegate_address` (with `merchantPayTo` set) selects
+    // the eip3009 funding-leg shape (`deriveFundingShape`); `payTo` = the
+    // merchant, the default, selects erc7710 direct settlement.
+
+    // Branch 1: eip3009 funding leg — `fundingAuth.prepared.delegateAccountAddress`.
+    mockPrepareFunding.mockResolvedValue(PREPARED)
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    let res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        settlement_scheme: 'eip3009',
+        delegate_account_address: PREPARED.prepared.delegateAccountAddress,
+      }),
+    }))
+
+    // Branch 2: erc7710 direct settlement — the settlement child's own delegator.
+    mockCreateIntent.mockClear()
+    mockSelect.mockResolvedValue({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody(),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        settlement_scheme: 'erc7710',
+        delegate_account_address: DELEGATE_ACCT,
       }),
     }))
   })
@@ -1684,6 +1742,46 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockPrepareFunding).toHaveBeenCalledTimes(1)
   })
 
+  it('#3045 a key whose rows are ALL expired is free again: authorize mints a fresh intent', async () => {
+    // The endpoint of the #3045 walk: after the duplicated key's rows have
+    // each been lazily expired in turn, the lookup returns the newest EXPIRED
+    // row (the lone-stale #961 semantics are unchanged), delegationReplay
+    // nulls on the non-pending status WITHOUT writing anything, and the fresh
+    // insert succeeds — pre-fix this same lookup result was the permanent 409.
+    const updates: string[] = []
+    mockQuery.mockImplementation((sql: string) => {
+      updates.push(String(sql))
+      if (/max_x402_per_hour/.test(String(sql))) return Promise.resolve({ rows: [{ max_x402_per_hour: 100 }] })
+      if (/COUNT\(\*\)/.test(String(sql))) return Promise.resolve({ rows: [{ cnt: '0' }] })
+      if (/x402_idempotency_key = \$2/.test(String(sql))) {
+        return Promise.resolve({ rows: [{ ...PENDING_3009_ROW, status: 'expired' }] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+    // Non-positional on purpose (#1227 ratchet): each mock answers exactly one
+    // call in this test and `beforeEach` resets both, so mockResolvedValue/
+    // mockImplementation wiring pins the same responses without lengthening
+    // the positional chain the ratchet exists to shrink.
+    mockPrepareFunding.mockResolvedValue(PREPARED)
+    mockCreateIntent.mockImplementation(async () => ({
+      id: 'fresh-mint',
+      status: 'pending_signature',
+      expires_at: 'x',
+    }))
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, idempotencyKey: 'k-dead' }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().payment_id).toBe('fresh-mint')
+    // No lazy-expire write ran — the row was already expired; there is
+    // nothing to free (an expire write here would be a wasted guarded UPDATE
+    // that can never match).
+    expect(updates.some((u) => /SET status = 'expired'/.test(u))).toBe(false)
+    expect(mockPrepareFunding).toHaveBeenCalledTimes(1)
+  })
+
   it('a scheme flip on the same key 409s via the funding_to mismatch (#961)', async () => {
     // The stored intent is 3009 (funding to the EOA); the retry asks erc7710
     // (payTo = merchant) with the SAME key — must never leak the original
@@ -1720,6 +1818,40 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(res.statusCode).toBe(400)
     expect(res.json().error).toMatch(/One-shot/)
     expect(mockPrepareFunding).not.toHaveBeenCalled()
+  })
+
+  it('an idempotent replay returns BEFORE the hourly cap read — no 429 on a replay (#3045)', async () => {
+    // #3045 keeps the #961 invariant while it widens which row the lookup can
+    // reach: a replay creates nothing and runs no estimation, so it must
+    // never be rate-limited. withHourlyCapQueries answers the cap reads with
+    // an UNCAPPED agent, so a 429 here could only mean the cap comparison ran
+    // on a replayed request — pin the ORDERING directly instead: when the
+    // lookup finds a live row and replays it, the cap's COUNT query must
+    // never be reached.
+    const capQueries: string[] = []
+    mockQuery.mockImplementation((sql: string) => {
+      if (/max_x402_per_hour/.test(String(sql))) return Promise.resolve({ rows: [{ max_x402_per_hour: 100 }] })
+      if (/COUNT\(\*\)/.test(String(sql))) {
+        capQueries.push(String(sql))
+        return Promise.resolve({ rows: [{ cnt: '100' }] }) // AT the cap — any cap read that reaches the comparator 429s
+      }
+      if (/x402_idempotency_key = \$2/.test(String(sql))) {
+        return Promise.resolve({ rows: [{ ...PENDING_3009_ROW, expires_at: new Date(Date.now() + 300_000).toISOString() }] })
+      }
+      return Promise.resolve({ rows: [] })
+    })
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT, idempotencyKey: 'k-1' }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().idempotent_replay).toBe(true)
+    // The replay answered from the lookup alone: the hourly-cap COUNT read
+    // (agentHourlyX402CapExceeded) never ran on it.
+    expect(capQueries).toHaveLength(0)
+    expect(mockPrepareFunding).not.toHaveBeenCalled()
+    expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 
   it('the per-agent hourly cap 429s BEFORE any sponsored estimation (#961)', async () => {
@@ -2386,5 +2518,179 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
     expect(second.statusCode).toBe(200)
     expect(second.json()).toEqual(first.json())
     expect(mockQuery.mock.calls.some((c) => /UPDATE payment_intents/i.test(String(c[0])))).toBe(false)
+  })
+
+  // ── #2945: the payment_refusals ledger — characterization ─────────────────
+  //
+  // The ledger is a RECORD of what the guardrails refused; it must never
+  // change what the caller receives. These tests pin, for every refusal on
+  // this surface, that the response is byte-identical with the ledger
+  // succeeding AND failing (the real module swallows write failures — the
+  // failing case proves the refusal does not wait on or branch on the
+  // ledger's outcome), and that the WRITE ASK carries the right reason,
+  // source and detail allowlist. The write itself is proven against real
+  // Postgres in infra/repositories/__tests__/payment-refusals.test.ts.
+  describe('payment_refusals ledger characterization (#2945)', () => {
+    // Same value as the main describe's DELEGATE_EOA: payTo = the delegate
+    // EOA selects the EIP-3009 funding leg.
+    const FUNDING_EOA = DELEGATE_SIGNER.address
+
+    // The enclosing describe's beforeEach clears ALL mocks; restore the
+    // default db routing the authorize handler needs (hourly cap, usage).
+    beforeEach(() => {
+      mockQuery.mockImplementation((sql: string) => {
+        if (/max_x402_per_hour/.test(String(sql))) return Promise.resolve({ rows: [{ max_x402_per_hour: 100 }] })
+        if (/COUNT\(\*\)/.test(String(sql))) return Promise.resolve({ rows: [{ cnt: '0' }] })
+        return Promise.resolve({ rows: [] })
+      })
+    })
+    /** The full over-budget erc7710 refusal, as JSON — the byte-identity anchor. */
+    async function overBudgetErc7710Response(): Promise<string> {
+      mockSelect.mockResolvedValue({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '50000', fromChain: true })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer «redacted:sk_…»' },
+        payload: authorizeBody({ amount: '100000' }),
+      })
+      expect(res.statusCode).toBe(403)
+      return JSON.stringify(res.json())
+    }
+
+    it('the erc7710 over-budget refusal body is byte-identical with the ledger succeeding and failing', async () => {
+      mockRecordRefusal.mockImplementation(() => {})
+      const withLedger = await overBudgetErc7710Response()
+
+      // The failing case, modeled FAITHFULLY: the real
+      // recordRefusalFireAndForget returns synchronously and swallows its own
+      // write failure — it can never throw into the handler. So the broken
+      // ledger is a call that returns normally while its write fails
+      // asynchronously. A synchronous throw here would model an impossible
+      // state (and this test would then pin a 500 the real system cannot
+      // produce). The dedicated proof that the swallowed failure changes
+      // nothing lives in modules/payments/__tests__/refusal-ledger.test.ts.
+      mockRecordRefusal.mockReset()
+      mockRecordRefusal.mockImplementation(() => {
+        Promise.reject(new Error('payment_refusals write exploded')).catch(() => {})
+      })
+      const withBrokenLedger = await overBudgetErc7710Response()
+
+      expect(withBrokenLedger).toBe(withLedger)
+    })
+
+    it('the erc7710 over-budget refusal records reason/source and the detail allowlist', async () => {
+      mockRecordRefusal.mockImplementation(() => {})
+      await overBudgetErc7710Response()
+
+      expect(mockRecordRefusal).toHaveBeenCalledTimes(1)
+      const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
+      expect(ask).toMatchObject({
+        userId: 'user-1',
+        agentId: 'agent-1',
+        chainId: 84532,
+        tokenSymbol: 'USDC',
+        amountAtomic: '100000',
+        reason: 'delegation_budget_exceeded',
+        source: 'x402_authorize',
+      })
+      // detail is the ALLOWLIST — no whole-body copy can slip through the
+      // writer's pick (proven at the DB level by migration 086's CHECK).
+      expect(ask.detail).toEqual({
+        error_code: 'delegation_budget_exceeded',
+        phase: 'insufficient_funds',
+        next_action: 'fund_safe_or_raise_allowance',
+        remaining_atomic: '50000',
+      })
+    })
+
+    it('the EIP-3009 funding-leg over-budget refusal: identical body with/without the ledger, right write ask', async () => {
+      mockSelect.mockResolvedValue({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '50000', fromChain: true })
+      const body = authorizeBody({ payTo: FUNDING_EOA, merchantPayTo: MERCHANT, amount: '100000' })
+
+      mockRecordRefusal.mockImplementation(() => {})
+      const withLedger = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer «redacted:sk_…»' },
+        payload: body,
+      })
+      expect(withLedger.statusCode).toBe(403)
+      const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
+      expect(ask.reason).toBe('delegation_budget_exceeded')
+      expect(ask.source).toBe('x402_authorize')
+      // On the funding leg the merchant is the SEPARATE field (payTo is the
+      // funding target) — the ledger must name the real merchant.
+      expect(ask.merchantTo).toBe(MERCHANT.toLowerCase())
+
+      mockRecordRefusal.mockReset()
+      mockRecordRefusal.mockImplementation(() => {
+        Promise.reject(new Error('payment_refusals write exploded')).catch(() => {})
+      })
+      const withBrokenLedger = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer «redacted:sk_…»' },
+        payload: body,
+      })
+      expect(withBrokenLedger.statusCode).toBe(403)
+      expect(JSON.stringify(withBrokenLedger.json())).toBe(JSON.stringify(withLedger.json()))
+    })
+
+    it('the no-delegation-for-target 403 (recipient pin) is recorded and the body is unchanged by a broken ledger', async () => {
+      // No delegation for (agent, token, merchant) — how a recipient pin
+      // refuses on this rail, named for what it is.
+      mockSelect.mockResolvedValue(null)
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
+      const inject403 = async () => {
+        const res = await app.inject({
+          method: 'POST', url: '/x402/authorize',
+          headers: { authorization: 'Bearer «redacted:sk_…»' },
+          payload: authorizeBody(),
+        })
+        expect(res.statusCode).toBe(403)
+        return JSON.stringify(res.json())
+      }
+
+      mockRecordRefusal.mockImplementation(() => {})
+      const withLedger = await inject403()
+      const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
+      expect(ask).toMatchObject({
+        reason: 'no_delegation_for_target',
+        source: 'x402_authorize',
+        merchantTo: MERCHANT.toLowerCase(),
+      })
+      expect(ask.detail).toEqual({ error_code: 'no_delegation_for_target' })
+
+      mockRecordRefusal.mockReset()
+      mockRecordRefusal.mockImplementation(() => {
+        Promise.reject(new Error('payment_refusals write exploded')).catch(() => {})
+      })
+      const withBrokenLedger = await inject403()
+      expect(withBrokenLedger).toBe(withLedger)
+    })
+
+    it('POSITIVE CONTROL: a successful authorize writes NO refusal', async () => {
+      mockSelect.mockResolvedValue({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer «redacted:sk_…»' },
+        payload: authorizeBody(),
+      })
+      expect(res.statusCode).toBe(201)
+      expect(mockRecordRefusal).not.toHaveBeenCalled()
+    })
   })
 })

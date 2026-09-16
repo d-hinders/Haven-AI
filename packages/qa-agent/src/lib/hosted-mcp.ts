@@ -305,7 +305,19 @@ export interface HostedSettleMcpToolResult {
   payment_id?: string
   funding_status?: string
   funding_tx_hash?: string | null
+  /**
+   * #2968/#2970: true only when Haven VERIFIED the settlement on-chain. On
+   * erc7710 this is NOT implied by the merchant answering 2xx — branch on
+   * `delivered` for whether the user has their goods, and on this field (or
+   * `code`) for whether the money is proven.
+   */
   settled?: boolean
+  /** #2970: present on an unconfirmed erc7710 settlement — SETTLEMENT_PENDING or DELIVERED_UNSETTLED. */
+  code?: string
+  /** #2968/#2970: the merchant answered 2xx and handed over the goods, whether or not the money is proven. */
+  delivered?: boolean
+  /** #2970: true only on SETTLEMENT_PENDING — the verification is worth asking about again. */
+  retryable?: boolean
   settlement_tx_hash?: string | null
   result?: unknown
   /**

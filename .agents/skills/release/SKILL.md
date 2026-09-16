@@ -14,6 +14,39 @@ This skill routes between them and adds the judgement they do not encode. When
 the two disagree with each other, the branch-and-release doc wins on branch
 questions and `scripts/README.md` wins on script questions.
 
+## Read State Directly, Every Time
+
+**Every wrong call on the 0.2.0-alpha.0 release came from one habit: treating a
+derived or adjacent signal as evidence for the thing itself.** Not from checking
+too rarely — from checking something next to the answer. Four in one release:
+
+| reported | actually read | what it was |
+|---|---|---|
+| `qa-freshness` is green | the `money-flow` **job** | the *check* had evaluated 11 minutes earlier and was red |
+| blocked on CODEOWNERS | `mergeable_state: blocked` | the PR was a **draft**; `draft` was never read |
+| the promotion must be brought forward | `strict_required_status_checks_policy: true` | the previous promotion merged while behind |
+| prod is down | a `curl` that returned 403 | the egress proxy refusing, not the service |
+
+So, before any merge and before reporting any state:
+
+- **Never name a blocker from `mergeable_state`.** It is one enum collapsing
+  `draft` / `behind` / `blocked` / `unstable` / `dirty`, and it reports only the
+  first one it hits. Read `draft`, `mergeable`, the reviews list and the check
+  runs as separate fields. `blocked` is equally consistent with "is a draft" and
+  "needs a review", and picking the one you saw last time is how it goes wrong.
+- **A check run's own conclusion is the only evidence for that check.** The
+  state of the thing it measures is not. A green run proves a run is green.
+- **Config is a hypothesis; behaviour is evidence.** `main` carries TWO rulesets
+  whose `strict_required_status_checks_policy` values disagree, and `dev` two
+  whose `allowed_merge_methods` are `["squash"]` and
+  `["squash","merge","rebase"]` — GitHub intersects the second pair, so `dev` is
+  squash-only. Before acting on a ruleset field, check what the previous
+  promotion actually did.
+- **A failed network call from this environment is not a fact about the
+  target.** The agent proxy answers `403` to `CONNECT` for any host outside its
+  allowlist, which looks identical to a service being down. Check
+  `$HTTPS_PROXY/__agentproxy/status` before reading anything into it.
+
 ## Preflight
 
 Establish facts before touching anything. Each of these has cost a real release.
@@ -115,6 +148,21 @@ them there rather than restating them here). Manual dispatches on `dev` are
 routine, not an emergency measure: the 0.1.36-alpha.0 promotion leaned on one,
 `workflow_dispatch` at 04:32Z on 2026-09-08 (#2725).
 
+**A green RUN is not a green CHECK, and this is the half that gets skipped.**
+The gate's own failure text says "Trigger it … **and re-run this check**".
+`qa-freshness` evaluates once, at the moment the promotion PR's head appears; a
+`money-flow` run that finishes afterwards does not retroactively turn it green.
+On 0.2.0-alpha.0 the dispatched run went green at 06:43:21Z against a check that
+had already failed at 06:32:33Z, and the release was reported satisfied off the
+run. **After dispatching, re-run the `qa-freshness` job and read its
+conclusion.** That is not the once-only flake re-run budget — the input state
+legitimately changed, so it is the documented remedy.
+
+**A CHANGELOG edit is a money-path change.** `packages/signer/**` matches the
+globs, and #2164's release-bump-version-string exemption does not cover a
+CHANGELOG, so a release commit that writes changelog headings always invalidates
+freshness and always needs a fresh run. Expect it rather than rediscovering it.
+
 Dispatch rather than wait for the automatic post-deploy run: that run is bound
 to whatever commit was deployed, not to the head you are promoting. And when you
 inspect any run, read the **`money-flow` job's** conclusion — a run whose job
@@ -187,9 +235,28 @@ tar xzf haven_ai-sdk-*.tgz
 diff package/dist/index.d.ts packages/sdk/dist/index.d.ts
 ```
 
-Zero declarations added or removed is the bar. Changed lines should be private
-members and comments only. This is cheap and it is the only check that would
-catch a facade that quietly dropped an export.
+**Compare declaration NAMES, with an instrument that admits `type` and
+`interface`.** On 0.2.0-alpha.0 the first pass counted `declare` statements —
+which covers `const`/`function`/`class`/`enum` and silently excludes every type
+alias, the shape most likely to break a consumer — and lost
+`AgentPaymentNextActionWire`, the one name carrying that release's break. Use:
+
+```sh
+ex() { grep -oE '^(export )?(declare )?(const|function|class|enum|type|interface) [A-Za-z0-9_]+' "$1" | awk '{print $NF}' | sort -u; }
+diff <(ex package/dist/index.d.ts) <(ex packages/sdk/dist/index.d.ts)
+```
+
+Zero **removed** is the bar; added names are fine and expected. A net count is
+not evidence — an increase hides a removal. The `export { … }` barrel is one
+long line and this extractor does not parse it, so diff it separately: split it
+on commas and sort, then compare. It also picks up non-exported internal
+declarations, which errs toward reporting too much rather than too little.
+
+**And a removal is not the only break.** A field whose TYPE widens — say
+`AgentPaymentNextAction` to a union carrying a compatibility alias — removes no
+declaration and still breaks any consumer that assigns it to the narrower type
+or switches exhaustively over it. Read the non-comment removed lines of the
+`.d.ts` diff, not only the names.
 
 ## Independent Review
 
@@ -216,6 +283,21 @@ release carries into production.
 Target **`dev`**, never `main` — `dev-gate` fails a `release/*` branch aimed at
 `main`. Fill the repository pull-request template. State plainly that nothing
 publishes on this merge.
+
+**Before merging it — or anything else — to `dev`, list the open PRs into
+`main`.** The hold below says to hold `dev` while a promotion PR is open; it
+never said to check whether one already is, which is the gap that bit
+0.2.0-alpha.0. A promotion PR's head is the `dev` branch, so a merge to `dev`
+silently changes what somebody else's promotion publishes, after they described
+it.
+
+```sh
+gh pr list --base main --state open      # or the GitHub MCP: list_pull_requests
+```
+
+Non-empty means a promotion is already open. Say so before merging, and if you
+merge anyway: re-run `qa-freshness` at the new head, re-measure the scope, and
+tell that PR's author what changed underneath them.
 
 ## Promotion To Production
 

@@ -5,6 +5,8 @@ import {
   fixtureFor,
   FIXTURE_AGENTS,
   FIXTURE_USER,
+  FIXTURE_ANALYTICS_OVERVIEW,
+  FIXTURE_ANALYTICS_OVERVIEW_EMPTY,
   SEED_STORAGE_KEYS,
   FIXTURE_EMPTY_FALLBACK,
   SCENARIOS,
@@ -133,11 +135,12 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     expect(fx('/contacts/ct-1/history')).toBeNull()
   })
 
-  // #2106: `/custody` renders a delegation-rail account's real spend
-  // authority from this endpoint. Both recipient states are seeded on
-  // purpose — a PINNED recipient (an AllowedCalldataEnforcer caveat) and an
-  // open one — because the page presents them differently and a fixture with
-  // only one of them cannot evidence that.
+  // #2106: `/agents/:id`'s budget card (formerly also `/custody`, deleted in
+  // #3024) renders a delegation-rail account's real spend authority from this
+  // endpoint. Both recipient states are seeded on purpose — a PINNED recipient
+  // (an AllowedCalldataEnforcer caveat) and an open one — because the card
+  // presents them differently and a fixture with only one of them cannot
+  // evidence that.
   describe('delegation budgets (#2106)', () => {
     it('keys the delegations endpoint for the fixture agents', () => {
       const pinned = fx('/agents/agent-research/delegations') as {
@@ -921,6 +924,243 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
 
       it('refuses an unknown stage', () => {
         expect(() => feed.stage('off')).toThrow(/unknown stage/)
+      })
+    })
+
+    /**
+     * #2949 (epic #2944 slice E): the analytics scenarios. The route and the
+     * page are slice C (#2947), gated on slice B (#2946) — so at filing there
+     * is nothing to point a browser at, and these pins are the scenarios'
+     * exercised half. They hold the SHARED fixture to the shape slice B's
+     * PR (#2957) specifies, so that when C lands, page captures and these
+     * assertions describe the same answer. The route-keyed
+     * `/analytics/overview` key is deliberately the fixture the POPULATED
+     * scenario serves (no scenario api() override), so the page and this test
+     * cannot drift into two shapes.
+     */
+    describe('analytics (#2949)', () => {
+      /**
+       * Look the populated scenario up WITHOUT the `scenarioWithApi` helper:
+       * the assertion IS that it has no api hook. `scenarioWithApi` throws on
+       * exactly that, which would make the no-override contract untestable.
+       */
+      const populated = (SCENARIOS as Record<string, Partial<ScenarioShape>>)['analytics-populated']
+      const emptyScenario = (SCENARIOS as Record<string, Partial<ScenarioShape>>)['analytics-empty']
+      expect(populated).toBeDefined()
+      expect(emptyScenario).toBeDefined()
+
+      it('the parity guard holds: analytics-populated serves the shared /analytics/overview key, not a private shape', () => {
+        // NO api() override, deliberately: an override here would let the
+        // scenario and the page (which reads the shared key) disagree
+        // silently — the exact drift the fixture contract exists to prevent.
+        expect(populated!.api).toBeUndefined()
+        expect(fx('/analytics/overview')).toBe(FIXTURE_ANALYTICS_OVERVIEW)
+      })
+
+      /**
+       * Wire-type fidelity to slice B (#2946, PR #2957). B books every fiat
+       * field as a numeric STRING — `::text` in SQL, passed through the route
+       * with no Number() coercion — and its own route test asserts
+       * `typeof body.totals.refused_amount === 'string'` and
+       * `spent === '10.00'`. Counts and `share` are B's number-typed
+       * exception. This pin goes RED if a fiat field regresses to a JS
+       * number OR if a numeric-string stops being numeric.
+       */
+      it('fiat fields are numeric STRINGS and the number-typed split matches B (#2946)', () => {
+        const overview = fx('/analytics/overview') as {
+          totals: Record<string, unknown> & { refused_count: unknown; refused_attempts: unknown; refused_previous_count: unknown; fees: Record<string, unknown>; budget_bands: Record<string, unknown> }
+          by_day: { spent_by_agent: Record<string, unknown>; refusals: unknown }[]
+          agents: { spent: unknown; share: unknown; payments: unknown; refusals: unknown; refusal_attempts: unknown }[]
+          merchants: { spent: unknown; payments: unknown }[]
+          balance_by_day: { value: unknown }[]
+        }
+        const isNumericString = (x: unknown) => typeof x === 'string' && !Number.isNaN(Number(x))
+        // String-typed: every fiat field on B's response.
+        expect(typeof overview.totals.spent).toBe('string')
+        expect(typeof overview.totals.refused_amount).toBe('string')
+        expect(isNumericString(overview.totals.spent)).toBe(true)
+        expect(isNumericString(overview.totals.refused_amount)).toBe(true)
+        expect(typeof overview.totals.fees.amount).toBe('string')
+        expect(typeof overview.totals.fees.previous).toBe('string')
+        expect(isNumericString(overview.totals.fees.amount)).toBe(true)
+        expect(isNumericString(overview.totals.fees.previous)).toBe(true)
+        for (const m of overview.merchants) {
+          expect(typeof m.spent).toBe('string')
+          expect(isNumericString(m.spent)).toBe(true)
+        }
+        for (const a of overview.agents) {
+          expect(typeof a.spent).toBe('string')
+          expect(isNumericString(a.spent)).toBe(true)
+        }
+        for (const d of overview.by_day) {
+          for (const v of Object.values(d.spent_by_agent)) {
+            expect(typeof v).toBe('string')
+            expect(isNumericString(v)).toBe(true)
+          }
+        }
+        for (const row of overview.balance_by_day) {
+          expect(typeof row.value).toBe('string')
+          expect(isNumericString(row.value)).toBe(true)
+        }
+        // Number-typed: B's counts and ratios are NOT strings.
+        expect(typeof overview.totals.refused_count).toBe('number')
+        expect(typeof overview.totals.refused_attempts).toBe('number')
+        expect(typeof overview.totals.refused_previous_count).toBe('number')
+        expect(typeof overview.totals.budget_bands.above_75).toBe('number')
+        for (const a of overview.agents) {
+          expect(typeof a.share).toBe('number')
+          expect(typeof a.payments).toBe('number')
+          expect(typeof a.refusals).toBe('number')
+          expect(typeof a.refusal_attempts).toBe('number')
+        }
+        for (const m of overview.merchants) expect(typeof m.payments).toBe('number')
+        for (const d of overview.by_day) expect(typeof d.refusals).toBe('number')
+      })
+
+      it('serves the overview sections slice B specifies, with every sum self-consistent', () => {
+        const overview = fx('/analytics/overview') as {
+          range: { from: string; to: string; days: number; previous_from: string; previous_to: string }
+          currency: string
+          basis: Record<string, number | string>
+          totals: {
+            spent: string; spent_previous: string; refused_amount: string
+            refused_count: number; refused_attempts: number
+            budget_bands: { above_75: number; above_50: number; agents_with_budget: number }
+            fees: { amount: string; previous: string; flag_on: boolean }
+          }
+          by_day: { date: string; spent_by_agent: Record<string, string>; refusals: number }[]
+          agents: { id: string; status: string; spent: string; share: number; budgets: Record<string, unknown>[] }[]
+          merchants: { label: string; address: string; spent: string; payments: number; agent_ids: string[]; first_seen: string; last_seen: string }[]
+          balance_by_day: { date: string; value: string }[]
+        }
+        // The envelope: one range, one currency, the basis block the page
+        // quotes its sentences from.
+        expect(overview.range).toMatchObject({ days: 30, to: '2026-07-11T00:00:00.000Z' })
+        expect(overview.currency).toBe('usd')
+        expect(overview.basis).toMatchObject({ payments_counted: 5, unsettled_submitted: 1, tz: 'UTC' })
+        // The ledger floor rides on the basis (#3013): the earliest day the
+        // refusal ledger has rows for — the exact value the Refused tile
+        // renders as "Refusals are recorded from <date>".
+        expect(overview.basis.refusals_recorded_from).toBe('2026-05-28')
+        // Sections sum EXACTLY to the total — a fixture whose parts disagreed
+        // with its own total would photograph a page no backend could serve.
+        // Fiat fields are numeric STRINGS on B's wire, so the folds go through
+        // Number() — the addition itself proves nothing is a plain number.
+        const spentSum = overview.merchants.reduce((s, m) => s + Number(m.spent), 0)
+        const daySum = overview.by_day.reduce((s, d) => s + Object.values(d.spent_by_agent).reduce((a, b) => a + Number(b), 0), 0)
+        const agentSum = overview.agents.reduce((s, a) => s + Number(a.spent), 0)
+        expect(spentSum).toBeCloseTo(Number(overview.totals.spent), 10)
+        expect(daySum).toBeCloseTo(Number(overview.totals.spent), 10)
+        expect(agentSum).toBeCloseTo(Number(overview.totals.spent), 10)
+        // B's own route test pins the fees-off state as strings: a 0 must be
+        // the STRING '0', not a number that would print differently.
+        expect(overview.totals.fees).toEqual({ amount: '0', previous: '0', flag_on: false })
+        // share is DERIVED from the string spends, never hand-typed: a ratio
+        // typed next to the sums it is a share of can drift from them.
+        for (const a of overview.agents) {
+          expect(a.share).toBeCloseTo(Number(a.spent) / Number(overview.totals.spent), 12)
+        }
+        const shareTotal = overview.agents.reduce((s, a) => s + a.share, 0)
+        expect(shareTotal).toBeCloseTo(1, 12)
+        const refusalSum = overview.by_day.reduce((s, d) => s + d.refusals, 0)
+        expect(refusalSum).toBe(overview.totals.refused_count)
+      })
+
+      it('merchant rows demonstrate all three label resolutions the API defines (#2949)', () => {
+        // contact name → receipt name → address, in that order (issue #2946);
+        // one capture must show every label source the product can produce.
+        const overview = fx('/analytics/overview') as { merchants: { label: string; address: string; spent: string }[] }
+        const labels = overview.merchants.map((m) => m.label)
+        expect(labels).toContain('Klara Data AB') // contact name
+        expect(labels).toContain('NordShield VPN') // receipt merchant name
+        const addressOnly = overview.merchants.find((m) => m.label === m.address)
+        expect(addressOnly).toBeDefined()
+        // Top of the table is by spent, descending. `spent` is a numeric
+        // string on the wire (B #2946), so the fold goes through Number().
+        const spent = overview.merchants.map((m) => Number(m.spent))
+        expect([...spent].sort((a, b) => b - a)).toEqual(spent)
+      })
+
+      it('agents carry both budget truth-states: a chain read and the snapshot fallback (#2946)', () => {
+        // `remaining_from_chain: false` is what slice C's "read from Haven's
+        // last snapshot" hint keys on; a fixture with only the happy path
+        // would leave that hint uncapturable.
+        const overview = fx('/analytics/overview') as { agents: { budgets: { remaining_from_chain: boolean; used_atomic: string; budget_atomic: string }[] }[] }
+        const states = overview.agents.map((a) => a.budgets[0].remaining_from_chain)
+        expect(states).toContain(true)
+        expect(states).toContain(false)
+        // The >75% band count is derivable from the rows — a tile and its
+        // detail rows must never disagree in a capture.
+        const above75 = overview.agents.filter((a) => {
+          const b = a.budgets[0]
+          return Number(b.used_atomic) / Number(b.budget_atomic) > 0.75
+        }).length
+        const totals = fx('/analytics/overview') as { totals: { budget_bands: { above_75: number } } }
+        expect(totals.totals.budget_bands.above_75).toBe(above75)
+        expect(above75).toBeGreaterThan(0)
+      })
+
+      it('the balance series is 30 unique absolute dates ending on the dashboard total', () => {
+        const overview = fx('/analytics/overview') as { balance_by_day: { date: string; value: string }[] }
+        expect(overview.balance_by_day).toHaveLength(30)
+        const dates = overview.balance_by_day.map((r) => r.date)
+        expect(new Set(dates).size).toBe(30)
+        expect([...dates].sort()).toEqual(dates) // ascending, no duplicate
+        // Wire type follows B (#2946): a snapshot value is a numeric STRING.
+        for (const row of overview.balance_by_day) {
+          expect(typeof row.value).toBe('string')
+          expect(Number.isNaN(Number(row.value))).toBe(false)
+        }
+        // Ends on FIXTURE_OVERVIEW.totals.usd — the analytics page and the
+        // dashboard must never quote two different balances in one capture.
+        expect(overview.balance_by_day.at(-1)!.value).toBe('12640.55')
+      })
+
+      it('the empty variant is the same envelope with every section empty, not a different shape', () => {
+        const empty = FIXTURE_ANALYTICS_OVERVIEW_EMPTY as Record<string, unknown>
+        const overview = fx('/analytics/overview') as Record<string, unknown>
+        expect(Object.keys(empty).sort()).toEqual(Object.keys(overview).sort())
+        expect(empty.basis).toMatchObject({ payments_counted: 0, snapshot_days: 0, tz: 'UTC' })
+        // An empty ledger reports the floor as null (#3013) — present in the
+        // envelope, but never a day the ledger cannot name.
+        expect((empty.basis as Record<string, unknown>).refusals_recorded_from).toBeNull()
+        expect(empty.merchants).toEqual([])
+        expect(empty.by_day).toEqual([])
+        expect(empty.agents).toEqual([])
+        expect(empty.balance_by_day).toEqual([])
+        // Same wire contract when there is nothing to count: a zero fiat
+        // field is the numeric STRING '0.00' (B #2946), never a bare number.
+        const emptyTotals = empty.totals as Record<string, unknown> & { fees: Record<string, unknown> }
+        expect(typeof emptyTotals.spent).toBe('string')
+        expect(emptyTotals.spent).toBe('0.00')
+        expect(typeof emptyTotals.refused_amount).toBe('string')
+        expect(Number.isNaN(Number(emptyTotals.refused_amount))).toBe(false)
+        expect(emptyTotals.fees).toEqual({ amount: '0', previous: '0', flag_on: false })
+      })
+
+      it('analytics-empty serves the exported empty fixture for the overview route only (#2949)', () => {
+        // An override IS allowed here — the empty scenario must answer the
+        // all-zero fixture, not fall through to the shared populated key.
+        expect(emptyScenario!.api).toBeDefined()
+        const answer = emptyScenario!.api!('/analytics/overview', 'GET')
+        expect(answer).toBe(FIXTURE_ANALYTICS_OVERVIEW_EMPTY)
+        // Everything else falls through to the shared fixture (#1075): the
+        // page's shell data (auth, agents) must still resolve so the state is
+        // the ACCOUNT's emptiness, not the session's.
+        expect(emptyScenario!.api!('/auth/me', 'GET')).toBeUndefined()
+        expect(emptyScenario!.api!('/agents', 'GET')).toBeUndefined()
+      })
+
+      it('analytics-error answers 503 for the overview route only (#1725)', () => {
+        const failure = scenarioWithApi('analytics-error')
+        const answer = failure.api('/analytics/overview', 'GET') as { status: number }
+        expect(answer).toBeInstanceOf(ScenarioHttpError)
+        expect(answer.status).toBe(503)
+        // Everything else falls through to the shared fixture (#1075): the
+        // page's shell data (auth, agents) must still resolve so the failure
+        // is the ENDPOINT's, not the session's.
+        expect(failure.api('/auth/me', 'GET')).toBeUndefined()
+        expect(failure.api('/agents', 'GET')).toBeUndefined()
       })
     })
 

@@ -158,6 +158,10 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   parseMcpTransport: { module: 'mcp-context', slices: ['s2810', 's2812'] },
   isMerchantEndpointMiss: { module: 'mcp-context', slices: ['s2810'] },
   withDiscoveryGuidance: { module: 'mcp-context', slices: ['s2810'] },
+  // #2979: the merchant_not_ready classifier, checked before the discovery
+  // wrapper below inside quoteMcpToolCall — same transitive-call shape as
+  // isMerchantEndpointMiss/withDiscoveryGuidance (see SINGLE_SLICE_RETAINED).
+  merchantNotReadyErrorFor: { module: 'mcp-context', slices: ['s2810'] },
   quoteMcpToolCall: { module: 'mcp-context', slices: ['s2810'] },
   submitSignatureWithExpiryMapping: { module: 'mcp-context', slices: ['s2809', 's2812'] },
   submitErc7710WithExpiryMapping: { module: 'mcp-context', slices: ['s2809'] },
@@ -169,11 +173,24 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   ResolvedMerchantCallContext: { module: 'paid-mcp-completion', slices: ['s2812'] },
   deliverMerchantPayment: { module: 'paid-mcp-completion', slices: ['s2812'] },
   preflightMcpPaymentHeader: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  // #2970: the hosted erc7710 settlement gate — "settled" means Haven verified
+  // the reported hash, not that the merchant answered 2xx. Single-slice, same
+  // as its siblings above.
+  classifyErc7710Settlement: { module: 'paid-mcp-completion', slices: ['s2812'] },
+  // #2972: the haven_report_settlement_evidence classification — same three
+  // outcomes as classifyErc7710Settlement above, built from a direct
+  // EvidenceReportOutcome rather than a merchant HTTP result. Single-slice,
+  // same module.
+  classifySettlementEvidenceReport: { module: 'paid-mcp-completion', slices: ['s2812'] },
   // tools/support/quote-response.ts — quote responses + status predicates.
   buildMcpToolQuoteResponse: { module: 'quote-response', slices: ['s2810', 's2811'] },
   isPendingApproval: { module: 'quote-response', slices: ['s2809', 's2810', 's2811', 's2812'] },
   wrongTool: { module: 'quote-response', slices: ['s2811'] },
   resolveResumeState: { module: 'quote-response', slices: ['s2811'] },
+  // #2999: the #2991 prediction field set, shared between
+  // buildMcpToolQuoteResponse's own two callers (s2810) and haven_quote_x402's
+  // direct call (s2811) — the third hosted quote surface to carry it.
+  settlementPredictionFields: { module: 'quote-response', slices: ['s2810', 's2811'] },
   // tools/support/catalog-entry.ts — catalog refusal contract, shared by the
   // #2810 quote/preflight paths whose error shape the #2811 resume tests pin.
   getUsableCatalogMcpEntry: { module: 'catalog-entry', slices: ['s2810'] },
@@ -212,6 +229,12 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     'also the mcp-server half of the #1271/#1301 bounded same-origin discovery pattern whose ' +
     'other half is shared verbatim with the local runtime through @haven_ai/sdk; forking the ' +
     'mcp-server half into one capability is what the CASP record for #1301 argues against.',
+  merchantNotReadyErrorFor:
+    'DELIBERATE, same shape as isMerchantEndpointMiss/withDiscoveryGuidance: zero references ' +
+    'from tools/catalog-purchase.ts, called only from inside quoteMcpToolCall (checked BEFORE ' +
+    'the discovery wrapper, so an honest merchant_not_ready 503 is reported as itself rather ' +
+    'than run through the #1271 wrong-endpoint heuristic). Belongs beside the wrapper it guards, ' +
+    'not the capability that cannot see it.',
   quoteMcpToolCall:
     'DELIBERATE. This one IS called by #2810 (tools/catalog-purchase.ts), so the earlier ' +
     'reason was accurate — but moving it alone forks the pattern, because it is the wrapper ' +
@@ -329,6 +352,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'delegationSignFields',
     'isMerchantEndpointMiss',
     'withDiscoveryGuidance',
+    'merchantNotReadyErrorFor',
     'quoteMcpToolCall',
     'serializeMcpTransport',
     'parseMcpTransport',
@@ -345,12 +369,15 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'ResolvedMerchantCallContext',
     'deliverMerchantPayment',
     'preflightMcpPaymentHeader',
+    'classifyErc7710Settlement',
+    'classifySettlementEvidenceReport',
   ],
   'quote-response': [
     'buildMcpToolQuoteResponse',
     'isPendingApproval',
     'wrongTool',
     'resolveResumeState',
+    'settlementPredictionFields',
   ],
   'signer-compat': ['SIGNER_CAPABILITY_KEY', 'signerCompatibilityNotice'],
 }
@@ -378,6 +405,8 @@ const HELPER_HOST_MODULE_EXPORTS: Record<string, string[]> = {
     'ResolvedMerchantCallContext',
     'deliverMerchantPayment',
     'preflightMcpPaymentHeader',
+    'classifyErc7710Settlement',
+    'classifySettlementEvidenceReport',
   ],
 }
 

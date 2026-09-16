@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/routes/__tests__/x402.test.ts
   - packages/backend/src/routes/__tests__/machine-payments.test.ts
   - docs/contributing/ai-agent-workflow.md
-last-verified: "2026-08-31"
+last-verified: "2026-09-15"
 ---
 
 # x402 / Machine-Payment Consolidation (PT-1)
@@ -87,11 +87,16 @@ and its money-path review bar.
 
 `POST /machine-payments/authorize` now refuses unconditionally (410) — the
 `mpp_demo` demo flow it served (`routes/demo-mpp.ts`) is retired outright. The
-"Allowance-only (MPP/generic)" coverage strategy above, `authorizeMachinePayment`
-(`modules/mpp/authorize.ts`), and the four shared primitives it lists are
-UNCHANGED and still live — the route stopped calling them because its only
-caller is gone, not because they were removed. They remain rail-agnostic
-infrastructure for a possible future non-demo MPP rail (`mpp_crypto`), which
-is out of #1328's scope by its own file-ownership note. Historical `mpp_demo`
+"Allowance-only (MPP/generic)" coverage strategy above, and the intent/token
+primitives it lists, are UNCHANGED and still live — the route stopped calling
+them because its only caller is gone, not because they were removed. One
+primitive has since gone with it: `authorizeMachinePayment` and
+`modules/mpp/authorize.ts` were DELETED by #1987 (epic #1440) — the route had
+been a `mppDemoRetired()` stub since #1328 and #1986 then 410'd the rail
+underneath it, so the 400-line orchestration had no reachable caller left; the
+route's refusal lives on in `routes/machine-payments.ts`. The remaining
+primitives remain rail-agnostic infrastructure for a possible future
+non-demo MPP rail (`mpp_crypto`), which is out of #1328's scope by its own
+file-ownership note. Historical `mpp_demo`
 payment/receipt/evidence/status rows stay readable through the generic
 `/machine-payments/*` reads this document does not otherwise cover.

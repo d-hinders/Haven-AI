@@ -28,15 +28,19 @@ import { formatConfiguredAllowance } from './agent-display'
  *
  * So the array is never a Haven-side policy mirror. It is an on-chain-enforced
  * envelope, reported. The caption inverted the one claim Haven makes everywhere
- * else — `/custody` exists to say the limit is enforced by the account and not
- * by Haven's database.
+ * else about agent budgets: the limit is enforced by the account, not by
+ * Haven's database.
  *
- * **The wording is not new.** `/custody` already labels this exact data
- * "Agent spend authority (enforced on-chain)" and states the honesty caveat
- * that applies here unchanged: *"These are the terms of the delegation you
- * signed"* — the signed terms, not a fresh chain read. Inventing a third
- * phrasing for one fact is the defect #2195 just fixed one surface over, so
- * this reuses `/custody`'s.
+ * **The wording is not new, even though its source page is gone.** Until
+ * #3024 deleted it, `/custody` labelled this exact data "Agent spend
+ * authority (enforced on-chain)" and stated the honesty caveat that applies
+ * here unchanged: *"These are the terms of the delegation you signed"* — the
+ * signed terms, not a fresh chain read. Inventing a third phrasing for one
+ * fact is the defect #2195 just fixed one surface over, so this row keeps
+ * that page's "enforced on-chain" caption rather than mint a new one. The
+ * caveat sentence itself is rendered nowhere since #3024; it survives as the
+ * reference wording in `docs/regulatory/casp-risk-guardrails.md`, which is
+ * where to borrow it from when a surface needs it.
  *
  * ── Why the "fallback" framing in the old header was wrong too ───────────────
  *

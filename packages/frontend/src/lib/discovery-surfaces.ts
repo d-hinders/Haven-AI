@@ -59,9 +59,11 @@ export const AUTH_MARKED_PREFIXES = [
   '/accounting',
   '/accounts',
   '/agents',
+  // #2947: the analytics page shell. Registered here or the route ships
+  // un-disallowed in robots and without the auth marker on its shell.
+  '/analytics',
   '/catalog',
   '/contacts',
-  '/custody',
   '/dashboard',
   '/design-system',
   '/device',

@@ -159,4 +159,41 @@ describe('erc7710 merchant completion reports evidence (#2092)', () => {
     const evidence = posts.find((p) => p.path === '/machine-payments/evidence')
     expect(evidence!.body.txHash).toBe(FUNDING_TX)
   })
+
+  // #2970: the hosted erc7710 settlement gate reads THIS field to decide
+  // whether `settled: true` is honest.
+  it('#2970: the resolved evidenceOutcome is confirmed when the backend accepts the report', async () => {
+    const { client } = harness({ paymentStatus: 'submitted', txHash: null })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(merchantResponse(SETTLEMENT_TX))
+
+    const result = await client.completeX402MerchantCall({
+      url: MERCHANT_URL,
+      paymentId: 'pay_1',
+      paymentHeader: 'header-abc',
+      noFundingLeg: true,
+    })
+
+    expect(result.evidenceOutcome).toEqual({ outcome: 'confirmed' })
+  })
+
+  // #2970: a zero hash is never a real transaction — reporting it can only
+  // ever come back refused, so it is treated as "no hash to report" and
+  // skipped BEFORE the network round trip, same as the no-hash case above.
+  it('#2970: a ZERO settlement hash is never reported — treated the same as no hash', async () => {
+    const ZERO_TX = `0x${'0'.repeat(64)}`
+    const { client, posts } = harness({ paymentStatus: 'submitted', txHash: null })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(merchantResponse(ZERO_TX))
+
+    const result = await client.completeX402MerchantCall({
+      url: MERCHANT_URL,
+      paymentId: 'pay_1',
+      paymentHeader: 'header-abc',
+      noFundingLeg: true,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.settlementTxHash).toBe(ZERO_TX)
+    expect(result.evidenceOutcome).toBeUndefined()
+    expect(posts.find((p) => p.path === '/machine-payments/evidence')).toBeUndefined()
+  })
 })

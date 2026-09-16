@@ -902,8 +902,9 @@ export const FIXTURE_AGENTS = [
     created_at: '2026-04-30T10:00:00.000Z', mcp_last_seen_at: null,
     // #2106: a PAUSED agent whose on-chain delegation is still live. That
     // combination is deliberate evidence, not an oversight — pausing an agent
-    // in Haven does not revoke what it signed, so `/custody` must still show
-    // the budget as constraining spend. Projection matches its delegation
+    // in Haven does not revoke what it signed, so the agent's budget card
+    // must still show the budget as constraining spend (formerly also
+    // `/custody`, deleted in #3024). Projection matches its delegation
     // (500 USDC / 86400s), same rule as agent-research above.
     allowances: [{
       id: 'alw-retired', agent_id: 'agent-retired',
@@ -1345,6 +1346,174 @@ export const FIXTURE_ACCOUNTING_FEED_ATTENTION = {
   counts: { pending: 0, failed: 1, exhausted: 3 },
 }
 
+// ── Analytics overview (#2949, epic #2944 slice E) ───────────────────────────
+// `GET /analytics/overview` is analytics slice B (#2946, PR #2957 — review at
+// the time of writing). The fixture pins the response shape THAT PR specifies:
+// one range-scoped aggregate whose sums cover confirmed `payment_intents`
+// only, with `basis` carrying the counts the page quotes ("based on N
+// payments", "M awaiting settlement evidence are not counted", the refusal
+// ledger's coverage window). Keyed here so the `analytics-*` scenarios below
+// and C's page (#2947) read ONE declared shape.
+//
+// Deliberate fixture properties, each of which the parity test pins:
+//   - Merchant labels demonstrate ALL THREE resolutions the API defines, in
+//     order — contact name (Klara Data AB), receipt merchant name (NordShield
+//     VPN), address-only (the row whose label IS its address) — so one capture
+//     shows every label source the product can produce.
+//   - Wire types follow B exactly: every fiat field is a numeric STRING
+//     (`totals.spent/spent_previous/refused_amount`, `fees.amount/.previous`,
+//     `spent_by_agent` values, `agents[].spent`, `merchants[].spent`,
+//     `balance_by_day[].value`), while counts and `share` stay numbers —
+//     B's repositories book fiat via `::text` in SQL and its route passes
+//     the strings through with no Number() coercion.
+//   - Merchant rows sum EXACTLY to `totals.spent`, and `by_day` sums exactly
+//     to it too: a fixture whose parts disagree with its own total would
+//     photograph a page no backend could serve.
+//   - Dates are ABSOLUTE (the capture-stability rule above): the range is a
+//     fixed 30-day window ending 2026-07-11, so "last seen", day buckets and
+//     the balance series render identically on the day the PNG is taken.
+//   - `basis.tz` is 'UTC' — a headless capture browser sends no zone, and the
+//     endpoint defaults to UTC; the doc (docs/product/analytics.md) states the
+//     page sends the user's zone in a real browser.
+export const ANALYTICS_RANGE = {
+  from: '2026-06-11T00:00:00.000Z',
+  to: '2026-07-11T00:00:00.000Z',
+  days: 30,
+  previous_from: '2026-05-12T00:00:00.000Z',
+  previous_to: '2026-06-11T00:00:00.000Z',
+}
+export const FIXTURE_ANALYTICS_MERCHANTS = [
+  {
+    label: 'NordShield VPN', address: ADDR.merchant,
+    spent: '225.00', payments: 3, agent_ids: ['agent-research'],
+    first_seen: '2026-07-08T09:15:00.000Z', last_seen: '2026-07-10T08:12:00.000Z',
+  },
+  {
+    label: 'Klara Data AB', address: '0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809',
+    spent: '87.25', payments: 1, agent_ids: ['agent-research'],
+    first_seen: '2026-07-09T10:00:00.000Z', last_seen: '2026-07-09T10:00:00.000Z',
+  },
+  {
+    // Address-only: no contact, no receipt name — the label IS the address.
+    label: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
+    address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
+    spent: '12.50', payments: 1, agent_ids: ['agent-retired'],
+    first_seen: '2026-07-10T12:30:00.000Z', last_seen: '2026-07-10T12:30:00.000Z',
+  },
+]
+// Four by-day rows that sum exactly to `totals.spent` (312.25 research +
+// 12.5 retired = 324.75) and whose refusals sum to `totals.refused_count`.
+export const FIXTURE_ANALYTICS_BY_DAY = [
+  { date: '2026-07-07', spent_by_agent: { 'agent-research': '85.75', 'agent-retired': '12.50' }, refusals: 0 },
+  { date: '2026-07-08', spent_by_agent: { 'agent-research': '112.50' }, refusals: 0 },
+  { date: '2026-07-09', spent_by_agent: { 'agent-research': '87.25' }, refusals: 1 },
+  { date: '2026-07-10', spent_by_agent: { 'agent-research': '26.75' }, refusals: 1 },
+]
+// 30 absolute daily snapshot values, deterministic (no randomness — a capture
+// must re-render identically), ending on the dashboard's own account total so
+// the two screens never disagree in a capture. Dates run 2026-06-12 →
+// 2026-07-11 UTC (the range's own window) by epoch arithmetic, not date-string
+// arithmetic — `2026-06-${12 + i}` would roll past the month's end silently.
+const ANALYTICS_BALANCE_START = 12_354.52
+const ANALYTICS_BALANCE_END = FIXTURE_OVERVIEW.totals.usd
+const ANALYTICS_BALANCE_DAY_MS = Date.UTC(2026, 5, 12) // range `from` + 1 day
+const analyticsBalanceDate = (i) => new Date(ANALYTICS_BALANCE_DAY_MS + i * 86_400_000).toISOString().slice(0, 10)
+// Wire shape (B #2946): `value` is a numeric STRING like every money field on
+// the response, so the generator's number is stringified here, not at render.
+const analyticsBalanceValue = (raw) => (Math.round(raw * 100) / 100).toFixed(2)
+export const FIXTURE_ANALYTICS_BALANCE_BY_DAY = Array.from({ length: ANALYTICS_RANGE.days }, (_, i) => ({
+  date: analyticsBalanceDate(i),
+  value: analyticsBalanceValue(ANALYTICS_BALANCE_START + ((ANALYTICS_BALANCE_END - ANALYTICS_BALANCE_START) * i) / (ANALYTICS_RANGE.days - 1) + (i % 3 === 0 ? -12.4 : 0)),
+}))
+export const FIXTURE_ANALYTICS_OVERVIEW = {
+  range: ANALYTICS_RANGE,
+  currency: 'usd',
+  basis: {
+    payments_counted: 5, unsettled_submitted: 1,
+    refusals_recorded_from: '2026-05-28',
+    refusals_counted: 2, refusal_attempts: 3,
+    fee_rows: 2, gas_sponsored_ops: 7,
+    snapshot_days: 30, tz: 'UTC',
+  },
+  totals: {
+    spent: '324.75', spent_previous: '280.10',
+    refused_count: 2, refused_attempts: 3, refused_amount: '3.00', refused_previous_count: 1,
+    budget_bands: { above_75: 1, above_50: 1, agents_with_budget: 2 },
+    // flag_on false is the honest "Haven is not charging fees" state — the
+    // tile must say so, not render a bare 0 (the doc's Fees section).
+    fees: { amount: '0', previous: '0', flag_on: false },
+    gas_sponsored_ops: 7,
+  },
+  by_day: FIXTURE_ANALYTICS_BY_DAY,
+  // Wire shape (B #2946): `spent` numeric strings; `share` is B's one
+  // number-typed money-adjacent field, DERIVED here (not hand-typed) so the
+  // ratios cannot drift from the sums they are shares of.
+  agents: (() => {
+    const raw = [
+      {
+        id: 'agent-research', name: 'Research agent', status: 'active',
+        spent: '312.25', payments: 4, refusals: 1, refusal_attempts: 2,
+        budgets: [{
+          token: 'USDC', recipient: null,
+          // 214 of 250 USDC — the >75% band the budget_bands count reflects.
+          used_atomic: '214000000', budget_atomic: '250000000',
+          remaining_from_chain: true,
+          period_start: '2026-07-04T00:00:00.000Z', period_end: '2026-07-11T00:00:00.000Z',
+        }],
+        top_merchant: { label: 'NordShield VPN', address: ADDR.merchant },
+        last_payment_at: '2026-07-10T08:12:00.000Z',
+      },
+      {
+        id: 'agent-retired', name: 'Data-feed agent', status: 'paused',
+        spent: '12.50', payments: 1, refusals: 1, refusal_attempts: 1,
+        budgets: [{
+          token: 'USDC', recipient: '0x9995F3aB1e2C4d6087A1b3E5f6C7D890aB1244E2',
+          // The fallback case: remaining_from_chain false → the page's
+          // "read from Haven's last snapshot" hint (slice C's agents table).
+          used_atomic: '5000000', budget_atomic: '500000000',
+          remaining_from_chain: false,
+          period_start: '2026-07-10T00:00:00.000Z', period_end: '2026-07-11T00:00:00.000Z',
+        }],
+        top_merchant: { label: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128', address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128' },
+        last_payment_at: '2026-07-10T12:30:00.000Z',
+      },
+    ]
+    const total = raw.reduce((s, a) => s + Number(a.spent), 0)
+    return raw.map((a) => ({ ...a, share: Number(a.spent) / total }))
+  })(),
+  merchants: FIXTURE_ANALYTICS_MERCHANTS,
+  balance_by_day: FIXTURE_ANALYTICS_BALANCE_BY_DAY,
+}
+
+// The SAME shape, all zero — the page's own empty state ("no payments in this
+// range"), not an error. `snapshot_days: 0` with an empty balance series and
+// empty agents/merchants/by_day is the API's honest no-data answer for a
+// range with nothing in it; a range that merely SPARSELY has data (one agent
+// with zero spend) is a different state slice C renders from the populated
+// fixture, so this stays the fully-empty variant.
+export const FIXTURE_ANALYTICS_OVERVIEW_EMPTY = {
+  range: ANALYTICS_RANGE,
+  currency: 'usd',
+  basis: {
+    payments_counted: 0, unsettled_submitted: 0,
+    refusals_recorded_from: null,
+    refusals_counted: 0, refusal_attempts: 0,
+    fee_rows: 0, gas_sponsored_ops: 0,
+    snapshot_days: 0, tz: 'UTC',
+  },
+  totals: {
+    spent: '0.00', spent_previous: '0.00',
+    refused_count: 0, refused_attempts: 0, refused_amount: '0.00', refused_previous_count: 0,
+    budget_bands: { above_75: 0, above_50: 0, agents_with_budget: 0 },
+    fees: { amount: '0', previous: '0', flag_on: false },
+    gas_sponsored_ops: 0,
+  },
+  by_day: [],
+  agents: [],
+  merchants: [],
+  balance_by_day: [],
+}
+
 export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (mode === 'empty') return null
   const [pathname] = apiPath.split('?')
@@ -1358,6 +1527,11 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   // endpoint" this fixture used to claim stopped being true with the table
   // drop. Unkeyed paths fall through to FIXTURE_EMPTY_FALLBACK (#1993).
   if (pathname === '/contacts') return { contacts: FIXTURE_CONTACTS }
+  // Analytics overview (#2949, slice B #2946). Keyed by exact path: the query
+  // (range/currency/tz) does not change this fixture's answer — every range
+  // choice renders the same declared 30-day window, which keeps the capture
+  // stable whatever the page's default range is when slice C lands.
+  if (pathname === '/analytics/overview') return FIXTURE_ANALYTICS_OVERVIEW
   if (pathname === '/accounting/providers') return { providers: FIXTURE_ACCOUNTING_PROVIDERS }
   if (pathname === '/accounting/connections') return { connections: [FIXTURE_ACCOUNTING_CONNECTION] }
   if (pathname === '/accounting/feed/status') return FIXTURE_ACCOUNTING_FEED_STATUS
@@ -1414,9 +1588,10 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname.startsWith('/agents/') && pathname.endsWith('/delegations')) {
     // #2106: the delegation rail's actual spend authority, as
-    // `GET /agents/:id/delegations` returns it. `/custody` renders this on a
-    // `delegator_hybrid` account instead of the retired AllowanceModule read,
-    // so the capture has to carry both recipient states — PINNED (an
+    // `GET /agents/:id/delegations` returns it. The agent's budget card
+    // renders this on a `delegator_hybrid` account instead of the retired
+    // AllowanceModule read (formerly also `/custody`, deleted in #3024), so
+    // the capture has to carry both recipient states — PINNED (an
     // AllowedCalldataEnforcer caveat) and open — or the rendered review never
     // sees the branch that was wrong.
     if (pathname === `/agents/agent-research/delegations`) {
@@ -2603,6 +2778,30 @@ function setAccountingFeedStage(next) {
     )
   }
   accountingFeedStage = next
+}
+
+/**
+ * The shared run body for the two analytics scenarios (#2949).
+ *
+ * The `/analytics` route itself is slice C (#2947), which is gated on slice B
+ * (#2946) — so at the time these scenarios were filed the route does not exist
+ * yet, and the parity pins in `screenshot-fixture.test.ts` are the exercised
+ * half. When C lands, this run produces the desktop and 390px captures, both
+ * themes, with no further harness change. It fails LOUDLY on a missing page:
+ * a scenario that silently captured nothing would be a worse evidence gap
+ * than no scenario at all.
+ */
+async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
+  await page.goto(`${BASE_URL}/analytics`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+  await page.evaluate(() => document.fonts.ready)
+  await dismissMobileSidebar(page, vp)
+  // The title is slice C's declared PageHeader title (issue #2947), so this
+  // wait pins that the page itself arrived — not an error boundary, not a
+  // redirect to the dashboard.
+  await page.getByRole('heading', { name: 'Analytics', exact: true }).waitFor({ timeout: 15_000 })
+  if (waitForContent) await waitForContent(page)
+  await page.locator('main').first().scrollIntoViewIfNeeded()
+  await shoot(page.locator('main').first(), 'page')
 }
 
 export const SCENARIOS = {
@@ -4108,9 +4307,9 @@ export const SCENARIOS = {
     //
     // #2202: this used to DROP `account_type` rather than set it. `railOf`
     // read the two identically at the time (it is deleted since #2413, and
-    // `lib/custody-rail.ts` now only records its removal), so nothing
-    // rendered differently — but an ABSENT `account_type` is not a state the
-    // API can serve: the column is `NOT NULL DEFAULT 'safe'`
+    // the custody page that once recorded its removal is itself deleted now,
+    // #3024), so nothing rendered differently — but an ABSENT `account_type`
+    // is not a state the API can serve: the column is `NOT NULL DEFAULT 'safe'`
     // (`041_hybrid_accounts.ts:29`) and the wire type requires the field
     // (`core/src/api-types.ts:10025`). The legacy rail has a name; this uses it.
     api(apiPath) {
@@ -4513,6 +4712,84 @@ export const SCENARIOS = {
   // — `/transactions` and `/design-system` both render the primitive and are
   // captured, and the mobile geometry sweep in
   // `e2e/transaction-row.mobile.spec.ts` measures it at 320/390/393px.
+  //
+  // ── Analytics (#2949, epic #2944 slice E) ──────────────────────────────────
+  // The endpoint fixture is the shared route-keyed `/analytics/overview` key
+  // (FIXTURE_ANALYTICS_OVERVIEW), not a scenario api() hook: slice C's page
+  // reads the same key, so page captures and the parity test hold ONE shape.
+  // `analytics-empty` serves the exported empty variant (same idiom as
+  // SCREENSHOT_FIXTURE=empty); the FAILURE path is its own scenario below.
+  'analytics-populated': {
+    description:
+      'Analytics over the populated overview fixture (#2949): merchants showing all three label resolutions (contact, receipt name, address-only), agents with a chain-read and a fallback budget, fees-off, refusals with attempts. Route is slice C (#2947) — until it lands, the scenario is exercised by the screenshot-fixture parity pins only.',
+    async run(args) {
+      await runAnalyticsScenario(args, async (page) => {
+        // Wait for the section the slice is ABOUT, so the capture cannot be a
+        // skeleton that happens to carry the right title: the top-merchants
+        // heading with the contact-labelled row's merchant name on screen.
+        //
+        // The VISIBLE one, and that word is load-bearing. `NordShield VPN`
+        // exists in two tables on this page: the merchants table (slice E,
+        // where the row's label is the merchant) and the agents table's
+        // `revealAt="xl"` "Top merchant" cell, which the Table primitive's
+        // container-keyed staging hides at the capture width (#1999 — the
+        // collapse is keyed on the container, not the viewport, and the
+        // capture's content column leaves the cell display:none). A plain
+        // `.first()` is DOM order, so it resolves to the hidden cell and the
+        // wait times out on an element Playwright can see and a reader
+        // cannot — the two-renderings rule biting at the harness. The filter
+        // asks for the rendering the reader is looking at: the desktop table
+        // at the desktop width, the mobile row at 390px, and a run where
+        // NEITHER shows the row still fails, loudly, with this call log.
+        await page.getByText('Top merchants', { exact: true }).waitFor({ timeout: 15_000 })
+        await page
+          .getByText('NordShield VPN', { exact: true })
+          .filter({ visible: true })
+          .first()
+          .waitFor({ timeout: 15_000 })
+      })
+    },
+  },
+  'analytics-empty': {
+    description:
+      'Analytics over the all-zero overview fixture (#2949) — an account with no payments, agents, merchants or balance rows in range: the page\'s own empty state, not an error. Route is slice C (#2947) — until it lands, the scenario is exercised by the screenshot-fixture parity pins only.',
+    api(apiPath) {
+      if (apiPath === '/analytics/overview') {
+        return FIXTURE_ANALYTICS_OVERVIEW_EMPTY
+      }
+      return undefined
+    },
+    async run(args) {
+      await runAnalyticsScenario(args, async (page) => {
+        // The empty state is slice C's to design; the shared body has already
+        // waited for the page itself. What this scenario additionally proves:
+        // the endpoint ANSWERED, so failure copy must be absent — asserted
+        // loudly, not left to photograph an outage as an empty state.
+        const failureCopy = await page.getByText(/could not load|try again/i).count()
+        if (failureCopy > 0) {
+          throw new Error('analytics-empty: the overview fixture answered, but failure copy is on screen')
+        }
+      })
+    },
+  },
+  'analytics-error': {
+    description:
+      'Analytics when the overview endpoint fails — a 503 via ScenarioHttpError (#1725 shape), so the capture shows the page\'s failure path (#2949). Route is slice C (#2947).',
+    api(apiPath) {
+      if (apiPath === '/analytics/overview') {
+        return httpError(503, { error: 'Service Unavailable' })
+      }
+      return undefined
+    },
+    async run(args) {
+      await runAnalyticsScenario(args, async (page) => {
+        // The failure state is slice C's to name; wait for visible failure
+        // copy rather than a selector C has not declared yet. `Try again` is
+        // the retry action C's spec calls for (one error state with retry).
+        await page.getByText(/could not load|try again/i).first().waitFor({ timeout: 15_000 })
+      })
+    },
+  },
 }
 
 function resolveScenarios(names) {

@@ -524,9 +524,26 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
 
     // The buyer whose money already moved gets the goods, and nothing is
     // submitted on-chain again. The spent read went to the PINNED enforcer.
+    //
+    // #2969: this recovery path is `already_settled_earlier` (the chain-truth
+    // check found the money already moved, in a transaction this process
+    // never observed) — a DIFFERENT fact from the skip-settle QA hook's
+    // `settlement_unknown` (#2970's original "delivered, not confirmed on-
+    // chain"), and it gets its own heading: paid, but no reference to show.
+    // No Tx: line for a hash that is not real, and no zero hash anywhere.
     expect(retry.status).toBe(200)
     expect(retry.headers.get(PAYMENT_RESPONSE_HEADER)).toBeTruthy()
-    expect(text).toContain('Purchase confirmed')
+    expect(text).toContain('Paid in an earlier transaction — the settlement reference is unavailable')
+    expect(text).not.toContain('Purchase confirmed')
+    expect(text).not.toContain('Delivered — not confirmed on-chain')
+    expect(text).toContain('"status":"already_settled_earlier"')
+    // The confirmation header's OWN Tx: line is gone (it is at the start of
+    // the text, flush-aligned like the other header fields); the invoice's
+    // separate BLOCKKEDJEREFERENS block is now omitted too (#2969) — there is
+    // no reference for a transaction this process never observed.
+    expect(text).not.toMatch(/Tx:       0x0{64}/)
+    expect(text).not.toContain('BLOCKCHAIN REFERENCE')
+    expect(text).not.toContain(`0x${'0'.repeat(64)}`)
     expect(second.submitRedeemDelegations).not.toHaveBeenCalled()
     expect(second.spentOnDelegation).toHaveBeenCalledWith(ENFORCER, DELEGATION_MANAGER, LEAF_HASH)
   })

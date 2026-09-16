@@ -22,7 +22,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-09-09"
+last-verified: "2026-09-14"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -152,7 +152,13 @@ MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb
 ```
 
 The second setting creates the deterministic stranded-balance condition used by
-the sweep-recovery scenario.
+the sweep-recovery scenario. Since #2989, the merchant discloses the fixture to
+any agent that queries it — `list_products` (structured `qa_fixture` field plus
+a text line), the product's 402 challenge `description`, and the discovery
+document (`GET /` / `GET /.well-known/haven-demo-merchant`) all carry it on
+`storage_50gb` only, so a cold agent sees at quote time — before signing — that
+this specific purchase settles nothing on-chain and its receipt will read
+"Delivered — not confirmed on-chain".
 
 ### Preflight: resources every run consumes (#1530)
 
@@ -253,6 +259,31 @@ no `status`, and the harness falls back to the old single-boolean behaviour
 (below the old floor blocks) rather than crashing or silently passing — and a
 merchant that predates the whole block still reports unknown and does not
 block, as before.
+
+**The merchant enforces the same fail band on `/mcp` itself, not only on the
+preflight's `/healthz` read
+([#2979](https://github.com/d-hinders/Haven-AI/issues/2979)).** Before this,
+`/healthz` reporting `fail` only stopped a QA run that checked it first — the
+merchant's own `POST /mcp` still issued 402 challenges and let an agent sign
+an authorization it could never settle. Now every PAID `tools/call` is gated
+on the same `readiness()` read (cached ~15s per merchant process) — on the
+unpaid call that would receive the 402 challenge and on the agent's signed
+retry alike, so a wallet that drains between the two is caught before
+settlement. In the `fail` band the merchant answers
+`HTTP 503 { error: 'merchant_not_ready', reason_code:
+'settlement_wallet_out_of_gas', settlements_remaining, fail_floor,
+retry_after_s }` with a matching `Retry-After` header, and no 402 is ever
+issued. `warn` and an unknown (throwing) read both proceed unchanged, same
+rule as `/healthz`; free tools and the `MERCHANT_SKIP_SETTLE_PRODUCT` fixture
+below are exempt because they settle nothing. This is a second, independent
+line of defense — a QA harness that skips the preflight, or races a topped-up
+run against a wallet draining mid-flight, still cannot get a merchant to sign
+away goods it cannot pay to settle.
+
+The existing merchant-fault 402 body also now carries a machine-readable
+`reason_code` (`settlement_wallet_out_of_gas` / `settlement_rpc_unreachable`
+/ `merchant_fault`), additive to the existing fault-class message — useful
+when triaging a run's red legs without re-reading the prose.
 
 ### 4. Run the seed locally
 
@@ -531,6 +562,25 @@ the same settling product `x402-hosted-mcp-signer` uses — **never** CloudNest
 `MERCHANT_SKIP_SETTLE_PRODUCT` verify-without-settle fixture on dev
 (`x402-delegation-3009-sweep`'s fixture): funds would strand on the delegate by
 design, and this leg's zero-residual assertion would be asserting a lie.
+
+**#2970 — the skip-settle fixture's new observable.** Buying the fixture
+through the hosted erc7710 settle/complete tools no longer reads as a normal
+purchase: the merchant's confirmation and invoice say "delivered — not
+confirmed on-chain" (no `Tx:` line, since the zero hash the fixture hands back
+is not a real transaction), and the hosted tool answers `settled: false`,
+`code: 'DELIVERED_UNSETTLED'`, `next_action: check_status_later`. This is the
+honest shape for a fixture that deliberately never settles — before #2970 it
+answered `settled: true` on the zero hash, which is the F2 finding this issue
+closed. `haven_get_payment_status` on the same payment answers
+`check_status_later` inside the settlement window and
+`awaiting_settlement_evidence` once it passes, since nothing will ever report
+evidence for a deliberately-skipped settlement. **#2972 — this stays true even
+with the new remedy tool.** `haven_report_settlement_evidence` refuses a zero
+settlement hash client-side before any network call
+(`isZeroSettlementTxHash`, the same recognizer the fixture's own marker
+matches), so there is no way to "unstick" this fixture's payment by reporting
+its zero hash back to Haven — the tool is a remedy for a REAL hash the agent
+is holding, not a way to force-settle a deliberately-skipped one.
 
 Two skip conditions are specific to this leg, both unmet-precondition, never a
 code defect:

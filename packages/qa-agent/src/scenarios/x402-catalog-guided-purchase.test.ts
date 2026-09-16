@@ -135,6 +135,9 @@ const settled = (over: Record<string, unknown> = {}) => ({
   payment_id: 'pay_catalog_1',
   funding_tx_hash: FUNDING_TX,
   settled: true,
+  // #2968: the settled arm carries the delivery half of the vocabulary —
+  // the scenario asserts the two fields AGREE on every erc7710 response.
+  delivered: true,
   settlement_tx_hash: MERCHANT_TX,
   result: { content: [{ text: 'VPN basic purchased' }] },
   allowance: {
@@ -632,6 +635,9 @@ describe('the erc7710 shape (#1547)', () => {
     settlement_scheme: 'erc7710',
     funding_tx_hash: null,
     settled: true,
+    // #2968: the settled arm carries the delivery half of the vocabulary —
+    // the scenario asserts the two fields AGREE on every erc7710 response.
+    delivered: true,
     settlement_tx_hash: MERCHANT_TX,
     result: { content: [{ text: 'VPN basic purchased' }] },
     allowance: {

@@ -3,7 +3,7 @@ owner: "@AntonioSaaranen"
 status: current
 covers:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-08-29"
+last-verified: "2026-09-15"
 ---
 
 # CASP verification log — sharded entries (#1366)

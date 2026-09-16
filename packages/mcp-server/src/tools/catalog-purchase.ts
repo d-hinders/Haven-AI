@@ -223,7 +223,24 @@ export function createCatalogPurchaseHandlers(
           if (paySelection.scheme === 'erc7710') {
             const prepared = await haven.prepareX402Erc7710(
               quote.paymentRequired as X402PaymentRequired,
-              { resourceUrl: merchantUrl, delegationRail: true },
+              {
+                resourceUrl: merchantUrl,
+                delegationRail: true,
+                // #3042 (scan B2, measured live on dev): this branch never
+                // passed the key, so a retried call minted a SECOND
+                // independently-signable settlement child — on this scheme
+                // the signed artifact IS spend authority. The backend has
+                // deduped on it all along (`findX402IntentByIdempotencyKey`
+                // before the shape branch). EXPLICIT key only, as #2041 did in
+                // plain-http-x402.ts — NOT the 3009 branch's
+                // `?? quote.idempotencyKey`: on the MCP quote path that
+                // fallback is never null (the SDK derives a 5-minute-bucket
+                // key without the tool arguments), so it would silently
+                // dedupe unkeyed calls too — a `submitted` child answering 409
+                // for the rest of the bucket, two different `arguments` at one
+                // price colliding. Auto-keys are scan F3, designed on purpose.
+                ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
+              },
             )
             return {
               payment_id: prepared.paymentId,
@@ -399,17 +416,31 @@ export function createCatalogPurchaseHandlers(
       runTool(async () => {
         const args = parseStrict('haven_quote_mcp_tool', input)
         const toolArguments = (args.arguments as Record<string, unknown> | undefined) ?? {}
+        // #2991: prefetch the agent so the quote can PREDICT the settlement
+        // scheme prepare/pay will actually select (expected_settlement_scheme
+        // / expected_funding_leg). Started BEFORE quoteMcpToolCall so it
+        // dedupes with quoteMcpX402's own internal getAgent() read
+        // (AccountReads' in-flight cache — #1456's one-round-trip budget is
+        // unaffected). Non-throwing, same `.then(a => a, () => undefined)`
+        // convention as the pay/prepare prefetches: a failed read degrades
+        // the prediction to null + a warning, never a quote-tool failure.
+        const agentPrefetch = haven.getAgent().then(
+          (a) => a,
+          () => undefined,
+        )
         const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
           merchantUrl: args.merchant_url as string,
           toolName: args.tool_name as string,
           toolArguments,
         })
+        const agent = await agentPrefetch
         return buildMcpToolQuoteResponse({
           quote,
           merchantUrl,
           toolName: args.tool_name as string,
           toolArguments,
           requestedMerchantUrl: args.merchant_url as string,
+          agent,
         })
       }),
 
@@ -621,6 +652,12 @@ export function createCatalogPurchaseHandlers(
                 // call by payment_id — the guided path's no-state-threading
                 // contract (#1305) holds on this scheme too.
                 mcpCallContext: catalogCallContext,
+                // #3042 (scan B2): the key was dropped here too — four live
+                // prepares, two with the SAME explicit key, produced four
+                // erc7710 intents. Explicit key only; see the
+                // haven_pay_mcp_tool twin above for why not the 3009
+                // fallback.
+                ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
               },
             )
             return {
@@ -800,11 +837,19 @@ export function createCatalogPurchaseHandlers(
         const args = parseStrict('haven_quote_catalog_purchase', input)
         const entry = await getUsableCatalogMcpEntry(haven, args.catalog_id as string)
         const toolArguments = entry.toolArguments ?? {}
+        // #2991: same non-throwing prefetch as haven_quote_mcp_tool, started
+        // BEFORE quoteMcpToolCall so it dedupes with its internal getAgent()
+        // read — see that tool's comment for the full rationale.
+        const agentPrefetch = haven.getAgent().then(
+          (a) => a,
+          () => undefined,
+        )
         const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
           merchantUrl: entry.resourceUrl,
           toolName: entry.toolName,
           toolArguments,
         })
+        const agent = await agentPrefetch
         return buildMcpToolQuoteResponse({
           quote,
           merchantUrl,
@@ -812,6 +857,7 @@ export function createCatalogPurchaseHandlers(
           toolArguments,
           requestedMerchantUrl: entry.resourceUrl,
           catalog: entry,
+          agent,
         })
       }),
 

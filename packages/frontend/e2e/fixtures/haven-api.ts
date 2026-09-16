@@ -8,9 +8,10 @@ export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
  * The shared account — on the LIVE delegation rail (#2264, epic #1440).
  *
  * It carried no `account_type` at all until #2264, and `railOf` reads
- * anything-but-`delegator_hybrid` as the legacy Safe rail
- * (`lib/custody-rail.ts`), so every spec in this suite rendered the app as it
- * looks for a **retired-rail** user. `browser_smoke` and `design_visual` were
+ * anything-but-`delegator_hybrid` as the legacy Safe rail (the retired custody
+ * page's rail helper, deleted with the page itself in #3024), so every spec
+ * in this suite rendered the app as it looks for a **retired-rail** user.
+ * `browser_smoke` and `design_visual` were
  * therefore pinning the pixel-and-DOM behaviour of a configuration that answers
  * HTTP 410 in production (#1986): green, and true about nobody.
  *
@@ -62,7 +63,7 @@ export const testAgent = {
   safe_address: testSafeAddress,
   safe_name: testSafe.name,
   api_key_prefix: 'haven_e2e',
-  status: 'active',
+  status: 'active' as const,
   // #2264: the agent's rail marker. It is not an `agents` column — every
   // agent-row read selects it as `us.account_type` off the joined `user_safes`
   // row (`infra/repositories/agents.ts`), so it must agree with `testSafe`,
@@ -94,14 +95,14 @@ export const testAgent = {
 
 export const dashboardTransaction = {
   hash: `0x${'ab'.repeat(32)}`,
-  type: 'erc20',
+  type: 'erc20' as const,
   from: testSafeAddress,
   to: testRecipientAddress,
   value: '12500000',
   valueFormatted: '12.50',
   asset: 'USDC',
   decimals: 6,
-  direction: 'out',
+  direction: 'out' as const,
   timestamp: 1_779_000_000,
   blockNumber: 12_345,
   isError: false,
@@ -125,7 +126,7 @@ export const dashboardTransaction = {
   paymentId: 'pay-research-1',
   accounting: {
     provider: 'fortnox',
-    status: 'pushed',
+    status: 'pushed' as const,
     externalRef: 'fortnox:supplierinvoice:11',
     error: null,
   },
@@ -204,9 +205,9 @@ export const dashboardOverview = {
 export const accountingProvider = {
   id: 'fortnox',
   displayName: 'Fortnox',
-  authKind: 'oauth2',
+  authKind: 'oauth2' as const,
   capabilities: { attachments: true, verify: true, revoke: true, companyInfo: true },
-  availability: 'live',
+  availability: 'live' as const,
   requiredScopes: ['bookkeeping', 'companyinformation', 'archive'],
   configured: true,
 }
@@ -218,7 +219,7 @@ export const accountingProviders = [
     id: displayName.toLowerCase(),
     displayName,
     capabilities: { attachments: false, verify: false, revoke: false, companyInfo: false },
-    availability: 'coming_soon',
+    availability: 'coming_soon' as const,
     requiredScopes: [],
     configured: false,
   })),
@@ -227,8 +228,8 @@ export const accountingProviders = [
 export const accountingConnection = {
   provider: 'fortnox',
   displayName: 'Fortnox',
-  authKind: 'oauth2',
-  status: 'connected',
+  authKind: 'oauth2' as const,
+  status: 'connected' as const,
   statusReason: null,
   isActiveDestination: true,
   feedFrom: '2026-05-01T10:00:00.000Z',
@@ -259,7 +260,7 @@ export const accountingFeedSync = {
   provider: 'fortnox',
   payment_id: 'pay_01HZX8KQ4M2N3P5R7T9V1W3Y5A',
   external_ref: 'fortnox:supplierinvoice:1042',
-  status: 'pushed',
+  status: 'pushed' as const,
   error: null as string | null,
   attempts: 1,
   created_at: '2026-05-02T09:15:00.000Z',
@@ -274,7 +275,7 @@ export const accountingFeedStatus = {
   flagEnabled: true,
   liveSyncReady: true,
   entitled: true,
-  entitlementMode: 'all',
+  entitlementMode: 'all' as const,
   available: true,
   connected: true,
   companyName: accountingConnection.externalCompanyName as string | null,
@@ -295,7 +296,7 @@ export const accountingFeedStatus = {
       id: '2a7c9e1b-3d5f-4a6c-8e0b-2f4d6a8c0e1f',
       payment_id: 'pay_01HZX8M0R6S8U0W2Y4A6C8E0G2',
       external_ref: null,
-      status: 'failed',
+      status: 'failed' as const,
       error: 'Fortnox answered 503 — will retry',
       attempts: 2,
       created_at: '2026-05-03T11:00:00.000Z',
@@ -340,7 +341,7 @@ export const accountingFeedAttention = {
   companyName: null,
   destination: {
     ...(accountingFeedStatus.destination as Record<string, unknown>),
-    status: 'needs_reauthorisation',
+    status: 'needs_reauthorisation' as const,
     companyName: null,
     lastPushAt: null,
   } as Record<string, unknown> | null,

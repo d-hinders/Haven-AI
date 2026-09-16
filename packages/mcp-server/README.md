@@ -63,6 +63,7 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_list_receipts` | `GET /machine-payments/receipts` | no |
 | `haven_sweep_delegate` | gasless stranded-funds sweep prepare/submit | no — relays signed sweep |
 | `haven_report_x402_outcome` | `POST /machine-payments/reconciliation-events` (rejected) or `POST /machine-payments/evidence` (accepted) | no — records a caller-asserted outcome; contacts no merchant |
+| `haven_report_settlement_evidence` | `POST /machine-payments/evidence` (fail-closed on-chain verification of an erc7710 settlement hash the agent holds; #2972) | no — hands over a hash; contacts no merchant |
 
 `haven_pay` returns `{ payment_id, payload_hash, expires_at }` in-budget. A
 payment outside the agent's on-chain budget, recipient pin or expiry is declined
@@ -91,6 +92,7 @@ sequenceDiagram
     Hosted->>Hosted: relay funding signature and wait for confirmation
     Hosted->>Merchant: tools/call with signed payment header (both wire names)
     Merchant-->>Hosted: tool result
+    Hosted->>Hosted: verify the merchant's reported settlement on-chain (fail-closed, #2971)
     Hosted-->>Agent: settled result + evidence/reconciliation status
 ```
 
@@ -106,7 +108,14 @@ Use these fully-qualified next steps when an agent discovers tools at runtime:
    process.
 3. `mcp__haven__haven_settle_mcp_tool` relays the signed funding artifact, waits
    for confirmation, then relays the already-signed merchant header and records
-   evidence or reconciliation against the funding payment.
+   evidence or reconciliation against the funding payment. Since #2971,
+   "settled" means verified: on erc7710 the tool answers `settled: true` only
+   after the backend has confirmed the merchant's reported settlement hash
+   on-chain, and otherwise returns `DELIVERED_UNSETTLED` or
+   `SETTLEMENT_PENDING` with `next_action: check_status_later` — an agent
+   holding the merchant's settlement hash can hand it to
+   `mcp__haven__haven_report_settlement_evidence` (#2972) for fail-closed
+   verification.
 
 The five-call decomposed path remains available for debugging and advanced
 agents:

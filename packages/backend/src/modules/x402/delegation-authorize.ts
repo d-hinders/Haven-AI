@@ -31,6 +31,7 @@ import {
 import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
+import { recordRefusalFireAndForget } from '../payments/refusal-ledger.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
@@ -185,6 +186,26 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         const fundingShortfallAtomic = amountRaw - fundingRemainingAtomic
         const fundingRemainingHuman = formatTokenValue(fundingRemainingAtomic.toString(), tokenConfig.decimals)
         const fundingShortfallHuman = formatTokenValue(fundingShortfallAtomic.toString(), tokenConfig.decimals)
+        // #2945: the refusal is decided — record it fire-and-forget (the
+        // ledger write can never change this response; see refusal-ledger.ts).
+        recordRefusalFireAndForget({
+          userId: agent.user_id,
+          agentId: agent.id,
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          amountAtomic: amountRaw.toString(),
+          accountAddress: agent.account_address,
+          merchantTo: merchantPayTo.toLowerCase(),
+          resourceUrl: url,
+          reason: 'delegation_budget_exceeded',
+          source: 'x402_authorize',
+          detail: {
+            error_code: 'delegation_budget_exceeded',
+            phase: AgentPaymentPhase.InsufficientFunds,
+            next_action: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
+            remaining_atomic: fundingRemainingAtomic.toString(),
+          },
+        })
         return {
           code: 403,
           body: {
@@ -267,7 +288,17 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // payment_id instead of the agent re-threading it.
       // #1355: same persistence for the full 402 PaymentRequired, so
       // sign-context can re-serve it and the signer needs only payment_id.
-      metadata: { network, settlement_scheme: 'eip3009', mcp_call_context: mcpCallContext ?? null, payment_required: paymentRequired ?? null },
+      // #2960: `delegate_account_address` is written at authorize on both
+      // delegation-rail legs so receipts/status can carry `parties.delegate_account`
+      // without a per-row RPC read. On this leg it is the account the funding
+      // leg mints the UserOp for, computed above as `fundingAuth.prepared.delegateAccountAddress`.
+      metadata: {
+        network,
+        settlement_scheme: 'eip3009',
+        mcp_call_context: mcpCallContext ?? null,
+        payment_required: paymentRequired ?? null,
+        delegate_account_address: fundingAuth.prepared.delegateAccountAddress,
+      },
       executionRail: 'delegation',
       delegationHash: fundingAuth.delegationHash,
       // #1059: on the funding leg the budget IS the signed instrument.
@@ -354,6 +385,21 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
 
   const budget = await selectDelegation(agent.id, tokenAddress, payTo.toLowerCase())
   if (!budget) {
+    // #2945: this 403 is how a recipient pin refuses on this rail — named
+    // for what it is, not distinguishable from no-delegation. Fire-and-forget.
+    recordRefusalFireAndForget({
+      userId: agent.user_id,
+      agentId: agent.id,
+      chainId: agent.chain_id,
+      tokenSymbol: tokenConfig.symbol,
+      amountAtomic: amountRaw.toString(),
+      accountAddress: agent.account_address,
+      merchantTo: payTo.toLowerCase(),
+      resourceUrl: url,
+      reason: 'no_delegation_for_target',
+      source: 'x402_authorize',
+      detail: { error_code: 'no_delegation_for_target' },
+    })
     return { code: 403, body: { error: `Agent has no active budget delegation for ${tokenConfig.symbol} to this merchant` } }
   }
 
@@ -420,6 +466,26 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     // make it actionable: MCP's `normalizeError` reads `phase`/`next_action`
     // straight off the body, so an agent is told to ask its owner to raise
     // the budget rather than to retry.
+    // #2945: the refusal is decided — record it fire-and-forget (the
+    // ledger write can never change this response; see refusal-ledger.ts).
+    recordRefusalFireAndForget({
+      userId: agent.user_id,
+      agentId: agent.id,
+      chainId: agent.chain_id,
+      tokenSymbol: tokenConfig.symbol,
+      amountAtomic: amountRaw.toString(),
+      accountAddress: agent.account_address,
+      merchantTo: payTo.toLowerCase(),
+      resourceUrl: url,
+      reason: 'delegation_budget_exceeded',
+      source: 'x402_authorize',
+      detail: {
+        error_code: 'delegation_budget_exceeded',
+        phase: AgentPaymentPhase.InsufficientFunds,
+        next_action: AgentPaymentNextAction.FundSafeOrRaiseAllowance,
+        remaining_atomic: remainingAtomic.toString(),
+      },
+    })
     return {
       code: 403,
       body: {
@@ -558,7 +624,15 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     // parsing prepared_user_op. The hash-semantics column is the follow-up.
     // #1307: same merchant-call-context persistence as the 3009 branch above.
     // #1355: same payment_required persistence as the 3009 branch above.
-    metadata: { network, settlement_scheme: 'erc7710', mcp_call_context: mcpCallContext ?? null, payment_required: paymentRequired ?? null },
+    // #2960: `delegate_account_address` is this leg's own delegator — the
+    // one the merchant's PAYMENT-RESPONSE.payer names on this scheme.
+    metadata: {
+      network,
+      settlement_scheme: 'erc7710',
+      mcp_call_context: mcpCallContext ?? null,
+      payment_required: paymentRequired ?? null,
+      delegate_account_address: delegateAccountAddress,
+    },
     executionRail: 'delegation',
     delegationHash: built.childHash,
     // #1059: the CHILD is signed, but the parent budget does the metering —

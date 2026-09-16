@@ -1645,6 +1645,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/analytics/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.
+         * @description Everything the `/analytics` page renders in one round trip, so the page has one loading state and one "based on N payments" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz`. Delegation-rail accounts only.
+         */
+        get: operations["getAnalyticsOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chains": {
         parameters: {
             query?: never;
@@ -2741,13 +2761,13 @@ export type components = {
             status: "active" | "degraded" | "delisted";
             verified_at: string | null;
             /**
-             * @description Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches; no verification badges). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.
+             * @description Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches for the listing; no domain-ownership proof runs). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.
              * @enum {string}
              */
             source: "operator" | "ingestion";
-            /** @description True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows, which have a different (operator) trust story. */
+            /** @description True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows: no ownership proof ever runs for them, and this field must not claim one. */
             domain_verified: boolean;
-            /** @description True only for `ingestion` entries that a leader-locked, SSRF-hardened, read-only probe watched answer a real x402 quote. The badge claims domain-control AND verified-payable — never merchant honesty, quality, or settlement reliability. */
+            /** @description True when Haven watched this endpoint answer a real x402 (or MPP) quote in its periodic probe: for `ingestion` rows that is the SSRF-hardened directory probe; for `operator` rows it is the catalog refresh probe (`status === active && verified_at` set) — same observation, no domain-ownership claim attached. False for a degraded row, or an operator row with no `verified_at` (migration 058 seeds its demo rows with one, so on a fresh database those carry the badge before the first refresh tick). Never treat this badge as proof of merchant honesty, quality, or settlement reliability. */
             verified_payable: boolean;
         };
         CatalogSubmitRequest: {
@@ -2803,7 +2823,7 @@ export type components = {
          * @description Stable next action an agent should take for a Haven payment state.
          * @enum {string}
          */
-        AgentPaymentNextAction: "sign_and_submit_payment" | "check_status_later" | "none" | "wait_for_user_approval" | "wait_for_user_to_complete_payment" | "retry_original_x402_request" | "stop_and_tell_user" | "request_again_if_user_still_wants_it" | "retry_with_explicit_context" | "payment_window_expired" | "fund_safe_or_raise_allowance" | "sweep_stranded_funds" | "fund_account_or_raise_allowance";
+        AgentPaymentNextAction: "sign_and_submit_payment" | "check_status_later" | "none" | "wait_for_user_approval" | "wait_for_user_to_complete_payment" | "retry_original_x402_request" | "stop_and_tell_user" | "request_again_if_user_still_wants_it" | "retry_with_explicit_context" | "payment_window_expired" | "fund_safe_or_raise_allowance" | "sweep_stranded_funds" | "awaiting_settlement_evidence" | "fund_account_or_raise_allowance";
         /**
          * @description Stable rail identifier for Haven agent payment states.
          * @enum {string}
@@ -3353,6 +3373,16 @@ export type components = {
             description: string | null;
             idempotency_key: string | null;
         };
+        Parties: {
+            /** @description The owner smart account the funds left. */
+            treasury_account: string | null;
+            /** @description The agent's signing EOA. */
+            delegate: string | null;
+            /** @description The agent's delegate smart account (erc7710 `delegator`), persisted at authorize time. Null for rows authorized before #2960 and on the legacy rail. */
+            delegate_account: string | null;
+            /** @description `payTo`. */
+            merchant: string | null;
+        };
         AgentPaymentStatus: {
             /** Format: uuid */
             payment_id: string;
@@ -3371,20 +3401,38 @@ export type components = {
             /** Format: uri */
             resource_url: string | null;
             merchant_address: string | null;
-            /** @description Delegate EOA captured on a payment intent. */
+            /**
+             * @deprecated
+             * @description Delegate EOA captured on a payment intent. Deprecated: same value as `parties.delegate`; prefer `parties`.
+             */
             payer_address?: string | null;
+            parties?: components["schemas"]["Parties"];
             tx_hash: string | null;
             /** Format: date-time */
             expires_at: string;
             chain_id: number;
             message: string;
+            fee?: {
+                amount: string;
+                token: string;
+                basis_points: number;
+                applied: boolean;
+            } | null;
             amount_atomic?: string | null;
             asset?: string | null;
             network?: string | null;
             description?: string | null;
             idempotency_key?: string | null;
             x402?: components["schemas"]["RailContext"];
-            mpp?: components["schemas"]["RailContext"] & {
+            mpp?: {
+                amount_atomic: string | null;
+                asset: string | null;
+                network: string | null;
+                /** Format: uri */
+                resource_url: string | null;
+                merchant_address: string | null;
+                description: string | null;
+                idempotency_key: string | null;
                 challenge_id?: string | null;
             };
         };
@@ -3711,12 +3759,20 @@ export type components = {
             budget_delegation_hash?: string | null;
             /** @enum {string} */
             proof_status: "payment_confirmed" | "merchant_response_observed" | "protocol_receipt_attached";
+            /** @description Deprecated (#2998) — kept for wire compatibility. Meaning depends on `settlement_scheme`: the account → delegate funding transaction on eip3009, the (only) settlement transaction on erc7710. Prefer `funding_tx_hash` / `settlement_tx_hash`, which name which is which. */
             tx_hash: string;
+            /** @description The account → delegate funding transaction, relayed by Haven (#2998). Set on eip3009 and on scheme-less retired-x402-rail rows; null on erc7710 (no funding leg) and on scheme-less retired mpp-rail rows (one direct account → merchant transaction, which is the settlement). */
+            funding_tx_hash?: string | null;
+            /** @description The delegate → merchant settlement transaction (#2998). On erc7710 this is `tx_hash` itself (the one transaction). On eip3009 this is the merchant-reported `protocol_receipt_payload.transaction` when it is a non-zero 0x-prefixed 32-byte hash, else null — the merchant has not reported a settlement yet, or reported the zero-hash "delivered, not settled" marker. Trust level differs by scheme: on erc7710 Haven verified this hash on-chain before the receipt existed; on eip3009 it is the merchant's claim as relayed (PAYMENT-RESPONSE), NOT verified on-chain by Haven. On scheme-less retired mpp-rail rows it is `tx_hash` itself. */
+            settlement_tx_hash?: string | null;
             chain_id: number;
             /** Format: uri */
             resource_url: string;
             merchant_address?: string | null;
-            /** @example 0x1111111111111111111111111111111111111111 */
+            /**
+             * @description The treasury account — same as `parties.treasury_account`; prefer `parties`.
+             * @example 0x1111111111111111111111111111111111111111
+             */
             payer_address?: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             settlement_address?: string;
@@ -3733,6 +3789,7 @@ export type components = {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            parties?: components["schemas"]["Parties"];
         } & {
             [key: string]: unknown;
         };
@@ -11913,6 +11970,175 @@ export interface operations {
                 };
             };
             /** @description Unparseable dates, or from is not before to. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAnalyticsOverview: {
+        parameters: {
+            query: {
+                /** @description Window length ending now. */
+                range: "7d" | "30d" | "90d";
+                /** @description Display currency — a sum of already-booked values, never re-converted. */
+                currency?: "usd" | "eur";
+                /** @description IANA time zone used to bucket `by_day`. Defaults to UTC; an unrecognized zone is a 400. */
+                tz?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The full analytics-overview aggregate for the requested window. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        range: {
+                            /** Format: date-time */
+                            from: string;
+                            /** Format: date-time */
+                            to: string;
+                            /** @enum {integer} */
+                            days: 7 | 30 | 90;
+                            /** Format: date-time */
+                            previous_from: string;
+                            /** Format: date-time */
+                            previous_to: string;
+                        };
+                        /** @enum {string} */
+                        currency: "usd" | "eur";
+                        basis: {
+                            /** @description CONFIRMED payments summed into `totals.spent`. */
+                            payments_counted: number;
+                            /** @description `submitted` rows in range, not counted as spend. */
+                            unsettled_submitted: number;
+                            /** @description Distinct `payment_refusals` rows (the dedupe makes rows != attempts). */
+                            refusals_counted: number;
+                            refusal_attempts: number;
+                            fee_rows: number;
+                            gas_sponsored_ops: number;
+                            snapshot_days: number;
+                            /** @description The zone actually used to bucket `by_day` — UTC when the request gave none. */
+                            tz: string;
+                            /** @description The ledger floor (#3013): the earliest `payment_refusals` day (UTC `YYYY-MM-DD`) with rows, inside NO window bound — a property of the ledger, not of the requested range. `null` only when the ledger has no rows at all, so a window behind the floor reads a coverage caveat ("nothing was recorded"), not a clean zero. */
+                            refusals_recorded_from: string | null;
+                        };
+                        totals: {
+                            /** @description Sum of booked fiat, CONFIRMED only. */
+                            spent: string;
+                            spent_previous: string;
+                            refused_count: number;
+                            refused_attempts: number;
+                            /** @description Attempted amount — never "saved". A numeric string like every other money field on this response. */
+                            refused_amount: string;
+                            refused_previous_count: number;
+                            budget_bands: {
+                                /** @description Agents whose worst active delegation's used/budget ratio exceeds 75%. */
+                                above_75: number;
+                                above_50: number;
+                                agents_with_budget: number;
+                            };
+                            fees: {
+                                /** @description "0" while the fee flag is off — honest, not a placeholder. */
+                                amount: string;
+                                previous: string;
+                                flag_on: boolean;
+                            };
+                            /** @description A COUNT on value-bearing chains only — never a fiat figure. */
+                            gas_sponsored_ops: number;
+                        };
+                        by_day: {
+                            /** @description YYYY-MM-DD in the `tz` zone. */
+                            date: string;
+                            spent_by_agent: {
+                                [key: string]: string;
+                            };
+                            refusals: number;
+                        }[];
+                        agents: {
+                            /** Format: uuid */
+                            id: string;
+                            name: string;
+                            status: string;
+                            spent: string;
+                            /** @description This agent’s share of total spend across delegation-rail agents, in [0, 1]. */
+                            share: number;
+                            payments: number;
+                            refusals: number;
+                            refusal_attempts: number;
+                            budgets: {
+                                token: string;
+                                recipient: string | null;
+                                used_atomic: string;
+                                budget_atomic: string;
+                                /** @description False when the on-chain read fell back to the configured budget. */
+                                remaining_from_chain: boolean;
+                                /** Format: date-time */
+                                period_start: string;
+                                /** Format: date-time */
+                                period_end: string;
+                            }[];
+                            top_merchant: {
+                                label: string;
+                                /** @example 0x1111111111111111111111111111111111111111 */
+                                address: string;
+                            } | null;
+                            /** Format: date-time */
+                            last_payment_at: string | null;
+                        }[];
+                        /** @description Top 10 by spend. */
+                        merchants: {
+                            /** @description The user’s contact name where the address matches, else the receipt’s merchant name, else the address. */
+                            label: string;
+                            /** @example 0x1111111111111111111111111111111111111111 */
+                            address: string;
+                            spent: string;
+                            payments: number;
+                            agent_ids: string[];
+                            /** Format: date-time */
+                            first_seen: string;
+                            /** Format: date-time */
+                            last_seen: string;
+                        }[];
+                        balance_by_day: {
+                            date: string;
+                            value: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description range/currency outside the enum, or tz is not a recognized IANA zone. */
             400: {
                 headers: {
                     [name: string]: unknown;

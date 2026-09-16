@@ -63,9 +63,14 @@ prose. `supported_settlement_methods` always lists `eip3009` first when present;
 Haven's registered DelegationManager — see below).
 
 A successful `buy_vpn`/`buy_cloud_storage` call also returns a
-`structuredContent.summary` object — `{ status: 'confirmed', product_id,
-product_name, invoice_id, amount_atomic, amount, asset, network,
-settlement_tx_hash }` — for agent-facing purchase reporting. It is
+`structuredContent.summary` object — `{ status, product_id, product_name,
+invoice_id, amount_atomic, amount, asset, network, settlement_tx_hash }` — for
+agent-facing purchase reporting. `status` is `'confirmed'` with a real
+`settlement_tx_hash` on a verified settlement; on the two paths with no
+observed settlement (#2969) it is `'already_settled_earlier'` (the
+authorization moved the money in an earlier transaction this process never
+saw) or `'delivered_unsettled'` (the `MERCHANT_SKIP_SETTLE_PRODUCT` QA hook),
+and `settlement_tx_hash` is `null` — never the zero hash. It is
 **display/reporting data only**: it never replaces the `x-receipt-json` header,
 the invoice, or on-chain settlement state as the source of truth for
 bookkeeping/reconciliation, and every field is read off the already-settled
@@ -215,6 +220,43 @@ Endpoints:
   boolean (`ok` is true unless `status` is `fail`). A read failure reports
   `ok: null` + `error` instead of taking health down.
 
+### `/mcp` settlement-readiness gate (#2979)
+
+`/healthz` reporting the `fail` band was not enough on its own: before #2979,
+`/mcp` never consulted it, so a wallet with no gas left still issued 402
+challenges — the agent signed an authorization, and only then did settlement
+fail, with no way to have known beforehand.
+
+`POST /mcp` now reads the same `readiness()` signal (cached per server for
+`readinessCacheMs`, default 15s, so a busy merchant does not turn every tool
+call into an extra RPC read) on every PAID tool call — the unpaid call that
+would receive the 402 challenge and the agent's signed retry alike, so a
+wallet that drains between the two is caught before anything is settled.
+
+- **`fail`**: the call is refused with `HTTP 503` and no 402 is ever issued
+  (or, on the paid retry, nothing is settled):
+  ```json
+  {
+    "error": "merchant_not_ready",
+    "reason_code": "settlement_wallet_out_of_gas",
+    "settlements_remaining": 0,
+    "fail_floor": 12,
+    "retry_after_s": 60
+  }
+  ```
+  with a matching `Retry-After: 60` header.
+- **`warn`**: unchanged — the call proceeds normally.
+- **unknown** (the `readiness()` read itself threw, e.g. an unreachable RPC):
+  unchanged — same "never block on an unknown" rule as `/healthz`.
+- **Exempt**: free (unpaid) tools, and the `MERCHANT_SKIP_SETTLE_PRODUCT`
+  QA fixture below — neither one settles anything on-chain, so a drained
+  wallet cannot block a settlement that never runs.
+
+The existing merchant-fault 402 body (the #1517 fault-class message) also now
+carries a `reason_code` additively — `settlement_wallet_out_of_gas`,
+`settlement_rpc_unreachable`, or `merchant_fault` — so a client can branch on
+it without parsing the message prose. The message text itself is unchanged.
+
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
 `SETTLEMENT_PRIVATE_KEY` is the gas-funded key that submits USDC
 `transferWithAuthorization`; it does not need to be the receiving wallet and
@@ -245,6 +287,30 @@ scenario uses it to strand the delegate deterministically. It is
 `MERCHANT_CHAIN_ID=84532`, because a skipped settlement also skips the only
 balance check — on any real chain a listed product would hand out goods
 against a well-formed authorization from an empty wallet.
+
+Listed products are also exempt from the `/mcp` settlement-readiness gate
+(#2979) above: the gate exists to stop settling against a wallet that cannot
+afford it, and this fixture settles nothing, so a fail-band wallet cannot
+block it either.
+
+**Disclosed to the agent, not just to the operator (#2989).** Before this, a
+cold agent buying a listed product got an honest "Delivered — not confirmed
+on-chain" receipt with no way to know beforehand that the outcome was by
+design — a quality scan spent 30 minutes chasing it as a stuck payment. Every
+surface an agent reads now carries the same marker on that product, and only
+that product:
+
+- `list_products`: a `qa_fixture: { kind: "skip_settle", settles_on_chain: false }`
+  field in the matching `structuredContent.products` entry, plus a text line
+  ("QA fixture: verified but never settled on-chain — the receipt will read
+  'Delivered — not confirmed on-chain'", localized for `locale: 'sv'`).
+- The product's 402 challenge `description` — visible to the agent at quote
+  time, before it signs.
+- The discovery document (`GET /` / `GET /.well-known/haven-demo-merchant`) —
+  the same `qa_fixture` field on the product's entry.
+
+Absent (not `null` or `undefined`-valued) on every other product and on every
+other chain, so the prod shape this fixture is inert on is unchanged.
 
 ## ERC-7710 Smart-Account Payments
 

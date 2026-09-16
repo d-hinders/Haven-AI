@@ -7,7 +7,7 @@
  * One button, two states, one gesture: it flips light → dark and back. The
  * icon shows the palette on screen — `Sun` in light, `Moon` in dark — and
  * each click flips it. The full three-way choice (light / dark / system)
- * stays in Settings → Appearance, on its `SegmentedControl`; the quick
+ * stays in Settings → Theme, on its `SegmentedControl`; the quick
  * toggle is the shortcut, not the full control, so it offers no `system`
  * step and no `Monitor` glyph.
  *

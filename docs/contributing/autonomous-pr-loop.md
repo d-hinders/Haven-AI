@@ -32,7 +32,7 @@ and only comes back to you for a real decision, a blocking review finding, a
 live work overlap, or stuck CI.
 
 Pieces:
-- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default.
+- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default. Code claims in a filed body are measured commands at a named commit, and an epic additionally gets one spec-review pass plus a verdict comment before partners are pinged — the skill's [§ *Epic review*](../../.agents/skills/new-task/SKILL.md).
 - **`ship-next`** ([canonical skill](../../.agents/skills/ship-next/SKILL.md)) — **execute**: does **one** PR end-to-end, then stops. `ship-next "<task>"` is `new-task` + ship in one go.
 - **Client adapters** — Claude Code exposes thin `/new-task` and `/ship-next` wrappers; `/loop /ship-next` re-invokes one item at a time. Other clients invoke the canonical skills through their supported skill and delegation mechanisms.
 - **haven-reviewer** — the per-PR quality gate.
@@ -423,7 +423,10 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      checks**, **MCP server checks**, **MCP checks**, **Connect checks**,
      **Signer checks** — and the blocking gates **Banned product-copy terms**
      (#902), **Design-system coupling (strict)** (#1023), **Docs front-matter &
-     agent skills** (#1023) and **Contract-doc coupling** (#646). Do **not**
+     agent skills** (#1023) and **Contract-doc coupling** (#646). Inside
+     *Backend checks*, the shrink-only ratchet steps gain the request-schema
+     ratchet (#3029) — a step, not a new required context: the context list
+     above is unchanged. Do **not**
      require **Docs links & style (advisory)** — it is the deliberately
      non-gating half of `docs.yml` (#1023) — and do **not** require **Vercel
      Preview Comments**, which isn't a quality gate.

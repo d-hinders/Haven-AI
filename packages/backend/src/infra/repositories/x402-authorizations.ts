@@ -64,7 +64,8 @@ export const FIND_X402_INTENT_BY_KEY_SQL = `SELECT *
            AND (x402_idempotency_key = $2 OR machine_idempotency_key = $2)
            AND COALESCE(payment_rail, source) = 'x402'
            AND status <> 'failed'
-         ORDER BY created_at DESC
+         ORDER BY CASE WHEN status = 'expired' THEN 1 ELSE 0 END ASC,
+                  created_at DESC
          LIMIT 1`
 
 /**
@@ -72,6 +73,19 @@ export const FIND_X402_INTENT_BY_KEY_SQL = `SELECT *
  * `pending_signature` row past its expiry is still FOUND (and then lazily
  * expired by the caller to free the key). Both key columns are matched — x402
  * fills both.
+ *
+ * #3045: the ordering ranks an `expired` row BELOW a live one instead of
+ * letting `created_at DESC` hand back the newest match unconditionally. When
+ * two rows share one key (a legacy duplicate from before the hosted tools
+ * forwarded the key — #3042), the old ordering always returned the newest
+ * row; once that row was lazily expired, every later lookup kept finding the
+ * dead row, the insert hit the partial unique index on the OLDER live row the
+ * lookup could never reach, and the key answered 409 forever. With live rows
+ * ranked first, the retry reaches the row the key actually belongs to —
+ * replayed, or lazily expired on its turn so a fresh intent can be minted.
+ * A lone expired row is still found (the freeing path above needs it), so the
+ * WHERE predicate is byte-identical to the original and only the ORDER BY
+ * changed.
  */
 export async function findX402IntentByIdempotencyKey(
   agentId: string,

@@ -143,6 +143,44 @@ last-verified: "2026-09-16"
 > server twin P0 does not emit yet, and the connector reads it first when it
 > appears.
 >
+> **Re-verification (#2914, naming epic #2906 phase 5 — the CONTRACTION):**
+> the window the #2908 note above describes is CLOSED. Read that note as
+> history from here; this one states what the runtimes do now.
+>
+> - **Credential FILE reads are unchanged and remain PERMANENT.**
+>   `account_address ?? safe_address ?? safeAddress` still resolves in both
+>   `@haven_ai/signer` and `@haven_ai/mcp`, still tested against an old-shape
+>   file. A file on disk never rewrites itself, so this is not part of the
+>   window and never was. `@haven_ai/connect`'s own `identity.json` /
+>   `agent.json` fallback is the same permanent class.
+> - **The retired ENV names are gone.** `HAVEN_ACCOUNT_ADDRESS` is the only
+>   spelling read; `HAVEN_WALLET_ADDRESS` and `HAVEN_SAFE_ADDRESS` resolve to
+>   nothing. This is the one upgrade step an operator has to take: a machine
+>   configured through either old variable stops finding its account address.
+> - **The CLI sends one name.** `?accountId=` only (`?safeId=` is REFUSED by
+>   the server with a 400 naming the replacement, not ignored), `account_id`
+>   only in the connection-setup body, and `--json` / the CSV header carry
+>   `account_id` / `account_address` with the old columns dropped.
+> - **The enum flipped.** `fund_account_or_raise_allowance` is the only value
+>   the server emits and the only one the SDK taxonomy declares; the backend
+>   mirror and the SDK are still pinned key-for-key
+>   (`agent-payment-taxonomy.parity.test.ts`, 10/10).
+> - **`sign_data.components.safe` is gone**; `payer_account` is the payer.
+>   `components.account` still means the DELEGATE account address — a
+>   different address, deliberately never merged with it.
+>
+> **The version-skew contract still does not move, and that is the load-bearing
+> claim in this note.** `SUPPORTED_X402_EXPECTED_VERSIONS` is `[1, 2, 3]`, the
+> advertised capability list is the same list, and both are asserted by
+> `signer/src/naming-window-no-version-change.test.ts` beside the untouched
+> `version-skew.test.ts` — green in the signer's 210/210 run for this slice.
+> The reason holds unchanged from #2908: `components` is response metadata,
+> never part of the signed expected-context payload, and the consent hash's
+> input is the resolved ADDRESS rather than the key it arrived under, so an
+> old-file machine's acknowledgement stays valid across this contraction.
+> `MCP_VERSION`, `CONNECTOR_VERSION` and `runtime-manifest.ts` are untouched by
+> this slice, so the Supported Runtime Manifest table below stands.
+>
 > **Recent re-verification (#2258):** Connect's `pending_approval` wording
 > describes zero spending authority, with the exact sweep-recovery exception
 > documented as stranded-balance recovery only. This does not change the local
@@ -1754,8 +1792,9 @@ what each server's instructions say and why they differ in length.
   nothing local records the backend stage, and the doctor's identity probe
   reads two fields (`id`, `delegate_address`) from `GET
   /machine-payments/agent` — whose response carries `id`, `name`, `status`,
-  `safe_address`, `delegate_address`, `delegate_account_address`, `chain_id`
-  and `execution_rail`, **none of them a re-key stage**. Widening the probe
+  `account_address`, `delegate_address`, `delegate_account_address`,
+  `chain_id` and `execution_rail` since #2914, **none of them a re-key
+  stage**. Widening the probe
   would not help, because the field does not exist on that endpoint to read.
   So "never started on the agent page" and "started, revoked,
   abandoned" look identical from the machine. The second is

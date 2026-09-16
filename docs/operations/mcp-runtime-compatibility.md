@@ -457,6 +457,52 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > unchanged. Recorded rather than date-stamped because the table is what a
 > consumer reads to know which versions work together.
 
+> **Re-verification (0.2.1-alpha.0 release, 2026-09-16):** unlike the previous
+> release, this one DOES move runtime surfaces, and the table's four rows moving
+> to `0.2.1-alpha.0` is the smaller half of that. **Most of it is additive, but
+> NOT all of it — an earlier draft of this note said "additive in every case" and
+> independent review was right that this is the worst possible document in which
+> to be loose about that**, since it is what a consumer reads to decide whether
+> an upgrade is safe. Two changes alter existing behaviour:
+>
+> - **`merchant_not_ready` in the LOCAL runtime (#2983) changes a code, not just
+>   adds one.** A merchant's `503 { error: 'merchant_not_ready' }` now maps to
+>   `MERCHANT_NOT_READY`; it previously fell through to the discovery path and
+>   surfaced a different code. An unchanged caller gets a different code for the
+>   same merchant response. The same change, and #3000, also REMOVE sweep
+>   guidance from the erc7710 post-funding refusals — correctly, since erc7710
+>   has no funding leg to sweep, but the guidance text a client may surface has
+>   changed.
+> - **`settled` changes truth value (#2968, #2971).** An erc7710 payment where
+>   the merchant returned 200 without on-chain confirmation now reports
+>   `settled: false` where it reported `true`. This is the change most likely to
+>   surprise an existing integration, and it is deliberately fail-closed.
+>
+> The additive remainder: a new hosted tool `haven_report_settlement_evidence`
+> (#2973); `expected_settlement_scheme` / `expected_funding_leg` /
+> `expected_settleable` on quotes (#2991); `merchant_not_ready` parity in the
+> LOCAL runtime, which previously refused differently from hosted (#2983);
+> sign-context refusals carrying `code` / `fallback` / `next_action` like the
+> version-mismatch refusal already did (#3001); `next_action` on
+> `PRICE_EXCEEDS_MAX` / `INVALID_MAX_AMOUNT` (#2975) and on
+> `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` (#3000); and a 15-second abort on
+> `fetchX402SignContext` where it previously hung (#2985).
+>
+> **Each of those was documented in this file by the PR that shipped it** — the
+> coupling gate forces that, and a grep for every symbol above finds it here
+> already. This note does not re-state them; it records that the release
+> carries them as a set.
+>
+> **The version-skew contract itself is unchanged, with the two exceptions named
+> above stated rather than buried.** No refusal was REMOVED and no EXISTING field
+> became required, so an older signer paired with a 0.2.1 backend still
+> understands every refusal it understood before and ignores the added fields,
+> and a 0.2.1 signer against an older backend sees those fields absent — the same
+> window the contract below already describes. What an integration must
+> nonetheless re-read before upgrading is the `settled` semantics and the local
+> `merchant_not_ready` mapping: neither is a skew problem between signer and
+> backend, both are behaviour changes visible to a caller at any pairing.
+
 **Do not re-pin the four `@haven_ai/*` rows by hand.** Since
 [#1790](https://github.com/d-hinders/Haven-AI/issues/1790) `npm run release:bump`
 writes them, and a check compares each row against its own constant — on every
@@ -468,10 +514,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.2.0-alpha.0` |
-| `@haven_ai/mcp` | `0.2.0-alpha.0` |
-| `@haven_ai/sdk` | `0.2.0-alpha.0` |
-| `@haven_ai/signer` | `0.2.0-alpha.0` |
+| `@haven_ai/connect` | `0.2.1-alpha.0` |
+| `@haven_ai/mcp` | `0.2.1-alpha.0` |
+| `@haven_ai/sdk` | `0.2.1-alpha.0` |
+| `@haven_ai/signer` | `0.2.1-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

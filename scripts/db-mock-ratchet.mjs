@@ -50,12 +50,72 @@ const DB_MOCK_RE = /vi\.mock\(\s*['"][^'"]*\/db\.js['"]/g
 const POSITIONAL_RE = /mockResolvedValueOnce/g
 const EXEMPT_RE = /\/\/ db-mock-exempt: .{20,}/
 
+/**
+ * Blank out `//` line comments and block comments, keeping string and
+ * template literals intact (#3048). The ratchet used to run POSITIONAL_RE on
+ * the raw source, so a doc comment that NAMES the counted token — and house
+ * comments name it constantly, because it is the ratchet's own subject —
+ * counted itself as a phantom positional seed (`contacts.test.ts` went
+ * 6 → 7 on PR #3044 with zero new calls). Only comments are removed; the
+ * text is replaced with spaces so nothing else shifts. Strings are tracked
+ * because a `//` inside `'https://…'` is not a comment, and template
+ * literals because a backtick string may span lines. Regex literals are NOT
+ * tracked — three consequences, all absent from the tree today (review of
+ * #3049 probed every backend test file): a `//` inside a regex (`/\/\//`)
+ * blanks the rest of that line, so a real call AFTER it on the same line is
+ * missed; a `/*` inside a regex (`/\/*$/`) opens a phantom block comment
+ * that swallows real calls until the next `*` `/`; a quote inside a regex
+ * (`/'/`) followed by a comment naming the token over-counts it. Parsing
+ * regex literals is what a real tokenizer is for; if one of these shapes
+ * ever lands in a test, this is the comment to come back to. The two other
+ * strippers in the repo were not reused on purpose:
+ * `scripts/ci/lib/strip-comments.mjs` is the prose-claim scanner's (no
+ * string tracking, joins literals) and `stripCommentsOutsideStrings` in
+ * `packages/backend/src/openapi/route-inventory.ts` is TypeScript.
+ */
+export function stripComments(source) {
+  let out = ''
+  let i = 0
+  const n = source.length
+  while (i < n) {
+    const c = source[i]
+    const next = source[i + 1]
+    if (c === '/' && next === '/') {
+      while (i < n && source[i] !== '\n') { out += ' '; i++ }
+      continue
+    }
+    if (c === '/' && next === '*') {
+      out += '  '; i += 2
+      while (i < n && !(source[i] === '*' && source[i + 1] === '/')) {
+        out += source[i] === '\n' ? '\n' : ' '; i++
+      }
+      if (i < n) { out += '  '; i += 2 }
+      continue
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      const quote = c
+      out += c; i++
+      while (i < n && source[i] !== quote) {
+        if (source[i] === '\\' && i + 1 < n) { out += source[i] + source[i + 1]; i += 2; continue }
+        if (quote !== '`' && source[i] === '\n') break
+        out += source[i]; i++
+      }
+      if (i < n) { out += source[i]; i++ }
+      continue
+    }
+    out += c; i++
+  }
+  return out
+}
+
 /** Count both patterns in one file's source; null when the file is exempt. */
 export function scanSource(source) {
   if (EXEMPT_RE.test(source)) return null
   const counts = {}
   const dbMocks = source.match(DB_MOCK_RE)?.length ?? 0
-  const positional = source.match(POSITIONAL_RE)?.length ?? 0
+  // Code, not prose (#3048). The db.js count stays on the raw source by the
+  // issue's scope; its token does not appear in comments today.
+  const positional = stripComments(source).match(POSITIONAL_RE)?.length ?? 0
   if (dbMocks > 0) counts['db-mock'] = dbMocks
   if (positional > 0) counts['positional'] = positional
   return counts

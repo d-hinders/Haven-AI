@@ -12,7 +12,7 @@ covers:
   - scripts/db-mock-ratchet.mjs
   - scripts/lib/ratchet.mjs
   - packages/backend/db-mock-baseline.json
-last-verified: "2026-09-09"
+last-verified: "2026-09-16"
 ---
 
 # Backend testing strategy: the real-database rule
@@ -735,7 +735,10 @@ not a harness change.
 `backend_checks`) counts `vi.mock('…/db.js')` occurrences and
 `mockResolvedValueOnce` chain length per test file against
 `packages/backend/db-mock-baseline.json` — **shrink-only**, on the shared
-`scripts/lib/ratchet.mjs` engine.
+`scripts/lib/ratchet.mjs` engine. The chain count is taken on the source with
+comments stripped (#3048): a comment that names the token — house comments
+do, since it is the ratchet's own subject — is prose, not a seed, and no
+longer trips the gate or pads the baseline.
 
 Counts, not coverage, deliberately: a coverage percentage can be satisfied
 without proving anything and rewards touching whatever is easiest; these

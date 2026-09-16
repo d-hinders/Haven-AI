@@ -365,6 +365,27 @@ export const ROUTING_MATRIX = [
       'skill, only of the runbook.',
   },
   {
+    files: ['packages/backend/src/infra/chain/x402-binding-signer.ts'],
+    expect: ['code', 'backend', 'mcp_server'],
+    kind: CONTRACT,
+    why:
+      'The producer of the Haven-signed x402 expected context (#3046). The mcp-server ' +
+      'wire-contract suite imports THIS file across the package boundary — the only runtime ' +
+      'import of backend/src from any other package — and runs only in mcp_server_checks. ' +
+      'A backend-only PR (#3023) changed its import graph and the MCP job never ran; dev runs ' +
+      'skip that job by surface, so the contract proof was absent until the next mcp-server ' +
+      'PR failed. `backend` is the generic arm; `mcp_server` is what the manifest entry adds. ' +
+      'Nothing fans out from backend, so the entry is the only mechanism (#2727 shape).',
+  },
+  {
+    files: ['packages/backend/src/config/boolean-flag.ts'],
+    expect: ['code', 'backend', 'mcp_server'],
+    kind: CONTRACT,
+    why:
+      'The one backend module the binding signer reaches (#3046); it must stay import-free, ' +
+      'and an import added here can only be caught by the mcp-server job, so a change routes it.',
+  },
+  {
     files: ['scripts/dep-lint.test.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,

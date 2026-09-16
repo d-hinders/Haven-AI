@@ -924,6 +924,12 @@ describe('haven_prepare_catalog_purchase', () => {
       expect(xBody().idempotencyKey).toBe('catalog-7710-key-1')
     })
 
+    it('sends NO idempotencyKey on the erc7710 authorize when the caller gave none (#3042 review)', async () => {
+      const res = await prepare(erc7710Header, DELEGATION_AGENT_RESPONSE, true)
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(xBody()).not.toHaveProperty('idempotencyKey')
+    })
+
     it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
       const res = await prepare(erc7710Header, AGENT_RESPONSE)
       expect(res.data.settlement_scheme).toBeUndefined()
@@ -1622,6 +1628,18 @@ describe('#2051 — cap binds the authorized option', () => {
       )
       expect(res.data.settlement_scheme).toBe('erc7710')
       expect(x402Body()?.idempotencyKey).toBe('x402:pay-mcp-7710:k1')
+    })
+
+    // Review of #3043: `quote.idempotencyKey` is NEVER null on the MCP quote
+    // path (the SDK derives a 5-minute-bucket key), so the 3009 branches'
+    // `?? quote.idempotencyKey` would have switched bucket-dedupe on for
+    // every unkeyed erc7710 call. Pinned: no key in → no key on the wire.
+    it('sends NO idempotencyKey on the erc7710 authorize when the caller gave none (#3042 review)', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }, true),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()).not.toHaveProperty('idempotencyKey')
     })
 
     it('reports amount_atomic as the amount ACTUALLY authorized on the erc7710 branch', async () => {

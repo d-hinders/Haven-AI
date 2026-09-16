@@ -1374,11 +1374,17 @@ hosted entry points until #3042 (scan B2, measured live on dev 2026-09-16):
 (#2041) — so re-running with the same key minted a second, independently
 signable settlement child (`6866bc97…` and `9835d550…` from one key). The
 backend had deduplicated on the key all along; the hosted branches simply did
-not send it. Since #3042 all three entry points replay the original child on a
-keyed retry. This is hosted-only: no signer or connector version is involved,
-and a hosted server older than #3042 is the only runtime that still shows the
-double-child behaviour — recognisable by a second `payment_id` for the same
-key, with `haven_get_payment_status.idempotencyKey` reading `null`.
+not send it. Since #3042 all three entry points forward an explicitly given
+key (and none derives one — unkeyed erc7710 calls mint one child per call on
+all three), so a keyed retry replays the original child **while that child is
+still `pending_signature` and inside its quote window**: an expired child is
+lazily expired and a new one minted (cap and budget re-checked); a `submitted`
+child answers 409 (retry the original); a `confirmed` child answers with its
+`tx_hash` and no `sign_data`. This is hosted-only: no signer or connector
+version is involved, and a hosted server older than #3042 is the only runtime
+that still shows the double-child behaviour — recognisable by a second
+`payment_id` for the same key, with `haven_get_payment_status.idempotencyKey`
+reading `null`.
 
 One more skew row since #1307, on the SETTLE leg rather than the sign leg:
 `haven_settle_mcp_tool` / `haven_complete_mcp_tool` accept `merchant_url` /

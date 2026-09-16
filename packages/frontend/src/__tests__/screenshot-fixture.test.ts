@@ -807,7 +807,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       const rowOf = () =>
         (settings.api('/accounting/connections', 'GET') as { connections: Record<string, unknown>[] }).connections[0]
 
-      it('serves every one of the five connection states, each under its own stage, plus the first-connect return and the two OFF states', () => {
+      it('serves every one of the five connection states, each under its own stage, plus the first-connect return, the #3017 paste-modal stage, and the two OFF states', () => {
         const seen: Record<string, unknown> = {}
         for (const stage of Object.keys(settings.stages)) {
           settings.stage(stage)
@@ -820,6 +820,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           revoked: 'revoked_at_provider',
           disconnected: 'disconnected',
           'first-connect': 'connected',
+          // #3017: the Accounted row waits for a pasted key — no connection row.
+          'api-key-modal': null,
           // #2869: no row at all — the feed-status answer makes these states.
           'coming-soon': null,
           'self-hosted': null,

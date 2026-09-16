@@ -214,7 +214,18 @@ export const accountingProvider = {
 
 export const accountingProviders = [
   accountingProvider,
-  ...['Accounted', 'Light', 'Igdrasil'].map((displayName) => ({
+  // #3017: Accounted is live over a pasted API key — the registry's real shape.
+  {
+    ...accountingProvider,
+    id: 'accounted',
+    displayName: 'Accounted',
+    authKind: 'api_key' as const,
+    capabilities: { attachments: false, verify: false, revoke: false, companyInfo: true },
+    availability: 'live' as const,
+    requiredScopes: [],
+    configured: true,
+  },
+  ...['Light', 'Igdrasil'].map((displayName) => ({
     ...accountingProvider,
     id: displayName.toLowerCase(),
     displayName,

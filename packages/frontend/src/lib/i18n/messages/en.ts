@@ -252,6 +252,51 @@ export const en = {
         working: 'Working…',
       },
       connectError: (provider: string) => `We could not start the ${provider} connection. Try again in a moment.`,
+      /**
+       * The API-key paste flow (#3017). Every sentence lives here through
+       * `useT()`; the provider-specific tokens inside them (the scope
+       * identifiers, the test-key prefix, the dashboard path) are
+       * interpolated from `accounting/accounted-copy.ts`, so the exact
+       * spelling is written exactly once — the modal test pins the two
+       * rendered sentences to both tokens.
+       */
+      apiKey: {
+        connect: 'Connect with API key',
+        title: (provider: string) => `Connect ${provider} with an API key`,
+        intro: (provider: string) =>
+          `Paste an API key from your ${provider} dashboard. Haven uses it to feed settled payments; the key never leaves this field except to ${provider}.`,
+        stepsTitle: 'In your Accounted dashboard:',
+        /** Step 1 — where the keys page is. */
+        stepOpen: (path: string) => `Open ${path} and choose Create key.`,
+        /** Step 2 — the two scopes to tick, interpolated from the copy module. */
+        stepScopes: (scopes: string) =>
+          `Tick exactly ${scopes}. Haven reads the company and feeds documents; it needs nothing else today.`,
+        /** Step 3 — which key kind to paste (test today, live for production). */
+        stepPaste: (testPrefix: string, livePrefix: string) =>
+          `Copy the key shown after creation. Keys begin with ${testPrefix} for the sandbox used today, or ${livePrefix} for a production company. A key is shown only once.`,
+        /** The key is revoked in the provider dashboard, not in Haven (#3017). */
+        revokeNote: 'To stop the feed, revoke the key in your Accounted dashboard, then disconnect here.',
+        keyLabel: 'API key',
+        keyPlaceholder: 'gnubok_sk_…',
+        submit: 'Connect',
+        submitting: 'Connecting…',
+        cancel: 'Cancel',
+        genericError: 'We could not connect. Try again in a moment.',
+        /** `API_KEY_REQUIRED` — the empty submit. */
+        API_KEY_REQUIRED: 'Paste the API key from your Accounted dashboard first.',
+        /** `INVALID_API_KEY` — the provider refused the key, or it can see no company. */
+        INVALID_API_KEY: 'That key was not accepted. Check it and try again.',
+        /** `MULTI_COMPANY_KEY` — a valid key with the wrong shape for the feed. */
+        MULTI_COMPANY_KEY:
+          'This key can see more than one company. Create a key for one company and paste that one.',
+        /**
+         * `UNSUPPORTED_BASE_CURRENCY` — inert for Accounted today (the read
+         * path exposes no currency), kept so the table covers every code the
+         * route can answer.
+         */
+        UNSUPPORTED_BASE_CURRENCY:
+          'The company behind this key books in a currency Haven does not feed. Use a company that books in SEK, EUR, USD, DKK, NOK or GBP.',
+      },
       disconnect: {
         title: (provider: string) => `Disconnect ${provider}?`,
         body: (provider: string) =>

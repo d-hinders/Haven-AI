@@ -7,6 +7,7 @@ covers:
   - packages/frontend/src/app/(authenticated)/analytics/AnalyticsClient.tsx
   - packages/frontend/src/components/analytics/MerchantsTable.tsx
   - packages/frontend/src/components/analytics/SpendSection.tsx
+  - packages/frontend/src/components/ui/StackedBarChart.tsx
   - packages/frontend/src/lib/analytics-series.ts
   - packages/frontend/src/components/analytics/BalanceSection.tsx
   - packages/backend/src/routes/analytics-overview.ts
@@ -67,9 +68,14 @@ chart keeps one colour across the chart, its legend and the swatch beside its
 spend figure in the agents table above it. The window starts and ends at the
 moment the page loads, not at midnight, so a bar on the window's first or
 last local day covers part of a day: it is striped and named as partial (the
-note under the chart says which end), never dropped or stretched. Below three
-days of data the chart is not drawn (see the sparse rule below) — a line
-through one point agrees with every trend.
+note under the chart says which end), never dropped or stretched. On a wide
+screen a day's detail opens as a callout anchored over that bar, kept inside
+the plot at either edge; when the bar is tall enough to reach under the
+callout, the callout drops to sit just above the axis instead, so the bar's
+top — its height against its neighbours and any refusal cap — stays visible
+while it is open. On a narrow screen the detail is a panel below the plot.
+Below three days of data the chart is not drawn (see the sparse rule below)
+— a line through one point agrees with every trend.
 
 **Top merchants.** The recipients your agents paid most, ranked by spent.
 A merchant's label is resolved by the API in a fixed order: your contact's

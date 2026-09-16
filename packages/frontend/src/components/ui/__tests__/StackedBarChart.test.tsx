@@ -278,6 +278,96 @@ describe('StackedBarChart — the desktop callout is clamped by its own measured
   })
 })
 
+describe('StackedBarChart — the desktop callout drops above the baseline when the described bar is tall (#3063)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // The fixture's totals are 150 / 250 / 450 on a 600 scale, a 200px svg:
+  // bar tops at CSS y 132.7 / 106.1 / 52.7 (Tue 9 also carries a refusal
+  // cap 10 viewBox units higher: 97.0). A 90px callout at rest spans
+  // 12..102 and needs 6px of clearance (bottom 108), so it hides Tue 9 and
+  // Wed 10 but not Mon 8.
+  function layOut() {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200)
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(90)
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(200)
+  }
+
+  it('rests at top-3 over a short bar and drops to the baseline over a tall one, keeping the bar top and its cap visible', () => {
+    layOut()
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    let tip = getByTestId('chart-tooltip')
+    expect(tip.className).toContain('top-3')
+    expect(tip.style.top).toBe('')
+    expect(tip.getAttribute('data-flipped')).toBeNull()
+    fireEvent.keyDown(svg, { key: 'End' })
+    tip = getByTestId('chart-tooltip')
+    expect(tip.className).not.toContain('top-3')
+    expect(tip.getAttribute('data-flipped')).toBe('true')
+    // Baseline at viewBox 190 of 220 → CSS 172.7; minus the 90px callout
+    // and the 6px gap: the callout's top sits at 76.7px, its bottom 6px
+    // above the axis — and 24px under the bar's top (52.7px).
+    expect(tip.style.top).toBe('76.7px')
+    // The horizontal clamp is untouched by the flip (200px callout in a
+    // 600px wrapper → half 17.2%, so End clamps to 100 − 17.2).
+    expect(tip.style.left).toMatch(/^82\.8/)
+  })
+
+  it('sits just under the bar top when the callout is taller than the bar, instead of climbing back over it', () => {
+    layOut()
+    // A 130px callout over Mon 8 (bar top 132.7): baseline-anchored it
+    // would start at 36.7 and cover the whole bar again, so it starts 6px
+    // under the bar's top (138.7) and runs on past the baseline instead.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(130)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    fireEvent.keyDown(container.querySelector('svg')!, { key: 'Home' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip.getAttribute('data-flipped')).toBe('true')
+    expect(tip.style.top).toBe('138.7px')
+  })
+
+  it('counts the refusal cap as part of the bar: a day whose CAP alone would hide flips too', () => {
+    layOut()
+    // Tue 9's bar top is at 106.1, the 90px callout's resting bottom at
+    // 108 → flips on the bar alone. Shrink the callout to 85px (bottom at
+    // 103): the bar clears it, the cap (97.0) does not — so it still flips
+    // with the cap and rests without it.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(85)
+    const withCap = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(withCap.container.querySelector('svg')!, { key: 'ArrowRight' })
+    expect(withCap.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBe('true')
+    withCap.unmount()
+    const noCap = THREE_DAYS.map((d, i) => (i === 1 ? { ...d, refusals: 0 } : d))
+    const without = render(<StackedBarChart days={noCap} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(without.container.querySelector('svg')!, { key: 'ArrowRight' })
+    expect(without.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBeNull()
+  })
+
+  it('never flips the narrow panel, and rests where nothing has a height (jsdom, first paint)', () => {
+    layOut()
+    const narrow = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} narrow />)
+    fireEvent.keyDown(narrow.container.querySelector('svg')!, { key: 'End' })
+    const panel = narrow.getByTestId('chart-tooltip')
+    expect(panel.getAttribute('data-flipped')).toBeNull()
+    expect(panel.style.top).toBe('')
+    narrow.unmount()
+    vi.restoreAllMocks()
+    const bare = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(bare.container.querySelector('svg')!, { key: 'End' })
+    const tip = bare.getByTestId('chart-tooltip')
+    expect(tip.className).toContain('top-3')
+    expect(tip.getAttribute('data-flipped')).toBeNull()
+  })
+})
+
 describe('StackedBarChart — ticks fit the gutter at 390 (#3051 design review)', () => {
   it('formats ticks with formatTick when given, and widens the gutter on the narrow treatment', () => {
     const compact = (n: number) => `$${Math.round(n)}`

@@ -223,7 +223,24 @@ export function createCatalogPurchaseHandlers(
           if (paySelection.scheme === 'erc7710') {
             const prepared = await haven.prepareX402Erc7710(
               quote.paymentRequired as X402PaymentRequired,
-              { resourceUrl: merchantUrl, delegationRail: true },
+              {
+                resourceUrl: merchantUrl,
+                delegationRail: true,
+                // #3042 (scan B2, measured live on dev): this branch never
+                // passed the key, so a retried call minted a SECOND
+                // independently-signable settlement child — on this scheme
+                // the signed artifact IS spend authority. The backend has
+                // deduped on it all along (`findX402IntentByIdempotencyKey`
+                // before the shape branch). EXPLICIT key only, as #2041 did in
+                // plain-http-x402.ts — NOT the 3009 branch's
+                // `?? quote.idempotencyKey`: on the MCP quote path that
+                // fallback is never null (the SDK derives a 5-minute-bucket
+                // key without the tool arguments), so it would silently
+                // dedupe unkeyed calls too — a `submitted` child answering 409
+                // for the rest of the bucket, two different `arguments` at one
+                // price colliding. Auto-keys are scan F3, designed on purpose.
+                ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
+              },
             )
             return {
               payment_id: prepared.paymentId,
@@ -635,6 +652,12 @@ export function createCatalogPurchaseHandlers(
                 // call by payment_id — the guided path's no-state-threading
                 // contract (#1305) holds on this scheme too.
                 mcpCallContext: catalogCallContext,
+                // #3042 (scan B2): the key was dropped here too — four live
+                // prepares, two with the SAME explicit key, produced four
+                // erc7710 intents. Explicit key only; see the
+                // haven_pay_mcp_tool twin above for why not the 3009
+                // fallback.
+                ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
               },
             )
             return {

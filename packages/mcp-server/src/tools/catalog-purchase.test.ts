@@ -901,6 +901,35 @@ describe('haven_prepare_catalog_purchase', () => {
       })
     })
 
+    // #3042 (scan B2): the catalog branch dropped the key too — live on dev,
+    // `haven_prepare_catalog_purchase` twice with the same explicit key gave
+    // `6866bc97…` and `9835d550…`, both pending_signature. See the
+    // haven_pay_mcp_tool twin of this test for the mechanism.
+    it('sends the caller idempotency_key on the erc7710 authorize (#3042)', async () => {
+      stubFetch({
+        'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': erc7710Header } },
+        'POST /x402': { status: 201, body: CHILD },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+        'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000', 'delegation') },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_prepare_catalog_purchase({
+          catalog_id: 'cat_1',
+          max_amount: '2000000',
+          idempotency_key: 'catalog-7710-key-1',
+        }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(xBody().idempotencyKey).toBe('catalog-7710-key-1')
+    })
+
+    it('sends NO idempotencyKey on the erc7710 authorize when the caller gave none (#3042 review)', async () => {
+      const res = await prepare(erc7710Header, DELEGATION_AGENT_RESPONSE, true)
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(xBody()).not.toHaveProperty('idempotencyKey')
+    })
+
     it('a LEGACY-rail account never takes the branch, even when the merchant offers it', async () => {
       const res = await prepare(erc7710Header, AGENT_RESPONSE)
       expect(res.data.settlement_scheme).toBeUndefined()
@@ -1566,6 +1595,51 @@ describe('#2051 — cap binds the authorized option', () => {
       expect(res.data.settlement_scheme).toBe('erc7710')
       expect(x402Body()?.amount).toBe('500000')
       expect(x402Body()?.settlementScheme).toBe('erc7710')
+    })
+
+    /**
+     * #3042 (scan B2, measured live on dev 2026-09-16): four prepares, two
+     * of them with the SAME explicit key, minted four erc7710 settlement
+     * children — this branch never passed `idempotency_key` to the authorize,
+     * while its 3009 sibling always did and the backend has deduped on the
+     * key all along (`findX402IntentByIdempotencyKey` before the shape
+     * branch). On this scheme the signed child IS spend authority, so a
+     * retried prepare + sign is a second payment. Pinned per branch: dropping
+     * the key from this branch reddens THIS test and leaves the catalog one
+     * (below) green, so the failure names the branch.
+     */
+    it('sends the caller idempotency_key on the erc7710 authorize, so a retry replays instead of minting a second child (#3042)', async () => {
+      stubFetch({
+        'POST /mcp': {
+          status: 402,
+          responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(merchant('3000000', '500000'))) },
+        },
+        'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+        'POST /x402': { status: 201, body: CHILD },
+      })
+      const res = ok<Record<string, any>>(
+        await handlers().haven_pay_mcp_tool({
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          max_amount_human: '1',
+          idempotency_key: 'x402:pay-mcp-7710:k1',
+        }),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()?.idempotencyKey).toBe('x402:pay-mcp-7710:k1')
+    })
+
+    // Review of #3043: `quote.idempotencyKey` is NEVER null on the MCP quote
+    // path (the SDK derives a 5-minute-bucket key), so the 3009 branches'
+    // `?? quote.idempotencyKey` would have switched bucket-dedupe on for
+    // every unkeyed erc7710 call. Pinned: no key in → no key on the wire.
+    it('sends NO idempotencyKey on the erc7710 authorize when the caller gave none (#3042 review)', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(merchant('3000000', '500000'), DELEGATION_AGENT, { max_amount_human: '1' }, true),
+      )
+      expect(res.data.settlement_scheme).toBe('erc7710')
+      expect(x402Body()).not.toHaveProperty('idempotencyKey')
     })
 
     it('reports amount_atomic as the amount ACTUALLY authorized on the erc7710 branch', async () => {

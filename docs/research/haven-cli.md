@@ -136,7 +136,7 @@ haven agents list | show <id>
 haven agents pause|resume|revoke <id>   # Tier B (backend-only)
 haven agents rotate-key <id>            # Tier B — prints new key once
 haven budget show <agentId>             # Tier A (live remaining)
-haven approvers list <safeId>           # Tier A
+haven approvers list <accountId>        # Tier A
 haven activity list [--safe|--agent|--direction] [--json]
 haven activity export [...] > out.csv   # reuse #411 CSV builder
 haven catalog list [--category]

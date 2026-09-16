@@ -264,7 +264,7 @@ sequenceDiagram
     SDK->>SDK: Attach resumeState
     SDK-->>Agent: Tell user to approve in Haven and preserve resume state
   else amount > remaining + delegate balance
-    API-->>SDK: 422 insufficient_funds / fund_safe_or_raise_allowance
+    API-->>SDK: 422 insufficient_funds / fund_account_or_raise_allowance
     Note over Agent,API: No payment or approval is created
   end
 ```
@@ -709,7 +709,7 @@ Sequence:
    redemption regardless.
 6. An over-budget quote REFUSES right here, before any funding intent is
    created (`DELEGATION_BUDGET_EXCEEDED`,
-   `next_action: fund_safe_or_raise_allowance`), rather than letting a later
+   `next_action: fund_account_or_raise_allowance`), rather than letting a later
    on-chain redemption revert. There is no approval queue to fall back to
    (#1090).
 
@@ -1087,7 +1087,7 @@ The flow is a two-call variant of `/x402/authorize`:
    the selected budget delegation's live remaining period budget — the same
    `ERC20PeriodTransferEnforcer` storage read `GET /machine-payments/allowances`
    performs (#1145) — and answers `403` `delegation_budget_exceeded` with
-   `phase: insufficient_funds`, `next_action: fund_safe_or_raise_allowance` and
+   `phase: insufficient_funds`, `next_action: fund_account_or_raise_allowance` and
    the shortfall, writing nothing and deploying nothing.
 
    Read this as a fail-fast convenience, **not a policy boundary**, and the

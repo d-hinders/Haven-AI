@@ -186,7 +186,8 @@ judged against the dark `/dashboard`.
 
 The pixel gate has a dark half too: the `chromium-desktop-dark` Playwright
 project (`npm run test:visual:dark`) is scoped to `design-system.visual.spec.ts`
-alone and runs under the same *Design visual regression* job — advisory on
+and `analytics.visual.spec.ts` — the two specs whose baselines exist in both
+schemes — and runs under the same *Design visual regression* job — advisory on
 `dev`, required on `main`, like the light project. It seeds `haven.theme` the
 same way and commits its baselines under a `-dark` suffix. It does not extend
 to the other visual specs, which have no dark baselines: a project that

@@ -55,6 +55,7 @@ vi.mock('../../db.js', () => ({
 
 import userAccountsRoutes from '../user-accounts.js'
 import userAccountsRetiredRoutes from '../user-accounts-retired.js'
+import userRoutes from '../user.js'
 
 const USER = 'user-1'
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111'
@@ -143,6 +144,32 @@ describe('/user/safes is retired and answers 410 (#2914)', () => {
       const res = await app.inject({ method, url })
       expect(res.statusCode, `${method} ${url}`).toBe(401)
     }
+  })
+
+  it('PUT /user/safe answers the SAME naming 410, naming PUT /user/account', async () => {
+    // The singular path is a tombstone twice over: #1984 closed the import
+    // flow, #2914 retired the path's vocabulary. It answers the NAMING
+    // refusal, because that is the one an old client can act on — the rail
+    // refusal lives on `/user/account`, which is where it points.
+    const userApp = Fastify({ logger: false })
+    await userApp.register(fastifyJwt, { secret: 'test-secret' })
+    await userApp.register(userRoutes, { prefix: '/user' })
+    const userToken = userApp.jwt.sign({ sub: USER, email: 'ada@example.com' })
+
+    const res = await userApp.inject({
+      method: 'PUT',
+      url: '/user/safe',
+      headers: { authorization: `Bearer ${userToken}` },
+      payload: { account_address: '0x'.padEnd(42, 'a') },
+    })
+
+    expect(res.statusCode).toBe(410)
+    const body = res.json() as { error: string; replacement: string }
+    expect(body.replacement).toBe('PUT /user/account')
+    expect(body.error).toMatch(/retired \(#2906\)/)
+    expect(mockPoolQuery).not.toHaveBeenCalled()
+
+    await userApp.close()
   })
 
   it('POST /user/safes and /deploy answer 410 too, so the whole prefix refuses one way', async () => {

@@ -203,6 +203,25 @@ const COPY = {
   retry: 'Try again',
   frozenLastPaymentRecent: '1d ago',
   frozenLastPaymentOlder: '2d ago',
+  /**
+   * The tiles' own delta caption (`TileGrid`'s `windowCaption`): the window
+   * COMPARISON, not the window label. It rides the two tiles that carry a
+   * delta — Spent and Refused; Budget used shows a band count and Fees shows
+   * no delta while the fee flag is off.
+   */
+  tilesDeltaCaption: 'vs previous 30 days',
+  /**
+   * The two agents' budget figures, word for word what `formatBudgetTokenValue`
+   * prints for the fixture delegations (`formatAllowanceForToken` at USDC's
+   * 6 decimals, minimumFractionDigits 2): '214.00 of 250.00 USDC' and
+   * '5.00 of 500.00 USDC'. Rendered TWICE per agent — above the desktop
+   * cell's bar, and inside the mobile row's `budgetLine` — so 2 at either
+   * width, exactly one of them on screen (#3038 structure run: the first
+   * draft omitted the '.00' and resolved 0; the house vitest pin is
+   * AgentsTable.test.tsx's `214\.00 of 250\.00 USDC`).
+   */
+  budgetOf250: '214.00 of 250.00 USDC',
+  budgetOf500: '5.00 of 500.00 USDC',
 } as const
 
 const OVERVIEW_PATH = '/analytics/overview'
@@ -279,7 +298,13 @@ const SCENARIOS: Scenario[] = [
       await expect(
         section(page, 'stat-tile-fees-paid-to-haven').getByText(COPY.gasSponsored),
       ).toHaveCount(1)
-      await expect(tiles.getByText(COPY.rangeCaption)).toHaveCount(1)
+      // The tiles' delta captions: `vs previous 30 days` on the two tiles that
+      // carry a delta (Spent, Refused). The window LABEL itself ('Last 30
+      // days', `rangeCaption(30)`) is NOT a tile string — it renders in the
+      // page header beside the range control, and is asserted below on
+      // `analytics-page`, not here (#3038 structure run: scoping it to the
+      // tiles grid resolves 0 and every populated capture times out on it).
+      await expect(tiles.getByText(COPY.tilesDeltaCaption)).toHaveCount(2)
 
       // ── The range control, in its resting state ───────────────────────────
       // The default window is 30d (`DEFAULT_ANALYTICS_RANGE`) and the fixture's
@@ -289,6 +314,13 @@ const SCENARIOS: Scenario[] = [
       const control = page.getByRole('radiogroup', { name: COPY.rangeControl })
       await expect(control).toHaveCount(1)
       await expect(control.getByRole('radio', { name: '30 days' })).toBeChecked()
+      // The window label the header carries (`rangeCaption(days)` in the
+      // PageHeader's actions, beside the control it names). Page-level because
+      // that is where it renders — the tiles carry the COMPARISON caption
+      // instead, asserted above.
+      await expect(
+        page.getByTestId('analytics-page').getByText(COPY.rangeCaption, { exact: true }),
+      ).toHaveCount(1)
 
       // ── The agents table ───────────────────────────────────────────────────
       const agents = section(page, 'analytics-agents-section')
@@ -297,8 +329,24 @@ const SCENARIOS: Scenario[] = [
       await expect(agents.getByText(COPY.agentRetired)).toHaveCount(2)
       await expectExactlyOneVisible(agents, COPY.agentResearch)
       await expectExactlyOneVisible(agents, COPY.agentRetired)
-      // One bar per delegation, two delegations, both read from the response.
-      await expect(agents.getByRole('progressbar')).toHaveCount(2)
+      // Each delegation's budget renders by a different medium per half: the
+      // desktop table measures it with a `role=progressbar` per delegation,
+      // the mobile rows print the same figures as text (`formatBudgetTokenValue`
+      // + the used percent, joined by `budgetLine`). Asserted by medium — and
+      // the role is an accessibility-tree role, so at mobile, where the desktop
+      // half is `display:none`, the bars resolve 0 BY DESIGN and the text line
+      // is the budget's only rendering (#3038 structure run: a viewport-blind
+      // bar count reads 2 on desktop and 0 on mobile for the same page).
+      await expect(agents.getByText(COPY.budgetOf250)).toHaveCount(2)
+      await expect(agents.getByText(COPY.budgetOf500)).toHaveCount(2)
+      await expect(agents.getByText(COPY.budgetOf250).filter({ visible: true })).toHaveCount(1)
+      await expect(agents.getByText(COPY.budgetOf500).filter({ visible: true })).toHaveCount(1)
+      if (vp.width >= 1024) {
+        // One bar per delegation, two delegations, both read from the response.
+        await expect(agents.getByRole('progressbar')).toHaveCount(2)
+      } else {
+        await expect(agents.getByRole('progressbar')).toHaveCount(0)
+      }
 
       // ── The merchants table ────────────────────────────────────────────────
       const merchants = section(page, 'analytics-merchants-section')
@@ -342,7 +390,7 @@ const SCENARIOS: Scenario[] = [
       // fact about the render, not a hope.
       await expect(page.getByTestId('analytics-sparse-line')).toHaveCount(0)
       await expect(page.getByText(COPY.emptyTitle)).toHaveCount(0)
-      await expect(page.getByRole('alert')).toHaveCount(0)
+      await expect(page.getByTestId('analytics-page').getByRole('alert')).toHaveCount(0)
     },
   },
   {
@@ -357,7 +405,11 @@ const SCENARIOS: Scenario[] = [
         page.getByRole('heading', { name: COPY.emptyTitle, exact: true }),
       ).toHaveCount(1)
       await expect(page.getByText(COPY.emptyBody)).toHaveCount(1)
-      await expect(page.getByRole('alert')).toHaveCount(0)
+      // Scoped to the page container, not the document: the app shell and the
+      // route announcer carry alert/surface roles of their own (the structure
+      // run measured 2 page-external alerts on every scenario), and the thing
+      // this assertion governs is the report's own failure region.
+      await expect(page.getByTestId('analytics-page').getByRole('alert')).toHaveCount(0)
       await expect(page.getByText(COPY.errorTitle)).toHaveCount(0)
       await expect(page.getByRole('button', { name: COPY.retry, exact: true })).toHaveCount(0)
 
@@ -391,8 +443,11 @@ const SCENARIOS: Scenario[] = [
     body: null,
     async assert(page) {
       // `role="alert"` is the primitive's own contract; the title is the page's
-      // copy; the one remedy the page has evidence for is the button.
-      await expect(page.getByRole('alert')).toHaveCount(1)
+      // copy; the one remedy the page has evidence for is the button. Scoped
+      // to the page container for the same reason the empty scenario's
+      // absence assertion is: the shell contributes alerts of its own (the
+      // structure run measured 3 document-wide where the page owns 1).
+      await expect(page.getByTestId('analytics-page').getByRole('alert')).toHaveCount(1)
       await expect(
         page.getByRole('heading', { name: COPY.errorTitle, exact: true }),
       ).toHaveCount(1)

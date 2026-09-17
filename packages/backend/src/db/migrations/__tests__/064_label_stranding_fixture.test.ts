@@ -16,11 +16,11 @@ async function seedMinifetch(): Promise<string> {
   const result = await db.query<{ id: string }>(
     `INSERT INTO merchant_catalog
        (name, description, category, resource_url, rail, protocol, tool_name,
-        price_display, price_atomic, asset, network, status)
+        price_display, price_atomic, asset, network, status, merchant_id)
      VALUES
        ('Minifetch — URL preview',
         'Extract link-preview / Open Graph metadata for a URL. Pay per call.',
-        'data', $1, 'x402', 'http', NULL, '0.001 USDC', '1000', 'USDC', 'eip155:8453', 'active')
+        'data', $1, 'x402', 'http', NULL, '0.001 USDC', '1000', 'USDC', 'eip155:8453', 'active', (SELECT id FROM merchants WHERE slug = 'test-merchant'))
      RETURNING id`,
     [FIXTURE_URL],
   )
@@ -42,6 +42,11 @@ describeDb('migration 064: label the stranding fixture (#1669)', () => {
 
   beforeEach(async () => {
     await resetDb()
+    // #3078: merchant_catalog.merchant_id is NOT NULL after migration 088; the
+    // rows this file plants belong to one throwaway merchant.
+    await db.query(
+      `INSERT INTO merchants (slug, name) VALUES ('test-merchant', 'Test merchant') ON CONFLICT (slug) DO NOTHING`,
+    )
   })
 
   it('marks the row in name, description AND category — prose for agents, the flag for clients', async () => {
@@ -71,9 +76,9 @@ describeDb('migration 064: label the stranding fixture (#1669)', () => {
     const other = await db.query<{ id: string }>(
       `INSERT INTO merchant_catalog
          (name, description, category, resource_url, rail, protocol, tool_name,
-          price_display, price_atomic, asset, network, status)
+          price_display, price_atomic, asset, network, status, merchant_id)
        VALUES ('Real service', 'Delivers.', 'data', 'https://real.example/x402',
-               'x402', 'http', NULL, '0.01 USDC', '10000', 'USDC', 'eip155:8453', 'active')
+               'x402', 'http', NULL, '0.01 USDC', '10000', 'USDC', 'eip155:8453', 'active', (SELECT id FROM merchants WHERE slug = 'test-merchant'))
        RETURNING id`,
     )
 

@@ -110,6 +110,47 @@ interface SubmitBody {
   resource_url?: unknown
   /** Honeypot. Presence + non-empty → bot, dropped with a fake success. */
   website?: unknown
+  /** #3078: the seller's display name and public site — real fields, bounded; `website` above stays the trap. */
+  merchant_name?: unknown
+  merchant_website?: unknown
+}
+
+const MAX_MERCHANT_NAME_LENGTH = 120
+
+/**
+ * The optional merchant fields (#3078): trimmed strings within bounds, or
+ * null; anything else is a 400 with the field named. `merchant_website`
+ * must be an https URL — it is shown as a link on the merchant's page.
+ */
+function normalizeMerchantFields(
+  body: SubmitBody | undefined,
+): { merchant_name: string | null; merchant_website: string | null } | { error: string } {
+  let merchant_name: string | null = null
+  let merchant_website: string | null = null
+  if (body?.merchant_name !== undefined) {
+    if (typeof body.merchant_name !== 'string') return { error: 'merchant_name must be a string' }
+    const name = body.merchant_name.trim().replace(/\s+/g, ' ')
+    if (name.length > MAX_MERCHANT_NAME_LENGTH) {
+      return { error: `merchant_name must be ${MAX_MERCHANT_NAME_LENGTH} characters or fewer` }
+    }
+    merchant_name = name || null
+  }
+  if (body?.merchant_website !== undefined) {
+    if (typeof body.merchant_website !== 'string') return { error: 'merchant_website must be a string' }
+    const site = body.merchant_website.trim()
+    if (site) {
+      if (site.length > MAX_RESOURCE_URL_LENGTH) return { error: 'merchant_website is too long' }
+      let parsed: URL
+      try {
+        parsed = new URL(site)
+      } catch {
+        return { error: 'merchant_website must be an https URL' }
+      }
+      if (parsed.protocol !== 'https:') return { error: 'merchant_website must be an https URL' }
+      merchant_website = parsed.toString()
+    }
+  }
+  return { merchant_name, merchant_website }
 }
 
 /**
@@ -311,6 +352,10 @@ export default async function catalogSubmissionRoutes(
       if ('error' in target) {
         return reply.code(400).send({ error: target.error })
       }
+      const merchantFields = normalizeMerchantFields(body)
+      if ('error' in merchantFields) {
+        return reply.code(400).send({ error: merchantFields.error })
+      }
 
       // Dedupe first (AC: same host while pending/active → same id, a no-op),
       // then the queue cap, then the insert. The insert's ON CONFLICT keeps
@@ -335,6 +380,8 @@ export default async function catalogSubmissionRoutes(
         submitter_ip: request.ip,
         verify_token: randomBytes(24).toString('hex'),
         queueCap: QUEUE_CAP,
+        merchant_name: merchantFields.merchant_name,
+        merchant_website: merchantFields.merchant_website,
       })
       // The ONLY response that carries a verify_token: this caller just minted
       // it by creating the row. Ownership-proof instructions come from

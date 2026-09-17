@@ -241,6 +241,17 @@ Isolation rules that are non-negotiable for a payments product:
   logs a boot warning when its variable is unset, and the harness prints which
   endpoint CLASS it is observing through (never the URL) in its run preamble.
 
+- **Marketplace chains and prospects (#3078, epic #3077)** —
+  `HAVEN_MARKETPLACE_CHAIN_IDS=84532,8453` on dev (owner decision 11: the demo
+  grid shows the real mainnet merchants next to the Ampersend sandbox; a
+  mainnet offer is not payable from a Sepolia agent and its network chip says
+  so) and `8453` on prod (testnets hidden outright). Unset falls back to
+  `HAVEN_DEPLOY_CHAIN_IDS`, both unset lists every chain. The list scopes
+  dashboard and credential-less reads only — an agent's `GET /catalog` sees
+  its own chain regardless. `HAVEN_MARKETPLACE_PROSPECTS=true` (strict
+  boolean) lists the `coming_soon` merchants of #3080 to authenticated
+  dashboard users on dev only; the route refuses to list them when any
+  mainnet chain is listed, so a copied env cannot publish them on prod.
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A

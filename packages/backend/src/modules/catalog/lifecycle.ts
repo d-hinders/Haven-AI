@@ -46,6 +46,7 @@
  * ownership proof makes no outbound request for a configuration failure.
  */
 import { config } from '../../config.js'
+import { findOrCreateMerchantByHost } from '../../infra/repositories/merchants.js'
 // dep-lint-exempt: pool appears only as the DEFAULT of the injectable Executor (index.ts and the real-DB tests inject their own); the lifecycle module otherwise runs against an injected db and makes no direct pool usage — same shape as the sibling merchant-catalog.ts exemption
 import pool from '../../db.js'
 import type { Executor } from '../../infra/transaction.js'
@@ -245,14 +246,30 @@ async function runProbeStage(
   let skipped = 0
   for (const outcome of outcomes) {
     if (outcome.status === 'verified_payable') {
-      if (
-        await repo.markCatalogSubmissionVerifiedPayable(
-          outcome.id,
-          { name: outcome.metadata.name, description: outcome.metadata.description, entrypoint: outcome.metadata.entrypoint },
-          db,
-        )
-      ) {
+      const mark = await repo.markCatalogSubmissionVerifiedPayable(
+        outcome.id,
+        { name: outcome.metadata.name, description: outcome.metadata.description, entrypoint: outcome.metadata.entrypoint },
+        db,
+      )
+      if (mark) {
         verified += 1
+        // #3078: a verified offer belongs to a merchant. The host is the
+        // find key — a submission on a curated merchant's host joins that
+        // merchant; otherwise one is founded from what the submitter said
+        // (or the probe's own name). Attached once; a re-verification keeps
+        // the merchant it has.
+        if (!mark.merchant_id) {
+          const merchant = await findOrCreateMerchantByHost(
+            mark.hostname,
+            {
+              name: mark.merchant_name ?? outcome.metadata.name,
+              description: outcome.metadata.description,
+              website: mark.merchant_website,
+            },
+            db,
+          )
+          await repo.setCatalogSubmissionMerchant(mark.id, merchant.id, db)
+        }
       }
       continue
     }

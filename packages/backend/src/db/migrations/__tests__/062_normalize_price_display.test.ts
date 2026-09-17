@@ -20,10 +20,10 @@ async function seedRow(priceDisplay: string | null, suffix: string): Promise<str
   const result = await db.query<{ id: string }>(
     `INSERT INTO merchant_catalog
        (name, description, category, resource_url, rail, protocol, tool_name,
-        price_display, price_atomic, asset, network, status)
+        price_display, price_atomic, asset, network, status, merchant_id)
      VALUES
        ('Row ' || $2, 'seeded by 062 test', 'demo', 'https://m.example/' || $2,
-        'x402', 'http', NULL, $1, '1500', 'USDC', 'eip155:84532', 'active')
+        'x402', 'http', NULL, $1, '1500', 'USDC', 'eip155:84532', 'active', (SELECT id FROM merchants WHERE slug = 'test-merchant'))
      RETURNING id`,
     [priceDisplay, suffix],
   )
@@ -51,6 +51,11 @@ describeDb('migration 062: normalize price_display (#1592)', () => {
 
   beforeEach(async () => {
     await resetDb()
+    // #3078: merchant_catalog.merchant_id is NOT NULL after migration 088; the
+    // rows this file plants belong to one throwaway merchant.
+    await db.query(
+      `INSERT INTO merchants (slug, name) VALUES ('test-merchant', 'Test merchant') ON CONFLICT (slug) DO NOTHING`,
+    )
   })
 
   it('strips the $ prefix from seeded $-prefixed USDC rows', async () => {

@@ -432,6 +432,34 @@ describe('catalog discovery + submission (#1716)', () => {
     ],
   }
 
+  // #3078: the merchant an entry belongs to rides along, camel-cased; a
+  // backend that predates the merchant layer sends no `merchant` at all and
+  // the public field is then ABSENT (not null) — an installed SDK must keep
+  // working against it.
+  it('maps the merchant when the backend sends one and leaves the field absent when it does not', async () => {
+    const withMerchant = {
+      entries: [
+        {
+          ...MIXED.entries[1],
+          merchant: { id: 'm_1', slug: 'curated-co', name: 'Curated Co', listing_status: 'live', is_test_merchant: false },
+        },
+        { ...MIXED.entries[0], merchant: null },
+        MIXED.entries[0],
+      ],
+    }
+    installRoutes({ 'GET https://haven.test/catalog': [() => json(withMerchant)] })
+    const [curated, nulled, older] = await client().discoverTools({})
+    expect(curated!.merchant).toEqual({
+      id: 'm_1',
+      slug: 'curated-co',
+      name: 'Curated Co',
+      listingStatus: 'live',
+      isTestMerchant: false,
+    })
+    expect('merchant' in nulled!).toBe(false)
+    expect('merchant' in older!).toBe(false)
+  })
+
   it('maps badge fields and filters on verified/operator without an extra query param', async () => {
     const routes = installRoutes({
       'GET https://haven.test/catalog': [

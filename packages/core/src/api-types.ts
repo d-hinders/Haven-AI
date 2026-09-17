@@ -2550,7 +2550,7 @@ export type paths = {
         };
         /**
          * List curated payable services agents can discover and pay.
-         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly, and clients that pre-filter should treat the category as the structural signal.
+         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.
          */
         get: operations["listCatalog"];
         put?: never;
@@ -2618,6 +2618,46 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/merchants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the marketplace's merchants.
+         * @description The sell side of the catalog (#3078, epic #3077): every live merchant with at least one non-delisted offer on a chain this deployment lists (HAVEN_MARKETPLACE_CHAIN_IDS, else HAVEN_DEPLOY_CHAIN_IDS, else every chain) or a verified self-submitted offer, ordered real merchants first, then test merchants. Readable without a credential, like `GET /catalog`. `coming_soon` prospects appear only for an authenticated dashboard user when HAVEN_MARKETPLACE_PROSPECTS is on and no mainnet chain is listed. Read-only; nothing here creates payments or signatures.
+         */
+        get: operations["listMerchants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchants/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One merchant and its offers.
+         * @description The merchant and its non-delisted offers on the chains this deployment lists (an agent: its own chain), plus its verified self-submitted offers. A credential-less caller gets the offers in the public catalog shape. 404 — never 403 — for an unknown slug, a live merchant with nothing to show on these chains, or a prospect the caller may not see (the URL must not confirm a prospect exists).
+         */
+        get: operations["getMerchant"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 };
 export type webhooks = Record<string, never>;
 export type components = {
@@ -2672,6 +2712,45 @@ export type components = {
             /** Format: date-time */
             updated_at: string;
         };
+        CatalogEntryMerchant: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            /**
+             * @description Named apart from `CatalogEntry.status` (active|degraded|delisted) on purpose. A `coming_soon` merchant has no offers, so an entry never carries it in practice.
+             * @enum {string}
+             */
+            listing_status: "live" | "coming_soon";
+            /** @description True for Haven-run test content: the Haven demo store (real payments, demo goods) and the stranded-funds fixture. The structural signal for clients that pre-filter test content. */
+            is_test_merchant: boolean;
+        };
+        Merchant: {
+            /** Format: uuid */
+            id: string;
+            /** @description URL key: `/merchants/{slug}` and `/marketplace/<slug>`. */
+            slug: string;
+            name: string;
+            description: string;
+            website: string | null;
+            /** @description Only Haven-run and Ampersend rows carry one; prospects never do (monogram only). */
+            logo_url: string | null;
+            category: string;
+            /** @description ISO 3166-1 alpha-2, when known. */
+            country: string | null;
+            /**
+             * @description `coming_soon` is a prospect Haven is talking to — shown only to an authenticated dashboard user on a deployment that lists no mainnet chain and has HAVEN_MARKETPLACE_PROSPECTS on; never an agreement, never payable, never in an agent read or the credential-less shape.
+             * @enum {string}
+             */
+            listing_status: "live" | "coming_soon";
+            is_test_merchant: boolean;
+            /** @description Non-delisted offers on the chains this deployment lists (an agent: its own chain) plus verified self-submitted offers. Zero for a prospect. */
+            offer_count: number;
+            /** @description Distinct CAIP-2 networks of the listed operator offers, e.g. ["eip155:84532"]. Ingestion offers carry none. */
+            networks: string[];
+            /** @description Any offer verified payable — the same observation `CatalogEntry.verified_payable` records, at merchant level. */
+            verified_payable: boolean;
+        };
         CatalogEntry: {
             /** Format: uuid */
             id: string;
@@ -2679,6 +2758,8 @@ export type components = {
             description: string;
             category: string;
             resource_url: string;
+            /** @description The merchant this entry belongs to (#3078, epic #3077): every operator row has one after migration 088; an ingestion row has one once it is verified payable. Null only for a row the merchant join could not resolve. */
+            merchant: components["schemas"]["CatalogEntryMerchant"] | null;
             /** @enum {string} */
             rail: "x402" | "mpp";
             /** @enum {string} */
@@ -2708,6 +2789,10 @@ export type components = {
             verified_payable: boolean;
         };
         CatalogSubmitRequest: {
+            /** @description Optional (#3078): the seller's display name. Used to name the merchant when the submission is verified payable and no merchant owns the host yet; ignored when one does (the host proves the seller). Distinct from `website`. */
+            merchant_name?: string;
+            /** @description Optional (#3078): the seller's public site, https. Same rules as `merchant_name`. */
+            merchant_website?: string;
             /** @description https URL of the payable x402/MCP endpoint the seller wants verified and listed. This endpoint makes no request to it: the submission is queue-only, and ownership proof plus the verification probe run later, asynchronously under the leader-locked catalog monitor. */
             resource_url: string;
             /** @description Honeypot. Bots that fill this plausible-looking field are dropped with a fake success and nothing is written; human submitters leave it empty. */
@@ -15722,6 +15807,122 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listMerchants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Merchants. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        merchants: components["schemas"]["Merchant"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        detail?: string;
+                    };
+                };
+            };
+        };
+    };
+    getMerchant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Merchant and offers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        merchant: components["schemas"]["Merchant"];
+                        offers: components["schemas"]["CatalogEntry"][];
                     };
                 };
             };

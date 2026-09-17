@@ -269,6 +269,20 @@ last-verified: "2026-09-17"
 > lives in `@haven_ai/sdk`, so the skew-flatness this document asserts is a
 > property of the SDK helper, not of which mcp-server file calls it.
 >
+> **Recent re-verification (#3078):** the merchant layer adds ONE field to
+> the catalog entry — `merchant { id, slug, name, listing_status,
+> is_test_merchant }` — on the SDK's `HavenCatalogEntry` (OPTIONAL there:
+> an installed SDK against a backend that predates migration 088 gets the
+> field absent, never null — `client-characterization.test.ts` pins both
+> readings) and on the hosted `haven_discover_tools` map in
+> `src/tools/catalog-purchase.ts` (wire-shaped, spread in only when the SDK
+> carries it). Additive on the read side only: no tool name, schema, strict/
+> permissive split, expected-context version or signer contract changes, and
+> the local server's `haven_pay_mcp_tool` twin and the #1301 discovery helper
+> are untouched. The skew-flatness this document asserts holds in both
+> directions — an old server against a new backend ignores the field, a new
+> server against an old backend omits it.
+>
 > **Recent re-verification (#2850):** the CLI's transaction CSV/JSON export
 > relabelled `delegate_sweep` from "allowance funding" to "sweep" — the old
 > label was the retired rail's name for what is now the shared gasless-sweep

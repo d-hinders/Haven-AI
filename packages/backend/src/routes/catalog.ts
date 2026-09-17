@@ -35,6 +35,8 @@ import {
   listVerifiedCatalogSubmissions,
   type VerifiedCatalogListingRow,
 } from '../infra/repositories/catalog-submissions.js'
+import { marketplaceChainIds } from '../modules/catalog/index.js'
+import { CATALOG_ROW_WITH_MERCHANT_SELECT, type CatalogRowWithMerchant } from '../infra/repositories/merchants.js'
 
 const VALID_RAILS = new Set(['x402', 'mpp'])
 
@@ -80,7 +82,22 @@ const PUBLIC_CATALOG_FIELDS = [
   'source',
   'domain_verified',
   'verified_payable',
+  // #3078: the merchant an entry belongs to — id, slug, name, listing
+  // status, test flag. Merchant metadata, never per-agent data.
+  'merchant',
 ] as const
+
+/** The `merchant` object of a catalog entry, or null when the row carries none. */
+export function merchantOf(row: CatalogRowWithMerchant) {
+  if (!row.merchant_id || !row.merchant_slug || !row.merchant_name) return null
+  return {
+    id: row.merchant_id,
+    slug: row.merchant_slug,
+    name: row.merchant_name,
+    listing_status: row.merchant_listing_status ?? 'live',
+    is_test_merchant: row.merchant_is_test_merchant ?? false,
+  }
+}
 
 /** The host of a merchant endpoint, or null if it will not parse. */
 export function endpointHost(resourceUrl: string | null | undefined): string | null {
@@ -101,7 +118,8 @@ export function toPublicListing(entry: Record<string, unknown>): Record<string, 
   return out
 }
 
-export { PUBLIC_CATALOG_FIELDS }
+export { PUBLIC_CATALOG_FIELDS, CATALOG_ROW_WITH_MERCHANT_SELECT }
+export type { CatalogRowWithMerchant }
 
 /**
  * #2530: `GET /catalog` is readable WITHOUT a credential, in the reduced shape
@@ -112,16 +130,23 @@ export { PUBLIC_CATALOG_FIELDS }
  * silently serving a reduced answer to a revoked agent hides the revocation
  * from the only party who would notice.
  */
-function isPublicCatalogRead(request: FastifyRequest): boolean {
+/**
+ * The GET routes a credential-less caller may read: the catalog listing and,
+ * since #3078, the merchants listing and a merchant's page (live merchants
+ * only — prospects are gated inside the route, `marketplace-scope.ts`).
+ */
+const PUBLIC_GET_ROUTES = new Set(['/', '/catalog', '/catalog/', '/merchants', '/merchants/', '/merchants/:slug'])
+
+export function isPublicCatalogRead(request: FastifyRequest): boolean {
   if (request.method !== 'GET') return false
   const path = request.routeOptions?.url ?? request.url.split('?')[0]
-  if (path !== '/' && path !== '/catalog' && path !== '/catalog/') return false
+  if (!PUBLIC_GET_ROUTES.has(path)) return false
   const authHeader = request.headers.authorization
   const xApiKey = request.headers['x-api-key']
   return !authHeader && typeof xApiKey !== 'string'
 }
 
-async function eitherAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+export async function eitherAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   if (isPublicCatalogRead(request)) return
   const authHeader = request.headers.authorization
   const xApiKey = request.headers['x-api-key']
@@ -144,7 +169,7 @@ async function eitherAuth(request: FastifyRequest, reply: FastifyReply): Promise
   return authMiddleware(request, reply)
 }
 
-function serialize(row: CatalogRow) {
+export function serialize(row: CatalogRow & CatalogRowWithMerchant) {
   return {
     id: row.id,
     name: row.name,
@@ -174,6 +199,7 @@ function serialize(row: CatalogRow) {
     // never-probed row (verified_at null) or one that failed three
     // consecutive probes (status 'degraded') stays unbadged.
     verified_payable: row.status === 'active' && row.verified_at !== null,
+    merchant: merchantOf(row),
   }
 }
 
@@ -182,7 +208,7 @@ function serialize(row: CatalogRow) {
  * Pointer-shaped by design: the probe stores no prices (epic #1717), so every
  * price field is null and the badge IS the payload.
  */
-function serializeIngestion(row: VerifiedCatalogListingRow) {
+export function serializeIngestion(row: VerifiedCatalogListingRow) {
   return {
     id: row.id,
     name: row.name ?? 'Payable service',
@@ -203,6 +229,7 @@ function serializeIngestion(row: VerifiedCatalogListingRow) {
     source: 'ingestion' as const,
     domain_verified: true,
     verified_payable: true,
+    merchant: merchantOf(row),
   }
 }
 
@@ -242,37 +269,52 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
         return reply.code(400).send({ error: 'Search must be 120 characters or fewer' })
       }
 
-      const conditions = [`status != 'delisted'`]
-      const values: string[] = []
+      const conditions = [`mc.status != 'delisted'`]
+      const values: unknown[] = []
       if (category !== undefined && typeof category !== 'string') {
         return reply.code(400).send({ error: 'Category must be a single string' })
       }
       const normalizedCategory = typeof category === 'string' ? category.trim() : undefined
       if (normalizedCategory) {
         values.push(normalizedCategory)
-        conditions.push(`LOWER(TRIM(category)) = LOWER(TRIM($${values.length}))`)
+        conditions.push(`LOWER(TRIM(mc.category)) = LOWER(TRIM($${values.length}))`)
       }
       if (rail) {
         values.push(rail)
-        conditions.push(`rail = $${values.length}`)
+        conditions.push(`mc.rail = $${values.length}`)
       }
       if (normalizedSearch) {
         values.push(normalizedSearch)
         conditions.push(
-          `(name ILIKE '%' || $${values.length} || '%' OR ` +
-            `description ILIKE '%' || $${values.length} || '%' OR ` +
-            `category ILIKE '%' || $${values.length} || '%')`,
+          `(mc.name ILIKE '%' || $${values.length} || '%' OR ` +
+            `mc.description ILIKE '%' || $${values.length} || '%' OR ` +
+            `mc.category ILIKE '%' || $${values.length} || '%')`,
         )
       }
       if (request.agent) {
+        // An agent sees its own chain's offers — this clause alone, whatever
+        // the deployment lists for browsers (#3078: the marketplace list is
+        // an ALTERNATIVE to it, never a conjunction; a Sepolia agent on prod
+        // with the list at 8453 would otherwise get zero operator rows).
         values.push(`eip155:${request.agent.chain_id}`)
-        conditions.push(`network = $${values.length}`)
+        conditions.push(`mc.network = $${values.length}`)
+      } else {
+        // A dashboard user or a credential-less reader sees the chains the
+        // marketplace lists (`HAVEN_MARKETPLACE_CHAIN_IDS`, else the deploy
+        // list, else every chain) — prod lists 8453 and hides testnets
+        // outright (epic #3077 decision 4). Operator half only: ingestion
+        // rows carry `network: null` and are never chain-filtered.
+        const listed = marketplaceChainIds()
+        if (listed !== null) {
+          values.push(listed.map((id) => `eip155:${id}`))
+          conditions.push(`mc.network = ANY($${values.length}::text[])`)
+        }
       }
 
-      const result = await pool.query<CatalogRow>(
-        `SELECT * FROM merchant_catalog
+      const result = await pool.query<CatalogRow & CatalogRowWithMerchant>(
+        `${CATALOG_ROW_WITH_MERCHANT_SELECT}
          WHERE ${conditions.join(' AND ')}
-         ORDER BY status = 'active' DESC, category ASC, name ASC, id ASC`,
+         ORDER BY mc.status = 'active' DESC, mc.category ASC, mc.name ASC, mc.id ASC`,
         values,
       )
 
@@ -319,14 +361,14 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
 
   // GET /catalog/:id — single entry detail (both sources).
   app.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
-    const conditions = [`id = $1`, `status != 'delisted'`]
+    const conditions = [`mc.id = $1`, `mc.status != 'delisted'`]
     const values = [request.params.id]
     if (request.agent) {
       values.push(`eip155:${request.agent.chain_id}`)
-      conditions.push(`network = $${values.length}`)
+      conditions.push(`mc.network = $${values.length}`)
     }
-    const result = await pool.query<CatalogRow>(
-      `SELECT * FROM merchant_catalog WHERE ${conditions.join(' AND ')} LIMIT 1`,
+    const result = await pool.query<CatalogRow & CatalogRowWithMerchant>(
+      `${CATALOG_ROW_WITH_MERCHANT_SELECT} WHERE ${conditions.join(' AND ')} LIMIT 1`,
       values,
     )
     const row = result.rows[0]

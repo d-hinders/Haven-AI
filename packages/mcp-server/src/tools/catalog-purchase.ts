@@ -133,6 +133,21 @@ export function createCatalogPurchaseHandlers(
           source: entry.source,
           domain_verified: entry.domainVerified,
           verified_payable: entry.verifiedPayable,
+          // #3078: the merchant the entry belongs to — wire-shaped (snake_case)
+          // like the rest of this map. `is_test_merchant` is the structural
+          // signal for skipping Haven's own test content. Absent when the
+          // backend predates the merchant layer (the SDK field is optional).
+          ...(entry.merchant
+            ? {
+                merchant: {
+                  id: entry.merchant.id,
+                  slug: entry.merchant.slug,
+                  name: entry.merchant.name,
+                  listing_status: entry.merchant.listingStatus,
+                  is_test_merchant: entry.merchant.isTestMerchant,
+                },
+              }
+            : {}),
           // Hosted surface is keyless: x402 entries start with the quote half
           // of the split flow; MCP entries take the GUIDED preflight —
           // haven_prepare_catalog_purchase runs the live quote, cap, and

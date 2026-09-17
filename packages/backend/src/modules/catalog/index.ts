@@ -4,6 +4,7 @@
 // resolve here, never to a deep file in this directory.
 export * from './catalog-discovery.js'
 export * from './lifecycle.js'
+export * from './marketplace-scope.js'
 export * from './merchant-catalog.js'
 export * from './ownership.js'
 export * from './probe.js'

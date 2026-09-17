@@ -160,6 +160,36 @@ describe('probeCatalogEntry', () => {
     })
   })
 
+  it('verifies an Ampersend-shaped 402 whose resource.url is http:// — the probe never compares it (#3078)', async () => {
+    // Ampersend's live 402 names its resource with an `http://` scheme while
+    // the seeded row is `https://`; the probe reads scheme/network/asset/
+    // amount from `accepts` and nothing from `resource`, so the seeded rows
+    // verify on their first tick rather than sitting `degraded` forever.
+    const body = {
+      x402Version: 2,
+      resource: { url: 'http://services.sandbox.ampersend.ai/api/joke', description: 'One joke', mimeType: 'application/json' },
+      accepts: [{
+        scheme: 'exact',
+        network: 'eip155:84532',
+        asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        amount: '1000',
+        payTo: '0x' + '22'.repeat(20),
+        maxTimeoutSeconds: 300,
+      }],
+    }
+    const entry: CatalogRow = {
+      ...X402_ENTRY,
+      resource_url: 'https://services.sandbox.ampersend.ai/api/joke',
+      network: 'eip155:84532',
+      asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    }
+    const fetchMock = vi.fn(async () => new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(body) } }))
+    const result = await probeCatalogEntry(entry, fetchMock as typeof fetch)
+    expect(result.ok).toBe(true)
+    expect(result).toMatchObject({ priceAtomic: '1000', network: 'eip155:84532', assetTransferMethods: ['eip3009'] })
+    expect(fetchMock).toHaveBeenCalledWith('https://services.sandbox.ampersend.ai/api/joke', { method: 'GET' })
+  })
+
   it('fails when the merchant does not answer 402', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }))
     expect((await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)).ok).toBe(false)

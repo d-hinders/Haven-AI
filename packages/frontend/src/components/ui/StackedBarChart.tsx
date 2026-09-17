@@ -401,8 +401,14 @@ export function StackedBarChart({
   // own it repeats) and never over a legend row. A bar too short for either (the
   // callout would swallow its body, the label and the legend to save a
   // sliver — design review) keeps the resting callout and loses its top
-  // instead. The svg scales the viewBox to its CSS box without preserving
-  // the ratio, so a viewBox y maps to CSS by `y / VIEW_H * clientHeight`.
+  // instead. Between the two slots, the one that hides the fewest
+  // NEIGHBOURS' tops wins (#3076): a 62px band above the baseline covers
+  // the top of every bar shorter than ~68px within the callout's span,
+  // leaving a refusal cap floating over a hidden bar, while the same
+  // callout above the legend clears them at the cost of the date labels it
+  // partly repeats. Ties go to the baseline slot. The svg scales the
+  // viewBox to its CSS box without preserving the ratio, so a viewBox y
+  // maps to CSS by `y / VIEW_H * clientHeight` (and x by `VIEW_W`).
   // Every input is a layout read or a value the render already fixed, so the
   // second pass reads the same number and the setter bails out — the same
   // fixed point as the half-width above.
@@ -428,7 +434,47 @@ export function StackedBarChart({
     const least = Math.max(barTop + TIP_GAP, markTop + TIP_MIN_VISIBLE)
     const aboveBaseline = cssY(baseY) - tip.offsetHeight - TIP_GAP
     const onLegendTop = svg.clientHeight + LEGEND_GAP - TIP_GAP - tip.offsetHeight
-    const top = aboveBaseline >= least ? aboveBaseline : onLegendTop >= least ? onLegendTop : null
+    // The callout's horizontal span, in the wrapper's CSS px (the box its
+    // `left: %` resolves against — the same one the half-width effect
+    // measures): the same centre-and-clamp the `left` style uses, half its
+    // measured width each side. A neighbour whose bar top — or whose
+    // refusal cap — lies inside a slot's box has its top hidden by that
+    // slot (a cap just above the box over a hidden bar top is the floating
+    // cap the review saw).
+    const width = tip.parentElement?.clientWidth ?? 0
+    const cssX = (x: number) => (x / VIEW_W) * width
+    const centre =
+      (Math.min(100 - tipHalfPct, Math.max(tipHalfPct, ((xOf(active as number) + barW / 2) / VIEW_W) * 100)) / 100) *
+      width
+    const spanLeft = centre - tip.offsetWidth / 2
+    const spanRight = centre + tip.offsetWidth / 2
+    const hiddenTops = (slotTop: number): number => {
+      if (width === 0) return 0
+      let n = 0
+      entries.forEach((e, j) => {
+        if (j === active) return
+        const left = cssX(xOf(j))
+        if (left + cssX(barW) <= spanLeft || left >= spanRight) return
+        const bar = cssY(yOf(e.total))
+        const mark = cssY(yOf(e.total) - (e.refusals > 0 ? REFUSAL_MARKER_H + 3 : 0))
+        const inside = (y: number) => y > slotTop && y < slotTop + tip.offsetHeight
+        if (inside(bar) || inside(mark)) n += 1
+      })
+      return n
+    }
+    const slots = [aboveBaseline, onLegendTop].filter((t) => t >= least)
+    let top: number | null = null
+    if (slots.length > 0) {
+      top = slots[0] as number
+      let best = hiddenTops(top)
+      for (const t of slots.slice(1)) {
+        const n = hiddenTops(t)
+        if (n < best) {
+          best = n
+          top = t
+        }
+      }
+    }
     setTipTop(top === null ? null : Number(top.toFixed(1)))
   })
 

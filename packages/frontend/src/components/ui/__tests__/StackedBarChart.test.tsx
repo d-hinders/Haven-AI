@@ -359,6 +359,51 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
     expect(tip.getAttribute('data-flipped')).toBeNull()
   })
 
+  it('prefers the slot above the legend when the baseline slot would hide a neighbour\'s top (#3076)', () => {
+    layOut()
+    // A 400px callout spans 30–70% of the 600px wrapper (clamped): at
+    // Wed 10 it reaches over Tue 9 (x 260–376), whose cap top (97.0) lies
+    // inside the baseline slot's box (76.7..166.7) — so that slot would hide
+    // a neighbour's top. Above the legend (116) it hides none: Mon 8's top
+    // (132.7) is outside the span. The legend slot wins.
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(400)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'End' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip.getAttribute('data-flipped')).toBe('true')
+    expect(tip.style.top).toBe('116px')
+    // The narrow 200px callout of the test above does not reach Tue 9, so
+    // the baseline slot keeps winning there (76.7px) — a tie goes to it.
+  })
+
+  it('counts a neighbour\'s BAR top as hidden, not only its cap: a cap floating above the box does not clear the bar under it (#3076)', () => {
+    layOut()
+    // Described: a tall middle bar B. Neighbour A (capless, top 132.7) sits
+    // inside both slots' boxes (baseline 76.7..166.7, legend 116..206).
+    // Neighbour C carries a cap: its bar top (79.9) sits inside the
+    // baseline box but its cap (70.8) floats just above it — the floating
+    // cap over a hidden bar the review saw. A 400px callout spans both.
+    // Counting bar tops, the baseline slot hides A and C, the legend slot
+    // only A: legend wins. Counting caps only, each slot hides one (A) and
+    // the baseline slot keeps the tie.
+    const capless: StackedBarDay[] = [
+      { label: 'A', series: [{ id: 'x', name: 'x', amount: 150, seriesIndex: 0 }] },
+      { label: 'B', series: [{ id: 'x', name: 'x', amount: 450, seriesIndex: 0 }] },
+      { label: 'C', refusals: 1, series: [{ id: 'x', name: 'x', amount: 348, seriesIndex: 0 }] },
+    ]
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(400)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={capless} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    fireEvent.keyDown(container.querySelector('svg')!, { key: 'ArrowRight' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip).toHaveTextContent(/^B/)
+    expect(tip.style.top).toBe('116px')
+  })
+
   it('counts the refusal cap as part of the bar: a day whose CAP alone would hide flips too', () => {
     layOut()
     // Tue 9's bar top is at 106.1, the 90px callout's resting bottom at

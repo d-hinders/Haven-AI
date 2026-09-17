@@ -75,7 +75,8 @@ bar, kept inside
 the plot at either edge; when the bar (or its refusal cap) is tall enough to
 reach under the callout, the callout drops below the bar's top instead — its
 bottom just above the axis when the bar can hold it, otherwise just above
-the legend, over the date labels beneath it — so the bar's top, its
+the legend, over the date labels beneath it; between the two, the slot that
+hides the fewest neighbouring bars' tops wins — so the bar's top, its
 height against its neighbours and any refusal cap stay visible while it is
 open. The callout takes no pointer, so hovering the next bar through it
 moves the detail on; a tap pins a day, and a second tap on it, or Escape,

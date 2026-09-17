@@ -180,7 +180,8 @@ export function useDelegationBudget(
       if (!enabled) return
       try {
         const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations`)
-        setBudgets(res.delegations)
+        // `?? []` — an absent key must degrade, not crash the route (#3093).
+        setBudgets(res.delegations ?? [])
         setBudgetsError(false)
       } catch {
         if (silent) return
@@ -198,7 +199,10 @@ export function useDelegationBudget(
   const reloadSigners = useCallback(async () => {
     if (!enabled) return
     try {
-      setSigners(await api.get<AccountSigners>(`/agents/${agentId}/account-signers`))
+      const res = await api.get<AccountSigners>(`/agents/${agentId}/account-signers`)
+      // `passkeys ?? []` — `pickSigningPath` reads `.length` during render;
+      // an answer without the array must degrade, not crash the route (#3093).
+      setSigners({ ...res, passkeys: res.passkeys ?? [] })
       setSignersError(false)
     } catch {
       setSigners(null)

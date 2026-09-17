@@ -78,3 +78,11 @@ throwaway account.
   as one usable signer remains — which is the recommendation's whole point.
 
 See [`dev-environment.md`](dev-environment.md) for the rest of the dev stack.
+
+> **Re-verified #3093 (frontend hooks: wire keys default instead of crashing):**
+> this diff touched `hooks/useDelegationBudget.ts`, in this document's coverage list, by
+> defaulting the array keys it stores (`?? []`; and `?? 0` on the portfolio
+> totals) so an API answer without the key degrades to an empty state instead
+> of sending the route into the ErrorBoundary. No endpoint, flow or
+> behaviour this document describes changes. Scope of this note: those
+> expressions. Nothing else in this document was re-verified.

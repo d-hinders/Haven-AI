@@ -160,6 +160,19 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
     source: entry.source,
     domainVerified: entry.domain_verified,
     verifiedPayable: entry.verified_payable,
+    // #3078: absent (older backend) or null (unresolved join) both mean "no
+    // merchant known" — the public field is then absent, never null.
+    ...(entry.merchant
+      ? {
+          merchant: {
+            id: entry.merchant.id,
+            slug: entry.merchant.slug,
+            name: entry.merchant.name,
+            listingStatus: entry.merchant.listing_status,
+            isTestMerchant: entry.merchant.is_test_merchant,
+          },
+        }
+      : {}),
   }
 }
 

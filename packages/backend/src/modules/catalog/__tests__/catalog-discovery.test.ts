@@ -45,6 +45,29 @@ function fakeDb(existing: string[] = []) {
   return { db, inserts }
 }
 
+
+/**
+ * #3078: the cron goes through a merchant writer before every insert. A stub
+ * that founds one merchant per host and counts the calls, so a test can say
+ * "the second resource on a host reused the merchant" without a database.
+ */
+function stubMerchants() {
+  const byHost = new Map<string, { id: string }>()
+  const calls: Array<{ host: string; name: string }> = []
+  const merchants = {
+    findOrCreateMerchantByHost: async (host: string, seed: { name: string }) => {
+      calls.push({ host, name: seed.name })
+      let m = byHost.get(host)
+      if (!m) {
+        m = { id: `merchant-${byHost.size + 1}` }
+        byHost.set(host, m)
+      }
+      return m
+    },
+  }
+  return { merchants, calls }
+}
+
 describe('ingestDiscoveredCatalog', () => {
   it('ingests a verified, payable, unknown resource', async () => {
     const { db, inserts } = fakeDb()
@@ -59,7 +82,7 @@ describe('ingestDiscoveredCatalog', () => {
       return paid402()
     })
 
-    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch)
+    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, stubMerchants().merchants)
 
     expect(result).toMatchObject({ scanned: 1, candidates: 1, ingested: 1, failedProbe: 0 })
     expect(inserts).toHaveLength(1)
@@ -75,7 +98,55 @@ describe('ingestDiscoveredCatalog', () => {
       'USDC',
       'eip155:8453',
       'eip3009',
+      'merchant-1',
     ])
+  })
+
+  it('keys the merchant by the host a client would fetch, so a crafted Bazaar URL cannot join a curated merchant (#3078 reviews)', async () => {
+    const { db } = fakeDb()
+    const { merchants, calls } = stubMerchants()
+    const crafted = [
+      'https://u@services.ampersend.ai:@evil.example/x',
+      'https://evil.example\\@services.ampersend.ai/y',
+    ]
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/discovery/resources')) {
+        return bazaarPage(crafted.map((resource) => ({ resource, type: 'http', accepts: X402_BODY.accepts, metadata: { name: 'Crafted', description: 'x' } })))
+      }
+      return paid402()
+    })
+    await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, merchants)
+    // Both name evil.example — what `new URL()` and every client resolve —
+    // never services.ampersend.ai.
+    expect(calls.map((c) => c.host)).toEqual(crafted.map((u) => new URL(u).hostname))
+    expect(calls.map((c) => c.host)).toEqual(['evil.example', 'evil.example'])
+  })
+
+  it('sets the merchant on every insert through the shared writer, and a second resource on the same host reuses it (#3078)', async () => {
+    const { db, inserts } = fakeDb()
+    const { merchants, calls } = stubMerchants()
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/discovery/resources')) {
+        return bazaarPage([
+          { resource: 'https://api.weather.example/paid', type: 'http', accepts: X402_BODY.accepts,
+            metadata: { name: 'Weather API', description: 'Per-call forecast data.' } },
+          { resource: 'https://api.weather.example/hourly', type: 'http', accepts: X402_BODY.accepts,
+            metadata: { name: 'Weather API — hourly', description: 'Hourly forecasts.' } },
+          { resource: 'https://api.other.example/x', type: 'http', accepts: X402_BODY.accepts,
+            metadata: { name: 'Other', description: 'Other.' } },
+        ])
+      }
+      return paid402()
+    })
+    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, merchants)
+    expect(result).toMatchObject({ ingested: 3 })
+    // The writer is asked once per row, keyed by the host, and named after
+    // the resource's own name — the merchant id lands in every insert.
+    expect(calls.map((c) => c.host)).toEqual(['api.weather.example', 'api.weather.example', 'api.other.example'])
+    expect(calls[0]?.name).toBe('Weather API')
+    expect(inserts.map((row) => row[9])).toEqual(['merchant-1', 'merchant-1', 'merchant-2'])
   })
 
   it('persists erc7710 support discovered on the probed challenge', async () => {
@@ -98,7 +169,7 @@ describe('ingestDiscoveredCatalog', () => {
       return new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(erc7710Body) } })
     })
 
-    await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch)
+    await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, stubMerchants().merchants)
     expect(inserts).toHaveLength(1)
     expect(inserts[0]?.[8]).toBe('eip3009,erc7710')
   })
@@ -116,7 +187,7 @@ describe('ingestDiscoveredCatalog', () => {
       return paid402()
     })
 
-    await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch)
+    await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, stubMerchants().merchants)
     // name ← serviceName, description ← top-level description, category ← tag rule
     expect(inserts[0]?.slice(0, 3)).toEqual(['Agent Search', 'Web search for agents.', 'search'])
   })
@@ -136,7 +207,7 @@ describe('ingestDiscoveredCatalog', () => {
       return paid402()
     })
 
-    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch)
+    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, stubMerchants().merchants)
     expect(result).toMatchObject({ scanned: 1, candidates: 0, ingested: 0, skippedUnsupported: 1 })
     expect(probe).not.toHaveBeenCalled()
     expect(inserts).toHaveLength(0)
@@ -154,7 +225,7 @@ describe('ingestDiscoveredCatalog', () => {
       return paid402()
     })
 
-    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch)
+    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, stubMerchants().merchants)
     expect(result).toMatchObject({ candidates: 0, ingested: 0, skippedExisting: 1 })
     expect(inserts).toHaveLength(0)
   })
@@ -171,7 +242,7 @@ describe('ingestDiscoveredCatalog', () => {
       return new Response('gone', { status: 404 })
     })
 
-    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch)
+    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, stubMerchants().merchants)
     expect(result).toMatchObject({ candidates: 1, ingested: 0, failedProbe: 1 })
     expect(inserts).toHaveLength(0)
   })
@@ -188,7 +259,7 @@ describe('ingestDiscoveredCatalog', () => {
       return paid402()
     })
 
-    await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch)
+    await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, stubMerchants().merchants)
     expect(inserts[0]?.[0]).toBe('search.example')
   })
 })

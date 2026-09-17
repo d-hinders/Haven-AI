@@ -11,6 +11,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { insertCatalogSubmission, listSubmittedCatalogSubmissions } from '../../../infra/repositories/catalog-submissions.js'
+import { findOrCreateMerchantByHost } from '../../../infra/repositories/merchants.js'
 import type { SafeFetchResult } from '../../../infra/http/ssrf-guard.js'
 import {
   FAIL_AFTER_CONSECUTIVE_FAILURES,
@@ -29,13 +30,18 @@ import {
 const SECRET = 'test-ownership-secret-not-a-real-key'
 const TOKEN = 'ab'.repeat(24)
 
-async function seed(hostname: string, resourceUrl?: string): Promise<OwnershipClaim> {
+async function seed(
+  hostname: string,
+  resourceUrl?: string,
+  merchant: { merchant_name?: string; merchant_website?: string } = {},
+): Promise<OwnershipClaim> {
   const created = await insertCatalogSubmission({
     hostname,
     resource_url: resourceUrl ?? `https://${hostname}/mcp`,
     submitter_ip: '127.0.0.1',
     verify_token: TOKEN,
     queueCap: 10_000,
+    ...merchant,
   })
   expect(created).not.toBeNull()
   const found = (await listSubmittedCatalogSubmissions()).find((r) => r.id === created!.id)
@@ -179,6 +185,48 @@ describeDb('catalog ingestion lifecycle (#1714)', () => {
     expect(saved.name).toBe('Summarizer')
     expect(saved.description).toBe('Summarizes documents')
     expect((saved as { last_verified_at: string | null }).last_verified_at).not.toBeNull()
+    // #3078: a verified offer belongs to a merchant — founded here from the
+    // probe's own name, since nobody owned the host and the submitter said
+    // nothing about the seller.
+    expect(saved.merchant_id).toBeTruthy()
+    const merchant = await db.query<{ slug: string; name: string; listing_status: string }>(
+      `SELECT slug, name, listing_status FROM merchants WHERE id = $1`,
+      [saved.merchant_id],
+    )
+    expect(merchant.rows[0]).toEqual({ slug: 'summarizer', name: 'Summarizer', listing_status: 'live' })
+  })
+
+  it('attaches a verified submission to the merchant that already owns its host, and founds one from merchant_name otherwise (#3078)', async () => {
+    // A curated merchant already answers on this host through a catalog row:
+    // the submission joins it, the submitter's name is ignored.
+    const owner = await findOrCreateMerchantByHost('shop.example.com', { name: 'Shop Co' })
+    await db.query(
+      `INSERT INTO merchant_catalog
+         (name, description, category, resource_url, rail, protocol, tool_name, network, status, merchant_id)
+       VALUES ('Shop tool', 'x', 'api', 'https://shop.example.com/paid', 'x402', 'http', NULL, 'eip155:8453', 'active', $1)`,
+      [owner.id],
+    )
+    const claim = await seed('shop.example.com', undefined, { merchant_name: 'Impostor Ltd', merchant_website: 'https://impostor.example' })
+    await runCatalogIngestTick(tickDeps({ fetchText: wellKnownServer(claim, SECRET), post: mcpServer() }))
+    const joined = await row(claim.submissionId)
+    expect(joined.status).toBe('verified_payable')
+    expect(joined.merchant_id).toBe(owner.id)
+    const count = await db.query<{ n: string }>(`SELECT count(*)::text AS n FROM merchants`)
+    expect(count.rows[0].n).toBe('1')
+
+    // Nobody owns this host: the submitter's merchant_name and website found the merchant.
+    const claim2 = await seed('new.example.com', undefined, { merchant_name: 'New Seller AB', merchant_website: 'https://new.example.com' })
+    await runCatalogIngestTick(tickDeps({ fetchText: wellKnownServer(claim2, SECRET), post: mcpServer() }))
+    const founded = await row(claim2.submissionId)
+    const m = await db.query<{ slug: string; name: string; website: string | null }>(
+      `SELECT slug, name, website FROM merchants WHERE id = $1`,
+      [founded.merchant_id],
+    )
+    expect(m.rows[0]).toEqual({ slug: 'new-seller-ab', name: 'New Seller AB', website: 'https://new.example.com' })
+
+    // A re-verification keeps the merchant it has.
+    await runCatalogIngestTick(tickDeps({ fetchText: wellKnownServer(claim2, SECRET), post: mcpServer() }))
+    expect((await row(claim2.submissionId)).merchant_id).toBe(founded.merchant_id)
   })
 
   it('leaves a submitted row pending through transient ownership failure, then fails it on token expiry', async () => {

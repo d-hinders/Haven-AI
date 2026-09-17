@@ -196,6 +196,12 @@ describe('catalog /submit (epic #1717 #1711)', () => {
       { payload: { resource_url: 'https://127.0.0.1/x' }, fragment: 'public hostname' },
       { payload: { resource_url: 'https://[::1]/x' }, fragment: 'public hostname' },
       { payload: { resource_url: 42 }, fragment: 'must be a string' },
+      // #3078 seller fields: bounded name, https-only site, typed.
+      { payload: { resource_url: 'https://mcp.example.com/x', merchant_name: 'x'.repeat(121) }, fragment: '120 characters' },
+      { payload: { resource_url: 'https://mcp.example.com/x', merchant_name: 42 }, fragment: 'merchant_name must be a string' },
+      { payload: { resource_url: 'https://mcp.example.com/x', merchant_website: 'http://seller.example' }, fragment: 'https URL' },
+      { payload: { resource_url: 'https://mcp.example.com/x', merchant_website: 'not a url' }, fragment: 'https URL' },
+      { payload: { resource_url: 'https://mcp.example.com/x', merchant_website: 42 }, fragment: 'merchant_website must be a string' },
     ]
 
     for (const { payload, fragment } of cases) {

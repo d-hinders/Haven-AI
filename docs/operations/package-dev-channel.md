@@ -256,6 +256,13 @@ untouched. The doc is a contract doc for this change because
 there is the deletion of the two twin helpers, not the refusal machinery this
 document depends on.
 
+Re-verified again 2026-09-17 against #3078
+(the marketplace's slice 1): `config.ts` gains `marketplaceChainIds` and
+`marketplaceProspectsEnabled` (the latter through the same `parseBooleanFlag`
+this document holds up as the #3015 shape) — two read-side keys beside
+`connectorChannel`, which is not touched, and `/discovery` is not touched
+either. Identifiers only for this section:
+
 ```bash
 curl -s "$BACKEND/discovery" | jq -r '.connector_package, .cli_package'
 ```

@@ -36,6 +36,9 @@ function entry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
     description: 'Generate text content.',
     category: 'media',
     resource_url: 'https://mcp.merchant.example/mcp',
+    // #3078: `merchant` is required on the wire (null when the join resolved
+    // nothing) — the same trap #1445 notes below for the other two fields.
+    merchant: null,
     rail: 'x402',
     protocol: 'mcp',
     // #1445: the route emits these on every row; the fixture omitted them

@@ -365,6 +365,28 @@ export const config = {
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n) && n > 0),
 
+  // Chains the MARKETPLACE lists for dashboard and credential-less readers
+  // (#3078, epic #3077 decision 4). Prod serves Sepolia deploys but must not
+  // show testnet merchants, so this is its own list: unset → `deployChainIds`;
+  // both unset → every supported chain (no environment or test returns zero
+  // rows by accident). An agent read never consults it — an agent on a chain
+  // is entitled to that chain's offers (its own clause, routes/catalog.ts).
+  // Prod sets `8453`; dev sets `84532,8453` (decision 11: the demo grid shows
+  // the mainnet merchants next to the Sepolia sandbox).
+  marketplaceChainIds: (process.env.HAVEN_MARKETPLACE_CHAIN_IDS ?? '')
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0),
+
+  // Prospects — merchants we are talking to, `listing_status: coming_soon`,
+  // seeded by #3080 — are listed only when this is on AND the marketplace
+  // lists no mainnet chain (the second line of defence lives in the route:
+  // a copied env cannot publish them on prod). Default off.
+  marketplaceProspectsEnabled: parseBooleanFlag(
+    'HAVEN_MARKETPLACE_PROSPECTS',
+    process.env.HAVEN_MARKETPLACE_PROSPECTS,
+  ),
+
   // Fortnox bookkeeping integration (P2 #465). Disabled unless all three are
   // set. Secrets — env only, never commit.
   fortnoxClientId: process.env.FORTNOX_CLIENT_ID ?? '',

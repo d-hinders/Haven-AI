@@ -1737,6 +1737,33 @@ export interface HavenCatalogEntry {
    * 'verified' })` filters on this field, not on `source`.
    */
   verifiedPayable: boolean
+  /**
+   * The merchant this entry belongs to (#3078). OPTIONAL on purpose: an
+   * installed SDK may face a backend that predates the merchant layer, and
+   * `discoverTools` must keep working against it — the field is absent, not
+   * null, in that case.
+   */
+  merchant?: HavenCatalogMerchant
+}
+
+/** A catalog entry's merchant as the wire carries it (#3078). */
+export interface HavenCatalogMerchant {
+  id: string
+  slug: string
+  name: string
+  /** `coming_soon` never reaches an entry in practice (a prospect has no offers). */
+  listingStatus: 'live' | 'coming_soon'
+  /** Haven-run test content: the demo store and the stranded-funds fixture. */
+  isTestMerchant: boolean
+}
+
+/** @internal */
+export interface RawCatalogEntryMerchant {
+  id: string
+  slug: string
+  name: string
+  listing_status: 'live' | 'coming_soon'
+  is_test_merchant: boolean
 }
 
 /** @internal */
@@ -1759,6 +1786,8 @@ export interface RawCatalogEntry {
   source: 'operator' | 'ingestion'
   domain_verified: boolean
   verified_payable: boolean
+  /** Absent from a backend older than #3078; null when the join resolved nothing. */
+  merchant?: RawCatalogEntryMerchant | null
 }
 
 export interface RawHavenPaymentReceiptsResponse {

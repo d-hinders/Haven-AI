@@ -3,8 +3,10 @@ owner: "@AntonioSaaranen"
 status: current
 covers:
   - packages/backend/src/db/migrations/088_merchants.ts
+  - packages/backend/src/db/migrations/089_marketplace_prospects.ts
   - packages/backend/src/infra/repositories/merchants.ts
   - packages/backend/src/modules/catalog/marketplace-scope.ts
+  - packages/backend/src/modules/catalog/prospect-copy.ts
   - packages/backend/src/routes/merchants.ts
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/config.ts
@@ -99,20 +101,100 @@ caller, including `haven_discover_tools`.
 
 ## Prospects
 
-A `coming_soon` merchant is a company Haven is in conversation with (#3080
-seeds Berget AI and Redpine). It is not an agreement and the copy never says
-partner, customer, integration, planned or pilot. It has no offers and is
-never payable; it never appears in `GET /catalog`, in any agent read or in
-the credential-less shape.
+A `coming_soon` merchant is a company Haven is in conversation with — migration
+089 (#3080) seeds two: **Berget AI** (`berget.ai`, category `ai`, "Sovereign
+Swedish inference — open models on Swedish data centres, OpenAI-compatible
+API") and **Redpine** (`redpine.ai`, category `data`, "Grounding API for
+licensed, non-public data — API, MCP and CLI"). Neither has a logo — a
+monogram only (decision 7). **Opper is not seeded**: it has no CRM record yet
+(decision 8); adding it later is one seed row in a migration plus that CRM
+record, nothing else.
+
+**These rows are not agreements.** Owner decision 2026-09-17 #9 on epic #3077,
+recorded verbatim because neither CRM record covers it on its own: *"a dev-only
+'Coming soon' card for Berget AI and Redpine is within each record's
+external-mention ceiling — it is shown only in private meetings with that
+company, never on prod, never in public copy. Each CRM record gets a line
+saying so (owner step in the promotion checklist)."* The copy itself is
+guardrail-tested: `modules/catalog/prospect-copy.ts` exports the shared banned
+word list (`partner`, `customer`, `integration`, `planned`, `pilot`) and
+`089_marketplace_prospects.test.ts` asserts every seed's name and description
+is clean of it, read from the migration's own exported `PROSPECT_SEEDS`
+constant — not from the database.
+
+A prospect has **zero offers**, enforced twice: `GET /merchants` and
+`GET /merchants/{slug}` never attach one (there is nothing to attach — a
+`coming_soon` row has none by construction), and the write side refuses on its
+own — `findOrCreateMerchantByHost`'s FIND query only matches a `live` merchant,
+and `assertMerchantAcceptsOffers` (`infra/repositories/merchants.ts`) throws a
+named `ProspectMerchantWriteError` if a caller ever tries to attach an offer to
+a `coming_soon` merchant anyway. A cross-table CHECK cannot express "this
+merchant has no rows in another table" without a trigger, so this application
+assertion is the rule, not a stand-in for one. A third-party submission that
+lands on a prospect's host (e.g. someone submits `api.berget.ai`) does **not**
+become the prospect: the slug collides and the submission founds `berget-ai-2`
+instead, leaving the prospect untouched.
 
 It is listed **only** to an authenticated dashboard user, **only** when
 `HAVEN_MARKETPLACE_PROSPECTS=true`, and **only** when the marketplace lists no
 mainnet chain — the second line of defence: a prod env copied from dev with
 the flag left on cannot publish them, because prod lists `8453`.
 `GET /merchants/{slug}` answers **404, never 403**, to anyone who may not see
-a prospect, so the URL does not confirm the row exists. Owner decision 9 on
-the epic is the authority for showing the card at all: a dev-only card in a
-private meeting is within each CRM record's external-mention ceiling.
+a prospect, so the URL does not confirm the row exists.
+
+### Turning the flag on for a meeting (dev only)
+
+1. On the **dev** deployment only — never prod, which never sets this —
+   set `HAVEN_MARKETPLACE_PROSPECTS=true` and confirm
+   `HAVEN_MARKETPLACE_CHAIN_IDS` lists no mainnet chain (dev's own
+   `84532,8453` per decision 11 already includes `8453` — for a prospects demo,
+   narrow it to `84532` for the duration, or the second line of defence hides
+   the cards).
+2. Show the marketplace grid to that company only, in that meeting. The card
+   reads "Coming soon" and nothing else.
+3. **Revert immediately after**: set the flag back to `false` (or restore
+   `HAVEN_MARKETPLACE_CHAIN_IDS` to its normal value). Leaving either on is an
+   operator error, not a code path Haven relies on to stay off prod.
+
+### Promotion: prospect → live
+
+A prospect becomes `live` only through this sequence, never implicitly through
+a catalog write:
+
+1. The merchant has a **verified payable offer** on its host — the same
+   verification any third-party submission goes through
+   (`docs/operations/catalog-ingestion.md`), or an operator-added row the
+   catalog probe has confirmed live.
+2. The **CRM record says `live` first** — update
+   `Haven Labs/crm/partners/<slug>.md` (or `accounts/`) before the SQL step, so
+   the guardrail on external-mention language is lifted in the one place that
+   tracks it before the product surface changes.
+3. The operator flips `listing_status` by hand:
+
+   ```sql
+   UPDATE merchants SET listing_status = 'live' WHERE slug = 'berget-ai';
+   ```
+
+   Record the change (who, when, which offer verified it) on the CRM record.
+   From this point the merchant is an ordinary live merchant: public-readable,
+   scoped like any other, and `findOrCreateMerchantByHost` will happily attach
+   further offers to it.
+
+Migration 089's `down()` refuses loudly, naming the slug, if a seed has already
+been promoted this way (still `coming_soon` with zero offers is the only state
+it will remove) — a rollback must never silently delete a merchant that has
+since become real inventory.
+
+**What the rule does and does not guarantee.** The zero-offers rule is
+application-level, twice: the catalog writer never returns a `coming_soon`
+merchant for a host, and it refuses to attach an offer to one. It is not a
+database invariant — a direct `INSERT INTO merchant_catalog` with a
+prospect's `merchant_id` is unguarded (no trigger, no CHECK), and the
+migration's `down()` will then refuse by name. And the flip runs one way: a
+live merchant with offers flipped back to `coming_soon` by hand is not
+"un-promoted" — the next verified submission or discovery row on its host
+founds a second merchant (`<slug>-2`) rather than attaching to it. Flip a
+merchant back only if it has no offers.
 
 ## Submitting an endpoint
 

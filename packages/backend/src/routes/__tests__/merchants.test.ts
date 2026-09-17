@@ -20,6 +20,7 @@ import { config } from '../../config.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { findOrCreateMerchantByHost } from '../../infra/repositories/merchants.js'
+import { PROSPECT_SEEDS } from '../../db/migrations/089_marketplace_prospects.js'
 import merchantRoutes from '../merchants.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
 import catalogRoutes from '../catalog.js'
@@ -79,6 +80,22 @@ async function insertProspect(slug: string): Promise<void> {
     `INSERT INTO merchants (slug, name, description, listing_status) VALUES ($1, $2, 'A company we are talking to.', 'coming_soon')`,
     [slug, slug],
   )
+}
+
+/**
+ * Plants the REAL migration 089 seeds (`resetDb()` wipes migration data).
+ * `seedMarketplace()`'s fixture already planted a GENERIC 'berget-ai' via
+ * `insertProspect` — remove it first so the real seed's slug is free.
+ */
+async function insertRealProspects(): Promise<void> {
+  await db.query(`DELETE FROM merchants WHERE slug = ANY($1::text[])`, [PROSPECT_SEEDS.map((s) => s.slug)])
+  for (const seed of PROSPECT_SEEDS) {
+    await db.query(
+      `INSERT INTO merchants (slug, name, description, website, category, country, listing_status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'coming_soon')`,
+      [seed.slug, seed.name, seed.description, seed.website, seed.category, seed.country],
+    )
+  }
 }
 
 /** The fixture every test starts from: one merchant per chain, one on both, one prospect. */
@@ -277,4 +294,69 @@ describeDb('merchants routes (#3078)', () => {
     expect(miss.statusCode).toBe(404)
   })
 
+
+  it('the real 089 seeds (Berget AI, Redpine): 404 with the flag off, listed with zero offers on a testnet-only list, omitted on a mainnet list (#3080)', async () => {
+    await insertRealProspects()
+
+    // Flag off entirely: both 404, neither listed, even for a dashboard user.
+    setConfig({ marketplaceProspectsEnabled: false, marketplaceChainIds: [84532], deployChainIds: [] })
+    // Per slug, not `not.arrayContaining([both])` — that passed when exactly
+    // one prospect leaked (review of #3080).
+    const flagOff = slugsOf((await app.inject({ method: 'GET', url: '/merchants', headers: dashboardHeaders() })).json())
+    expect(flagOff).not.toContain('berget-ai')
+    expect(flagOff).not.toContain('redpine')
+    expect((await app.inject({ method: 'GET', url: '/merchants/berget-ai', headers: dashboardHeaders() })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/merchants/redpine', headers: dashboardHeaders() })).statusCode).toBe(404)
+
+    // Flag on, testnet-only list, dashboard user: both listed, zero offers, coming_soon.
+    setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [84532], deployChainIds: [] })
+    const dash = await app.inject({ method: 'GET', url: '/merchants', headers: dashboardHeaders() })
+    expectMatchesSpec('GET', '/merchants', dash.json())
+    const berget = dash.json().merchants.find((m: { slug: string }) => m.slug === 'berget-ai')
+    const redpine = dash.json().merchants.find((m: { slug: string }) => m.slug === 'redpine')
+    expect(berget).toMatchObject({
+      name: 'Berget AI',
+      listing_status: 'coming_soon',
+      offer_count: 0,
+      category: 'ai',
+      country: 'SE',
+      logo_url: null,
+    })
+    expect(redpine).toMatchObject({
+      name: 'Redpine',
+      listing_status: 'coming_soon',
+      offer_count: 0,
+      category: 'data',
+      country: 'SE',
+      logo_url: null,
+    })
+    const page = await app.inject({ method: 'GET', url: '/merchants/berget-ai', headers: dashboardHeaders() })
+    expect(page.statusCode).toBe(200)
+    expect(page.json().offers).toEqual([])
+    expectMatchesSpec('GET', '/merchants/{slug}', page.json())
+
+    // Flag on but HAVEN_MARKETPLACE_CHAIN_IDS=8453 (mainnet listed): omitted
+    // for everyone, including the dashboard user.
+    setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [8453], deployChainIds: [] })
+    const prodDash = await app.inject({ method: 'GET', url: '/merchants', headers: dashboardHeaders() })
+    expect(slugsOf(prodDash.json())).not.toContain('berget-ai')
+    expect(slugsOf(prodDash.json())).not.toContain('redpine')
+    expect((await app.inject({ method: 'GET', url: '/merchants/berget-ai', headers: dashboardHeaders() })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/merchants/redpine', headers: dashboardHeaders() })).statusCode).toBe(404)
+  })
+
+  it('the real 089 seeds are invisible to a credential-less reader and to an agent even with the flag on (decision 12)', async () => {
+    await insertRealProspects()
+    setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [84532], deployChainIds: [] })
+    for (const slug of ['berget-ai', 'redpine']) {
+      expect(slugsOf((await app.inject({ method: 'GET', url: '/merchants' })).json())).not.toContain(slug)
+      expect((await app.inject({ method: 'GET', url: `/merchants/${slug}` })).statusCode).toBe(404)
+    }
+    await seedAgent(84532)
+    const agentHeaders = { authorization: `Bearer ${AGENT_KEY}` }
+    for (const slug of ['berget-ai', 'redpine']) {
+      expect(slugsOf((await app.inject({ method: 'GET', url: '/merchants', headers: agentHeaders })).json())).not.toContain(slug)
+      expect((await app.inject({ method: 'GET', url: `/merchants/${slug}`, headers: agentHeaders })).statusCode).toBe(404)
+    }
+  })
 })

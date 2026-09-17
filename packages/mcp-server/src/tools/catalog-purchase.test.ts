@@ -153,6 +153,41 @@ describe('haven_discover_tools', () => {
     expect(recordedCalls()[0]?.url).toBe('http://haven.test/catalog?search=')
     expect(recordedCalls()).toHaveLength(1)
   })
+
+  it('returns no prospect even with HAVEN_MARKETPLACE_PROSPECTS on: it reads GET /catalog only, never GET /merchants (#3080)', async () => {
+    // Prospects have zero offers by construction, so they never appear in
+    // `GET /catalog` regardless of the flag — the merchants route is the only
+    // listing surface for them, and this tool has no reason to call it. The
+    // fixture below is what `GET /catalog` returns on a dev deployment with
+    // the flag on: real offers only, `berget-ai` and `redpine` absent.
+    stubFetch({
+      'GET /catalog': {
+        status: 200,
+        body: {
+          entries: [
+            {
+              id: 'cat_1', name: 'Ampersend — fact', description: 'One fact', category: 'api',
+              resource_url: 'https://services.sandbox.ampersend.ai/api/fact', rail: 'x402', protocol: 'http',
+              tool_name: null, tool_arguments: null, price_display: '0.001 USDC', price_atomic: '1000',
+              asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', network: 'eip155:84532', status: 'active',
+              verified_at: null,
+              merchant: { id: 'm_amp', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false },
+            },
+          ],
+        },
+      },
+    })
+
+    const result = ok<Array<{ merchant?: { slug: string } }>>(await handlers().haven_discover_tools({}))
+
+    expect(result.data.map((e) => e.merchant?.slug)).toEqual(['ampersend-demo-api'])
+    expect(result.data.some((e) => e.merchant?.slug === 'berget-ai' || e.merchant?.slug === 'redpine')).toBe(false)
+    // The one call this tool ever makes is GET /catalog; it never touches
+    // /merchants, so a prospect could not reach it even if the fixture leaked one.
+    expect(recordedCalls()).toHaveLength(1)
+    expect(recordedCalls()[0]?.url).toMatch(/^http:\/\/haven\.test\/catalog(\?|$)/)
+    expect(recordedCalls().some((call) => call.url.includes('/merchants'))).toBe(false)
+  })
 })
 
 // ── haven_quote_mcp_tool ─────────────────────────────────────────────────────

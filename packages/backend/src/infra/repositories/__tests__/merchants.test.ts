@@ -10,10 +10,12 @@ import db from '../../../db.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { HOST_OF_URL_SQL } from '../../../db/url-host.js'
 import {
+  assertMerchantAcceptsOffers,
   findOrCreateMerchantByHost,
   getMerchantBySlug,
   listMerchants,
   merchantHostOf,
+  ProspectMerchantWriteError,
   slugifyMerchantName,
 } from '../merchants.js'
 
@@ -226,6 +228,28 @@ describeDb('merchants repository (#3078)', () => {
     await insertProspect('berget-ai')
     const founded = await findOrCreateMerchantByHost('api.berget.ai', { name: 'Berget AI' })
     expect(founded.slug).toBe('berget-ai-2')
+    expect(founded.listing_status).toBe('live')
+  })
+
+  it('assertMerchantAcceptsOffers refuses a coming_soon merchant and allows a live one (#3080)', async () => {
+    const prospectId = await insertProspect('redpine')
+    await expect(assertMerchantAcceptsOffers(prospectId)).rejects.toThrow(ProspectMerchantWriteError)
+    await expect(assertMerchantAcceptsOffers(prospectId)).rejects.toThrow(/coming_soon and cannot receive an offer/)
+
+    const live = await findOrCreateMerchantByHost('live.example', { name: 'Live merchant' })
+    await expect(assertMerchantAcceptsOffers(live.id)).resolves.toBeUndefined()
+  })
+
+  it('the FIND SQL itself never matches a coming_soon merchant through an offer on its host (#3080)', async () => {
+    // A prospect with an offer attached is not a shape any real writer
+    // produces (`assertMerchantAcceptsOffers` refuses it) — this proves the
+    // FIRST line of defence independently: even with the row already in that
+    // state, the host lookup does not treat it as "found", so a writer on
+    // that host founds a NEW merchant rather than reusing the prospect.
+    const prospectId = await insertProspect('bypassed-prospect')
+    await insertOffer(prospectId, 'https://bypassed.example/a')
+    const founded = await findOrCreateMerchantByHost('bypassed.example', { name: 'Bypassed' })
+    expect(founded.id).not.toBe(prospectId)
     expect(founded.listing_status).toBe('live')
   })
 })

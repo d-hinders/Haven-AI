@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  retiredNameVerdict,
-  retiredSafeField,
-  retiredSafeQuery,
-  withRetiredAccountNameTwin,
-  withRetiredAccountsEnvelopeTwin,
-} from '../retired-safe-names.js'
+import { retiredNameVerdict, retiredSafeField, retiredSafeQuery } from '../retired-safe-names.js'
 
 const ID = '11111111-1111-4111-8111-111111111111'
 const OTHER = '22222222-2222-4222-8222-222222222222'
@@ -53,23 +47,14 @@ describe('refusal bodies carry a routable `replacement`', () => {
   })
 })
 
-describe('response twins kept for one more release', () => {
-  // These are the ONLY two retired names still emitted. `@haven_ai/cli` on
-  // `latest` reads both and, unlike a request parameter, cannot dual-read.
-  it('`safes` is the SAME array as `accounts`, not a copy with a stale shape', () => {
-    const accounts = [{ id: ID }, { id: OTHER }]
-    const body = withRetiredAccountsEnvelopeTwin({ accounts })
-    expect(body.safes).toEqual(accounts)
-    expect(body.safes).toBe(body.accounts)
-  })
-
-  it('`safeName` carries the same value as `accountName`, including null', () => {
-    expect(withRetiredAccountNameTwin({ accountName: 'Treasury' }).safeName).toBe('Treasury')
-    expect(withRetiredAccountNameTwin({ accountName: null }).safeName).toBeNull()
-  })
-
-  it('leaves every other field on the row untouched', () => {
-    const row = { accountName: 'Treasury', asset: 'USDC', valueFormatted: '1.00' }
-    expect(withRetiredAccountNameTwin(row)).toMatchObject(row)
+// The two response-twin helpers that used to live here are GONE, and the
+// module now exports nothing that emits a retired name. The asymmetry they
+// were the exception to is the thing left to assert: a retired REQUEST name
+// is refused, never echoed back, because a request can be sent twice and a
+// response cannot be read twice.
+describe('nothing is twinned any more (#2914 follow-up)', () => {
+  it('exports no response-twin helper', async () => {
+    const mod = await import('../retired-safe-names.js')
+    expect(Object.keys(mod).filter((k) => /Twin$/.test(k))).toEqual([])
   })
 })

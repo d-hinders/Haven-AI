@@ -107,58 +107,23 @@ export function retiredSafeField(
   }
 }
 
-// ── Response twins kept for one more release (#2914 → follow-up) ──────
+// ── The response twins are GONE (#2914 follow-up) ─────────────────────
 //
-// The contraction removes the retired names from every RESPONSE, and for
-// every name but two that is safe: `@haven_ai/cli@0.2.1-alpha.0`, which is
-// what both `latest` and `alpha` resolve to today, reads each renamed FIELD
-// new-name-first (`s.account_address ?? s.safe_address`). #2908 migrated the
-// field reads. It missed two things, and independent review caught them
-// against the published tarball rather than against this repo:
+// `withRetiredAccountsEnvelopeTwin` and `withRetiredAccountNameTwin` lived
+// here for exactly one release. They echoed `accounts` as `safes` on
+// `GET /user/accounts` and `accountName` as `safeName` on the transactions
+// feed, because `@haven_ai/cli@0.2.1-alpha.0` — what `latest` resolved to
+// then — read both, and a published client cannot dual-READ the way #2908
+// had it dual-SEND.
 //
-//   dist/index.js:877,891,918,1243,1363  `const { safes } = await api.get('/user/accounts')`
-//   dist/index.js:1273                   `t.safeName ?? ''`
+// Their removal condition was written at the call site and is now met:
+// 0.3.0-alpha.0 published on 2026-09-17 and `npm view @haven_ai/cli
+// dist-tags` reads `latest: 0.3.0-alpha.0`, a CLI whose `accountsEnvelope()`
+// reads `accounts`. The condition was `latest`, not `alpha`, precisely
+// because a bare `npx @haven_ai/cli` resolves `latest` — and that promotion
+// was verified against the registry rather than a green workflow, since
+// CLAUDE.md records that a promotion can be half green.
 //
-// The first is an ENVELOPE KEY and the second a FEED FIELD, and a published
-// client can do nothing about either: unlike a request, it cannot "send
-// both". Against a contracted backend the five envelope reads throw
-// `Cannot read properties of undefined` and the ACCOUNT column renders blank.
-//
-// Why that is not just an ordering note. The backend deploys from a branch
-// while the packages publish on the later `dev -> main` promotion, and per
-// CLAUDE.md that promotion can be HALF GREEN — published, with `latest`
-// unmoved — while a bare `npx @haven_ai/cli` resolves `latest`. So the break
-// would have no bounded end, and this PR's own claim that neither side has to
-// ship first would be false.
-//
-// So these two names, and only these two, survive one more release. The fix
-// on the consumer side ships in THIS slice (`accountsEnvelope()` in
-// `packages/cli/src/commands.ts`), so the next release removes them against a
-// `latest` that no longer reads either. Nothing else is twinned: the request
-// names are refused (above), not echoed.
-//
-// REMOVAL: delete both helpers and their two call sites in the release after
-// the one carrying #2914, once `npm view @haven_ai/cli dist-tags` shows
-// `latest` at or past that release.
-
-/**
- * `{ accounts }` -> `{ accounts, safes }`, same array, for `GET /user/accounts`.
- *
- * @deprecated Retired name; removal is the release after #2914's.
- */
-export function withRetiredAccountsEnvelopeTwin<T extends { accounts: unknown[] }>(
-  body: T,
-): T & { safes: T['accounts'] } {
-  return { ...body, safes: body.accounts }
-}
-
-/**
- * `.accountName` -> a `.safeName` twin on one transaction row, same value.
- *
- * @deprecated Retired name; removal is the release after #2914's.
- */
-export function withRetiredAccountNameTwin<T extends { accountName?: string | null }>(
-  tx: T,
-): T & { safeName: T['accountName'] } {
-  return { ...tx, safeName: tx.accountName }
-}
+// Nothing is twinned any more. The retired REQUEST names above are refused,
+// not echoed, and that asymmetry is deliberate: a request can be sent twice,
+// a response cannot be read twice.

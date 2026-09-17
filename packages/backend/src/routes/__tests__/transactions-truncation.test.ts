@@ -194,8 +194,9 @@ describe('GET /transactions — truncation signal (#2882)', () => {
 
     // Envelope only, deliberately. Asserting the whole payload trips a
     // PRE-EXISTING validator bug this assertion surfaced (#2885): the spec's
-    // `Transaction` correctly declares `chainId`/`safeId`/`safeAddress`/
-    // `safeName` in an `allOf` branch, but `response-shape.ts` closes the
+    // `Transaction` correctly declared `chainId`/`safeId`/`safeAddress`/
+    // `safeName` in an `allOf` branch — only `chainId` survives, the rest went
+    // with #2914 and its follow-up — but `response-shape.ts` closes the
     // `$ref`'d `TransactionBase` where it is ALSO registered standalone, so
     // the composed schema rejects its own sibling's properties. The contract
     // is right and the validator is wrong, which is not #2882's to fix — so

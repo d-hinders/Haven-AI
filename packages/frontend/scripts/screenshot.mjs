@@ -1569,7 +1569,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname === '/transactions/filters') {
     return {
-      safes: [{ id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name, address: FIXTURE_ACCOUNT.account_address, chainId: FIXTURE_ACCOUNT.chain_id }],
+      accounts: [{ id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name, address: FIXTURE_ACCOUNT.account_address, chainId: FIXTURE_ACCOUNT.chain_id }],
       agents: FIXTURE_AGENTS.map((a) => ({ id: a.id, name: a.name, status: a.status })),
       tokens: [
         { key: `usdc:${FIXTURE_ACCOUNT.chain_id}`, symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', chainId: FIXTURE_ACCOUNT.chain_id, isNative: false },
@@ -1683,7 +1683,12 @@ export const FIXTURE_EMPTY_FALLBACK = {
   // route is deliberately unkeyed in `fixtureFor` above — so no hook reads it,
   // and a collection key for an endpoint that answers 404 reads as coverage of
   // a flow the product cannot reach.
-  safes: [], agents: [], transactions: [], contacts: [],
+  accounts: [], agents: [], transactions: [], contacts: [],
+  // #2914 follow-up: `failedAccountIds` is `GET /transactions`' partial-failure
+  // key. Its absence here is what made the empty /transactions capture render
+  // the ErrorBoundary. The hook now defaults it too, so this is belt AND
+  // braces — deliberately, because the fixture is what a reviewer looks at.
+  failedAccountIds: [],
   recipients: [], delegations: [], owners: [], passkeys: [], tokens: [],
   payments: [], receipts: [], catalog: [], activity: [],
   // #2295: `entries` is `GET /catalog`'s collection key — `useCatalog` does

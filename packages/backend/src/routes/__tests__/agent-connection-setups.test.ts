@@ -2285,7 +2285,7 @@ describe('cancel cannot orphan a live delegation-rail agent (#1073)', () => {
 
   it('refuses to cancel once the budget signature has activated the agent', async () => {
     // The regression this guards: on this rail the grant activates the agent
-    // in its OWN transaction, and no safe_tx_hash/tx_hash is ever written, so
+    // in its OWN transaction, and no account_tx_hash/tx_hash is ever written, so
     // the setup still looks cancellable. Cancelling would have reported "this
     // setup can no longer connect an agent" while leaving a live, spending
     // agent behind — the revoke is scoped to 'pending_approval' and misses it.

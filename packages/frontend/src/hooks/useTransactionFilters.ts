@@ -11,7 +11,7 @@ interface UseTransactionFiltersReturn extends TransactionFilterOptionsResponse {
 }
 
 export function useTransactionFilters(): UseTransactionFiltersReturn {
-  const [safes, setSafes] = useState<TransactionFilterOptionsResponse['safes']>([])
+  const [accounts, setAccounts] = useState<TransactionFilterOptionsResponse['accounts']>([])
   const [agents, setAgents] = useState<TransactionFilterOptionsResponse['agents']>([])
   const [tokens, setTokens] = useState<TransactionFilterOptionsResponse['tokens']>([])
   const [loading, setLoading] = useState(true)
@@ -29,9 +29,16 @@ export function useTransactionFilters(): UseTransactionFiltersReturn {
       )
       if (requestId !== requestIdRef.current) return
 
-      setSafes(data.safes)
-      setAgents(data.agents)
-      setTokens(data.tokens)
+      // `?? []` on every key, deliberately. `api.get` does no response
+      // validation, so a missing key stores `undefined` and the next render
+      // calls `.map`/`.find`/`.length` on it — which takes the whole
+      // transactions route down through the shell's ErrorBoundary, not just
+      // this bar. That is #1075's failure mode and #2295 repeated it. It is
+      // live here because the `accounts` key is NEW in this release: a new
+      // bundle briefly talks to a pre-rename backend during the deploy.
+      setAccounts(data.accounts ?? [])
+      setAgents(data.agents ?? [])
+      setTokens(data.tokens ?? [])
     } catch (err) {
       if (requestId !== requestIdRef.current) return
       setError(
@@ -52,7 +59,7 @@ export function useTransactionFilters(): UseTransactionFiltersReturn {
   }, [fetchFilters])
 
   return {
-    safes,
+    accounts,
     agents,
     tokens,
     loading,

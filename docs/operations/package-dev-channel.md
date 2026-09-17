@@ -240,7 +240,21 @@ Fastify drop it in silence and create a setup with no account behind it,
 which looks successful until the agent tries to spend. Still no change to
 `CONNECTOR_PACKAGE`, `CLI_PACKAGE`, `config.connectorChannel` or the
 `/discovery` response shape — this section's subject is untouched; the input
-field it happens to cite is not:
+field it happens to cite is not.
+
+Re-verified again 2026-09-17 against the #2914 FOLLOW-UP (the release that
+removes the two response twins and the third retired response name). That
+change is RESPONSE-side only: `GET /user/accounts` drops the `safes` envelope
+twin, the `GET /transactions` feed drops `safeName`, and
+`GET /transactions/filters` renames `safes` to `accounts`. The paragraph
+above is about a REQUEST field on `POST /agent-connection-setups`, and that
+field's behaviour is unchanged — `safe_id` stays declared and stays refused
+with a 400, for the reason the paragraph gives. `CONNECTOR_PACKAGE`,
+`CLI_PACKAGE`, `config.connectorChannel` and the `/discovery` shape are again
+untouched. The doc is a contract doc for this change because
+`middleware/retired-safe-names.ts` is in its `covers:` list; what changed
+there is the deletion of the two twin helpers, not the refusal machinery this
+document depends on.
 
 ```bash
 curl -s "$BACKEND/discovery" | jq -r '.connector_package, .cli_package'

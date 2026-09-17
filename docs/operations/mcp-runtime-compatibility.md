@@ -19,6 +19,7 @@ covers:
   - packages/connect/src/installed-clients.test.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/backend/src/routes/transactions.ts
+  - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/domain/agent-payment-taxonomy.ts
@@ -594,6 +595,28 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `packages/backend/src/middleware/retired-safe-names.ts`: the release AFTER
 > this one, once `npm view @haven_ai/cli dist-tags` shows `latest` at or past
 > 0.3.0-alpha.0. This release is what makes that true.
+>
+> **Update, same day — the follow-up release closes this.** 0.3.0-alpha.0
+> published and `npm view @haven_ai/cli dist-tags` reads `latest:
+> 0.3.0-alpha.0`, a CLI whose `accountsEnvelope()` reads `accounts`. The
+> removal condition above is met, so the FOLLOW-UP release — cut the same
+> day, immediately after this one, not "next" in any later reader's sense —
+> removes both twins AND the third name, and
+> `middleware/retired-safe-names.ts` exports no twin helper at all. It also
+> removes a FOURTH retired response name nothing had noticed: `safe_tx_hash`
+> on `GET /agent-connection-setups/{id}`'s `approval` object, which outlived
+> the epic by reading migration 084's `account_tx_hash` column through the
+> old wire key. No published package read it, so it was renamed outright.
+> `last-verified` is not bumped for this block: it already reads 2026-09-17,
+> and this records what the two releases carry rather than a re-verification
+> of the document. What that leaves is worth stating, because it is the shape
+> of the contract rather than an incident: the `/user/safes*` TOMBSTONE PATHS
+> stay 410 and the retired REQUEST names stay refused with a 400 — a path is
+> what an old client types and a request can be sent twice, so those are
+> answered, not deleted. Only the response bodies contracted. One consequence
+> for a reader pinning versions: a pre-0.3.0 CLI against the follow-up
+> backend breaks exactly as described above, and there is no longer a
+> backend release where it does not — the one-release window WAS the window.
 >
 > **The version-skew contract is therefore ASYMMETRIC for one release**: a 0.3.0 client against a 0.3.0 backend is consistent,
 > and a pre-0.3.0 client against a 0.3.0 backend now fails **loudly and typed**

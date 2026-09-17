@@ -96,11 +96,14 @@ export interface TransactionFilterState {
 
 export type TransactionFilterOptionsResponse = ApiSchema<'TransactionFilterOptionsResponse'>
 /**
- * The filter-options wire envelope key stays `safes` until #2914 retires it —
- * #2907 twinned the transaction query param (`?accountId=`) but not this
- * envelope. Only the frontend alias carries the account vocabulary.
+ * The filter-options envelope key is `accounts` now. It was the LAST retired
+ * `safes` name on the wire: #2907 twinned the transaction query parameter
+ * (`?accountId=`) but not this envelope, and #2914's contraction left it
+ * because the two twinned response names were the urgent ones. Unlike those,
+ * this key was never read by a published package — the dashboard is its only
+ * consumer — so it was renamed outright rather than twinned.
  */
-export type TransactionFilterAccountOption = TransactionFilterOptionsResponse['safes'][number]
+export type TransactionFilterAccountOption = TransactionFilterOptionsResponse['accounts'][number]
 export type TransactionFilterAgentOption = TransactionFilterOptionsResponse['agents'][number]
 export type TransactionFilterTokenOption = TransactionFilterOptionsResponse['tokens'][number]
 

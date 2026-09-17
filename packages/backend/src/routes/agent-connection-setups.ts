@@ -762,7 +762,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
           // #1073: the guards above read the SETUP's own state, which on the
           // delegation rail can lag the authority itself. The grant activates
           // the agent in its own transaction, and this rail never writes
-          // safe_tx_hash/tx_hash — so a setup whose budget is already signed
+          // account_tx_hash/tx_hash — so a setup whose budget is already signed
           // still looks cancellable here. Cancelling it would report "this
           // setup can no longer connect an agent" while leaving a live,
           // spend-capable agent behind, and the revoke below is scoped to
@@ -1139,7 +1139,13 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
     },
     install_status: setup.install_status ?? {},
     approval: {
-      safe_tx_hash: setup.account_tx_hash,
+      // #2914 follow-up: the wire key follows the column. Migration 084
+      // renamed `agent_connection_setups.safe_tx_hash` to `account_tx_hash`
+      // but this emit kept the old spelling, so the name outlived the epic by
+      // reading the new column through the old key. No twin window is owed:
+      // the property-level spec sweep found it, and no published package and
+      // no frontend source reads it — only two frontend test fixtures did.
+      account_tx_hash: setup.account_tx_hash,
       tx_hash: setup.tx_hash,
       status: setup.approval_status,
     },

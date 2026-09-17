@@ -1,7 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { retiredSafeInflowHandler } from '../middleware/safe-inflow-retired.js'
-import { withRetiredAccountsEnvelopeTwin } from '../middleware/retired-safe-names.js'
 import {
   deleteAccountForUser,
   findOwnedAccountAddress,
@@ -41,15 +40,14 @@ export default async function userAccountsRoutes(app: FastifyInstance): Promise<
   app.addHook('onRequest', authMiddleware)
 
   // GET /user/accounts — list all linked accounts for the authenticated user.
-  // One address name (`account_address`); the old address twin went with
-  // #2914. The `safes` ENVELOPE KEY did not: `@haven_ai/cli` on `latest`
-  // destructures it at five call sites and cannot dual-read the way it can
-  // dual-send, so it survives one more release. See
-  // `middleware/retired-safe-names.ts` for the removal condition.
+  // One address name (`account_address`) and now ONE envelope key. The `safes`
+  // twin outlived #2914 by exactly one release, because `@haven_ai/cli` on
+  // `latest` destructured it at five call sites and cannot dual-read the way
+  // it can dual-send; `latest` is 0.3.0-alpha.0 now and reads `accounts`.
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    return withRetiredAccountsEnvelopeTwin({ accounts: await listAccountsForUser(sub) })
+    return { accounts: await listAccountsForUser(sub) }
   })
 
   // POST /user/accounts/deploy — TOMBSTONE (#1984 closed it, #1988 deleted the

@@ -555,7 +555,7 @@ export async function mockHavenApi(page: Page) {
     // `/transactions/` catch-all below, which it would otherwise match.
     if (method === 'GET' && path === '/transactions/filters') {
       await fulfillJson(route, {
-        safes: [
+        accounts: [
           { id: testSafe.id, name: testSafe.name, address: testSafeAddress, chainId: 8453 },
         ],
         agents: [{ id: testAgent.id, name: testAgent.name, status: testAgent.status }],

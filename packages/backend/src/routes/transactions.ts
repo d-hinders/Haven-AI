@@ -1,10 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import {
-  retiredNameVerdict,
-  retiredSafeQuery,
-  withRetiredAccountNameTwin,
-} from '../middleware/retired-safe-names.js'
+import { retiredNameVerdict, retiredSafeQuery } from '../middleware/retired-safe-names.js'
 import { agentExistsForUser } from '../infra/repositories/agents.js'
 import {
   findMachinePaymentEvidenceDetail,
@@ -192,10 +188,10 @@ export default async function transactionRoutes(
     // ledger query per response, and none for an unentitled account.
     const enrichedPage = await enrichTransactionsWithAccounting(sub, paginated, request.log)
     return {
-      // `safeName` twins `accountName` for one more release: `@haven_ai/cli`
-      // on `latest` renders its ACCOUNT column from the old name and would
-      // print every row blank. See `middleware/retired-safe-names.ts`.
-      transactions: enrichedPage.map(withRetiredAccountNameTwin),
+      // One account name. The `safeName` twin outlived #2914 by exactly one
+      // release so `@haven_ai/cli` on `latest` would not print every ACCOUNT
+      // cell blank; `latest` is 0.3.0-alpha.0 now and reads `accountName`.
+      transactions: enrichedPage,
       total: filtered.length,
       offset,
       limit,
@@ -380,11 +376,14 @@ export default async function transactionRoutes(
     const { safes, agents, tokens } = await resolveTransactionFilters(sub, request.log, fresh)
 
     return {
-      safes: safes.map((safe) => ({
-        id: safe.id,
-        name: safe.name,
-        address: safe.account_address,
-        chainId: safe.chain_id,
+      // #2914's last retired RESPONSE name. It was not twinned like the other
+      // two and no published package ever read it — the dashboard is the only
+      // consumer, and it ships from the same promotion as this backend.
+      accounts: safes.map((account) => ({
+        id: account.id,
+        name: account.name,
+        address: account.account_address,
+        chainId: account.chain_id,
       })),
       agents,
       tokens,

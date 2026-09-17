@@ -8,6 +8,17 @@ covers:
   - packages/backend/src/routes/merchants.ts
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/config.ts
+  - packages/frontend/src/app/(authenticated)/marketplace/page.tsx
+  - packages/frontend/src/app/(authenticated)/marketplace/[slug]/page.tsx
+  - packages/frontend/src/components/marketplace/MerchantGrid.tsx
+  - packages/frontend/src/components/marketplace/MerchantCard.tsx
+  - packages/frontend/src/components/marketplace/MerchantHeader.tsx
+  - packages/frontend/src/components/marketplace/OffersTable.tsx
+  - packages/frontend/src/components/marketplace/OfferRow.tsx
+  - packages/frontend/src/components/marketplace/PayWithHavenBlock.tsx
+  - packages/frontend/src/lib/marketplace.ts
+  - packages/frontend/src/hooks/useCatalog.ts
+  - packages/frontend/src/components/CatalogSubmitModal.tsx
 last-verified: "2026-09-17"
 ---
 
@@ -109,4 +120,39 @@ private meeting is within each CRM record's external-mention ceiling.
 `merchant_name` (at most 120 characters) and `merchant_website` (an https
 URL). They are used only if no merchant owns the host when the submission is
 verified; on a curated merchant's host they are ignored. The `website` field
-of that request is the bot honeypot and is unrelated.
+of that request is the bot honeypot and is unrelated. The submit modal exposes
+both as optional inputs (`components/CatalogSubmitModal.tsx`), reachable from
+the marketplace grid and from a merchant page.
+
+## Screens (#3079)
+
+`/marketplace` replaces `/catalog` (a permanent redirect preserves the query
+string, `next.config.ts`); the sidebar label is "Marketplace", same index in
+`baseNavItems`, same More-sheet position.
+
+- **Grid** (`components/marketplace/MerchantGrid.tsx`,
+  `MerchantCard.tsx`) — one card per merchant: a monogram (initials, the same
+  pattern `/contacts` uses) or a logo when `logo_url` is set, name, category
+  chip, description clamped to two lines, network chips, and a footer that
+  reads "N offers", "Coming soon" or the Haven test-merchant label. Filters:
+  category pills (`components/ui/FilterPill.tsx`, moved out of
+  `CatalogPanel.tsx`), a network dropdown shown only when the listed chains
+  are more than one, search over name and description, "Verified only", and
+  "Show test merchants" — defaulted **on** when any of the merchants' listed
+  networks is a testnet (`eip155:84532`), read off the served data rather than
+  `NEXT_PUBLIC_HAVEN_ENV` (epic decision 10).
+- **Merchant page** (`app/(authenticated)/marketplace/[slug]/page.tsx`,
+  `MerchantHeader.tsx`, `PayWithHavenBlock.tsx`, `OffersTable.tsx`) — header
+  (monogram/logo, name, category, website link, networks, Verified), a "Pay
+  this with Haven" block with one paste-into-agent instruction per offer
+  (`agentInstruction()`, moved to `lib/marketplace.ts`) and a copy button, the
+  line "This merchant settles by EIP-3009 — the paying agent needs an
+  unpinned budget" on any offer whose `asset_transfer_methods` lacks
+  `erc7710`, and an offers table reusing `withinBudget()` for the per-agent
+  budget hint. A `coming_soon` merchant renders its description, website and
+  "Coming soon — not payable yet" — no instruction block, no offers table, no
+  price. Loading, empty, error and unknown-slug (404, via `next/navigation`'s
+  `notFound()`) states are covered by unit tests, not baselines.
+- `CatalogPanel.tsx` and `app/(authenticated)/catalog/page.tsx` are deleted;
+  `CatalogCard` is now `components/marketplace/OfferRow.tsx`;
+  `hooks/useCatalog.ts` gains `useMerchants()` / `useMerchant(slug)`.

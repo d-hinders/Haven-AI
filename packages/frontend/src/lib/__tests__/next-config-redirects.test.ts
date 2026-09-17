@@ -31,4 +31,27 @@ describe('next.config redirects (#3024)', () => {
     const redirects = await config(PHASE as never).redirects!()
     expect(redirects.find((r) => r.source === '/not-a-real-route')).toBeUndefined()
   })
+
+  // #3079: /catalog is renamed Marketplace. Two entries — a bare `/catalog`
+  // and a `:path*` form — so a deep link (`/catalog/ampersend-demo-api`,
+  // `/catalog?category=x`) redirects too, not just the bare route.
+  it('answers a permanent redirect from /catalog to /marketplace', async () => {
+    const config = (await import('../../../next.config')).default
+    const redirects = await config(PHASE as never).redirects!()
+    const catalog = redirects.find((r) => r.source === '/catalog')
+    expect(catalog, 'no /catalog redirect entry in next.config.ts').toBeDefined()
+    expect(catalog).toMatchObject({ source: '/catalog', destination: '/marketplace', permanent: true })
+  })
+
+  it('answers a permanent redirect from any /catalog/* deep link to the same path under /marketplace', async () => {
+    const config = (await import('../../../next.config')).default
+    const redirects = await config(PHASE as never).redirects!()
+    const catalogDeepLink = redirects.find((r) => r.source === '/catalog/:path*')
+    expect(catalogDeepLink, 'no /catalog/:path* redirect entry in next.config.ts').toBeDefined()
+    expect(catalogDeepLink).toMatchObject({
+      source: '/catalog/:path*',
+      destination: '/marketplace/:path*',
+      permanent: true,
+    })
+  })
 })

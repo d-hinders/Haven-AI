@@ -69,6 +69,22 @@ const nextConfig: NextConfig = {
         destination: '/accounts',
         permanent: true,
       },
+      // #3079: the catalog page is renamed Marketplace, so `/catalog` (and any
+      // deep link under it, e.g. `/catalog?category=x`) 308s to `/marketplace`.
+      // Next preserves the query string on a redirect by default — nothing to
+      // do for that. This is a PAGE redirect only: `/api/:path*` above rewrites
+      // to the backend before this array runs, so `/api/catalog` (the wire
+      // route, unrenamed) is a different path and is never touched.
+      {
+        source: '/catalog',
+        destination: '/marketplace',
+        permanent: true,
+      },
+      {
+        source: '/catalog/:path*',
+        destination: '/marketplace/:path*',
+        permanent: true,
+      },
     ]
   },
   // Security response headers (scanner follow-up). The dashboard's JWT lives in

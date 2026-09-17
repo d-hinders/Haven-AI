@@ -1,5 +1,13 @@
 import type { Page, Route } from '@playwright/test'
 import { ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '../../src/lib/auth-storage'
+import {
+  ampersendDemoApi,
+  ampersendOffers,
+  bergetAi,
+  havenDemoStore,
+  havenDemoStoreOffers,
+  marketplaceMerchants,
+} from './marketplace'
 
 export const testSafeAddress = '0x1111111111111111111111111111111111111111'
 export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
@@ -421,6 +429,28 @@ export async function mockHavenApi(page: Page) {
 
     if (method === 'GET' && path === '/agents') {
       await fulfillJson(route, { agents: [testAgent] })
+      return
+    }
+
+    // #3079: the marketplace grid and merchant page.
+    if (method === 'GET' && path === '/merchants') {
+      await fulfillJson(route, { merchants: marketplaceMerchants })
+      return
+    }
+    if (method === 'GET' && path === `/merchants/${ampersendDemoApi.slug}`) {
+      await fulfillJson(route, { merchant: ampersendDemoApi, offers: ampersendOffers })
+      return
+    }
+    if (method === 'GET' && path === `/merchants/${havenDemoStore.slug}`) {
+      await fulfillJson(route, { merchant: havenDemoStore, offers: havenDemoStoreOffers })
+      return
+    }
+    if (method === 'GET' && path === `/merchants/${bergetAi.slug}`) {
+      await fulfillJson(route, { merchant: bergetAi, offers: [] })
+      return
+    }
+    if (method === 'GET' && path.startsWith('/merchants/')) {
+      await fulfillJson(route, { error: 'Merchant not found' }, 404)
       return
     }
 

@@ -229,6 +229,33 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
     expect(res.json()).toEqual({ created: { name: 'Acme', address } })
   })
 
+  it('#3082: a COERCIBLE off-spec body is counted as would_coerce — the divergence a refusal never shows', async () => {
+    // Restoring the body is what makes this silent, so the same snapshot
+    // measures it. `name: 42` validates CLEAN after coercion to "42", so it
+    // raises no would-refusal — yet the handler would receive a different
+    // value the moment this route is enforced. Epic #3028 flips money-path
+    // modules on these readings.
+    const before = requestValidationOpsSnapshot()
+    const res = await auth('POST', '/contacts', { name: 42, address: '0x' + 'ab'.repeat(20) })
+    const after = requestValidationOpsSnapshot()
+
+    // The client's value reached the handler untouched...
+    expect(res.json()).toEqual({ created: { name: 42, address: '0x' + 'ab'.repeat(20) } })
+    // ...and the divergence was recorded rather than hidden.
+    expect(after.wouldCoerce).toBe(before.wouldCoerce + 1)
+    expect(Object.keys(after.coerceByRouteField)).toContain('POST /contacts name')
+    // It is NOT a would-refusal: coercion made it valid, which is the whole point.
+    expect(after.wouldRefuse).toBe(before.wouldRefuse)
+  })
+
+  it('#3082: a body needing no coercion moves NEITHER counter', async () => {
+    const before = requestValidationOpsSnapshot()
+    await auth('POST', '/contacts', { name: 'Acme', address: '0x' + 'ab'.repeat(20) })
+    const after = requestValidationOpsSnapshot()
+    expect(after.wouldCoerce).toBe(before.wouldCoerce)
+    expect(after.wouldRefuse).toBe(before.wouldRefuse)
+  })
+
   it('a typed query parameter (limit=10, a string on the wire) is ACCEPTED — coercion proven', async () => {
     // /agent-activity/{id}/activity is the spec'd GET with typed params
     // (uuid path, integer limit/offset query) — the plugin injects its schema.

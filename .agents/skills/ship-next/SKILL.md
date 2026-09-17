@@ -685,7 +685,12 @@ you need the reasoning. Never edit one without the other — CI will not let you
   the day it lands. In epic #3028 slice 1 it refuses only on the contacts
   proof module and shadow-logs everywhere else; it is a shape VALIDATOR —
   it reads the request against the spec, refuses or logs, and never
-  authorizes, alters, or constructs spend intent);
+  authorizes or constructs spend intent. It does REWRITE values where the
+  spec declares a type and ajv coerces: #3082 found a shadow-mode body
+  reaching handlers with `null` turned into `''`, which refused every open
+  budget. Shadow bodies are restored since then and the divergence is
+  counted; querystring/params coercion, and enforce-mode bodies, still
+  rewrite by design);
 - `routes/hybrid-accounts.ts` (user-signed execution and account provisioning;
   the approval queue's route file was deleted with its table by #2055, so its
   glob left the perimeter rather than being repointed — the code is dead, not

@@ -1660,12 +1660,29 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
  * serves traffic. These cases assemble it the production way.
  */
 describe('POST /:id/delegations/build — OPEN budget through request validation (#3082)', () => {
-  for (const mode of ['off', 'shadow', 'enforce'] as const) {
-    describe(`HAVEN_REQUEST_VALIDATION=${mode}`, () => {
+  // The fourth case is NOT `mode: 'enforce'`. Independent review caught that
+  // `enforced` is derived ONLY from `prefixIsEnforced(prefix,
+  // enforcedPrefixes)` (`request-validation.ts:356`) — `mode` gates the `off`
+  // early-return and the counters, nothing else. So a bare `mode: 'enforce'`
+  // takes the SHADOW branch for any unlisted prefix, and a test that passed
+  // only the mode would silently be a duplicate of the shadow case while
+  // claiming to prove enforcement. `enforcedPrefixes: ['/agents']` is what
+  // actually enforces this route.
+  const SETUPS = [
+    { label: 'mode=off', options: { mode: 'off' as const } },
+    { label: 'mode=shadow', options: { mode: 'shadow' as const } },
+    { label: 'mode=enforce (no prefix — still the shadow branch)', options: { mode: 'enforce' as const } },
+    {
+      label: 'ENFORCED via enforcedPrefixes',
+      options: { mode: 'shadow' as const, enforcedPrefixes: ['/agents'] },
+    },
+  ]
+  for (const { label, options } of SETUPS) {
+    describe(label, () => {
       let app: FastifyInstance
       beforeAll(async () => {
         app = Fastify({ logger: false })
-        installRequestValidation(app, { mode })
+        installRequestValidation(app, options)
         await app.register(agentDelegationRoutes, { prefix: '/agents' })
       })
       afterAll(async () => app.close())

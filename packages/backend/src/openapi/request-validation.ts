@@ -18,8 +18,12 @@
  *             any currently-accepted request. That last clause was ASPIRATIONAL
  *             until #3082: ajv's `coerceTypes` rewrites the body in place, so
  *             shadow was editing the payload it claimed only to measure and a
- *             `null` reached handlers as `''`. It is now enforced by a
- *             snapshot/restore pair (see the hooks below), not merely stated.
+ *             `null` reached handlers as `''`. It is now enforced for the
+ *             request BODY by a snapshot/restore pair (see the hooks below),
+ *             not merely stated. Querystring and params coercion deliberately
+ *             stays, so the promise still reads narrower than it sounds — and
+ *             a body that coercion made VALID is now counted as
+ *             `request_validation.would_coerce` rather than passing unseen.
  *   enforce — a refused request gets the 400 envelope instead of the route
  *
  * Per-module `enforcedPrefixes` flips a module regardless of the mode (the
@@ -27,8 +31,16 @@
  * shadow counters have been read on dev.
  *
  * This is a VALIDATOR, nothing more (CASP, docs/regulatory/casp-risk-guardrails.md):
- * it reads shape, refuses or logs, and never authorizes, alters, or constructs
- * spend intent. Every semantic refusal on the money path — the rail seam's 410,
+ * it reads shape, refuses or logs, and never authorizes or constructs spend
+ * intent. It did once ALTER a request, and that is worth stating precisely
+ * rather than leaving the older absolute wording to contradict the note below:
+ * ajv's spec-declared scalar coercion rewrites values in place. Since #3082 a
+ * shadow-mode BODY is restored before the handler sees it; coercion of
+ * querystring and params (and of an enforce-mode body) remains, deliberately,
+ * because a typed spec parameter is unusable without it and an enforced route
+ * answers on the result. No coercion has ever touched spend intent: the
+ * semantic money-path refusals — entitlement, budget, delegation, settlement —
+ * keep their exact position and body. Every semantic refusal on the money path — the rail seam's 410,
  * the budget pre-check, the token resolution — keeps its exact position and
  * body; this layer only answers BEFORE them for requests the spec already
  * refuses, and in slice 1 it does not even do that outside the proof module.
@@ -68,6 +80,7 @@
  * registration, so flipping `HAVEN_REQUEST_VALIDATION` is a redeploy, not a
  * live kill switch (documented in .env.example and the runbook).
  */
+import { isDeepStrictEqual } from 'node:util'
 import type { FastifyError, FastifyInstance, FastifyRequest, RouteOptions } from 'fastify'
 import { makeSpecAjv, REQUEST_AJV_OPTIONS, type ErrorObject } from './ajv.js'
 import { fastifyPathToOpenApi } from './route-inventory.js'
@@ -105,7 +118,17 @@ export interface WouldRefuseEvent {
 export interface RequestValidationSnapshot {
   mode: RequestValidationMode
   wouldRefuse: number
+  /**
+   * Bodies shadow COERCED and then restored (#3082). A refusal is not the only
+   * way shadow and enforce diverge: a coercible off-spec body validates clean,
+   * so it never counts as a would-refusal, yet the handler would receive a
+   * DIFFERENT value once the route is enforced. Slices 2–4 flip money-path
+   * modules on these readings, so that divergence has to be visible rather
+   * than inferred from a comment.
+   */
+  wouldCoerce: number
   byRouteField: Record<string, number>
+  coerceByRouteField: Record<string, number>
 }
 
 /**
@@ -118,12 +141,16 @@ const counters = {
   mode: 'off' as RequestValidationMode,
   total: 0,
   byRouteField: new Map<string, number>(),
+  coerceTotal: 0,
+  coerceByRouteField: new Map<string, number>(),
 }
 
 function resetCounters(mode: RequestValidationMode): void {
   counters.mode = mode
   counters.total = 0
   counters.byRouteField.clear()
+  counters.coerceTotal = 0
+  counters.coerceByRouteField.clear()
 }
 
 function recordWouldRefuse(route: string, field: string): void {
@@ -132,13 +159,50 @@ function recordWouldRefuse(route: string, field: string): void {
   counters.byRouteField.set(key, (counters.byRouteField.get(key) ?? 0) + 1)
 }
 
+function recordWouldCoerce(route: string, field: string): void {
+  counters.coerceTotal += 1
+  const key = `${route} ${field}`
+  counters.coerceByRouteField.set(key, (counters.coerceByRouteField.get(key) ?? 0) + 1)
+}
+
+/** The top-level body keys ajv rewrote, so a reading names a field, not just a route. */
+function coercedFields(original: unknown, coerced: unknown): string[] {
+  if (
+    original === null ||
+    coerced === null ||
+    typeof original !== 'object' ||
+    typeof coerced !== 'object'
+  ) {
+    return ['body']
+  }
+  const keys = new Set([...Object.keys(original), ...Object.keys(coerced)])
+  const changed = [...keys].filter(
+    (k) =>
+      !isDeepStrictEqual(
+        (original as Record<string, unknown>)[k],
+        (coerced as Record<string, unknown>)[k],
+      ),
+  )
+  return changed.length > 0 ? changed.sort() : ['body']
+}
+
 /** What `GET /health/ops` reports under `request_validation` (keys sorted for a stable payload). */
 export function requestValidationOpsSnapshot(): RequestValidationSnapshot {
   const byRouteField: Record<string, number> = {}
   for (const key of [...counters.byRouteField.keys()].sort()) {
     byRouteField[key] = counters.byRouteField.get(key) as number
   }
-  return { mode: counters.mode, wouldRefuse: counters.total, byRouteField }
+  const coerceByRouteField: Record<string, number> = {}
+  for (const key of [...counters.coerceByRouteField.keys()].sort()) {
+    coerceByRouteField[key] = counters.coerceByRouteField.get(key) as number
+  }
+  return {
+    mode: counters.mode,
+    wouldRefuse: counters.total,
+    wouldCoerce: counters.coerceTotal,
+    byRouteField,
+    coerceByRouteField,
+  }
 }
 
 /**
@@ -437,11 +501,36 @@ export function installRequestValidation(app: FastifyInstance, options: RequestV
   // when attachValidation let it attach).
   app.addHook('preHandler', (request: FastifyRequest, _reply, done) => {
     // Restore FIRST: every later hook and the handler itself must see the
-    // client's body, not ajv's edit of it.
+    // client's body, not ajv's edit of it. NOTE for future hooks: nothing
+    // registered after this snapshot may mutate `request.body` — the restore
+    // below would silently revert it. There are no route-level
+    // `preValidation` hooks in this package today; if one is added, it must
+    // run before the snapshot or not touch the body.
     const carrier = request as FastifyRequest & { [k: symbol]: unknown }
     if (BODY_SNAPSHOT in carrier) {
-      request.body = carrier[BODY_SNAPSHOT]
+      const original = carrier[BODY_SNAPSHOT]
+      const coerced = request.body
+      request.body = original
       delete carrier[BODY_SNAPSHOT]
+
+      // A refusal is not the only divergence between shadow and enforce. A
+      // COERCIBLE off-spec body validates clean — no would-refusal, nothing
+      // logged — and yet the handler would receive a different value the
+      // moment the route is enforced: `period_seconds: "86400"` becomes an
+      // integer, a numeric `budget_atomic` becomes a string, a one-element
+      // array is unwrapped. Restoring the body is what makes that silent, so
+      // the same snapshot is used to measure it. Epic #3028 flips money-path
+      // modules on these readings; this is the reading.
+      if (!isDeepStrictEqual(original, coerced)) {
+        const route = `${request.routeOptions.method} ${request.routeOptions.url}`
+        for (const field of coercedFields(original, coerced)) {
+          request.log.info(
+            { event: 'request_validation.would_coerce', route, field },
+            'request_validation.would_coerce',
+          )
+          recordWouldCoerce(route, field)
+        }
+      }
     }
     const validationError = (request as FastifyRequest & { validationError?: ValidationCarrierError })
       .validationError

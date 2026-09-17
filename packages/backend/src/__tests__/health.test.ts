@@ -116,7 +116,15 @@ describe('GET /health/ops', () => {
       // The request-validation shadow counters (#3029). This bare app installs
       // no plugin, so the module-level counters sit at their pre-install
       // default: mode 'off', nothing counted (vitest isolates per test file).
-      request_validation: { mode: 'off', wouldRefuse: 0, byRouteField: {} },
+      // `wouldCoerce`/`coerceByRouteField` joined the payload with #3082 —
+      // a body coercion is a shadow/enforce divergence a refusal never shows.
+      request_validation: {
+        mode: 'off',
+        wouldRefuse: 0,
+        wouldCoerce: 0,
+        byRouteField: {},
+        coerceByRouteField: {},
+      },
     })
   })
 
@@ -164,9 +172,15 @@ describe('GET /health/ops', () => {
       passport: { configured: true },
       trustProxy: { hops: 1, authRateLimitArmed: true },
       accounting: { exhaustedSyncs: null, connectionsNeedingAttention: null, unavailable: true },
-      // The request-validation shadow counters (#3029); pre-install default,
-      // same reason as the valid-token test above — no plugin on this app.
-      request_validation: { mode: 'off', wouldRefuse: 0, byRouteField: {} },
+      // The request-validation shadow counters (#3029, plus #3082's coercion
+      // pair); pre-install default, same reason as the valid-token test above.
+      request_validation: {
+        mode: 'off',
+        wouldRefuse: 0,
+        wouldCoerce: 0,
+        byRouteField: {},
+        coerceByRouteField: {},
+      },
     })
     // The failure is logged at warn with the error's class only — never its message.
     expect(log.warn).toHaveBeenCalledTimes(1)

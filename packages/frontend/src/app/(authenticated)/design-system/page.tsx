@@ -2495,7 +2495,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AreaChart"
-        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's spend annotated as the endpoint delta. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart."
+        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's spend annotated as the endpoint delta. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart, and the same pointer treatment too: the callout takes no pointer, a tap pins a day, and a second tap on the pinned day or Escape releases it (#3070)."
       >
         <Card hover={false} className="p-5">
           <AreaChart

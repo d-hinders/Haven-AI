@@ -669,24 +669,38 @@ export function StackedBarChart({
               it dropped) the whole bar — a ~60px callout fits above or
               below almost any bar and the drop rule (#3063) has room to
               work. The values in full are in the data table below. */}
-          <div className="flex items-baseline justify-between gap-4">
-            <p className="text-xs font-semibold text-[var(--v2-ink)]">
-              {entry.label}
+          {/* The header row wraps: the label's units ("10 Jul", "· partial
+              day", "· 1 payment refused") each hold together and break only
+              between each other — a space between them is the break, the
+              <p> may shrink (min-w-0) — and the total is pushed to the
+              right edge, or onto the next line when the units fill this
+              one; it never leaves the box (design re-check: with no break
+              between nowrap units the row's min-content pushed the total
+              6.7px past the 390 panel's border and split "10 Jul"). */}
+          <div data-testid="chart-tooltip-header" className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+            <p className="min-w-0 text-xs font-semibold text-[var(--v2-ink)]">
+              <span className="whitespace-nowrap">{entry.label}</span>
               {entry.partial && (
-                <span data-testid="chart-tooltip-partial" className="ml-1.5 whitespace-nowrap font-normal text-[var(--v2-ink-3)]">
-                  · partial day
-                </span>
+                <>
+                  {' '}
+                  <span data-testid="chart-tooltip-partial" className="whitespace-nowrap font-normal text-[var(--v2-ink-3)]">
+                    · partial day
+                  </span>
+                </>
               )}
               {/* The day's refusal count belongs to the day, so it sits
                   beside the day — as a trailing chip it read as the last
                   agent's (design review). */}
               {entry.refusals > 0 && (
-                <span data-testid="chart-tooltip-refusals" className="ml-1.5 whitespace-nowrap font-normal text-[var(--v2-ink-2)]">
-                  · {entry.refusals} payment{entry.refusals === 1 ? '' : 's'} refused
-                </span>
+                <>
+                  {' '}
+                  <span data-testid="chart-tooltip-refusals" className="whitespace-nowrap font-normal text-[var(--v2-ink-2)]">
+                    · {entry.refusals} payment{entry.refusals === 1 ? '' : 's'} refused
+                  </span>
+                </>
               )}
             </p>
-            <p data-testid="chart-tooltip-total" className="v2-tabular whitespace-nowrap text-xs font-semibold text-[var(--v2-ink)]">
+            <p data-testid="chart-tooltip-total" className="v2-tabular ml-auto whitespace-nowrap text-xs font-semibold text-[var(--v2-ink)]">
               {currency} {formatValue(entry.total)}
             </p>
           </div>

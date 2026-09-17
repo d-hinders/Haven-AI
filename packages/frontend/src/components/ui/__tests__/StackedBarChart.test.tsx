@@ -469,7 +469,18 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     // last agent's.
     const refusals = screen.getByTestId('chart-tooltip-refusals')
     expect(refusals.parentElement).toBe(total.parentElement!.firstElementChild)
-    expect(refusals.parentElement!.textContent).toMatch(/^Tue 9.*4 payments refused$/)
+    // Units are separated by a real space (the only place the line may
+    // break) and each unit holds together; the row wraps and the <p> may
+    // shrink, so the total is never pushed out of the box.
+    expect(refusals.parentElement!.textContent).toBe('Tue 9 · 4 payments refused')
+    expect(refusals.className).toMatch(/whitespace-nowrap/)
+    expect(refusals.parentElement!.className).toMatch(/min-w-0/)
+    const dateUnit = refusals.parentElement!.firstElementChild!
+    expect(dateUnit.textContent).toBe('Tue 9')
+    expect(dateUnit.className).toMatch(/whitespace-nowrap/)
+    const header = screen.getByTestId('chart-tooltip-header')
+    expect(header.className).toMatch(/flex-wrap/)
+    expect(total.className).toMatch(/ml-auto/)
     // One wrapping list of agent chips — no row-per-agent block underneath.
     const list = screen.getByTestId('chart-tooltip-chips')
     expect(list.tagName).toBe('UL')

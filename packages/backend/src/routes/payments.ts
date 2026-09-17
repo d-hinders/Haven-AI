@@ -27,7 +27,7 @@ import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { AgentPaymentNextAction, AgentPaymentPhase } from '../domain/agent-payment-taxonomy.js'
 import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
-import { recordRefusalFireAndForget, classifyRevertForLedger } from '../modules/payments/index.js'
+import { classifyRevertForLedger, refuse } from '../modules/payments/index.js'
 import { formatTokenAmount, isAddress as isValidAddress, parseTokenAmount } from '@haven_ai/core'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
@@ -434,8 +434,14 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // classifier returns null for it and nothing is written. The
       // 502 the caller receives is unchanged either way.
       const refusalReason = classifyRevertForLedger(err)
-      if (refusalReason) {
-        recordRefusalFireAndForget({
+      // #3053: through the shared choke point; the ledger input is null when
+      // the classification says NOT a refusal.
+      return refuse(
+        reply.code(502).send({
+          error: 'Delegation-rail authorization failed (on-chain policy or bundler)',
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+        }),
+        refusalReason && {
           userId: agent.user_id,
           agentId: agent.id,
           chainId: agent.chain_id,
@@ -446,32 +452,31 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           reason: refusalReason,
           source: 'payment',
           detail: { error_code: refusalReason },
-        })
-      }
-      return reply.code(502).send({
-        error: 'Delegation-rail authorization failed (on-chain policy or bundler)',
-        details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
-      })
+        },
+      )
     }
     if (!authorization) {
       // #2945: no active budget delegation for this token/recipient — how a
       // recipient pin refuses on this rail. Record fire-and-forget, then the
       // response the caller has always received, unchanged.
-      recordRefusalFireAndForget({
-        userId: agent.user_id,
-        agentId: agent.id,
-        chainId: agent.chain_id,
-        tokenSymbol: tokenConfig.symbol,
-        amountAtomic: amountRaw.toString(),
-        accountAddress: agent.account_address,
-        merchantTo: to.toLowerCase(),
-        reason: 'no_delegation_for_target',
-        source: 'payment',
-        detail: { error_code: 'no_delegation_for_target' },
-      })
-      return reply.code(403).send({
-        error: `Agent has no active budget delegation for ${tokenConfig.symbol} to this recipient`,
-      })
+      // #3053: through the shared choke point.
+      return refuse(
+        reply.code(403).send({
+          error: `Agent has no active budget delegation for ${tokenConfig.symbol} to this recipient`,
+        }),
+        {
+          userId: agent.user_id,
+          agentId: agent.id,
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          amountAtomic: amountRaw.toString(),
+          accountAddress: agent.account_address,
+          merchantTo: to.toLowerCase(),
+          reason: 'no_delegation_for_target',
+          source: 'payment',
+          detail: { error_code: 'no_delegation_for_target' },
+        },
+      )
     }
 
     let delegationIntent
@@ -744,33 +749,44 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         if (err instanceof RelayerBudgetExceededError) {
           // #2945: the sponsorship budget refused before broadcast — recorded
           // fire-and-forget; `releaseSubmittedClaim` and the 429 are unchanged.
-          recordRefusalFireAndForget({
-            userId: agent.user_id,
-            agentId: agent.id,
-            chainId: intent.chain_id,
-            tokenSymbol: intent.token_symbol,
-            amountAtomic: intent.amount_raw,
-            accountAddress: intent.account_address,
-            merchantTo: intent.to_address,
-            resourceUrl: intent.x402_resource_url ?? intent.payment_resource_url ?? null,
-            reason: 'relayer_budget',
-            source: 'redeem',
-            detail: { error_code: 'relayer_budget_exceeded' },
-          })
+          // #3053: through the shared choke point. The claim release stays
+          // BEFORE the return — refuse() records, it does not release claims.
+          const refused = refuse(
+            reply.code(429).send({ payment_id: intent.id, status: 'pending_signature', error: err.message }),
+            {
+              userId: agent.user_id,
+              agentId: agent.id,
+              chainId: intent.chain_id,
+              tokenSymbol: intent.token_symbol,
+              amountAtomic: intent.amount_raw,
+              accountAddress: intent.account_address,
+              merchantTo: intent.to_address,
+              resourceUrl: intent.x402_resource_url ?? intent.payment_resource_url ?? null,
+              reason: 'relayer_budget',
+              source: 'redeem',
+              detail: { error_code: 'relayer_budget_exceeded' },
+            },
+          )
           await releaseSubmittedClaim(intent.id)
-          return reply.code(429).send({ payment_id: intent.id, status: 'pending_signature', error: err.message })
+          return refused
         }
         // 6. Failure. Session-rail (bundler) errors echo the request URL,
         // which embeds the API key — scrub before persisting or responding.
         const errorMsg = redactVendorSecrets(err instanceof Error ? err.message : String(err))
         await failSubmittedIntent(errorMsg, id, agent.id)
 
-        return reply.code(502).send({
-          payment_id: id,
-          status: 'failed',
-          error: 'On-chain execution failed',
-          details: errorMsg,
-        })
+        // #3053: through the shared choke point; allowlisted without a ledger
+        // row — this is the on-chain/bundler FAILURE answer, booked on the
+        // intent row by failSubmittedIntent above, not a policy refusal.
+        return refuse(
+          reply.code(502).send({
+            payment_id: id,
+            status: 'failed',
+            error: 'On-chain execution failed',
+            details: errorMsg,
+          }),
+          null,
+        )
       }
     },
   )

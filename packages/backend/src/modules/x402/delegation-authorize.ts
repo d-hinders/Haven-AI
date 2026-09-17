@@ -31,7 +31,8 @@ import {
 import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
-import { recordRefusalFireAndForget, classifyRevertForLedger } from '../payments/refusal-ledger.js'
+import { classifyRevertForLedger } from '../payments/refusal-ledger.js'
+import { refuse } from '../payments/refuse.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
@@ -186,52 +187,55 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         const fundingShortfallAtomic = amountRaw - fundingRemainingAtomic
         const fundingRemainingHuman = formatTokenValue(fundingRemainingAtomic.toString(), tokenConfig.decimals)
         const fundingShortfallHuman = formatTokenValue(fundingShortfallAtomic.toString(), tokenConfig.decimals)
-        // #2945: the refusal is decided — record it fire-and-forget (the
-        // ledger write can never change this response; see refusal-ledger.ts).
-        recordRefusalFireAndForget({
-          userId: agent.user_id,
-          agentId: agent.id,
-          chainId: agent.chain_id,
-          tokenSymbol: tokenConfig.symbol,
-          amountAtomic: amountRaw.toString(),
-          accountAddress: agent.account_address,
-          merchantTo: merchantPayTo.toLowerCase(),
-          resourceUrl: url,
-          reason: 'delegation_budget_exceeded',
-          source: 'x402_authorize',
-          detail: {
-            error_code: 'delegation_budget_exceeded',
-            phase: AgentPaymentPhase.InsufficientFunds,
-            next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-            remaining_atomic: fundingRemainingAtomic.toString(),
+        // #3053: through the shared choke point — the decided response is
+        // returned verbatim while the ledger row is recorded fire-and-forget
+        // (the write can never change this response; see refusal-ledger.ts).
+        return refuse(
+          {
+            code: 403,
+            body: {
+              error:
+                `This x402 payment of ${amountHuman} ${tokenConfig.symbol} exceeds the agent's remaining ` +
+                `budget for this period (${fundingRemainingHuman} ${tokenConfig.symbol}, short by ${fundingShortfallHuman}). ` +
+                'There is no approval queue on the delegation rail — an over-budget redemption reverts ' +
+                'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
+              error_code: 'delegation_budget_exceeded',
+              phase: AgentPaymentPhase.InsufficientFunds,
+              next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+              rail: AgentPaymentRail.X402,
+              chain_id: agent.chain_id,
+              token: tokenConfig.symbol,
+              asset: tokenAddress,
+              network,
+              amount: amountHuman,
+              amount_atomic: amountRaw.toString(),
+              remaining: fundingRemainingHuman,
+              remaining_atomic: fundingRemainingAtomic.toString(),
+              shortfall: fundingShortfallHuman,
+              shortfall_atomic: fundingShortfallAtomic.toString(),
+              resource_url: url,
+              merchant_address: merchantPayTo.toLowerCase(),
+            },
           },
-        })
-        return {
-          code: 403,
-          body: {
-            error:
-              `This x402 payment of ${amountHuman} ${tokenConfig.symbol} exceeds the agent's remaining ` +
-              `budget for this period (${fundingRemainingHuman} ${tokenConfig.symbol}, short by ${fundingShortfallHuman}). ` +
-              'There is no approval queue on the delegation rail — an over-budget redemption reverts ' +
-              'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
-            error_code: 'delegation_budget_exceeded',
-            phase: AgentPaymentPhase.InsufficientFunds,
-            next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-            rail: AgentPaymentRail.X402,
-            chain_id: agent.chain_id,
-            token: tokenConfig.symbol,
-            asset: tokenAddress,
-            network,
-            amount: amountHuman,
-            amount_atomic: amountRaw.toString(),
-            remaining: fundingRemainingHuman,
-            remaining_atomic: fundingRemainingAtomic.toString(),
-            shortfall: fundingShortfallHuman,
-            shortfall_atomic: fundingShortfallAtomic.toString(),
-            resource_url: url,
-            merchant_address: merchantPayTo.toLowerCase(),
+          {
+            userId: agent.user_id,
+            agentId: agent.id,
+            chainId: agent.chain_id,
+            tokenSymbol: tokenConfig.symbol,
+            amountAtomic: amountRaw.toString(),
+            accountAddress: agent.account_address,
+            merchantTo: merchantPayTo.toLowerCase(),
+            resourceUrl: url,
+            reason: 'delegation_budget_exceeded',
+            source: 'x402_authorize',
+            detail: {
+              error_code: 'delegation_budget_exceeded',
+              phase: AgentPaymentPhase.InsufficientFunds,
+              next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+              remaining_atomic: fundingRemainingAtomic.toString(),
+            },
           },
-        }
+        )
       }
     }
 
@@ -262,31 +266,34 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // #3053 (slice 2 of epic #3056) migrates this call site behind the
       // shared choke point that slice introduces.
       const fundingRefusalReason = classifyRevertForLedger(err)
-      if (fundingRefusalReason) {
-        recordRefusalFireAndForget({
+      // #3053: through the shared choke point. The ledger input is null when
+      // the classification says NOT a refusal (an outage is not a refusal):
+      // the write is skipped and the 502 is returned unchanged either way.
+      // NOT `payTo` in merchantTo — on this leg payTo is the agent's own
+      // funding EOA; the real merchant is the separate field, exactly as the
+      // #2706 pre-check writer above books it.
+      return refuse(
+        {
+          code: 502,
+          body: {
+            error: 'Delegation-rail funding authorization failed (on-chain policy or bundler)',
+            details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+          },
+        },
+        fundingRefusalReason && {
           userId: agent.user_id,
           agentId: agent.id,
           chainId: agent.chain_id,
           tokenSymbol: tokenConfig.symbol,
           amountAtomic: amountRaw.toString(),
           accountAddress: agent.account_address,
-          // NOT `payTo`, which on this leg is the agent's own funding EOA.
-          // The real merchant is the separate field, exactly as the #2706
-          // pre-check writer above books it.
           merchantTo: merchantPayTo.toLowerCase(),
           resourceUrl: url,
           reason: fundingRefusalReason,
           source: 'x402_authorize',
           detail: { error_code: fundingRefusalReason },
-        })
-      }
-      return {
-        code: 502,
-        body: {
-          error: 'Delegation-rail funding authorization failed (on-chain policy or bundler)',
-          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
         },
-      }
+      )
     }
     if (!fundingAuth) {
       // #3052: the sibling writers for this condition — the erc7710
@@ -301,27 +308,32 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // succeeds or fails (see refusal-ledger.ts).
       // #3053 (slice 2 of epic #3056) migrates this call site behind the
       // shared choke point that slice introduces.
-      recordRefusalFireAndForget({
-        userId: agent.user_id,
-        agentId: agent.id,
-        chainId: agent.chain_id,
-        tokenSymbol: tokenConfig.symbol,
-        amountAtomic: amountRaw.toString(),
-        accountAddress: agent.account_address,
-        merchantTo: merchantPayTo.toLowerCase(),
-        resourceUrl: url,
-        reason: 'no_delegation_for_target',
-        source: 'x402_authorize',
-        detail: { error_code: 'no_delegation_for_target' },
-      })
-      return {
-        code: 403,
-        body: {
-          error:
-            `Agent has no delegation able to fund EIP-3009 settlement for ${tokenConfig.symbol}. ` +
-            '3009-mode needs an open (unpinned) budget delegation — merchant-pinned budgets settle via erc7710 only.',
+      // #3053: through the shared choke point — the decided response is
+      // returned verbatim while the ledger row is recorded fire-and-forget
+      // (the write cannot change the 403 below, whether it succeeds or fails).
+      return refuse(
+        {
+          code: 403,
+          body: {
+            error:
+              `Agent has no delegation able to fund EIP-3009 settlement for ${tokenConfig.symbol}. ` +
+              '3009-mode needs an open (unpinned) budget delegation — merchant-pinned budgets settle via erc7710 only.',
+          },
         },
-      }
+        {
+          userId: agent.user_id,
+          agentId: agent.id,
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          amountAtomic: amountRaw.toString(),
+          accountAddress: agent.account_address,
+          merchantTo: merchantPayTo.toLowerCase(),
+          resourceUrl: url,
+          reason: 'no_delegation_for_target',
+          source: 'x402_authorize',
+          detail: { error_code: 'no_delegation_for_target' },
+        },
+      )
     }
 
     const intent = await createPaymentIntent({
@@ -446,20 +458,23 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
   if (!budget) {
     // #2945: this 403 is how a recipient pin refuses on this rail — named
     // for what it is, not distinguishable from no-delegation. Fire-and-forget.
-    recordRefusalFireAndForget({
-      userId: agent.user_id,
-      agentId: agent.id,
-      chainId: agent.chain_id,
-      tokenSymbol: tokenConfig.symbol,
-      amountAtomic: amountRaw.toString(),
-      accountAddress: agent.account_address,
-      merchantTo: payTo.toLowerCase(),
-      resourceUrl: url,
-      reason: 'no_delegation_for_target',
-      source: 'x402_authorize',
-      detail: { error_code: 'no_delegation_for_target' },
-    })
-    return { code: 403, body: { error: `Agent has no active budget delegation for ${tokenConfig.symbol} to this merchant` } }
+    // #3053: through the shared choke point.
+    return refuse(
+      { code: 403, body: { error: `Agent has no active budget delegation for ${tokenConfig.symbol} to this merchant` } },
+      {
+        userId: agent.user_id,
+        agentId: agent.id,
+        chainId: agent.chain_id,
+        tokenSymbol: tokenConfig.symbol,
+        amountAtomic: amountRaw.toString(),
+        accountAddress: agent.account_address,
+        merchantTo: payTo.toLowerCase(),
+        resourceUrl: url,
+        reason: 'no_delegation_for_target',
+        source: 'x402_authorize',
+        detail: { error_code: 'no_delegation_for_target' },
+      },
+    )
   }
 
   // ── #2082: fail-fast remaining-budget pre-check ──────────────────────────
@@ -525,52 +540,55 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     // make it actionable: MCP's `normalizeError` reads `phase`/`next_action`
     // straight off the body, so an agent is told to ask its owner to raise
     // the budget rather than to retry.
-    // #2945: the refusal is decided — record it fire-and-forget (the
-    // ledger write can never change this response; see refusal-ledger.ts).
-    recordRefusalFireAndForget({
-      userId: agent.user_id,
-      agentId: agent.id,
-      chainId: agent.chain_id,
-      tokenSymbol: tokenConfig.symbol,
-      amountAtomic: amountRaw.toString(),
-      accountAddress: agent.account_address,
-      merchantTo: payTo.toLowerCase(),
-      resourceUrl: url,
-      reason: 'delegation_budget_exceeded',
-      source: 'x402_authorize',
-      detail: {
-        error_code: 'delegation_budget_exceeded',
-        phase: AgentPaymentPhase.InsufficientFunds,
-        next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-        remaining_atomic: remainingAtomic.toString(),
+    // #3053: through the shared choke point — the decided response is
+    // returned verbatim while the ledger row is recorded fire-and-forget
+    // (the write can never change this response; see refusal-ledger.ts).
+    return refuse(
+      {
+        code: 403,
+        body: {
+          error:
+            `This x402 payment of ${amountHuman} ${tokenConfig.symbol} exceeds the agent's remaining ` +
+            `budget for this period (${remainingHuman} ${tokenConfig.symbol}, short by ${shortfallHuman}). ` +
+            'There is no approval queue on the delegation rail — an over-budget redemption reverts ' +
+            'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
+          error_code: 'delegation_budget_exceeded',
+          phase: AgentPaymentPhase.InsufficientFunds,
+          next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+          rail: AgentPaymentRail.X402,
+          chain_id: agent.chain_id,
+          token: tokenConfig.symbol,
+          asset: tokenAddress,
+          network,
+          amount: amountHuman,
+          amount_atomic: amountRaw.toString(),
+          remaining: remainingHuman,
+          remaining_atomic: remainingAtomic.toString(),
+          shortfall: shortfallHuman,
+          shortfall_atomic: shortfallAtomic.toString(),
+          resource_url: url,
+          merchant_address: payTo.toLowerCase(),
+        },
       },
-    })
-    return {
-      code: 403,
-      body: {
-        error:
-          `This x402 payment of ${amountHuman} ${tokenConfig.symbol} exceeds the agent's remaining ` +
-          `budget for this period (${remainingHuman} ${tokenConfig.symbol}, short by ${shortfallHuman}). ` +
-          'There is no approval queue on the delegation rail — an over-budget redemption reverts ' +
-          'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
-        error_code: 'delegation_budget_exceeded',
-        phase: AgentPaymentPhase.InsufficientFunds,
-        next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
-        rail: AgentPaymentRail.X402,
-        chain_id: agent.chain_id,
-        token: tokenConfig.symbol,
-        asset: tokenAddress,
-        network,
-        amount: amountHuman,
-        amount_atomic: amountRaw.toString(),
-        remaining: remainingHuman,
-        remaining_atomic: remainingAtomic.toString(),
-        shortfall: shortfallHuman,
-        shortfall_atomic: shortfallAtomic.toString(),
-        resource_url: url,
-        merchant_address: payTo.toLowerCase(),
+      {
+        userId: agent.user_id,
+        agentId: agent.id,
+        chainId: agent.chain_id,
+        tokenSymbol: tokenConfig.symbol,
+        amountAtomic: amountRaw.toString(),
+        accountAddress: agent.account_address,
+        merchantTo: payTo.toLowerCase(),
+        resourceUrl: url,
+        reason: 'delegation_budget_exceeded',
+        source: 'x402_authorize',
+        detail: {
+          error_code: 'delegation_budget_exceeded',
+          phase: AgentPaymentPhase.InsufficientFunds,
+          next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+          remaining_atomic: remainingAtomic.toString(),
+        },
       },
-    }
+    )
   }
 
   // #2094: the intent id is generated HERE, before the child is built, and
@@ -613,13 +631,20 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
     })
   } catch (err) {
-    return {
-      code: 502,
-      body: {
-        error: 'Could not build the settlement delegation',
-        details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+    // #3053: through the shared choke point. This 502 sits on the enumerated
+    // policy-status list WITHOUT a ledger row on purpose: it is build
+    // infrastructure loss, not a policy refusal — the census guard's
+    // allowlist owns that distinction, do not "fix" it here.
+    return refuse(
+      {
+        code: 502,
+        body: {
+          error: 'Could not build the settlement delegation',
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+        },
       },
-    }
+      null,
+    )
   }
 
   // ── #1667: deploy the child's delegator if still counterfactual ──────────
@@ -645,15 +670,22 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     )
   } catch (err) {
     if (err instanceof RelayerBudgetExceededError) {
-      return { code: 429, body: { error: err.message } }
+      // #3053: choke point; allowlisted without a ledger row — the relayer
+      // sponsorship budget is exhausted (capacity, not spend policy).
+      return refuse({ code: 429, body: { error: err.message } }, null)
     }
-    return {
-      code: 502,
-      body: {
-        error: 'Could not deploy the delegate account for erc7710 settlement — retry the authorize',
-        details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+    // #3053: choke point; allowlisted without a ledger row — delegate-account
+    // deploy infrastructure, not policy (named in the census guard's header).
+    return refuse(
+      {
+        code: 502,
+        body: {
+          error: 'Could not deploy the delegate account for erc7710 settlement — retry the authorize',
+          details: redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+        },
       },
-    }
+      null,
+    )
   }
 
   const intent = await createPaymentIntent({

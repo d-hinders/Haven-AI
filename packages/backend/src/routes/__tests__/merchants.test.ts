@@ -11,7 +11,7 @@
  *    only on a testnet-only list — and their page is a 404 to everyone else;
  *  - every 200 matches the spec, and a slug the spec rejects is a 404.
  */
-import Fastify, { FastifyInstance } from 'fastify'
+import Fastify, { FastifyError, FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { createHash } from 'crypto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -21,6 +21,7 @@ import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '..
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { findOrCreateMerchantByHost } from '../../infra/repositories/merchants.js'
 import merchantRoutes from '../merchants.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import catalogRoutes from '../catalog.js'
 
 const AGENT_KEY = 'sk_agent_test_merchants'
@@ -98,7 +99,16 @@ describeDb('merchants routes (#3078)', () => {
   beforeAll(async () => {
     await initDbHarness()
     app = Fastify({ logger: false })
+    // The app-level handler the enforced route delegates to (production has
+    // httpErrorHandler, #1464); the shape is what matters here.
+    app.setErrorHandler((error: FastifyError, _request, reply) => {
+      void reply.status(error.statusCode ?? 500).send({ error: error.message })
+    })
     await app.register(fastifyJwt, { secret: 'test-secret' })
+    // `/merchants` is born ENFORCED in `src/index.ts` (#3028 rollout): the
+    // suite runs every case under enforcement so a spec/route mismatch on a
+    // legitimate request would fail here, not on dev.
+    installRequestValidation(app, { mode: 'off', enforcedPrefixes: ['/merchants'] })
     await app.register(merchantRoutes, { prefix: '/merchants' })
     await app.register(catalogRoutes, { prefix: '/catalog' })
   })
@@ -170,7 +180,9 @@ describeDb('merchants routes (#3078)', () => {
     expect((await app.inject({ method: 'GET', url: '/merchants/sepolia-only' })).statusCode).toBe(404)
     expect((await app.inject({ method: 'GET', url: '/merchants/nobody' })).statusCode).toBe(404)
     // A slug the spec's pattern rejects never reaches the database.
-    expect((await app.inject({ method: 'GET', url: '/merchants/Not%20A%20Slug' })).statusCode).toBe(404)
+    // A malformed slug is refused by the enforced spec pattern (400), never
+    // looked up — the dedicated enforcement case below pins the envelope.
+    expect((await app.inject({ method: 'GET', url: '/merchants/Not%20A%20Slug' })).statusCode).toBe(400)
   })
 
   it('an agent sees its own chain, whatever the marketplace lists (decision 4, B1)', async () => {
@@ -252,4 +264,17 @@ describeDb('merchants routes (#3078)', () => {
     expect(slugsOf((await app.inject({ method: 'GET', url: '/merchants', headers: dashboardHeaders() })).json())).not.toContain('berget-ai')
     expect((await app.inject({ method: 'GET', url: '/merchants/berget-ai', headers: dashboardHeaders() })).statusCode).toBe(404)
   })
+  it('refuses a malformed slug with the 400 envelope before the handler — the module is enforced, not shadowed', async () => {
+    const res = await app.inject({ method: 'GET', url: '/merchants/Not_A_Slug' })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({
+      error: 'Request does not match the API spec',
+      statusCode: 400,
+      error_code: 'invalid_request',
+    })
+    // A well-formed unknown slug still reaches the handler's 404.
+    const miss = await app.inject({ method: 'GET', url: '/merchants/no-such-merchant' })
+    expect(miss.statusCode).toBe(404)
+  })
+
 })

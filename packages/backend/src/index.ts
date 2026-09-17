@@ -103,14 +103,16 @@ app.setErrorHandler(httpErrorHandler)
 // EVERY route's request is compiled against the OpenAPI spec from here down —
 // shadow mode logs would-be refusals and counts them (`request_validation` on
 // GET /health/ops) without changing any answer; the contacts proof module is
-// enforced via enforcedPrefixes. MUST sit after setErrorHandler (the enforced
+// enforced via enforcedPrefixes, and so is /merchants (#3078): a module born
+// after the rollout began is born enforced — read-only, one path parameter
+// with a slug pattern — rather than adding to the shadow residue. MUST sit after setErrorHandler (the enforced
 // route handler delegates non-validation errors to it) and before the first
 // app.register — it is a root-scope install, not an encapsulated plugin, so
 // its onRoute/compiler/formatter are the ones every child module inherits
 // (spiked: an encapsulated plugin's onRoute sees no later routes).
 installRequestValidation(app, {
   mode: config.requestValidationMode,
-  enforcedPrefixes: ['/contacts'],
+  enforcedPrefixes: ['/contacts', '/merchants'],
 })
 
 // --- Process-level error handlers ---

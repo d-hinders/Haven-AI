@@ -26,6 +26,7 @@ import {
 } from '../infra/repositories/merchants.js'
 import { listVerifiedCatalogSubmissionsForMerchant } from '../infra/repositories/catalog-submissions.js'
 import { eitherAuth, isPublicCatalogRead, serialize, serializeIngestion, toPublicListing } from './catalog.js'
+import type { CatalogListingEntry } from './catalog.js'
 
 /** The wire shape of a merchant: the row plus what its offers say. */
 export function serializeMerchant(row: MerchantListingRow) {
@@ -84,7 +85,7 @@ export default async function merchantRoutes(app: FastifyInstance): Promise<void
     }
 
     const operator = await listOperatorOffersForMerchant<CatalogRow & CatalogRowWithMerchant>(merchant.id, chainIds)
-    const offers: Array<ReturnType<typeof serialize> | ReturnType<typeof serializeIngestion>> = operator.map((row) =>
+    const offers: CatalogListingEntry[] = operator.map((row) =>
       serialize(row),
     )
     // The ingestion half: verified submissions attached to this merchant,

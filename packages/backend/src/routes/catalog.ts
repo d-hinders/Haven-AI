@@ -239,7 +239,8 @@ const SOURCE_RANK: Record<'operator' | 'ingestion', number> = {
   ingestion: 1,
 }
 
-type CatalogListingEntry = ReturnType<typeof serialize> | ReturnType<typeof serializeIngestion>
+/** One serialized catalog listing — operator row or ingestion row (shared with `routes/merchants.ts`). */
+export type CatalogListingEntry = ReturnType<typeof serialize> | ReturnType<typeof serializeIngestion>
 
 export default async function catalogRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', eitherAuth)

@@ -39,8 +39,7 @@
  * querystring and params (and of an enforce-mode body) remains, deliberately,
  * because a typed spec parameter is unusable without it and an enforced route
  * answers on the result. No coercion has ever touched spend intent: the
- * semantic money-path refusals — entitlement, budget, delegation, settlement —
- * keep their exact position and body. Every semantic refusal on the money path — the rail seam's 410,
+ * semantic money-path refusals keep their exact position and body. Every semantic refusal on the money path — the rail seam's 410,
  * the budget pre-check, the token resolution — keeps its exact position and
  * body; this layer only answers BEFORE them for requests the spec already
  * refuses, and in slice 1 it does not even do that outside the proof module.
@@ -120,9 +119,12 @@ export interface RequestValidationSnapshot {
   wouldRefuse: number
   /**
    * Bodies shadow COERCED and then restored (#3082). A refusal is not the only
-   * way shadow and enforce diverge: a coercible off-spec body validates clean,
-   * so it never counts as a would-refusal, yet the handler would receive a
-   * DIFFERENT value once the route is enforced. Slices 2–4 flip money-path
+   * way shadow and enforce diverge: a body that coercion alone made valid
+   * raises no would-refusal, yet the handler would receive a DIFFERENT value
+   * once the route is enforced. NOT mutually exclusive with `wouldRefuse`, and
+   * the two must never be summed as "requests affected": ajv coerces field by
+   * field, so one request can coerce an earlier field and still be refused on
+   * a later one, moving both counters. Slices 2–4 flip money-path
    * modules on these readings, so that divergence has to be visible rather
    * than inferred from a comment.
    */

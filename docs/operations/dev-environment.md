@@ -274,7 +274,9 @@ Isolation rules that are non-negotiable for a payments product:
   that deterministic test so the normal 15-minute merchant-report grace stays
   in force; never set it in production.
 - **Request-validation mode** — `HAVEN_REQUEST_VALIDATION` on the backend is
-  `off` (nothing runs) | `shadow` (default: log and count would-be refusals;
+  `off` (no schema is injected — EXCEPT on an `enforcedPrefixes` module,
+  which stays enforced regardless of the mode) | `shadow` (default: log and
+  count would-be refusals;
   since #3082 the request BODY is restored after validation so nothing the
   handler reads changes, and a body that coercion alone made valid is counted
   as `would_coerce`. Typed querystring/params are still coerced — that is what
@@ -287,7 +289,9 @@ Isolation rules that are non-negotiable for a payments product:
   `['/contacts']` — `mode` gates the `off` early-return and the counters and
   nothing else. Setting `HAVEN_REQUEST_VALIDATION=enforce` today therefore
   refuses exactly what `shadow` refuses. Epic #3028 slices 2–4 widen the
-  prefix list; the variable is not the switch that does it. Any other value refuses the boot rather than falling
+  prefix list; the variable is not the switch that does it.
+
+  Any other value refuses the boot rather than falling
   back — a misspelled `enforce` must not silently mean `shadow`. **A mode
   change is a RESTART**: the injected schemas are fixed at route
   registration, so flipping the variable is a redeploy, not a live switch.

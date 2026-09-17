@@ -1662,7 +1662,7 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
 describe('POST /:id/delegations/build — OPEN budget through request validation (#3082)', () => {
   // The fourth case is NOT `mode: 'enforce'`. Independent review caught that
   // `enforced` is derived ONLY from `prefixIsEnforced(prefix,
-  // enforcedPrefixes)` (`request-validation.ts:356`) — `mode` gates the `off`
+  // enforcedPrefixes)` in `request-validation.ts` — `mode` gates the `off`
   // early-return and the counters, nothing else. So a bare `mode: 'enforce'`
   // takes the SHADOW branch for any unlisted prefix, and a test that passed
   // only the mode would silently be a duplicate of the shadow case while

@@ -92,6 +92,8 @@ export interface DiscoveryResult {
   skippedExisting: number
   /** On an unsupported network (e.g. Solana) — can't pay, never probed. */
   skippedUnsupported: number
+  /** #3078: a resource whose URL host the merchant rule cannot read — never inserted. */
+  skippedUnparseableHost: number
   /** A candidate that did not answer a parsable 402. */
   failedProbe: number
 }
@@ -167,6 +169,7 @@ export async function ingestDiscoveredCatalog(
     ingested: 0,
     skippedExisting: 0,
     skippedUnsupported: 0,
+    skippedUnparseableHost: 0,
     failedProbe: 0,
   }
 
@@ -218,7 +221,7 @@ export async function ingestDiscoveredCatalog(
     // the catalog joins its merchant rather than founding another.
     const host = merchantHostOf(resourceUrl)
     if (host === null) {
-      result.skippedUnsupported += 1
+      result.skippedUnparseableHost += 1
       continue
     }
     const merchant = await merchants.findOrCreateMerchantByHost(host, { name, description, category }, db)

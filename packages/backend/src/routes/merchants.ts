@@ -52,11 +52,13 @@ const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 export default async function merchantRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', eitherAuth)
 
-  // GET /merchants — every live merchant with an offer on a listed chain,
+  // GET /merchants — every live merchant with an offer on a listed chain
+  // (an agent: its own chain, the same alternative-not-conjunction rule the
+  // catalog applies — the grid and the page must agree for an agent too),
   // plus prospects for a caller allowed to see them.
   app.get('/', async (request) => {
     const merchants = await listMerchants({
-      chainIds: marketplaceChainIds(),
+      chainIds: request.agent ? [request.agent.chain_id] : marketplaceChainIds(),
       includeProspects: prospectsVisibleTo(request),
     })
     return { merchants: merchants.map(serializeMerchant) }

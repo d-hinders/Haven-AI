@@ -115,6 +115,7 @@ export type {
   SweepEntry,
   SweepConfirmation,
   HavenCatalogEntry,
+  HavenCatalogMerchant,
   HavenCatalogSubmission,
   CatalogSubmissionAccepted,
 } from './types.js'

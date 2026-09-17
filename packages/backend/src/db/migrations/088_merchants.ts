@@ -1,4 +1,5 @@
 import type { PoolClient } from 'pg'
+import { HOST_OF_URL_SQL } from '../url-host.js'
 
 /**
  * 088 — the merchant layer over the catalog (#3078, slice 1 of epic #3077).
@@ -34,10 +35,8 @@ import type { PoolClient } from 'pg'
  */
 export const version = '088_merchants'
 
-/** The regex both the backfill and the repository use to read a host. */
-// `FROM` upper-cased on purpose: the dependency-parity test reads `from '…'`
-// as an import specifier, and this is SQL, not a module.
-export const HOST_OF_URL_SQL = `lower(substring(resource_url FROM '^[A-Za-z][A-Za-z0-9+.-]*://([^/:?#]+)'))`
+/** The one host definition, shared with the repository (`db/url-host.ts`). */
+export { HOST_OF_URL_SQL }
 
 interface SeedMerchant {
   slug: string
@@ -256,14 +255,21 @@ export async function up(client: PoolClient): Promise<void> {
       n INTEGER;
       mid UUID;
     BEGIN
+      -- A row whose resource_url the host rule cannot read would be left
+      -- without a merchant and SET NOT NULL would fail three statements on
+      -- with an error naming no row. Fail here instead, naming every id, so
+      -- the operator knows what to fix (review S1). No current writer can
+      -- produce such a row; a database this migration meets might.
+      IF EXISTS (SELECT 1 FROM merchant_catalog WHERE merchant_id IS NULL AND ${HOST_OF_URL_SQL} IS NULL) THEN
+        RAISE EXCEPTION '088_merchants: merchant_catalog rows with an unreadable resource_url host: %',
+          (SELECT string_agg(id::text || ' (' || resource_url || ')', ', ')
+           FROM merchant_catalog WHERE merchant_id IS NULL AND ${HOST_OF_URL_SQL} IS NULL);
+      END IF;
       FOR h IN
         SELECT DISTINCT ${HOST_OF_URL_SQL} AS host
         FROM merchant_catalog
         WHERE merchant_id IS NULL
       LOOP
-        IF h IS NULL THEN
-          CONTINUE;
-        END IF;
         base_slug := trim(both '-' from regexp_replace(h, '[^a-z0-9]+', '-', 'g'));
         IF base_slug = '' THEN
           base_slug := 'merchant';
@@ -300,11 +306,12 @@ export async function up(client: PoolClient): Promise<void> {
 
 export async function down(client: PoolClient): Promise<void> {
   // The Ampersend rows are this migration's seed; every other catalog row
-  // predates it and stays. Columns before the table: the FKs point at it.
-  await client.query(
-    `DELETE FROM merchant_catalog
-     WHERE ${HOST_OF_URL_SQL} IN ('services.sandbox.ampersend.ai', 'services.ampersend.ai')`,
-  )
+  // predates it and stays — including any OTHER row that later landed on an
+  // Ampersend host (a verified submission, the cron), so the delete is by the
+  // six seeded URLs, not by host. Columns before the table: the FKs point at it.
+  await client.query(`DELETE FROM merchant_catalog WHERE resource_url = ANY($1::text[]) AND tool_name IS NULL`, [
+    AMPERSEND_OFFERS.map((o) => o.resourceUrl),
+  ])
   await client.query(`
     DROP INDEX IF EXISTS idx_catalog_submissions_merchant_id;
     DROP INDEX IF EXISTS idx_merchant_catalog_merchant_id;

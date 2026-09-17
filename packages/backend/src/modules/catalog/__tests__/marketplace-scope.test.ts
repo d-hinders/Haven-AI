@@ -62,8 +62,10 @@ describe('prospectsVisibleTo', () => {
   it('shows prospects only to a dashboard user, with the flag on, on a testnet-only list', () => {
     setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [84532], deployChainIds: [] })
     expect(prospectsVisibleTo(request({ user: { sub: 'u1' } }))).toBe(true)
-    // Not to an agent, even an authenticated one.
-    expect(prospectsVisibleTo(request({ agent: { id: 'a1', chain_id: 84532 } }))).toBe(false)
+    // Not to an agent — even one a middleware also left a `user` on (no
+    // door does today; the guard is defence in depth and this fixture has
+    // BOTH set so the agent check is the thing under test).
+    expect(prospectsVisibleTo(request({ user: { sub: 'u1' }, agent: { id: 'a1', chain_id: 84532 } }))).toBe(false)
     // Not to a credential-less read.
     expect(prospectsVisibleTo(request())).toBe(false)
   })

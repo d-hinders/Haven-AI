@@ -542,6 +542,7 @@ describe('HavenClient structural boundary', () => {
       'HavenAllowance',
       'HavenAllowanceSummary',
       'HavenCatalogEntry',
+      'HavenCatalogMerchant', // #3078
       'HavenCatalogSubmission',
       'HavenClientConfig',
       'HavenPaymentReceipt',

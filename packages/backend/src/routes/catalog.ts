@@ -362,10 +362,19 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
   // GET /catalog/:id — single entry detail (both sources).
   app.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
     const conditions = [`mc.id = $1`, `mc.status != 'delisted'`]
-    const values = [request.params.id]
+    const values: unknown[] = [request.params.id]
     if (request.agent) {
       values.push(`eip155:${request.agent.chain_id}`)
       conditions.push(`mc.network = $${values.length}`)
+    } else {
+      // The same marketplace scope as the listing (#3078): a dashboard user
+      // or credential-less reader who knows an id does not get a testnet
+      // entry a prod deployment hides from the list.
+      const listed = marketplaceChainIds()
+      if (listed !== null) {
+        values.push(listed.map((id) => `eip155:${id}`))
+        conditions.push(`mc.network = ANY($${values.length}::text[])`)
+      }
     }
     const result = await pool.query<CatalogRow & CatalogRowWithMerchant>(
       `${CATALOG_ROW_WITH_MERCHANT_SELECT} WHERE ${conditions.join(' AND ')} LIMIT 1`,

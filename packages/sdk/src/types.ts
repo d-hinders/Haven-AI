@@ -1744,10 +1744,8 @@ export interface HavenCatalogEntry {
    * null, in that case.
    */
   merchant?: HavenCatalogMerchant
-
 }
 
-/** @internal */
 /** A catalog entry's merchant as the wire carries it (#3078). */
 export interface HavenCatalogMerchant {
   id: string
@@ -1768,6 +1766,7 @@ export interface RawCatalogEntryMerchant {
   is_test_merchant: boolean
 }
 
+/** @internal */
 export interface RawCatalogEntry {
   id: string
   name: string

@@ -214,15 +214,16 @@ export const MARK_CATALOG_SUBMISSION_VERIFIED_PAYABLE_SQL = `
       name = $2, description = $3, entrypoint = $4,
       updated_at = now()
   WHERE id = $1 AND status IN ('ownership_verified', 'verified_payable')
-  RETURNING id, hostname, merchant_id, merchant_name, merchant_website`
+  RETURNING id, hostname, merchant_id, merchant_name AS submitted_merchant_name, merchant_website AS submitted_merchant_website`
 
 /** What `markCatalogSubmissionVerifiedPayable` hands back for the merchant hook (#3078). */
 export interface VerifiedPayableMark {
   id: string
   hostname: string
   merchant_id: string | null
-  merchant_name: string | null
-  merchant_website: string | null
+  /** What the SUBMITTER said the seller is — not the merchant's display name (that is the join's `merchant_name`). */
+  submitted_merchant_name: string | null
+  submitted_merchant_website: string | null
 }
 
 export const SET_CATALOG_SUBMISSION_MERCHANT_SQL = `

@@ -262,9 +262,9 @@ async function runProbeStage(
           const merchant = await findOrCreateMerchantByHost(
             mark.hostname,
             {
-              name: mark.merchant_name ?? outcome.metadata.name,
+              name: mark.submitted_merchant_name ?? outcome.metadata.name,
               description: outcome.metadata.description,
-              website: mark.merchant_website,
+              website: mark.submitted_merchant_website,
             },
             db,
           )

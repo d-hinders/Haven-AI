@@ -225,6 +225,58 @@ describeDb('migration 088_merchants', () => {
     }
   })
 
+  it('fails loudly, naming the rows, when a resource_url has no readable host — instead of an anonymous NOT NULL error three statements later', async () => {
+    await withMigrationReverted(
+      () => db.connect().then(async (c) => { try { await down(c) } finally { c.release() } }),
+      async () => {
+        const planted = await db.query<{ id: string }>(
+          `INSERT INTO merchant_catalog
+             (name, description, category, resource_url, rail, protocol, tool_name, network, status)
+           VALUES ('Broken', 'x', 'api', 'not-a-url', 'x402', 'http', NULL, 'eip155:8453', 'active')
+           RETURNING id`,
+        )
+        const client = await db.connect()
+        try {
+          await expect(up(client)).rejects.toThrow(new RegExp(`unreadable resource_url host: ${planted.rows[0].id} \\(not-a-url\\)`))
+        } finally {
+          client.release()
+        }
+        // The operator fixes the row and re-runs: the migration completes.
+        await db.query(`UPDATE merchant_catalog SET resource_url = 'https://fixed.example/x' WHERE id = $1`, [planted.rows[0].id])
+        const again = await db.connect()
+        try {
+          await up(again)
+        } finally {
+          again.release()
+        }
+        expect((await merchantSlugs())).toContain('fixed-example')
+      },
+      async () => {},
+    )
+  })
+
+  it('a second up() on a migrated database is a no-op', async () => {
+    // The harness wipes seed rows, so the first up() here re-seeds (the
+    // merchants map and the six Ampersend rows); the SECOND is the claim.
+    const counts = () =>
+      db.query<{ m: string; c: string }>(
+        `SELECT (SELECT count(*) FROM merchants)::text AS m, (SELECT count(*) FROM merchant_catalog)::text AS c`,
+      )
+    const run = async () => {
+      const client = await db.connect()
+      try {
+        await up(client)
+      } finally {
+        client.release()
+      }
+    }
+    await run()
+    const once = (await counts()).rows[0]
+    expect(once).toEqual({ m: String(SEED_MERCHANTS.length), c: String(AMPERSEND_OFFERS.length) })
+    await run()
+    expect((await counts()).rows[0]).toEqual(once)
+  })
+
   it('refuses an offer with no merchant', async () => {
     await expect(insertOffer('https://nobody.example/x', 'orphan')).rejects.toMatchObject({ code: '23502' })
   })

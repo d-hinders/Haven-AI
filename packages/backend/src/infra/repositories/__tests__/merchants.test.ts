@@ -8,6 +8,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
+import { HOST_OF_URL_SQL } from '../../../db/url-host.js'
 import {
   findOrCreateMerchantByHost,
   getMerchantBySlug,
@@ -68,10 +69,16 @@ describe('merchants repository — pure helpers', () => {
     expect(slugifyMerchantName('***')).toBe('merchant')
   })
 
-  it('reads the lowercased host of a URL, or null', () => {
+  it('reads the lowercased host of a URL by the one rule the SQL side uses, or null', () => {
     expect(merchantHostOf('https://Services.Sandbox.Ampersend.ai/api/joke')).toBe('services.sandbox.ampersend.ai')
+    expect(merchantHostOf('https://api.example:8443/x?y#z')).toBe('api.example')
+    // Userinfo is stripped and an IDN is kept as written — the same answers
+    // `HOST_OF_URL_SQL` gives, so the find key cannot disagree with itself.
+    expect(merchantHostOf('https://user:pw@api.example/x')).toBe('api.example')
+    expect(merchantHostOf('https://bücher.example/x')).toBe('bücher.example')
     expect(merchantHostOf('not a url')).toBeNull()
   })
+
 })
 
 describeDb('merchants repository (#3078)', () => {
@@ -107,6 +114,21 @@ describeDb('merchants repository (#3078)', () => {
     expect(other.slug).toBe('weather-api-2')
     const third = await findOrCreateMerchantByHost('api.third.example', { name: 'Weather API' })
     expect(third.slug).toBe('weather-api-3')
+  })
+
+  it('agrees with HOST_OF_URL_SQL on every shape the JavaScript rule handles', async () => {
+    const urls = [
+      'https://Services.Sandbox.Ampersend.ai/api/joke',
+      'https://api.example:8443/x?y#z',
+      'https://user:pw@api.example/x',
+      'https://bücher.example/x',
+      'not a url',
+    ]
+    const { rows } = await db.query<{ url: string; host: string | null }>(
+      `SELECT resource_url AS url, ${HOST_OF_URL_SQL} AS host FROM unnest($1::text[]) AS resource_url`,
+      [urls],
+    )
+    expect(rows.map((r) => r.host)).toEqual(urls.map(merchantHostOf))
   })
 
   it('refuses an empty host', async () => {

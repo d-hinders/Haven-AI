@@ -16,7 +16,7 @@
  */
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
-import { HOST_OF_URL_SQL } from '../../db/migrations/088_merchants.js'
+import { HOST_OF_URL_SQL, hostOfUrl } from '../../db/url-host.js'
 
 export type MerchantListingStatus = 'live' | 'coming_soon'
 
@@ -97,14 +97,14 @@ export interface MerchantListingRow extends MerchantRow {
   verified_payable: boolean
 }
 
-/** The lowercased host of a URL, or null when it will not parse. */
+/**
+ * The lowercased host of a URL by the ONE rule the SQL side uses
+ * (`db/url-host.ts`), or null when it will not parse. Not `new URL()`: its
+ * `hostname` punycodes an IDN and drops userinfo the way the regex does not,
+ * and two definitions of the find key found two merchants for one row.
+ */
 export function merchantHostOf(resourceUrl: string): string | null {
-  try {
-    const host = new URL(resourceUrl).hostname.toLowerCase()
-    return host || null
-  } catch {
-    return null
-  }
+  return hostOfUrl(resourceUrl)
 }
 
 /** A URL-safe slug from a display name; never empty. */
@@ -227,10 +227,15 @@ const FIND_MERCHANT_BY_HOST_SQL = `
   ORDER BY m.created_at ASC, m.id ASC
   LIMIT 1`
 
+/** The same columns, unqualified, for a statement with no alias. */
+const MERCHANT_COLUMNS_BARE = `
+  id, slug, name, description, website, logo_url, category, country,
+  listing_status, is_test_merchant, created_at, updated_at`
+
 const INSERT_MERCHANT_SQL = `
   INSERT INTO merchants (slug, name, description, website, category)
   VALUES ($1, $2, $3, $4, $5)
-  RETURNING ${MERCHANT_COLUMNS.replace(/m\./g, '')}`
+  RETURNING ${MERCHANT_COLUMNS_BARE}`
 
 export interface NewMerchantSeed {
   name: string
@@ -273,8 +278,15 @@ export async function findOrCreateMerchantByHost(
       return inserted.rows[0]
     } catch (err) {
       if ((err as { code?: string }).code !== '23505') throw err
-      // Slug taken: another merchant, or the same host inserted concurrently
-      // — re-find before suffixing so a race yields one merchant, not two.
+      // Slug taken by another merchant: suffix. The re-find only helps when a
+      // concurrent writer has ALSO written its catalog row by now (the host
+      // is discoverable through rows alone); a writer that inserted the
+      // merchant but not yet the row is invisible here, so two truly
+      // simultaneous founders on one host would found two merchants. Both
+      // writers today are leader-locked cron ticks (the Bazaar discovery
+      // cron, the ingestion lifecycle), so the window is between two ticks
+      // that never overlap — a host registry would close it for good
+      // (review S3, left as a recorded residual).
       const again = await db.query<MerchantRow>(FIND_MERCHANT_BY_HOST_SQL, [key])
       if (again.rows[0]) return again.rows[0]
     }

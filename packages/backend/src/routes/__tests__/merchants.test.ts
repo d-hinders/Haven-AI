@@ -176,6 +176,12 @@ describeDb('merchants routes (#3078)', () => {
   it('an agent sees its own chain, whatever the marketplace lists (decision 4, B1)', async () => {
     await seedAgent(84532)
     setConfig({ marketplaceChainIds: [8453], deployChainIds: [] })
+    // The LIST honours the agent's chain like the page does (review S2):
+    // the Sepolia-only merchant is in the agent's grid though prod lists 8453.
+    const list = await app.inject({ method: 'GET', url: '/merchants', headers: { authorization: `Bearer ${AGENT_KEY}` } })
+    expect(list.statusCode).toBe(200)
+    expect(slugsOf(list.json())).toEqual(['both-chains', 'sepolia-only'])
+    expect(list.json().merchants.find((m: { slug: string }) => m.slug === 'both-chains').networks).toEqual(['eip155:84532'])
     const page = await app.inject({
       method: 'GET',
       url: '/merchants/sepolia-only',
@@ -191,6 +197,16 @@ describeDb('merchants routes (#3078)', () => {
     // While a dashboard user on the same deployment sees mainnet only.
     const dash = await app.inject({ method: 'GET', url: '/catalog', headers: dashboardHeaders() })
     expect(new Set(dash.json().entries.map((e: { network: string }) => e.network))).toEqual(new Set(['eip155:8453']))
+    // GET /catalog/{id} follows the same scope (review S6): a dashboard user
+    // on a mainnet-only deployment does not get a Sepolia entry by id; the
+    // Sepolia agent does.
+    const sepoliaId = (
+      await db.query<{ id: string }>(`SELECT id FROM merchant_catalog WHERE resource_url = 'https://sepolia.example/a'`)
+    ).rows[0].id
+    expect((await app.inject({ method: 'GET', url: `/catalog/${sepoliaId}`, headers: dashboardHeaders() })).statusCode).toBe(404)
+    expect(
+      (await app.inject({ method: 'GET', url: `/catalog/${sepoliaId}`, headers: { authorization: `Bearer ${AGENT_KEY}` } })).statusCode,
+    ).toBe(200)
     // The dashboard user's full shape matches the spec, `merchant` included.
     expectMatchesSpec('GET', '/catalog', dash.json())
     expect(dash.json().entries[0].merchant).toMatchObject({ listing_status: 'live', is_test_merchant: false })

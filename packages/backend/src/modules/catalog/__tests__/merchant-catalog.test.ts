@@ -177,12 +177,12 @@ describe('probeCatalogEntry', () => {
         maxTimeoutSeconds: 300,
       }],
     }
-    const entry: CatalogRow = {
+    const entry = {
       ...X402_ENTRY,
       resource_url: 'https://services.sandbox.ampersend.ai/api/joke',
       network: 'eip155:84532',
       asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-    }
+    } as CatalogRow
     const fetchMock = vi.fn(async () => new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(body) } }))
     const result = await probeCatalogEntry(entry, fetchMock as typeof fetch)
     expect(result.ok).toBe(true)

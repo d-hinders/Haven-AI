@@ -33,6 +33,15 @@ export function OfferRow({
               Limited availability
             </span>
           ) : null}
+          {entry.verified_payable && (
+            // Beside the offer, as on the phone card — the trust claim is not
+            // a recency fact, so it does not live under Freshness.
+            <span title={VERIFIED_MEANING}>
+              <StatusBadge tone="success" className="uppercase tracking-wide">
+                Verified
+              </StatusBadge>
+            </span>
+          )}
         </div>
         <p className="mt-0.5 max-w-xs truncate text-xs text-[var(--v2-ink-3)]">{path}</p>
         {degraded ? (
@@ -60,15 +69,6 @@ export function OfferRow({
       <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-2)]">{chainId === undefined ? '—' : chainName(chainId)}</td>
       <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-3)]">
         {freshness(entry.verified_at)}
-        {entry.verified_payable && (
-          // The meaning is visible text under the merchant header; a tooltip
-          // per row was four identical tab stops on one page.
-          <span className="ml-2" title={VERIFIED_MEANING}>
-            <StatusBadge tone="success" className="uppercase tracking-wide">
-              Verified
-            </StatusBadge>
-          </span>
-        )}
       </td>
     </tr>
   )

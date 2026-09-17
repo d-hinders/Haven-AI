@@ -47,7 +47,9 @@ export default function MarketplacePage() {
         title="Marketplace"
         subtitle="Merchants your agents can pay — one instruction per offer."
       />
-      <Suspense fallback={null}>
+      {/* The grid's own measured skeleton, so a capture between shell paint
+          and boundary resolve is not an empty page that clears the content floor. */}
+      <Suspense fallback={<MerchantGrid merchants={[]} loading error={null} onSubmit={() => {}} />}>
         <MarketplaceContent />
       </Suspense>
     </div>

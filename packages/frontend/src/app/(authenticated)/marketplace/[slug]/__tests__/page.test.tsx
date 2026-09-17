@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const { mockUseMerchant, mockUseAgents, mockNotFound } = vi.hoisted(() => ({
@@ -104,6 +104,22 @@ describe('MerchantPage', () => {
     render(<MerchantPage />)
     expect(screen.getByText('Could not load this merchant')).toBeDefined()
     expect(screen.getByText('boom')).toBeDefined()
+  })
+
+  it('designs the merchant-less 200 (no notFound, no error) instead of rendering nothing', () => {
+    const refetch = vi.fn()
+    mockUseMerchant.mockReturnValue({ merchant: null, offers: [], loading: false, error: null, notFound: false, refetch })
+    const { container } = render(<MerchantPage />)
+    expect(container.textContent).toContain('Could not load this merchant')
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(refetch).toHaveBeenCalledTimes(1)
+    expect(mockNotFound).not.toHaveBeenCalled()
+  })
+
+  it('offers the way back to the marketplace from the merchant page', () => {
+    mockUseMerchant.mockReturnValue({ merchant, offers: [offer()], loading: false, error: null, notFound: false, refetch: vi.fn() })
+    render(<MerchantPage />)
+    expect(screen.getByRole('link', { name: '← Marketplace' }).getAttribute('href')).toBe('/marketplace')
   })
 
   it('calls notFound() for an unknown slug', () => {

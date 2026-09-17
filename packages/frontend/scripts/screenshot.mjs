@@ -1774,6 +1774,9 @@ export const FIXTURE_EMPTY_FALLBACK = {
   // #3079: `merchants` is `GET /merchants`' collection key — `useMerchants`
   // does `setMerchants(res.merchants)`; the same trap as `entries` above.
   merchants: [],
+  // `GET /merchants/{slug}` answers `{ merchant, offers }`; a fallback without
+  // them left the merchant page blank (the same trap, one key over again).
+  merchant: null, offers: [],
   // #2868: `useAccountingProviders` / `useAccountingConnections` do
   // `setProviders(res.providers)` / `setConnections(res.connections)`; under
   // `SCREENSHOT_FIXTURE=empty` the Settings page reads these, and a missing

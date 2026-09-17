@@ -96,6 +96,7 @@ const SCENARIOS: Scenario[] = [
     heading: ampersendDemoApi.name,
     async assert(page) {
       const merchantPage = page.getByTestId('merchant-page')
+      await expect(merchantPage.getByRole('link', { name: '← Marketplace' })).toBeVisible()
       await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(1)
       await expect(merchantPage.getByRole('heading', { name: 'Offers' })).toHaveCount(1)
       // `exact` — a substring match also hits the merchant description ("Fact,

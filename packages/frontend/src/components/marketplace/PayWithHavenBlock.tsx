@@ -46,7 +46,7 @@ export function PayWithHavenBlock({ offers }: { offers: CatalogEntry[] }) {
                 </span>
               )}
             </div>
-            <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center justify-between gap-2">
               <code className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs text-[var(--v2-ink-2)]">
                 {instruction}
               </code>

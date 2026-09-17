@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { AlertTriangle } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { notFound as nextNotFound, useParams } from 'next/navigation'
@@ -55,12 +56,34 @@ export default function MerchantPage() {
     )
   }
 
-  if (!merchant) return null
+  if (!merchant) {
+    // A 200 without a merchant body is neither a 404 nor a transport error;
+    // it is still a state a user can land on, so it is designed, not blank.
+    return (
+      <div className="max-w-5xl">
+        <EmptyState
+          icon={<Icon icon={AlertTriangle} className="h-5 w-5" />}
+          tone="danger"
+          title="Could not load this merchant"
+          body="The merchant answered without a listing."
+          action={
+            <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+              Try again
+            </Button>
+          }
+        />
+      </div>
+    )
+  }
 
   const comingSoon = merchant.listing_status === 'coming_soon'
 
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
+      {/* The way back on a phone, where Marketplace lives in the More drawer. */}
+      <Link href="/marketplace" className="inline-block text-xs font-medium text-[var(--v2-brand)] hover:underline">
+        ← Marketplace
+      </Link>
       {/* The merchant header IS the page header — one h1 (a second `PageHeader`
           made the name two headings, which the visual spec's anchor refused). */}
       <MerchantHeader merchant={merchant} />

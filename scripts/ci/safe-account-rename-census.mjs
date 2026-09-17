@@ -168,9 +168,20 @@ const ALLOWED = [
 const ALLOWED_CEILING = new Map([
   ['packages/backend/src/infra/repositories/smart-accounts.ts', 1],
   ['packages/backend/src/infra/repositories/transaction-history.ts', 3],
-  ['packages/backend/src/middleware/retired-safe-names.ts', 5],
+  // 5 -> 10 (#2914 review, B1): the module gained the two RESPONSE twins
+  // kept for one more release, and a twin cannot be described without
+  // writing the name it keeps (`safes`, `safeName`). These are the only
+  // two retired names still EMITTED anywhere; the removal condition is at
+  // the call site. Everything else in this file names a retired input in
+  // order to refuse it.
+  ['packages/backend/src/middleware/retired-safe-names.ts', 10],
   ['packages/backend/src/modules/transactions/csv-export.ts', 1],
-  ['packages/backend/src/openapi/spec.ts', 9],
+  // 9 -> 14 (#2914 review, B1+S1): two `safe_id` request properties
+  // declared so ajv agrees with the handlers that deliberately ACCEPT a
+  // dual-send (undeclared under `additionalProperties: false` they would be
+  // refused before the handler ran), plus the two response twins. Declaring
+  // a name in order to refuse it is the opposite of putting it back.
+  ['packages/backend/src/openapi/spec.ts', 14],
   ['packages/backend/src/routes/agent-connection-setups.ts', 8],
   ['packages/backend/src/routes/agents.ts', 7],
   ['packages/backend/src/routes/transactions.ts', 9],
@@ -187,14 +198,18 @@ const ALLOWED_CEILING = new Map([
   ['packages/frontend/src/lib/agent-handoff.ts', 1],
   ['packages/frontend/src/lib/signer.ts', 9],
   ['packages/mcp/README.md', 2],
-  ['packages/mcp/src/credentials.ts', 7],
+  // 7 -> 8 and 6 -> 7 (#2914 review, S2): the retired env names moved from
+  // prose into a refusal list. Ignoring them silently left `expectedSafe`
+  // undefined, which SKIPS the sweep-destination cross-check in
+  // `signer/src/core.ts` — a money-path check lost with no signal.
+  ['packages/mcp/src/credentials.ts', 8],
   ['packages/qa-agent/src/seed.ts', 1],
   ['packages/sdk/src/account-naming.ts', 2],
   ['packages/sdk/src/types.ts', 1],
   ['packages/signer/README.md', 2],
   ['packages/signer/src/audit.ts', 3],
   ['packages/signer/src/core.ts', 1],
-  ['packages/signer/src/credentials.ts', 6],
+  ['packages/signer/src/credentials.ts', 7],
 ])
 
 /** The first ALLOWED reason matching `file`, or null when nothing allows it. */

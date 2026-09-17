@@ -101,21 +101,25 @@ export default async function userAccountsRetiredRoutes(app: FastifyInstance) {
   //    alone leaves a reader destructuring `undefined`. That is not
   //    hypothetical — it is exactly how `@haven_ai/cli` broke six commands in
   //    this very slice, against a green test suite;
-  //  - three of these replacements are THEMSELVES 410 (the Safe-rail inflow
-  //    closure, #1984/#1988). Sending a caller there would hand them a second
-  //    410 with a different explanation and no way forward, so those say the
-  //    operation is closed and name the live alternative instead.
+  //  - two of these addresses have no `/user/accounts` successor at all: the
+  //    Safe-rail inflow closure (#1984/#1988) retired both `POST /user/safes`
+  //    and `POST /user/safes/deploy`, and their `/user/accounts` spellings
+  //    are 410 too. Naming those in `replacement` would hand a routing client
+  //    a SECOND 410 — the circle this module claims to avoid — so the field
+  //    carries the live alternative, `POST /accounts/hybrid`, and the note
+  //    explains why the operation itself is gone. The field stays routable;
+  //    that is the whole point of promising it.
   app.get('/', retiredSafePathHandler(
     'GET /user/accounts',
     'The response envelope key is `accounts`, not `safes` — a client that only swaps the path will read an undefined array.',
   ))
   app.post('/', retiredSafePathHandler(
-    'POST /user/accounts',
-    'That path is itself retired (#1984): importing an account is closed with the Safe rail, and no path replaces it. Create a Haven account on the delegation rail with POST /accounts/hybrid.',
+    'POST /accounts/hybrid',
+    'Importing an account is closed with the Safe rail (#1984), and `POST /user/accounts` is 410 too — so `replacement` names the live alternative rather than a second tombstone. Create a Haven account on the delegation rail.',
   ))
   app.post('/deploy', retiredSafePathHandler(
-    'POST /user/accounts/deploy',
-    'That path is itself retired (#1984): Haven no longer deploys Safes, and no path replaces it. Create a Haven account on the delegation rail with POST /accounts/hybrid.',
+    'POST /accounts/hybrid',
+    'Haven no longer deploys Safes (#1984), and `POST /user/accounts/deploy` is 410 too — so `replacement` names the live alternative rather than a second tombstone. Create a Haven account on the delegation rail.',
   ))
   app.put('/:id', retiredSafePathHandler('PUT /user/accounts/:accountId'))
   app.put('/:id/default', retiredSafePathHandler('PUT /user/accounts/:accountId/default'))

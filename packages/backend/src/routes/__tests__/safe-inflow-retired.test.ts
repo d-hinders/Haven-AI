@@ -233,7 +233,7 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
    * PATH, the rail refusal does not.
    */
   describe('the old /user/safes* names answer the NAMING tombstone, not the rail message', () => {
-    it('POST /user/safes/deploy names POST /user/accounts/deploy', async () => {
+    it('POST /user/safes/deploy routes to the live POST /accounts/hybrid', async () => {
       const res = await app.inject({
         method: 'POST',
         url: '/user/safes/deploy',
@@ -243,15 +243,17 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
 
       expect(res.statusCode).toBe(410)
       const body = res.json() as { error: string; replacement: string }
-      expect(body.replacement).toBe('POST /user/accounts/deploy')
       // #2914 review: naming a replacement that is ITSELF 410 would send a
-      // caller in a circle, so the body says so and names the live path.
-      expect(body.error).toMatch(/itself retired \(#1984\)/)
-      expect(body.error).toContain('POST /accounts/hybrid')
+      // caller in a circle, and this module advertises `replacement` as a
+      // field a client can ROUTE on. So the field carries the live path and
+      // the prose explains why the operation is gone.
+      expect(body.replacement).toBe('POST /accounts/hybrid')
+      expect(body.error).toMatch(/#1984/)
+      expect(body.error).toMatch(/rather than a second tombstone/)
       expect(res.json()).not.toEqual(safeRailRetired('deploy').body)
     })
 
-    it('POST /user/safes names POST /user/accounts', async () => {
+    it('POST /user/safes routes to the live POST /accounts/hybrid', async () => {
       const res = await app.inject({
         method: 'POST',
         url: '/user/safes',
@@ -261,9 +263,9 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
 
       expect(res.statusCode).toBe(410)
       const body = res.json() as { error: string; replacement: string }
-      expect(body.replacement).toBe('POST /user/accounts')
-      expect(body.error).toMatch(/itself retired \(#1984\)/)
-      expect(body.error).toContain('POST /accounts/hybrid')
+      expect(body.replacement).toBe('POST /accounts/hybrid')
+      expect(body.error).toMatch(/#1984/)
+      expect(body.error).toMatch(/rather than a second tombstone/)
       expect(res.json()).not.toEqual(safeRailRetired('import').body)
     })
 
@@ -295,7 +297,8 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
    * just a deletion: an EXISTING account must stay fully usable. These pin
    * that the closure did not spill onto the read/edit paths of the very same
    * routers — at the ONE surviving name, `/user/accounts` (#2914 deleted the
-   * `safes` envelope key and its twin address names; see
+   * twin address names, and keeps the `safes` envelope key for one more
+   * release for the published CLI; see
    * `openapi/session-account-schema.test.ts` and `spec.test.ts`).
    */
   describe('an existing account is untouched', () => {
@@ -308,7 +311,10 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
 
       expect(res.statusCode).toBe(200)
       expect(res.json().accounts).toHaveLength(1)
-      expect(res.json().safes).toBeUndefined()
+      // `safes` is the ONE retired name still emitted here, and only as the
+      // same array: the published CLI destructures it at five call sites and
+      // cannot dual-read. Removal is the release after this one.
+      expect(res.json().safes).toEqual(res.json().accounts)
       expect(mockPoolQuery).toHaveBeenCalled()
     })
 

@@ -2937,6 +2937,12 @@ export type components = {
              * @description The linked account the agent spends from. The retired `safe_id` spelling is REFUSED with a 400 naming this field (#2914) rather than ignored.
              */
             account_id?: string;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description RETIRED (#2914) and REFUSED, not accepted — declared here only so the request-validation layer agrees with the handler, which applies the same reliance rule as `POST /agents`: `safe_id` alone refuses, both-and-matching is accepted, both-and-disagreeing refuses. Undeclared under `additionalProperties: false` it would be rejected by ajv before the handler ever ran.
+             */
+            safe_id?: string;
             runtime?: string;
             allowances?: components["schemas"]["AgentConnectionAllowanceInput"][];
             /** @description Opt in to an L0 Agent Passport for the agent this setup creates. Default false. */
@@ -3140,6 +3146,12 @@ export type components = {
              * @description The linked account the agent spends from. The retired `safe_id` spelling is REFUSED with a 400 naming this field (#2914) rather than ignored — an ignored account id would create an unlinked agent that looks successfully created.
              */
             account_id?: string;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description RETIRED (#2914) and REFUSED, not accepted — declared here only so the request-validation layer agrees with the handler. #2908 told every published client to send both names for the window, so the handler applies a RELIANCE rule: `safe_id` alone is refused with a 400 naming `account_id`, both-and-matching is accepted (the new name is read), both-and-disagreeing is refused. Were this field left undeclared under `additionalProperties: false`, a correctly dual-sending client would raise a `would_refuse` shadow counter today and be rejected outright the moment request validation is set to `enforce` — silently reversing the handler decision above.
+             */
+            safe_id?: string;
             /** @description RETIRED (#1440/#2020): per-token allowances died with the Safe rail. A non-empty array is refused with 400 — grant the agent a budget delegation after creation instead. The field survives (empty-only) so older clients sending `allowances: []` keep working. */
             allowances?: {
                 [key: string]: unknown;
@@ -3910,6 +3922,11 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             accountAddress: string;
             accountName: string;
+            /**
+             * @deprecated
+             * @description The same value as `accountName`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.
+             */
+            safeName?: string;
             /** Format: uuid */
             agentId?: string;
         };
@@ -7740,6 +7757,23 @@ export interface operations {
                 content: {
                     "application/json": {
                         accounts: {
+                            /** Format: uuid */
+                            id: string;
+                            /** @example 0x1111111111111111111111111111111111111111 */
+                            account_address: string;
+                            chain_id: number;
+                            /** @description Display label; defaults to 'My account' when none is given. */
+                            name: string;
+                            /** @description The first account a user links becomes the default. */
+                            is_default: boolean;
+                            /** Format: date-time */
+                            created_at: string;
+                        }[];
+                        /**
+                         * @deprecated
+                         * @description The same array as `accounts`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.
+                         */
+                        safes: {
                             /** Format: uuid */
                             id: string;
                             /** @example 0x1111111111111111111111111111111111111111 */

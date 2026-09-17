@@ -1196,7 +1196,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
   // `failedAccountIds`, carry the account_* names ONLY — a request-level
   // check, not just the mapper's own unit test (the mapper itself is
   // deleted).
-  it('#2914: transactions[] and failedAccountIds carry the account_* names only, not the retired safe*', async () => {
+  it('#2914: transactions[] and failedAccountIds drop the retired safe* names, except the safeName twin', async () => {
     const token = signToken({ sub: 'twin-user', email: 'twin@example.com' })
     stubMixedTransactionFetch()
     mockPoolForAggregation([
@@ -1214,9 +1214,13 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     for (const tx of body.transactions) {
       expect(tx.safeId).toBeUndefined()
       expect(tx.safeAddress).toBeUndefined()
-      expect(tx.safeName).toBeUndefined()
       expect(tx.accountId).toBeDefined()
       expect(tx.accountAddress).toBeDefined()
+      // `safeName` is the ONE row field still twinned, and only because the
+      // published CLI renders its ACCOUNT column from it and would print
+      // every row blank. Same value as `accountName`, never a second source
+      // of truth. Removal is the release after this one.
+      expect(tx.safeName).toBe(tx.accountName)
     }
     expect(body.failedSafeIds).toBeUndefined()
     expect(body.failedAccountIds).toBeDefined()

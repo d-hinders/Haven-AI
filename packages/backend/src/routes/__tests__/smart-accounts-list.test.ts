@@ -58,7 +58,7 @@ describe('GET /user/accounts — list invariants', () => {
   // #2914: one name, one envelope. `rows` below is the exact row shape
   // `LIST_ACCOUNTS_FOR_USER_SQL` returns; the response carries it unchanged
   // under `{ accounts }` — no `safes` key, no `safe_address` twin.
-  it('returns the caller-scoped accounts under an { accounts } envelope, with no retired twin', async () => {
+  it('returns the caller-scoped accounts under { accounts }, with the `safes` twin but no retired row fields', async () => {
     const rows = [
       // A real row: smart_accounts.id is a UUID and account_address is a full
       // 20-byte address, so 's1'/'0xabc' described a response the table
@@ -81,9 +81,13 @@ describe('GET /user/accounts — list invariants', () => {
     })
 
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ accounts: rows })
-    expect(res.json().safes).toBeUndefined()
+    // `safes` is the SAME array, kept for one more release because
+    // `@haven_ai/cli` on `latest` destructures it at five call sites and,
+    // unlike a request parameter, a published client cannot dual-read. The
+    // per-row address twin has no such reader and IS gone.
+    expect(res.json()).toEqual({ accounts: rows, safes: rows })
     expect(res.json().accounts[0].safe_address).toBeUndefined()
+    expect(res.json().safes[0].safe_address).toBeUndefined()
     // Scoped by the JWT subject — never a client-supplied id.
     const [, params] = mockPoolQuery.mock.calls[0]
     expect(params).toEqual([USER])

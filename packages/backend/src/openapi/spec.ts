@@ -2799,9 +2799,16 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['accounts'],
+                  required: ['accounts', 'safes'],
                   properties: {
                     accounts: { type: 'array', items: account },
+                    safes: {
+                      type: 'array',
+                      items: account,
+                      deprecated: true,
+                      description:
+                        'The same array as `accounts`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.',
+                    },
                   },
                 },
               },
@@ -7094,6 +7101,12 @@ export const openapiSpec = {
             description:
               'The linked account the agent spends from. The retired `safe_id` spelling is REFUSED with a 400 naming this field (#2914) rather than ignored.',
           },
+          safe_id: {
+            ...uuid,
+            deprecated: true,
+            description:
+              'RETIRED (#2914) and REFUSED, not accepted — declared here only so the request-validation layer agrees with the handler, which applies the same reliance rule as `POST /agents`: `safe_id` alone refuses, both-and-matching is accepted, both-and-disagreeing refuses. Undeclared under `additionalProperties: false` it would be rejected by ajv before the handler ever ran.',
+          },
           runtime: { type: 'string' },
           allowances: {
             type: 'array',
@@ -7418,8 +7431,9 @@ export const openapiSpec = {
       },
       Agent: {
         type: 'object',
-        // #2907: every safe_* field gains its account_* twin (declared below,
-        // dual-emitted by one mapper, equality-tested old === new). The
+        // #2914: the `safe_*` twins #2907 added and the dual-emit mapper that
+        // fed them (`openapi/wire-aliases.ts`) are both deleted. `account_*`
+        // is the only spelling on this schema.
         required: [
           'id', 'name', 'delegate_address',
           'account_id', 'account_address', 'account_name', 'account_chain_id',
@@ -7486,6 +7500,12 @@ export const openapiSpec = {
             ...uuid,
             description:
               'The linked account the agent spends from. The retired `safe_id` spelling is REFUSED with a 400 naming this field (#2914) rather than ignored — an ignored account id would create an unlinked agent that looks successfully created.',
+          },
+          safe_id: {
+            ...uuid,
+            deprecated: true,
+            description:
+              'RETIRED (#2914) and REFUSED, not accepted — declared here only so the request-validation layer agrees with the handler. #2908 told every published client to send both names for the window, so the handler applies a RELIANCE rule: `safe_id` alone is refused with a 400 naming `account_id`, both-and-matching is accepted (the new name is read), both-and-disagreeing is refused. Were this field left undeclared under `additionalProperties: false`, a correctly dual-sending client would raise a `would_refuse` shadow counter today and be rejected outright the moment request validation is set to `enforce` — silently reversing the handler decision above.',
           },
           allowances: {
             type: 'array',
@@ -8301,6 +8321,12 @@ export const openapiSpec = {
           accountId: uuid,
           accountAddress: address,
           accountName: { type: 'string' },
+          safeName: {
+            type: 'string',
+            deprecated: true,
+            description:
+              'The same value as `accountName`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.',
+          },
           agentId: uuid,
         },
       },

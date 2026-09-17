@@ -174,7 +174,7 @@ Three escalating options; ship the first, design toward the third:
   bin in as `haven connect`).
 - Reuse from `connect`: arg parsing (`args.ts`), secure logging/redaction
   (`redact.ts`), owner-only credential storage (`storage.ts`).
-- No backend changes for Tiers A/B/D — the endpoints exist (auth, user/safes,
+- No backend changes for Tiers A/B/D — the endpoints exist (auth, user/accounts,
   agents, agent-activity, transactions, balances, catalog, analytics, payments).
 - Output: a small `--json` flag + a human formatter; no heavy TUI in v1.
 

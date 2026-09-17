@@ -10,6 +10,9 @@ covers:
   - packages/mcp-server/src/tools/**
   - .github/workflows/publish.yml
   - packages/cli/src/connect-runner.ts
+  - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/modules/x402/delegation-authorize.ts
+  - packages/backend/src/modules/x402/replay.ts
   - packages/cli/src/commands.ts
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
@@ -21,7 +24,7 @@ covers:
   - packages/backend/src/domain/agent-payment-taxonomy.ts
   - packages/backend/src/modules/transactions/csv-export.ts
   - packages/sdk/src/types.ts
-last-verified: "2026-09-16"
+last-verified: "2026-09-17"
 ---
 
 # MCP Runtime Compatibility
@@ -146,9 +149,10 @@ last-verified: "2026-09-16"
 > the consent hash input is the resolved address, not the key it came from —
 > an old-file machine's ack stays valid. The Supported Runtime Manifest table
 > below is unchanged. The `GET /machine-payments/agent` field list quoted under
-> `--rekey` is the P0 (#2907) shape; `account_address` on that endpoint is a
-> server twin P0 does not emit yet, and the connector reads it first when it
-> appears.
+> `--rekey` was the P0 (#2907) shape when this note was written; #2914 rewrote
+> that list in place to the contracted shape, so read this sentence as history
+> — `account_address` is no longer "a server twin P0 does not emit yet", it is
+> the only spelling.
 >
 > **Re-verification (#2914, naming epic #2906 phase 5 — the CONTRACTION):**
 > the window the #2908 note above describes is CLOSED. Read that note as

@@ -532,7 +532,14 @@ describe('TransactionBase settlementScheme (#1705)', () => {
     ).toEqual([])
   })
 
-  it('refuses the retired safeId/safeAddress/safeName twins (#2914)', () => {
+  it('refuses the retired safeId/safeAddress twins, but NOT safeName (#2914)', () => {
+    // `safeName` is the one retired row field that survives this release, and
+    // it is not an oversight: `@haven_ai/cli` on `latest` renders its ACCOUNT
+    // column from `t.safeName` and would print every row blank. A published
+    // client cannot dual-READ the way it can dual-send, so the twin stays for
+    // one more release — see `middleware/retired-safe-names.ts` for the
+    // removal condition. `safeId` and `safeAddress` have no such reader and
+    // are refused.
     const problems = matchSpec(
       { $ref: '#/components/schemas/Transaction' },
       {
@@ -543,7 +550,6 @@ describe('TransactionBase settlementScheme (#1705)', () => {
         accountName: 'Main',
         safeId: '11111111-1111-4111-8111-111111111111',
         safeAddress: '0x3333333333333333333333333333333333333333',
-        safeName: 'Main',
       },
     )
     expect(problems).not.toEqual([])
@@ -551,9 +557,23 @@ describe('TransactionBase settlementScheme (#1705)', () => {
       expect.arrayContaining([
         expect.stringContaining("'safeId'"),
         expect.stringContaining("'safeAddress'"),
-        expect.stringContaining("'safeName'"),
       ]),
     )
+  })
+
+  it('accepts the surviving safeName twin alongside accountName (#2914)', () => {
+    const problems = matchSpec(
+      { $ref: '#/components/schemas/Transaction' },
+      {
+        ...transactionRow({ settlementScheme: 'erc7710' }),
+        chainId: 8453,
+        accountId: '11111111-1111-4111-8111-111111111111',
+        accountAddress: '0x3333333333333333333333333333333333333333',
+        accountName: 'Main',
+        safeName: 'Main',
+      },
+    )
+    expect(problems).toEqual([])
   })
 })
 

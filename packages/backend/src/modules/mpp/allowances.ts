@@ -81,7 +81,7 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
 
     return {
       statusCode: 200,
-      body: ({
+      body: {
         agent_id: agent.id,
         account_address: agent.account_address,
         delegate_address: agent.delegate_address,
@@ -138,7 +138,7 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
             },
           }
         }),
-      }),
+      },
     }
   }
 

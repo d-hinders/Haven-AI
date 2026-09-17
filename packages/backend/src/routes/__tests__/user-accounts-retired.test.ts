@@ -148,15 +148,19 @@ describe('/user/safes is retired and answers 410 (#2914)', () => {
   it.each([
     { method: 'POST' as const, url: '/user/safes' },
     { method: 'POST' as const, url: '/user/safes/deploy' },
-  ])('$method $url says the replacement is ITSELF closed, rather than sending a caller in a circle', async ({ method, url }) => {
-    // These three replacements are also 410 (the Safe-rail inflow closure,
-    // #1984). Naming one as "the replacement" with no further word hands a
-    // caller a second 410 with a different explanation and no way forward.
+  ])('$method $url routes to the LIVE alternative, not to a second tombstone', async ({ method, url }) => {
+    // These two addresses have no `/user/accounts` successor: the Safe-rail
+    // inflow closure (#1984) retired those too. This module advertises
+    // `replacement` as a field a client can ROUTE on without parsing prose,
+    // so naming a path that is itself 410 would break that promise and hand
+    // the caller a second refusal. The field carries the live alternative;
+    // the prose explains why the operation itself is gone.
     const res = await app.inject({ method, url, headers: auth() })
     expect(res.statusCode).toBe(410)
-    const body = res.json() as { error: string }
-    expect(body.error).toMatch(/itself retired \(#1984\)/)
-    expect(body.error).toContain('POST /accounts/hybrid')
+    const body = res.json() as { error: string; replacement: string }
+    expect(body.replacement).toBe('POST /accounts/hybrid')
+    expect(body.error).toMatch(/#1984/)
+    expect(body.error).toMatch(/rather than a second tombstone/)
   })
 
   it('an anonymous caller gets 401, never the 410 — auth runs before the tombstone', async () => {
@@ -205,7 +209,10 @@ describe('/user/safes is retired and answers 410 (#2914)', () => {
     for (const url of ['/user/safes', '/user/safes/deploy']) {
       const res = await app.inject({ method: 'POST', url, headers: auth() })
       expect(res.statusCode, url).toBe(410)
-      expect((res.json() as { replacement: string }).replacement, url).toContain('/user/accounts')
+      // `replacement` names the live delegation-rail path, not the
+      // `/user/accounts` twin — that twin is 410 as well, and this field is
+      // meant to be routable.
+      expect((res.json() as { replacement: string }).replacement, url).toBe('POST /accounts/hybrid')
     }
   })
 })

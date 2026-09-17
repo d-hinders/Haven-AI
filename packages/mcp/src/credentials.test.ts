@@ -406,19 +406,22 @@ describe('account address naming — file fallback permanent, env fallback retir
     expect(readAccountAddressField({})).toBeUndefined()
   })
 
-  it('RETIRED env: HAVEN_SAFE_ADDRESS alone no longer resolves an account address', async () => {
+  // A REFUSAL, not an undefined result — see the signer's copy of these two
+  // for what an undefined account address costs on the sweep path.
+  it('RETIRED env: HAVEN_SAFE_ADDRESS alone REFUSES at load, naming the replacement', async () => {
     process.env.HAVEN_API_KEY = 'sk_agent_env'
     process.env.HAVEN_DELEGATE_KEY = '0xdelegate-env'
     process.env.HAVEN_SAFE_ADDRESS = '0xOldEnv'
-    const creds = await loadCredentials(undefined)
-    expect(creds.accountAddress).toBeUndefined()
+    await expect(loadCredentials(undefined)).rejects.toThrow(
+      /HAVEN_SAFE_ADDRESS is retired[\s\S]*HAVEN_ACCOUNT_ADDRESS/,
+    )
   })
 
-  it('RETIRED env: HAVEN_WALLET_ADDRESS alone no longer resolves an account address', async () => {
+  it('RETIRED env: HAVEN_WALLET_ADDRESS alone REFUSES at load', async () => {
     process.env.HAVEN_API_KEY = 'sk_agent_env'
     process.env.HAVEN_DELEGATE_KEY = '0xdelegate-env'
     process.env.HAVEN_WALLET_ADDRESS = '0xWalletEnv'
-    expect((await loadCredentials(undefined)).accountAddress).toBeUndefined()
+    await expect(loadCredentials(undefined)).rejects.toThrow(/HAVEN_WALLET_ADDRESS is retired/)
   })
 
   it('NEW-shape env: HAVEN_ACCOUNT_ADDRESS only (the survivor)', async () => {
@@ -428,10 +431,43 @@ describe('account address naming — file fallback permanent, env fallback retir
     expect((await loadCredentials(undefined)).accountAddress).toBe('0xNewEnv')
   })
 
-  it('the env chain is exactly HAVEN_ACCOUNT_ADDRESS, and only that — the retired names are ignored even when present', () => {
-    expect(readAccountAddressEnv({ HAVEN_ACCOUNT_ADDRESS: 'a', HAVEN_WALLET_ADDRESS: 'w', HAVEN_SAFE_ADDRESS: 's' })).toBe('a')
-    expect(readAccountAddressEnv({ HAVEN_WALLET_ADDRESS: 'w', HAVEN_SAFE_ADDRESS: 's' })).toBeUndefined()
-    expect(readAccountAddressEnv({ HAVEN_SAFE_ADDRESS: 's' })).toBeUndefined()
+  it('HAVEN_ACCOUNT_ADDRESS is the only name read', () => {
+    expect(readAccountAddressEnv({ HAVEN_ACCOUNT_ADDRESS: 'a' })).toBe('a')
     expect(readAccountAddressEnv({})).toBeUndefined()
+  })
+
+  // The retired env names are REFUSED, not ignored — the same rule the
+  // backend applies to retired request names, and here the stakes are
+  // higher. `accountAddress` is what the sweep tool passes as
+  // `expectedSafe`, and an undefined `expectedSafe` SKIPS the check that a
+  // sweep's `to` matches the account in the local credential. Ignoring these
+  // would cost an operator a money-path cross-check with no signal at all.
+  it('refuses a retired env name set ALONE, naming the replacement', () => {
+    for (const name of ['HAVEN_WALLET_ADDRESS', 'HAVEN_SAFE_ADDRESS']) {
+      expect(() => readAccountAddressEnv({ [name]: '0xabc' })).toThrow(
+        /retired \(#2906\)[\s\S]*HAVEN_ACCOUNT_ADDRESS/,
+      )
+    }
+    expect(() => readAccountAddressEnv({ HAVEN_WALLET_ADDRESS: 'w', HAVEN_SAFE_ADDRESS: 's' })).toThrow(
+      /retired \(#2906\)/,
+    )
+  })
+
+  it('accepts a retired name set ALONGSIDE the new one when they agree — reliance, not presence', () => {
+    // A handoff or shell profile that still exports the old name next to the
+    // new one is not a stale caller; refusing it would punish the operator
+    // who migrated without cleaning up.
+    expect(
+      readAccountAddressEnv({ HAVEN_ACCOUNT_ADDRESS: '0xABC', HAVEN_SAFE_ADDRESS: '0xabc' }),
+    ).toBe('0xABC')
+    expect(
+      readAccountAddressEnv({ HAVEN_ACCOUNT_ADDRESS: '0xabc', HAVEN_WALLET_ADDRESS: '0xabc' }),
+    ).toBe('0xabc')
+  })
+
+  it('refuses a retired name that DISAGREES with HAVEN_ACCOUNT_ADDRESS', () => {
+    expect(() =>
+      readAccountAddressEnv({ HAVEN_ACCOUNT_ADDRESS: '0xabc', HAVEN_SAFE_ADDRESS: '0xdef' }),
+    ).toThrow(/different addresses/)
   })
 })

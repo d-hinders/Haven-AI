@@ -28,11 +28,23 @@ alone.
 
 ### Compatibility note
 
-- The server accepts `safeId` / `safe_id` **beside** the new name when both
-  agree, so the dual-sending 0.2.x CLI keeps working against a contracted
-  backend; sending only the retired name is refused with a typed 400. That
-  removes the release-ordering constraint this change would otherwise have
-  imposed.
+- **Requests.** The server accepts `safeId` / `safe_id` **beside** the new name
+  when both agree, so the dual-sending 0.2.x CLI keeps working against a
+  contracted backend; sending only the retired name is refused with a typed
+  400.
+- **Responses.** A published client cannot dual-READ, so two names it depends
+  on are not contracted in this release: the `safes` envelope key on
+  `GET /user/accounts` (0.2.1-alpha.0 destructures it at five call sites and
+  would throw) and `safeName` on the `GET /transactions` feed (it renders the
+  ACCOUNT column from that name and would print every row blank). Both are
+  emitted alongside `accounts` / `accountName` for one more release and are
+  removed in the release after this one, by which time `latest` reads the new
+  names.
+- Together those mean **there is no release-ordering constraint** — neither
+  side has to ship first. An earlier draft of this entry claimed that on the
+  strength of the request half alone; review caught that the response half
+  imposed exactly such a constraint, and the fix was to remove the constraint
+  rather than to document it.
 
 ## 0.2.1-alpha.0 — 2026-09-16
 

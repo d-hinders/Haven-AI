@@ -911,6 +911,12 @@ hard backstop.
 > actually reachable through both names, which is the whole point of an
 > additive rename. Proven with a parity test that fails 4 assertions when the
 > twin entries are removed.
+>
+> **Superseded at #2914:** the contraction removed the `/user/safes` pair from
+> `OWNER_CLI_ALLOWED_ROUTES` rather than keeping both, so the allow-list now
+> carries the `/user/accounts` names alone and matches §9 exactly. A reader
+> should not act on the "adding the two twin entries" instruction above — it
+> records what #2907 did, not what the list holds today.
 
 > **Re-verified #2850:** this diff touched two files in this document's
 > covered-paths list — `routes/agent-rekey.ts` and `routes/agents.ts` — each by

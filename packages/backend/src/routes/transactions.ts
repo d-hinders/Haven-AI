@@ -1,6 +1,10 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { retiredNameVerdict, retiredSafeQuery } from '../middleware/retired-safe-names.js'
+import {
+  retiredNameVerdict,
+  retiredSafeQuery,
+  withRetiredAccountNameTwin,
+} from '../middleware/retired-safe-names.js'
 import { agentExistsForUser } from '../infra/repositories/agents.js'
 import {
   findMachinePaymentEvidenceDetail,
@@ -188,7 +192,10 @@ export default async function transactionRoutes(
     // ledger query per response, and none for an unentitled account.
     const enrichedPage = await enrichTransactionsWithAccounting(sub, paginated, request.log)
     return {
-      transactions: enrichedPage,
+      // `safeName` twins `accountName` for one more release: `@haven_ai/cli`
+      // on `latest` renders its ACCOUNT column from the old name and would
+      // print every row blank. See `middleware/retired-safe-names.ts`.
+      transactions: enrichedPage.map(withRetiredAccountNameTwin),
       total: filtered.length,
       offset,
       limit,

@@ -1,6 +1,6 @@
 /**
  * Data access for the `users` aggregate — the account row itself: display
- * name, the connected wallet address, the legacy `safe_address` mirror, and
+ * name, the connected wallet address, the legacy account-address mirror, and
  * the currency preference.
  *
  * Extracted verbatim from `routes/user.ts` (#1167) so

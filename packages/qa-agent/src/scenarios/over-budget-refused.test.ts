@@ -78,7 +78,7 @@ const PRECHECK_403 = {
     // anywhere in the enum. Nothing asserts on them — which is exactly why a
     // fixture that calls itself verbatim has to be.
     phase: 'insufficient_funds',
-    next_action: 'fund_safe_or_raise_allowance',
+    next_action: 'fund_account_or_raise_allowance',
     rail: 'x402',
     chain_id: 84532,
     token: 'USDC',

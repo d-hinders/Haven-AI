@@ -29,7 +29,7 @@ import AgentPanel from '../AgentPanel'
 const SAFE = {
   id: 'safe-1',
   name: 'Main account',
-  safe_address: '0x1111111111111111111111111111111111111111',
+  account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 100,
   account_type: 'delegator_hybrid',
 }
@@ -40,10 +40,10 @@ function agent(overrides: Record<string, unknown> = {}) {
     name: 'Research agent',
     description: null,
     delegate_address: '0x2222222222222222222222222222222222222222',
-    safe_id: SAFE.id,
-    safe_address: SAFE.safe_address,
-    safe_name: SAFE.name,
-    safe_chain_id: SAFE.chain_id,
+    account_id: SAFE.id,
+    account_address: SAFE.account_address,
+    account_name: SAFE.name,
+    account_chain_id: SAFE.chain_id,
     account_type: SAFE.account_type,
     status: 'active',
     created_at: '2026-05-01T00:00:00Z',

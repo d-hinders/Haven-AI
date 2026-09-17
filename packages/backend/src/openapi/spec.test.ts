@@ -84,17 +84,23 @@ describe('openapiSpec', () => {
     expect(openapiSpec.components.schemas.AgentPaymentPhase.enum).toEqual(
       Object.values(AgentPaymentPhase),
     )
-    // #2907 (naming P0): the served enum carries one additive value beyond
-    // the backend mirror — `fund_account_or_raise_allowance`, the twin of
-    // `fund_safe_or_raise_allowance` accepted on input but never yet
-    // emitted (#2914 flips the emitted value). The mirror itself is
-    // untouched because it is parity-pinned to the SDK
-    // (`agent-payment-taxonomy.parity.test.ts`), which is P1's (#2908)
-    // surface, not P0's.
-    expect(openapiSpec.components.schemas.AgentPaymentNextAction.enum).toEqual([
-      ...Object.values(AgentPaymentNextAction),
-      'fund_account_or_raise_allowance',
-    ])
+    // #2907 (naming P0) served the enum with one additive value beyond the
+    // backend mirror — `fund_account_or_raise_allowance` alongside the
+    // still-emitted `fund_safe_or_raise_allowance` — because the input twin
+    // existed before anything emitted it. #2914 (naming epic #2906 phase 5,
+    // the contraction) flips the emitted value and renames the backend
+    // export itself (`FundSafeOrRaiseAllowance` -> `FundAccountOrRaiseAllowance`,
+    // value `fund_account_or_raise_allowance`), so the served enum is back to
+    // a plain mirror with no additive member — `fund_safe_or_raise_allowance`
+    // is out of the served enum entirely. The mirror itself is parity-pinned
+    // to the SDK (`agent-payment-taxonomy.parity.test.ts`), which is P1's
+    // (#2908) surface, not P0's.
+    expect(openapiSpec.components.schemas.AgentPaymentNextAction.enum).toEqual(
+      Object.values(AgentPaymentNextAction),
+    )
+    expect(openapiSpec.components.schemas.AgentPaymentNextAction.enum).not.toContain(
+      'fund_safe_or_raise_allowance',
+    )
     expect(openapiSpec.components.schemas.AgentPaymentRail.enum).toEqual(
       Object.values(AgentPaymentRail),
     )
@@ -505,24 +511,56 @@ describe('TransactionBase settlementScheme (#1705)', () => {
     expect(asProperties(aggregated).settlementScheme).toEqual(asProperties(base).settlementScheme)
 
     // Being flat (not `allOf`), the aggregated schema validates the full
-    // Safe-scoped row directly through `matchSpec` — no composition trap to
-    // route around.
+    // account-scoped row directly through `matchSpec` — no composition trap
+    // to route around. #2914 (naming epic #2906 phase 5, the contraction)
+    // deleted the `safeId`/`safeAddress` dual-emit twins the row used to
+    // carry alongside `accountId`/`accountAddress`/`accountName`, and the
+    // follow-up release deleted the `safeName` twin that outlived them —
+    // registered closed by `response-shape.ts`, so the row now carries the
+    // account names ONLY, and the old names are rejected as additional
+    // properties, asserted separately below.
     expect(
       matchSpec(
         { $ref: '#/components/schemas/Transaction' },
         {
           ...transactionRow({ settlementScheme: 'erc7710' }),
           chainId: 8453,
-          safeId: '11111111-1111-4111-8111-111111111111',
-          safeAddress: '0x3333333333333333333333333333333333333333',
-          safeName: 'Main',
-          // #2907: dual-emitted account twins, same values.
           accountId: '11111111-1111-4111-8111-111111111111',
           accountAddress: '0x3333333333333333333333333333333333333333',
           accountName: 'Main',
         },
       ),
     ).toEqual([])
+  })
+
+  it('refuses every retired row twin, safeName included (#2914 follow-up)', () => {
+    // `safeName` was the one retired row field that outlived #2914, because
+    // `@haven_ai/cli` on `latest` rendered its ACCOUNT column from
+    // `t.safeName` and would have printed every row blank — a published
+    // client cannot dual-READ the way it can dual-send. `latest` is
+    // 0.3.0-alpha.0 now and reads `accountName`, so the twin is gone and
+    // `safeName` is refused alongside `safeId` and `safeAddress`.
+    const problems = matchSpec(
+      { $ref: '#/components/schemas/Transaction' },
+      {
+        ...transactionRow({ settlementScheme: 'erc7710' }),
+        chainId: 8453,
+        accountId: '11111111-1111-4111-8111-111111111111',
+        accountAddress: '0x3333333333333333333333333333333333333333',
+        accountName: 'Main',
+        safeId: '11111111-1111-4111-8111-111111111111',
+        safeAddress: '0x3333333333333333333333333333333333333333',
+        safeName: 'Main',
+      },
+    )
+    expect(problems).not.toEqual([])
+    expect(problems.map((p) => p.problem)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("'safeId'"),
+        expect.stringContaining("'safeAddress'"),
+        expect.stringContaining("'safeName'"),
+      ]),
+    )
   })
 })
 
@@ -787,18 +825,33 @@ describe('retired-rail residue in the published contract (#2105)', () => {
       },
       instructions: 'Sign sign_data.typed_data with your delegate (agent) key using EIP-712.',
     }
+    // #2914 (naming epic #2906 phase 5, the contraction): `components.safe`
+    // is gone — `payer_account` is the only name for the x402 funding shape's
+    // payer field now, not a same-value twin of `safe` anymore.
     const x402FundingSignData = {
       ...directPaymentSignData,
-      components: { safe: '0x' + '77'.repeat(20), ...directPaymentSignData.components },
+      components: { payer_account: '0x' + '77'.repeat(20), ...directPaymentSignData.components },
     }
 
     const signDataSchema = openapiSpec.components.schemas.SignablePaymentIntent.properties.sign_data
 
     it.each([
       ['the direct-payment 201 shape', directPaymentSignData],
-      ['the x402 funding shape (adds components.safe)', x402FundingSignData],
+      ['the x402 funding shape (adds components.payer_account)', x402FundingSignData],
     ])('accepts %s', (_label, payload) => {
       expect(matchSpec(signDataSchema, payload)).toEqual([])
+    })
+
+    it('rejects the retired components.safe key — payer_account is the only name', () => {
+      const withRetiredSafe = {
+        ...directPaymentSignData,
+        components: { safe: '0x' + '77'.repeat(20), ...directPaymentSignData.components },
+      }
+      const problems = matchSpec(signDataSchema, withRetiredSafe)
+      expect(problems).not.toEqual([])
+      expect(problems.map((p) => p.problem)).toEqual(
+        expect.arrayContaining([expect.stringContaining("'safe'")]),
+      )
     })
 
     it('still REJECTS the retired AllowanceModule shape', () => {

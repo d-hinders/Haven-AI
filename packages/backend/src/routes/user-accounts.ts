@@ -1,0 +1,268 @@
+import { FastifyInstance } from 'fastify'
+import { authMiddleware } from '../middleware/auth.js'
+import { retiredSafeInflowHandler } from '../middleware/safe-inflow-retired.js'
+import {
+  deleteAccountForUser,
+  findOwnedAccountAddress,
+  findOwnedAccountDefaultFlag,
+  findOwnedAccountForFunding,
+  listAccountsForUser,
+  renameAccountForUser,
+  setDefaultAccountForUser,
+} from '../infra/repositories/smart-accounts.js'
+import { getChainClient } from '../infra/chain/index.js'
+import { formatTokenValue } from '../domain/tokens.js'
+import { getChain } from '../domain/chains.js'
+import {
+  formatTokenAmount,
+  getFaucetUrl,
+  minimumUsefulTokens,
+  parseTokenAmount,
+  UUID_RE,
+} from '@haven_ai/core'
+
+/**
+ * #2914 (naming epic #2906 phase 5, the contraction): the dual-emit mapper
+ * (`withAccountAddressAlias`) and the `toSafeAddressed` shim that fed it are
+ * both gone. The repository row already carries `account_address`, so these
+ * handlers now return it unchanged — there is no projection left to do.
+ */
+
+// ── Types ─────────────────────────────────────────────────────────
+
+interface RenameAccountBody {
+  name: string
+}
+
+// ── Routes ────────────────────────────────────────────────────────
+
+export default async function userAccountsRoutes(app: FastifyInstance): Promise<void> {
+  app.addHook('onRequest', authMiddleware)
+
+  // GET /user/accounts — list all linked accounts for the authenticated user.
+  // One address name (`account_address`) and now ONE envelope key. The `safes`
+  // twin outlived #2914 by exactly one release, because `@haven_ai/cli` on
+  // `latest` destructured it at five call sites and cannot dual-read the way
+  // it can dual-send; `latest` is 0.3.0-alpha.0 now and reads `accounts`.
+  app.get('/', async (request) => {
+    const { sub } = request.user as { sub: string }
+
+    return { accounts: await listAccountsForUser(sub) }
+  })
+
+  // POST /user/accounts/deploy — TOMBSTONE (#1984 closed it, #1988 deleted the
+  // body). It relay-sponsored a wallet-owned Safe deployment through
+  // `relaySafeDeploy`, which is deleted with this slice. Note what it never
+  // had: any check that the caller owned `owner_address`. The relayer paid gas
+  // to deploy a Safe for whatever address a caller named, bounded only by a
+  // global rate limit — a surface that is now gone rather than guarded.
+  app.post('/deploy', retiredSafeInflowHandler('deploy'))
+
+  // POST /user/accounts — TOMBSTONE (#1984 closed it, #1988 deleted the body).
+  // Importing is the other half of creating; both are how a Safe entered Haven.
+  app.post('/', retiredSafeInflowHandler('import'))
+
+  // PUT /user/accounts/:accountId — rename an account
+  app.put<{ Params: { accountId: string }; Body: RenameAccountBody }>(
+    '/:accountId',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { accountId } = request.params
+      const { name } = request.body
+
+      if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        return reply.code(400).send({ error: 'Name is required' })
+      }
+
+      const renamed = await renameAccountForUser(name.trim(), accountId, sub)
+
+      if (!renamed) {
+        return reply.code(404).send({ error: 'Account not found' })
+      }
+
+      return renamed
+    },
+  )
+
+  // PUT /user/accounts/:accountId/default — set an account as the default
+  app.put<{ Params: { accountId: string } }>(
+    '/:accountId/default',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { accountId } = request.params
+
+      // Verify the account belongs to the user
+      const owned = await findOwnedAccountAddress(accountId, sub)
+      if (!owned) {
+        return reply.code(404).send({ error: 'Account not found' })
+      }
+
+      await setDefaultAccountForUser(accountId, owned.account_address, sub)
+
+      return { success: true }
+    },
+  )
+
+  // DELETE /user/accounts/:accountId — remove (unlink) an account
+  app.delete<{ Params: { accountId: string } }>(
+    '/:accountId',
+    async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { accountId } = request.params
+
+      // Check the account exists and belongs to user
+      const owned = await findOwnedAccountDefaultFlag(accountId, sub)
+      if (!owned) {
+        return reply.code(404).send({ error: 'Account not found' })
+      }
+
+      const deleted = await deleteAccountForUser(accountId, sub, owned.is_default)
+      if (!deleted) {
+        return reply.code(409).send({
+          error: 'Cannot unlink this Haven wallet while an agent has a pending or active budget delegation or recovery is in progress',
+        })
+      }
+
+      return { success: true }
+    },
+  )
+
+  // ── Funding facts (#2534) ─────────────────────────────────────────
+//
+// `GET /user/accounts/:accountId/funding` — the machine-readable funding hand-off.
+//
+// Funding is a HUMAN step (a transfer from the user's own wallet or exchange);
+// today the only instruction is the address the dashboard renders, which an
+// agent driving the CLI cannot see. This endpoint is READ-ONLY FACTS for the
+// human to act on: chain identity, the per-token `minimum_useful_human`
+// constants from `@haven_ai/core`, and the live balances. It constructs no
+// transfer, calls no faucet, and grants no authority — the `owner_cli`
+// opt-in covers it for exactly that reason, via the central allow-list.
+
+interface FundingToken {
+  symbol: string
+  address: string
+  decimals: number
+  balance_human: string
+  minimum_useful_human: string | null
+}
+
+interface FundingResponse {
+  account_address: string
+  chain: { id: number; name: string; explorer_url: string }
+  tokens: FundingToken[]
+  native: { symbol: string; balance_human: string; needed: boolean }
+  faucet_url?: string
+  funded: boolean
+}
+
+app.get<{ Params: { accountId: string } }>(
+  '/:accountId/funding',
+  async (request, reply): Promise<FundingResponse> => {
+    const { sub } = request.user as { sub: string }
+    const { accountId } = request.params
+
+    // Format first: a malformed id cannot name a row, so answering 400 rather
+    // than 404 keeps the two cases apart for a caller debugging a typo.
+    if (!UUID_RE.test(accountId)) {
+      return reply.code(400).send({ error: 'Invalid account id' }) as never
+    }
+
+    // ONE tenant-scoped read: ownership, the account address and its chain, with
+    // the delegation-rail scope the account lists apply (#2413) — funding
+    // instructions are for the account an agent spends from.
+    const owned = await findOwnedAccountForFunding(accountId, sub)
+    if (!owned) {
+      return reply.code(404).send({ error: 'Account not found' }) as never
+    }
+    const chainId = owned.chain_id
+    const chain = getChain(chainId)
+
+    // The same ethers-backed balance read `GET /balances/:accountAddress` runs —
+    // no new chain machinery, and a failed read reads as zero exactly as it
+    // does there (a balance RPC hiccup must not 500 a hand-off whose whole
+    // job is to be pasteable).
+    const client = getChainClient('ethers')
+    const tokens = Object.values(chain.tokens)
+    const nativeToken = tokens.find((t) => t.address === null)!
+    const erc20Tokens = tokens.filter((t) => t.address !== null)
+
+    const results = await Promise.allSettled([
+      client.getNativeBalance(chainId, owned.account_address),
+      ...erc20Tokens.map((token) =>
+        client.getTokenBalance(chainId, token.address!, owned.account_address),
+      ),
+    ])
+
+    const nativeRaw =
+      results[0].status === 'fulfilled' ? results[0].value.toString() : '0'
+
+    // One pass over the ERC-20s: project each balance to its human shape and
+    // keep the raw atomic value alongside, because `funded` compares at the
+    // atomic level (the same bigint the balance RPC returned) rather than
+    // re-parsing a rounded human string.
+    let funded = false
+    const fundingTokens: FundingToken[] = erc20Tokens.map((token, i) => {
+      const result = results[i + 1]
+      const raw = result.status === 'fulfilled' ? result.value.toString() : '0'
+      const minimum = minimumUsefulTokens(token.symbol)
+      const rawBigint = BigInt(raw)
+      if (minimum !== undefined && rawBigint >= parseTokenAmount(minimum, token.decimals)) {
+        funded = true
+      }
+      return {
+        symbol: token.symbol,
+        address: token.address!,
+        decimals: token.decimals,
+        balance_human: formatTokenValue(raw, token.decimals),
+        minimum_useful_human: minimum ?? null,
+      }
+    })
+
+    const response: FundingResponse = {
+      account_address: owned.account_address,
+      chain: { id: chainId, name: chain.name, explorer_url: chain.explorerUrl },
+      tokens: fundingTokens,
+      native: {
+        symbol: nativeToken.symbol,
+        balance_human: formatTokenAmount(BigInt(nativeRaw), nativeToken.decimals),
+        // Sponsored UserOps: the human never needs ETH/xDAI to fund.
+        needed: false,
+      },
+      funded,
+    }
+    const faucet = getFaucetUrl(chainId)
+    if (faucet !== undefined) {
+      response.faucet_url = faucet
+    }
+    return response
+  },
+)
+
+// ── Approvers (Safe owners) — DELETED (#1988, epic #1440 slice 5) ────
+  //
+  // Five routes lived under the old prefix: a known-approvers list, a
+  // per-account approver list and add, an owner-change transaction builder,
+  // and a per-address removal. They constructed and
+  // guarded Safe owner-change self-calls (Haven never signed one) and stored
+  // the label/type decoration in `safe_approver_metadata` — the table the
+  // epic's approved phase 5 drops in #1990. `modules/accounts/safe-owner-tx.ts`
+  // went with them.
+  //
+  // WHAT THIS COSTS, stated rather than buried: this was Haven's only surface
+  // for adding a backup owner to a legacy Safe (#1229's preventive recovery).
+  // It is not the last way an owner reaches their account: an owner-signed
+  // Safe transaction — including moving funds out — was relayable while the
+  // owner-signed execution route stayed open (#2847 later deleted that last
+  // live Safe-rail route), and a passkey already enrolled as an on-chain
+  // owner still authorises there against the live owner list. Every one of the
+  // 15 Safes in the epic's census is owned by an external EOA (or, in one
+  // case, the prod relayer, wound down in #1985), and an EOA owner manages
+  // owners directly at app.safe.global with their own key — which Haven's
+  // non-custody rule requires to be true regardless of what Haven offers.
+  //
+  // The frontend callers (`ManageApprovers`, `RecoveryNudge`,
+  // `useSafeApprovers`, `lib/approver-tx.ts`) are removed in #1989; until then
+  // they see a 404 from these paths, the same owner-sequenced consequence
+  // #1986 accepted for the approval queue.
+}

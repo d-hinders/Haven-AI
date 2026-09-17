@@ -631,7 +631,7 @@ export default function WalletButton() {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
   const { activeAccount, passkeys } = useAuth()
-  const activeAccountAddress = activeAccount?.safe_address as Address | undefined
+  const activeAccountAddress = activeAccount?.account_address as Address | undefined
   const activeSigner = useActiveSigner({
     accountAddress: activeAccountAddress,
     chainId: activeAccount?.chain_id,
@@ -651,7 +651,7 @@ export default function WalletButton() {
   // "Connect wallet" for a passkey that had just signed a budget.
   const delegatorSigner = activeSigner?.type === 'delegator_passkey' ? activeSigner : null
   const passkeyUnavailableOnDevice = useMemo(() => {
-    const accountAddress = activeAccount?.safe_address.toLowerCase()
+    const accountAddress = activeAccount?.account_address.toLowerCase()
     if (!accountAddress || activeAccount?.chain_id === undefined || passkeySigner) {
       return false
     }
@@ -659,9 +659,9 @@ export default function WalletButton() {
     return passkeys.some(
       (passkey) =>
         passkey.chain_id === activeAccount.chain_id &&
-        passkey.safe_address?.toLowerCase() === accountAddress,
+        passkey.account_address?.toLowerCase() === accountAddress,
     )
-  }, [activeAccount?.chain_id, activeAccount?.safe_address, passkeySigner, passkeys])
+  }, [activeAccount?.chain_id, activeAccount?.account_address, passkeySigner, passkeys])
 
   // "Switch wallet" flow: disconnect, then open the connect modal once
   // wagmi has committed isConnected=false. Driven from the parent so the

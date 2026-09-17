@@ -7,6 +7,7 @@ import agentConnectionSetupRoutes, {
   CONNECTOR_PACKAGE,
   normalizeMcpServerName,
 } from '../agent-connection-setups.js'
+import { retiredSafeField } from '../../middleware/retired-safe-names.js'
 import {
   AGENT_APPROVAL_RELAY_JSON_SENTENCE,
   AGENT_APPROVAL_RELAY_PROSE_SENTENCE,
@@ -89,8 +90,8 @@ const SETUP = {
   tx_hash: null,
   failure_reason: null,
   account_address: SAFE.account_address,
-  safe_name: SAFE.name,
-  safe_chain_id: SAFE.chain_id,
+  account_name: SAFE.name,
+  account_chain_id: SAFE.chain_id,
 }
 
 const ALLOWANCE = {
@@ -294,7 +295,7 @@ describe('agent connection setup routes', () => {
       payload: {
         name: 'Research Agent',
         description: 'Pays for research APIs',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         runtime: 'claude-code',
         allowances: [ALLOWANCE],
       },
@@ -411,7 +412,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         allowances: [ALLOWANCE],
         issue_passport: true,
       },
@@ -436,7 +437,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         allowances: [ALLOWANCE],
         source: '  402-Page ',
       },
@@ -455,7 +456,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         allowances: [ALLOWANCE],
         source: '<script>alert(1)</script>',
       },
@@ -478,7 +479,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         runtime: 'claude-code',
         local_mcp: true,
         allowances: [ALLOWANCE],
@@ -498,7 +499,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         runtime: 'claude-code',
         allowances: [ALLOWANCE],
       },
@@ -522,7 +523,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         local_mcp: true,
         allowances: [ALLOWANCE],
       },
@@ -545,7 +546,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         runtime: 'cursor',
         local_mcp: true,
         allowances: [ALLOWANCE],
@@ -565,7 +566,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         allowances: [{
           ...ALLOWANCE,
           token_symbol: '  USDC.e  ',
@@ -605,7 +606,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         allowances: [allowance],
       },
     })
@@ -626,7 +627,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         allowances: [
           ALLOWANCE,
           {
@@ -670,7 +671,7 @@ describe('agent connection setup routes', () => {
         url: '/agent-connection-setups',
         payload: {
           name: 'Research Agent',
-          safe_id: SAFE.id,
+          account_id: SAFE.id,
           runtime,
           allowances: [ALLOWANCE],
         },
@@ -702,7 +703,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         runtime: 'claude-desktop',
         allowances: [ALLOWANCE],
       },
@@ -727,7 +728,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         runtime: 'openclaw',
         allowances: [ALLOWANCE],
       },
@@ -756,7 +757,7 @@ describe('agent connection setup routes', () => {
         url: '/agent-connection-setups',
         payload: {
           name: 'Research Agent',
-          safe_id: SAFE.id,
+          account_id: SAFE.id,
           runtime,
           local_mcp: true,
           allowances: [ALLOWANCE],
@@ -779,7 +780,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         runtime: 'openclaw',
         local_mcp: true,
         allowances: [ALLOWANCE],
@@ -812,7 +813,7 @@ describe('agent connection setup routes', () => {
       url: '/agent-connection-setups',
       payload: {
         name: 'Research Agent',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         runtime: 'hermes',
         allowances: [ALLOWANCE],
       },
@@ -854,7 +855,7 @@ describe('agent connection setup routes', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/agent-connection-setups',
-        payload: { name: 'Research Agent', safe_id: SAFE.id, runtime, allowances: [ALLOWANCE] },
+        payload: { name: 'Research Agent', account_id: SAFE.id, runtime, allowances: [ALLOWANCE] },
       })
       expect(response.statusCode).toBe(201)
       const body = response.json()
@@ -895,7 +896,7 @@ describe('agent connection setup routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/agent-connection-setups',
-      payload: { name: 'Research Agent', safe_id: SAFE.id, allowances: [ALLOWANCE] },
+      payload: { name: 'Research Agent', account_id: SAFE.id, allowances: [ALLOWANCE] },
     })
     expect(response.statusCode).toBe(201)
     const promptLines = String(response.json().setup_prompt).split('\n')
@@ -952,7 +953,7 @@ describe('agent connection setup routes', () => {
       method: 'POST',
       url: '/agent-connection-setups',
       headers: { host: 'api.haven.example', 'x-forwarded-proto': 'https' },
-      payload: { name: 'Research Agent', safe_id: SAFE.id, allowances: [ALLOWANCE] },
+      payload: { name: 'Research Agent', account_id: SAFE.id, allowances: [ALLOWANCE] },
     })
     expect(response.statusCode).toBe(201)
     const body = response.json()
@@ -1137,7 +1138,7 @@ describe('agent connection setup routes', () => {
       payload: {
         name: 'Research Agent',
         description: 'Pays for research APIs',
-        safe_id: SAFE.id,
+        account_id: SAFE.id,
         runtime: 'claude-code',
         allowances: [ALLOWANCE],
       },
@@ -1557,7 +1558,7 @@ describe('agent connection setup routes', () => {
   it('requests a passport at register time when the setup opted in on an eligible chain', async () => {
     const app = await buildApp()
     const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
-    const passportSetup = { ...SETUP, issue_passport: true, safe_chain_id: 84532 }
+    const passportSetup = { ...SETUP, issue_passport: true, account_chain_id: 84532 }
     const proof = await wallet.signMessage(passportSetup.challenge_message)
 
     mockClientQuery.mockImplementation(async (sql: string) => {
@@ -1637,7 +1638,7 @@ describe('agent connection setup routes', () => {
   it('registers the agent even when passport issuance throws', async () => {
     const app = await buildApp()
     const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
-    const passportSetup = { ...SETUP, issue_passport: true, safe_chain_id: 84532 }
+    const passportSetup = { ...SETUP, issue_passport: true, account_chain_id: 84532 }
     const proof = await wallet.signMessage(passportSetup.challenge_message)
     mockRequestPassport.mockRejectedValue(new Error('passport table missing'))
 
@@ -2284,7 +2285,7 @@ describe('cancel cannot orphan a live delegation-rail agent (#1073)', () => {
 
   it('refuses to cancel once the budget signature has activated the agent', async () => {
     // The regression this guards: on this rail the grant activates the agent
-    // in its OWN transaction, and no safe_tx_hash/tx_hash is ever written, so
+    // in its OWN transaction, and no account_tx_hash/tx_hash is ever written, so
     // the setup still looks cancellable. Cancelling would have reported "this
     // setup can no longer connect an agent" while leaving a live, spending
     // agent behind — the revoke is scoped to 'pending_approval' and misses it.
@@ -2428,7 +2429,7 @@ describe('data access characterization (#985)', () => {
     await app.close()
   })
 
-  it('scopes an explicit safe_id to the calling user', async () => {
+  it('scopes an explicit account_id (the #2914 replacement for safe_id) to the calling user', async () => {
     const app = await buildApp()
     primeDb(safeLookup())
 
@@ -2436,12 +2437,56 @@ describe('data access characterization (#985)', () => {
       method: 'POST',
       url: '/agent-connection-setups',
       headers: { authorization: 'Bearer user-jwt' },
-      payload: { name: 'Agent', safe_id: SAFE.id, runtime: 'claude-code', allowances: [ALLOWANCE] },
+      payload: { name: 'Agent', account_id: SAFE.id, runtime: 'claude-code', allowances: [ALLOWANCE] },
     })
 
     const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
     expect(String(sql)).toContain('WHERE id = $1 AND user_id = $2')
     expect(params).toEqual([SAFE.id, 'user-1'])
+    await app.close()
+  })
+
+  // #2914 (naming epic #2906 phase 5, the contraction): `safe_id` is retired
+  // as an INPUT, not merely undocumented — refused with a 400 naming
+  // `account_id`, and no setup row is written. Before this slice an ignored
+  // `safe_id` would have fallen through to the default-wallet lookup and
+  // created a setup against the WRONG account, which looks like success.
+  it('accepts safe_id when it MATCHES account_id — the published connector dual-sends (#2908)', async () => {
+    // `@haven_ai/cli` on `latest` sends `{ account_id: id, safe_id: id }`
+    // because #2908's migration instruction said to, so a refusal keyed on
+    // PRESENCE would have 400'd `agents connect` for the clients that
+    // followed it. An UNMIGRATED caller sending `safe_id` alone is still
+    // refused — that is the test directly below.
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', safe_id: SAFE.id, account_id: SAFE.id, runtime: 'claude-code', allowances: [ALLOWANCE] },
+    })
+
+    expect(res.statusCode).not.toBe(400)
+    await app.close()
+  })
+
+  it('refuses safe_id with a 400 naming account_id, and writes no setup row', async () => {
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', safe_id: SAFE.id, runtime: 'claude-code', allowances: [ALLOWANCE] },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual(retiredSafeField('safe_id', 'account_id'))
+    expect(res.json().replacement).toBe('account_id')
+    expect(mockQuery).not.toHaveBeenCalled()
+    expect(mockConnect).not.toHaveBeenCalled()
     await app.close()
   })
 

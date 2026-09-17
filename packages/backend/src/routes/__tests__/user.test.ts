@@ -70,10 +70,10 @@ describe('User routes', () => {
       expect(body.id).toBe(USER_UUID)
       expect(body.name).toBe('Ada Lovelace')
       expectMatchesSpec('PUT', '/user/profile', response.json())
-      // #2907: request-level twin === old, not just the mapper's own unit
-      // test — mutation-proven by dropping the withSessionAccountAddressAlias
-      // call at this route.
-      expect(body.safe_address).toBe(body.account_address)
+      // #2914 (naming epic #2906 phase 5, the contraction): the twin `#2907`
+      // dual-emitted is gone — one name only.
+      expect(body.safe_address).toBeUndefined()
+      expect(body.account_address).toBeDefined()
     })
 
     it('returns 400 for invalid name', async () => {
@@ -128,8 +128,10 @@ describe('User routes', () => {
       const body = response.json()
       expect(body.id).toBe('user-1')
       expect(body.wallet_address).toBe(walletAddress)
-      // #2907: request-level twin === old.
-      expect(body.safe_address).toBe(body.account_address)
+      // #2914 (naming epic #2906 phase 5, the contraction): the twin `#2907`
+      // dual-emitted is gone — one name only.
+      expect(body.safe_address).toBeUndefined()
+      expect(body.account_address).toBeDefined()
     })
 
     it('returns 400 for invalid address', async () => {
@@ -167,7 +169,7 @@ describe('User routes', () => {
   // that can no longer run; the full refusal proof, including that nothing
   // is written on the way to it, lives in `safe-inflow-retired.test.ts`.
   describe('PUT /user/safe', () => {
-    it('is retired — 410, and no Safe is linked', async () => {
+    it('is a naming 410 pointing to PUT /user/account, and no account is linked', async () => {
       const token = signToken({ sub: 'user-1', email: 'test@example.com' })
 
       const response = await app.inject({
@@ -177,8 +179,15 @@ describe('User routes', () => {
         payload: { safe_address: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd' },
       })
 
+      // #2914 (naming epic #2906 phase 5, the contraction): `PUT /user/safe`
+      // now answers the NAMING tombstone first (`retiredSafePath`), naming
+      // `PUT /user/account` as the replacement — a different, EARLIER
+      // refusal than the rail message the route used to answer directly.
+      // The rail refusal itself is still reachable, one hop later, at
+      // `PUT /user/account` (`retiredSafeInflowHandler('import')`).
       expect(response.statusCode).toBe(410)
-      expect(response.json().error).toMatch(/Safe rail is retired/)
+      expect(response.json().error).not.toMatch(/Safe rail is retired/)
+      expect(response.json().replacement).toBe('PUT /user/account')
       expect(mockQuery, 'the retired route wrote nothing').not.toHaveBeenCalled()
     })
 
@@ -199,7 +208,7 @@ describe('User routes', () => {
   // SQL-dispatched (mockImplementation), not positional (#1227 ratchet) —
   // this file's baseline is shrink-only.
   describe('GET /passkeys', () => {
-    it('dual-emits account_address alongside safe_address on each passkey, request-level equal', async () => {
+    it('carries account_address only — the retired safe_address twin is gone', async () => {
       const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
       mockQuery.mockImplementation((sql: string) =>
         String(sql).includes('FROM user_passkeys')
@@ -225,9 +234,9 @@ describe('User routes', () => {
       expect(response.statusCode).toBe(200)
       const body = response.json()
       expectMatchesSpec('GET', '/passkeys', body)
-      // Mutation-proven: dropping the withSessionAccountAddressAlias call in
-      // routes/passkeys.ts leaves this undefined, failing the equality below.
-      expect(body.passkeys[0].safe_address).toBe(body.passkeys[0].account_address)
+      // #2914 (naming epic #2906 phase 5, the contraction): the twin `#2907`
+      // dual-emitted is gone — one name only.
+      expect(body.passkeys[0].safe_address).toBeUndefined()
       expect(body.passkeys[0].account_address).toBe('0x2222222222222222222222222222222222222222')
     })
 

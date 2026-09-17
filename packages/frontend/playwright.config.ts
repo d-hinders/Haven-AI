@@ -317,7 +317,13 @@ export default defineConfig({
       // `main`, exactly like the light project.
       name: 'chromium-desktop-dark',
       use: { ...devices['Desktop Chrome'], colorScheme: 'dark' },
-      testMatch: ['**/design-system.visual.spec.ts', '**/analytics.visual.spec.ts'],
+      // #3079: marketplace.visual.spec.ts joins with five desktop `-dark`
+      // baselines (grid, merchant page, coming-soon, test-merchant, not-found).
+      testMatch: [
+        '**/design-system.visual.spec.ts',
+        '**/analytics.visual.spec.ts',
+        '**/marketplace.visual.spec.ts',
+      ],
       testIgnore: SUITE_IGNORE,
     },
   ],

@@ -5,6 +5,9 @@ covers:
   - packages/backend/src/modules/accounting/registry.ts
   - packages/backend/src/modules/accounting/connections.ts
   - packages/backend/src/modules/accounting/oauth-flow.ts
+  - packages/backend/src/modules/accounting/api-key-flow.ts
+  - packages/backend/src/modules/accounting/accounted-client.ts
+  - packages/backend/src/modules/accounting/accounted-connector.ts
   - packages/backend/src/modules/accounting/company-info.ts
   - packages/backend/src/modules/accounting/feed-orchestrator.ts
   - packages/backend/src/modules/accounting/fortnox.ts
@@ -15,9 +18,10 @@ covers:
   - packages/backend/src/routes/accounting-connections.ts
   - packages/backend/src/routes/accounting-feed.ts
   - packages/frontend/src/app/(authenticated)/accounting/page.tsx
+  - packages/frontend/src/components/accounting/ApiKeyConnectModal.tsx
   - packages/frontend/src/hooks/useAccounting.ts
   - packages/frontend/src/hooks/useAccountingFeed.ts
-last-verified: "2026-09-12"
+last-verified: "2026-09-16"
 ---
 
 # Accounting connections
@@ -38,7 +42,8 @@ the retry sweep, what on-call reads when something is stuck — is in
 
 - **Settings → Accounting** is where a connection is made, changed and removed
   (owner decision 2026-09-11; the card ships in #2868). One row per provider:
-  Fortnox, and the platforms listed as *Coming soon* below.
+  Fortnox, Accounted (live, over a pasted API key), and the platforms listed as
+  *Coming soon* below.
 - **`/accounting`** is the feed page (#2869): a one-line summary of the
   connection at the top — which platform, which company, when the last
   payment was delivered, or what needs your attention with a *Fix in
@@ -93,15 +98,59 @@ conversion Haven recorded **at the moment the payment settled**, in the
 currency your company books in; the rate and its source travel with the
 document, and Haven never re-prices a payment afterwards.
 
-In practice every connection today books in SEK, because Fortnox is the only
-platform Haven can connect to yet and a Fortnox company books in kronor. The
-other currencies matter when the platforms listed as *Coming soon* arrive.
+In practice every connection today books in SEK. Fortnox companies book in
+kronor. For Accounted the answer is an assumption rather than a reading: the
+company lookup exposes no currency, so Haven books the feed in SEK. Accounted
+is a Swedish accounting platform and a company there carries a Swedish
+organisation number and a Swedish entity type, so SEK is the right default
+(#3017); nothing on the connection row claims the company itself asserted a
+currency.
 
 **One company per connection.** If you reconnect and approve a *different*
 Fortnox company, Haven keeps the connection, switches it to the new company,
 and feeds only payments settled from that moment into it. What was fed to the
 previous company stays there; *Check in Fortnox* on those rows reports them as
 not found in the new company, which is correct.
+
+## Connecting Accounted
+
+Accounted connects without a sign-in redirect: you create an **API key** in
+Accounted's dashboard and paste it into Haven. Haven uses the key to read which
+company the key belongs to, then stores it encrypted (#3017).
+
+1. In Accounted, open **Settings → API keys** (`app.accounted.se/settings/api`)
+   and choose **Create key**.
+
+2. Tick exactly the two scopes the feed needs: `companies:read` (so Haven can
+   tell whose company it is feeding) and `documents:write` (so it can deliver
+   documents). Nothing else is needed today.
+3. Copy the key Accounted shows after creation. A sandbox key begins with
+   `gnubok_sk_test_`, a production key with `gnubok_sk_live_`. The key is
+   shown only once.
+4. Back in Haven, press **Connect** on the Accounted row and paste the key.
+   Haven answers within a moment: the row reads *Connected to \<your company\>*
+   when the key was accepted.
+
+Refusals the paste step can answer with, and what each means:
+
+- **The key was not accepted.** Accounted refused the key, or it can see no
+  company at all. Check that the whole key was pasted.
+- **This key can see more than one company.** The key was created without
+  being scoped to a single company, and the feed has no per-push company
+  choice. Create a key scoped to one company and paste that one.
+- **A currency Haven does not feed.** The company behind the key books in a
+  currency outside SEK, EUR, USD, DKK, NOK and GBP. Not reachable through the
+  Accounted flow today: its company lookup exposes no currency at all.
+
+Two Accounted specifics worth knowing:
+
+- **`documents:write` cannot be checked at connect.** Accounted offers no way
+  to ask a key what it may write, so a key that is missing that scope passes
+  connection and is refused at the first delivery. The row then reads *Needs
+  more access*, and the fix is a new key with both scopes.
+- **Revocation happens in Accounted, not in Haven.** Disconnecting here
+  deletes the stored key and stops the feed. The key itself keeps working
+  until you revoke it under `app.accounted.se/settings/api`.
 
 ## What to include: the backfill choice
 
@@ -166,21 +215,31 @@ the next payment settles or you press **Sync now**).
 
 ## The other platforms
 
-Accounted, Light and Igdrasil are listed on the Settings card as *Coming soon*
-with a disabled Connect. Listing is a product decision about what the module is
-built to hold, not an endorsement of any of them, and none of the three is
-connectable today: each gets its own connector when access exists (#2873,
-#2874, #2875). Switching between platforms is first-class once a second one is
-live — several connections, exactly one place payments go, and the starting
-point rule above means the switch never re-feeds history.
+Accounted is **live**: connect it with an API key (the section above). Light
+and Igdrasil are listed on the Settings card as *Coming soon* with a disabled
+Connect. Listing is a product decision about what the module is built to hold,
+not an endorsement of any of them, and neither is connectable yet: each gets
+its own connector when access exists (#2874, #2875). Switching between
+platforms is first-class now that a second one is live — several connections,
+exactly one place payments go, and the starting point rule above means the
+switch never re-feeds history.
 
 ## What Haven does not do here
 
 - It does not book, code, choose an account or assert VAT — the accountant
   does, in the platform.
-- It does not hold your Fortnox password. The connection is Fortnox's own
-  approval, stored encrypted, revocable from either side.
+- It does not hold your Fortnox password or your Accounted credentials. The
+  Fortnox connection is Fortnox's own approval, stored encrypted, revocable
+  from either side. The Accounted connection is an API key you created in
+  Accounted's dashboard, stored encrypted, revocable in that dashboard.
 - It does not touch money. The feed reads payments that have already settled;
   a Fortnox outage delays the feed, never a payment.
 - It does not email you. The state shows on the row, on `/accounting`, and
   as the sidebar dot (#2869).
+
+> **Re-verified #3093 (frontend hooks: wire keys default instead of crashing):**
+> this diff touched `hooks/useAccounting.ts`, in this document's coverage list, by
+> defaulting the array keys it stores (`?? []`) so an API answer without the key degrades to an empty state instead
+> of sending the route into the ErrorBoundary. No endpoint, flow or
+> behaviour this document describes changes. Scope of this note: those
+> expressions. Nothing else in this document was re-verified.

@@ -9,7 +9,7 @@ const mockUseAggregatedBalances = vi.fn()
 const mockUseDashboardOverview = vi.fn()
 const mockUseBalances = vi.fn()
 const mockUseSafeDetails = vi.fn()
-const mockUseSafeOperationGate = vi.fn()
+const mockUseAccountOperationGate = vi.fn()
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
@@ -44,7 +44,7 @@ vi.mock('@/hooks/useSafeDetails', () => ({
 }))
 
 vi.mock('@/hooks/useAccountOperationGate', () => ({
-  useAccountOperationGate: () => mockUseSafeOperationGate(),
+  useAccountOperationGate: () => mockUseAccountOperationGate(),
 }))
 
 
@@ -103,7 +103,7 @@ import DashboardClient from '../DashboardClient'
 const SAFE = {
   id: 'safe-1',
   name: 'Main account',
-  safe_address: '0x1111111111111111111111111111111111111111',
+  account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 8453,
   is_default: true,
   created_at: '2026-05-12T00:00:00Z',
@@ -178,7 +178,7 @@ function mockBaseState() {
     loading: false,
     error: null,
   })
-  mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
+  mockUseAccountOperationGate.mockReturnValue({ kind: 'ready' })
 }
 
 describe('DashboardClient', () => {
@@ -461,9 +461,9 @@ describe('DashboardClient', () => {
     /** The signer set AuthContext resolves on login, as the dashboard reads it. */
     const storeSigners = (passkeys: number, owner: string | null) => {
       window.localStorage.setItem(
-        `haven_hybrid_signers_${DELEGATOR_SAFE.safe_address.toLowerCase()}_${DELEGATOR_SAFE.chain_id}`,
+        `haven_hybrid_signers_${DELEGATOR_SAFE.account_address.toLowerCase()}_${DELEGATOR_SAFE.chain_id}`,
         JSON.stringify({
-          account_address: DELEGATOR_SAFE.safe_address,
+          account_address: DELEGATOR_SAFE.account_address,
           chain_id: DELEGATOR_SAFE.chain_id,
           owner_address: owner,
           passkeys: Array.from({ length: passkeys }, (_, i) => ({ key_id: `0x0${i}`, x: '0x1', y: '0x2' })),
@@ -549,7 +549,7 @@ describe('DashboardClient', () => {
               credential_id: 'cred-primary',
               signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
               chain_id: SAFE.chain_id,
-              safe_address: SAFE.safe_address,
+              account_address: SAFE.account_address,
               created_at: '2026-05-12T00:00:00Z',
             },
           ],

@@ -81,8 +81,8 @@ describe('GET /agents — the #1069 pin: pending_approval agents are SURFACED', 
     delegate_address: VALID_DELEGATE,
     account_id: 'safe-1',
     account_address: '0x2222222222222222222222222222222222222222',
-    safe_name: 'Main wallet',
-    safe_chain_id: 8453,
+    account_name: 'Main wallet',
+    account_chain_id: 8453,
     account_type: null,
     api_key_prefix: 'sk_agent_abc',
     status: 'pending_approval',
@@ -156,7 +156,7 @@ describe('GET /agents/:id/delegate-balance', () => {
         ? {
             rows: [{
               delegate_address: '0x1111111111111111111111111111111111111111',
-              safe_chain_id: 84532,
+              account_chain_id: 84532,
               account_address: '0x2222222222222222222222222222222222222222',
               account_type: 'delegator_hybrid',
             }],
@@ -176,7 +176,7 @@ describe('GET /agents/:id/delegate-balance', () => {
     mockQuery.mockResolvedValueOnce({
       rows: [{
         delegate_address: VALID_DELEGATE,
-        safe_chain_id: 8453,
+        account_chain_id: 8453,
         account_address: '0x2222222222222222222222222222222222222222',
       }],
     })
@@ -193,15 +193,17 @@ describe('GET /agents/:id/delegate-balance', () => {
     expect(body.eth_atomic).toBe('1000000000000000000')
     expect(body.usdc_atomic).toBe('2000000')
     expect(body.sweep_min_usdc).toBe('0.01')
-    // #2907: DelegateBalance.account_address twins safe_address, request-level.
-    expect(body.safe_address).toBe(body.account_address)
+    // #2914 (naming epic #2906 phase 5, the contraction): the `safe_address`
+    // twin `#2907` dual-emitted on DelegateBalance is gone — one name only.
+    expect(body.safe_address).toBeUndefined()
+    expect(body.account_address).toBeDefined()
     await app.close()
   })
 
   it('422s when the agent has no delegate address', async () => {
     const app = await makeApp()
     mockQuery.mockResolvedValueOnce({
-      rows: [{ delegate_address: null, safe_chain_id: 8453, account_address: null }],
+      rows: [{ delegate_address: null, account_chain_id: 8453, account_address: null }],
     })
 
     const res = await app.inject({ method: 'GET', url: '/agents/agent-1/delegate-balance' })
@@ -218,7 +220,7 @@ describe('POST /agents — create-flow transaction sequence', () => {
   const CREATE_BODY = {
     name: 'Research Agent',
     delegate_address: VALID_DELEGATE,
-    safe_id: 'safe-1',
+    account_id: 'safe-1',
   }
 
   function mockHappyCreate() {
@@ -240,8 +242,8 @@ describe('POST /agents — create-flow transaction sequence', () => {
           }],
         }
       }
-      if (/SELECT account_address, name AS safe_name/.test(s)) {
-        return { rows: [{ account_address: '0x2222222222222222222222222222222222222222', safe_name: 'Main', safe_chain_id: 8453 }] }
+      if (/SELECT account_address, name AS account_name/.test(s)) {
+        return { rows: [{ account_address: '0x2222222222222222222222222222222222222222', account_name: 'Main', account_chain_id: 8453 }] }
       }
       return { rows: [] }
     })
@@ -265,7 +267,7 @@ describe('POST /agents — create-flow transaction sequence', () => {
       dupCheck: sqls.findIndex((s) => /SELECT id FROM agents WHERE user_id = \$1 AND delegate_address/.test(s)),
       begin: sqls.findIndex((s) => s === 'BEGIN'),
       insertAgent: sqls.findIndex((s) => /INSERT INTO agents/.test(s)),
-      safeInfo: sqls.findIndex((s) => /SELECT account_address, name AS safe_name/.test(s)),
+      safeInfo: sqls.findIndex((s) => /SELECT account_address, name AS account_name/.test(s)),
       commit: sqls.findIndex((s) => s === 'COMMIT'),
     }
     expect(Object.values(idx).every((i) => i !== -1)).toBe(true)
@@ -336,7 +338,7 @@ describe('PUT /agents/:id', () => {
         id: 'agent-1', name: 'Renamed', description: 'new desc',
         delegate_address: VALID_DELEGATE, account_id: 'safe-1',
         account_address: '0x2222222222222222222222222222222222222222',
-        safe_name: 'Main', safe_chain_id: 8453, account_type: null,
+        account_name: 'Main', account_chain_id: 8453, account_type: null,
         api_key_prefix: 'sk_agent_abcd', status: 'active',
         created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null,
       }],
@@ -368,7 +370,7 @@ describe('PUT /agents/:id', () => {
             id: 'agent-1', name: 'Renamed', description: null,
             delegate_address: VALID_DELEGATE, account_id: 'safe-1',
             account_address: '0x2222222222222222222222222222222222222222',
-            safe_name: 'Main', safe_chain_id: 8453, account_type: 'delegator_hybrid',
+            account_name: 'Main', account_chain_id: 8453, account_type: 'delegator_hybrid',
             api_key_prefix: 'sk_agent_abcd', status: 'active',
             created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null,
           }],

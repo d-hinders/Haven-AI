@@ -9,12 +9,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
  * This file is the single place that proves the Safe rail refuses new
  * accounts. There are FOUR ways a Safe could enter Haven, and a closure that
  * shuts three of them is not a closure — the fourth is simply the one an
- * attacker or an old client uses. All four are pinned here:
+ * attacker or an old client uses. All four are pinned here, at the names they
+ * are reachable at TODAY:
  *
- *   POST /safe/deploy        passkey-owned Safe deployment
- *   POST /user/safes/deploy  relay-sponsored, wallet-owned Safe deployment
- *   POST /user/safes         importing an existing Safe
- *   PUT  /user/safe          the legacy single-Safe link — also an import
+ *   POST /safe/deploy           passkey-owned Safe deployment
+ *   POST /user/accounts/deploy  relay-sponsored, wallet-owned Safe deployment
+ *   POST /user/accounts         importing an existing account
+ *   PUT  /user/account          the legacy single-account link — also an import
  *
  * Each route gets three assertions, because "returns 410" alone would still
  * pass if the handler had already spent a relayer transaction or written a
@@ -37,6 +38,22 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
  * (`retiredSafeInflowHandler`) — one code path, nothing to reach around. The
  * "nothing was touched" assertions survive the change of mechanism because
  * they assert on the database and the relayer, not on Fastify's lifecycle.
+ *
+ * **#2914 (naming epic #2906 phase 5, the contraction) moved three of the
+ * four addresses.** `POST /safe/deploy` still answers the RAIL refusal
+ * (`safeRailRetired`) directly at its historical URL, because it is a single
+ * dynamic-free path with no Safe-vocabulary segment to retire. The other
+ * three moved house: `/user/safes*` is now itself a NAMING tombstone
+ * (`user-accounts-retired.ts`, covered by
+ * `routes/__tests__/user-accounts-retired.test.ts`) that answers 410 naming
+ * an `/user/accounts*` replacement — so `POST /user/safes/deploy`,
+ * `POST /user/safes` and `PUT /user/safe` no longer reach the RAIL refusal at
+ * all; they are refused one hop earlier, for a different reason. The rail
+ * refusal for those three inflows is reachable only at the NEW names:
+ * `POST /user/accounts/deploy`, `POST /user/accounts`, `PUT /user/account`.
+ * Both hops are asserted below, at the app-wiring registration #2914 shipped
+ * (see `index.ts`): `/user/safes` → the naming tombstone, `/user/accounts` →
+ * the live (rail-closed) routes.
  *
  * The same slice deleted the APPROVER surface, so this file also pins its
  * absence — a deletion nobody asserts is a deletion that comes back — and,
@@ -74,9 +91,11 @@ vi.mock('../../db.js', () => ({
 // statement than a mock that was never called: there is nothing left to call.
 
 import safeDeployRoutes from '../safe-deploy.js'
-import userSafesRoutes from '../user-safes.js'
+import userAccountsRoutes from '../user-accounts.js'
+import userAccountsRetiredRoutes from '../user-accounts-retired.js'
 import userRoutes from '../user.js'
 import { safeRailRetired } from '../../middleware/safe-inflow-retired.js'
+import { retiredSafePath } from '../user-accounts-retired.js'
 
 const USER = 'user-1'
 const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
@@ -90,7 +109,10 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(safeDeployRoutes, { prefix: '/safe' })
-    await app.register(userSafesRoutes, { prefix: '/user/safes' })
+    // Mirrors index.ts's real wiring (#2914): the naming tombstone owns
+    // `/user/safes`, the live (rail-closed) routes own `/user/accounts`.
+    await app.register(userAccountsRetiredRoutes, { prefix: '/user/safes' })
+    await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
     await app.register(userRoutes, { prefix: '/user' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
   })
@@ -129,24 +151,24 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
       payload: { chain_id: 84532 },
     },
     {
-      name: 'POST /user/safes/deploy — relay-sponsored Safe deployment',
+      name: 'POST /user/accounts/deploy — relay-sponsored account deployment',
       kind: 'deploy' as const,
       method: 'POST' as const,
-      url: '/user/safes/deploy',
+      url: '/user/accounts/deploy',
       payload: { chain_id: 84532, owner_address: OWNER_ADDRESS },
     },
     {
-      name: 'POST /user/safes — Safe import',
+      name: 'POST /user/accounts — account import',
       kind: 'import' as const,
       method: 'POST' as const,
-      url: '/user/safes',
+      url: '/user/accounts',
       payload: { safe_address: SAFE_ADDRESS, chain_id: 84532 },
     },
     {
-      name: 'PUT /user/safe — legacy single-Safe link (also an import)',
+      name: 'PUT /user/account — legacy single-account link (also an import)',
       kind: 'import' as const,
       method: 'PUT' as const,
-      url: '/user/safe',
+      url: '/user/account',
       payload: { safe_address: SAFE_ADDRESS, chain_id: 84532 },
     },
   ]
@@ -202,6 +224,65 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
     })
   }
 
+  /**
+   * #2914 moved three of the four historical inflow URLs behind the NAMING
+   * tombstone first. An old client posting to one of these never reaches
+   * `safeRailRetired` at all — it is refused one hop earlier, for a
+   * different, equally loud reason. Both refusals are 410, so the only way
+   * to tell them apart is the body: the naming refusal names a REPLACEMENT
+   * PATH, the rail refusal does not.
+   */
+  describe('the old /user/safes* names answer the NAMING tombstone, not the rail message', () => {
+    it('POST /user/safes/deploy routes to the live POST /accounts/hybrid', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/user/safes/deploy',
+        headers: auth(),
+        payload: { chain_id: 84532, owner_address: OWNER_ADDRESS },
+      })
+
+      expect(res.statusCode).toBe(410)
+      const body = res.json() as { error: string; replacement: string }
+      // #2914 review: naming a replacement that is ITSELF 410 would send a
+      // caller in a circle, and this module advertises `replacement` as a
+      // field a client can ROUTE on. So the field carries the live path and
+      // the prose explains why the operation is gone.
+      expect(body.replacement).toBe('POST /accounts/hybrid')
+      expect(body.error).toMatch(/#1984/)
+      expect(body.error).toMatch(/rather than a second tombstone/)
+      expect(res.json()).not.toEqual(safeRailRetired('deploy').body)
+    })
+
+    it('POST /user/safes routes to the live POST /accounts/hybrid', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/user/safes',
+        headers: auth(),
+        payload: { safe_address: SAFE_ADDRESS, chain_id: 84532 },
+      })
+
+      expect(res.statusCode).toBe(410)
+      const body = res.json() as { error: string; replacement: string }
+      expect(body.replacement).toBe('POST /accounts/hybrid')
+      expect(body.error).toMatch(/#1984/)
+      expect(body.error).toMatch(/rather than a second tombstone/)
+      expect(res.json()).not.toEqual(safeRailRetired('import').body)
+    })
+
+    it('PUT /user/safe names PUT /user/account', async () => {
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/user/safe',
+        headers: auth(),
+        payload: { safe_address: SAFE_ADDRESS, chain_id: 84532 },
+      })
+
+      expect(res.statusCode).toBe(410)
+      expect(res.json().replacement).toBe('PUT /user/account')
+      expect(res.json()).not.toEqual(safeRailRetired('import').body)
+    })
+  })
+
   describe('the refusal body', () => {
     it('distinguishes creating from importing', () => {
       expect(safeRailRetired('deploy').body.error).toMatch(/no longer creates Safe accounts/)
@@ -213,31 +294,37 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
 
   /**
    * The other half of the acceptance criteria, and the reason this is not
-   * just a deletion: an EXISTING Safe account must stay fully usable. These
-   * pin that the closure did not spill onto the read/edit paths of the very
-   * same routers.
+   * just a deletion: an EXISTING account must stay fully usable. These pin
+   * that the closure did not spill onto the read/edit paths of the very same
+   * routers — at the ONE surviving name, `/user/accounts` (#2914 deleted the
+   * twin address names, and keeps the `safes` envelope key for one more
+   * release for the published CLI; see
+   * `openapi/session-account-schema.test.ts` and `spec.test.ts`).
    */
-  describe('an existing Safe account is untouched', () => {
-    it('GET /user/safes still lists the caller’s Safes', async () => {
+  describe('an existing account is untouched', () => {
+    it('GET /user/accounts still lists the caller’s accounts', async () => {
       mockPoolQuery.mockResolvedValue({
         rows: [{ id: 'safe-1', account_address: SAFE_ADDRESS, chain_id: 84532, is_default: true }],
       })
 
-      const res = await app.inject({ method: 'GET', url: '/user/safes', headers: auth() })
+      const res = await app.inject({ method: 'GET', url: '/user/accounts', headers: auth() })
 
       expect(res.statusCode).toBe(200)
-      expect(res.json().safes).toHaveLength(1)
+      expect(res.json().accounts).toHaveLength(1)
+      // The `safes` twin is gone (#2914 follow-up): `latest` now resolves to
+      // a CLI that reads `accounts`.
+      expect(res.json().safes).toBeUndefined()
       expect(mockPoolQuery).toHaveBeenCalled()
     })
 
-    it('PUT /user/safes/:safeId still renames an existing Safe', async () => {
+    it('PUT /user/accounts/:accountId still renames an existing account', async () => {
       mockPoolQuery.mockResolvedValue({
         rows: [{ id: 'safe-1', account_address: SAFE_ADDRESS, chain_id: 84532, name: 'Renamed' }],
       })
 
       const res = await app.inject({
         method: 'PUT',
-        url: '/user/safes/safe-1',
+        url: '/user/accounts/safe-1',
         headers: auth(),
         payload: { name: 'Renamed' },
       })
@@ -246,26 +333,26 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
       expect(res.json().name).toBe('Renamed')
     })
 
-    it('PUT /user/safes/:safeId/default still re-defaults an existing Safe', async () => {
+    it('PUT /user/accounts/:accountId/default still re-defaults an existing account', async () => {
       mockPoolQuery.mockResolvedValue({ rows: [{ id: 'safe-1', account_address: SAFE_ADDRESS }] })
       mockClientQuery.mockResolvedValue({ rows: [] })
 
       const res = await app.inject({
         method: 'PUT',
-        url: '/user/safes/safe-1/default',
+        url: '/user/accounts/safe-1/default',
         headers: auth(),
       })
 
       expect(res.statusCode).toBe(200)
     })
 
-    it('DELETE /user/safes/:safeId still unlinks an existing Safe', async () => {
+    it('DELETE /user/accounts/:accountId still unlinks an existing account', async () => {
       mockPoolQuery.mockResolvedValue({ rows: [{ is_default: false }] })
       mockClientQuery.mockResolvedValue({ rows: [] })
 
       const res = await app.inject({
         method: 'DELETE',
-        url: '/user/safes/safe-1',
+        url: '/user/accounts/safe-1',
         headers: auth(),
       })
 
@@ -285,13 +372,13 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
    */
   describe('the approver surface is deleted (#1988)', () => {
     const APPROVER_PATHS = [
-      { method: 'GET' as const, url: '/user/safes/known-approvers' },
-      { method: 'GET' as const, url: '/user/safes/safe-1/approvers' },
-      { method: 'POST' as const, url: '/user/safes/safe-1/approvers/tx' },
-      { method: 'POST' as const, url: '/user/safes/safe-1/approvers' },
+      { method: 'GET' as const, url: '/user/accounts/known-approvers' },
+      { method: 'GET' as const, url: '/user/accounts/safe-1/approvers' },
+      { method: 'POST' as const, url: '/user/accounts/safe-1/approvers/tx' },
+      { method: 'POST' as const, url: '/user/accounts/safe-1/approvers' },
       {
         method: 'DELETE' as const,
-        url: '/user/safes/safe-1/approvers/0x3333333333333333333333333333333333333333',
+        url: '/user/accounts/safe-1/approvers/0x3333333333333333333333333333333333333333',
       },
     ]
 

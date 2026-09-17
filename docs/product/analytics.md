@@ -69,15 +69,21 @@ spend figure in the agents table above it. The window starts and ends at the
 moment the page loads, not at midnight, so a bar on the window's first or
 last local day covers part of a day: it is striped and named as partial (the
 note under the chart says which end), never dropped or stretched. On a wide
-screen a day's detail opens as a callout anchored over that bar, kept inside
+screen a day's detail opens as a two-line callout — the day, its refusal
+count and its total, then each agent's share as a chip — anchored over that
+bar, kept inside
 the plot at either edge; when the bar (or its refusal cap) is tall enough to
 reach under the callout, the callout drops below the bar's top instead — its
 bottom just above the axis when the bar can hold it, otherwise just above
-the legend, over that day's own date label — so the bar's top, its
+the legend, over the date labels beneath it; between the two, the slot that
+hides the fewest neighbouring bars' tops wins — so the bar's top, its
 height against its neighbours and any refusal cap stay visible while it is
-open. A bar too short for either (the drop would cover the whole bar to
-save a sliver) keeps the resting callout and loses its top instead. On a
-narrow screen the detail is a panel below the plot.
+open. The callout takes no pointer, so hovering the next bar through it
+moves the detail on; a tap pins a day, and a second tap on it, or Escape,
+releases it — on touch too, where no pointer ever leaves. A bar too short
+for either drop (it would cover the whole bar to save a sliver) keeps the
+resting callout and loses its top instead. On a narrow screen the detail
+is a panel below the plot.
 Below three days of data the chart is not drawn (see the sparse rule below)
 — a line through one point agrees with every trend.
 

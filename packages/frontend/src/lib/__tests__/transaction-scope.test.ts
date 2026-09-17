@@ -98,9 +98,7 @@ function tx(direction: 'in' | 'out', isError = false): AggregatedTransaction {
     chainId: 100,
     accountId: 'saf_1',
     accountAddress: '0xsafe',
-    safeId: 'saf_1',
-    safeAddress: '0xsafe',
-    safeName: 'Main account',
+    accountName: 'Main account',
   }
 }
 

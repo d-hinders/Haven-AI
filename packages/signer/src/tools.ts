@@ -619,7 +619,7 @@ export function createToolHandlers(
           authorization: args.authorization,
           expectedAuth: args.expected_auth,
           // Cross-check `to` against the Safe in the local credential when present.
-          expectedSafe: options.audit?.safeAddress,
+          expectedSafe: options.audit?.accountAddress,
         })
         await auditSigning(
           'haven_sign_sweep_delegate',

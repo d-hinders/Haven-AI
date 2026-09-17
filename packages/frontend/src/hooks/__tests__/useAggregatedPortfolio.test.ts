@@ -26,7 +26,7 @@ const SECOND_SAFE_ADDRESS = '0x2222222222222222222222222222222222222222'
 const TOKEN_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 
 function mockSafes(
-  accounts: Array<{ id: string; safe_address: string; chain_id: number }>,
+  accounts: Array<{ id: string; account_address: string; chain_id: number }>,
 ) {
   mockUseAuth.mockReturnValue({
     user: {
@@ -77,8 +77,8 @@ describe('aggregated portfolio hooks', () => {
 
   it('requests aggregate portfolio totals for each Safe chain', async () => {
     mockSafes([
-      { id: 'gnosis', safe_address: SAFE_ADDRESS, chain_id: 100 },
-      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'gnosis', account_address: SAFE_ADDRESS, chain_id: 100 },
+      { id: 'base', account_address: SAFE_ADDRESS, chain_id: 8453 },
     ])
     mockApiGet.mockImplementation(async (path: string) => {
       if (path === `/portfolio/${SAFE_ADDRESS}?chain_id=100`) {
@@ -102,8 +102,8 @@ describe('aggregated portfolio hooks', () => {
 
   it('keeps same-symbol balances separate across chains', async () => {
     mockSafes([
-      { id: 'gnosis', safe_address: SAFE_ADDRESS, chain_id: 100 },
-      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'gnosis', account_address: SAFE_ADDRESS, chain_id: 100 },
+      { id: 'base', account_address: SAFE_ADDRESS, chain_id: 8453 },
     ])
     mockApiGet.mockImplementation(async (path: string) => {
       if (path === `/balances/${SAFE_ADDRESS}?chain_id=100`) {
@@ -129,8 +129,8 @@ describe('aggregated portfolio hooks', () => {
 
   it('merges matching token balances on the same chain', async () => {
     mockSafes([
-      { id: 'base-1', safe_address: SAFE_ADDRESS, chain_id: 8453 },
-      { id: 'base-2', safe_address: SECOND_SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'base-1', account_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'base-2', account_address: SECOND_SAFE_ADDRESS, chain_id: 8453 },
     ])
     mockApiGet.mockImplementation(async (path: string) => {
       if (path === `/balances/${SAFE_ADDRESS}?chain_id=8453`) {
@@ -158,7 +158,7 @@ describe('aggregated portfolio hooks', () => {
 
   it('surfaces an aggregate balance error instead of treating failures as zero funds', async () => {
     mockSafes([
-      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'base', account_address: SAFE_ADDRESS, chain_id: 8453 },
     ])
     mockApiGet.mockRejectedValue(new Error('temporarily unavailable'))
 
@@ -172,8 +172,8 @@ describe('aggregated portfolio hooks', () => {
 
   it('requests aggregate transactions for each Safe chain', async () => {
     mockSafes([
-      { id: 'gnosis', safe_address: SAFE_ADDRESS, chain_id: 100 },
-      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'gnosis', account_address: SAFE_ADDRESS, chain_id: 100 },
+      { id: 'base', account_address: SAFE_ADDRESS, chain_id: 8453 },
     ])
     const sharedTransaction = transaction('0xshared')
     mockApiGet.mockImplementation(async (path: string) => {
@@ -202,7 +202,7 @@ describe('aggregated portfolio hooks', () => {
 
   it('surfaces aggregate transaction errors instead of treating failures as empty history', async () => {
     mockSafes([
-      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'base', account_address: SAFE_ADDRESS, chain_id: 8453 },
     ])
     mockApiGet.mockRejectedValue(new Error('temporarily unavailable'))
 
@@ -229,7 +229,7 @@ describe('aggregated portfolio hooks — visible-only polling (#2732)', () => {
 
   it('useAggregatedPortfolio: a failed silent tick keeps the last good totals instead of wiping them to zero', async () => {
     mockSafes([
-      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'base', account_address: SAFE_ADDRESS, chain_id: 8453 },
     ])
     mockApiGet.mockResolvedValue({ totalUsd: 42, totalEur: 38, breakdown: [] })
     const { result } = renderHook(() => useAggregatedPortfolio())
@@ -249,7 +249,7 @@ describe('aggregated portfolio hooks — visible-only polling (#2732)', () => {
 
   it('useAggregatedBalances: a failed silent tick keeps the last good balances', async () => {
     mockSafes([
-      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'base', account_address: SAFE_ADDRESS, chain_id: 8453 },
     ])
     mockApiGet.mockResolvedValue({ balances: [usdc('1000000')] })
     const { result } = renderHook(() => useAggregatedBalances())
@@ -270,7 +270,7 @@ describe('aggregated portfolio hooks — visible-only polling (#2732)', () => {
 
   it('useAggregatedTransactions: a failed silent tick keeps the last good transactions', async () => {
     mockSafes([
-      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'base', account_address: SAFE_ADDRESS, chain_id: 8453 },
     ])
     mockApiGet.mockResolvedValue({
       transactions: [transaction('0xgood')],
@@ -297,7 +297,7 @@ describe('aggregated portfolio hooks — visible-only polling (#2732)', () => {
 
   it('useAggregatedPortfolio: a successful silent tick refreshes totals without the loading flag', async () => {
     mockSafes([
-      { id: 'base', safe_address: SAFE_ADDRESS, chain_id: 8453 },
+      { id: 'base', account_address: SAFE_ADDRESS, chain_id: 8453 },
     ])
     mockApiGet.mockResolvedValue({ totalUsd: 42, totalEur: 38, breakdown: [] })
     const { result } = renderHook(() => useAggregatedPortfolio())

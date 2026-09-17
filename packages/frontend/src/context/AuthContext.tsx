@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { api, type ListPasskeysResponse } from '@/lib/api'
-import { ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY, migrateActiveAccountStorageKey } from '@/lib/auth-storage'
+import { ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '@/lib/auth-storage'
 import {
   PASSKEY_SCHEMA_VERSION,
   clearStoredPasskeySigner,
@@ -27,7 +27,7 @@ import type { Address } from 'viem'
  */
 export interface SmartAccount {
   id: string
-  safe_address: string
+  account_address: string
   chain_id: number
   name: string
   is_default: boolean
@@ -54,10 +54,11 @@ export interface User {
   name: string | null
   email: string
   wallet_address: string | null
-  safe_address: string | null
+  account_address: string | null
   /**
-   * The list is read from the #2907 `accounts` envelope key, which the
-   * backend always emits alongside the deprecated `safes` twin (same array).
+   * The list is read from the #2907 `accounts` envelope key, which is the
+   * only one the backend emits: the `safes` twin went with #2914 on these
+   * session payloads and with its follow-up everywhere else.
    */
   accounts: SmartAccount[]
   currency_preference?: 'USD' | 'EUR'
@@ -115,10 +116,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // add/remove).
   const syncActiveAccount = useCallback((u: User) => {
     const accounts = u.accounts ?? []
-    // #2913: run the storage-key migration against the fresh list, BEFORE the
-    // stored id is read — a pre-rename selection lands in the new key on the
-    // first boot and every read after this sees the new key only.
-    migrateActiveAccountStorageKey(accounts.map((s) => s.id))
     setActiveAccountState((prev) => {
       // If the current active account is still in the list, keep it
       if (prev && accounts.find((s) => s.id === prev.id)) {
@@ -139,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       for (const passkey of rows) {
         if (
-          !passkey.safe_address ||
+          !passkey.account_address ||
           !hasPasskeyCredentialOnDevice(passkey.credential_id)
         ) {
           continue
@@ -150,7 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           address: passkey.signer_address as Address,
           credentialId: passkey.credential_id,
           chainId: passkey.chain_id,
-          safeAddress: passkey.safe_address as Address,
+          safeAddress: passkey.account_address as Address,
           createdAt: Date.parse(passkey.created_at) || Date.now(),
         })
       }
@@ -169,7 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (u.accounts ?? []).map(async (account) => {
         try {
           const signers = await api.get<HybridAccountSigners>(
-            `/accounts/hybrid/${account.safe_address}/signers?chain_id=${account.chain_id}`,
+            `/accounts/hybrid/${account.account_address}/signers?chain_id=${account.chain_id}`,
           )
           setStoredHybridSigners(signers)
         } catch {
@@ -269,7 +266,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const accounts = user?.accounts ?? []
     for (const account of accounts) {
       clearStoredPasskeySigner({
-        accountAddress: account.safe_address as Address,
+        accountAddress: account.account_address as Address,
         chainId: account.chain_id,
       })
     }

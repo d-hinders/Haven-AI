@@ -115,7 +115,7 @@ async function createSetup(app: FastifyInstance) {
     payload: {
       name: 'Research Agent',
       description: 'Pays for research APIs',
-      safe_id: SAFE.id,
+      account_id: SAFE.id,
       runtime: 'claude-code',
       allowances: [ALLOWANCE],
     },

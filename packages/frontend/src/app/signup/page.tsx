@@ -116,7 +116,7 @@ export default function SignupPage() {
         password,
         viaMarkerFromSearch(search),
       )
-      router.push(postAuthDestination(Boolean(u.safe_address), next))
+      router.push(postAuthDestination(Boolean(u.account_address), next))
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message)

@@ -18,7 +18,7 @@ import {
 import { formatTokenValue } from '../domain/tokens.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import { config } from '../config.js'
-import { withAgentAccountAlias } from '../openapi/wire-aliases.js'
+import { retiredNameVerdict, retiredSafeField } from '../middleware/retired-safe-names.js'
 import {
   agentExistsForUser,
   createAgent,
@@ -40,22 +40,12 @@ import {
 } from '../infra/repositories/agents.js'
 
 /**
- * #2911 (schema rename, epic #2906 phase 3): `withAgentAccountAlias`'s input
- * type (`SafeIdentified`, `openapi/wire-aliases.ts`) still names its fields
- * `safe_id`/`safe_address` — that file is the wire contract and is
- * deliberately untouched by this migration (it dual-emits both wire names
- * from whatever it is handed; it does not care where the value came from).
- * The repository row it used to read those two fields directly off of is
- * renamed (`account_id`/`account_address`), so this shim re-derives the
- * `SafeIdentified` shape from the renamed fields at the call site — the
- * "prefer renaming the read" choice, applied consistently: the read changes,
- * the wire mapper and its output do not.
+ * #2914 (naming epic #2906 phase 5, the contraction): an agent carries the
+ * four account_* fields and nothing else. The `safe_*` twins, the dual-emit
+ * mapper (`openapi/wire-aliases.ts`) and the `toSafeIdentified` shim that fed
+ * it are deleted — the repository row is already in the account vocabulary,
+ * so the handlers return it unprojected.
  */
-function toSafeIdentified<T extends { account_id: string | null; account_address: string | null }>(
-  row: T,
-): T & { safe_id: string | null; safe_address: string | null } {
-  return { ...row, safe_id: row.account_id, safe_address: row.account_address }
-}
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -63,13 +53,13 @@ interface CreateAgentBody {
   name: string
   description?: string
   delegate_address: string
-  safe_id?: string
   /**
-   * #2907 input twin of `safe_id` (P1/#2908 will make the SDK send this
-   * instead of `safe_id`). Either wins if the other is absent; both present
-   * and disagreeing is a 400 naming both keys — silently preferring one would
-   * hide a caller bug where the two were meant to name the same account.
+   * #2914: the retired `safe_id` input name stays DECLARED so it can be
+   * refused (see the handler). An undeclared key would be dropped in silence
+   * and the agent would be created unlinked — the failure this epic's
+   * acceptance bar calls "loudly, typed".
    */
+  safe_id?: string
   account_id?: string
   /**
    * Opt in to an L0 Agent Passport at creation time (#972). Absent/false is the
@@ -117,7 +107,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     const derivedByAgent = await deriveDelegationAllowances(delegationAgentIds)
 
     const agents = agentRows.map((agent) => ({
-      ...withAgentAccountAlias(toSafeIdentified(agent)),
+      ...agent,
       allowances:
         agent.account_type === 'delegator_hybrid'
           ? (derivedByAgent.get(agent.id) ?? [])
@@ -141,12 +131,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     if (agent.account_type === 'delegator_hybrid') {
       // Live budget = the active delegations, not an onboarding mirror (#1090).
       const derived = await deriveDelegationAllowances([id])
-      return { ...withAgentAccountAlias(toSafeIdentified(agent)), allowances: derived.get(id) ?? [] }
+      return { ...agent, allowances: derived.get(id) ?? [] }
     }
 
     // Legacy rail retired (#1440/#2020): no allowance config to show.
     return {
-      ...withAgentAccountAlias(toSafeIdentified(agent)),
+      ...agent,
       allowances: [],
     }
   })
@@ -167,7 +157,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(422).send({ error: 'Agent has no delegate address' })
     }
 
-    const chainId = agent.safe_chain_id ?? DEFAULT_CHAIN_ID
+    const chainId = agent.account_chain_id ?? DEFAULT_CHAIN_ID
     if (!isSupportedChain(chainId)) {
       return reply.code(422).send({ error: `Unsupported chain: ${chainId}` })
     }
@@ -184,11 +174,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
     return {
       delegate_address: delegate,
-      safe_address: agent.account_address,
-      // #2907: DelegateBalance.account_address twins safe_address (nullable —
-      // agent.account_address can be null pre-linking, so the generic
-      // withAccountAddressAlias<SafeAddressed> mapper, which requires a
-      // string, does not apply here).
+      // Nullable: an agent can exist before it is linked to an account.
       account_address: agent.account_address,
       chain_id: chainId,
       eth: formatTokenValue(ethAtomic.toString(), 18),
@@ -216,15 +202,16 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     if (!delegate_address || !isValidAddress(delegate_address)) {
       return reply.code(400).send({ error: 'Valid delegate address is required' })
     }
-    // #2907: account_id is the input twin of safe_id. Either wins alone; both
-    // given and disagreeing is a 400 naming both keys rather than silently
-    // preferring one.
-    if (safe_id && account_id && safe_id !== account_id) {
-      return reply.code(400).send({
-        error: 'safe_id and account_id disagree — send only one, or make them match',
-      })
+    // #2914: `safe_id` is retired. Refused rather than ignored — an ignored
+    // account id creates an UNLINKED agent that looks successfully created,
+    // and the caller only finds out when a payment has nothing to spend from.
+    // Keyed on reliance, not presence: #2908's published clients send both
+    // names, so `safe_id` BESIDE a matching `account_id` is a migrated caller.
+    const safeIdVerdict = retiredNameVerdict(safe_id, account_id)
+    if (safeIdVerdict.kind === 'refuse') {
+      return reply.code(400).send(retiredSafeField('safe_id', 'account_id', safeIdVerdict.reason))
     }
-    const requestedAccountId = safe_id ?? account_id
+    const requestedAccountId = account_id
     // #2020: the allowance mirror is retired with the Safe rail. Refuse rather
     // than silently drop — a caller passing allowances believes it is granting
     // authority, and nothing here grants anything any more.
@@ -235,13 +222,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       })
     }
 
-    // Validate the requested account (safe_id or its account_id twin) belongs
-    // to the user, if either was provided.
+    // Validate that the requested `account_id` belongs to the user, if given.
     let resolvedAccountId: string | null = null
     if (requestedAccountId) {
       const ownedAccountId = await findUserAccountIdForUser(requestedAccountId, sub)
       if (!ownedAccountId) {
-        return reply.code(400).send({ error: 'Invalid Safe — not found or not yours' })
+        return reply.code(400).send({ error: 'Invalid account — not found or not yours' })
       }
       resolvedAccountId = requestedAccountId
     } else {
@@ -284,9 +270,9 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       // agree rather than one silently creating a permanently-failed row.
       const passportChainId =
         issue_passport === true &&
-        accountInfo.safe_chain_id != null &&
-        PASSPORT_CHAIN_IDS.has(accountInfo.safe_chain_id)
-          ? accountInfo.safe_chain_id
+        accountInfo.account_chain_id != null &&
+        PASSPORT_CHAIN_IDS.has(accountInfo.account_chain_id)
+          ? accountInfo.account_chain_id
           : null
       if (passportChainId != null) {
         try {
@@ -311,7 +297,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       }
 
       return reply.code(201).send({
-        ...withAgentAccountAlias(toSafeIdentified({ ...agent, ...accountInfo })),
+        ...agent,
+        ...accountInfo,
         api_key: apiKey,
         // Always empty since #2020 — kept for response-shape compatibility;
         // budgets arrive later as delegation grants.
@@ -356,7 +343,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
           : []
 
       return {
-        ...withAgentAccountAlias(toSafeIdentified(updated)),
+        ...updated,
         allowances,
       }
     },

@@ -256,7 +256,7 @@ const PER_LEG_ATOMIC = 1_000n
  * expected; an empty treasury is never expected.)
  *
  * The address is derived the way the scenarios derive it — `GET
- * /machine-payments/agent` → `safe_address` — never restated in config (design
+ * /machine-payments/agent` → `account_address` — never restated in config (design
  * rule 1 above).
  */
 export async function checkDelegationTreasury(
@@ -269,15 +269,15 @@ export async function checkDelegationTreasury(
     if (!ok) {
       return { name, balance: '—', ok: null, detail: `GET /machine-payments/agent returned HTTP ${status}` }
     }
-    if (!data.safe_address) {
-      return { name, balance: '—', ok: null, detail: 'agent identity carries no safe_address' }
+    if (!data.account_address) {
+      return { name, balance: '—', ok: null, detail: 'agent identity carries no account_address' }
     }
     const usdc = new ethers.Contract(SEPOLIA_USDC, [...ERC20_BALANCE_ABI], provider)
-    const raw: bigint = await usdc.balanceOf(data.safe_address)
+    const raw: bigint = await usdc.balanceOf(data.account_address)
     const funded = raw >= TREASURY_RUN_COST_ATOMIC
     return {
       name,
-      address: data.safe_address,
+      address: data.account_address,
       balance: `${ethers.formatUnits(raw, USDC_DECIMALS)} USDC`,
       headroom: `~${raw / PER_LEG_ATOMIC} leg(s)`,
       ok: funded,

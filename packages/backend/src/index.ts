@@ -56,7 +56,8 @@ import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
 import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
-import userSafesRoutes from './routes/user-safes.js'
+import userAccountsRoutes from './routes/user-accounts.js'
+import userAccountsRetiredRoutes from './routes/user-accounts-retired.js'
 import passkeyRoutes from './routes/passkeys.js'
 import safeDeployRoutes from './routes/safe-deploy.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
@@ -64,12 +65,14 @@ import openapiRoutes from './routes/openapi.js'
 import { registerHealthRoutes } from './routes/health.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
+import merchantRoutes from './routes/merchants.js'
 import analyticsRoutes from './routes/analytics.js'
 import analyticsOverviewRoutes from './routes/analytics-overview.js'
 import accountingRoutes from './routes/accounting.js'
 import accountingConnectionsRoutes from './routes/accounting-connections.js'
 import accountingFeedRoutes from './routes/accounting-feed.js'
 import { registerConnector, startRetrySweep, getAccountingOpsCounters, setOpsEventSink } from './modules/accounting/index.js'
+import { AccountedConnector } from './modules/accounting/index.js'
 import { FortnoxConnector } from './modules/accounting/index.js'
 import { fortnoxConfigured } from './modules/accounting/index.js'
 import {
@@ -100,14 +103,16 @@ app.setErrorHandler(httpErrorHandler)
 // EVERY route's request is compiled against the OpenAPI spec from here down —
 // shadow mode logs would-be refusals and counts them (`request_validation` on
 // GET /health/ops) without changing any answer; the contacts proof module is
-// enforced via enforcedPrefixes. MUST sit after setErrorHandler (the enforced
+// enforced via enforcedPrefixes, and so is /merchants (#3078): a module born
+// after the rollout began is born enforced — read-only, one path parameter
+// with a slug pattern — rather than adding to the shadow residue. MUST sit after setErrorHandler (the enforced
 // route handler delegates non-validation errors to it) and before the first
 // app.register — it is a root-scope install, not an encapsulated plugin, so
 // its onRoute/compiler/formatter are the ones every child module inherits
 // (spiked: an encapsulated plugin's onRoute sees no later routes).
 installRequestValidation(app, {
   mode: config.requestValidationMode,
-  enforcedPrefixes: ['/contacts'],
+  enforcedPrefixes: ['/contacts', '/merchants'],
 })
 
 // --- Process-level error handlers ---
@@ -284,18 +289,20 @@ await app.register(paymentRoutes, { prefix: '/payments' })
 // AllowanceModule rail and its table is dropped; the routes went with it.
 await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
 await app.register(x402Routes, { prefix: '/x402' })
-await app.register(userSafesRoutes, { prefix: '/user/safes' })
-// #2907 (naming P0): additive `account`-vocabulary twin of every
-// `/user/safes*` route — same handler module registered a second time under
-// the new prefix, so behavior is identical by construction (no second
-// implementation to drift). Old paths stay registered above, deprecated in
-// the spec, for exactly one release.
-await app.register(userSafesRoutes, { prefix: '/user/accounts' })
+// #2914 (naming P5, the contraction): the `/user/safes*` prefix stops
+// serving and answers 410 with the replacement path. It is registered as a
+// TOMBSTONE module rather than dropped, because an absent registration is a
+// bare 404 — a transient-looking error for a path that is permanently gone.
+await app.register(userAccountsRetiredRoutes, { prefix: '/user/safes' })
+// The account vocabulary is now the only one that serves.
+await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
 await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
+// #3078: the merchant layer over the catalog — read-only, same auth door.
+await app.register(merchantRoutes, { prefix: '/merchants' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 // #2946 (epic #2944, slice B): a SEPARATE module under the SAME prefix — the
 // internal onboarding funnel above owns `/analytics/funnel`, this owns
@@ -316,6 +323,13 @@ await app.register(accountingFeedRoutes, { prefix: '/accounting/feed' })
 if (fortnoxConfigured()) {
   registerConnector(new FortnoxConnector())
 }
+// #3017: the Accounted adapter registers UNCONDITIONALLY. Unlike Fortnox it
+// has no deployment credentials to configure — a key is per USER (pasted at
+// connect, stored encrypted), so there is nothing an operator opts into here;
+// `availability: 'live'` plus the per-account accounting feature gate is the
+// whole exposure decision. The connector's push half is #3018; until then it
+// skips, so a registered instance delivers nothing.
+registerConnector(new AccountedConnector())
 // #1328: the legacy /demo/mpp/* MPP demo route is retired (see
 // modules/mpp/challenge.ts's mppDemoRetired() for the authorize-side refusal).
 

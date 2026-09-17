@@ -296,7 +296,7 @@ export default function AgentPanel() {
             <div className="grid items-start gap-4 lg:grid-cols-2">
               {visibleAgents.map((agent) => {
                 const usesActiveAccount = panel.agentUsesActiveAccount(agent)
-                const agentChainId = agent.safe_chain_id ?? chainId
+                const agentChainId = agent.account_chain_id ?? chainId
 
                 return (
                   <AgentCard
@@ -359,7 +359,7 @@ export default function AgentPanel() {
                 onRestore={panel.handleRestore}
                 busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
                 canUseWalletActions={panel.agentUsesActiveAccount(agent)}
-                chainId={agent.safe_chain_id ?? chainId}
+                chainId={agent.account_chain_id ?? chainId}
               />
             ))}
           </div>

@@ -47,7 +47,7 @@ covers:
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/passkeys.ts
   - packages/backend/src/routes/safe-deploy.ts
-  - packages/backend/src/routes/user-safes.ts
+  - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
@@ -695,7 +695,17 @@ on-chain state addressed entirely from stored columns. That property is
 preserved by the surviving route, which takes no body at all. (#985 moved this
 route's SQL into `infra/repositories/agent-connection-setups.ts`; the
 delegation verification still runs in the route. The approval write remains one
-locked, guarded function, so the checks and the write cannot be run apart.) Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
+locked, guarded function, so the checks and the write cannot be run apart.)
+Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
+
+**One name in that historical list now collides with a live one, so read it
+carefully:** the `safe_tx_hash` above is a field of the DELETED
+`WalletApprovalBody` REQUEST, quoted as history. The #2914 follow-up renamed a
+differently-scoped key of the same spelling — `approval.safe_tx_hash` on the
+setup-status RESPONSE — to `account_tx_hash`, following migration 084's column.
+Neither the deleted body nor the authority decision this paragraph describes is
+affected: the surviving route takes no body at all, and a response key carries
+no authority.
 
 **Connection setup never hands out another environment's hosted MCP endpoint (#1129).** The production hosted MCP URL is served as a built-in default only when the backend's own resolved public URL is the production host; any other deployment must set `HAVEN_HOSTED_MCP_URL` explicitly, or `/resolve` and `/register` refuse with an explicit configuration error naming the variable — raised before any state is written, so a misconfigured environment can neither consume the client's one-shot setup token nor leave a registration half-created, and an agent's credentials are never pointed at a different environment's backend. Fail-closed, same as the authority checks above.
 
@@ -1083,13 +1093,62 @@ version constants a bump rewrites in `mcp/`, `signer/`, `connect/` and
 `mcp-server/src/`.
 
 **Naming them here makes a load-bearing dependency deliberate.** Since #1790 the
-bump *writes* one of the two release contract docs, and the coupling gate excuses
-a doc on **file presence alone** — so the only thing still forcing human-written
-content into a release PR is this doc's `covers:` breadth. That is pinned by a
-test (`scripts/docs/coupling-gate.test.mjs`, which this sentence now names as
-its pin, #2680), but the entries it rests on exist
+bump *writes* one of the **three** release contract docs, and the coupling gate
+excuses a doc on **file presence alone** — so the only thing still forcing a
+human-written *argument* into a release PR is this doc's `covers:` breadth. That
+is pinned by a test (`scripts/docs/coupling-gate.test.mjs`, which this sentence
+now names as its pin, #2680), but the entries it rests on exist
 for unrelated reasons and nothing in the list said so. Now the release path is
 named in the list that guarantees it.
+
+**This paragraph said "two" until 2026-09-17, and the correction sharpens the
+claim rather than only counting better.** A release bump implicates three
+contract docs, forced three different ways. Measured with the gate's own
+reckoning over **every path `release-bump.mjs` writes** — the six
+`package.json`, the five `CHANGELOG.md`, the five source version constants,
+`connect/src/runtime-manifest.ts`, `sdk/src/connector-channel.ts`,
+`package-lock.json` and the manifest doc — not over a sample:
+
+| doc | how a release satisfies it | what the GATE forces |
+|---|---|---|
+| `mcp-runtime-compatibility.md` | the bump writes the manifest table (#1790) | nothing — the bump's own write satisfies it by presence |
+| `package-dev-channel.md` | a hand edit; the bump writes no part of it | an **edit**, which presence lets be a bare date bump |
+| this document | a new `casp-changelog/` shard | a **new file** — see the limit below |
+
+Run over the bump's **code** writes the gate names all three; add the manifest
+doc the bump itself writes and it names **two**, because that doc is then
+already touched. That drop from three to two IS row 1, observable rather than
+argued.
+
+`package-dev-channel.md` is the one the old sentence dropped: the bump rewrites
+`CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which sits in that
+doc's `covers:`, so every release couples it — 0.1.37, 0.2.0 and 0.2.1 all had
+to touch it, and the first two satisfied it with a `last-verified` bump and
+nothing else. (`sdk/src/connector-channel.ts` is a second coupler in the same
+doc's `covers:`, but the bump rewrites it only when the channel changes, so
+`runtime.ts` is the one that always diffs.) That a bare date bump SATISFIES the
+gate is a statement about the gate, never a licence: #1366's rule is that a
+rubber-stamped `last-verified` is worse than a stale one, and 0.2.1 declined to
+re-stamp for exactly that reason.
+
+**The limit of row 3, stated rather than glossed.** The gate does not read a
+shard. `satisfied-by` matches on glob and, since #2192, on *added* status only —
+so mechanically row 3 forces a **new dated file**, not an argument. What makes
+that file carry an argument is the blockquote below: a shard is authored by a
+human and nothing generates one. So the honest form of this section's claim is
+that the shard is the only release artifact whose satisfaction the gate cannot
+reduce to a value the bump already wrote — the first two rows are pure
+presence, and the third is presence plus an authorship rule this document
+maintains by hand. That is a weaker guarantee than "the gate forces an
+argument", and it is the one that is true.
+
+**Do not confuse this three with the other three above.** The earlier bullet
+names `publish.yml`'s three contract docs — `branch-and-release-flow.md`,
+`mcp-runtime-compatibility.md`, `package-dev-channel.md`. Same number,
+different set: `branch-and-release-flow.md` is in that one and not in this one,
+because a release *runs* `release-bump.mjs` rather than editing it, and this
+section's own rule is that `covers:` gates *edits to a file*, never *runs* of
+it. Its exclusion here is correct, not an oversight.
 
 > **A CASP shard is never generated, and must never become generated.** #1790
 > established that a bump may write a contract doc; that precedent stops at the

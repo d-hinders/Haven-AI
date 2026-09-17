@@ -15,7 +15,7 @@ export type AgentBusyAction = 'pause' | 'resume' | 'archive' | 'restore' | null
  */
 export function useAgentPanelState() {
   const { activeAccount } = useAuth()
-  const accountAddress = activeAccount?.safe_address ?? null
+  const accountAddress = activeAccount?.account_address ?? null
   const chainId = activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
   const {
     agents,
@@ -112,12 +112,12 @@ export function useAgentPanelState() {
 
   const agentUsesActiveAccount = useCallback(
     (agent: Agent): boolean => {
-      if (agent.safe_id) return agent.safe_id === activeAccount?.id
-      if (agent.safe_address) {
-        const agentChainId = agent.safe_chain_id ?? DEFAULT_CHAIN_ID
+      if (agent.account_id) return agent.account_id === activeAccount?.id
+      if (agent.account_address) {
+        const agentChainId = agent.account_chain_id ?? DEFAULT_CHAIN_ID
         return Boolean(
           accountAddress &&
-            agent.safe_address.toLowerCase() === accountAddress.toLowerCase() &&
+            agent.account_address.toLowerCase() === accountAddress.toLowerCase() &&
             agentChainId === chainId,
         )
       }

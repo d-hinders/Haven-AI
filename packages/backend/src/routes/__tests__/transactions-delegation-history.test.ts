@@ -127,14 +127,14 @@ describe('#2849 delegation-account history read', () => {
     expect(response.statusCode).toBe(200)
     const body = response.json() as {
       partialFailure: boolean
-      failedSafeIds: string[]
+      failedAccountIds: string[]
       transactions: Array<{ hash: string }>
     }
 
     // The behavioural change: a healthy delegation read is no longer a
     // permanent "partial failure".
     expect(body.partialFailure).toBe(false)
-    expect(body.failedSafeIds).toEqual([])
+    expect(body.failedAccountIds).toEqual([])
 
     // Blockscout rows flow through unchanged — the retired leg contributed
     // none of them before either (it 404'd), so rows are identical to the

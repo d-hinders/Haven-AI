@@ -238,7 +238,7 @@ describe('nonce reuse across retries (same idempotency key)', () => {
         payment_id: 'pay_323',
         status: 'pending_signature',
         chain_id: 8453,
-        safe_address: SAFE_ADDRESS,
+        account_address: SAFE_ADDRESS,
         token: 'USDC',
         amount: '0.02',
         to: DELEGATE_ADDRESS,
@@ -248,7 +248,7 @@ describe('nonce reuse across retries (same idempotency key)', () => {
           signature_scheme: 'eip712_userop',
           typed_data: userOpTypedData,
           components: {
-            safe: SAFE_ADDRESS,
+            payer_account: SAFE_ADDRESS,
             token: accepted.asset,
             to: DELEGATE_ADDRESS,
             amount: accepted.amount,

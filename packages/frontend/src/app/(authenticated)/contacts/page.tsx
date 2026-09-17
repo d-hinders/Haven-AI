@@ -1,5 +1,6 @@
 'use client'
 
+import { Monogram } from '@/components/ui/Monogram'
 import { Check, Copy, Info, Pencil, Search, Trash2, Users } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useId, useState, type FormEvent, type MouseEvent } from 'react'
@@ -41,20 +42,6 @@ function chainName(chainId: number): string {
 function ContactIcon() {
   return (
     <Icon icon={Users} className="h-5 w-5" />
-  )
-}
-
-function Initials({ name }: { name: string }) {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  const initials =
-    parts.length >= 2
-      ? `${parts[0][0]}${parts[parts.length - 1][0]}`
-      : (parts[0] ?? '?').slice(0, 2)
-
-  return (
-    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-brand/20 bg-[var(--v2-brand-soft)]">
-      <span className="text-xs font-semibold text-[var(--v2-brand)]">{initials.toUpperCase()}</span>
-    </div>
   )
 }
 
@@ -231,7 +218,7 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
 
   return (
     <div className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[var(--v2-surface)]">
-      <Initials name={contact.name} />
+      <Monogram name={contact.name} />
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>

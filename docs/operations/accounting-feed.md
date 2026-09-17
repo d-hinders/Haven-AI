@@ -700,3 +700,50 @@ fresh dev user connects Fortnox from Settings, chooses a backfill option, an
 agent purchase settles and appears in the Fortnox sandbox as an unattested
 supplier invoice with both attachments, *Check in Fortnox* reports registered,
 Disconnect revokes.
+
+## Provider notes: Accounted (#3017)
+
+**Auth kind.** `api_key` — the user pastes a `gnubok_sk_*` key from
+`app.accounted.se/settings/api`; there is no redirect, no grant and no scope
+string on the row (`grantedScope` is null). No deployment variables: the
+connector registers unconditionally (keys are per user), unlike Fortnox's
+credential-gated instance. The connect route validates the key by reading
+`GET /api/v1/companies` with it (`accounted-client.ts`, OpenAPI
+`2026-05-12`): zero companies or a 401/403 → 400 `INVALID_API_KEY`; more than
+one → 409 `MULTI_COMPANY_KEY` (the feed has no per-push company choice — the
+user creates a key scoped to one company); exactly one → the row stores the
+key encrypted (`HAVEN_SECRETS_KEY`, same path as every provider secret) with
+`external_company_id` = the company UUID.
+
+**Currencies.** The companies read path exposes no currency field, so
+`base_currency` is stored null and the feed books in `DEFAULT_LEDGER_CURRENCY`
+(SEK). Accounted is a Swedish platform (Swedish org numbers, `entity_type`);
+SEK is the inference, not a provider-stated fact (#2877's supported list still
+guards any future provider that does expose a currency).
+
+**Scopes.** `requiredScopes` is empty per the api_key contract (there is no
+grant to compare against). The key must carry `companies:read` +
+`documents:write`; that requirement lives in the paste-UI copy and the product
+doc, because no scope-introspection endpoint exists and `dry_run` is
+unsupported on document upload — a short key connects fine and surfaces as
+`scope_missing` at the first push (#2865 path).
+
+**The connector in slice 1.** `AccountedConnector.getCompanyInfo` is the only
+live provider call. `pushTransaction`, `verify` and `revoke` are explicit
+no-ops until slice 2 (#3018 adds the document push; verify stays answered from
+Haven's own record per the epic Notes; Accounted keys are revoked in their
+dashboard, so `revoke` clears local secrets only).
+
+**Live hosts.** `https://app.accounted.se` (the OpenAPI `servers` entry);
+`app.gnubok.se` serves the same deployment as an alternative host, not a
+redirect target. Keys are created AND revoked at `/settings/api`; the sandbox
+test key is simulation-only — writes answer 403 `TEST_KEY_WRITE_BLOCKED`, so
+end-to-end document delivery can only be proven with a live key (#3018's
+probe).
+
+> **Re-verified #3093 (frontend hooks: wire keys default instead of crashing):**
+> this diff touched `hooks/useAccounting.ts`, in this document's coverage list, by
+> defaulting the array keys it stores (`?? []`) so an API answer without the key degrades to an empty state instead
+> of sending the route into the ErrorBoundary. No endpoint, flow or
+> behaviour this document describes changes. Scope of this note: those
+> expressions. Nothing else in this document was re-verified.

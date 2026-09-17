@@ -91,7 +91,7 @@ export const x402Erc7710Settle: Scenario = {
 
     // ── 2. Baselines: treasury, merchant, delegate EOA ───────────────────────
     const agentInfo = await api.getAgent()
-    const treasury = agentInfo.data.safe_address
+    const treasury = agentInfo.data.account_address
     if (!treasury) return fail("could not read the agent's account address from GET /machine-payments/agent")
     const [treasuryBefore, merchantBefore, delegateBefore] = (await Promise.all([
       usdc.balanceOf(treasury),

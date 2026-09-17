@@ -385,7 +385,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
       expect(res.json()).toMatchObject({
         error_code: 'delegation_budget_exceeded',
         phase: 'insufficient_funds',
-        next_action: 'fund_safe_or_raise_allowance',
+        next_action: 'fund_account_or_raise_allowance',
         rail: 'x402',
         token: 'USDC',
         amount_atomic: '100000',
@@ -543,7 +543,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
       expect(res.json()).toMatchObject({
         error_code: 'delegation_budget_exceeded',
         phase: 'insufficient_funds',
-        next_action: 'fund_safe_or_raise_allowance',
+        next_action: 'fund_account_or_raise_allowance',
         rail: 'x402',
         token: 'USDC',
         amount_atomic: '100000',
@@ -584,11 +584,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
       })
       expect(res.statusCode).toBe(201)
       expect(res.json().sign_data.signature_scheme).toBe('eip712_userop')
-      // #2907: payer_account is a same-value twin of `safe` on a REAL
-      // response, not a source regex — mutation-proven by pointing
-      // payer_account at the delegate account instead.
+      // #2914 (naming epic #2906 phase 5, the contraction): `components.safe`
+      // is gone — `payer_account` is the only name now, on a REAL response,
+      // not a source regex.
       const components = res.json().sign_data.components
-      expect(components.payer_account).toBe(components.safe)
+      expect(components.safe).toBeUndefined()
+      expect(components.payer_account).toBeDefined()
       expect(components.payer_account).not.toBe(components.account)
     })
 
@@ -1642,11 +1643,11 @@ describe('x402 delegation-rail settlement (#830)', () => {
     // The whole point: NO fresh sponsored estimation ran.
     expect(mockPrepareFunding).not.toHaveBeenCalled()
     expect(mockCreateIntent).not.toHaveBeenCalled()
-    // #2907: payer_account is a same-value twin of `safe` on the REPLAY
-    // response too, not a source regex — mutation-proven by pointing
-    // payer_account at the delegate account instead.
+    // #2914 (naming epic #2906 phase 5, the contraction): `components.safe`
+    // is gone on the REPLAY response too — `payer_account` is the only name.
     const components = body.sign_data.components
-    expect(components.payer_account).toBe(components.safe)
+    expect(components.safe).toBeUndefined()
+    expect(components.payer_account).toBeDefined()
     expect(components.payer_account).not.toBe(components.account)
   })
 
@@ -2651,7 +2652,7 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
       expect(ask.detail).toEqual({
         error_code: 'delegation_budget_exceeded',
         phase: 'insufficient_funds',
-        next_action: 'fund_safe_or_raise_allowance',
+        next_action: 'fund_account_or_raise_allowance',
         remaining_atomic: '50000',
       })
     })

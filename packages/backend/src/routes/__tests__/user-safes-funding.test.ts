@@ -11,10 +11,19 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 // so the documented file-level exemption applies.
 
 /**
- * Characterization coverage for `GET /user/safes/:safeId/funding` — written
- * BEFORE the endpoint exists (#2534, epic #2519 slice B4), so the route's
- * contract is pinned on the money-path-adjacent file before its first
- * behavior change, per the repo convention.
+ * Characterization coverage for `GET /user/accounts/:accountId/funding` —
+ * written BEFORE the endpoint exists (#2534, epic #2519 slice B4), so the
+ * route's contract is pinned on the money-path-adjacent file before its
+ * first behavior change, per the repo convention.
+ *
+ * #2914 (naming epic #2906 phase 5, the contraction) ended the one-release
+ * dual mount `#2907` opened: `userAccountsRoutes` now registers ONLY at
+ * `/user/accounts`, and `/user/safes` is a separate, unrelated NAMING
+ * tombstone module (`user-accounts-retired.ts`, covered by
+ * `user-accounts-retired.test.ts`) that 410s every request before
+ * `owner_cli`/JWT distinctions even matter. The former "#2907 owner_cli
+ * parity between /user/safes and /user/accounts" section is retired with it
+ * — there is no longer a second mount of this module to compare against.
  *
  * What is pinned here, in the order the route checks it:
  *
@@ -53,7 +62,7 @@ vi.mock('../../infra/chain/index.js', async (importOriginal) => {
   return { ...actual, getChainClient: mockGetChainClient }
 })
 
-import userSafesRoutes from '../user-safes.js'
+import userAccountsRoutes from '../user-accounts.js'
 
 const SAFE_ID = 'd2c47f10-9a83-4e61-8b25-7c3f0e91a4d6'
 const SAFE_ID_OTHER = 'e3d58f21-ab94-4f72-8c36-8d4f1f02b5e7'
@@ -80,7 +89,7 @@ function chainClientWithUsdc(atomic: bigint) {
   }
 }
 
-describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
+describe('GET /user/accounts/:accountId/funding — characterization (#2534)', () => {
   let app: FastifyInstance
   let ownerToken: string
   let ownerCliToken: string
@@ -88,12 +97,9 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
   beforeAll(async () => {
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
-    await app.register(userSafesRoutes, { prefix: '/user/safes' })
-    // #2907: the SAME module, mounted a second time under the account-vocabulary
-    // prefix, exactly as `index.ts` registers it in production. Without this
-    // second registration the parity test below would exercise only the
-    // `/user/safes` half of the pair and could not have caught the 401.
-    await app.register(userSafesRoutes, { prefix: '/user/accounts' })
+    // #2914: one mount now, matching production (`index.ts`) — `#2907`'s
+    // dual registration is gone.
+    await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
     // Cast as in owner-cli-authorization.test.ts: the declared JWT payload
     // type names only { sub, email }, but purpose-carrying tokens are real.
     ownerToken = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
@@ -121,7 +127,7 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
     mockPoolQuery.mockResolvedValue({ rows: [] })
     const res = await app.inject({
       method: 'GET',
-      url: `/user/safes/${SAFE_ID}/funding`,
+      url: `/user/accounts/${SAFE_ID}/funding`,
     })
     expect(res.statusCode).toBe(401)
     expect(mockPoolQuery).not.toHaveBeenCalled()
@@ -133,7 +139,7 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/user/safes/${SAFE_ID}/funding`,
+      url: `/user/accounts/${SAFE_ID}/funding`,
       headers: auth(),
     })
     expect(res.statusCode).toBe(200)
@@ -146,7 +152,7 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/user/safes/${SAFE_ID}/funding`,
+      url: `/user/accounts/${SAFE_ID}/funding`,
       headers: auth(ownerCliToken),
     })
     expect(res.statusCode).toBe(200)
@@ -161,7 +167,7 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
     // the funding read.
     const res = await app.inject({
       method: 'GET',
-      url: `/user/safes/${SAFE_ID}/funding`,
+      url: `/user/accounts/${SAFE_ID}/funding`,
       headers: { authorization: 'Bearer sk_agent_testkey000000000000000000000' },
     })
     expect(res.statusCode).toBe(401)
@@ -175,7 +181,7 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/user/safes/${SAFE_ID}/funding`,
+      url: `/user/accounts/${SAFE_ID}/funding`,
       headers: auth(),
     })
     expect(res.statusCode).toBe(404)
@@ -185,7 +191,7 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
   it('400s a path segment that is not a UUID', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/user/safes/not-a-uuid/funding',
+      url: '/user/accounts/not-a-uuid/funding',
       headers: auth(),
     })
     expect(res.statusCode).toBe(400)
@@ -201,7 +207,7 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/user/safes/${SAFE_ID}/funding`,
+      url: `/user/accounts/${SAFE_ID}/funding`,
       headers: auth(),
     })
     expect(res.statusCode).toBe(200)
@@ -228,7 +234,7 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: `/user/safes/${SAFE_ID}/funding`,
+      url: `/user/accounts/${SAFE_ID}/funding`,
       headers: auth(),
     })
     expect(res.statusCode).toBe(200)
@@ -243,7 +249,7 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
 
     const sepolia = await app.inject({
       method: 'GET',
-      url: `/user/safes/${SAFE_ID}/funding`,
+      url: `/user/accounts/${SAFE_ID}/funding`,
       headers: auth(),
     })
     expect(sepolia.statusCode).toBe(200)
@@ -253,7 +259,7 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
 
     const gnosis = await app.inject({
       method: 'GET',
-      url: `/user/safes/${SAFE_ID}/funding`,
+      url: `/user/accounts/${SAFE_ID}/funding`,
       headers: auth(),
     })
     expect(gnosis.statusCode).toBe(200)
@@ -261,52 +267,9 @@ describe('GET /user/safes/:safeId/funding — characterization (#2534)', () => {
     expect('faucet_url' in gnosis.json()).toBe(false)
   })
 
-  // ── #2907 owner_cli parity across the safe/account twin prefixes ───
-
-  describe('#2907: owner_cli parity between /user/safes and /user/accounts', () => {
-    // Reproduces the exact probe from the review finding: a `purpose:
-    // 'owner_cli'` token got 200 on `/user/safes` and 401 on `/user/accounts`
-    // for the identical caller and the identical row, because the allow-list
-    // named only the `/user/safes` literal. Both prefixes are the SAME route
-    // module here (registered in beforeAll), so a real mismatch can only come
-    // from the allow-list, not from two diverging implementations.
-    it('GET / (list) gets the same status on both prefixes for an owner_cli token', async () => {
-      mockPoolQuery.mockResolvedValue({ rows: [] })
-
-      const safes = await app.inject({
-        method: 'GET',
-        url: '/user/safes',
-        headers: auth(ownerCliToken),
-      })
-      const accounts = await app.inject({
-        method: 'GET',
-        url: '/user/accounts',
-        headers: auth(ownerCliToken),
-      })
-
-      expect(accounts.statusCode).toBe(safes.statusCode)
-      expect(safes.statusCode).toBe(200)
-    })
-
-    it('GET /:safeId/funding gets the same status on both prefixes for an owner_cli token', async () => {
-      mockPoolQuery
-        .mockResolvedValueOnce({ rows: [ownershipRow()] })
-        .mockResolvedValueOnce({ rows: [ownershipRow()] })
-      mockGetChainClient.mockReturnValue(chainClientWithUsdc(0n))
-
-      const safes = await app.inject({
-        method: 'GET',
-        url: `/user/safes/${SAFE_ID}/funding`,
-        headers: auth(ownerCliToken),
-      })
-      const accounts = await app.inject({
-        method: 'GET',
-        url: `/user/accounts/${SAFE_ID}/funding`,
-        headers: auth(ownerCliToken),
-      })
-
-      expect(accounts.statusCode).toBe(safes.statusCode)
-      expect(safes.statusCode).toBe(200)
-    })
-  })
+  // #2907's "owner_cli parity between /user/safes and /user/accounts" section
+  // is retired with the dual mount (see the file header): there is exactly
+  // one registration of this module now, so there is nothing left to compare
+  // it against. Coverage that an `owner_cli` token is accepted on the one
+  // surviving mount stays above ("accepts an owner_cli device-code session").
 })

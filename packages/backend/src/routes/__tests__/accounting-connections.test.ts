@@ -141,7 +141,9 @@ vi.mock('../../modules/accounting/api-key-flow.js', async (importOriginal) => ({
 
 import accountingConnectionsRoutes from '../accounting-connections.js'
 import {
+  AccountedConnector,
   InMemoryConnector,
+  MultiCompanyKeyError,
   OAUTH_STATE_PURPOSE,
   UnsupportedBaseCurrencyError,
   clearConnectors,
@@ -222,6 +224,11 @@ describe('accounting connection routes (#2862)', () => {
     clearConnectors()
     clearTestProviders()
     registerConnector(stubConnector('fortnox'))
+    // #3017: the Accounted adapter registers UNCONDITIONALLY at boot
+    // (index.ts) — keys are per user, so there is no deployment credential to
+    // wait for. The listing's `configured` flag reflects that, so the suite's
+    // boot state mirrors production's: the real connector instance, not a stub.
+    registerConnector(new AccountedConnector())
     for (const m of Object.values(repo)) m.mockClear()
     flowMocks.completeOAuth2Connect.mockReset().mockImplementation(async ({ userId, provider }) => {
       const r = row(provider.id, { user_id: userId, is_active_destination: true })
@@ -239,18 +246,27 @@ describe('accounting connection routes (#2862)', () => {
     app.inject({ method, url, headers: { authorization: `Bearer ${token}` }, ...(payload ? { payload } : {}) })
 
   describe('GET /accounting/providers', () => {
-    it('lists the four providers with their availability; only Fortnox is live', async () => {
+    it('lists the four providers with their availability; Fortnox and Accounted are live (#3017)', async () => {
       const res = await authed('GET', '/accounting/providers')
       expect(res.statusCode).toBe(200)
       const { providers } = res.json()
       expect(providers.map((p: { id: string; availability: string }) => [p.id, p.availability])).toEqual([
         ['fortnox', 'live'],
-        ['accounted', 'coming_soon'],
+        ['accounted', 'live'],
         ['light', 'coming_soon'],
         ['igdrasil', 'coming_soon'],
       ])
       expect(providers[0]).toMatchObject({ authKind: 'oauth2', configured: true, capabilities: { attachments: true, verify: true } })
       expect(providers[0].requiredScopes).toContain('connectfile')
+      // #3017: the first api_key provider — live, keyed, no scopes on the
+      // descriptor (the key's scopes are the provider's, stated in the UI copy).
+      expect(providers[1]).toMatchObject({
+        id: 'accounted',
+        authKind: 'api_key',
+        configured: true,
+        requiredScopes: [],
+        capabilities: { attachments: false, verify: false, revoke: false, companyInfo: true },
+      })
       expectMatchesSpec('GET', '/accounting/providers', res.json())
     })
 
@@ -346,8 +362,9 @@ describe('accounting connection routes (#2862)', () => {
     it('LIVE-ONLY GATE: a coming_soon provider is refused even with a connector registered', async () => {
       // With a connector present, the ONLY thing standing between this call
       // and a consent URL is the availability check — the mutation target.
-      registerConnector(stubConnector('accounted'))
-      const res = await authed('POST', '/accounting/connections/accounted/connect-url')
+      // Light is the coming_soon provider since #3017 (Accounted went live).
+      registerConnector(stubConnector('light'))
+      const res = await authed('POST', '/accounting/connections/light/connect-url')
       expect(res.statusCode).toBe(409)
       expect(res.json()).toMatchObject({ error_code: 'PROVIDER_NOT_LIVE' })
       expect(res.json()).not.toHaveProperty('url')
@@ -510,6 +527,24 @@ describe('accounting connection routes (#2862)', () => {
       expect(res.json()).toMatchObject({ error_code: 'UNSUPPORTED_BASE_CURRENCY' })
       expect(res.json().error).toContain('Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers')
       expect(res.json().error).toContain('JPY')
+      expect(res.json()).not.toHaveProperty('connection')
+      expect(rows.size).toBe(0)
+      expect(leaks(res.body)).toBe(false)
+      expectMatchesSpec('POST', '/accounting/connections/{provider}/api-key', res.json(), '409')
+    })
+
+    it('#3017: a key that sees MORE THAN ONE company is refused (409 MULTI_COMPANY_KEY) — the user creates a key scoped to one company', async () => {
+      registerTestProvider(KEYED)
+      registerConnector(stubConnector('keyed'))
+      // The connector throws MultiCompanyKeyError when GET /api/v1/companies
+      // lists N > 1 companies; the flow does not translate it (it is not a
+      // ProviderError), so the route's mapping IS the behavior under test.
+      flowMocks.connectWithApiKey.mockRejectedValueOnce(new MultiCompanyKeyError(2))
+      const res = await authed('POST', '/accounting/connections/keyed/api-key', { apiKey: 'sk-keyed-multi' })
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error_code: 'MULTI_COMPANY_KEY' })
+      expect(res.json().error).toContain('2 companies')
+      expect(res.json().error).toContain('one company')
       expect(res.json()).not.toHaveProperty('connection')
       expect(rows.size).toBe(0)
       expect(leaks(res.body)).toBe(false)

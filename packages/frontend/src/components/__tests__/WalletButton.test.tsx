@@ -6,7 +6,7 @@ const PASSKEY_ADDRESS = '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2'
 const EOA_ADDRESS = '0x5555555555555555555555555555555555555555'
 const ACTIVE_ACCOUNT = {
   id: 'safe-1',
-  safe_address: '0x1111111111111111111111111111111111111111',
+  account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 100,
   name: 'Main account',
   is_default: true,
@@ -288,7 +288,7 @@ describe('WalletButton', () => {
           credential_id: 'credential-1',
           signer_address: PASSKEY_ADDRESS,
           chain_id: ACTIVE_ACCOUNT.chain_id,
-          safe_address: ACTIVE_ACCOUNT.safe_address,
+          account_address: ACTIVE_ACCOUNT.account_address,
           created_at: '2026-05-05T00:00:00.000Z',
         },
       ],

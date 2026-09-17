@@ -13,14 +13,14 @@ function json(body: unknown): Response {
 function agent(executionRail = 'legacy') {
   return {
     id: 'agent_1', name: 'Read agent', status: 'active',
-    safe_address: '0xsafe', delegate_address: '0xdelegate', chain_id: 8453,
+    account_address: '0xsafe', delegate_address: '0xdelegate', chain_id: 8453,
     execution_rail: executionRail,
   }
 }
 
 function allowance(remaining = '4960000') {
   return {
-    agent_id: 'agent_1', safe_address: '0xsafe', delegate_address: '0xdelegate', chain_id: 8453,
+    agent_id: 'agent_1', account_address: '0xsafe', delegate_address: '0xdelegate', chain_id: 8453,
     allowances: [{
       id: 'allowance_1', token_address: USDC, token_symbol: 'USDC', configured_amount: '5000000', reset_period_min: 1440,
       onchain: { amount: '5000000', spent: '40000', remaining, effective_spent: '40000', reset_time_min: 1440, last_reset_min: 0, nonce: 1, is_reset_pending: false },
@@ -124,7 +124,7 @@ describe('AccountReads', () => {
   it('verifies receipt bundles locally instead of trusting a server verification claim', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ receipt: {
       version: 'haven-receipt-1', paymentId: 'pay_1',
-      payment: { token: 'USDC', tokenAddress: USDC, amount: '1', amountSek: null, recipient: '0xmerchant', safe: '0xsafe', chainId: 8453, settledAt: null, resourceUrl: null },
+      payment: { token: 'USDC', tokenAddress: USDC, amount: '1', amountSek: null, recipient: '0xmerchant', account: '0xsafe', chainId: 8453, settledAt: null, resourceUrl: null },
       authorization: { delegate: '0xdelegate', signHash: '0xhash', signature: null },
       onChain: { txHash: null, chainId: 8453 },
     }, verification: { verified: true } })))

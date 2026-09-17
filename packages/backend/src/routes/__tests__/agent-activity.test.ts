@@ -30,7 +30,7 @@ function paymentRow(overrides: Record<string, unknown> = {}) {
     agent_id: 'agent-1',
     account_id: 'safe-base',
     account_address: SAFE_ADDRESS,
-    safe_name: 'Base wallet',
+    account_name: 'Base wallet',
     chain_id: 8453,
     token_symbol: 'USDC',
     token_address: TOKEN_ADDRESS,
@@ -145,15 +145,14 @@ describe('agent activity routes', () => {
       type: 'payment',
       account_id: 'safe-base',
       account_address: SAFE_ADDRESS,
-      safe_name: 'Base wallet',
+      account_name: 'Base wallet',
       chain_id: 8453,
     })
-    // #2907: request-level twin === old, not just the mapper's own unit
-    // test — mutation-proven by dropping the withActivityPaymentAccountAlias
-    // call at this emit site.
-    expect(body.activity[0].safe_id).toBe(body.activity[0].account_id)
-    expect(body.activity[0].safe_address).toBe(body.activity[0].account_address)
-    expect(body.activity[0].account_name).toBe(body.activity[0].safe_name)
+    // #2914 (naming epic #2906 phase 5, the contraction): the twin `#2907`
+    // dual-emitted is gone — one name only, and the old ones must be absent.
+    expect(body.activity[0].safe_id).toBeUndefined()
+    expect(body.activity[0].safe_address).toBeUndefined()
+    expect(body.activity[0].safe_name).toBeUndefined()
 
     const paymentSql = String(
       mockQuery.mock.calls.find(([sql]) => String(sql).includes('FROM payment_intents pi'))?.[0],
@@ -202,9 +201,9 @@ describe('agent activity routes', () => {
       account_address: SAFE_ADDRESS,
       chain_id: 8453,
     })
-    expect(body.activity[0].safe_id).toBe(body.activity[0].account_id)
-    expect(body.activity[0].safe_address).toBe(body.activity[0].account_address)
-    expect(body.activity[0].account_name).toBe(body.activity[0].safe_name)
+    expect(body.activity[0].safe_id).toBeUndefined()
+    expect(body.activity[0].safe_address).toBeUndefined()
+    expect(body.activity[0].safe_name).toBeUndefined()
     expect(mockQuery.mock.calls.some(([sql]) => /approval_requests/i.test(String(sql)))).toBe(false)
   })
 })

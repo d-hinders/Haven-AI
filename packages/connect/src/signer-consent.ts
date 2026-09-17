@@ -74,7 +74,7 @@ async function buildSignerConsentInput(signerPath: string): Promise<SignerConsen
   })
   return {
     delegateAddress: signer.delegateAddress,
-    safeAddress: credentials.accountAddress ?? credentials.safeAddress,
+    accountAddress: credentials.accountAddress,
     agentId: credentials.agentId,
     chainId: credentials.chainId,
     network: credentials.network,

@@ -19,18 +19,8 @@ import { readFile, stat } from 'node:fs/promises'
 export interface SignerCredentials {
   delegateKey: string
   agentId?: string
-  /**
-   * The Haven account (smart account) the agent spends from — #2908, the
-   * account-vocabulary name. Same value as `safeAddress`.
-   */
+  /** The Haven account (smart account) the agent spends from. */
   accountAddress?: string
-  /**
-   * @deprecated #2908 — same value as {@link SignerCredentials.accountAddress}.
-   * Removed from this shape in the release after the one carrying #2908
-   * (#2914). The credential-FILE keys it was read from are a different
-   * matter — see `readAccountAddressField`.
-   */
-  safeAddress?: string
   chainId?: number
   network?: string
   x402BindingSigner?: string
@@ -43,11 +33,11 @@ interface RawCredentialFile {
   delegateKey?: unknown
   agent_id?: unknown
   agentId?: unknown
-  /** #2908: what `@haven_ai/connect` writes from this release on. */
+  /** What `@haven_ai/connect` writes. */
   account_address?: unknown
-  /** Pre-#2908 spelling — read PERMANENTLY, see `readAccountAddressField`. */
+  /** Pre-#2908 spelling — read PERMANENTLY (a credential file never rewrites itself), see `readAccountAddressField`. */
   safe_address?: unknown
-  /** Pre-#2908 spelling — read PERMANENTLY, see `readAccountAddressField`. */
+  /** Pre-#2908 spelling — read PERMANENTLY (a credential file never rewrites itself), see `readAccountAddressField`. */
   safeAddress?: unknown
   chain_id?: unknown
   chainId?: unknown
@@ -79,7 +69,6 @@ export async function loadSignerCredentials(
       delegateKey: envKey,
       agentId: stringField(process.env.HAVEN_AGENT_ID),
       accountAddress,
-      safeAddress: accountAddress,
       chainId: chainIdField(process.env.HAVEN_CHAIN_ID, 'HAVEN_CHAIN_ID'),
       network: stringField(process.env.HAVEN_NETWORK),
       x402BindingSigner: stringField(process.env.HAVEN_X402_BINDING_SIGNER),
@@ -121,7 +110,6 @@ async function loadFromFile(path: string): Promise<SignerCredentials> {
     delegateKey,
     agentId: stringField(raw.agent_id ?? raw.agentId),
     accountAddress,
-    safeAddress: accountAddress,
     chainId: chainIdField(raw.chain_id ?? raw.chainId, 'chain_id'),
     network: stringField(raw.network),
     x402BindingSigner: stringField(
@@ -153,14 +141,49 @@ export function readAccountAddressField(raw: Pick<RawCredentialFile, 'account_ad
 }
 
 /**
- * The account address off the process environment, new name first:
- * `HAVEN_ACCOUNT_ADDRESS` (the survivor, decided on #2906) then the two
- * names the dashboard handoff emitted before #2908 — `HAVEN_WALLET_ADDRESS`
- * and `HAVEN_SAFE_ADDRESS`. Unlike the file fallbacks these two ARE
- * window-scoped: they are dropped at #2914, one release after this one.
+ * The account address off the process environment: `HAVEN_ACCOUNT_ADDRESS`
+ * (the survivor, decided on #2906). The two names the dashboard handoff
+ * emitted before #2908 — `HAVEN_WALLET_ADDRESS` and `HAVEN_SAFE_ADDRESS` —
+ * were window-scoped (unlike the credential-FILE fallbacks) and are retired
+ * as of #2914.
  */
 export function readAccountAddressEnv(env: NodeJS.ProcessEnv): string | undefined {
-  return stringField(env.HAVEN_ACCOUNT_ADDRESS ?? env.HAVEN_WALLET_ADDRESS ?? env.HAVEN_SAFE_ADDRESS)
+  const current = stringField(env.HAVEN_ACCOUNT_ADDRESS)
+
+  // Retired, but REFUSED rather than ignored — the same rule the backend
+  // applies to retired request names, for the same reason and with more at
+  // stake. Silently dropping these would not merely leave the address unset:
+  // `accountAddress` is what `haven_sign_sweep_delegate` passes as
+  // `expectedSafe`, and an undefined `expectedSafe` SKIPS the check that a
+  // sweep's `to` matches the account in the local credential (see
+  // `core.ts`). An operator who upgrades without touching env would lose a
+  // money-path cross-check and get no signal at all.
+  //
+  // The verdict keys on RELIANCE, not presence, so a handoff that still
+  // exports both names alongside the new one keeps working:
+  //   retired alone      -> throw
+  //   both, same value   -> accept the new one
+  //   both, disagreeing  -> throw
+  for (const name of ['HAVEN_WALLET_ADDRESS', 'HAVEN_SAFE_ADDRESS'] as const) {
+    const retired = stringField(env[name])
+    if (!retired) continue
+    if (!current) {
+      throw new Error(
+        `${name} is retired (#2906) — Haven accounts are addressed as accounts, not Safes. ` +
+          'Set HAVEN_ACCOUNT_ADDRESS to the same value. Refusing rather than ignoring it, ' +
+          'because an unset account address silently skips the sweep-destination check.',
+      )
+    }
+    if (retired.toLowerCase() !== current.toLowerCase()) {
+      throw new Error(
+        `${name} and HAVEN_ACCOUNT_ADDRESS were both set to different addresses. ` +
+          'Remove the retired name, or make them match — picking one silently would hide ' +
+          'the mismatch.',
+      )
+    }
+  }
+
+  return current
 }
 
 function stringField(value: unknown): string | undefined {

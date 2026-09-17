@@ -95,7 +95,7 @@ export default function AccountDetailClient() {
 
   // Find this Safe from user's list
   const safe = user?.accounts?.find((s) => s.id === accountId)
-  const accountAddress = safe?.safe_address ?? null
+  const accountAddress = safe?.account_address ?? null
   const chainId = safe?.chain_id ?? DEFAULT_CHAIN_ID
 
   // Keep the active Safe in sync with the route. Runs as an effect so we
@@ -109,13 +109,13 @@ export default function AccountDetailClient() {
   const accountNamesByAddress = new Map<string, string>()
   for (const account of user?.accounts ?? []) {
     accountNamesByAddress.set(
-      `${account.safe_address.toLowerCase()}:${account.chain_id}`,
+      `${account.account_address.toLowerCase()}:${account.chain_id}`,
       account.name,
     )
   }
 
   // Build linked-agent list
-  const safeAgents = agents.filter((a) => a.safe_id === accountId)
+  const linkedAgents = agents.filter((a) => a.account_id === accountId)
 
 
   // #2413: the deposit gate was about retired accounts, which no longer
@@ -438,7 +438,7 @@ export default function AccountDetailClient() {
               ))}
             </Card.Section>
           </div>
-        ) : agentsError && safeAgents.length > 0 ? (
+        ) : agentsError && linkedAgents.length > 0 ? (
           <>
             <div className="border-t border-warning/30 px-5 py-3 text-sm text-[var(--v2-ink-2)]">
               <div className="flex flex-wrap items-center justify-between gap-3" role="alert">
@@ -447,7 +447,7 @@ export default function AccountDetailClient() {
               </div>
             </div>
             <Card.Section divided>
-              {safeAgents.map((agent) => {
+              {linkedAgents.map((agent) => {
                 const status = agentStatusPresentation(agent.status)
                 return (
                   <Row
@@ -476,9 +476,9 @@ export default function AccountDetailClient() {
               action={<Button variant="ghost" size="sm" onClick={() => refetchAgents()}>Try again</Button>}
             />
           </div>
-        ) : safeAgents.length > 0 ? (
+        ) : linkedAgents.length > 0 ? (
           <Card.Section divided>
-            {safeAgents.map((agent) => {
+            {linkedAgents.map((agent) => {
               const status = agentStatusPresentation(agent.status)
               return (
                 <Row
@@ -514,7 +514,7 @@ export default function AccountDetailClient() {
       {/* #1089: backup & recovery is an account capability, not an agent one —
           it works from the moment the account exists, with no agent required. */}
       <AccountSignersCard
-        accountAddress={safe.safe_address}
+        accountAddress={safe.account_address}
         chainId={chainId}
         userEmail={user?.email ?? ''}
       />

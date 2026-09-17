@@ -28,10 +28,8 @@ function tx(hash: string, accountId: string): AggregatedTransaction {
     isError: false,
     chainId: 8453,
     accountId,
-    safeId: accountId,
     accountAddress: '0x1111111111111111111111111111111111111111',
-    safeAddress: '0x1111111111111111111111111111111111111111',
-    safeName: 'Base wallet',
+    accountName: 'Base wallet',
   }
 }
 
@@ -43,7 +41,7 @@ function response(transactions: AggregatedTransaction[]): TransactionsFeedRespon
     limit: 25,
     hasMore: false,
     partialFailure: false,
-    failedSafeIds: [],
+    failedAccountIds: [],
     truncated: false,
   }
 }

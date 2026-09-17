@@ -43,7 +43,7 @@ function paymentRow(merchant: string) {
     chainId: 8453,
     accountId: 'safe-main',
     accountAddress: testSafeAddress,
-    safeName: 'Operations',
+    accountName: 'Operations',
     source: 'x402',
   }
 }

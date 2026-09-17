@@ -210,7 +210,7 @@ Approving the budget stays with the human, in the browser, every time.
 Prints the funding instruction a human acts on: what to send (each token's
 documented minimum-useful amount), to which address, on which chain, plus the
 explorer link and a faucet link on testnets. It reads
-`GET /user/safes/:safeId/funding` — the same facts the dashboard's funding
+`GET /user/accounts/:accountId/funding` — the same facts the dashboard's funding
 card shows — and composes nothing locally, so the printed sentence and the
 dashboard can never disagree about the amount.
 

@@ -21,10 +21,10 @@ export default async function portfolioRoutes(
 ): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  app.get<{ Params: { safeAddress: string }; Querystring: { chain_id?: string } }>(
-    '/:safeAddress',
+  app.get<{ Params: { accountAddress: string }; Querystring: { chain_id?: string } }>(
+    '/:accountAddress',
     async (request, reply) => {
-      const { safeAddress: accountAddress } = request.params
+      const { accountAddress } = request.params
       const requestedChainId = parseChainId(request.query.chain_id)
       const { sub } = request.user as { sub: string }
 

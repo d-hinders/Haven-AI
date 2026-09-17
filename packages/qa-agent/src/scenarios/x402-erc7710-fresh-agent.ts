@@ -115,7 +115,7 @@ export const x402Erc7710FreshAgent: Scenario = {
     // ── 2. Fund the throwaway treasury from the standing identity ────────────
     const funding = await payViaDelegation(
       apiUrl, ctx.cfg.delegationAgentApiKey, ctx.cfg.delegationDelegateKey,
-      identity.safeAddress, FUND_HUMAN,
+      identity.accountAddress, FUND_HUMAN,
     )
     if (!funding.ok) return fail(`funding the throwaway treasury failed: ${funding.error}`)
 
@@ -142,7 +142,7 @@ export const x402Erc7710FreshAgent: Scenario = {
     }
 
     const [treasuryBefore, merchantBefore, delegateBefore] = (await Promise.all([
-      usdc.balanceOf(identity.safeAddress),
+      usdc.balanceOf(identity.accountAddress),
       usdc.balanceOf(merchant),
       usdc.balanceOf(identity.delegate.address),
     ])) as [bigint, bigint, bigint]
@@ -243,7 +243,7 @@ export const x402Erc7710FreshAgent: Scenario = {
     let merchantAfter = merchantBefore
     for (;;) {
       ;[treasuryAfter, merchantAfter] = (await Promise.all([
-        usdc.balanceOf(identity.safeAddress),
+        usdc.balanceOf(identity.accountAddress),
         usdc.balanceOf(merchant),
       ])) as [bigint, bigint]
       if (treasuryAfter !== treasuryBefore || Date.now() >= deadline) break

@@ -93,6 +93,7 @@ import {
   insertCatalogSubmission,
 } from '../infra/repositories/catalog-submissions.js'
 import {
+  normalizeMerchantFields,
   ownershipInstructions,
   type OwnershipClaim,
 } from '../modules/catalog/index.js'
@@ -110,7 +111,12 @@ interface SubmitBody {
   resource_url?: unknown
   /** Honeypot. Presence + non-empty → bot, dropped with a fake success. */
   website?: unknown
+  /** #3078: the seller's display name and public site — real fields, bounded; `website` above stays the trap. */
+  merchant_name?: unknown
+  merchant_website?: unknown
 }
+
+
 
 /**
  * Ownership-proof instructions for a row, or undefined when the deployment
@@ -311,6 +317,10 @@ export default async function catalogSubmissionRoutes(
       if ('error' in target) {
         return reply.code(400).send({ error: target.error })
       }
+      const merchantFields = normalizeMerchantFields(body, MAX_RESOURCE_URL_LENGTH)
+      if ('error' in merchantFields) {
+        return reply.code(400).send({ error: merchantFields.error })
+      }
 
       // Dedupe first (AC: same host while pending/active → same id, a no-op),
       // then the queue cap, then the insert. The insert's ON CONFLICT keeps
@@ -335,6 +345,8 @@ export default async function catalogSubmissionRoutes(
         submitter_ip: request.ip,
         verify_token: randomBytes(24).toString('hex'),
         queueCap: QUEUE_CAP,
+        merchant_name: merchantFields.merchant_name,
+        merchant_website: merchantFields.merchant_website,
       })
       // The ONLY response that carries a verify_token: this caller just minted
       // it by creating the row. Ownership-proof instructions come from

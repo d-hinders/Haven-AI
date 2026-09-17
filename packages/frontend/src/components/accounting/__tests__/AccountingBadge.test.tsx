@@ -49,9 +49,7 @@ function tx(overrides: Partial<AggregatedTransaction> = {}): AggregatedTransacti
     chainId: 8453,
     accountId: 'safe-1',
     accountAddress: '0x4444444444444444444444444444444444444444',
-    safeId: 'safe-1',
-    safeAddress: '0x4444444444444444444444444444444444444444',
-    safeName: 'Main',
+    accountName: 'Main',
     source: 'x402',
     agentName: 'Research agent',
     paymentId: 'pay-1',
@@ -82,6 +80,8 @@ describe('AccountingBadge', () => {
     renderWithLocale(<AccountingBadge accounting={accounting({ provider: 'visma' })} />)
     expect(screen.getByRole('link')).toHaveTextContent('In Visma')
     expect(providerDisplayName('fortnox')).toBe('Fortnox')
+    // #3017: the second live provider is spelled from the map, not capitalised ad hoc.
+    expect(providerDisplayName('accounted')).toBe('Accounted')
     expect(providerDisplayName('bokio')).toBe('Bokio')
   })
 

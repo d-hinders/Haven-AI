@@ -73,7 +73,7 @@ function SafeCard({
     totalEur,
     breakdown,
     loading: portfolioLoading,
-  } = usePortfolio(safe.safe_address, { chainId: safe.chain_id })
+  } = usePortfolio(safe.account_address, { chainId: safe.chain_id })
   const fiatTotal = currency === 'USD' ? totalUsd : totalEur
 
   // The breakdown comes back sorted by value, but make it explicit so we never
@@ -376,16 +376,16 @@ export default function AccountsOverviewClient() {
   const { agents } = useAgents()
   const { currency } = usePreferences()
 
-  // Count agents per Safe
-  const agentCountBySafe = new Map<string, number>()
+  // Count agents per account
+  const agentCountByAccount = new Map<string, number>()
   for (const agent of agents) {
-    if (agent.safe_id) {
-      agentCountBySafe.set(agent.safe_id, (agentCountBySafe.get(agent.safe_id) ?? 0) + 1)
+    if (agent.account_id) {
+      agentCountByAccount.set(agent.account_id, (agentCountByAccount.get(agent.account_id) ?? 0) + 1)
     }
   }
 
-  // Count orphaned agents (no safe_id)
-  const orphanedAgents = agents.filter((a) => !a.safe_id && a.status === 'active')
+  // Count orphaned agents (no account_id)
+  const orphanedAgents = agents.filter((a) => !a.account_id && a.status === 'active')
 
   return (
     <div className="max-w-5xl">
@@ -434,7 +434,7 @@ export default function AccountsOverviewClient() {
               safe={safe}
               isActive={activeAccount?.id === safe.id}
               showActiveBadge={activeAccount?.id === safe.id && safes.length > 1}
-              agentCount={agentCountBySafe.get(safe.id) ?? 0}
+              agentCount={agentCountByAccount.get(safe.id) ?? 0}
               showDefaultBadge={!!safe.is_default && safes.length > 1}
               currency={currency}
               staggerIndex={index}

@@ -128,16 +128,24 @@ export function useTransactionsFeed(
         )
         if (requestId !== requestIdRef.current) return
 
-        setTransactions((prev) =>
-          append
-            ? appendUniqueTransactions(prev, data.transactions)
-            : data.transactions,
-        )
-        setTotal(data.total)
-        setHasMore(data.hasMore)
-        setPartialFailure(data.partialFailure)
-        setFailedAccountIds(data.failedAccountIds ?? data.failedSafeIds)
-        setTruncated(data.truncated)
+        // Every key defaulted, not just the arrays. `api.get` does no response
+        // validation, so a missing key stores `undefined` and the next render
+        // takes the WHOLE route down through the shell's ErrorBoundary — a
+        // blank screen, not a degraded one. #1075 was this (`activity`), #2295
+        // repeated it (`entries`), and it repeated a THIRD time here: the
+        // #2914 follow-up's first draft guarded `useTransactionFilters` while
+        // `failedAccountIds` three lines away stayed bare, so
+        // `SCREENSHOT_FIXTURE=empty` on /transactions still rendered the error
+        // card. Design review caught it by looking at the render rather than
+        // at the diff. Defaulting the whole destructure is the fix that does
+        // not depend on anyone noticing the next one.
+        const rows = data.transactions ?? []
+        setTransactions((prev) => (append ? appendUniqueTransactions(prev, rows) : rows))
+        setTotal(data.total ?? 0)
+        setHasMore(data.hasMore ?? false)
+        setPartialFailure(data.partialFailure ?? false)
+        setFailedAccountIds(data.failedAccountIds ?? [])
+        setTruncated(data.truncated ?? false)
         if (silent) setError(null)
       } catch (err) {
         if (requestId !== requestIdRef.current) return

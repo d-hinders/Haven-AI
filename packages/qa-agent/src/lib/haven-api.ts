@@ -269,7 +269,7 @@ export class HavenApi {
 
   /** This agent's own identity, including the account holding the funds. */
   getAgent(): Promise<
-    ApiResponse<{ id?: string; safe_address?: string; delegate_address?: string; chain_id?: number }>
+    ApiResponse<{ id?: string; account_address?: string; delegate_address?: string; chain_id?: number }>
   > {
     return this.call('GET', '/machine-payments/agent')
   }

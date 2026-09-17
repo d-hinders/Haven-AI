@@ -55,7 +55,7 @@ function installFakeApi(opts: FakeOpts) {
     if (path === '/auth/signup') return json(201, { token: 'jwt-throwaway' })
     if (path === '/accounts/hybrid') return json(201, {})
     if (path === '/auth/me') {
-      return json(200, { safes: [{ id: 'safe-t', safe_address: '0x' + 'ab'.repeat(20), account_type: 'delegator_hybrid' }] })
+      return json(200, { accounts: [{ id: 'safe-t', account_address: '0x' + 'ab'.repeat(20), account_type: 'delegator_hybrid' }] })
     }
     if (path === '/agents' && init?.method === 'POST') {
       return json(201, { id: 'agent-t', api_key: 'sk_agent_throwaway' })
@@ -77,7 +77,7 @@ function installFakeApi(opts: FakeOpts) {
       revoked = true
       return json(200, { revoked: true })
     }
-    if (path === '/machine-payments/agent') return json(200, { safe_address: '0x' + 'cd'.repeat(20) })
+    if (path === '/machine-payments/agent') return json(200, { account_address: '0x' + 'cd'.repeat(20) })
     if (path === '/payments' && init?.method === 'POST') {
       payments += 1
       if (revoked) return json(opts.postRevokeAuthorize.status, opts.postRevokeAuthorize.body)

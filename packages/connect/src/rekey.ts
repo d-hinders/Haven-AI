@@ -222,10 +222,10 @@ export async function finishRekey(
     apiKey: options.newApiKey,
     delegateKey: pending.new_delegate_key,
     delegateAddress: pending.new_delegate_address,
-    // #2908: the stored value (already new-name-first) wins; the hosted
-    // identity's `account_address` twin before its deprecated `safe_address`.
-    accountAddress:
-      stored.accountAddress ?? identity.account_address ?? identity.safe_address ?? undefined,
+    // The stored value (already new-name-first, from the credential-FILE
+    // permanent fallback) wins; the hosted identity's `account_address` is a
+    // LIVE server read, which as of #2914 emits only that name.
+    accountAddress: stored.accountAddress ?? identity.account_address ?? undefined,
     chainId: stored.chainId ?? identity.chain_id ?? undefined,
     network: stored.network,
     agentBudget: stored.agentBudget,

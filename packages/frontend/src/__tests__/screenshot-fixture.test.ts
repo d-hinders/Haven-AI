@@ -101,7 +101,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
 
   it('distinguishes the three /transactions shapes', () => {
     // The aggregated feed (useTransactionsFeed):
-    expect(fx('/transactions?offset=0&limit=25')).toMatchObject({ hasMore: false, failedSafeIds: [] })
+    expect(fx('/transactions?offset=0&limit=25')).toMatchObject({ hasMore: false, failedAccountIds: [] })
     // Filter options (useTransactionFilters) — must NOT fall into the paginated branch:
     expect(fx('/transactions/filters')).toMatchObject({
       safes: expect.any(Array), agents: expect.any(Array), tokens: expect.any(Array),
@@ -117,8 +117,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     // a component nobody renders cannot regression-lock anything.
     // SafeCard: timeAgo(safe.created_at) — served via /auth/me + /user/safes in the
     // script itself; asserted here through the agents' safe linkage staying non-null.
-    const agents = fx('/agents') as { agents: { safe_id: string }[] }
-    expect(agents.agents.every((a) => a.safe_id)).toBe(true)
+    const agents = fx('/agents') as { agents: { account_id: string }[] }
+    expect(agents.agents.every((a) => a.account_id)).toBe(true)
   })
 
   it('SCREENSHOT_FIXTURE=empty falls through to the generic empty shape', () => {
@@ -171,7 +171,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // this had — "one safe cannot disagree" — is gone with it. What remains
       // falsifiable is that the fixture never seeds a second default, which is
       // what `CLEAR_DEFAULT_SAFES_FOR_USER_SQL` guarantees in production.
-      const safes = (FIXTURE_USER as unknown as { safes: { is_default: boolean; account_type: string }[] }).safes
+      const safes = (FIXTURE_USER as unknown as { accounts: { is_default: boolean; account_type: string }[] }).accounts
       expect(safes.filter((s) => s.is_default)).toHaveLength(1)
       expect(safes.every((s) => s.account_type === 'delegator_hybrid')).toBe(true)
     })
@@ -520,8 +520,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         // does not have, i.e. a shape the frontend could not have been written
         // against.
         const expected = [
-          'chain_id', 'delegate_address', 'eth', 'eth_atomic',
-          'safe_address', 'sweep_min_usdc', 'usdc', 'usdc_address', 'usdc_atomic',
+          'account_address', 'chain_id', 'delegate_address', 'eth', 'eth_atomic',
+          'sweep_min_usdc', 'usdc', 'usdc_address', 'usdc_atomic',
         ]
         const served = agentIds()
           .map((id) => [id, balanceFor(id)] as const)
@@ -584,8 +584,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         // `haven-reviewer`'s should-fix, applied, and it is the shape #2194 is
         // about one field further out: `chain_id: 1` or another agent's
         // `delegate_address` here is union-legal, path-impossible (the route
-        // echoes `agent.delegate_address`, `agent.safe_address` and
-        // `agent.safe_chain_id ?? DEFAULT_CHAIN_ID` — `routes/agents.ts:143,159-162`
+        // echoes `agent.delegate_address`, `agent.account_address` and
+        // `agent.account_chain_id ?? DEFAULT_CHAIN_ID` — `routes/agents.ts:143,159-162`
         // — it cannot answer for a different agent or a different chain), and
         // the reviewer's own mutations of both left all 77 tests green.
         //
@@ -599,8 +599,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         const agents = FIXTURE_AGENTS as {
           id: string
           delegate_address: string | null
-          safe_address: string
-          safe_chain_id: number
+          account_address: string
+          account_chain_id: number
         }[]
         const usdcAddress = (fixtureFor('/agents/agent-research/delegate-balance') as {
           usdc_address: string
@@ -616,8 +616,8 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           if (body === null || body instanceof ScenarioHttpError) continue
           checked += 1
           expect([agent.id, body.delegate_address]).toEqual([agent.id, agent.delegate_address])
-          expect([agent.id, body.safe_address]).toEqual([agent.id, agent.safe_address])
-          expect([agent.id, body.chain_id]).toEqual([agent.id, agent.safe_chain_id])
+          expect([agent.id, body.account_address]).toEqual([agent.id, agent.account_address])
+          expect([agent.id, body.chain_id]).toEqual([agent.id, agent.account_chain_id])
           expect([agent.id, body.usdc_address]).toEqual([agent.id, usdcAddress])
         }
         expect(checked).toBeGreaterThan(0)
@@ -1205,15 +1205,18 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // exists to prevent.
       const unresolved = scenarioWithApi('add-funds-unresolved-chain')
       const me = unresolved.api('/auth/me', 'GET') as { accounts: Record<string, unknown>[] }
-      const list = unresolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
-      // The scenario sets both envelope keys (`accounts` authoritative, the
-      // deprecated `safes` twin) to the same array — assert both halves.
-      for (const accounts of [me.accounts, list.safes]) {
+      // #2914: asserted once, off `/auth/me`. The harness used to answer
+      // `/user/safes` beside it and this loop checked both — but the live
+      // server answers 410 there and no in-app caller reaches it, so the
+      // second half was a route double asserting agreement with itself. A
+      // fixture for a path the product cannot call is the `frontend.md`
+      // §"reachable state" hazard, so the double is gone rather than aligned.
+      for (const accounts of [me.accounts]) {
         expect(accounts).toHaveLength(1)
         expect(accounts[0]).not.toHaveProperty('chain_id')
         // Still a real, addressable safe — the hazard is a MISSING chain beside
         // a PRESENT address, so an empty safe would prove something else.
-        expect(accounts[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(accounts[0].account_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
         expect(accounts[0].id).toBe(FIXTURE_ACCOUNT_ID)
         // #2202: the rail is named, and it matches the resolved twin's — the
         // pair is evidence about `chain_id` only while `chain_id` is the one
@@ -1242,10 +1245,11 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // both halves of the pair, which is what makes `chain_id` the sole
       // variable.
       expect(me.accounts[0].account_type).toBe('legacy_safe')
-      // Both safe endpoints must agree — a fixture where one says 84532 and the
-      // other says nothing is a trap for the next scenario that reads the other.
-      const list = resolved.api('/user/safes', 'GET') as { safes: Record<string, unknown>[] }
-      expect(list.safes[0].chain_id).toBe(84532)
+      // #2914: the `/user/safes` route double this used to cross-check against
+      // is gone (see the #1844 unresolved twin above) — `/auth/me` is the one
+      // endpoint the product reads the account list from, so it is the one
+      // asserted.
+      expect(me.accounts[0].chain_id).toBe(84532)
       expect(resolved.api('/agents', 'GET')).toBeUndefined()
     })
 
@@ -1257,21 +1261,21 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       const resolved = scenarioWithApi('receive-funds')
       const unresolved = scenarioWithApi('receive-funds-unresolved-chain')
 
-      for (const endpoint of ['/auth/me', '/user/safes']) {
-        // /auth/me serves the `accounts` envelope; /user/safes keeps the
-        // `safes` envelope until #2914 retires it. The scenario sets both
-        // keys on /auth/me, so the pair asserts the same array either way.
-        const r = resolved.api(endpoint, 'GET') as Record<string, Record<string, unknown>[] | undefined>
-        const u = unresolved.api(endpoint, 'GET') as Record<string, Record<string, unknown>[] | undefined>
-        const rList = endpoint === '/auth/me' ? r.accounts : r.safes
-        const uList = endpoint === '/auth/me' ? u.accounts : u.safes
+      // #2914: one endpoint, not two — `/auth/me` is where the product reads
+      // the account list. The `/user/safes` half of this loop was a harness
+      // double for a path that now answers 410 and that no caller reaches.
+      {
+        const r = resolved.api('/auth/me', 'GET') as Record<string, Record<string, unknown>[] | undefined>
+        const u = unresolved.api('/auth/me', 'GET') as Record<string, Record<string, unknown>[] | undefined>
+        const rList = r.accounts
+        const uList = u.accounts
         expect(rList).toHaveLength(1)
         expect(uList).toHaveLength(1)
         expect(rList?.[0].chain_id).toBe(84532)
         expect(uList?.[0]).not.toHaveProperty('chain_id')
         // A MISSING chain beside a PRESENT address is the hazard; an empty safe
         // would prove something else entirely.
-        expect(uList?.[0].safe_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
+        expect(uList?.[0].account_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
         expect(uList?.[0].id).toBe(FIXTURE_ACCOUNT_ID)
         // The rail override is the ONLY other difference from the shared
         // fixture, and both halves carry it, so `chain_id` is the sole variable.

@@ -37,7 +37,7 @@ export const AgentPaymentNextAction = {
   /** #1307: retry the SAME tool call with explicit context fields the server could not rehydrate. */
   RetryWithExplicitContext: 'retry_with_explicit_context',
   PaymentWindowExpired: 'payment_window_expired',
-  FundSafeOrRaiseAllowance: 'fund_safe_or_raise_allowance',
+  FundAccountOrRaiseAllowance: 'fund_account_or_raise_allowance',
   SweepStrandedFunds: 'sweep_stranded_funds',
   /** #2970: a `submitted` erc7710 x402 intent past its settlement window with no verified evidence. */
   AwaitingSettlementEvidence: 'awaiting_settlement_evidence',
@@ -87,7 +87,7 @@ export const AgentPaymentNextActionDescriptions: Record<AgentPaymentNextAction, 
   [AgentPaymentNextAction.RequestAgainIfUserStillWantsIt]: 'Ask again only if the user still wants the payment after expiry.',
   [AgentPaymentNextAction.PaymentWindowExpired]:
     'The x402 funding/quote window expired. Re-quote with the same idempotency key before asking the signer to build a merchant payment header again.',
-  [AgentPaymentNextAction.FundSafeOrRaiseAllowance]:
+  [AgentPaymentNextAction.FundAccountOrRaiseAllowance]:
     'Stop and tell the user that the account needs to be funded or the agent budget raised before the payment can succeed.',
   [AgentPaymentNextAction.RetryWithExplicitContext]:
     'Retry the same tool call, this time passing merchant_url, tool_name, arguments, and mcp_transport explicitly — the server had no stored context to rehydrate for this payment id.',

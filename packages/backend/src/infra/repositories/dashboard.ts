@@ -9,7 +9,7 @@
  * Why its own file rather than spread across `smart-accounts.ts` / `agents.ts`:
  * these are dashboard PROJECTIONS, not the canonical shape of those
  * aggregates. The Safe list here drops `created_at` and the agent list is a
- * preview join carrying `safe_name`/`safe_chain_id` — folding them into the
+ * preview join carrying `account_name`/`account_chain_id` — folding them into the
  * owning repositories would either widen those statements for every caller or
  * leave near-duplicates sitting next to each other. #999 recorded the specific
  * version of that trap: `agents.test.ts` pins every `smart_accounts` JOIN in
@@ -50,8 +50,8 @@ export interface DashboardAgentRow {
   name: string
   status: string
   account_id: string | null
-  safe_name: string | null
-  safe_chain_id: number | null
+  account_name: string | null
+  account_chain_id: number | null
   account_type: string | null
 }
 
@@ -88,7 +88,7 @@ export const LIST_DASHBOARD_ACCOUNTS_SQL = `SELECT id, account_address, chain_id
          WHERE user_id = $1 AND account_type = 'delegator_hybrid'
          ORDER BY created_at ASC`
 
-export const LIST_DASHBOARD_AGENTS_SQL = `SELECT a.id, a.name, a.status, a.account_id, us.name AS safe_name, us.chain_id AS safe_chain_id,
+export const LIST_DASHBOARD_AGENTS_SQL = `SELECT a.id, a.name, a.status, a.account_id, us.name AS account_name, us.chain_id AS account_chain_id,
                 us.account_type
          FROM agents a
          LEFT JOIN smart_accounts us ON us.id = a.account_id

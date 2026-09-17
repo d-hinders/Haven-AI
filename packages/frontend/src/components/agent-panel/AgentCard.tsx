@@ -153,9 +153,9 @@ export function AgentCard({
                 </span>
               ) : null}
             </div>
-            {agent.safe_name && (
+            {agent.account_name && (
               <p className="text-xs text-[var(--v2-ink-2)] mt-0.5">
-                <span className="text-[var(--v2-ink-3)]">Account:</span> {agent.safe_name}
+                <span className="text-[var(--v2-ink-3)]">Account:</span> {agent.account_name}
               </p>
             )}
             {/*

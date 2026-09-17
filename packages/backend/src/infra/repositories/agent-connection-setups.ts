@@ -63,8 +63,8 @@ export interface SetupRow {
   tx_hash: string | null
   failure_reason: string | null
   account_address: string
-  safe_name: string
-  safe_chain_id: number
+  account_name: string
+  account_chain_id: number
   /** 'delegator_hybrid' = delegation rail (#1073); 'safe' = legacy AllowanceModule. */
   account_type: string | null
   /** Passport opt-in recorded at setup creation, acted on at /register (#1072). */
@@ -115,7 +115,7 @@ function setupSelectSql(where: string): string {
                  s.api_key_prefix, s.connector_version, s.connector_context,
                  s.install_status, s.approval_status, s.account_tx_hash, s.tx_hash,
                  s.failure_reason, s.issue_passport, s.source, s.via,
-                 us.account_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
+                 us.account_address, us.name AS account_name, us.chain_id AS account_chain_id,
                  us.account_type
           FROM agent_connection_setups s
           JOIN smart_accounts us ON us.id = s.account_id
@@ -148,7 +148,7 @@ export const FIND_SETUP_BY_AGENT_API_KEY_SQL = `SELECT s.id, s.user_id, s.agent_
             s.api_key_prefix, s.connector_version, s.connector_context,
             s.install_status, s.approval_status, s.account_tx_hash, s.tx_hash,
             s.failure_reason,
-            us.account_address, us.name AS safe_name, us.chain_id AS safe_chain_id
+            us.account_address, us.name AS account_name, us.chain_id AS account_chain_id
      FROM agent_connection_setups s
      JOIN smart_accounts us ON us.id = s.account_id
      JOIN agents a ON a.id = s.agent_id

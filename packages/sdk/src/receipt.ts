@@ -25,18 +25,13 @@ export interface PaymentReceipt {
     amount: string
     amountSek: string | null
     recipient: string
-    /** @deprecated since #2907 — read `account`; removed in #2914 (the release after the naming window). Same value as `account`. */
-    safe: string
+    /** The payer's smart-account address. */
+    account: string
     /**
-     * The payer's smart-account address (#2907 twin of `safe`). Optional for
-     * the window: a server from before the twin emits `safe` only.
-     */
-    account?: string
-    /**
-     * #2960: one party vocabulary for "who paid", additive alongside `safe`/
-     * `account` above (which are `parties.treasury_account` only). Optional
-     * for the window: a server from before #2960 emits neither. Ignored by
-     * `verifyPaymentReceipt`, which reads only `authorization`.
+     * #2960: one party vocabulary for "who paid", additive alongside `account`
+     * above (which is `parties.treasury_account` only). Optional: a server
+     * from before #2960 emits neither. Ignored by `verifyPaymentReceipt`,
+     * which reads only `authorization`.
      */
     parties?: RawPaymentParties
     chainId: number

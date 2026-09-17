@@ -297,7 +297,7 @@ describe('Haven MCP tool handlers', () => {
           payment_id: 'x402-pay-1',
           status: 'pending_signature',
           chain_id: 8453,
-          safe_address: safeAddress,
+          account_address: safeAddress,
           token: 'USDC',
           amount: '0.01',
           to: delegateAddress,
@@ -307,7 +307,7 @@ describe('Haven MCP tool handlers', () => {
             signature_scheme: 'eip712_userop',
             typed_data: userOpTypedData,
             components: {
-              safe: safeAddress,
+              payer_account: safeAddress,
               token: x402PaymentRequired.accepts[0].asset,
               to: delegateAddress,
               amount: x402PaymentRequired.accepts[0].amount,
@@ -399,7 +399,7 @@ describe('Haven MCP tool handlers', () => {
           payment_id: 'x402-one-shot-1',
           status: 'pending_signature',
           chain_id: 8453,
-          safe_address: safeAddress,
+          account_address: safeAddress,
           token: 'USDC',
           amount: '0.01',
           to: delegateAddress,
@@ -409,7 +409,7 @@ describe('Haven MCP tool handlers', () => {
             signature_scheme: 'eip712_userop',
             typed_data: userOpTypedData,
             components: {
-              safe: safeAddress,
+              payer_account: safeAddress,
               token: x402PaymentRequired.accepts[0].asset,
               to: delegateAddress,
               amount: x402PaymentRequired.accepts[0].amount,
@@ -640,7 +640,7 @@ describe('Haven MCP tool handlers', () => {
           payment_id: 'pay-x402-1',
           status: 'pending_signature',
           chain_id: 8453,
-          safe_address: safeAddress,
+          account_address: safeAddress,
           token: 'USDC',
           amount: '0.01',
           to: delegateAddress,
@@ -650,7 +650,7 @@ describe('Haven MCP tool handlers', () => {
             signature_scheme: 'eip712_userop',
             typed_data: userOpTypedData,
             components: {
-              safe: safeAddress,
+              payer_account: safeAddress,
               token: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
               to: delegateAddress,
               amount: '10000',
@@ -801,7 +801,7 @@ describe('Haven MCP tool handlers', () => {
             '= 0.005 USDC, short by 0.015. Fund the Safe or raise the agent allowance and retry.',
           error_code: 'insufficient_funds',
           phase: 'insufficient_funds',
-          next_action: 'fund_safe_or_raise_allowance',
+          next_action: 'fund_account_or_raise_allowance',
           rail: 'x402',
           chain_id: 8453,
           token: 'USDC',
@@ -835,7 +835,7 @@ describe('Haven MCP tool handlers', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       // The two machine-readable fields the agent should branch on.
-      expect(result.nextAction).toBe('fund_safe_or_raise_allowance')
+      expect(result.nextAction).toBe('fund_account_or_raise_allowance')
       expect(result.phase).toBe('insufficient_funds')
       expect(result.statusCode).toBe(422)
       // No payment_id because no intent was created — the pre-flight check
@@ -878,12 +878,12 @@ describe('Haven MCP tool handlers', () => {
       if (String(url).endsWith('/machine-payments/agent')) {
         return jsonResponse({
           id: 'agt_1', name: 'Test', delegate_address: delegateAddress,
-          safe_address: safeAddress, chain_id: 8453, status: 'active',
+          account_address: safeAddress, chain_id: 8453, status: 'active',
         })
       }
       if (String(url).includes('/allowances')) {
         return jsonResponse({
-          agent_id: 'agt_1', safe_address: safeAddress, delegate_address: delegateAddress,
+          agent_id: 'agt_1', account_address: safeAddress, delegate_address: delegateAddress,
           chain_id: 8453, allowances: [],
         })
       }
@@ -914,12 +914,12 @@ describe('Haven MCP tool handlers', () => {
       if (u.endsWith('/machine-payments/agent')) {
         return jsonResponse({
           id: 'agt_1', name: 'Test', status: 'active',
-          safe_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
+          account_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
         })
       }
       if (u.includes('/allowances')) {
         return jsonResponse({
-          agent_id: 'agt_1', safe_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
+          agent_id: 'agt_1', account_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
           allowances: [{
             id: 'a1', token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
             token_symbol: 'USDC', configured_amount: '10000', reset_period_min: 60,
@@ -1191,7 +1191,7 @@ describe('haven_pay_mcp_tool', () => {
             hash: SIGN_HASH,
             signature_scheme: 'eip712_userop',
             typed_data: userOpTypedData,
-            components: { safe: '0xSafe', token: '0xToken', to: '0xTo', amount: '10000', payment_token: '0x0', payment: '0', nonce: 1 },
+            components: { payer_account: '0xSafe', token: '0xToken', to: '0xTo', amount: '10000', payment_token: '0x0', payment: '0', nonce: 1 },
           },
         }, 201)
       }
@@ -1306,7 +1306,7 @@ describe('merchant MCP endpoint discovery (#1301)', () => {
             signature_scheme: 'eip712_userop',
             typed_data: userOpTypedData,
             components: {
-              safe: '0xSafe',
+              payer_account: '0xSafe',
               token: '0xToken',
               to: '0xTo',
               amount: '10000',
@@ -1813,13 +1813,13 @@ describe('haven_discover_tools (#349)', () => {
         payment_id: 'pay_349',
         status: 'pending_signature',
         chain_id: 8453,
-        safe_address: safeAddress,
+        account_address: safeAddress,
         sign_data: {
           hash: `0x${'11'.repeat(32)}`,
           signature_scheme: 'eip712_userop',
           typed_data: userOpTypedData,
           components: {
-            safe: safeAddress,
+            payer_account: safeAddress,
             token: x402PaymentRequired.accepts[0].asset,
             to: delegateAddress,
             amount: x402PaymentRequired.accepts[0].amount,
@@ -1977,7 +1977,7 @@ describe('haven_get_payment_status: post-purchase allowance summary (#1310)', ()
 
   function allowancesFixture(remaining: string) {
     return {
-      agent_id: 'agent-1', safe_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
+      agent_id: 'agent-1', account_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
       allowances: [{
         id: 'allowance-1', token_address: USDC, token_symbol: 'USDC',
         configured_amount: '5000000', reset_period_min: 60,
@@ -1996,7 +1996,7 @@ describe('haven_get_payment_status: post-purchase allowance summary (#1310)', ()
       if (u.endsWith('/machine-payments/agent')) {
         return jsonResponse({
           id: 'agent-1', name: 'A', status: 'active',
-          safe_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
+          account_address: safeAddress, delegate_address: delegateAddress, chain_id: 8453,
           execution_rail: 'legacy',
         })
       }

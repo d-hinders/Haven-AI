@@ -1,6 +1,7 @@
 // db-mock-exempt: no database behaviour is under test here — every mocked
 // row below is a fixed literal pinned to the recorded base-SHA fixture, at
-// the same route/repository boundary p0-characterization.test.ts already
+// the same route/repository boundary the (deleted with #2914)
+// p0-characterization.test.ts already
 // mocks (that file's own db-mock-exempt comment explains the pattern).
 /**
  * #2960 — party-characterization replay.
@@ -9,7 +10,7 @@
  * recorded from a scratch worktree checked out at this PR's base commit
  * (`24a08ec3`, the `_base` on every fixture — see `record.ts`'s doc
  * comment for the exact recipe, the same recorder-run-at-base-only pattern
- * `p0-characterization/record.ts` uses). This file replays the SAME inputs
+ * the deleted `p0-characterization/record.ts` used). This file replays the SAME inputs
  * against HEAD's `listReceipts` / `getAgentPaymentStatus` and asserts:
  *
  *   1. Every field the base fixture carried is byte-for-byte unchanged

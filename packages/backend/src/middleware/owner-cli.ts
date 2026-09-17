@@ -114,7 +114,6 @@ export const OWNER_CLI_ALLOWED_ROUTES: readonly AllowedRoute[] = [
   // CLI session actually has, and the census test now refuses any entry whose
   // route is not behind `authMiddleware`, so this cannot come back silently.
   // Read-only account context.
-  { method: 'GET', path: '/user/safes' },
   // #2534 (epic #2519 slice B4): the funding hand-off. The whole endpoint is
   // READ-ONLY FACTS for the human — chain identity, the documented
   // `minimum_useful_human` constants, live balances, a testnet faucet LINK.
@@ -122,26 +121,22 @@ export const OWNER_CLI_ALLOWED_ROUTES: readonly AllowedRoute[] = [
   // agent-driven CLI session needs it to paste the instruction its human acts
   // on ("Send at least 5 USDC on Base to 0x…"). GET on `/user/...` is the
   // shape the census already classifies as a reading, not an arrangement.
-  { method: 'GET', path: '/user/safes/{safeId}/funding' },
-  // #2907 (naming P0): `/user/accounts*` is the SAME handler module mounted a
-  // second time under the account-vocabulary prefix (`index.ts`) — not a new
-  // surface, so it carries the exact same authority as the two entries above.
-  // Missing this pair was a real bug (not a hypothetical one): a probe of a
-  // live `owner_cli` token showed `GET /user/safes` at 200 and `GET
-  // /user/accounts` at 401 for the identical caller and the identical data,
-  // because `routeAllowsOwnerCli` compares the LITERAL registered path and the
-  // twin registration is a different literal. The funding path param keeps
-  // the name `safeId` on the account-prefixed mount too (#2907
-  // route-coverage literal mapping — the param is not renamed in P0), so the
-  // twin entry below is `{safeId}`, matching what `request.routeOptions.url`
-  // actually reports for that mount.
+  //
+  // #2914 (naming P5): the `/user/safes*` entries are GONE from this list,
+  // not renamed into it — those paths answer 410 now and an allow-list entry
+  // for a permanently-retired path grants nothing while reading as coverage,
+  // which is the one failure mode this list must not have. Only the live
+  // account-vocabulary paths are listed. `routeAllowsOwnerCli` compares the
+  // LITERAL registered path, so these must match what
+  // `request.routeOptions.url` reports for the mount — hence `{accountId}`,
+  // the param name `routes/user-accounts.ts` now registers.
   { method: 'GET', path: '/user/accounts' },
-  { method: 'GET', path: '/user/accounts/{safeId}/funding' },
+  { method: 'GET', path: '/user/accounts/{accountId}/funding' },
   // Also corrected from the issue's text: balances are served under their own
   // prefix, and the activity surface has no bare route — it has a feed and a
   // per-agent stats read. Granting a path that does not exist grants nothing
   // and reads like coverage, which is the failure mode this list must not have.
-  { method: 'GET', path: '/balances/{safeAddress}' },
+  { method: 'GET', path: '/balances/{accountAddress}' },
   { method: 'GET', path: '/agent-activity/feed' },
   { method: 'GET', path: '/agent-activity/{id}/stats' },
   { method: 'GET', path: '/transactions' },

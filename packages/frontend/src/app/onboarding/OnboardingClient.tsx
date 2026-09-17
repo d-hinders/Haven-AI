@@ -107,7 +107,7 @@ export default function OnboardingClient() {
   useEffect(() => {
     if (loading || !user) return
     if (creationStartedRef.current || phase === 'success') return
-    if (user.accounts?.length > 0 || user.safe_address) {
+    if (user.accounts?.length > 0 || user.account_address) {
       router.replace(nextPath ?? '/dashboard')
     }
   }, [loading, phase, router, user, nextPath])
@@ -140,7 +140,7 @@ export default function OnboardingClient() {
 
   async function handleHybridComplete(args: { accountAddress: `0x${string}` }) {
     setError('')
-    updateUser({ safe_address: args.accountAddress, wallet_address: null })
+    updateUser({ account_address: args.accountAddress, wallet_address: null })
     await refreshUser()
     setPhase('success')
   }

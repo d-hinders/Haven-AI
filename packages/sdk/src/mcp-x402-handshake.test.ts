@@ -88,7 +88,7 @@ function fundingPendingSignature(resourceUrl: string = mcpUrl): Response {
     payment_id: 'pay_123',
     status: 'pending_signature',
     chain_id: 8453,
-    safe_address: safeAddress,
+    account_address: safeAddress,
     token: 'USDC',
     amount: '0.02',
     to: delegateAddress,
@@ -98,7 +98,7 @@ function fundingPendingSignature(resourceUrl: string = mcpUrl): Response {
       signature_scheme: 'eip712_userop',
       typed_data: userOpTypedData,
       components: {
-        safe: safeAddress,
+        payer_account: safeAddress,
         token: accepted.asset,
         to: delegateAddress,
         amount: accepted.amount,
@@ -190,7 +190,7 @@ function agentResponse(): Response {
     id: 'agt_1',
     name: 'Hosted Agent',
     status: 'active',
-    safe_address: safeAddress,
+    account_address: safeAddress,
     delegate_address: delegateAddress,
     chain_id: 8453,
   }), { status: 200 })

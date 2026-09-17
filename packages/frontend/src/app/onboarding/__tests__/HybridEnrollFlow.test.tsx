@@ -29,7 +29,7 @@ const mockUser = {
   name: 'Ada Lovelace',
   email: 'hybrid@example.com',
   wallet_address: null,
-  safe_address: null,
+  account_address: null,
   accounts: [],
 }
 

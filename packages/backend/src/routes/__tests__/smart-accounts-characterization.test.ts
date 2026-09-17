@@ -35,7 +35,7 @@ vi.mock('../../db.js', () => ({
 // route no longer reaches the accounts module at all, so there is nothing
 // left to mock here.
 
-import userSafesRoutes from '../user-safes.js'
+import userAccountsRoutes from '../user-accounts.js'
 
 const SAFE_ID = '11111111-1111-1111-1111-111111111111'
 const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
@@ -48,7 +48,7 @@ describe('user-safes characterization (#988)', () => {
   beforeAll(async () => {
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
-    await app.register(userSafesRoutes, { prefix: '/user/safes' })
+    await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
   })
 
@@ -74,11 +74,11 @@ describe('user-safes characterization (#988)', () => {
   // guarantee are pinned in `safe-inflow-retired.test.ts`; the half that must
   // KEEP working for existing accounts is the rename/default/delete/approver
   // coverage below, deliberately untouched.
-  describe('POST /user/safes — import is retired', () => {
+  describe('POST /user/accounts — import is retired', () => {
     it('410s and writes nothing', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/user/safes',
+        url: '/user/accounts',
         headers: auth(),
         payload: { safe_address: SAFE_ADDRESS, chain_id: 8453 },
       })
@@ -89,11 +89,11 @@ describe('user-safes characterization (#988)', () => {
     })
   })
 
-  describe('POST /user/safes/deploy — relay-sponsored deploy is retired', () => {
+  describe('POST /user/accounts/deploy — relay-sponsored deploy is retired', () => {
     it('410s without asking the relayer for anything', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/user/safes/deploy',
+        url: '/user/accounts/deploy',
         headers: auth(),
         payload: { chain_id: 8453, owner_address: SAFE_ADDRESS },
       })
@@ -104,7 +104,7 @@ describe('user-safes characterization (#988)', () => {
     })
   })
 
-  describe('PUT /user/safes/:safeId — rename', () => {
+  describe('PUT /user/accounts/:safeId — rename', () => {
     it('renames a Safe scoped to the caller', async () => {
       mockPoolQuery.mockResolvedValueOnce({
         rows: [{ id: SAFE_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Treasury', is_default: true, created_at: '2026-08-05T00:00:00.000Z' }],
@@ -112,7 +112,7 @@ describe('user-safes characterization (#988)', () => {
 
       const res = await app.inject({
         method: 'PUT',
-        url: `/user/safes/${SAFE_ID}`,
+        url: `/user/accounts/${SAFE_ID}`,
         headers: auth(),
         payload: { name: '  Treasury  ' },
       })
@@ -127,7 +127,7 @@ describe('user-safes characterization (#988)', () => {
 
       const res = await app.inject({
         method: 'PUT',
-        url: `/user/safes/${SAFE_ID}`,
+        url: `/user/accounts/${SAFE_ID}`,
         headers: auth(),
         payload: { name: 'X' },
       })
@@ -136,14 +136,14 @@ describe('user-safes characterization (#988)', () => {
     })
   })
 
-  describe('PUT /user/safes/:safeId/default', () => {
+  describe('PUT /user/accounts/:safeId/default', () => {
     it('clears every default, sets the new one, and mirrors the legacy column — in a transaction', async () => {
       mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: SAFE_ID, account_address: SAFE_ADDRESS }] })
       mockClientQuery.mockResolvedValue({ rows: [] })
 
       const res = await app.inject({
         method: 'PUT',
-        url: `/user/safes/${SAFE_ID}/default`,
+        url: `/user/accounts/${SAFE_ID}/default`,
         headers: auth(),
       })
 
@@ -175,7 +175,7 @@ describe('user-safes characterization (#988)', () => {
 
       const res = await app.inject({
         method: 'PUT',
-        url: `/user/safes/${SAFE_ID}/default`,
+        url: `/user/accounts/${SAFE_ID}/default`,
         headers: auth(),
       })
 
@@ -184,7 +184,7 @@ describe('user-safes characterization (#988)', () => {
     })
   })
 
-  describe('DELETE /user/safes/:safeId — default promotion branches', () => {
+  describe('DELETE /user/accounts/:safeId — default promotion branches', () => {
     it('promotes the oldest remaining Safe when the default is deleted', async () => {
       const NEXT = { id: 'safe-2', account_address: '0x2222222222222222222222222222222222222222' }
       mockPoolQuery.mockResolvedValue({ rows: [{ id: SAFE_ID, is_default: true }] })
@@ -195,7 +195,7 @@ describe('user-safes characterization (#988)', () => {
 
       const res = await app.inject({
         method: 'DELETE',
-        url: `/user/safes/${SAFE_ID}`,
+        url: `/user/accounts/${SAFE_ID}`,
         headers: auth(),
       })
 
@@ -217,7 +217,7 @@ describe('user-safes characterization (#988)', () => {
 
       const res = await app.inject({
         method: 'DELETE',
-        url: `/user/safes/${SAFE_ID}`,
+        url: `/user/accounts/${SAFE_ID}`,
         headers: auth(),
       })
 

@@ -5,7 +5,7 @@ import { toolDescriptions, toolSchemas, type SignerToolName } from './tools.js'
 
 export interface SignerConsentInput {
   delegateAddress: string
-  safeAddress?: string
+  accountAddress?: string
   agentId?: string
   chainId?: number
   network?: string
@@ -49,7 +49,7 @@ export const SIGNER_CONSENT_SURFACE_VERSION = 2
 export function computeSignerConsentHash(input: SignerConsentInput): string {
   const identity = [
     input.delegateAddress.toLowerCase(),
-    (input.safeAddress ?? '').toLowerCase(),
+    (input.accountAddress ?? '').toLowerCase(),
     input.agentId ?? '',
     input.chainId ?? '',
     input.network ?? '',
@@ -70,7 +70,7 @@ export function renderSignerConsentBlock(input: SignerConsentInput, hash: string
     '',
     `Delegate address: ${input.delegateAddress}`,
   ]
-  lines.push(`Haven wallet:     ${input.safeAddress ?? 'not provided to this signer'}`)
+  lines.push(`Haven wallet:     ${input.accountAddress ?? 'not provided to this signer'}`)
   if (input.agentId) lines.push(`Agent ID:         ${input.agentId}`)
   if (typeof input.chainId === 'number') lines.push(`Chain ID:         ${input.chainId}`)
   if (input.network) lines.push(`Network:          ${input.network}`)

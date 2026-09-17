@@ -1,7 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { listUserPasskeys } from '../infra/repositories/user-passkeys.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { withSessionAccountAddressAlias } from '../openapi/wire-aliases.js'
 
 /**
  * Passkeys, read-only as of #2847 (epic #1440).
@@ -19,10 +18,12 @@ export default async function passkeyRoutes(app: FastifyInstance): Promise<void>
   app.get('/', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    // #2907: account_address twins safe_address on each passkey (same value).
-    const passkeys = (await listUserPasskeys(sub)).map((p) =>
-      withSessionAccountAddressAlias({ ...p, safe_address: p.account_address ?? null }),
-    )
+    // #2914: one address name per passkey — `account_address`, normalised to
+    // null when the row carries none.
+    const passkeys = (await listUserPasskeys(sub)).map((p) => ({
+      ...p,
+      account_address: p.account_address ?? null,
+    }))
     return { passkeys }
   })
 }

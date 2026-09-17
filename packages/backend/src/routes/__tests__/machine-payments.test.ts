@@ -317,8 +317,8 @@ describe('machine payment routes', () => {
       id: AGENT.id,
       name: AGENT.name,
       status: AGENT.status,
-      safe_address: AGENT.account_address,
-      // #2907: account_address twins safe_address, request-level asserted.
+      // #2914 (naming epic #2906 phase 5, the contraction): the `safe_address`
+      // twin `#2907` dual-emitted is gone — one name only.
       account_address: AGENT.account_address,
       delegate_address: AGENT.delegate_address,
       // #1472: null here BECAUSE the fixture buckets into legacy — the
@@ -422,7 +422,6 @@ describe('machine payment routes', () => {
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual({
         agent_id: AGENT.id,
-        safe_address: AGENT.account_address,
         account_address: AGENT.account_address,
         delegate_address: AGENT.delegate_address,
         chain_id: 84532,
@@ -561,7 +560,6 @@ describe('machine payment routes', () => {
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual({
         agent_id: AGENT.id,
-        safe_address: AGENT.account_address,
         account_address: AGENT.account_address,
         delegate_address: AGENT.delegate_address,
         chain_id: 84532,

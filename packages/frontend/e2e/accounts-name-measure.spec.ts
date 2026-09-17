@@ -138,7 +138,7 @@ const WRAPPING_NAME = 'Operating wallet Europe'
 const SECOND_SAFE = {
   ...testSafe,
   id: 'safe-second',
-  safe_address: '0x4444444444444444444444444444444444444444',
+  account_address: '0x4444444444444444444444444444444444444444',
   name: 'Imported Safe',
   is_default: false,
   created_at: '2026-04-20T10:00:00.000Z',

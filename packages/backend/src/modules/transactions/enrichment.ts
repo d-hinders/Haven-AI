@@ -18,13 +18,13 @@ export async function enrichTransactionsWithAgents(
   const txHashes = Array.from(
     new Set(transactions.map((tx) => tx.hash.toLowerCase())),
   )
-  const safeIds = Array.from(
-    new Set(transactions.map((tx) => tx.safeId).filter(Boolean)),
+  const accountIds = Array.from(
+    new Set(transactions.map((tx) => tx.accountId).filter(Boolean)),
   )
-  if (txHashes.length === 0 || safeIds.length === 0) return transactions
+  if (txHashes.length === 0 || accountIds.length === 0) return transactions
 
   try {
-    const piRows = await findPaymentIntentAgentMatches(txHashes, userId, safeIds)
+    const piRows = await findPaymentIntentAgentMatches(txHashes, userId, accountIds)
 
     const agentByTransactionIdentity = new Map<
       string,
@@ -72,7 +72,7 @@ export async function enrichTransactionsWithAgents(
 
     // #2055: the approval_requests attribution pass is gone with the table.
 
-    const sweepRows = await findDelegateSweepAgentMatches(txHashes, userId, safeIds)
+    const sweepRows = await findDelegateSweepAgentMatches(txHashes, userId, accountIds)
 
     for (const row of sweepRows) {
       agentByTransactionIdentity.set(
@@ -97,7 +97,7 @@ export async function enrichTransactionsWithAgents(
 
     return transactions.map((tx) => {
       const agent = agentByTransactionIdentity.get(
-        paymentAgentIdentityKey(tx.hash, tx.safeId, tx.chainId),
+        paymentAgentIdentityKey(tx.hash, tx.accountId, tx.chainId),
       )
       // #2097: the initiator record follows the EFFECTIVE attribution — an
       // agent matched here, or one already on the row (confirmed x402 rows

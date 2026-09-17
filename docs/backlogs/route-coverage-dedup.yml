@@ -57,7 +57,7 @@ items:
       - packages/backend/src/routes/portfolio.ts
       - packages/backend/src/routes/transactions.ts
       - packages/backend/src/routes/safe-details.ts
-      - packages/backend/src/routes/user-safes.ts
+      - packages/backend/src/routes/user-accounts.ts
       - packages/backend/src/routes/balances.ts
       - packages/backend/src/routes/user.ts
     money_path: false
@@ -85,18 +85,19 @@ items:
     status: in-pr
 
   - id: pr3
-    title: "test(user-safes): cover the Safe-list endpoint (auth + user scoping)"
+    title: "test(user-accounts): cover the account-list endpoint (auth + user scoping)"
     scope: >
-      P1 route coverage for routes/user-safes.ts GET / (the Safe list at
-      /user/safes), which has no test today — the existing user-safes-approvers
-      and user-safes-delete suites cover only approvers and delete. Read the route
-      first and pin its actual invariants; do not invent endpoints. Assert: the
-      endpoint requires auth; it returns only Safes that belong to the requesting
-      user (no cross-user leakage); and the response shape matches the route's
-      current contract (including consolidated balances/metadata if the handler
-      returns them). Mock the db/balance seams — no live network. Test-only, no
-      runtime change. Acceptance: new tests green; backend suite + tsc unchanged.
+      DONE as written — re-scoped at #2914 rather than left pointing at a dead
+      address. The route moved (routes/user-safes.ts -> routes/user-accounts.ts)
+      and /user/safes now answers 410, so the original instruction — "cover
+      routes/user-safes.ts GET / (the Safe list at /user/safes)" — would have
+      sent a future agent to write tests against a tombstone. The coverage it
+      asked for exists at the live address: smart-accounts-list.test.ts pins
+      auth, per-user scoping (no cross-user leakage) and the response shape
+      against the spec, and user-accounts-retired.test.ts pins the 410 on the
+      old prefix.
     files:
       - packages/backend/src/routes/__tests__/smart-accounts-list.test.ts
+      - packages/backend/src/routes/__tests__/user-accounts-retired.test.ts
     money_path: false
-    status: in-pr
+    status: done

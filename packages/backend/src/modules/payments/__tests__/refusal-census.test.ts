@@ -84,17 +84,17 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     { line: 193, code: 403, ledger: 'row' }, // 3009 funding-leg pre-check: over budget (#2706)
     { line: 275, code: 502, ledger: 'row' }, // 3009 prepare catch: classified caveat revert (slice 1's writer)
     { line: 314, code: 403, ledger: 'row' }, // 3009 no open budget delegation (slice 1's writer)
-    { line: 463, code: 403, ledger: 'row' }, // erc7710 no active budget delegation (#2945)
-    { line: 547, code: 403, ledger: 'row' }, // erc7710 pre-check: over budget (#2082)
-    { line: 639, code: 502, ledger: 'skipped' }, // settlement-delegation build failure — infrastructure, allowlisted
-    { line: 676, code: 429, ledger: 'skipped' }, // relayer sponsorship budget exhausted — capacity, allowlisted
-    { line: 680, code: 502, ledger: 'skipped' }, // delegate-account deploy failure — infrastructure, allowlisted
+    { line: 462, code: 403, ledger: 'row' }, // erc7710 no active budget delegation (#2945)
+    { line: 546, code: 403, ledger: 'row' }, // erc7710 pre-check: over budget (#2082)
+    { line: 638, code: 502, ledger: 'skipped' }, // settlement-delegation build failure — infrastructure, allowlisted
+    { line: 675, code: 429, ledger: 'skipped' }, // relayer sponsorship budget exhausted — capacity, allowlisted
+    { line: 679, code: 502, ledger: 'skipped' }, // delegate-account deploy failure — infrastructure, allowlisted
   ],
   'src/routes/payments.ts': [
-    { line: 439, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
-    { line: 463, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
-    { line: 754, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 781, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
+    { line: 438, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
+    { line: 462, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
+    { line: 753, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 780, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
   ],
 }
 
@@ -123,13 +123,13 @@ const RAW_ALLOWLIST: Record<(typeof TARGET_FILES)[number], { line: number; code:
 
 const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; reason: string }[]> = {
   'src/modules/x402/delegation-authorize.ts': [
-    { line: 639, reason: 'buildSettlementDelegation threw — child-construction infrastructure failure, not spend policy' },
-    { line: 676, reason: 'RelayerBudgetExceededError — the sponsorship budget is exhausted (capacity), not a guardrail refusal' },
-    { line: 680, reason: 'ensureHybridDeployed failed — delegate-account deploy infrastructure, not spend policy' },
+    { line: 638, reason: 'buildSettlementDelegation threw — child-construction infrastructure failure, not spend policy' },
+    { line: 675, reason: 'RelayerBudgetExceededError — the sponsorship budget is exhausted (capacity), not a guardrail refusal' },
+    { line: 679, reason: 'ensureHybridDeployed failed — delegate-account deploy infrastructure, not spend policy' },
   ],
   'src/routes/payments.ts': [
     {
-      line: 781,
+      line: 780,
       reason: 'on-chain execution failed after claim — bundler/chain failure booked on the intent row by failSubmittedIntent, not a policy refusal',
     },
   ],

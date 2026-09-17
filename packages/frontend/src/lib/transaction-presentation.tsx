@@ -50,7 +50,7 @@ export function transactionStatus(
 export function transactionMovement(
   tx: AggregatedTransaction,
   resolveAddress?: (address: string) => string | null,
-  safeNamesByAddress?: Map<string, string>,
+  accountNamesByAddress?: Map<string, string>,
 ) {
   if (tx.movementOverride) return tx.movementOverride
 
@@ -58,14 +58,14 @@ export function transactionMovement(
     return (
       <TransactionMovement
         from={tx.agentName ?? 'Agent'}
-        to={tx.safeName}
+        to={tx.accountName}
       />
     )
   }
 
-  const counterparty = counterpartyLabel(tx, resolveAddress, safeNamesByAddress)
-  const from = tx.direction === 'in' ? counterparty : tx.safeName
-  const to = tx.direction === 'in' ? tx.safeName : counterparty
+  const counterparty = counterpartyLabel(tx, resolveAddress, accountNamesByAddress)
+  const from = tx.direction === 'in' ? counterparty : tx.accountName
+  const to = tx.direction === 'in' ? tx.accountName : counterparty
 
   return <TransactionMovement from={from} to={to} />
 }
@@ -73,7 +73,7 @@ export function transactionMovement(
 function counterpartyLabel(
   tx: AggregatedTransaction,
   resolveAddress?: (address: string) => string | null,
-  safeNamesByAddress?: Map<string, string>,
+  accountNamesByAddress?: Map<string, string>,
 ): string {
   if (isMachinePaymentSource(tx.source)) {
     return parseX402Hostname(tx.x402ResourceUrl) ?? truncate(tx.to)
@@ -81,12 +81,12 @@ function counterpartyLabel(
 
   const address = tx.direction === 'in' ? tx.from : tx.to
   const addressKey = address.toLowerCase()
-  const safeName =
-    safeNamesByAddress?.get(`${addressKey}:${tx.chainId}`) ??
-    safeNamesByAddress?.get(addressKey)
+  const accountName =
+    accountNamesByAddress?.get(`${addressKey}:${tx.chainId}`) ??
+    accountNamesByAddress?.get(addressKey)
   const contactName = resolveAddress?.(address)
 
-  return safeName ?? contactName ?? truncate(address)
+  return accountName ?? contactName ?? truncate(address)
 }
 
 /**

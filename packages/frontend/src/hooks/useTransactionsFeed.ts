@@ -136,7 +136,7 @@ export function useTransactionsFeed(
         setTotal(data.total)
         setHasMore(data.hasMore)
         setPartialFailure(data.partialFailure)
-        setFailedAccountIds(data.failedAccountIds ?? data.failedSafeIds)
+        setFailedAccountIds(data.failedAccountIds)
         setTruncated(data.truncated)
         if (silent) setError(null)
       } catch (err) {

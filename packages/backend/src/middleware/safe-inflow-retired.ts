@@ -7,15 +7,23 @@
  * imported.** Four entry points could mint or attach one, and all four now
  * refuse with HTTP 410:
  *
- * - `POST /safe/deploy`        — passkey-owned Safe deployment
- * - `POST /user/safes/deploy`  — relay-sponsored, wallet-owned Safe deployment
- * - `POST /user/safes`         — importing / registering an existing Safe
- * - `PUT  /user/safe`          — the legacy single-Safe link, which is also an
- *                                import: it wrote `smart_accounts` through
- *                                `linkDefaultUserSafe` and emitted the
- *                                `safe_imported` funnel event. No shipped
- *                                client calls it, which is exactly why it
- *                                would have been the hole left open.
+ * - `POST /safe/deploy`             — passkey-owned Safe deployment
+ * - `POST /user/accounts/deploy`    — relay-sponsored, wallet-owned deployment
+ * - `POST /user/accounts`           — importing / registering an existing Safe
+ * - `PUT  /user/account`            — the legacy single-account link, which is
+ *                                     also an import: it wrote
+ *                                     `smart_accounts` and emitted the
+ *                                     `safe_imported` funnel event. No shipped
+ *                                     client calls it, which is exactly why it
+ *                                     would have been the hole left open.
+ *
+ * Three of those four were reached under `/user/safes*` / `/user/safe` when
+ * #1984 shipped. #2914 (naming epic #2906) retired those PATHS: they answer a
+ * different 410 first — the naming tombstone in
+ * `routes/user-accounts-retired.ts`, which names the replacement path — so an
+ * old client is told where the address moved rather than why the rail closed.
+ * The rail refusal below is what the replacement paths answer, and it is a
+ * separate and still-true fact.
  *
  * **Why a shared handler and not a per-route stub (#1988, slice 5).** #1984
  * shipped this as a route `preHandler` so the live handler bodies underneath

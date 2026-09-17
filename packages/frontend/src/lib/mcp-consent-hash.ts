@@ -14,7 +14,7 @@
  *   - api_key prefix (first 12 chars)
  *   - api_url
  *   - agent_id
- *   - safe_address (lowercased)
+ *   - account_address (lowercased)
  *   - delegate_address (lowercased)
  *   - chain_id
  *   - sorted canonical tool name list (all 8 registered tools — static; #1328
@@ -78,7 +78,7 @@ export async function computeMcpConsentHash(cred: AgentCredentialJson): Promise<
     cred.api_key.slice(0, 12),
     cred.api_url ?? '',
     cred.agent_id,
-    cred.safe_address.toLowerCase(),
+    cred.account_address.toLowerCase(),
     cred.delegate_address.toLowerCase(),
     cred.chain_id,
   ].join('|')

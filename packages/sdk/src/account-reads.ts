@@ -15,7 +15,6 @@ import type {
 } from './types.js'
 import { AgentPaymentWarningCode } from './types.js'
 import { HavenApiTransport } from './haven-api-transport.js'
-import { accountAddressTwins, readAccountAddress } from './account-naming.js'
 import { mapPaymentReceipt } from './payment-mappers.js'
 import { resolveTokenFromAddress } from './x402.js'
 
@@ -104,10 +103,13 @@ export class AccountReads {
     const raw = await this.transport.get<RawHavenAllowanceSummary>('/machine-payments/allowances')
     return {
       agentId: raw.agent_id,
-      // #2908: one mapper, both names, same value — `readAccountAddress`
-      // prefers the server's `account_address` twin and falls back to
-      // `safe_address` for a pre-#2907 server.
-      ...accountAddressTwins(readAccountAddress(raw)),
+      // `account_address` is required on the wire contract, so the declared
+      // type stays `string`; a server that omits it is off-contract and the
+      // cast is the one place that case is allowed through as `undefined`
+      // rather than a fabricated `''` (a present-but-blank address downstream
+      // — the hosted MCP output spreads this object, and the sweep uses it as
+      // a destination).
+      accountAddress: raw.account_address as string,
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
       allowances: raw.allowances.map((allowance) => ({
@@ -206,10 +208,10 @@ export class AccountReads {
       id: raw.id,
       name: raw.name,
       status: raw.status,
-      // #2908: both camelCase names off whichever snake_case name the server
-      // sent (new first). The hosted MCP's `haven_get_agent` spreads this
-      // object, so this is also the hosted output's dual-emit point.
-      ...accountAddressTwins(readAccountAddress(raw)),
+      // See the comment on `getAllowances` above: `account_address` is
+      // required on the wire contract, so an omission here is off-contract
+      // and comes through as `undefined` rather than a fabricated `''`.
+      accountAddress: raw.account_address as string,
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
       executionRail: raw.execution_rail === 'delegation' ? 'delegation' : 'legacy',

@@ -30,9 +30,9 @@ function enriched(overrides: Partial<EnrichedTransaction> = {}): EnrichedTransac
   return {
     ...tx(),
     chainId: 8453,
-    safeId: 'safe-1',
-    safeAddress: '0xsafe',
-    safeName: 'Main',
+    accountId: 'safe-1',
+    accountAddress: '0xsafe',
+    accountName: 'Main',
     ...overrides,
   }
 }
@@ -54,9 +54,9 @@ describe('compareTransactions (module internals, no HTTP)', () => {
 })
 
 describe('compareEnrichedTransactions', () => {
-  it('falls back to safeAddress when the underlying transaction is fully tied', () => {
-    const a = enriched({ safeAddress: '0xaaaa' })
-    const b = enriched({ safeAddress: '0xbbbb' })
+  it('falls back to accountAddress when the underlying transaction is fully tied', () => {
+    const a = enriched({ accountAddress: '0xaaaa' })
+    const b = enriched({ accountAddress: '0xbbbb' })
     expect(compareEnrichedTransactions(a, b)).toBeLessThan(0)
   })
 })
@@ -71,9 +71,9 @@ describe('transactionDedupKey / enrichedTransactionIdentityKey', () => {
     expect(transactionDedupKey(tokenTx)).not.toBe(transactionDedupKey(nativeTx))
   })
 
-  it('scopes the identity key by chain and Safe, not just the transaction fields', () => {
-    const onBase = enriched({ chainId: 8453, safeId: 'safe-base' })
-    const onGnosis = enriched({ chainId: 100, safeId: 'safe-gnosis' })
+  it('scopes the identity key by chain and account, not just the transaction fields', () => {
+    const onBase = enriched({ chainId: 8453, accountId: 'safe-base' })
+    const onGnosis = enriched({ chainId: 100, accountId: 'safe-gnosis' })
     expect(enrichedTransactionIdentityKey(onBase)).not.toBe(
       enrichedTransactionIdentityKey(onGnosis),
     )
@@ -81,7 +81,7 @@ describe('transactionDedupKey / enrichedTransactionIdentityKey', () => {
 })
 
 describe('paymentAgentIdentityKey', () => {
-  it('lowercases the tx hash but is exact on safeId and chainId', () => {
+  it('lowercases the tx hash but is exact on accountId and chainId', () => {
     expect(paymentAgentIdentityKey('0xABC', 'safe-1', 8453)).toBe('0xabc:safe-1:8453')
     expect(paymentAgentIdentityKey('0xabc', 'safe-1', 8453)).toBe(
       paymentAgentIdentityKey('0xABC', 'safe-1', 8453),

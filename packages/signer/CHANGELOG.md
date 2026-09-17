@@ -8,6 +8,26 @@ alone.
 
 ## Unreleased
 
+### Removed
+
+- **BREAKING (#2914, naming epic #2906 phase 5).** `HAVEN_WALLET_ADDRESS` and
+  `HAVEN_SAFE_ADDRESS` are no longer read from the environment;
+  `HAVEN_ACCOUNT_ADDRESS` is the only name. A machine configured through
+  either old variable resolves **no** account address, which is the condition
+  under which the sweep-destination check degrades to "no local value to
+  compare against" — set `HAVEN_ACCOUNT_ADDRESS` before upgrading.
+- `SignerCredentials.safeAddress` is removed; `accountAddress` is the field.
+
+### Unchanged, and deliberately
+
+- The credential-FILE fallback `account_address ?? safe_address ?? safeAddress`
+  is **permanent**. A file on disk never rewrites itself. So is the audit
+  JSONL's persisted `safe_address` key, while the in-memory field it comes
+  from is now `accountAddress` — the two spellings differ on purpose.
+- `SUPPORTED_X402_EXPECTED_VERSIONS` is still `[1, 2, 3]`. This rename moves
+  no signed payload and no consent hash: the hash takes the resolved address,
+  not the key it arrived under, so an existing acknowledgement stays valid.
+
 ## 0.2.1-alpha.0 — 2026-09-16
 
 ### Added

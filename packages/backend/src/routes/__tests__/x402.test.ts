@@ -963,7 +963,7 @@ describe('x402 routes', () => {
     // generation and then fail on-chain at executeAllowanceTransfer, leaving
     // the agent in a dead-end "signed but won't settle" state. The new
     // pre-flight fails fast with a structured error the agent can act on
-    // (next_action=fund_safe_or_raise_allowance).
+    // (next_action=fund_account_or_raise_allowance).
     allowanceMocks.getTokenBalance.mockResolvedValueOnce(0n)
 
     primeDb(AUTH, ...POLICY_ROUTES)

@@ -428,13 +428,16 @@ describe('transaction routes', () => {
     // The legacy route's destructure (`routes/transactions.ts`) drops these —
     // `TransactionsPageResponse` uses the narrow `TransactionBase`, which does
     // not declare them, so a leak would also fail `expectMatchesSpec` below.
-    for (const field of ['chainId', 'safeId', 'safeAddress', 'safeName', 'agentId']) {
+    for (const field of ['chainId', 'accountId', 'accountAddress', 'accountName', 'agentId']) {
       expect(body.transactions[0]).not.toHaveProperty(field)
     }
     // Full payload against the spec's own schema — the same assertion the
     // feed test above makes, on the route whose `TransactionBase` schema was
-    // never the composed one.
-    expectMatchesSpec('GET', '/transactions/{safeAddress}', body)
+    // never the composed one. #2914: the path segment is `{accountAddress}`
+    // now — a single dynamic segment has no wire-visible name, so this was
+    // always the same Fastify route as the old `{safeAddress}` spelling; only
+    // the documented OpenAPI key moved.
+    expectMatchesSpec('GET', '/transactions/{accountAddress}', body)
   })
 })
 
@@ -484,7 +487,7 @@ describe('mergeX402Transactions', () => {
             agent_name: 'Research assistant',
             account_id: 'safe-id',
             account_address: SAFE_ADDRESS,
-            safe_name: 'Main wallet',
+            account_name: 'Main wallet',
             chain_id: 8453,
             token_symbol: 'USDC',
             token_address: USDC_ADDRESS,
@@ -525,9 +528,9 @@ describe('mergeX402Transactions', () => {
         tokenAddress: USDC_ADDRESS,
         tokenSymbol: 'USDC',
         chainId: 8453,
-        safeId: 'safe-id',
-        safeAddress: SAFE_ADDRESS,
-        safeName: 'Main wallet',
+        accountId: 'safe-id',
+        accountAddress: SAFE_ADDRESS,
+        accountName: 'Main wallet',
       }],
     )
 
@@ -543,8 +546,8 @@ describe('mergeX402Transactions', () => {
       source: 'x402',
       x402ResourceUrl: 'https://api.example.com/data',
       x402MerchantAddress: '0x2222222222222222222222222222222222222222',
-      safeId: 'safe-id',
-      safeName: 'Main wallet',
+      accountId: 'safe-id',
+      accountName: 'Main wallet',
       agentId: 'agent-id',
       agentName: 'Research assistant',
       paymentId: 'payment-id',
@@ -565,7 +568,7 @@ describe('mergeX402Transactions', () => {
             agent_name: 'Research assistant',
             account_id: 'safe-id',
             account_address: SAFE_ADDRESS,
-            safe_name: 'Base wallet',
+            account_name: 'Base wallet',
             chain_id: 8453,
             token_symbol: 'USDC',
             token_address: USDC_ADDRESS,
@@ -607,9 +610,9 @@ describe('mergeX402Transactions', () => {
         tokenAddress: USDC_ADDRESS,
         tokenSymbol: 'USDC',
         chainId: 100,
-        safeId: 'safe-id',
-        safeAddress: SAFE_ADDRESS,
-        safeName: 'Gnosis wallet',
+        accountId: 'safe-id',
+        accountAddress: SAFE_ADDRESS,
+        accountName: 'Gnosis wallet',
       }],
     )
 
@@ -649,7 +652,7 @@ describe('mergeX402Transactions', () => {
           agent_name: 'Research assistant',
           account_id: 'safe-id',
           account_address: SAFE_ADDRESS,
-          safe_name: 'Main wallet',
+          account_name: 'Main wallet',
           chain_id: 8453,
           token_symbol: 'USDC',
           token_address: USDC_ADDRESS,
@@ -696,7 +699,7 @@ describe('mergeX402Transactions', () => {
           agent_name: 'Research assistant',
           account_id: 'safe-id',
           account_address: SAFE_ADDRESS,
-          safe_name: 'Main wallet',
+          account_name: 'Main wallet',
           chain_id: 8453,
           token_symbol: 'USDC',
           token_address: USDC_ADDRESS,
@@ -736,7 +739,7 @@ describe('mergeX402Transactions', () => {
           agent_name: 'Research assistant',
           account_id: 'safe-id',
           account_address: SAFE_ADDRESS,
-          safe_name: 'Main wallet',
+          account_name: 'Main wallet',
           chain_id: 8453,
           token_symbol: 'USDC',
           token_address: USDC_ADDRESS,
@@ -783,9 +786,9 @@ describe('mergeX402Transactions', () => {
         tokenAddress: USDC_ADDRESS,
         tokenSymbol: 'USDC',
         chainId: 8453,
-        safeId: 'safe-id',
-        safeAddress: SAFE_ADDRESS,
-        safeName: 'Main wallet',
+        accountId: 'safe-id',
+        accountAddress: SAFE_ADDRESS,
+        accountName: 'Main wallet',
         source: 'x402',
         settlementScheme: 'eip3009',
       } as EnrichedTransaction,
@@ -805,7 +808,7 @@ describe('mergeX402Transactions', () => {
             agent_name: 'Research assistant',
             account_id: 'safe-id',
             account_address: SAFE_ADDRESS,
-            safe_name: 'Main wallet',
+            account_name: 'Main wallet',
             chain_id: 8453,
             token_symbol: 'USDC',
             token_address: USDC_ADDRESS,
@@ -863,9 +866,9 @@ describe('enrichTransactionsWithAgents', () => {
       tokenAddress: USDC_ADDRESS,
       tokenSymbol: 'USDC',
       chainId: 8453,
-      safeId: 'safe-base',
-      safeAddress: SAFE_ADDRESS,
-      safeName: 'Based',
+      accountId: 'safe-base',
+      accountAddress: SAFE_ADDRESS,
+      accountName: 'Based',
       ...overrides,
     }
   }
@@ -895,9 +898,9 @@ describe('enrichTransactionsWithAgents', () => {
     const result = await enrichTransactionsWithAgents('user-id', [
       explorerTransfer(),
       explorerTransfer({
-        safeId: 'safe-gnosis',
+        accountId: 'safe-gnosis',
         chainId: 100,
-        safeName: 'Gnosis',
+        accountName: 'Gnosis',
       }),
     ])
 
@@ -913,7 +916,7 @@ describe('enrichTransactionsWithAgents', () => {
     })
     expect(result[1]).toMatchObject({
       hash: TX_HASH,
-      safeId: 'safe-gnosis',
+      accountId: 'safe-gnosis',
       chainId: 100,
     })
     expect(result[1].agentId).toBeUndefined()
@@ -969,9 +972,9 @@ describe('enrichTransactionsWithAgents', () => {
         direction: 'in',
       }),
       explorerTransfer({
-        safeId: 'safe-gnosis',
+        accountId: 'safe-gnosis',
         chainId: 100,
-        safeName: 'Gnosis',
+        accountName: 'Gnosis',
         from: '0xA87300000000000000000000000000000000DD35',
         to: SAFE_ADDRESS,
         direction: 'in',
@@ -990,7 +993,7 @@ describe('enrichTransactionsWithAgents', () => {
     expect(result[0].paymentFlowStatus).toBeUndefined()
     expect(result[1]).toMatchObject({
       hash: TX_HASH,
-      safeId: 'safe-gnosis',
+      accountId: 'safe-gnosis',
       chainId: 100,
     })
     expect(result[1].activityType).toBeUndefined()
@@ -1188,12 +1191,12 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     ])
   })
 
-  // #2907 (naming P0 finding #2): every transaction row, and the top-level
-  // `failedAccountIds`, dual-emit the account_* twins ON THE WIRE. Removing
-  // `withTransactionAccountAlias(...)` or `withFailedAccountIdsAlias(...)`
-  // from this route leaves `wire-aliases.test.ts` green (it never calls the
-  // route) — this is the request-level check that catches it.
-  it('#2907: transactions[] and failedAccountIds dual-emit the account_* twins', async () => {
+  // #2914 (naming epic #2906 phase 5, the contraction): the twin `#2907`
+  // dual-emitted is gone. Every transaction row, and the top-level
+  // `failedAccountIds`, carry the account_* names ONLY — a request-level
+  // check, not just the mapper's own unit test (the mapper itself is
+  // deleted).
+  it('#2914: transactions[] and failedAccountIds drop the retired safe* names, except the safeName twin', async () => {
     const token = signToken({ sub: 'twin-user', email: 'twin@example.com' })
     stubMixedTransactionFetch()
     mockPoolForAggregation([
@@ -1209,11 +1212,18 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     const body = response.json()
     expect(body.transactions.length).toBeGreaterThan(0)
     for (const tx of body.transactions) {
-      expect(tx.accountId).toBe(tx.safeId)
-      expect(tx.accountAddress).toBe(tx.safeAddress)
-      expect(tx.accountName).toBe(tx.safeName)
+      expect(tx.safeId).toBeUndefined()
+      expect(tx.safeAddress).toBeUndefined()
+      expect(tx.accountId).toBeDefined()
+      expect(tx.accountAddress).toBeDefined()
+      // `safeName` is the ONE row field still twinned, and only because the
+      // published CLI renders its ACCOUNT column from it and would print
+      // every row blank. Same value as `accountName`, never a second source
+      // of truth. Removal is the release after this one.
+      expect(tx.safeName).toBe(tx.accountName)
     }
-    expect(body.failedAccountIds).toEqual(body.failedSafeIds)
+    expect(body.failedSafeIds).toBeUndefined()
+    expect(body.failedAccountIds).toBeDefined()
   })
 
   it('filters by tokenKey: native excludes ERC-20, and the token address excludes native', async () => {
@@ -1245,7 +1255,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     expect(erc20Body.transactions[0].tokenAddress).toBe(USDC_ADDRESS)
   })
 
-  it('filters by safeId to a single owned Safe, rejecting an unrecognized one earlier', async () => {
+  it('filters by accountId to a single owned account, rejecting an unrecognized one earlier', async () => {
     const token = signToken({ sub: 'safeid-user', email: 'safeid@example.com' })
     const fetchMock = stubEmptyTransactionFetch()
     const SAFE_A_ID = '33333333-3333-4333-8333-333333333333'
@@ -1257,7 +1267,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
 
     const scoped = await app.inject({
       method: 'GET',
-      url: `/transactions?safeId=${SAFE_A_ID}&fresh=1`,
+      url: `/transactions?accountId=${SAFE_A_ID}&fresh=1`,
       headers: { authorization: `Bearer ${token}` },
     })
     expect(scoped.statusCode).toBe(200)
@@ -1271,19 +1281,44 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
 
     const unowned = await app.inject({
       method: 'GET',
-      url: '/transactions?safeId=00000000-0000-4000-8000-000000000000&fresh=1',
+      url: '/transactions?accountId=00000000-0000-4000-8000-000000000000&fresh=1',
       headers: { authorization: `Bearer ${token}` },
     })
     expect(unowned.statusCode).toBe(400)
-    expect(unowned.json().error).toBe('Invalid safeId')
+    expect(unowned.json().error).toBe('Invalid accountId')
   })
 
-  // #2907: `accountId` is the account-vocabulary twin of `safeId` — both
-  // accepted, both filter identically. Asserted on a REAL count difference,
-  // not just "200 OK": an unknown query key is silently ignored by Fastify,
-  // so a missing alias would have returned ALL transactions with no error —
-  // the exact failure mode this guards against.
-  it('filters by accountId (the #2907 twin of safeId) — filtered count differs from unfiltered', async () => {
+  // #2914 (naming epic #2906 phase 5, the contraction) ends the #2907 parity
+  // window: `?safeId=` is now REFUSED with a 400 naming `accountId`, never
+  // silently ignored. This is the important one: Fastify drops an undeclared
+  // query key in silence, so without the explicit refusal the response would
+  // be a 200 carrying EVERY row the user owns instead of one account's.
+  it('?safeId= is refused with a 400 naming accountId — never a silent ignore that returns every row', async () => {
+    const token = signToken({ sub: 'safeid-refused-user', email: 'safeid-refused@example.com' })
+    stubEmptyTransactionFetch()
+    const SAFE_A_ID = '33333333-3333-4333-8333-333333333333'
+    mockPoolForAggregation([
+      { id: SAFE_A_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'A' },
+    ])
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/transactions?safeId=${SAFE_A_ID}&fresh=1`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().replacement).toBe('accountId')
+    // The important guard: NOT a 200 carrying every row the user owns.
+    expect(res.json().transactions).toBeUndefined()
+    expect(res.json().total).toBeUndefined()
+  })
+
+  // #2907 gave `accountId` a same-value input twin, `safeId`, for one
+  // release. #2914 ends the window: asserted on a REAL count difference, not
+  // just "200 OK" — an unknown query key is silently ignored by Fastify, so a
+  // missing filter would have returned ALL transactions with no error, the
+  // exact failure mode this guards against.
+  it('filters by accountId (the retired safeId is refused, not read) — filtered count differs from unfiltered', async () => {
     const token = signToken({ sub: 'accountid-user', email: 'accountid@example.com' })
     const ACCOUNT_WITH_TXS_ID = '55555555-5555-4555-8555-555555555555'
     const ACCOUNT_EMPTY_ID = '66666666-6666-4666-8666-666666666666'
@@ -1340,12 +1375,16 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     expect(filteredToEmptyByAccountId.json().total).toBe(0)
     expect(filteredToEmptyByAccountId.json().total).not.toBe(unfilteredTotal)
 
-    const filteredToEmptyBySafeId = await app.inject({
+    // `?safeId=` is refused outright now (#2914) — asserted on this same
+    // fixture so the refusal is proven on a request that would otherwise
+    // have filtered to something meaningful, not a vacuous empty case.
+    const refusedBySafeId = await app.inject({
       method: 'GET',
       url: `/transactions?safeId=${ACCOUNT_EMPTY_ID}&fresh=1`,
       headers: { authorization: `Bearer ${token}` },
     })
-    expect(filteredToEmptyBySafeId.json().total).toBe(0)
+    expect(refusedBySafeId.statusCode).toBe(400)
+    expect(refusedBySafeId.json().replacement).toBe('accountId')
 
     // An unrecognized accountId still 400s (proves the param is actually
     // read, not silently ignored).
@@ -1355,16 +1394,15 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
       headers: { authorization: `Bearer ${token}` },
     })
     expect(unrecognized.statusCode).toBe(400)
-    expect(unrecognized.json().error).toBe('Invalid safeId')
+    expect(unrecognized.json().error).toBe('Invalid accountId')
   })
 
-  // #2907 finding #10: when both are given, `accountId` wins (documented in
-  // `openapi/spec.ts`'s parameter description). Scoping to the account WITH
-  // transactions via `accountId` while `safeId` names the EMPTY one proves
-  // which one the route actually reads first — a swapped `??` operand would
-  // pass every other test here (both still filter something) but flip this
-  // one silently.
-  it('#2907: accountId wins when both accountId and safeId are given', async () => {
+  // #2914 (naming epic #2906 phase 5, the contraction): `safeId` alongside
+  // `accountId` is STILL refused — the retired name's mere PRESENCE is
+  // refused, not resolved by precedence. `#2907`'s "accountId wins" rule
+  // (finding #10) does not survive the contraction: there is no longer a
+  // second accepted name to arbitrate between.
+  it('safeId DISAGREEING with accountId is refused — two answers to one question', async () => {
     const token = signToken({ sub: 'precedence-user', email: 'precedence@example.com' })
     const ACCOUNT_WITH_TXS_ID = '77777777-7777-4777-8777-777777777777'
     const ACCOUNT_EMPTY_ID = '88888888-8888-4888-8888-888888888888'
@@ -1380,9 +1418,38 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
       url: `/transactions?accountId=${ACCOUNT_WITH_TXS_ID}&safeId=${ACCOUNT_EMPTY_ID}&fresh=1`,
       headers: { authorization: `Bearer ${token}` },
     })
+    expect(response.statusCode).toBe(400)
+    expect(response.json().replacement).toBe('accountId')
+  })
+
+  it('safeId MATCHING accountId is accepted — the published CLI dual-sends, and #2908 told it to', async () => {
+    // The regression this exists for. `@haven_ai/cli` on `latest` sends
+    // `params.set('accountId', id); params.set('safeId', id)` because #2908's
+    // migration instruction said to. A refusal keyed on PRESENCE fires before
+    // the new name is read, so the contraction would have 400'd exactly the
+    // clients that followed the instruction most faithfully — on
+    // `activity list`, `activity export` and `agents connect`.
+    //
+    // The bar is unchanged for a client that has NOT migrated: `safeId` alone
+    // is still a typed 400 (asserted above). What is accepted is a caller
+    // that sends both and agrees with itself.
+    const token = signToken({ sub: 'dualsend-user', email: 'dualsend@example.com' })
+    const ACCOUNT_ID = '77777777-7777-4777-8777-777777777777'
+
+    stubMixedTransactionFetch()
+    mockPoolForAggregation([
+      { id: ACCOUNT_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Has txs' },
+    ])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions?accountId=${ACCOUNT_ID}&safeId=${ACCOUNT_ID}&fresh=1`,
+      headers: { authorization: `Bearer ${token}` },
+    })
     expect(response.statusCode).toBe(200)
-    // If safeId (the empty account) won, total would be 0.
-    expect(response.json().total).toBeGreaterThan(0)
+    // And it actually FILTERED — a 200 carrying every row would be the silent
+    // failure the refusal exists to prevent, wearing a success code.
+    expect(response.json().transactions.length).toBeGreaterThan(0)
   })
 
   it('agentId=user selects the unattributed outbound tx, not the agent-attributed one', async () => {
@@ -1556,7 +1623,7 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
               agent_name: 'Research assistant',
               account_id: '11111111-2222-4333-8444-555555555501',
               account_address: SAFE_ADDRESS,
-              safe_name: 'Main wallet',
+              account_name: 'Main wallet',
               chain_id: 8453,
               token_symbol: 'USDC',
               token_address: USDC_ADDRESS,

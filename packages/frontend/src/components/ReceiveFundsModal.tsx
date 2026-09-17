@@ -45,10 +45,10 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
   // unprovable by mutation — a guard no test can turn red is worse than none,
   // because it reads as protection while protecting nothing.
   useEffect(() => {
-    if (!open || !showQr || !safe?.safe_address) return
+    if (!open || !showQr || !safe?.account_address) return
 
     let cancelled = false
-    QRCode.toDataURL(safe.safe_address, {
+    QRCode.toDataURL(safe?.account_address, {
       margin: 1,
       width: 220,
       color: { dark: '#1A2140', light: '#FFFFFF' }, // QR encoder needs literal hex for module colours — design-lint-disable-line
@@ -63,11 +63,11 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
     return () => {
       cancelled = true
     }
-  }, [open, showQr, safe?.safe_address])
+  }, [open, showQr, safe?.account_address])
 
   if (!open || !safe) return null
 
-  const accountAddress = safe.safe_address
+  const accountAddress = safe?.account_address
   // #1852: was `getChainConfig(safe.chain_id)`, which THROWS for any id outside
   // the registry — including `undefined` — taking the whole screen down through
   // the error boundary. Both shapes of unresolved (absent id, present-but-

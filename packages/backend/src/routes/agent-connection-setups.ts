@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import crypto from 'crypto'
+import { retiredNameVerdict, retiredSafeField } from '../middleware/retired-safe-names.js'
 import { resolveX402BindingSignerAddress } from '../infra/chain/x402-binding-signer.js'
 import * as setups from '../infra/repositories/agent-connection-setups.js'
 import type {
@@ -63,7 +64,14 @@ interface AllowanceInput {
 interface CreateSetupBody {
   name: string
   description?: string
+  /**
+   * #2914: the retired `safe_id` input name stays DECLARED so it can be
+   * refused (see the handler). An undeclared key is dropped in silence, and
+   * a setup created with no account behind it looks successful until the
+   * agent tries to spend.
+   */
   safe_id?: string
+  account_id?: string
   runtime?: string
   allowances?: AllowanceInput[]
   /** Advanced opt-in: generate a connector command for the fully-local MCP topology. */
@@ -252,7 +260,15 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       const parsed = validateCreateBody(request.body, reply)
       if (!parsed) return
 
-      const safe = await resolveAccountForSetup(sub, request.body.safe_id)
+      // #2914: `safe_id` is retired — refused, never ignored. Keyed on
+      // reliance, not presence: #2908's published connector sends both names
+      // (`{ account_id, safe_id }`), so a matching pair is a migrated caller.
+      const safeIdVerdict = retiredNameVerdict(request.body.safe_id, request.body.account_id)
+      if (safeIdVerdict.kind === 'refuse') {
+        return reply.code(400).send(retiredSafeField('safe_id', 'account_id', safeIdVerdict.reason))
+      }
+
+      const safe = await resolveAccountForSetup(sub, request.body.account_id)
       if (!safe) {
         return reply.code(400).send({ error: 'Haven wallet is required' })
       }
@@ -453,7 +469,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         }
         setupId = setup.id
         issuePassportForSetup = setup.issue_passport === true
-        setupChainId = setup.safe_chain_id
+        setupChainId = setup.account_chain_id
         setupUserId = setup.user_id
         setupSource = setup.source ?? null
         setupVia = setup.via ?? null
@@ -1062,10 +1078,10 @@ function buildConnectorSetupResponse(
     },
     haven_wallet: {
       id: setup.account_id,
-      name: setup.safe_name,
+      name: setup.account_name,
       address: setup.account_address,
-      chain_id: setup.safe_chain_id,
-      network: networkName(setup.safe_chain_id),
+      chain_id: setup.account_chain_id,
+      network: networkName(setup.account_chain_id),
     },
     agent_budget: allowances.map((allowance) => ({
       token_address: allowance.token_address,
@@ -1098,10 +1114,10 @@ function buildUserSetupStatus(setup: SetupRow, allowances: AllowanceRow[]) {
     },
     haven_wallet: {
       id: setup.account_id,
-      name: setup.safe_name,
+      name: setup.account_name,
       address: setup.account_address,
-      chain_id: setup.safe_chain_id,
-      network: networkName(setup.safe_chain_id),
+      chain_id: setup.account_chain_id,
+      network: networkName(setup.account_chain_id),
     },
     agent_budget: allowances.map((allowance) => ({
       id: allowance.id,

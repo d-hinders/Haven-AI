@@ -100,9 +100,9 @@ and the `release` skill.
 > that the two channels cannot cross are untouched. Worth noting for this
 > release specifically: `0.0.0-` still sorts below every real version, so the
 > MINOR bump to 0.3.0 changes nothing about channel ordering. `last-verified`
-> deliberately NOT bumped — a scoped check of one constant is not a
-> re-verification of this document, and #1366 rates a rubber stamp worse than a
-> stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
+> deliberately NOT bumped — **it already reads 2026-09-17 from an earlier change
+> today**, and a scoped check of one constant is not a re-verification of this
+> document; #1366 rates a rubber stamp worse than a stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
 
 ## What `@dev` is, and is not
 

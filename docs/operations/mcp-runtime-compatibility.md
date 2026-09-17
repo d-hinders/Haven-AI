@@ -568,8 +568,13 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > **What an old client now meets.** Retired paths answer **410** with a typed
 > body naming their replacement; retired REQUEST names are **refused with 400**
 > naming the new field rather than ignored; the next-action enum emits
-> `fund_account_or_raise_allowance` and no longer accepts the old value on
-> input. Measured against the published `@haven_ai/sdk@0.2.1-alpha.0` tarball,
+> `fund_account_or_raise_allowance`, and the SDK stops translating it for you.
+> **That last one is a response-only enum** — `openapi/spec.ts` says so at the
+> enum itself, "No route takes this as request input" — so nothing rejects an
+> old value on input; what went is the SDK's client-side normaliser
+> `canonicalAgentPaymentNextAction`, with `isFundAccountOrRaiseAllowance`. A
+> 0.3.0 SDK against a pre-0.3.0 server therefore passes the old value through
+> unrecognised rather than mapping it. Measured against the published `@haven_ai/sdk@0.2.1-alpha.0` tarball,
 > **seven exported declarations are removed and none added**
 > (`AgentPaymentNextActionAccountAlias`, `AgentPaymentNextActionWire`,
 > `accountAddressTwins`, `canonicalAgentPaymentNextAction`,
@@ -577,7 +582,11 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 >
 > **Two response names deliberately SURVIVE this release**, and that is the one
 > skew statement a reader must not miss: the `safes` envelope key on
-> `GET /user/accounts` and `safeName` on the `GET /transactions` feed. Both are
+> `GET /user/accounts` and `safeName` on the `GET /transactions` feed. (A third
+> retired name also survives — the `safes` key on `GET /transactions/filters` —
+> but it is read only by the dashboard, which ships from the same branch as the
+> backend, so it carries no published-client skew and is not part of this
+> contract. It is named in the release shard.) Both twins are
 > declared `deprecated` in the spec, and both are still emitted, because
 > `@haven_ai/cli@0.2.1-alpha.0` — what `latest` resolved to before this release
 > — reads them, and a published client cannot dual-READ the way a request can
@@ -586,12 +595,13 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > this one, once `npm view @haven_ai/cli dist-tags` shows `latest` at or past
 > 0.3.0-alpha.0. This release is what makes that true.
 >
-> **The version-skew contract is therefore ASYMMETRIC for one release**, which
-> it has not been before: a 0.3.0 client against a 0.3.0 backend is consistent,
+> **The version-skew contract is therefore ASYMMETRIC for one release**: a 0.3.0 client against a 0.3.0 backend is consistent,
 > and a pre-0.3.0 client against a 0.3.0 backend now fails **loudly and typed**
 > rather than silently — which is the intended end state of #2906, not a
 > regression. The signer's supported expected-context versions are untouched by
-> this epic and by this release.
+> this epic and by this release. `last-verified` is NOT bumped: it already reads
+> 2026-09-17 from an earlier change today, and this note records what this
+> release carries rather than a re-verification of the document.
 
 **Do not re-pin the four `@haven_ai/*` rows by hand.** Since
 [#1790](https://github.com/d-hinders/Haven-AI/issues/1790) `npm run release:bump`

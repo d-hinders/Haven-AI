@@ -408,7 +408,11 @@ export function StackedBarChart({
   // callout above the legend clears them at the cost of the date labels it
   // partly repeats. Ties go to the baseline slot. The svg scales the
   // viewBox to its CSS box without preserving the ratio, so a viewBox y
-  // maps to CSS by `y / VIEW_H * clientHeight` (and x by `VIEW_W`).
+  // maps to CSS by `y / VIEW_H * clientHeight` (and x by `VIEW_W`). This
+  // effect reads `tipHalfPct`, which the half-width effect above sets: on
+  // the pass where that value changes this one uses the previous value and
+  // corrects itself on the next — a two-stage fixed point, one way (the
+  // half-width never depends on `tipTop`), converging before paint.
   // Every input is a layout read or a value the render already fixed, so the
   // second pass reads the same number and the setter bails out — the same
   // fixed point as the half-width above.
@@ -455,10 +459,14 @@ export function StackedBarChart({
         if (j === active) return
         const left = cssX(xOf(j))
         if (left + cssX(barW) <= spanLeft || left >= spanRight) return
-        const bar = cssY(yOf(e.total))
-        const mark = cssY(yOf(e.total) - (e.refusals > 0 ? REFUSAL_MARKER_H + 3 : 0))
+        // A day with nothing spent draws no bar: its "top" is the baseline
+        // and must not score (it only ever falls in the legend slot's box,
+        // which would bias the choice toward the baseline slot — review).
+        // Its cap, if it has one, still counts.
         const inside = (y: number) => y > slotTop && y < slotTop + tip.offsetHeight
-        if (inside(bar) || inside(mark)) n += 1
+        const barHidden = e.total > 0 && inside(cssY(yOf(e.total)))
+        const capHidden = e.refusals > 0 && inside(cssY(yOf(e.total) - REFUSAL_MARKER_H - 3))
+        if (barHidden || capHidden) n += 1
       })
       return n
     }

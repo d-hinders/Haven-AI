@@ -131,7 +131,7 @@ Both pixel jobs still **run** on any diff under `packages/frontend/`: `scripts/c
 
 **But running is not comparing, and the difference decides whether this narrowing is safe on your route.** `design_visual` compares only what has a **committed baseline** under `e2e/__screenshots__/`, and coverage comes in three grades rather than two:
 
-- **Whole-page**, at the viewports that spec committed: `/design-system`, `/dashboard` and `/transactions` (the last two desktop-only).
+- **Whole-page**, at the viewports that spec committed: `/dashboard` and `/transactions` (both desktop-only). `/design-system` commits scoped clips rather than a whole page — the shell (top bar, sidebar) and, since [#3064](https://github.com/d-hinders/Haven-AI/issues/3064), one clip per StackedBarChart showcase sample (the page's only baselines below the shell — the wide chart, the narrow one, the swatch list — each spec test asserting the tick voice, the striped partial day or the swatch order so a pixel diff has a named cause).
 - **Element-scoped only.** `/agents` is the one to know: `agent-panel-states` and `focus-visible` both `goto('/agents')` and commit clips of the agent-card states, the empty states and the driven focus targets — real coverage, but of *elements*. A whole-page `/agents` regression outside those boxes is compared against nothing.
 - **Nothing at all**: `/accounts`, agent detail, the connect flow.
 

@@ -723,8 +723,9 @@ the argument-spelling convergence (#2366) was declared done.
   tool-naming hits (13 emissions), 14 raw argument hits (12 real, 3 emit a
   null id); signer 4 raw / 5 decision sites / 0 tools; local runtime 5 raw /
   1 decision site / 0 tools; discovery emission sites 2, `suggested_arguments`
-  0 (the wider grep's 25 hits are mostly declarations — recorded as the
-  artefact it was; the spec review of the epic measured the split). Live: discovery hands the agent `resource_url`, the suggested tool takes
+  0 (the wider grep's 25 hits are 14 wrong-tool hints and 11 declarations;
+  the two discovery hints are the ones this finding is about — recorded as
+  the artefact it was; the spec review of the epic measured the split). Live: discovery hands the agent `resource_url`, the suggested tool takes
   `url`, the strict refusal explains bodies and idempotency. Cost: thirteen
   issues in the class in five weeks (#2282, #2343, #2348, #2349, #2353, #2366,
   #2393; #1308, #1588, #2550, #2557, #2975, #3001).
@@ -760,10 +761,11 @@ the argument-spelling convergence (#2366) was declared done.
 - block 2 (`covers:` completeness) → the block's loop under `bash` → 8
   contract docs; in scope the runtime-compatibility contract cites 28, covers
   22, 17 cited-but-not-covered (09-15: 17 of 27 — unchanged, not re-reported).
-- block 3 (stale numbers) → the four package READMEs + the runtime doc → 0
-  figure-bearing lines; ledger re-derivations are the sizing deltas above.
-- block 4 (retired vocabulary) → the block's term list → 184 files (192 on
-  09-15), 46 historical / 138 live (146); positive control 36 shards; in
+- block 3 (stale numbers) → the four package READMEs → 0 figure-bearing
+  lines; the runtime doc 4, of which 2 real test counts inside dated notes
+  (historical, correct); ledger re-derivations are the sizing deltas above.
+- block 4 (retired vocabulary) → the block's term list over its full tracked
+  file set → 190 files (192 on 09-15), 46 historical / 144 live (146); positive control 36 shards; in
   scope 15 live files, all enforcement tests, drop migrations or comments;
   `npm run lint:retired-rail-prose` → 33 hits / 31 files (34 / 32), green;
   the rename census → 752 surviving hits, all in allowed classes; #2851 closed.

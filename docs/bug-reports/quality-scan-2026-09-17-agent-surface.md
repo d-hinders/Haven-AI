@@ -3,10 +3,22 @@ owner: "@AntonioSaaranen"
 status: current
 covers:
   - .github/money-path-globs.json
-  - packages/mcp-server/src/tools/plain-http-x402.ts
-  - scripts/ci/safe-account-rename-census.mjs
   - docs/regulatory/casp-risk-guardrails.md
+  - packages/backend/src/middleware/retired-safe-names.ts
+  - packages/backend/src/routes/safe-deploy.ts
+  - packages/backend/src/routes/user-accounts-retired.ts
   - packages/demo-merchant-mcp/src/x402.ts
+  - packages/mcp-server/src/tools/catalog-purchase.ts
+  - packages/mcp-server/src/tools/contracts.ts
+  - packages/mcp-server/src/tools/plain-http-x402.ts
+  - packages/mcp-server/src/tools/support/guidance.ts
+  - packages/mcp/src/tools.ts
+  - packages/sdk/src/client.ts
+  - packages/sdk/src/x402-protocol.ts
+  - packages/sdk/src/x402.ts
+  - packages/signer/src/tools.ts
+  - scripts/ci/safe-account-rename-census.mjs
+  - scripts/retired-rail-prose-ratchet.mjs
 last-verified: "2026-09-17"
 ---
 
@@ -60,8 +72,9 @@ decisions, not stalled work.
   (`client.ts:1146,1165`: `input.url ?? paymentRequired.resource.url`). A live
   `GET http://…/api/fact` answers **308 → https**, so the paid request's first
   hop — carrying `PAYMENT-SIGNATURE` — travels in clear before the redirect.
-  No scheme check exists on the path (`grep "https:" packages/sdk/src/x402*.ts
-  packages/mcp-server/src/tools/plain-http-x402.ts` → 0 code hits). See D1.
+  No scheme check exists on the path (`grep -n "https:"` over the four SDK
+  x402 modules and the hosted plain-HTTP module → 2 non-test hits, both
+  explorer base URLs in `x402-protocol.ts:44-45`; none is a check). See D1.
 
 ## 2. Finding that meets the bar
 
@@ -71,15 +84,15 @@ This is the **argument half of the 2026-09-13 F3 / proposal 1** ("response
 contract v2"), re-surfaced with the delta the live run produced after the
 argument-spelling "convergence" (#2366, 2026-09-01) was declared done.
 
-**Measured** (`grep -rn <field>: packages/<p>/src --include='*.ts' | grep -v test`, camelCase builders included):
+**Measured** (`grep -rn "<field>:" packages/<p>/src --include='*.ts' | grep -v "\.test\.\|__tests__"`, camelCase builders included; "decision sites" by `grep -rn "next_action: AgentPaymentNextAction\.\|next_action = AgentPaymentNextAction\."` on the signer and `"nextAction: AgentPaymentNextAction\."` on the local runtime):
 
-| surface | `next_action` sites | of which name a `next_tool` | of which carry `next_arguments` | `suggested_tool` sites | with `suggested_arguments` |
+| surface | `next_action` sites | of which name a `next_tool` | of which carry `next_arguments` | discovery `suggested_tool` sites | with `suggested_arguments` |
 |---|---|---|---|---|---|
 | hosted MCP (`mcp-server`) | 46 | 15 raw (13 emissions) | 14 raw (12 real; 3 emit `payment_id: null`) | 1 | **0** |
 | signer | 4 raw (5 decision sites) | **0** | 0 | 0 | **0** |
 | local MCP (`mcp`) | 5 raw (1 decision site) | **0** | 0 | 1 | **0** |
 
-(Raw = the grep in the heading; "emissions"/"decision sites" exclude the builder's own line, a comment, a type field and pass-throughs — the spec review of epic #3105 measured the split. The wider `suggested_tool\|suggestedTool` grep returns 25 hits; 23 of them are type declarations, the `wrongTool()` helper and its error class, so the first draft's "25 sites" was an instrument artefact.)
+(Raw = the grep in the heading; "emissions" exclude the builder's own line and a comment, "decision sites" are the second grep in the heading — the signer's five are three assignments in `sign-context.ts:98,101,105` and two literals in `tools.ts:729,764`; `tools.ts:742` is a pass-through. The wider `suggested_tool\|suggestedTool` grep returns 25 hits: 14 emission sites (12 hosted wrong-tool hints, 1 signer `tools.ts:766`, 1 local) and 11 declarations, the `wrongTool()` helper and its error class; 2 of the 14 are discovery hints (`catalog-purchase.ts:163`, `mcp/src/tools.ts:421`), and neither carries arguments. The first draft's "25 sites" was that artefact.)
 
 - Two discovery emission sites (hosted `catalog-purchase.ts:163`, local
   `mcp/src/tools.ts:421`), neither with arguments; the hosted payload hands the
@@ -135,8 +148,9 @@ Refused as a second finding (one-PR remedies, recorded as candidates): C1–C2 b
   `packages/cli/src/**`, `packages/sdk/src/**`; the classifier's
   `.github/money-path-globs.json` (read by `loadMoneyPathGlobs`) lists none of
   the first four and only `sdk/src/signer.ts` of the fifth. Block 6 in scope:
-  `find packages/{mcp,mcp-server,signer,demo-merchant-mcp}/src -name '*.ts' ! -name '*.test.ts' | xargs grep -l -E 'sendTransaction|signTypedData|writeContract|…'`
-  → 3 verb files, **1 outside every glob: `packages/demo-merchant-mcp/src/x402.ts`**
+  `find packages/{mcp,mcp-server,signer,demo-merchant-mcp}/src -name '*.ts' ! -name '*.test.ts' ! -path '*__tests__*' | xargs grep -l -E 'sendTransaction|redeemDelegation|signTypedData|sendUserOperation|executeTransaction|broadcastTransaction|signMessage|privateKeyToAccount|writeContract'`
+  → 3 verb files (the demo merchant's `x402.ts`, the signer's `core.ts` and
+  `settlement-child.ts`), **1 outside every glob: `packages/demo-merchant-mcp/src/x402.ts`**
   (1,516 lines; it settles the buyer's authorization on-chain, and the prod
   instance runs on Base mainnet per #1458). Cost: #2969/#2977 (the zero-hash
   settlement sentinel) and #2979/#2980 (settlement readiness) changed that
@@ -170,8 +184,8 @@ Refused as a second finding (one-PR remedies, recorded as candidates): C1–C2 b
   → 33 hits / 31 files (was 34 / 32, shrink-only, green).
   `node scripts/ci/safe-account-rename-census.mjs origin/dev` → 752 surviving
   hits, every one in an allowed path class, no allow-listed file grew.
-- Block 4 residue: 184 files carry a retired term (was 192 on 09-15), 46
-  historical / 138 live (was 146); in scope 15 live files, all enforcement
+- Block 4 residue: 190 files carry a retired term (was 192 on 09-15), 46
+  historical / 144 live (was 146); in scope 15 live files, all enforcement
   tests, drop migrations or comments describing the term as history. Nothing
   live reads the retired rail. No finding.
 
@@ -208,11 +222,15 @@ Refused as a second finding (one-PR remedies, recorded as candidates): C1–C2 b
   contract docs; in scope `mcp-runtime-compatibility.md` cites 28, covers 22,
   **17 cited-but-not-covered** (09-15: 17 of 27 — unchanged, not re-reported);
   `04-x402-payment-sequence.md` 3 of 23.
-- block 3 **stale numbers** → the four package READMEs + the runtime doc carry
-  **0** figure-bearing lines (nothing to re-derive); ledger re-derivations are
-  the sizing deltas above.
-- block 4 **retired vocabulary** → 184 files / 46 hist / 138 live, positive
-  control 36 shards; code half unchanged (`failPendingX402Intent` only in its
+- block 3 **stale numbers** → the four package READMEs carry **0**
+  figure-bearing lines; the runtime-compatibility doc carries 4, of which 2
+  are real test counts (`10/10`, `210/210`) inside its dated re-verification
+  notes — historical record, correct, nothing to re-derive; ledger
+  re-derivations are the sizing deltas above.
+- block 4 **retired vocabulary** → over every tracked `.md|.ts|.tsx|.mjs|.json`
+  under `docs/`, `packages/`, `.agents/`, `scripts/` (the block's file set;
+  the first draft omitted `packages/**/*.md` and read 184) → **190 files /
+  46 historical / 144 live** (09-15: 192 / 46 / 146), positive control 36 shards; code half unchanged (`failPendingX402Intent` only in its
   defining file; the other two have the qa-agent importer).
 - block 5 **merge-method drift** → not taken (out of scope; 09-15 baseline
   holds).
@@ -228,7 +246,7 @@ Refused as a second finding (one-PR remedies, recorded as candidates): C1–C2 b
   → 40 / 40 success.
 - workflow archaeology → last 200 Actions runs: 16 with attempt > 1 (docs
   quality 4, copy lint 3, docs coupling 3, DS coupling 3 — the parked-run
-  re-runs after bot baseline pushes), 4 failures; `ci.yml` last 60: 45
+  re-runs after bot baseline pushes — plus CI 2 and PR labeler 1), 4 failures; `ci.yml` last 60: 45
   success / 5 failure / 10 cancelled; 4 of 135 in-scope commits since 08-15
   mention flake/rerun.
 - comment archaeology → `TODO|FIXME|HACK` in the four packages → 0; the most

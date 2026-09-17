@@ -17,7 +17,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
 })
 
 import { getSubmissionStatus, submitCatalog, useMerchant, useMerchants } from '@/hooks/useCatalog'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { ApiRequestError } from '@/lib/api'
 
 describe('catalog submission api (#1715)', () => {
@@ -137,5 +137,30 @@ describe('useMerchant (#3078)', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.notFound).toBe(false)
     expect(result.current.error).toBe('boom')
+  })
+
+  it('ignores a late answer for a previous slug (a → b, a resolves last)', async () => {
+    const pending = new Map<string, (v: unknown) => void>()
+    mockApiGet.mockImplementation(
+      (url: string) => new Promise((resolve) => pending.set(url, resolve)),
+    )
+    const { result, rerender } = renderHook(({ slug }) => useMerchant(slug), {
+      initialProps: { slug: 'a' },
+    })
+    rerender({ slug: 'b' })
+    await waitFor(() => expect(pending.has('/merchants/b')).toBe(true))
+
+    pending.get('/merchants/b')!({ merchant: { slug: 'b' }, offers: [{ id: 'o-b' }] })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.merchant?.slug).toBe('b')
+
+    // The stale answer must not overwrite the current page.
+    await act(async () => {
+      pending.get('/merchants/a')!({ merchant: { slug: 'a' }, offers: [{ id: 'o-a' }] })
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(result.current.merchant?.slug).toBe('b')
+    expect(result.current.offers).toEqual([{ id: 'o-b' }])
+    expect(result.current.loading).toBe(false)
   })
 })

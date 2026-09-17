@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { notFound as nextNotFound, useParams } from 'next/navigation'
-import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'

@@ -2624,7 +2624,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Merchant card (marketplace)"
-        description="The /marketplace grid's card (#3079, epic #3077): monogram or logo, name, category chip, description clamped to two lines, network chips, and one of three footer states — an offer count, 'Coming soon' for a prospect, or the Haven test-merchant label. The Verified badge follows verified_payable, exactly like the catalog card it replaces."
+        description="The /marketplace grid's card (#3079, epic #3077): monogram or logo, name, category chip, description clamped to two lines, network chips, and one of three footer states — an offer count, 'Coming soon' for a prospect, or the Haven test-merchant label. The Verified badge follows verified_payable — the wire's own proof (#3078) — where the catalog card it replaces read the row's source."
       >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <MerchantCard

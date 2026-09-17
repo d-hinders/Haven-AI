@@ -8,12 +8,9 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
-import { chainName, networkToChainId } from '@/lib/marketplace'
+import { chainName, listsTestnet, networkToChainId } from '@/lib/marketplace'
 import { MerchantCard } from './MerchantCard'
 import type { Merchant } from '@/hooks/useCatalog'
-
-/** Sepolia's CAIP-2 id — the one testnet a live merchant is seeded on today (epic #3077 decision 11). */
-const TESTNET_NETWORK = 'eip155:84532'
 
 export function MerchantGrid({
   merchants,
@@ -48,11 +45,9 @@ export function MerchantGrid({
   const showNetworkFilter = chainIds.length > 1
 
   // Default "Show test merchants" ON when any LISTED network is a testnet —
-  // read off the served data, never `NEXT_PUBLIC_HAVEN_ENV` (decision 10).
-  const testMerchantsDefaultOn = useMemo(
-    () => merchants.some((m) => m.networks.includes(TESTNET_NETWORK)),
-    [merchants],
-  )
+  // read off the served data (chain facts from core, not a hard-coded id),
+  // never `NEXT_PUBLIC_HAVEN_ENV` (decision 10).
+  const testMerchantsDefaultOn = useMemo(() => listsTestnet(merchants), [merchants])
   // The user's explicit choice, or none: the default is DERIVED at read time
   // from the served data, not captured into state at mount — the grid mounts
   // before the merchants arrive, and a `useState(default)` froze `false` on

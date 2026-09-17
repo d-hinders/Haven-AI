@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   agentInstruction,
   freshness,
-  isVerified,
+  isTestnetChain,
+  listsTestnet,
   merchantInitials,
   needsUnpinnedBudget,
   networkToChainId,
@@ -123,10 +124,20 @@ describe('networkToChainId', () => {
   })
 })
 
-describe('isVerified', () => {
-  it('only treats ingestion entries as verified', () => {
-    expect(isVerified({ source: 'ingestion' })).toBe(true)
-    expect(isVerified({ source: 'operator' })).toBe(false)
+describe('isTestnetChain / listsTestnet (decision 10)', () => {
+  it('knows Base Sepolia from Base and Gnosis, and treats an unknown chain as NOT a testnet', () => {
+    expect(isTestnetChain(84532)).toBe(true)
+    expect(isTestnetChain(8453)).toBe(false)
+    expect(isTestnetChain(100)).toBe(false)
+    expect(isTestnetChain(999999)).toBe(false)
+  })
+
+  it('lists a testnet when any merchant serves one, in either network form', () => {
+    expect(listsTestnet([{ networks: ['eip155:8453'] }])).toBe(false)
+    expect(listsTestnet([{ networks: ['eip155:8453'] }, { networks: ['eip155:8453', 'eip155:84532'] }])).toBe(true)
+    expect(listsTestnet([{ networks: ['base-sepolia'] }])).toBe(true)
+    expect(listsTestnet([{ networks: ['solana'] }])).toBe(false)
+    expect(listsTestnet([])).toBe(false)
   })
 })
 

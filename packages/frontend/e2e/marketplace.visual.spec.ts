@@ -80,9 +80,13 @@ const SCENARIOS: Scenario[] = [
       const merchantPage = page.getByTestId('merchant-page')
       await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(1)
       await expect(merchantPage.getByRole('heading', { name: 'Offers' })).toHaveCount(1)
-      await expect(merchantPage.getByText('Fact')).toHaveCount(1)
-      await expect(merchantPage.getByText('Joke')).toHaveCount(1)
-      await expect(merchantPage.getByText('Quote')).toHaveCount(1)
+      // `exact` — a substring match also hits the merchant description ("Fact,
+      // joke and quote endpoints") and each offer's own description.
+      await expect(merchantPage.getByText('Fact', { exact: true })).toHaveCount(1)
+      await expect(merchantPage.getByText('Joke', { exact: true })).toHaveCount(1)
+      await expect(merchantPage.getByText('Quote', { exact: true })).toHaveCount(1)
+      // The network column shows the chain's NAME, never the raw CAIP-2 id.
+      await expect(merchantPage.getByText('eip155:')).toHaveCount(0)
       // None of the three offers advertises erc7710 (asset_transfer_methods:
       // null in the fixture), so every one carries the unpinned-budget line.
       await expect(

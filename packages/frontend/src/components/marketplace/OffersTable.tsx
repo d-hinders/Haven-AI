@@ -24,7 +24,7 @@ export function OffersTable({
       <Table className="min-w-[720px]">
         <Table.Head collapseWhenNarrow={false}>
           <tr>
-            <Table.HeaderCell align="left">Tool / method</Table.HeaderCell>
+            <Table.HeaderCell align="left">Offer</Table.HeaderCell>
             <Table.HeaderCell align="left">Method</Table.HeaderCell>
             <Table.HeaderCell align="left">Description</Table.HeaderCell>
             <Table.HeaderCell align="left">Price</Table.HeaderCell>

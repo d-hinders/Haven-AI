@@ -2,25 +2,23 @@
  * Marketplace — merchant-facing pure helpers (#3079, epic #3077).
  *
  * Moved out of `CatalogPanel.tsx` (deleted by this issue) unchanged in
- * behaviour: `isVerified`, `agentInstruction` and `withinBudget` keep their
- * exact contracts, byte-identical output, so a merchant page's copy button
- * and per-agent budget hint read the same as the old catalog card's did.
+ * behaviour: `agentInstruction` and `withinBudget` keep their exact
+ * contracts, byte-identical output, so a merchant page's copy button and
+ * per-agent budget hint read the same as the old catalog card's did.
  * `networkToChainId`, `chainName` and `freshness` moved alongside them
  * because every one of the new marketplace components needs at least one.
+ *
+ * NOT moved: the old card's `isVerified` (`source === 'ingestion'`). The
+ * Verified badge now follows `verified_payable` — the epic's trust claim is
+ * "domain controlled AND verified payable", and since #3078 the wire carries
+ * that proof per entry and per merchant, so the badge reads the proof rather
+ * than the row's provenance (an ingestion row is verified payable the moment
+ * it is marked; an operator row can be too). Stated in PR #3087.
  */
+import { getFaucetUrl, isRegisteredChain } from '@haven_ai/core'
 import { ALL_CHAINS, getChainConfig } from '@/lib/chains'
 import { getTokenDecimals, humanAmountToAtomic } from '@/lib/allowance-format'
-import type { CatalogEntry } from '@/hooks/useCatalog'
-
-/**
- * The epic trust claim, verbatim: "verified" only ever means domain
- * controlled AND verified payable — never merchant honesty, quality or
- * settlement reliability. The badge appears exactly when the row is a
- * self-submitted ingestion entry that passed both proofs.
- */
-export function isVerified(entry: Pick<CatalogEntry, 'source'>): boolean {
-  return entry.source === 'ingestion'
-}
+import type { CatalogEntry, Merchant } from '@/hooks/useCatalog'
 
 /**
  * Resolve a catalog entry's `network` to a chain id. The field is heterogeneous
@@ -41,6 +39,32 @@ export function chainName(chainId: number): string {
   } catch {
     return `Chain ${chainId}`
   }
+}
+
+/**
+ * A testnet is a registered chain with a faucet — `faucetUrl` is core's
+ * testnet-only field (#2534), the same predicate the backend's marketplace
+ * scope uses for the prospects gate. An unregistered id is NOT a testnet
+ * (fail closed: the test-merchant toggle stays off for a chain we do not know).
+ */
+export function isTestnetChain(chainId: number): boolean {
+  return isRegisteredChain(chainId) && getFaucetUrl(chainId) !== undefined
+}
+
+/**
+ * Whether any listed merchant serves a testnet — the "Show test merchants"
+ * default (epic #3077 decision 10). Read off the served data: the backend
+ * already scopes `GET /merchants` to the deployment's listed chains
+ * (#3078), so a merchant's `networks` ARE the listed chains projected onto
+ * merchants, and a staging env on any other testnet follows its chains.
+ */
+export function listsTestnet(merchants: ReadonlyArray<Pick<Merchant, 'networks'>>): boolean {
+  return merchants.some((m) =>
+    m.networks.some((n) => {
+      const id = networkToChainId(n)
+      return id !== undefined && isTestnetChain(id)
+    }),
+  )
 }
 
 /**

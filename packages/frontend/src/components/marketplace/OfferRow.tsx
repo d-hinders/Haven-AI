@@ -1,5 +1,5 @@
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { freshness } from '@/lib/marketplace'
+import { chainName, freshness, networkToChainId } from '@/lib/marketplace'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
 /**
@@ -18,10 +18,13 @@ export function OfferRow({
 }) {
   const degraded = entry.status === 'degraded'
   const method = entry.protocol === 'mcp' ? entry.tool_name : entry.rail.toUpperCase()
-  const path = entry.protocol === 'mcp' ? entry.tool_name : entry.resource_url
+  // The resource URL for every protocol: an MCP offer's tool name is already
+  // the Method cell, so repeating it here printed one string under two headers.
+  const path = entry.resource_url
+  const chainId = networkToChainId(entry.network)
 
   return (
-    <tr>
+    <tr data-testid={`offer-row-${entry.id}`}>
       <td className="px-4 py-3 align-top">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-[var(--v2-ink)]">{entry.name}</span>
@@ -54,7 +57,7 @@ export function OfferRow({
           </p>
         )}
       </td>
-      <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-2)]">{entry.network ?? '—'}</td>
+      <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-2)]">{chainId === undefined ? '—' : chainName(chainId)}</td>
       <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-3)]">
         {freshness(entry.verified_at)}
         {entry.verified_payable && (

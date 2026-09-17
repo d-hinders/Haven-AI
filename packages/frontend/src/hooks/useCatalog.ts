@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiRequestError } from '@/lib/api'
 import type { ApiSchema } from '@haven_ai/core'
 
@@ -49,34 +49,6 @@ export function getSubmissionStatus(id: string): Promise<CatalogSubmissionStatus
   return api.get<CatalogSubmissionStatus>(`/catalog/submit/${id}`)
 }
 
-export function useCatalog() {
-  const [entries, setEntries] = useState<CatalogEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const fetchCatalog = useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const res = await api.get<{ entries: CatalogEntry[] }>('/catalog')
-      // `?? []`: `api.get` does no response validation, so an absent key stores
-      // `undefined` and the next `.map` takes the whole route into the
-      // ErrorBoundary (#1075, #2295, #3091 — #3093 sweeps the array stores).
-      setEntries(res.entries ?? [])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'We could not load the catalog.')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchCatalog()
-  }, [fetchCatalog])
-
-  return { entries, loading, error, refetch: fetchCatalog }
-}
-
 /** `GET /merchants` — every live merchant on a listed chain, plus prospects for an owner who may see them. */
 export function useMerchants() {
   const [merchants, setMerchants] = useState<Merchant[]>([])
@@ -115,8 +87,13 @@ export function useMerchant(slug: string) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
+  // Generation counter: `/marketplace/a` → `/marketplace/b` reuses the mounted
+  // page under the app router, so a slow answer for `a` landing after `b`'s
+  // would otherwise overwrite the current page. Only the latest request writes.
+  const generation = useRef(0)
 
   const fetchMerchant = useCallback(async () => {
+    const mine = ++generation.current
     try {
       setLoading(true)
       setError(null)
@@ -124,16 +101,18 @@ export function useMerchant(slug: string) {
       const res = await api.get<{ merchant: Merchant; offers: CatalogEntry[] }>(
         `/merchants/${slug}`,
       )
+      if (mine !== generation.current) return
       setMerchant(res.merchant)
       setOffers(res.offers)
     } catch (err) {
+      if (mine !== generation.current) return
       if (err instanceof ApiRequestError && err.status === 404) {
         setNotFound(true)
       } else {
         setError(err instanceof Error ? err.message : 'We could not load this merchant.')
       }
     } finally {
-      setLoading(false)
+      if (mine === generation.current) setLoading(false)
     }
   }, [slug])
 

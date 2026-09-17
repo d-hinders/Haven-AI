@@ -1691,15 +1691,19 @@ export const FIXTURE_EMPTY_FALLBACK = {
   failedAccountIds: [],
   recipients: [], delegations: [], owners: [], passkeys: [], tokens: [],
   payments: [], receipts: [], catalog: [], activity: [],
-  // #2295: `entries` is `GET /catalog`'s collection key — `useCatalog` does
-  // `setEntries(res.entries)` (`hooks/useCatalog.ts:47`). It was missing, so
-  // `/catalog` fell through to this shape, stored `undefined`, and
+  // #2295: `entries` is `GET /catalog`'s collection key. It was missing, so
+  // `/catalog` fell through to this shape, stored `undefined`, and the old
   // `CatalogPanel`'s `entries.map` took the whole route down into the error
   // boundary. Exactly the #1075 failure this block's own comment describes,
   // one key over: the sibling `catalog: []` above is not the key the hook
   // reads, which is why it looked covered. Found by haven-design-reviewer on
-  // #2295 while trying to capture the surface that issue changes.
+  // #2295 while trying to capture the surface that issue changes. #3079
+  // deleted that panel (`/catalog` now redirects to `/marketplace`); the key
+  // stays because the endpoint still answers with it.
   entries: [],
+  // #3079: `merchants` is `GET /merchants`' collection key — `useMerchants`
+  // does `setMerchants(res.merchants)`; the same trap as `entries` above.
+  merchants: [],
   // #2868: `useAccountingProviders` / `useAccountingConnections` do
   // `setProviders(res.providers)` / `setConnections(res.connections)`; under
   // `SCREENSHOT_FIXTURE=empty` the Settings page reads these, and a missing
@@ -4551,7 +4555,7 @@ export const SCENARIOS = {
   },
   'catalog-budget-states': {
     description:
-      'The /catalog card grid with all three budget states side by side — within budget, above budget, and unknown (#2295)',
+      'A merchant page\'s offers table with all three budget states side by side — within budget, above budget, and unknown (#2295; re-pointed from the /catalog card grid by #3079)',
     // ── Why this scenario exists ─────────────────────────────────────────
     //
     // Before #2295, `withinBudget` compared a HUMAN-DECIMAL `allowance_amount`
@@ -4563,10 +4567,16 @@ export const SCENARIOS = {
     // stale unnoticed while dead, still promising the retired approval queue.
     //
     // A route capture cannot evidence this on its own: the shared fixture
-    // serves no catalog entries, so `/catalog` photographs its empty state.
-    // Three entries against one agent's single 25 USDC budget produce all
+    // serves no merchants, so `/marketplace` photographs its empty state.
+    // Three offers against one agent's single 25 USDC budget produce all
     // three states in one frame, which is the only way to judge whether they
     // read as answer / answer / absence rather than as error states.
+    //
+    // #3079 moved the hint from the `/catalog` card to the merchant page's
+    // `OfferRow` (`withinBudget` itself moved byte-identical to
+    // `lib/marketplace.ts`), so the scenario now answers `GET /merchants/{slug}`
+    // and captures `/marketplace/{slug}`. The three fixture offers are the
+    // same three, under one fixture merchant.
     api(apiPath) {
       if (apiPath === '/agents') {
         // ONE active agent, ONE USDC budget, in the shape `GET /agents`
@@ -4592,16 +4602,28 @@ export const SCENARIOS = {
           ],
         }
       }
-      if (apiPath === '/catalog') {
+      if (apiPath === '/merchants/budget-fixture') {
+        const merchant = {
+          id: 'merchant-budget-fixture', slug: 'budget-fixture', name: 'Budget fixture',
+          description: 'Three offers priced to reach every budget state.',
+          website: 'https://mcp.text.example', logo_url: null, category: 'media', country: null,
+          listing_status: 'live', is_test_merchant: false, offer_count: 3,
+          networks: [`eip155:${FIXTURE_ACCOUNT.chain_id}`], verified_payable: false,
+        }
         const base = {
           category: 'media', rail: 'x402', protocol: 'mcp', tool_name: 'create_text',
           tool_arguments: null, asset_transfer_methods: null,
           network: `eip155:${FIXTURE_ACCOUNT.chain_id}`, status: 'active',
           verified_at: '2026-08-30T09:00:00.000Z',
           source: 'operator', domain_verified: false, verified_payable: false,
+          merchant: {
+            id: merchant.id, slug: merchant.slug, name: merchant.name,
+            listing_status: 'live', is_test_merchant: false,
+          },
         }
         return {
-          entries: [
+          merchant,
+          offers: [
             {
               ...base, id: 'cat-within', name: 'Text generation',
               description: 'Generate short-form text. Priced well inside the agent budget.',
@@ -4631,29 +4653,29 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/catalog`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await page.goto(`${BASE_URL}/marketplace/budget-fixture`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      // Wait on the two ANSWERING states by their copy, not on the grid. The
-      // grid renders as soon as entries arrive, and the pre-#2295 defect
+      // Wait on the two ANSWERING states by their copy, not on the table. The
+      // table renders as soon as offers arrive, and the pre-#2295 defect
       // rendered a complete, plausible-looking grid with no budget line on any
-      // card — so a capture that waited on the cards alone would have
+      // card — so a capture that waited on the rows alone would have
       // photographed the bug and called it evidence.
       await page.getByText('Within your agent budget').first().waitFor({ timeout: 20_000 })
       await page.getByText(/^Above every agent budget/).first().waitFor({ timeout: 20_000 })
 
-      // Positive control for the ABSENCE. The third card must render (its name
+      // Positive control for the ABSENCE. The third row must render (its name
       // is on screen) while carrying neither budget line — otherwise "no
-      // warning" would be indistinguishable from "card never rendered".
-      const unknownCard = page.locator('[data-testid="catalog-card-cat-unknown"]')
-      await unknownCard.waitFor({ timeout: 20_000 })
-      if ((await unknownCard.getByText(/agent budget/).count()) > 0) {
+      // warning" would be indistinguishable from "row never rendered".
+      const unknownRow = page.locator('[data-testid="offer-row-cat-unknown"]')
+      await unknownRow.waitFor({ timeout: 20_000 })
+      if ((await unknownRow.getByText(/agent budget/).count()) > 0) {
         throw new Error(
-          'catalog-budget-states: the EURe card rendered a budget line; the unknown state is not absent',
+          'catalog-budget-states: the EURe row rendered a budget line; the unknown state is not absent',
         )
       }
 
-      await shoot(page.locator('main').first(), 'grid')
+      await shoot(page.locator('main').first(), 'table')
     },
   },
   /**

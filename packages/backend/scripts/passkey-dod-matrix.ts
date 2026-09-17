@@ -106,7 +106,7 @@ async function main(): Promise<void> {
   // agent on the account
   const created = await fetch(`${api}/agents`, {
     method: 'POST', headers: authed,
-    body: JSON.stringify({ name: `Passkey DoD agent ${Date.now()}`, delegate_address: agentDelegate, safe_id: account.id }),
+    body: JSON.stringify({ name: `Passkey DoD agent ${Date.now()}`, delegate_address: agentDelegate, account_id: account.id }),
   })
   if (!created.ok) { record(2, 'One-ceremony grant', 'FAIL', `agent create ${created.status}`); return finish() }
   const agent = (await created.json()) as { id: string; api_key: string }

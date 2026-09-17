@@ -101,8 +101,9 @@ const SCENARIOS: Scenario[] = [
         await expect(merchantPage.getByTestId(`offer-row-${id}`)).toHaveCount(1)
         await expect(merchantPage.getByTestId(`pay-block-${id}`)).toHaveCount(1)
       }
-      // The frozen clock is in effect (see FROZEN_NOW).
-      await expect(merchantPage.getByText(FROZEN_FRESHNESS).first()).toBeVisible()
+      // The frozen clock is in effect (see FROZEN_NOW). The string renders in
+      // both the table and the phone-width list; only one is visible at a time.
+      await expect(merchantPage.getByText(FROZEN_FRESHNESS).locator('visible=true').first()).toBeVisible()
       // The network column shows the chain's NAME, never the raw CAIP-2 id.
       await expect(merchantPage.getByText('eip155:')).toHaveCount(0)
       // None of the three offers advertises erc7710 (asset_transfer_methods:
@@ -148,7 +149,7 @@ const SCENARIOS: Scenario[] = [
       await expect(merchantPage.getByRole('cell', { name: 'buy_vpn', exact: true })).toHaveCount(1)
       // Labelled on the page itself, not only on the grid card (decision 6).
       await expect(merchantPage.getByTestId('test-merchant-note')).toBeInViewport()
-      await expect(merchantPage.getByText(FROZEN_FRESHNESS).first()).toBeVisible()
+      await expect(merchantPage.getByText(FROZEN_FRESHNESS).locator('visible=true').first()).toBeVisible()
       await expect(merchantPage.getByText(/via buy_vpn for/)).toHaveCount(1)
       // The fixture's one offer DOES advertise erc7710, so the unpinned-budget
       // line must be absent here — the negative half of the merchant-page case.

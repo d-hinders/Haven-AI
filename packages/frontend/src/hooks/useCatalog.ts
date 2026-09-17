@@ -60,7 +60,8 @@ export function useMerchants() {
       setLoading(true)
       setError(null)
       const res = await api.get<{ merchants: Merchant[] }>('/merchants')
-      setMerchants(res.merchants)
+      // `?? []` — an absent key must degrade, not crash the route (#3093).
+      setMerchants(res.merchants ?? [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'We could not load the marketplace.')
     } finally {
@@ -103,7 +104,7 @@ export function useMerchant(slug: string) {
       )
       if (mine !== generation.current) return
       setMerchant(res.merchant)
-      setOffers(res.offers)
+      setOffers(res.offers ?? [])
     } catch (err) {
       if (mine !== generation.current) return
       if (err instanceof ApiRequestError && err.status === 404) {

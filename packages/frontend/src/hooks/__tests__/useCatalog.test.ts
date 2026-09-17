@@ -97,6 +97,14 @@ describe('useMerchants (#3078)', () => {
     expect(result.current.error).toBeNull()
   })
 
+  it('defaults an absent merchants key to [] instead of storing undefined (#3093)', async () => {
+    mockApiGet.mockResolvedValue({})
+    const { result } = renderHook(() => useMerchants())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.merchants).toEqual([])
+    expect(result.current.error).toBeNull()
+  })
+
   it('surfaces a load error', async () => {
     mockApiGet.mockRejectedValue(new Error('network down'))
     const { result } = renderHook(() => useMerchants())
@@ -121,6 +129,13 @@ describe('useMerchant (#3078)', () => {
     expect(result.current.merchant?.slug).toBe('ampersend')
     expect(result.current.offers).toHaveLength(1)
     expect(result.current.notFound).toBe(false)
+  })
+
+  it('defaults an absent offers key to [] (#3093)', async () => {
+    mockApiGet.mockResolvedValue({ merchant: { id: 'm-1', slug: 'ampersend', name: 'Ampersend' } })
+    const { result } = renderHook(() => useMerchant('ampersend'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.offers).toEqual([])
   })
 
   it('sets notFound (not error) on a 404, and error on anything else', async () => {

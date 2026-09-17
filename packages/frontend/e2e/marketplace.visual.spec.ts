@@ -120,7 +120,10 @@ const SCENARIOS: Scenario[] = [
     async assert(page) {
       const merchantPage = page.getByTestId('merchant-page')
       await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(1)
-      await expect(merchantPage.getByText('buy_vpn')).toHaveCount(1)
+      // The tool name is on screen three times (offer name, Method cell, the
+      // agent instruction) — assert the two that carry meaning, exactly.
+      await expect(merchantPage.getByRole('cell', { name: 'buy_vpn', exact: true })).toHaveCount(1)
+      await expect(merchantPage.getByText(/via buy_vpn for/)).toHaveCount(1)
       // The fixture's one offer DOES advertise erc7710, so the unpinned-budget
       // line must be absent here — the negative half of the merchant-page case.
       await expect(

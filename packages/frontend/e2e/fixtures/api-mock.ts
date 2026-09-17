@@ -96,7 +96,7 @@ import {
  * remaining cast is `feedDestination()`, which re-narrows the fixture's own
  * `Record<string, unknown> | null` destination row.
  *
- * `/auth/me` (`getSession`) is NOT in the typed route table: `testUser.safes`
+ * `/auth/me` (`getSession`) is NOT in the typed route table: `testUser.accounts`
  * (built from `testSafe`) is missing `value_bearing_chain` (required
  * `boolean`, no fixture value to reuse — inventing one would be the
  * fabrication the note above forbids) and `needs_backup_recommendation`

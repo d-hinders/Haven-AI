@@ -3059,7 +3059,7 @@ export type components = {
             connector?: components["schemas"]["AgentConnectionConnector"];
             install_status: components["schemas"]["AgentConnectionInstallStatus"];
             approval: {
-                safe_tx_hash: string | null;
+                account_tx_hash: string | null;
                 tx_hash: string | null;
                 status: string;
             };

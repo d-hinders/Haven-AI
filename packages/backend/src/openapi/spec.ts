@@ -7344,9 +7344,9 @@ export const openapiSpec = {
           install_status: { $ref: '#/components/schemas/AgentConnectionInstallStatus' },
           approval: {
             type: 'object',
-            required: ['safe_tx_hash', 'tx_hash', 'status'],
+            required: ['account_tx_hash', 'tx_hash', 'status'],
             properties: {
-              safe_tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
+              account_tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
               tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
               status: { type: 'string' },
             },

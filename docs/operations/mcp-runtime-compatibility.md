@@ -598,9 +598,17 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > **Update, same day — the follow-up release closes this.** 0.3.0-alpha.0
 > published and `npm view @haven_ai/cli dist-tags` reads `latest:
 > 0.3.0-alpha.0`, a CLI whose `accountsEnvelope()` reads `accounts`. The
-> removal condition above is met, so the next release removes both twins AND
-> the third name, and `middleware/retired-safe-names.ts` exports no twin
-> helper at all. What that leaves is worth stating, because it is the shape
+> removal condition above is met, so the FOLLOW-UP release — cut the same
+> day, immediately after this one, not "next" in any later reader's sense —
+> removes both twins AND the third name, and
+> `middleware/retired-safe-names.ts` exports no twin helper at all. It also
+> removes a FOURTH retired response name nothing had noticed: `safe_tx_hash`
+> on `GET /agent-connection-setups/{id}`'s `approval` object, which outlived
+> the epic by reading migration 084's `account_tx_hash` column through the
+> old wire key. No published package read it, so it was renamed outright.
+> `last-verified` is not bumped for this block: it already reads 2026-09-17,
+> and this records what the two releases carry rather than a re-verification
+> of the document. What that leaves is worth stating, because it is the shape
 > of the contract rather than an incident: the `/user/safes*` TOMBSTONE PATHS
 > stay 410 and the retired REQUEST names stay refused with a 400 — a path is
 > what an old client types and a request can be sent twice, so those are

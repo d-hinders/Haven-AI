@@ -1683,7 +1683,7 @@ export const FIXTURE_EMPTY_FALLBACK = {
   // route is deliberately unkeyed in `fixtureFor` above — so no hook reads it,
   // and a collection key for an endpoint that answers 404 reads as coverage of
   // a flow the product cannot reach.
-  safes: [], agents: [], transactions: [], contacts: [],
+  accounts: [], agents: [], transactions: [], contacts: [],
   recipients: [], delegations: [], owners: [], passkeys: [], tokens: [],
   payments: [], receipts: [], catalog: [], activity: [],
   // #2295: `entries` is `GET /catalog`'s collection key — `useCatalog` does

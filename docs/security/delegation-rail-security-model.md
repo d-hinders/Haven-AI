@@ -12,13 +12,14 @@ covers:
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/user-accounts.ts
+  - packages/backend/src/routes/transactions.ts
+  - packages/backend/src/middleware/retired-safe-names.ts
   - packages/backend/src/modules/agents/rekey-*.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
   - packages/backend/src/infra/repositories/smart-accounts.ts
-  - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/backend/src/rails/hybrid-transfers.ts
   - packages/backend/src/infra/repositories/hybrid-signers.ts
@@ -321,7 +322,21 @@ chain.
 > still `WHERE user_id = $1`, and the retired REQUEST names are still refused
 > with a 400 rather than ignored — which is the part that matters here, since
 > an ignored `safeId` filter would widen a query the ownership scope is
-> supposed to narrow.
+> supposed to narrow. This document's coverage list gains
+> `routes/transactions.ts` and `middleware/retired-safe-names.ts` in the same
+> change, because those two files are what make the claims above true and
+> neither was declared.
+>
+> **Scope of this re-read** (so the `last-verified` date is not carrying an
+> unstated claim; it is NOT bumped — it already reads 2026-09-17 from an
+> earlier change today): the envelope keys on `GET /user/accounts`,
+> `GET /transactions` and `GET /transactions/filters`; that every query behind
+> them is still scoped to the caller's `user_id`; and that the retired request
+> names are still refused with a 400. Nothing else in this document was
+> re-read. On the scoping: the two list queries bind it as `$1`, while the
+> x402 legs behind `GET /transactions` bind it as `$2` alongside an account-id
+> `ANY(...)` — the same ownership property, written differently. An earlier
+> draft of this note said `WHERE user_id = $1` flatly; review measured it.
 
 > **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
 > migration):** this diff touched one file in this document's coverage list,

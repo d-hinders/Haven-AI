@@ -2809,16 +2809,9 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['accounts', 'safes'],
+                  required: ['accounts'],
                   properties: {
                     accounts: { type: 'array', items: account },
-                    safes: {
-                      type: 'array',
-                      items: account,
-                      deprecated: true,
-                      description:
-                        'The same array as `accounts`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.',
-                    },
                   },
                 },
               },
@@ -6134,7 +6127,7 @@ export const openapiSpec = {
       get: {
         tags: ['Dashboard'],
         operationId: 'getTransactionFilterOptions',
-        summary: 'Filter metadata (safes, agents, tokens) for the transactions view.',
+        summary: 'Filter metadata (accounts, agents, tokens) for the transactions view.',
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
@@ -8331,12 +8324,6 @@ export const openapiSpec = {
           accountId: uuid,
           accountAddress: address,
           accountName: { type: 'string' },
-          safeName: {
-            type: 'string',
-            deprecated: true,
-            description:
-              'The same value as `accountName`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.',
-          },
           agentId: uuid,
         },
       },
@@ -8443,9 +8430,9 @@ export const openapiSpec = {
       },
       TransactionFilterOptionsResponse: {
         type: 'object',
-        required: ['safes', 'agents', 'tokens'],
+        required: ['accounts', 'agents', 'tokens'],
         properties: {
-          safes: {
+          accounts: {
             type: 'array',
             items: {
               type: 'object',

@@ -2415,7 +2415,7 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** Filter metadata (safes, agents, tokens) for the transactions view. */
+        /** Filter metadata (accounts, agents, tokens) for the transactions view. */
         get: operations["getTransactionFilterOptions"];
         put?: never;
         post?: never;
@@ -3922,11 +3922,6 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             accountAddress: string;
             accountName: string;
-            /**
-             * @deprecated
-             * @description The same value as `accountName`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.
-             */
-            safeName?: string;
             /** Format: uuid */
             agentId?: string;
         };
@@ -4004,7 +3999,7 @@ export type components = {
             breakdown: components["schemas"]["PortfolioBreakdown"][];
         };
         TransactionFilterOptionsResponse: {
-            safes: {
+            accounts: {
                 /** Format: uuid */
                 id: string;
                 name: string;
@@ -7757,23 +7752,6 @@ export interface operations {
                 content: {
                     "application/json": {
                         accounts: {
-                            /** Format: uuid */
-                            id: string;
-                            /** @example 0x1111111111111111111111111111111111111111 */
-                            account_address: string;
-                            chain_id: number;
-                            /** @description Display label; defaults to 'My account' when none is given. */
-                            name: string;
-                            /** @description The first account a user links becomes the default. */
-                            is_default: boolean;
-                            /** Format: date-time */
-                            created_at: string;
-                        }[];
-                        /**
-                         * @deprecated
-                         * @description The same array as `accounts`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.
-                         */
-                        safes: {
                             /** Format: uuid */
                             id: string;
                             /** @example 0x1111111111111111111111111111111111111111 */

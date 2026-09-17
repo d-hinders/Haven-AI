@@ -104,7 +104,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     expect(fx('/transactions?offset=0&limit=25')).toMatchObject({ hasMore: false, failedAccountIds: [] })
     // Filter options (useTransactionFilters) — must NOT fall into the paginated branch:
     expect(fx('/transactions/filters')).toMatchObject({
-      safes: expect.any(Array), agents: expect.any(Array), tokens: expect.any(Array),
+      accounts: expect.any(Array), agents: expect.any(Array), tokens: expect.any(Array),
     })
     // Safe-scoped paginated (useTransactions):
     expect(fx('/transactions/0x1111?page=1')).toMatchObject({ pages: 1, page: 1 })

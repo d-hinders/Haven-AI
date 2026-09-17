@@ -14,7 +14,7 @@ import type {
 
 interface FilterBarProps {
   filters: TransactionFilterState
-  safes: TransactionFilterAccountOption[]
+  accounts: TransactionFilterAccountOption[]
   agents: TransactionFilterAgentOption[]
   tokens: TransactionFilterTokenOption[]
   loading: boolean
@@ -22,7 +22,7 @@ interface FilterBarProps {
   onChange: (filters: TransactionFilterState) => void
 }
 
-type DropdownKey = 'safe' | 'agent' | 'token' | 'direction' | null
+type DropdownKey = 'account' | 'agent' | 'token' | 'direction' | null
 
 const DIRECTION_OPTIONS: { value: 'in' | 'out'; label: string }[] = [
   { value: 'in', label: 'Incoming' },
@@ -64,7 +64,7 @@ function triggerClasses(active: boolean, disabled = false): string {
 
 export default function FilterBar({
   filters,
-  safes,
+  accounts,
   agents,
   tokens,
   loading,
@@ -93,7 +93,7 @@ export default function FilterBar({
     return rank(a.status) - rank(b.status) || a.name.localeCompare(b.name)
   })
 
-  const selectedSafe = safes.find((safe) => safe.id === filters.accountId)
+  const selectedAccount = accounts.find((account) => account.id === filters.accountId)
   const selectedAgent =
     filters.agentId === 'user'
       ? { id: 'user', name: 'User (manual)', status: 'manual' }
@@ -102,8 +102,8 @@ export default function FilterBar({
 
   type ChipKey = 'accountId' | 'agentId' | 'tokenKey' | 'direction'
   const chips = [
-    selectedSafe
-      ? { key: 'accountId' as const, label: `Account: ${selectedSafe.name}` }
+    selectedAccount
+      ? { key: 'accountId' as const, label: `Account: ${selectedAccount.name}` }
       : null,
     selectedAgent
       ? { key: 'agentId' as const, label: `Initiator: ${selectedAgent.name}` }
@@ -129,16 +129,16 @@ export default function FilterBar({
         <div className="relative">
           <button
             onClick={() => {
-              if (safes.length <= 1) return
-              setOpen(open === 'safe' ? null : 'safe')
+              if (accounts.length <= 1) return
+              setOpen(open === 'account' ? null : 'account')
             }}
-            disabled={safes.length <= 1}
-            className={triggerClasses(Boolean(filters.accountId), safes.length <= 1)}
+            disabled={accounts.length <= 1}
+            className={triggerClasses(Boolean(filters.accountId), accounts.length <= 1)}
           >
-            <span>Account: {selectedSafe?.name ?? 'All'}</span>
-            <Chevron open={open === 'safe'} />
+            <span>Account: {selectedAccount?.name ?? 'All'}</span>
+            <Chevron open={open === 'account'} />
           </button>
-          {open === 'safe' && safes.length > 1 && (
+          {open === 'account' && accounts.length > 1 && (
             <div className="absolute left-0 top-full z-40 mt-2 min-w-60 overflow-hidden rounded-lg border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal">
               <DropdownButton
                 active={!filters.accountId}
@@ -149,19 +149,19 @@ export default function FilterBar({
               >
                 All
               </DropdownButton>
-              {safes.map((safe) => (
+              {accounts.map((account) => (
                 <DropdownButton
-                  key={safe.id}
-                  active={filters.accountId === safe.id}
+                  key={account.id}
+                  active={filters.accountId === account.id}
                   onClick={() => {
-                    onChange({ ...filters, accountId: safe.id })
+                    onChange({ ...filters, accountId: account.id })
                     setOpen(null)
                   }}
                 >
                   <div className="min-w-0 text-left">
-                    <div className="truncate font-medium">{safe.name}</div>
+                    <div className="truncate font-medium">{account.name}</div>
                     <div className="text-xs text-[var(--v2-ink-3)]">
-                      {chainLabel(safe.chainId)}
+                      {chainLabel(account.chainId)}
                     </div>
                   </div>
                 </DropdownButton>

@@ -44,7 +44,7 @@ vi.mock('@/hooks/useActiveChain', () => ({
 }))
 vi.mock('@/hooks/useTransactionFilters', () => ({
   useTransactionFilters: () => ({
-    safes: [],
+    accounts: [],
     agents: [],
     tokens: [],
     loading: false,

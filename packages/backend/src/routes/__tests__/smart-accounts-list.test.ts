@@ -81,13 +81,12 @@ describe('GET /user/accounts — list invariants', () => {
     })
 
     expect(res.statusCode).toBe(200)
-    // `safes` is the SAME array, kept for one more release because
-    // `@haven_ai/cli` on `latest` destructures it at five call sites and,
-    // unlike a request parameter, a published client cannot dual-read. The
-    // per-row address twin has no such reader and IS gone.
-    expect(res.json()).toEqual({ accounts: rows, safes: rows })
+    // ONE envelope key. `safes` outlived #2914 by exactly one release,
+    // because `@haven_ai/cli` on `latest` destructured it at five call sites
+    // and a published client cannot dual-read; `latest` is 0.3.0-alpha.0 now.
+    // `toEqual` is exact, so this fails if the twin ever comes back.
+    expect(res.json()).toEqual({ accounts: rows })
     expect(res.json().accounts[0].safe_address).toBeUndefined()
-    expect(res.json().safes[0].safe_address).toBeUndefined()
     // Scoped by the JWT subject — never a client-supplied id.
     const [, params] = mockPoolQuery.mock.calls[0]
     expect(params).toEqual([USER])

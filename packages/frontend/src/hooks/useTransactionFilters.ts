@@ -11,7 +11,7 @@ interface UseTransactionFiltersReturn extends TransactionFilterOptionsResponse {
 }
 
 export function useTransactionFilters(): UseTransactionFiltersReturn {
-  const [safes, setSafes] = useState<TransactionFilterOptionsResponse['safes']>([])
+  const [accounts, setAccounts] = useState<TransactionFilterOptionsResponse['accounts']>([])
   const [agents, setAgents] = useState<TransactionFilterOptionsResponse['agents']>([])
   const [tokens, setTokens] = useState<TransactionFilterOptionsResponse['tokens']>([])
   const [loading, setLoading] = useState(true)
@@ -29,7 +29,7 @@ export function useTransactionFilters(): UseTransactionFiltersReturn {
       )
       if (requestId !== requestIdRef.current) return
 
-      setSafes(data.safes)
+      setAccounts(data.accounts)
       setAgents(data.agents)
       setTokens(data.tokens)
     } catch (err) {
@@ -52,7 +52,7 @@ export function useTransactionFilters(): UseTransactionFiltersReturn {
   }, [fetchFilters])
 
   return {
-    safes,
+    accounts,
     agents,
     tokens,
     loading,

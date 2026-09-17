@@ -309,6 +309,19 @@ chain.
 > responses this document quotes carry `account_address` / `account_id` and
 > nothing else. Read the paragraph above as the record of what #2911 did; read
 > this one for what the wire does today.
+>
+> **Extended by the #2914 follow-up (2026-09-17), same day.** #2914 left three
+> retired RESPONSE names standing: `safes` on `GET /user/accounts`, `safeName`
+> on the `GET /transactions` feed, and `safes` on `GET /transactions/filters`.
+> All three are gone now — the first two were deliberate one-release twins for
+> the published CLI, the third was simply missed and found in review. So "carry
+> `account_address` / `account_id` and nothing else" is true of the ENVELOPE
+> keys too, not just the row fields. Nothing in this document's security
+> argument moves: an envelope key is not an authority boundary, the queries are
+> still `WHERE user_id = $1`, and the retired REQUEST names are still refused
+> with a 400 rather than ignored — which is the part that matters here, since
+> an ignored `safeId` filter would widen a query the ownership scope is
+> supposed to narrow.
 
 > **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
 > migration):** this diff touched one file in this document's coverage list,

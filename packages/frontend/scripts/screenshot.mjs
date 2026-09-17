@@ -1569,7 +1569,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname === '/transactions/filters') {
     return {
-      safes: [{ id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name, address: FIXTURE_ACCOUNT.account_address, chainId: FIXTURE_ACCOUNT.chain_id }],
+      accounts: [{ id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name, address: FIXTURE_ACCOUNT.account_address, chainId: FIXTURE_ACCOUNT.chain_id }],
       agents: FIXTURE_AGENTS.map((a) => ({ id: a.id, name: a.name, status: a.status })),
       tokens: [
         { key: `usdc:${FIXTURE_ACCOUNT.chain_id}`, symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', chainId: FIXTURE_ACCOUNT.chain_id, isNative: false },

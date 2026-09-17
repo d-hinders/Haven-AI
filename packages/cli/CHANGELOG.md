@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+## 0.3.0-alpha.0 — 2026-09-17
+
 ### Fixed
 
 - **BREAKING for older backends, and a fix against current ones (#2914).**

@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+## 0.3.0-alpha.0 — 2026-09-17
+
 ### Fixed
 
 - **`AgentIdentity` declared the wrong wire shape (#2914).** `safe_address` was

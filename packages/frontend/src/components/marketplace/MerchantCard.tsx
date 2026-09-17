@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Monogram } from '@/components/ui/Monogram'
+import { TEST_MERCHANT_NOTE } from './MerchantHeader'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
 import { categoryLabel, chainName, networkToChainId, VERIFIED_MEANING } from '@/lib/marketplace'
@@ -52,7 +53,7 @@ export function MerchantCard({ merchant }: { merchant: Merchant }) {
       </div>
 
       {merchant.is_test_merchant && !comingSoon && (
-        <p className="text-xs font-medium text-[var(--v2-warning)]">Haven test merchant — real payments, demo goods</p>
+        <p className="text-xs font-medium text-[var(--v2-warning)]">{TEST_MERCHANT_NOTE}</p>
       )}
 
       <p className="line-clamp-2 text-xs text-[var(--v2-ink-3)]">{merchant.description}</p>

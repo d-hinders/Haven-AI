@@ -2,7 +2,7 @@
  * Visual regression for `/marketplace` and `/marketplace/<slug>` (#3079,
  * epic #3077).
  *
- * Four scenarios, each a distinct branch the merchant layer added:
+ * Five scenarios, each a distinct branch the merchant layer added:
  *
  *   - `marketplace-grid`      — the grid with three merchants (live/verified,
  *     test, coming-soon), at desktop and mobile.
@@ -11,12 +11,15 @@
  *     desktop and mobile.
  *   - `merchant-coming-soon`  — a `coming_soon` merchant page (desktop only):
  *     no instruction block, no price, no offers table.
- *   - `merchant-test-merchant`— a live `is_test_merchant` merchant page
- *     (desktop only), so the grid's "Haven test merchant" label has a card to
- *     render it on.
+ *   - `merchant-test-merchant`— a live `is_test_merchant` merchant page at
+ *     desktop AND mobile: the safety note that stops a real-money paste
+ *     against demo goods once clipped at 390, so the phone frame is a gate.
+ *   - `merchant-not-found`    — an unknown slug (desktop only): the client
+ *     `notFound()` must land on the segment's own `not-found.tsx` inside
+ *     the shell, a join the unit tests cannot see.
  *
  * Same discipline as `analytics.visual.spec.ts`: the desktop shots of all
- * four ALSO run under `chromium-desktop-dark` (`<name>-dark.png`), no mobile
+ * five ALSO run under `chromium-desktop-dark` (`<name>-dark.png`), no mobile
  * dark project exists, and every capture is preceded by a structural
  * assertion that runs under `VISUAL_STRUCTURE_ONLY=1` even when pixels are
  * not compared.
@@ -48,7 +51,9 @@ const DESKTOP_ONLY = VIEWPORTS.filter((vp) => vp.name === 'desktop')
  * render) and ASSERTED by the literal string on every offers scenario, so a
  * clock that stops working fails by name rather than as a pixel diff.
  */
-const FROZEN_NOW = new Date('2026-09-17T12:00:00.000Z')
+// 54 h after the fixtures' `verified_at` — inside the "2d" bucket with a
+// six-hour margin on either side, not on its edge.
+const FROZEN_NOW = new Date('2026-09-17T18:00:00.000Z')
 const FROZEN_FRESHNESS = 'verified 2d ago'
 
 const PIXEL_THRESHOLD = 0.02

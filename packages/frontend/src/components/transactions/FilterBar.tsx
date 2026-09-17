@@ -94,6 +94,18 @@ export default function FilterBar({
   })
 
   const selectedAccount = accounts.find((account) => account.id === filters.accountId)
+  // An account filter can be ACTIVE without being resolvable: `accountId` is
+  // seeded from the URL (the "View all" link on account detail), while
+  // `accounts` comes from a separate request that can be empty — during the
+  // deploy window that the `?? []` in `useTransactionsFilters` creates, or on
+  // any failed filter fetch. Saying "All" there would label a filtered money
+  // history as unfiltered, which is the wrong failure direction on this
+  // screen: a crash is loud, a wrong total is not. So the label admits the
+  // filter it cannot name, and the chip below stays rendered so there is
+  // always a way out — the trigger is disabled on a short list, so the chip
+  // is the ONLY exit.
+  const accountFilterUnresolved = Boolean(filters.accountId) && !selectedAccount
+  const accountLabel = selectedAccount?.name ?? (accountFilterUnresolved ? 'filtered' : 'All')
   const selectedAgent =
     filters.agentId === 'user'
       ? { id: 'user', name: 'User (manual)', status: 'manual' }
@@ -102,8 +114,8 @@ export default function FilterBar({
 
   type ChipKey = 'accountId' | 'agentId' | 'tokenKey' | 'direction'
   const chips = [
-    selectedAccount
-      ? { key: 'accountId' as const, label: `Account: ${selectedAccount.name}` }
+    filters.accountId
+      ? { key: 'accountId' as const, label: `Account: ${accountLabel}` }
       : null,
     selectedAgent
       ? { key: 'agentId' as const, label: `Initiator: ${selectedAgent.name}` }
@@ -135,7 +147,7 @@ export default function FilterBar({
             disabled={accounts.length <= 1}
             className={triggerClasses(Boolean(filters.accountId), accounts.length <= 1)}
           >
-            <span>Account: {selectedAccount?.name ?? 'All'}</span>
+            <span>Account: {accountLabel}</span>
             <Chevron open={open === 'account'} />
           </button>
           {open === 'account' && accounts.length > 1 && (

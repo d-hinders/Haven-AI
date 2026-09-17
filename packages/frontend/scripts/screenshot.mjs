@@ -1684,6 +1684,11 @@ export const FIXTURE_EMPTY_FALLBACK = {
   // and a collection key for an endpoint that answers 404 reads as coverage of
   // a flow the product cannot reach.
   accounts: [], agents: [], transactions: [], contacts: [],
+  // #2914 follow-up: `failedAccountIds` is `GET /transactions`' partial-failure
+  // key. Its absence here is what made the empty /transactions capture render
+  // the ErrorBoundary. The hook now defaults it too, so this is belt AND
+  // braces — deliberately, because the fixture is what a reviewer looks at.
+  failedAccountIds: [],
   recipients: [], delegations: [], owners: [], passkeys: [], tokens: [],
   payments: [], receipts: [], catalog: [], activity: [],
   // #2295: `entries` is `GET /catalog`'s collection key — `useCatalog` does

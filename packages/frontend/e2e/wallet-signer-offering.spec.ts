@@ -43,7 +43,11 @@ const CREDENTIAL_ID = 'AQIDBAUGBwg'
 const DEVICE_MARKER_KEY = `haven_passkey_device_${CREDENTIAL_ID}`
 
 const hybridSafe = { ...testSafe, account_type: 'delegator_hybrid' }
-const hybridUser = { ...testUser, safes: [hybridSafe] }
+// `accounts`, not `safes`: AuthContext has only ever read `accounts`, and the
+// `safes` twin is gone entirely (#2914 follow-up). Spreading the dead key left
+// `accounts` pointing at the NON-hybrid `testSafe`, so this spec rendered
+// wallet UI against the wrong account type while claiming otherwise.
+const hybridUser = { ...testUser, accounts: [hybridSafe] }
 const OWNER_ADDRESS = '0x2222222222222222222222222222222222222222'
 const UNRELATED_ADDRESS = '0x9999999999999999999999999999999999999999'
 const hybridSigners = {

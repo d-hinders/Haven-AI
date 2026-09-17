@@ -19,6 +19,7 @@ covers:
   - packages/connect/src/installed-clients.test.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/backend/src/routes/transactions.ts
+  - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/domain/agent-payment-taxonomy.ts

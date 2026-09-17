@@ -513,10 +513,15 @@ export function parseAccountingEntitlementMode(raw: string | undefined | null): 
 /**
  * The request-validation plugin's mode (#3029, epic #3028).
  *
- *   off     — nothing runs: no schema is injected, no route is observed
+ *   off     — no schema is injected and no route is observed, EXCEPT a module
+ *             in the plugin's `enforcedPrefixes` (`index.ts` sets
+ *             `['/contacts']`), which stays enforced whatever the mode is
  *   shadow  — every route's request is validated against the spec, a refusal
- *             is logged and counted, and the request CONTINUES (no behaviour
- *             change on any currently-accepted request)
+ *             is logged and counted, and the request CONTINUES. That last
+ *             clause was ASPIRATIONAL until #3082: ajv coerces in place, so
+ *             shadow was rewriting the body the handler then read. The body
+ *             is restored since then; querystring and params are still
+ *             coerced, deliberately
  *   enforce — a refused request gets the 400 envelope instead of the route
  *
  * Default `shadow` until slice 4 flips it (owner decision, epic #3028): the
@@ -541,7 +546,9 @@ export function parseRequestValidationMode(raw: string | undefined | null): Requ
   if (value === 'off' || value === 'shadow' || value === 'enforce') return value
   throw new Error(
     `HAVEN_REQUEST_VALIDATION is set to ${JSON.stringify(raw)}; it must be "off" ` +
-      '(nothing runs), "shadow" (log and count would-be refusals, change nothing) ' +
+      '(nothing runs, except an enforcedPrefixes module), "shadow" (log and ' +
+      'count would-be refusals; the body is restored, so the handler reads ' +
+      'what the client sent) ' +
       'or "enforce" (refuse with the 400 envelope). Refusing to start rather than ' +
       'falling back, because a misspelled "enforce" on prod would silently mean ' +
       '"shadow" and look like the gate is on when it is merely misspelled. ' +

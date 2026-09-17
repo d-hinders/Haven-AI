@@ -8,6 +8,9 @@ covers:
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
+  - packages/backend/src/config.ts
+  - packages/backend/src/openapi/request-validation.ts
+  - packages/backend/src/index.ts
 last-verified: "2026-09-17"
 ---
 

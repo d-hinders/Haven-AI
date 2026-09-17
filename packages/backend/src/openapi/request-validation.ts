@@ -11,7 +11,9 @@
  * `settlementScheme`, which the shipped SDK sends). So enforcement lands
  * BEHIND A MODE, shadow-first (owner decision #2, epic #3028):
  *
- *   off     — nothing runs: no schema is injected, no route is observed
+ *   off     — no schema is injected and no route is observed, EXCEPT a
+ *             module in `enforcedPrefixes`, which stays enforced whatever
+ *             the mode is
  *   shadow  — every route's request is compiled against the spec; a refusal is
  *             logged once (`request_validation.would_refuse`) and counted, and
  *             the request CONTINUES on the normal path — no behaviour change on
@@ -38,10 +40,9 @@
  * shadow-mode BODY is restored before the handler sees it; coercion of
  * querystring and params (and of an enforce-mode body) remains, deliberately,
  * because a typed spec parameter is unusable without it and an enforced route
- * answers on the result. No coercion has ever touched spend intent: the
- * semantic money-path refusals keep their exact position and body. Every semantic refusal on the money path — the rail seam's 410,
- * the budget pre-check, the token resolution — keeps its exact position and
- * body; this layer only answers BEFORE them for requests the spec already
+ * answers on the result. No coercion has ever touched spend intent: every
+ * semantic refusal on the money path — the rail seam's 410, the budget
+ * pre-check, the token resolution — keeps its exact position and body; this layer only answers BEFORE them for requests the spec already
  * refuses, and in slice 1 it does not even do that outside the proof module.
  *
  * ## Registration contract (spiked against fastify 5.8.x, issue item 2)
@@ -95,7 +96,11 @@ const spec = openapiSpec as unknown as {
 }
 
 export interface RequestValidationOptions {
-  /** Boot-read mode. `off` observes nothing; `shadow` logs and continues; `enforce` refuses. */
+  /**
+   * Boot-read mode. `off` observes nothing OUTSIDE `enforcedPrefixes`, which
+   * stays enforced whatever the mode is; `shadow` logs and continues;
+   * `enforce` refuses.
+   */
   mode: RequestValidationMode
   /**
    * Module mount prefixes flipped to enforce REGARDLESS of the mode (and
@@ -118,13 +123,19 @@ export interface RequestValidationSnapshot {
   mode: RequestValidationMode
   wouldRefuse: number
   /**
-   * Bodies shadow COERCED and then restored (#3082). A refusal is not the only
-   * way shadow and enforce diverge: a body that coercion alone made valid
-   * raises no would-refusal, yet the handler would receive a DIFFERENT value
-   * once the route is enforced. NOT mutually exclusive with `wouldRefuse`, and
-   * the two must never be summed as "requests affected": ajv coerces field by
-   * field, so one request can coerce an earlier field and still be refused on
-   * a later one, moving both counters. Slices 2–4 flip money-path
+   * Top-level body FIELDS ajv rewrote in place and #3082 then restored — one
+   * increment PER FIELD, so a single body can move it more than once. That is
+   * the unit, and it is why this must never be summed with `wouldRefuse`,
+   * which fires at most once per request (`allErrors: false` stops at the
+   * first error). One request can do both: ajv rewrites an earlier field and
+   * then fails a later one.
+   *
+   * A refusal is not the only way shadow and enforce diverge. A body ajv made
+   * valid by rewriting it raises no would-refusal, yet the handler would
+   * receive a DIFFERENT value once the route is enforced. "Rewrote" is wider
+   * than type coercion: `useDefaults: true` would inject a spec `default`
+   * here too. No request BODY declares one today — all 16 `default:`s in the
+   * spec are query parameters — but the counter would catch it if one did. Slices 2–4 flip money-path
    * modules on these readings, so that divergence has to be visible rather
    * than inferred from a comment.
    */
@@ -257,7 +268,9 @@ export function requestSchemaErrorFormatter(
 /**
  * The mode this route was registered under, read off the `config` the
  * `onRoute` hook set at registration. `undefined` for a route the plugin
- * never touched (schema-less, or mode `off`).
+ * never touched (schema-less, or mode `off` with no matching
+ * `enforcedPrefixes` — an enforced prefix reports `'enforced'` even under
+ * `off`).
  */
 function routeMode(request: FastifyRequest): 'enforced' | 'shadow' | undefined {
   const config = request.routeOptions.config as

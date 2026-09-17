@@ -298,7 +298,8 @@ regenerating. Editing the spec now changes the dashboard's compile-time types
 pressure that keeps the contract honest.
 
 That pressure is on **response** types only. Request bodies are posted as
-`unknown` (`packages/frontend/src/lib/api.ts`: `post<T>(path, body?: unknown)`),
+`unknown` (`packages/frontend/src/lib/api.ts` — `post`, `put` and `patch` all take
+`body?: unknown`),
 so no generated type ever constrains what the dashboard SENDS. #3082 is the
 worked example: `recipient_address` was declared `string` on
 `POST /agents/{id}/delegations/build` while the dashboard sent `null` for an

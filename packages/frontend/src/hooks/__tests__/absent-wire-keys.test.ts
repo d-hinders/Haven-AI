@@ -32,6 +32,7 @@ import { useTransactions } from '@/hooks/useTransactions'
 import { useDelegationBudget } from '@/hooks/useDelegationBudget'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { useAccountingConnections, useAccountingProviders, useMerchantAccounts } from '@/hooks/useAccounting'
+import { useAccountSigners } from '@/hooks/useAccountSigners'
 
 const ADDRESS = '0x1111111111111111111111111111111111111111'
 
@@ -74,7 +75,7 @@ describe('array wire keys default to [] when the response omits them (#3093)', (
     // The signer set is served whole (it is not in scope); only the
     // delegations key is absent.
     mockApiGet.mockImplementation((url: string) =>
-      Promise.resolve(url.endsWith('/account-signers') ? { account_address: ADDRESS, passkeys: [], owners: [] } : {}),
+      Promise.resolve(url.endsWith('/account-signers') ? { account_address: ADDRESS, chain_id: 84532, owner_address: null, passkeys: [] } : {}),
     )
     const { result } = renderHook(() => useDelegationBudget('agent-1', 84532))
     await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/agents/agent-1/delegations'))
@@ -83,11 +84,18 @@ describe('array wire keys default to [] when the response omits them (#3093)', (
 
   it('useDelegationBudget: the signer set without passkeys degrades (pickSigningPath reads .length in render)', async () => {
     mockApiGet.mockImplementation((url: string) =>
-      Promise.resolve(url.endsWith('/account-signers') ? { account_address: ADDRESS, owners: [] } : { delegations: [] }),
+      Promise.resolve(url.endsWith('/account-signers') ? { account_address: ADDRESS, chain_id: 84532, owner_address: null } : { delegations: [] }),
     )
     const { result } = renderHook(() => useDelegationBudget('agent-1', 84532))
     await waitFor(() => expect(result.current.budgets).toEqual([]))
     expect(result.current.ready).toBe(false)
+  })
+
+  it('useAccountSigners: the signer set without passkeys degrades (same shape, other endpoint)', async () => {
+    mockApiGet.mockResolvedValue({ account_address: ADDRESS, chain_id: 84532, owner_address: null })
+    const { result } = renderHook(() => useAccountSigners(ADDRESS, 84532, 'u@test.dev'))
+    await waitFor(() => expect(result.current.signers).not.toBeNull())
+    expect(result.current.signers?.passkeys).toEqual([])
   })
 
   it('usePortfolio: breakdown', async () => {

@@ -18,7 +18,7 @@ import {
 import { formatTokenValue } from '../domain/tokens.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import { config } from '../config.js'
-import { retiredSafeField } from '../middleware/retired-safe-names.js'
+import { retiredNameVerdict, retiredSafeField } from '../middleware/retired-safe-names.js'
 import {
   agentExistsForUser,
   createAgent,
@@ -205,8 +205,11 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     // #2914: `safe_id` is retired. Refused rather than ignored — an ignored
     // account id creates an UNLINKED agent that looks successfully created,
     // and the caller only finds out when a payment has nothing to spend from.
-    if (safe_id !== undefined) {
-      return reply.code(400).send(retiredSafeField('safe_id', 'account_id'))
+    // Keyed on reliance, not presence: #2908's published clients send both
+    // names, so `safe_id` BESIDE a matching `account_id` is a migrated caller.
+    const safeIdVerdict = retiredNameVerdict(safe_id, account_id)
+    if (safeIdVerdict.kind === 'refuse') {
+      return reply.code(400).send(retiredSafeField('safe_id', 'account_id', safeIdVerdict.reason))
     }
     const requestedAccountId = account_id
     // #2020: the allowance mirror is retired with the Safe rail. Refuse rather

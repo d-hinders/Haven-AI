@@ -488,15 +488,46 @@ async function cmdWhoami(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
 
 // ── Wallets ─────────────────────────────────────────────────────────
 
+/**
+ * Read the `accounts` envelope off `GET /user/accounts`, failing LOUDLY when
+ * it is absent (#2914).
+ *
+ * The envelope key moved `safes` -> `accounts` in the naming contraction, and
+ * this file kept reading the old one. Five call sites destructured an
+ * `undefined` array and every wallets command died on
+ * `Cannot read properties of undefined (reading 'length')` — a stack trace
+ * blaming the CLI for a SERVER shape change, with nothing naming the real
+ * cause. Nothing caught it: `api.get<T>` is an unchecked generic over a
+ * hand-written interface, `@haven_ai/core` cannot be a dependency here
+ * (it is `private: true` and this package publishes), and every fixture in
+ * the suite encoded the old envelope, so the tests were green against a
+ * response shape the server had stopped sending.
+ *
+ * So the envelope is read through one function that says what went wrong.
+ * This is the same principle the rest of the slice applies to the server —
+ * a shape mismatch should be a typed refusal naming the cause, never a
+ * silent `undefined` that surfaces somewhere else.
+ */
+function accountsEnvelope(body: { accounts?: Safe[] }): Safe[] {
+  if (!Array.isArray(body.accounts)) {
+    throw new Error(
+      "GET /user/accounts did not return an `accounts` array. This CLI needs a Haven backend " +
+        'from the release that carries #2914 or later; an older server returns the retired ' +
+        '`safes` envelope. Upgrade the backend, or pin an older @haven_ai/cli.',
+    )
+  }
+  return body.accounts
+}
+
 async function cmdWalletsList(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const { api } = await authed(args, d)
-  const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
-  emit(d, args.flags.json, safes, () =>
-    safes.length === 0
+  const accounts = accountsEnvelope(await api.get<{ accounts?: Safe[] }>('/user/accounts'))
+  emit(d, args.flags.json, accounts, () =>
+    accounts.length === 0
       ? 'No Haven wallets yet.'
       : table(
           ['NAME', 'NETWORK', 'ADDRESS', 'DEFAULT'],
-          safes.map((s) => [s.name, chainName(s.chain_id), truncateAddress(accountAddressOf(s)), s.is_default ? '✓' : '']),
+          accounts.map((s) => [s.name, chainName(s.chain_id), truncateAddress(accountAddressOf(s)), s.is_default ? '✓' : '']),
         ),
   )
   return EXIT.ok
@@ -504,8 +535,8 @@ async function cmdWalletsList(args: ParsedArgs, d: ResolvedDeps): Promise<number
 
 async function cmdWalletsBalances(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const { api } = await authed(args, d)
-  const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
-  const safe = pickSafe(safes, args.flags.safe)
+  const accounts = accountsEnvelope(await api.get<{ accounts?: Safe[] }>('/user/accounts'))
+  const safe = pickSafe(accounts, args.flags.safe)
   if (!safe) {
     if (args.flags.safe) throw new UsageError(`No wallet matches "${args.flags.safe}".`)
     throw new CliApiError('No Haven wallet found.', 404)
@@ -524,10 +555,10 @@ async function cmdWalletsBalances(args: ParsedArgs, d: ResolvedDeps): Promise<nu
   return EXIT.ok
 }
 
-function pickSafe(safes: Safe[], ref?: string): Safe | undefined {
-  if (!ref) return safes.find((s) => s.is_default) ?? safes[0]
+function pickSafe(accounts: Safe[], ref?: string): Safe | undefined {
+  if (!ref) return accounts.find((s) => s.is_default) ?? accounts[0]
   const lower = ref.toLowerCase()
-  return safes.find((s) => s.id === ref || accountAddressOf(s).toLowerCase() === lower)
+  return accounts.find((s) => s.id === ref || accountAddressOf(s).toLowerCase() === lower)
 }
 
 // ── Wallet funding (#2534) ──────────────────────────────────────────
@@ -552,8 +583,8 @@ function pickSafe(safes: Safe[], ref?: string): Safe | undefined {
  */
 async function cmdWalletsFunding(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const { api } = await authed(args, d)
-  const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
-  const safe = pickSafe(safes, args.flags.safe)
+  const accounts = accountsEnvelope(await api.get<{ accounts?: Safe[] }>('/user/accounts'))
+  const safe = pickSafe(accounts, args.flags.safe)
   if (!safe) {
     if (args.flags.safe) throw new UsageError(`No wallet matches "${args.flags.safe}".`)
     throw new CliApiError('No Haven wallet found.', 404)
@@ -1014,8 +1045,8 @@ async function cmdWalletRename(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
  */
 async function resolveAccountId(args: ParsedArgs, api: CliApi): Promise<string | undefined> {
   if (!args.flags.safe) return undefined
-  const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
-  const safe = pickSafe(safes, args.flags.safe)
+  const accounts = accountsEnvelope(await api.get<{ accounts?: Safe[] }>('/user/accounts'))
+  const safe = pickSafe(accounts, args.flags.safe)
   if (!safe) throw new UsageError(`No wallet matches "${args.flags.safe}".`)
   return safe.id
 }
@@ -1148,13 +1179,13 @@ async function resolveWalletAndToken(
   api: CliApi,
   symbol: string,
 ): Promise<{ accountId: string; token: BalanceToken }> {
-  const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
-  if (safes.length === 0) {
+  const accounts = accountsEnvelope(await api.get<{ accounts?: Safe[] }>('/user/accounts'))
+  if (accounts.length === 0) {
     throw new HavenCliError('No wallet on this account yet — finish onboarding first.', EXIT.refused)
   }
   const safe = args.flags.safe
-    ? safes.find((s) => s.id === args.flags.safe || accountAddressOf(s) === args.flags.safe)
-    : (safes.find((s) => s.is_default) ?? safes[0])
+    ? accounts.find((s) => s.id === args.flags.safe || accountAddressOf(s) === args.flags.safe)
+    : (accounts.find((s) => s.is_default) ?? accounts[0])
   if (!safe) throw new UsageError(`No wallet matches --safe ${args.flags.safe}`)
 
   // `chain_id` is REQUIRED here, not decorative. The same account address is

@@ -242,7 +242,12 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
       })
 
       expect(res.statusCode).toBe(410)
-      expect(res.json()).toEqual(retiredSafePath('POST /user/accounts/deploy').body)
+      const body = res.json() as { error: string; replacement: string }
+      expect(body.replacement).toBe('POST /user/accounts/deploy')
+      // #2914 review: naming a replacement that is ITSELF 410 would send a
+      // caller in a circle, so the body says so and names the live path.
+      expect(body.error).toMatch(/itself retired \(#1984\)/)
+      expect(body.error).toContain('POST /accounts/hybrid')
       expect(res.json()).not.toEqual(safeRailRetired('deploy').body)
     })
 
@@ -255,7 +260,10 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
       })
 
       expect(res.statusCode).toBe(410)
-      expect(res.json()).toEqual(retiredSafePath('POST /user/accounts').body)
+      const body = res.json() as { error: string; replacement: string }
+      expect(body.replacement).toBe('POST /user/accounts')
+      expect(body.error).toMatch(/itself retired \(#1984\)/)
+      expect(body.error).toContain('POST /accounts/hybrid')
       expect(res.json()).not.toEqual(safeRailRetired('import').body)
     })
 

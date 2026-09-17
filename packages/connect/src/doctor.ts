@@ -357,7 +357,8 @@ function agentIsWired(
  *   the dashboard and is never touched again, so it records nothing about how
  *   far the backend got; and the identity probe this connector makes reads two
  *   fields (`id`, `delegate_address`) from `GET /machine-payments/agent`, whose
- *   response is `id`, `name`, `status`, `safe_address`, `delegate_address`,
+ *   response is `id`, `name`, `status`, `account_address` (`safe_address`
+ *   until #2914), `delegate_address`,
  *   `delegate_account_address`, `chain_id` and `execution_rail` — **none of
  *   which is a re-key stage**. The absent field is what matters here, not the
  *   count: there is nothing on this endpoint to read the stage from, so

@@ -143,6 +143,60 @@ const ALLOWED = [
  * dropped from the pattern, because narrowing the pattern to make a census
  * pass is the move this file exists to prevent.
  */
+/**
+ * Per-file CEILINGS for the named live-source entries above (#2914 review).
+ *
+ * The allow-list matches on PATH, which is the granularity that let the guard
+ * be switched off on the two files where it earned its keep: re-adding
+ * `'safe_address'` to `TRANSACTION_CSV_COLUMNS` left the census green, and
+ * that is byte-for-byte the first defect this instrument caught. An entry
+ * saying "prose naming what was removed" cannot tell prose from a
+ * reintroduced wire field — but it can tell a file that grew.
+ *
+ * So each named file also carries the number of hits it had when its reason
+ * was written. Shrink-only: fewer is fine and re-baselines on the next run,
+ * more is a finding. That closes the reintroduction case without pretending a
+ * regex can read intent. The bulk classes (migrations, tests, docs) are not
+ * capped — they are legitimately large and churn for unrelated reasons.
+ */
+// Raised once, deliberately, during #2914's own review: the reliance-based
+// refusal (`retiredNameVerdict`) names the retired input more times than the
+// presence check it replaced — in the producer's doc and at each call site.
+// Every added hit was read before the number moved; that is the bar for
+// raising one of these, and the guard caught the increase rather than being
+// told about it.
+const ALLOWED_CEILING = new Map([
+  ['packages/backend/src/infra/repositories/smart-accounts.ts', 1],
+  ['packages/backend/src/infra/repositories/transaction-history.ts', 3],
+  ['packages/backend/src/middleware/retired-safe-names.ts', 5],
+  ['packages/backend/src/modules/transactions/csv-export.ts', 1],
+  ['packages/backend/src/openapi/spec.ts', 9],
+  ['packages/backend/src/routes/agent-connection-setups.ts', 8],
+  ['packages/backend/src/routes/agents.ts', 7],
+  ['packages/backend/src/routes/transactions.ts', 9],
+  ['packages/backend/src/routes/user.ts', 1],
+  ['packages/cli/README.md', 1],
+  ['packages/connect/src/api.ts', 1],
+  ['packages/connect/src/doctor.ts', 6],
+  ['packages/connect/src/storage.ts', 7],
+  ['packages/frontend/e2e/fixtures/api-mock.ts', 2],
+  ['packages/frontend/e2e/fixtures/haven-api.ts', 2],
+  ['packages/frontend/scripts/screenshot.mjs', 6],
+  ['packages/frontend/src/context/AuthContext.tsx', 1],
+  ['packages/frontend/src/hooks/useAgents.ts', 1],
+  ['packages/frontend/src/lib/agent-handoff.ts', 1],
+  ['packages/frontend/src/lib/signer.ts', 9],
+  ['packages/mcp/README.md', 2],
+  ['packages/mcp/src/credentials.ts', 7],
+  ['packages/qa-agent/src/seed.ts', 1],
+  ['packages/sdk/src/account-naming.ts', 2],
+  ['packages/sdk/src/types.ts', 1],
+  ['packages/signer/README.md', 2],
+  ['packages/signer/src/audit.ts', 3],
+  ['packages/signer/src/core.ts', 1],
+  ['packages/signer/src/credentials.ts', 6],
+])
+
 /** The first ALLOWED reason matching `file`, or null when nothing allows it. */
 export function allowedReason(file) {
   for (const [matcher, reason] of ALLOWED) {
@@ -214,11 +268,26 @@ export function runCensus(ref) {
   const files = grepHitsWithExclusions(ref)
   const perToken = PER_TOKEN.map((token) => ({ token, count: grepCount(ref, token, true) }))
   const unallowed = new Map()
+  const perFile = new Map()
   for (const file of files) {
+    perFile.set(file, (perFile.get(file) ?? 0) + 1)
     if (allowedReason(file) !== null) continue
     unallowed.set(file, (unallowed.get(file) ?? 0) + 1)
   }
-  return { ref, total: files.length, perToken, unallowed: [...unallowed.entries()].sort() }
+  // A named file that GREW past the count its reason was written for: the
+  // reason still matches the path, so `unallowed` cannot see it.
+  const overCeiling = []
+  for (const [file, ceiling] of ALLOWED_CEILING) {
+    const actual = perFile.get(file) ?? 0
+    if (actual > ceiling) overCeiling.push([file, actual, ceiling])
+  }
+  return {
+    ref,
+    total: files.length,
+    perToken,
+    unallowed: [...unallowed.entries()].sort(),
+    overCeiling: overCeiling.sort(),
+  }
 }
 
 /**
@@ -235,7 +304,7 @@ export function zeroedTokens(perToken) {
 
 function main() {
   const ref = process.argv[2] ?? ''
-  const { total, perToken, unallowed } = runCensus(ref)
+  const { total, perToken, unallowed, overCeiling } = runCensus(ref)
 
   console.log(`#2906 naming census — ref: ${ref || '(working tree)'}`)
   console.log(`Tier-A pattern total (excluding false positives): ${total}`)
@@ -265,7 +334,21 @@ function main() {
     return
   }
 
-  console.log(`\n✓ every one of the ${total} surviving hit(s) is in an ALLOWED path class.`)
+  if (overCeiling.length > 0) {
+    console.error(`\n#2906 census FAILED — ${overCeiling.length} allow-listed file(s) gained retired-vocabulary hits:`)
+    for (const [file, actual, ceiling] of overCeiling) {
+      console.error(`  ${file}: ${actual} hit(s), ceiling ${ceiling}`)
+    }
+    console.error(
+      '\nThese files are allow-listed for PROSE, a permanent fallback, or a refusal that must ' +
+        'name the retired input — not as a licence to put the old vocabulary back on the wire. ' +
+        'Raising a ceiling is a decision to argue for in review, not a way to make this pass.',
+    )
+    process.exitCode = 1
+    return
+  }
+
+  console.log(`\n✓ every one of the ${total} surviving hit(s) is in an ALLOWED path class, and no allow-listed file grew.`)
 }
 
 // Only run as a CLI when invoked directly — importing `runCensus` for a test

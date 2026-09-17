@@ -44,9 +44,12 @@ Create a private JSON file from the values in the Haven agent handoff:
 `delegate_key` is required. Without it the MCP server cannot sign locally.
 `account_address` is the name the connector writes since #2908; a file that
 still says `safe_address` (or `safeAddress`) is read the same way, permanently.
-The same holds for the environment: `HAVEN_ACCOUNT_ADDRESS` is read first, and
-the older `HAVEN_WALLET_ADDRESS` / `HAVEN_SAFE_ADDRESS` are accepted for one
-release (#2914 removes them).
+The environment is **not** the same: only `HAVEN_ACCOUNT_ADDRESS` is read.
+`HAVEN_WALLET_ADDRESS` and `HAVEN_SAFE_ADDRESS` were accepted for one release
+and #2914 removed them, so a machine still configured through either resolves
+no account address at all. The credential-FILE fallback above is permanent —
+a file on disk never rewrites itself — and the environment is not, which is
+the whole difference between the two paragraphs.
 
 The Haven connector may also write split credentials:
 

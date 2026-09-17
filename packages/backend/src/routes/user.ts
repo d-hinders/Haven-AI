@@ -102,7 +102,10 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
   // `PUT /user/account`, which is where the rail refusal — a different and
   // still-true fact — lives. Kept as a 410 rather than removed, per #834/#1328.
   app.put('/safe', async (_request, reply) => {
-    const retired = retiredSafePath('PUT /user/account')
+    const retired = retiredSafePath(
+      'PUT /user/account',
+      'That path is itself retired (#1984): this link is an import, closed with the Safe rail, and no path replaces it. Create a Haven account on the delegation rail with POST /accounts/hybrid.',
+    )
     return reply.code(retired.statusCode).send(retired.body)
   })
 

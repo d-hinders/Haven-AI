@@ -73,7 +73,7 @@ function argvFor(command: string): string[] {
     // the usage path rather than the refusal path it is here to cover.
     'agents connect': ['--name', 'demo', '--budget', '25', '--token', 'USDC', '--period', '1440'],
     'wallets rename': ['s1', 'New name'],
-    // #2534: needs the /user/safes read stubbed in ROUTES to get past the
+    // #2534: needs the /user/accounts read stubbed in ROUTES to get past the
     // wallet pick — the refusal rows below run against `refusingApi`, but the
     // argv still has to parse, and `--wait` is a boolean flag, no extras needed.
     'wallets funding': ['--safe', 's1'],
@@ -180,7 +180,7 @@ describe('--json contract, success paths', () => {
   // stdout (haven-reviewer, finding 4 @ 2d43d255). Without these, the shared
   // `data()`/`text()` plumbing is trusted rather than asserted.
   const ROUTES: Record<string, unknown> = {
-    'GET /user/accounts': { safes: [{ id: 's1', account_address: '0xabc', chain_id: 8453, name: 'Ops', is_default: true }] },
+    'GET /user/accounts': { accounts: [{ id: 's1', account_address: '0xabc', chain_id: 8453, name: 'Ops', is_default: true }] },
     'GET /user/accounts/s1/funding': {
       account_address: '0xabc',
       chain: { id: 8453, name: 'Base', explorer_url: 'https://sepolia.basescan.org' },

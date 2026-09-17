@@ -35,7 +35,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-14"
+last-verified: "2026-09-17"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -302,6 +302,13 @@ chain.
 > old table or columns now name the new ones with the old in parentheses. The
 > wire keys this document quotes (`safe_address`, `safe_id` on responses) are
 > still emitted — the #2907 alias mappers are untouched and fed by local shims.
+>
+> **Superseded by #2914 (2026-09-17), appended rather than rewritten:** that
+> last sentence was true when it was written and is not now. The contraction
+> deleted `openapi/wire-aliases.ts` and the local shims with it, so the
+> responses this document quotes carry `account_address` / `account_id` and
+> nothing else. Read the paragraph above as the record of what #2911 did; read
+> this one for what the wire does today.
 
 > **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
 > migration):** this diff touched one file in this document's coverage list,

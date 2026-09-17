@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { retiredSafeQuery } from '../middleware/retired-safe-names.js'
+import { retiredNameVerdict, retiredSafeQuery } from '../middleware/retired-safe-names.js'
 import { agentExistsForUser } from '../infra/repositories/agents.js'
 import {
   findMachinePaymentEvidenceDetail,
@@ -114,11 +114,15 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'Invalid pagination params' })
     }
 
-    // #2914: `safeId` is retired. It stays DECLARED so it can be refused —
+    // #2914: `safeId` is retired. It stays DECLARED so it can be REFUSED —
     // Fastify drops an undeclared query key silently, and a filter that
-    // quietly stops filtering returns every row rather than none.
-    if (request.query.safeId !== undefined) {
-      return reply.code(400).send(retiredSafeQuery('safeId', 'accountId'))
+    // quietly stops filtering returns every row rather than none. The verdict
+    // keys on what the caller RELIES on, not on presence: #2908's published
+    // clients dual-send both names, and 400-ing them would punish the ones
+    // that followed the migration instruction.
+    const safeIdVerdict = retiredNameVerdict(request.query.safeId, request.query.accountId)
+    if (safeIdVerdict.kind === 'refuse') {
+      return reply.code(400).send(retiredSafeQuery('safeId', 'accountId', safeIdVerdict.reason))
     }
 
     const accountFilterId = request.query.accountId
@@ -251,10 +255,10 @@ export default async function transactionRoutes(
   }>('/export.csv', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const fresh = parseFreshFlag(request.query.fresh)
-    // #2914: see the sibling feed above — `safeId` is declared so it can be
-    // refused rather than silently widening the result set.
-    if (request.query.safeId !== undefined) {
-      return reply.code(400).send(retiredSafeQuery('safeId', 'accountId'))
+    // #2914: see the sibling feed above — same verdict, same reasoning.
+    const safeIdVerdict = retiredNameVerdict(request.query.safeId, request.query.accountId)
+    if (safeIdVerdict.kind === 'refuse') {
+      return reply.code(400).send(retiredSafeQuery('safeId', 'accountId', safeIdVerdict.reason))
     }
 
     const accountFilterId = request.query.accountId

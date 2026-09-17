@@ -2451,6 +2451,26 @@ describe('data access characterization (#985)', () => {
   // `account_id`, and no setup row is written. Before this slice an ignored
   // `safe_id` would have fallen through to the default-wallet lookup and
   // created a setup against the WRONG account, which looks like success.
+  it('accepts safe_id when it MATCHES account_id — the published connector dual-sends (#2908)', async () => {
+    // `@haven_ai/cli` on `latest` sends `{ account_id: id, safe_id: id }`
+    // because #2908's migration instruction said to, so a refusal keyed on
+    // PRESENCE would have 400'd `agents connect` for the clients that
+    // followed it. An UNMIGRATED caller sending `safe_id` alone is still
+    // refused — that is the test directly below.
+    const app = await buildApp()
+    primeDb(safeLookup())
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups',
+      headers: { authorization: 'Bearer user-jwt' },
+      payload: { name: 'Agent', safe_id: SAFE.id, account_id: SAFE.id, runtime: 'claude-code', allowances: [ALLOWANCE] },
+    })
+
+    expect(res.statusCode).not.toBe(400)
+    await app.close()
+  })
+
   it('refuses safe_id with a 400 naming account_id, and writes no setup row', async () => {
     const app = await buildApp()
     primeDb(safeLookup())

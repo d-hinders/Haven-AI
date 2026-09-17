@@ -1398,7 +1398,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
   // refused, not resolved by precedence. `#2907`'s "accountId wins" rule
   // (finding #10) does not survive the contraction: there is no longer a
   // second accepted name to arbitrate between.
-  it('safeId alongside accountId is still refused (presence alone is enough)', async () => {
+  it('safeId DISAGREEING with accountId is refused — two answers to one question', async () => {
     const token = signToken({ sub: 'precedence-user', email: 'precedence@example.com' })
     const ACCOUNT_WITH_TXS_ID = '77777777-7777-4777-8777-777777777777'
     const ACCOUNT_EMPTY_ID = '88888888-8888-4888-8888-888888888888'
@@ -1416,6 +1416,36 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     })
     expect(response.statusCode).toBe(400)
     expect(response.json().replacement).toBe('accountId')
+  })
+
+  it('safeId MATCHING accountId is accepted — the published CLI dual-sends, and #2908 told it to', async () => {
+    // The regression this exists for. `@haven_ai/cli` on `latest` sends
+    // `params.set('accountId', id); params.set('safeId', id)` because #2908's
+    // migration instruction said to. A refusal keyed on PRESENCE fires before
+    // the new name is read, so the contraction would have 400'd exactly the
+    // clients that followed the instruction most faithfully — on
+    // `activity list`, `activity export` and `agents connect`.
+    //
+    // The bar is unchanged for a client that has NOT migrated: `safeId` alone
+    // is still a typed 400 (asserted above). What is accepted is a caller
+    // that sends both and agrees with itself.
+    const token = signToken({ sub: 'dualsend-user', email: 'dualsend@example.com' })
+    const ACCOUNT_ID = '77777777-7777-4777-8777-777777777777'
+
+    stubMixedTransactionFetch()
+    mockPoolForAggregation([
+      { id: ACCOUNT_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Has txs' },
+    ])
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/transactions?accountId=${ACCOUNT_ID}&safeId=${ACCOUNT_ID}&fresh=1`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(response.statusCode).toBe(200)
+    // And it actually FILTERED — a 200 carrying every row would be the silent
+    // failure the refusal exists to prevent, wearing a success code.
+    expect(response.json().transactions.length).toBeGreaterThan(0)
   })
 
   it('agentId=user selects the unattributed outbound tx, not the agent-attributed one', async () => {

@@ -135,6 +135,30 @@ describe('/user/safes is retired and answers 410 (#2914)', () => {
     expect(res.statusCode).not.toBe(410)
   })
 
+  it('the LIST tombstone warns that the envelope key moved, not just the path (#2914)', async () => {
+    // "Use GET /user/accounts" alone is incomplete advice: the envelope key
+    // moved `safes` -> `accounts`, so a client that swaps only the path reads
+    // an undefined array. That is not hypothetical — it is how @haven_ai/cli
+    // broke six commands in this slice, against a green suite.
+    const res = await app.inject({ method: 'GET', url: '/user/safes', headers: auth() })
+    expect(res.statusCode).toBe(410)
+    expect((res.json() as { error: string }).error).toMatch(/envelope key is `accounts`, not `safes`/)
+  })
+
+  it.each([
+    { method: 'POST' as const, url: '/user/safes' },
+    { method: 'POST' as const, url: '/user/safes/deploy' },
+  ])('$method $url says the replacement is ITSELF closed, rather than sending a caller in a circle', async ({ method, url }) => {
+    // These three replacements are also 410 (the Safe-rail inflow closure,
+    // #1984). Naming one as "the replacement" with no further word hands a
+    // caller a second 410 with a different explanation and no way forward.
+    const res = await app.inject({ method, url, headers: auth() })
+    expect(res.statusCode).toBe(410)
+    const body = res.json() as { error: string }
+    expect(body.error).toMatch(/itself retired \(#1984\)/)
+    expect(body.error).toContain('POST /accounts/hybrid')
+  })
+
   it('an anonymous caller gets 401, never the 410 — auth runs before the tombstone', async () => {
     // Ordering, not content: `authMiddleware` is an `onRequest` hook and the
     // refusal is the handler, so this is a Fastify-lifecycle guarantee. An

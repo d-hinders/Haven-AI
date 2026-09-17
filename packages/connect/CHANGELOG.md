@@ -8,6 +8,21 @@ alone.
 
 ## Unreleased
 
+### Fixed
+
+- **`AgentIdentity` declared the wrong wire shape (#2914).** `safe_address` was
+  required and `account_address` optional — exactly backwards from what the
+  server emits after the naming contraction. It is a hand-written wire shape,
+  so nothing validated it against the spec and typecheck stayed green while
+  the type was simply wrong. `rekey.ts` had the same bug on a live identity
+  read, with no test reaching the fallback; both are fixed and the fallback
+  now has one.
+
+### Unchanged, and deliberately
+
+- Connect's own `identity.json` / `agent.json` `safe_address` fallback is
+  **permanent**, the same class as a credential file.
+
 ## 0.2.1-alpha.0 — 2026-09-16
 
 ### Fixed

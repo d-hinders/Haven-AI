@@ -8,6 +8,32 @@ alone.
 
 ## Unreleased
 
+### Fixed
+
+- **BREAKING for older backends, and a fix against current ones (#2914).**
+  `GET /user/accounts` returns an `accounts` envelope; this package still read
+  `safes`, which broke `wallets list`, `wallets balances`, `wallets funding`,
+  `activity list --safe`, `activity export --safe` and `agents connect` with a
+  `TypeError`. The envelope is now read through one function that fails with a
+  sentence naming the cause instead of a stack trace.
+
+### Removed
+
+- The dual-name emission promised by 0.2.0-alpha.0 is gone, one release later
+  as stated there: `--json` and the CSV header carry `account_id` /
+  `account_address` only (the `safe_address` CSV column is dropped, shifting
+  column indexes for an importer keyed on position), `/transactions` is
+  queried with `?accountId=` only, and the connection-setup body sends
+  `account_id` only.
+
+### Compatibility note
+
+- The server accepts `safeId` / `safe_id` **beside** the new name when both
+  agree, so the dual-sending 0.2.x CLI keeps working against a contracted
+  backend; sending only the retired name is refused with a typed 400. That
+  removes the release-ordering constraint this change would otherwise have
+  imposed.
+
 ## 0.2.1-alpha.0 — 2026-09-16
 
 - **No source change in this release.** `@haven_ai/cli` is republished so its version and

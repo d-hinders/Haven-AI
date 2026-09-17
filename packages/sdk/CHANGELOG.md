@@ -8,6 +8,23 @@ alone.
 
 ## Unreleased
 
+### Removed
+
+- **BREAKING (#2914, naming epic #2906 phase 5).** The Safe-vocabulary
+  compatibility half promised by 0.2.0-alpha.0 is gone, one release later as
+  stated there.
+  - `safeAddress` leaves `HavenAgent` and `HavenAllowanceSummary`;
+    `safe_address` / `safe_id` leave the raw server shapes.
+  - `SignData.components.safe` is gone. `payer_account` is the account the
+    payment is drawn from; `components.account` still means the DELEGATE
+    account address — a different address, deliberately never merged.
+  - `AgentPaymentNextAction.FundSafeOrRaiseAllowance` is now
+    `FundAccountOrRaiseAllowance`, value `fund_account_or_raise_allowance`.
+    `AgentPaymentNextActionAccountAlias`, `canonicalAgentPaymentNextAction`
+    and `isFundAccountOrRaiseAllowance` are deleted — there is one spelling to
+    switch on now.
+  - The dual-name read helpers collapse to single-name reads.
+
 ## 0.2.1-alpha.0 — 2026-09-16
 
 ### Added

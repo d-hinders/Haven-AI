@@ -48,7 +48,7 @@ const BUDGET_403 = {
     error: "This x402 payment of 2.00 USDC exceeds the agent's remaining budget for this period",
     error_code: 'delegation_budget_exceeded',
     phase: 'insufficient_funds',
-    next_action: 'fund_safe_or_raise_allowance',
+    next_action: 'fund_account_or_raise_allowance',
     remaining_atomic: '1000000',
     shortfall_atomic: '1000000',
   },

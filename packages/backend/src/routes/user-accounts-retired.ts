@@ -45,7 +45,10 @@ import { authMiddleware } from '../middleware/auth.js'
  * `error` carries the human sentence; `replacement` carries the new path as a
  * field so a client can route on it without parsing prose.
  */
-export function retiredSafePath(replacement: string): {
+export function retiredSafePath(
+  replacement: string,
+  note?: string,
+): {
   statusCode: 410
   body: { error: string; replacement: string }
 } {
@@ -54,7 +57,8 @@ export function retiredSafePath(replacement: string): {
     body: {
       error:
         'The /user/safes paths are retired (#2906) — Haven accounts are addressed as ' +
-        `accounts, not Safes. Use ${replacement}. The response shape is unchanged.`,
+        `accounts, not Safes. Use ${replacement}.` +
+        (note === undefined ? '' : ` ${note}`),
       replacement,
     },
   }
@@ -68,9 +72,9 @@ export function retiredSafePath(replacement: string): {
  * stopped from calling a permanently-gone path. A handler called anything
  * else leaves these seven addresses uncounted in BOTH directions.
  */
-function retiredSafePathHandler(replacement: string) {
+function retiredSafePathHandler(replacement: string, note?: string) {
   return async (_request: FastifyRequest, reply: FastifyReply) => {
-    const retired = retiredSafePath(replacement)
+    const retired = retiredSafePath(replacement, note)
     return reply.code(retired.statusCode).send(retired.body)
   }
 }
@@ -88,9 +92,29 @@ export default async function userAccountsRetiredRoutes(app: FastifyInstance) {
   // is the failure mode the owner_cli allow-list comment names: it reads as
   // coverage and is not. The producer stays single, which is the part that
   // mattered.
-  app.get('/', retiredSafePathHandler('GET /user/accounts'))
-  app.post('/', retiredSafePathHandler('POST /user/accounts'))
-  app.post('/deploy', retiredSafePathHandler('POST /user/accounts/deploy'))
+  // The note is per address, because "use the replacement" is not uniformly
+  // safe advice. Two things a migrating client cannot see from the path alone:
+  //
+  //  - the LIST envelope key moved `safes` -> `accounts`, so swapping the path
+  //    alone leaves a reader destructuring `undefined`. That is not
+  //    hypothetical — it is exactly how `@haven_ai/cli` broke six commands in
+  //    this very slice, against a green test suite;
+  //  - three of these replacements are THEMSELVES 410 (the Safe-rail inflow
+  //    closure, #1984/#1988). Sending a caller there would hand them a second
+  //    410 with a different explanation and no way forward, so those say the
+  //    operation is closed and name the live alternative instead.
+  app.get('/', retiredSafePathHandler(
+    'GET /user/accounts',
+    'The response envelope key is `accounts`, not `safes` — a client that only swaps the path will read an undefined array.',
+  ))
+  app.post('/', retiredSafePathHandler(
+    'POST /user/accounts',
+    'That path is itself retired (#1984): importing an account is closed with the Safe rail, and no path replaces it. Create a Haven account on the delegation rail with POST /accounts/hybrid.',
+  ))
+  app.post('/deploy', retiredSafePathHandler(
+    'POST /user/accounts/deploy',
+    'That path is itself retired (#1984): Haven no longer deploys Safes, and no path replaces it. Create a Haven account on the delegation rail with POST /accounts/hybrid.',
+  ))
   app.put('/:id', retiredSafePathHandler('PUT /user/accounts/:accountId'))
   app.put('/:id/default', retiredSafePathHandler('PUT /user/accounts/:accountId/default'))
   app.delete('/:id', retiredSafePathHandler('DELETE /user/accounts/:accountId'))

@@ -2677,7 +2677,7 @@ export const openapiSpec = {
         deprecated: true,
         summary: 'RETIRED (#2914) — always answers 410.',
         description:
-          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `GET /user/accounts`, which takes the same request and returns the same response shape. The refusal body carries `replacement` as a field so a client can route on it without parsing prose, and `authMiddleware` still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `GET /user/accounts`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '401': errorResponse,
@@ -2690,7 +2690,7 @@ export const openapiSpec = {
         deprecated: true,
         summary: 'RETIRED (#2914) — always answers 410.',
         description:
-          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `POST /user/accounts`, which takes the same request and returns the same response shape. The refusal body carries `replacement` as a field so a client can route on it without parsing prose, and `authMiddleware` still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `POST /user/accounts`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '401': errorResponse,
@@ -2705,7 +2705,7 @@ export const openapiSpec = {
         deprecated: true,
         summary: 'RETIRED (#2914) — always answers 410.',
         description:
-          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `POST /user/accounts/deploy`, which takes the same request and returns the same response shape. The refusal body carries `replacement` as a field so a client can route on it without parsing prose, and `authMiddleware` still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `POST /user/accounts/deploy`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '401': errorResponse,
@@ -2720,7 +2720,7 @@ export const openapiSpec = {
         deprecated: true,
         summary: 'RETIRED (#2914) — always answers 410.',
         description:
-          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/accounts/{accountId}`, which takes the same request and returns the same response shape. The refusal body carries `replacement` as a field so a client can route on it without parsing prose, and `authMiddleware` still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/accounts/{accountId}`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '401': errorResponse,
@@ -2733,7 +2733,7 @@ export const openapiSpec = {
         deprecated: true,
         summary: 'RETIRED (#2914) — always answers 410.',
         description:
-          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `DELETE /user/accounts/{accountId}`, which takes the same request and returns the same response shape. The refusal body carries `replacement` as a field so a client can route on it without parsing prose, and `authMiddleware` still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `DELETE /user/accounts/{accountId}`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '401': errorResponse,
@@ -2748,7 +2748,7 @@ export const openapiSpec = {
         deprecated: true,
         summary: 'RETIRED (#2914) — always answers 410.',
         description:
-          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/accounts/{accountId}/default`, which takes the same request and returns the same response shape. The refusal body carries `replacement` as a field so a client can route on it without parsing prose, and `authMiddleware` still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/accounts/{accountId}/default`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '401': errorResponse,
@@ -2763,7 +2763,7 @@ export const openapiSpec = {
         deprecated: true,
         summary: 'RETIRED (#2914) — always answers 410.',
         description:
-          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `GET /user/accounts/{accountId}/funding`, which takes the same request and returns the same response shape. The refusal body carries `replacement` as a field so a client can route on it without parsing prose, and `authMiddleware` still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `GET /user/accounts/{accountId}/funding`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '401': errorResponse,
@@ -2778,7 +2778,7 @@ export const openapiSpec = {
         deprecated: true,
         summary: 'RETIRED (#2914) — always answers 410.',
         description:
-          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/account`, which takes the same request and returns the same response shape. The refusal body carries `replacement` as a field so a client can route on it without parsing prose, and `authMiddleware` still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/account`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '401': errorResponse,

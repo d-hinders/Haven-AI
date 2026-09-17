@@ -44,6 +44,7 @@ vi.mock('../../middleware/auth.js', () => ({
 // a fixture id like 'agent-1' would make the response-shape assertion (#1444)
 // pass against a payload production can never produce.
 const AGENT_UUID = '4f9a1c2e-7b3d-4a10-9c55-2f8e6d0b1a34'
+const OTHER_SAFE_UUID = '99999999-9999-4999-8999-999999999999'
 const SAFE_UUID = 'b1d7c9a4-3e28-4f61-8a0d-5c7e2b9f4d16'
 
 const DELEGATION_UUID = 'c3e5a8f1-9d24-4b70-8e13-6a4f2c8d5b09'
@@ -554,7 +555,13 @@ describe('agent creation — passport opt-in never breaks creation', () => {
       expect(mockQuery.mock.calls.some(([sql]) => /SELECT id FROM smart_accounts/.test(String(sql)))).toBe(false)
     })
 
-    it('safe_id alongside account_id is STILL refused — presence alone is enough, agreement does not save it', async () => {
+    it('safe_id MATCHING account_id is ACCEPTED — the published connector dual-sends, and #2908 told it to', async () => {
+      // `@haven_ai/cli` on `latest` sends `{ account_id: id, safe_id: id }`
+      // because #2908's migration instruction said to. A refusal keyed on
+      // PRESENCE fires before the new name is read, so the contraction would
+      // have 400'd `agents connect` for exactly the clients that followed the
+      // instruction. The bar for an UNMIGRATED caller is unchanged: `safe_id`
+      // alone is still a typed 400 (asserted above).
       const app = Fastify({ logger: false })
       await app.register(agentRoutes, { prefix: '/agents' })
       mockCreateFlow()
@@ -563,8 +570,21 @@ describe('agent creation — passport opt-in never breaks creation', () => {
         method: 'POST', url: '/agents',
         payload: { name: 'A', delegate_address: VALID_DELEGATE, safe_id: SAFE_UUID, account_id: SAFE_UUID },
       })
+      expect(res.statusCode).toBe(201)
+      expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO agents/.test(String(sql)))).toBe(true)
+    })
+
+    it('safe_id DISAGREEING with account_id is refused — two answers to one question', async () => {
+      const app = Fastify({ logger: false })
+      await app.register(agentRoutes, { prefix: '/agents' })
+      mockCreateFlow()
+
+      const res = await app.inject({
+        method: 'POST', url: '/agents',
+        payload: { name: 'A', delegate_address: VALID_DELEGATE, safe_id: SAFE_UUID, account_id: OTHER_SAFE_UUID },
+      })
       expect(res.statusCode).toBe(400)
-      expect(res.json()).toEqual(retiredSafeField('safe_id', 'account_id'))
+      expect(res.json()).toEqual(retiredSafeField('safe_id', 'account_id', 'disagree'))
       expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO agents/.test(String(sql)))).toBe(false)
     })
   })

@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import crypto from 'crypto'
-import { retiredSafeField } from '../middleware/retired-safe-names.js'
+import { retiredNameVerdict, retiredSafeField } from '../middleware/retired-safe-names.js'
 import { resolveX402BindingSignerAddress } from '../infra/chain/x402-binding-signer.js'
 import * as setups from '../infra/repositories/agent-connection-setups.js'
 import type {
@@ -260,9 +260,12 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
       const parsed = validateCreateBody(request.body, reply)
       if (!parsed) return
 
-      // #2914: `safe_id` is retired — refused, never ignored.
-      if (request.body.safe_id !== undefined) {
-        return reply.code(400).send(retiredSafeField('safe_id', 'account_id'))
+      // #2914: `safe_id` is retired — refused, never ignored. Keyed on
+      // reliance, not presence: #2908's published connector sends both names
+      // (`{ account_id, safe_id }`), so a matching pair is a migrated caller.
+      const safeIdVerdict = retiredNameVerdict(request.body.safe_id, request.body.account_id)
+      if (safeIdVerdict.kind === 'refuse') {
+        return reply.code(400).send(retiredSafeField('safe_id', 'account_id', safeIdVerdict.reason))
       }
 
       const safe = await resolveAccountForSetup(sub, request.body.account_id)

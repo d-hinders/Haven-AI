@@ -464,22 +464,46 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     const total = screen.getByTestId('chart-tooltip-total')
     expect(total).toHaveTextContent('USD 250.00')
     expect(total.parentElement!.textContent).toMatch(/^Tue 9/)
-    // Every agent is a chip in one wrapping list, and the refusal count is
-    // the last chip of the same list — no row-per-agent block underneath.
+    // One wrapping row: the agents as a list, the refusal count beside the
+    // list (not one of its items) — no row-per-agent block underneath.
     const chips = screen.getByTestId('chart-tooltip-chips')
     expect(chips.className).toMatch(/flex-wrap/)
-    const items = Array.from(chips.children)
-    expect(items.map((li) => li.getAttribute('data-testid'))).toEqual([
+    expect(chips.className).not.toMatch(/flex-col/)
+    const list = chips.querySelector('ul')!
+    expect(list.className).toMatch(/flex-wrap/)
+    expect(list.className).not.toMatch(/flex-col/)
+    expect(Array.from(list.children).map((li) => li.getAttribute('data-testid'))).toEqual([
       'chart-tooltip-row',
       'chart-tooltip-row',
-      'chart-tooltip-refusals',
     ])
+    const refusals = screen.getByTestId('chart-tooltip-refusals')
+    expect(refusals.tagName).toBe('P')
+    expect(refusals.parentElement).toBe(chips)
+    expect(list.nextElementSibling).toBe(refusals)
     // The chips carry swatch, name and amount — the name stays (the legend
     // is below the plot, the chip is where the eye is).
-    expect(items[0]).toHaveTextContent(/Research agent.*200\.00/)
-    // Nothing of the old block form remains after the chips.
+    expect(list.children[0]).toHaveTextContent(/Research agent.*200\.00/)
+    // Nothing of the old block form remains after the row.
     expect(chips.nextElementSibling).toBeNull()
-    expect(tip.querySelector('.border-t')).toBeNull()
+  })
+
+  it('never lets a long name push the money figure out of the panel: the name truncates, the amount and tokens do not shrink (#3067 review)', () => {
+    renderChart()
+    fireEvent.keyDown(document.querySelector('svg')!, { key: 'ArrowRight' })
+    const row = screen.getAllByTestId('chart-tooltip-row')[0]!
+    // jsdom lays nothing out, so the guard is the class contract that a
+    // browser turns into geometry: the chip may shrink (min-w-0), the
+    // name ellipsises inside it, and the figures refuse to shrink or wrap.
+    expect(row.className).toMatch(/min-w-0/)
+    expect(row.className).not.toMatch(/whitespace-nowrap/)
+    const name = row.querySelector('[data-testid="chart-tooltip-name"]')!
+    expect(name.className).toMatch(/truncate/)
+    expect(name.className).toMatch(/min-w-0/)
+    for (const id of ['chart-tooltip-amount', 'chart-tooltip-tokens']) {
+      const el = row.querySelector(`[data-testid="${id}"]`)!
+      expect(el.className).toMatch(/whitespace-nowrap/)
+      expect(el.className).toMatch(/flex-shrink-0/)
+    }
   })
 
   it('moves the caret and stops at the ends of the range', () => {

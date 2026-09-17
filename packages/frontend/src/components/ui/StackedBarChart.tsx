@@ -682,41 +682,51 @@ export function StackedBarChart({
               {currency} {formatValue(entry.total)}
             </p>
           </div>
-          <ul data-testid="chart-tooltip-chips" className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
-            {entry.segments.map((s) => (
-              <li
-                key={s.seriesId}
-                data-testid="chart-tooltip-row"
-                className="inline-flex items-baseline gap-1.5 whitespace-nowrap"
-              >
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-2 w-2 flex-shrink-0 self-center rounded-full"
-                  style={{ backgroundColor: seriesColor(s.seriesIndex) }}
-                />
-                <span className="text-[var(--v2-ink-2)]">{s.name}</span>
-                <span className="v2-tabular text-[var(--v2-ink)]">{formatValue(s.amount)}</span>
-                {s.tokens !== undefined && s.tokens.length > 0 && (
+          {/* The agents are a list; the refusal count is not one of them,
+              so it sits beside the list as its own item of the same
+              wrapping row. A chip may not run off the panel: the name
+              truncates, the money figure never does (a 36-char id fallback
+              or a long agent name pushed the amount out of the 390 panel —
+              the whitespace-nowrap trap of #2038, caught in review). */}
+          <div data-testid="chart-tooltip-chips" className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
+            <ul className="flex min-w-0 max-w-full flex-wrap items-baseline gap-x-3 gap-y-0.5">
+              {entry.segments.map((s) => (
+                <li
+                  key={s.seriesId}
+                  data-testid="chart-tooltip-row"
+                  className="inline-flex min-w-0 max-w-full items-baseline gap-1.5"
+                >
                   <span
-                    data-testid="chart-tooltip-tokens"
-                    className="v2-tabular text-[var(--v2-ink-3)]"
-                  >
-                    {'('}
-                    {s.tokens.map(([token, amount]) => `${formatValue(amount)} ${token}`).join(' + ')}
-                    {')'}
+                    aria-hidden="true"
+                    className="inline-block h-2 w-2 flex-shrink-0 self-center rounded-full"
+                    style={{ backgroundColor: seriesColor(s.seriesIndex) }}
+                  />
+                  <span data-testid="chart-tooltip-name" className="min-w-0 truncate text-[var(--v2-ink-2)]">{s.name}</span>
+                  <span data-testid="chart-tooltip-amount" className="v2-tabular flex-shrink-0 whitespace-nowrap text-[var(--v2-ink)]">
+                    {formatValue(s.amount)}
                   </span>
-                )}
-              </li>
-            ))}
+                  {s.tokens !== undefined && s.tokens.length > 0 && (
+                    <span
+                      data-testid="chart-tooltip-tokens"
+                      className="v2-tabular flex-shrink-0 whitespace-nowrap text-[var(--v2-ink-3)]"
+                    >
+                      {'('}
+                      {s.tokens.map(([token, amount]) => `${formatValue(amount)} ${token}`).join(' + ')}
+                      {')'}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
             {entry.refusals > 0 && (
-              <li
+              <p
                 data-testid="chart-tooltip-refusals"
                 className="whitespace-nowrap text-[var(--v2-ink-2)]"
               >
                 {entry.refusals} payment{entry.refusals === 1 ? '' : 's'} refused
-              </li>
+              </p>
             )}
-          </ul>
+          </div>
         </div>
       )}
 

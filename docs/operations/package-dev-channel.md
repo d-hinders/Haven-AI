@@ -64,6 +64,19 @@ and the `release` skill.
 > note: `CONNECTOR_VERSION` and the channel constant's unchanged value — nothing
 > else in this document was re-verified.
 
+> **Re-verification (#3082, request-validation body restore, 2026-09-17):** this
+> doc is coupled because `packages/backend/src/config.ts` is in its `covers:` and
+> that file was edited. Only a JSDoc block and the boot-refusal error string
+> changed, both describing `HAVEN_REQUEST_VALIDATION`: `off` does not disable an
+> `enforcedPrefixes` module, and shadow's "changes nothing" was true of the
+> handler's view only after #3082 restored the request body. No parse shape, no
+> default, no accepted value and no restart semantics moved.
+> **Nothing in this document was made false or stale by that edit.** Its own
+> claim at step 5 — `off`/`shadow`/`enforce`, default `shadow`, a mode change is
+> a restart, and the variable does not affect the package-selection path — was
+> re-read against `config.ts` and `openapi/request-validation.ts` at this
+> commit and is true in every clause, which is why it needed no content change.
+
 > **Re-verification (contract-doc count correction, 2026-09-17):** this doc is
 > coupled because `scripts/release-bump.mjs` is in its `covers:` and that script
 > was edited — its *printed* next-steps block said "the two contract docs" and

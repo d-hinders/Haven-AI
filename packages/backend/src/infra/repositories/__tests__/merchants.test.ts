@@ -79,6 +79,24 @@ describe('merchants repository — pure helpers', () => {
     expect(merchantHostOf('not a url')).toBeNull()
   })
 
+  it('splits userinfo at the LAST @ like every client, so a crafted URL cannot claim a curated merchant\'s host', () => {
+    // Review of 6f6ef7f6: with the first-@ rule these three named
+    // services.ampersend.ai / b@c.example / evil.example — a third-party
+    // Bazaar URL would have listed under Ampersend. The host must be what a
+    // client fetches: WHATWG's answer, asserted against `new URL()` itself.
+    const shapes = [
+      'https://u@services.ampersend.ai:@evil.example/x',
+      'https://a@b@c.example/',
+      'https://user:pw@api.example/x',
+      'https://api.example/a@b',
+      'https://api.example:8443/x?y#z',
+    ]
+    for (const url of shapes) {
+      expect(merchantHostOf(url), url).toBe(new URL(url).hostname)
+    }
+    expect(merchantHostOf('https://u@services.ampersend.ai:@evil.example/x')).toBe('evil.example')
+  })
+
 })
 
 describeDb('merchants repository (#3078)', () => {
@@ -116,11 +134,14 @@ describeDb('merchants repository (#3078)', () => {
     expect(third.slug).toBe('weather-api-3')
   })
 
-  it('agrees with HOST_OF_URL_SQL on every shape the JavaScript rule handles', async () => {
+  it('agrees with HOST_OF_URL_SQL on the plain, port, userinfo, double-@, path-@, IDN and unparseable shapes', async () => {
     const urls = [
       'https://Services.Sandbox.Ampersend.ai/api/joke',
       'https://api.example:8443/x?y#z',
       'https://user:pw@api.example/x',
+      'https://u@services.ampersend.ai:@evil.example/x',
+      'https://a@b@c.example/',
+      'https://api.example/a@b',
       'https://bücher.example/x',
       'not a url',
     ]

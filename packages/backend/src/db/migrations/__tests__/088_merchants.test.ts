@@ -203,23 +203,48 @@ describeDb('migration 088_merchants', () => {
   })
 
   it('down() removes the Ampersend seed and the columns before the table; up() round-trips', async () => {
+    // A LATER row on an Ampersend host (a verified submission, the cron) is
+    // not this migration's to delete: down() removes the six seeded URLs,
+    // not a host. Plant one (the harness wiped the seeded merchant, so plant
+    // it too) and expect it to survive.
+    await db.query(
+      `INSERT INTO merchants (slug, name) VALUES ('ampersend-demo-api', 'Ampersend Demo API') ON CONFLICT (slug) DO NOTHING`,
+    )
+    await db.query(
+      `INSERT INTO merchant_catalog
+         (name, description, category, resource_url, rail, protocol, tool_name, network, status, merchant_id)
+       VALUES ('Later', 'x', 'api', 'https://services.ampersend.ai/api/later', 'x402', 'http', NULL, 'eip155:8453', 'active',
+               (SELECT id FROM merchants WHERE slug = 'ampersend-demo-api'))`,
+    )
     const client = await db.connect()
     try {
       await down(client)
+      const survivor = await db.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM merchant_catalog WHERE resource_url = 'https://services.ampersend.ai/api/later'`,
+      )
+      expect(survivor.rows[0].n).toBe('1')
       expect(await tableExists('merchants')).toBe(false)
       expect(await columnInfo('merchant_catalog', 'merchant_id')).toEqual({ exists: false, nullable: null })
       expect(await columnInfo('catalog_submissions', 'merchant_name')).toEqual({ exists: false, nullable: null })
       const amp = await db.query<{ n: string }>(
-        `SELECT count(*)::text AS n FROM merchant_catalog WHERE ${HOST_OF_URL_SQL} LIKE '%ampersend.ai'`,
+        `SELECT count(*)::text AS n FROM merchant_catalog WHERE resource_url = ANY($1::text[])`,
+        [AMPERSEND_OFFERS.map((o) => o.resourceUrl)],
       )
       expect(amp.rows[0].n).toBe('0')
       await up(client)
       expect(await tableExists('merchants')).toBe(true)
       expect(await columnInfo('merchant_catalog', 'merchant_id')).toEqual({ exists: true, nullable: false })
       const ampAgain = await db.query<{ n: string }>(
-        `SELECT count(*)::text AS n FROM merchant_catalog WHERE ${HOST_OF_URL_SQL} LIKE '%ampersend.ai'`,
+        `SELECT count(*)::text AS n FROM merchant_catalog WHERE resource_url = ANY($1::text[])`,
+        [AMPERSEND_OFFERS.map((o) => o.resourceUrl)],
       )
       expect(ampAgain.rows[0].n).toBe(String(AMPERSEND_OFFERS.length))
+      // The survivor is back under its merchant (the backfill's map knows the host).
+      const survivorAgain = await db.query<{ slug: string }>(
+        `SELECT m.slug FROM merchant_catalog mc JOIN merchants m ON m.id = mc.merchant_id
+         WHERE mc.resource_url = 'https://services.ampersend.ai/api/later'`,
+      )
+      expect(survivorAgain.rows[0]?.slug).toBe('ampersend-demo-api')
     } finally {
       client.release()
     }

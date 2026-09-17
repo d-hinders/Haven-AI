@@ -258,8 +258,11 @@ export async function up(client: PoolClient): Promise<void> {
       -- A row whose resource_url the host rule cannot read would be left
       -- without a merchant and SET NOT NULL would fail three statements on
       -- with an error naming no row. Fail here instead, naming every id, so
-      -- the operator knows what to fix (review S1). No current writer can
-      -- produce such a row; a database this migration meets might.
+      -- the operator knows what to fix (review S1). The map's merchant rows
+      -- and the Ampersend seeds were inserted above; the migration runner
+      -- wraps up() in one transaction (migrate.ts applyInTransaction), so a
+      -- throw here rolls them back and the database is as it was. No current
+      -- writer can produce such a row; a database this migration meets might.
       IF EXISTS (SELECT 1 FROM merchant_catalog WHERE merchant_id IS NULL AND ${HOST_OF_URL_SQL} IS NULL) THEN
         RAISE EXCEPTION '088_merchants: merchant_catalog rows with an unreadable resource_url host: %',
           (SELECT string_agg(id::text || ' (' || resource_url || ')', ', ')

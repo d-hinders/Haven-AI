@@ -285,7 +285,7 @@ from branches; `@haven_ai/core` is workspace-private.
   them, because a release must not depend on a lint having been run.
 - To cut one end to end, use the `release` skill — it covers the whole
   production release, including a promotion that moves no version and publishes
-  nothing, and its closeout ends in production rather than on npm;
+  nothing, and its closeout covers production and not only npm;
   [`scripts/README.md`](scripts/README.md) has the full rationale.
 
 ## UI Surface Hierarchy

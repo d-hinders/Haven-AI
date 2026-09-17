@@ -81,11 +81,23 @@ describe('array wire keys default to [] when the response omits them (#3093)', (
     await waitFor(() => expect(result.current.budgets).toEqual([]))
   })
 
+  it('useDelegationBudget: the signer set without passkeys degrades (pickSigningPath reads .length in render)', async () => {
+    mockApiGet.mockImplementation((url: string) =>
+      Promise.resolve(url.endsWith('/account-signers') ? { account_address: ADDRESS, owners: [] } : { delegations: [] }),
+    )
+    const { result } = renderHook(() => useDelegationBudget('agent-1', 84532))
+    await waitFor(() => expect(result.current.budgets).toEqual([]))
+    expect(result.current.ready).toBe(false)
+  })
+
   it('usePortfolio: breakdown', async () => {
-    mockApiGet.mockResolvedValue({ totalUsd: 0, totalEur: 0 })
+    mockApiGet.mockResolvedValue({})
     const { result } = renderHook(() => usePortfolio(ADDRESS, { chainId: 8453 }))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.breakdown).toEqual([])
+    // The scalar totals feed `formatFiat(...).toLocaleString` on /accounts.
+    expect(result.current.totalUsd).toBe(0)
+    expect(result.current.totalEur).toBe(0)
   })
 
   it('useAccounting: overrides, providers, connections', async () => {

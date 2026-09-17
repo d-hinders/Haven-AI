@@ -47,7 +47,7 @@ export function useCatalog() {
       const res = await api.get<{ entries: CatalogEntry[] }>('/catalog')
       // `?? []`: `api.get` does no response validation, so an absent key stores
       // `undefined` and the next `.map` takes the whole route into the
-      // ErrorBoundary (#1075, #2295, #3091 — #3093 closes the class).
+      // ErrorBoundary (#1075, #2295, #3091 — #3093 sweeps the array stores).
       setEntries(res.entries ?? [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'We could not load the catalog.')

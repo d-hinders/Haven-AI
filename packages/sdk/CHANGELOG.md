@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+## 0.3.0-alpha.0 — 2026-09-17
+
 ### Removed
 
 - **BREAKING (#2914, naming epic #2906 phase 5).** The Safe-vocabulary

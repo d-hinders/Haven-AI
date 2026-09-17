@@ -560,6 +560,39 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.3.0-alpha.0 release, 2026-09-17):** this release is a
+> **BREAK**, and the version says so — MINOR under the 0.x convention, the same
+> reason 0.2.0-alpha.0 was. It carries the naming-P5 contraction (#2914 /
+> #3075), which ends the compatibility window 0.2.0-alpha.0 opened.
+>
+> **What an old client now meets.** Retired paths answer **410** with a typed
+> body naming their replacement; retired REQUEST names are **refused with 400**
+> naming the new field rather than ignored; the next-action enum emits
+> `fund_account_or_raise_allowance` and no longer accepts the old value on
+> input. Measured against the published `@haven_ai/sdk@0.2.1-alpha.0` tarball,
+> **seven exported declarations are removed and none added**
+> (`AgentPaymentNextActionAccountAlias`, `AgentPaymentNextActionWire`,
+> `accountAddressTwins`, `canonicalAgentPaymentNextAction`,
+> `isFundAccountOrRaiseAllowance`, `readAccountAddress`, `readAccountId`).
+>
+> **Two response names deliberately SURVIVE this release**, and that is the one
+> skew statement a reader must not miss: the `safes` envelope key on
+> `GET /user/accounts` and `safeName` on the `GET /transactions` feed. Both are
+> declared `deprecated` in the spec, and both are still emitted, because
+> `@haven_ai/cli@0.2.1-alpha.0` — what `latest` resolved to before this release
+> — reads them, and a published client cannot dual-READ the way a request can
+> dual-send. Their removal condition is written at the call site in
+> `packages/backend/src/middleware/retired-safe-names.ts`: the release AFTER
+> this one, once `npm view @haven_ai/cli dist-tags` shows `latest` at or past
+> 0.3.0-alpha.0. This release is what makes that true.
+>
+> **The version-skew contract is therefore ASYMMETRIC for one release**, which
+> it has not been before: a 0.3.0 client against a 0.3.0 backend is consistent,
+> and a pre-0.3.0 client against a 0.3.0 backend now fails **loudly and typed**
+> rather than silently — which is the intended end state of #2906, not a
+> regression. The signer's supported expected-context versions are untouched by
+> this epic and by this release.
+
 **Do not re-pin the four `@haven_ai/*` rows by hand.** Since
 [#1790](https://github.com/d-hinders/Haven-AI/issues/1790) `npm run release:bump`
 writes them, and a check compares each row against its own constant — on every
@@ -571,10 +604,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.2.1-alpha.0` |
-| `@haven_ai/mcp` | `0.2.1-alpha.0` |
-| `@haven_ai/sdk` | `0.2.1-alpha.0` |
-| `@haven_ai/signer` | `0.2.1-alpha.0` |
+| `@haven_ai/connect` | `0.3.0-alpha.0` |
+| `@haven_ai/mcp` | `0.3.0-alpha.0` |
+| `@haven_ai/sdk` | `0.3.0-alpha.0` |
+| `@haven_ai/signer` | `0.3.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

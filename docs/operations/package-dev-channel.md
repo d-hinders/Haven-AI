@@ -89,6 +89,21 @@ and the `release` skill.
 > edit, not a re-verification of the document, and #1366 rates a rubber-stamped
 > date worse than a stale one.
 
+> **Re-verification (0.3.0-alpha.0 release, 2026-09-17):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
+> is in this doc's `covers:`. Verified rather than asserted: the bump's own
+> checks report channel `alpha` and version `0.3.0-alpha.0` agreeing across the
+> source, the built connect bundle and the SDK that bundle resolves. **No
+> channel behaviour changed** — nothing in this release touches `publish.yml`,
+> `release-channel.mjs`, `release-snapshot-version.mjs` or
+> `release-version-order.mjs`, so the `0.0.0-dev.*` snapshot path and the rule
+> that the two channels cannot cross are untouched. Worth noting for this
+> release specifically: `0.0.0-` still sorts below every real version, so the
+> MINOR bump to 0.3.0 changes nothing about channel ordering. `last-verified`
+> deliberately NOT bumped — a scoped check of one constant is not a
+> re-verification of this document, and #1366 rates a rubber stamp worse than a
+> stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
+
 ## What `@dev` is, and is not
 
 - **Which packages.** The five the publish loop names — `sdk`, `signer`, `mcp`,

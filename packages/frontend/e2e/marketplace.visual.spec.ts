@@ -144,9 +144,11 @@ const SCENARIOS: Scenario[] = [
     async assert(page) {
       const merchantPage = page.getByTestId('merchant-page')
       await expect(merchantPage.getByRole('heading', { name: 'Pay this with Haven' })).toHaveCount(1)
-      // The tool name is on screen three times (offer name, Method cell, the
-      // agent instruction) — assert the two that carry meaning, exactly.
-      await expect(merchantPage.getByRole('cell', { name: 'buy_vpn', exact: true })).toHaveCount(1)
+      // The one offer, by id in both its shapes (table row from md up, stacked
+      // card below — a role query skips whichever is hidden), and its
+      // instruction, which names the tool.
+      await expect(merchantPage.getByTestId('offer-row-offer-nordshield-vpn')).toHaveCount(1)
+      await expect(merchantPage.getByTestId('offer-card-offer-nordshield-vpn')).toHaveCount(1)
       // Labelled on the page itself, not only on the grid card (decision 6).
       await expect(merchantPage.getByTestId('test-merchant-note')).toBeInViewport()
       await expect(merchantPage.getByText(FROZEN_FRESHNESS).locator('visible=true').first()).toBeVisible()

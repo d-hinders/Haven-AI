@@ -72,6 +72,20 @@ describe('MerchantGrid', () => {
     expect(screen.getByText('Haven test merchant — real payments, demo goods')).toBeDefined()
   })
 
+  it('derives the "Show test merchants" default from data that arrives AFTER mount — the grid mounts on an empty list', () => {
+    // The baseline harness saw the demo store hidden with a testnet listed:
+    // a `useState(default)` captured `false` on the empty first render.
+    const { rerender } = render(<MerchantGrid merchants={[]} loading={false} error={null} onSubmit={() => {}} />)
+    expect(screen.getByLabelText('Show test merchants')).not.toBeChecked()
+    rerender(<MerchantGrid merchants={[merchant({ networks: ['eip155:84532'] }), merchant({ id: 'm-test', slug: 'haven-demo-store', name: 'Haven Demo Store', is_test_merchant: true, networks: ['eip155:84532'] })]} loading={false} error={null} onSubmit={() => {}} />)
+    expect(screen.getByLabelText('Show test merchants')).toBeChecked()
+    // A user's click still wins over the derived default afterwards.
+    fireEvent.click(screen.getByLabelText('Show test merchants'))
+    expect(screen.getByLabelText('Show test merchants')).not.toBeChecked()
+    rerender(<MerchantGrid merchants={[merchant({ networks: ['eip155:84532'] }), merchant({ id: 'm-test', slug: 'haven-demo-store', name: 'Haven Demo Store', is_test_merchant: true, networks: ['eip155:84532'] })]} loading={false} error={null} onSubmit={() => {}} />)
+    expect(screen.getByLabelText('Show test merchants')).not.toBeChecked()
+  })
+
   it('defaults "Show test merchants" on when any listed network is a testnet', () => {
     const merchants = [
       merchant({ id: 't', slug: 'test-one', is_test_merchant: true, networks: ['eip155:84532'] }),

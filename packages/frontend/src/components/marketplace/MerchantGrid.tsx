@@ -53,7 +53,14 @@ export function MerchantGrid({
     () => merchants.some((m) => m.networks.includes(TESTNET_NETWORK)),
     [merchants],
   )
-  const [showTestMerchants, setShowTestMerchants] = useState(testMerchantsDefaultOn)
+  // The user's explicit choice, or none: the default is DERIVED at read time
+  // from the served data, not captured into state at mount — the grid mounts
+  // before the merchants arrive, and a `useState(default)` froze `false` on
+  // the empty list (the baseline harness saw the demo store hidden with a
+  // testnet listed). Toggling records a choice; until then the data decides.
+  const [testMerchantsChoice, setTestMerchantsChoice] = useState<boolean | null>(null)
+  const showTestMerchants = testMerchantsChoice ?? testMerchantsDefaultOn
+  const setShowTestMerchants = setTestMerchantsChoice
 
   const categories = useMemo(
     () => Array.from(new Set(merchants.map((m) => m.category))).sort(),

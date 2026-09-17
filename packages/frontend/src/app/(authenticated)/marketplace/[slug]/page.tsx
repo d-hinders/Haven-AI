@@ -53,7 +53,8 @@ export default function MerchantPage() {
 
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
-      <PageHeader title={merchant.name} />
+      {/* The merchant header IS the page header — one h1 (a second `PageHeader`
+          made the name two headings, which the visual spec's anchor refused). */}
       <MerchantHeader merchant={merchant} />
 
       {comingSoon ? (

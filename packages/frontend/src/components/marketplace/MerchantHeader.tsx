@@ -35,7 +35,7 @@ export function MerchantHeader({ merchant }: { merchant: Merchant }) {
         <MerchantMonogram merchant={merchant} />
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-lg font-semibold text-[var(--v2-ink)]">{merchant.name}</h1>
+            <h1 className="v2-text-h1 text-[var(--v2-ink)]">{merchant.name}</h1>
             {merchant.verified_payable && (
               <span title="Domain controlled and verified payable">
                 <StatusBadge tone="success" className="uppercase tracking-wide">

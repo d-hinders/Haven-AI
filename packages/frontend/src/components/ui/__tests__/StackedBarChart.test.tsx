@@ -511,6 +511,30 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
     fireEvent.keyDown(svg, { key: 'Escape' })
     expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // A touch tap synthesises mouseenter → mousedown with no mouseleave
+    // between taps: the second tap must still take the callout down, so
+    // the release drops the hover too.
+    fireEvent.mouseEnter(groups[1]!)
+    fireEvent.mouseDown(groups[1]!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
+    fireEvent.mouseDown(groups[1]!)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+  })
+
+  it('lets a pin and a caret go when the days change, so a shorter range does not strand the reveal on a day that is gone', () => {
+    const fourDays: StackedBarDay[] = [
+      ...THREE_DAYS,
+      { label: 'Thu 11', series: [{ id: 'alpha', name: 'Research agent', amount: 20, seriesIndex: 0 }] },
+    ]
+    const { rerender } = renderChart({}, fourDays)
+    fireEvent.mouseDown(dayGroups()[3]!)
+    fireEvent.mouseLeave(document.querySelector('svg')!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Thu 11/)
+    rerender(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel={SUMMARY} formatValue={fmt} />)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // Hover works again at once — the stale pin is not outranking it.
+    fireEvent.mouseEnter(dayGroups()[0]!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Mon 8/)
   })
 
   it('sits below the plot when the screen is narrow, rather than over it', () => {

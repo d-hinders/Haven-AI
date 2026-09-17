@@ -84,7 +84,7 @@
  * media list to honour it.
  */
 
-import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { chartScale, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components/charts/chart-scale'
 
@@ -348,6 +348,14 @@ export function StackedBarChart({
     return [...set]
   }, [entries])
 
+  // A pin or caret outlives the data it pointed at otherwise: a shorter
+  // range would leave `active` on an index with no entry — no callout, and
+  // no hover either, until a tap or Escape. Reset both when the days change.
+  useEffect(() => {
+    setPinned(null)
+    setCaret(null)
+  }, [entries.length])
+
   const active = caret ?? pinned ?? hovered
   const entry = active === null ? null : entries[active] ?? null
   const legend = useMemo(() => legendRows(entries), [entries])
@@ -506,8 +514,18 @@ export function StackedBarChart({
                 onMouseEnter={() => setHovered(dayIdx)}
                 // A tap pins the day; a second tap on the pinned day lets
                 // it go (the callout takes no pointer, so nothing else can
-                // — #3066).
-                onMouseDown={() => setPinned((prev) => (prev === dayIdx ? null : dayIdx))}
+                // — #3066). The release also drops the hover: a touch tap
+                // synthesises mouseenter before mousedown and never a
+                // mouseleave, so without this the panel would stay up
+                // through the second tap.
+                onMouseDown={() => {
+                  if (pinned === dayIdx) {
+                    setPinned(null)
+                    setHovered(null)
+                  } else {
+                    setPinned(dayIdx)
+                  }
+                }}
               >
                 {e.segments.map((s) => {
                   const height = scale.max === 0 ? 0 : (s.amount / scale.max) * plotH

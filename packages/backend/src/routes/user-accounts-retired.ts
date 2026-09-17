@@ -70,9 +70,11 @@ export function retiredSafePath(
  * Named `retired…` deliberately: `qa-seed-routes.test.ts`'s retirement
  * detector matches `.<method>('<path>', retired*(` and is how the QA seed is
  * stopped from calling a permanently-gone path. A handler called anything
- * else leaves these seven addresses uncounted in BOTH directions.
+ * else leaves the address uncounted in BOTH directions — which is why
+ * `PUT /user/safe` uses this factory too rather than an inline arrow, even
+ * though it lives in `routes/user.ts`.
  */
-function retiredSafePathHandler(replacement: string, note?: string) {
+export function retiredSafePathHandler(replacement: string, note?: string) {
   return async (_request: FastifyRequest, reply: FastifyReply) => {
     const retired = retiredSafePath(replacement, note)
     return reply.code(retired.statusCode).send(retired.body)

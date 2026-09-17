@@ -14,6 +14,13 @@ covers:
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/connect/src/installed-clients.test.ts
+  - packages/backend/src/middleware/retired-safe-names.ts
+  - packages/backend/src/routes/transactions.ts
+  - packages/backend/src/routes/agents.ts
+  - packages/backend/src/routes/agent-connection-setups.ts
+  - packages/backend/src/domain/agent-payment-taxonomy.ts
+  - packages/backend/src/modules/transactions/csv-export.ts
+  - packages/sdk/src/types.ts
 last-verified: "2026-09-16"
 ---
 
@@ -157,10 +164,18 @@ last-verified: "2026-09-16"
 >   spelling read; `HAVEN_WALLET_ADDRESS` and `HAVEN_SAFE_ADDRESS` resolve to
 >   nothing. This is the one upgrade step an operator has to take: a machine
 >   configured through either old variable stops finding its account address.
-> - **The CLI sends one name.** `?accountId=` only (`?safeId=` is REFUSED by
->   the server with a 400 naming the replacement, not ignored), `account_id`
->   only in the connection-setup body, and `--json` / the CSV header carry
->   `account_id` / `account_address` with the old columns dropped.
+> - **The CLI sends one name — from this release.** `?accountId=` only,
+>   `account_id` only in the connection-setup body, and `--json` / the CSV
+>   header carry `account_id` / `account_address` with the old columns
+>   dropped. **An INSTALLED 0.2.x CLI does not**, and that distinction is the
+>   point of this document: #2908 told it to dual-send both names, and it
+>   does. The server therefore refuses a retired name on RELIANCE rather than
+>   presence — `safeId` alone is a 400, `safeId` beside a matching `accountId`
+>   is accepted, the two disagreeing is a 400. So a 0.2.x CLI keeps working
+>   against a contracted backend, and **there is no release-ordering
+>   constraint**: neither side has to ship first. Had the refusal keyed on
+>   presence, `activity list`, `activity export` and `agents connect` would
+>   have 400'd for every user until the CLI reached `latest`.
 > - **The enum flipped.** `fund_account_or_raise_allowance` is the only value
 >   the server emits and the only one the SDK taxonomy declares; the backend
 >   mirror and the SDK are still pinned key-for-key

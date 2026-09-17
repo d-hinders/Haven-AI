@@ -513,8 +513,9 @@ describe('TransactionBase settlementScheme (#1705)', () => {
     // Being flat (not `allOf`), the aggregated schema validates the full
     // account-scoped row directly through `matchSpec` — no composition trap
     // to route around. #2914 (naming epic #2906 phase 5, the contraction)
-    // deleted the `safeId`/`safeAddress`/`safeName` dual-emit twins the row
-    // used to carry alongside `accountId`/`accountAddress`/`accountName` —
+    // deleted the `safeId`/`safeAddress` dual-emit twins the row used to
+    // carry alongside `accountId`/`accountAddress`/`accountName`, and the
+    // follow-up release deleted the `safeName` twin that outlived them —
     // registered closed by `response-shape.ts`, so the row now carries the
     // account names ONLY, and the old names are rejected as additional
     // properties, asserted separately below.
@@ -532,14 +533,13 @@ describe('TransactionBase settlementScheme (#1705)', () => {
     ).toEqual([])
   })
 
-  it('refuses the retired safeId/safeAddress twins, but NOT safeName (#2914)', () => {
-    // `safeName` is the one retired row field that survives this release, and
-    // it is not an oversight: `@haven_ai/cli` on `latest` renders its ACCOUNT
-    // column from `t.safeName` and would print every row blank. A published
-    // client cannot dual-READ the way it can dual-send, so the twin stays for
-    // one more release — see `middleware/retired-safe-names.ts` for the
-    // removal condition. `safeId` and `safeAddress` have no such reader and
-    // are refused.
+  it('refuses every retired row twin, safeName included (#2914 follow-up)', () => {
+    // `safeName` was the one retired row field that outlived #2914, because
+    // `@haven_ai/cli` on `latest` rendered its ACCOUNT column from
+    // `t.safeName` and would have printed every row blank — a published
+    // client cannot dual-READ the way it can dual-send. `latest` is
+    // 0.3.0-alpha.0 now and reads `accountName`, so the twin is gone and
+    // `safeName` is refused alongside `safeId` and `safeAddress`.
     const problems = matchSpec(
       { $ref: '#/components/schemas/Transaction' },
       {
@@ -550,6 +550,7 @@ describe('TransactionBase settlementScheme (#1705)', () => {
         accountName: 'Main',
         safeId: '11111111-1111-4111-8111-111111111111',
         safeAddress: '0x3333333333333333333333333333333333333333',
+        safeName: 'Main',
       },
     )
     expect(problems).not.toEqual([])
@@ -557,23 +558,9 @@ describe('TransactionBase settlementScheme (#1705)', () => {
       expect.arrayContaining([
         expect.stringContaining("'safeId'"),
         expect.stringContaining("'safeAddress'"),
+        expect.stringContaining("'safeName'"),
       ]),
     )
-  })
-
-  it('accepts the surviving safeName twin alongside accountName (#2914)', () => {
-    const problems = matchSpec(
-      { $ref: '#/components/schemas/Transaction' },
-      {
-        ...transactionRow({ settlementScheme: 'erc7710' }),
-        chainId: 8453,
-        accountId: '11111111-1111-4111-8111-111111111111',
-        accountAddress: '0x3333333333333333333333333333333333333333',
-        accountName: 'Main',
-        safeName: 'Main',
-      },
-    )
-    expect(problems).toEqual([])
   })
 })
 

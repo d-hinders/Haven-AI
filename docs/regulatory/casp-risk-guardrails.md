@@ -695,7 +695,17 @@ on-chain state addressed entirely from stored columns. That property is
 preserved by the surviving route, which takes no body at all. (#985 moved this
 route's SQL into `infra/repositories/agent-connection-setups.ts`; the
 delegation verification still runs in the route. The approval write remains one
-locked, guarded function, so the checks and the write cannot be run apart.) Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
+locked, guarded function, so the checks and the write cannot be run apart.)
+Since #1074 a delegation-rail setup also refuses more than one allowance at CREATE — a multi-allowance setup could never satisfy this verification (only the first budget is ever granted), and a clean 400 with the remedy beats a permanently unapprovable setup; fail-closed either way.
+
+**One name in that historical list now collides with a live one, so read it
+carefully:** the `safe_tx_hash` above is a field of the DELETED
+`WalletApprovalBody` REQUEST, quoted as history. The #2914 follow-up renamed a
+differently-scoped key of the same spelling — `approval.safe_tx_hash` on the
+setup-status RESPONSE — to `account_tx_hash`, following migration 084's column.
+Neither the deleted body nor the authority decision this paragraph describes is
+affected: the surviving route takes no body at all, and a response key carries
+no authority.
 
 **Connection setup never hands out another environment's hosted MCP endpoint (#1129).** The production hosted MCP URL is served as a built-in default only when the backend's own resolved public URL is the production host; any other deployment must set `HAVEN_HOSTED_MCP_URL` explicitly, or `/resolve` and `/register` refuse with an explicit configuration error naming the variable — raised before any state is written, so a misconfigured environment can neither consume the client's one-shot setup token nor leave a registration half-created, and an agent's credentials are never pointed at a different environment's backend. Fail-closed, same as the authority checks above.
 

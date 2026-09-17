@@ -118,7 +118,7 @@ function connectedSetupStatus(overrides: Record<string, unknown> = {}) {
     agent_budget: [],
     delegate_address: '0x3333333333333333333333333333333333333333',
     install_status: CONFIGURED_INSTALL,
-    approval: { status: 'pending_approval', safe_tx_hash: null, tx_hash: null },
+    approval: { status: 'pending_approval', account_tx_hash: null, tx_hash: null },
     ...overrides,
   }
 }

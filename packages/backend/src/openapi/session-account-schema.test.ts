@@ -52,10 +52,12 @@ describe('#2907 — sessionAccount is referenced, not dead', () => {
     // behind: no `sessionSafe` name, no "same value as `sessionAccount`"
     // deprecation sentence anywhere in the served spec.
     //
-    // (`TransactionFilterOptionsResponse.safes` — a distinct, unrelated field
-    // this slice did not touch, reported to the captain separately — is why
-    // this test targets the session-user shape specifically rather than a
-    // bare `"safes"` string search over the whole spec.)
+    // (`TransactionFilterOptionsResponse.safes` was why this test targeted
+    // the session-user shape rather than a bare `"safes"` string search over
+    // the whole spec. That field is `accounts` now — the #2914 follow-up
+    // took it with the two response twins — and the property-level sweep
+    // over the whole spec lives in `retired-response-names.test.ts`. A string
+    // search still would not do: the `/user/safes*` tombstone PATHS stay.)
     const raw = JSON.stringify(openapiSpec)
     expect(raw).not.toContain('sessionSafe')
     expect(raw).not.toContain('same value as `sessionAccount`')

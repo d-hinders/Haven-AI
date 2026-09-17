@@ -311,10 +311,9 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
 
       expect(res.statusCode).toBe(200)
       expect(res.json().accounts).toHaveLength(1)
-      // `safes` is the ONE retired name still emitted here, and only as the
-      // same array: the published CLI destructures it at five call sites and
-      // cannot dual-read. Removal is the release after this one.
-      expect(res.json().safes).toEqual(res.json().accounts)
+      // The `safes` twin is gone (#2914 follow-up): `latest` now resolves to
+      // a CLI that reads `accounts`.
+      expect(res.json().safes).toBeUndefined()
       expect(mockPoolQuery).toHaveBeenCalled()
     })
 

@@ -11,9 +11,12 @@ import { expectMatchesSpec } from '../../openapi/response-shape.js'
  * requires auth, and it returns only the *calling* user's accounts (the
  * query is scoped to the JWT subject, never a client-supplied id).
  *
- * #2914 (naming epic #2906 phase 5, the contraction) removed the `safes`
- * envelope key and the `safe_address` twin `#2907` dual-emitted for one
- * release: one name now, `{ accounts }`, `account_address` only.
+ * #2914 (naming epic #2906 phase 5, the contraction) removed the
+ * `safe_address` twin `#2907` dual-emitted for one release. The `safes`
+ * ENVELOPE key outlived it by one more, because the published CLI
+ * destructured it and a published client cannot dual-read; #2914's own
+ * follow-up removed that. One name now, `{ accounts }`, `account_address`
+ * only.
  */
 
 const { mockPoolQuery } = vi.hoisted(() => ({ mockPoolQuery: vi.fn() }))
@@ -81,13 +84,12 @@ describe('GET /user/accounts — list invariants', () => {
     })
 
     expect(res.statusCode).toBe(200)
-    // `safes` is the SAME array, kept for one more release because
-    // `@haven_ai/cli` on `latest` destructures it at five call sites and,
-    // unlike a request parameter, a published client cannot dual-read. The
-    // per-row address twin has no such reader and IS gone.
-    expect(res.json()).toEqual({ accounts: rows, safes: rows })
+    // ONE envelope key. `safes` outlived #2914 by exactly one release,
+    // because `@haven_ai/cli` on `latest` destructured it at five call sites
+    // and a published client cannot dual-read; `latest` is 0.3.0-alpha.0 now.
+    // `toEqual` is exact, so this fails if the twin ever comes back.
+    expect(res.json()).toEqual({ accounts: rows })
     expect(res.json().accounts[0].safe_address).toBeUndefined()
-    expect(res.json().safes[0].safe_address).toBeUndefined()
     // Scoped by the JWT subject — never a client-supplied id.
     const [, params] = mockPoolQuery.mock.calls[0]
     expect(params).toEqual([USER])

@@ -40,7 +40,7 @@ const STATUS = {
   delegate_address: '0x333',
   runtime: null,
   install_status: {},
-  approval: { status: 'pending_approval', safe_tx_hash: null, tx_hash: null },
+  approval: { status: 'pending_approval', account_tx_hash: null, tx_hash: null },
 }
 
 function resumedFlow(overrides: Record<string, unknown> = {}): AgentConnectionSetupFlow {

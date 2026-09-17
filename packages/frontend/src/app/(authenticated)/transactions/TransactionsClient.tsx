@@ -114,7 +114,7 @@ export default function TransactionsClient() {
     }
   })
   const {
-    safes,
+    accounts,
     agents,
     tokens,
     loading: filtersLoading,
@@ -160,7 +160,7 @@ export default function TransactionsClient() {
     })
   }, [transactions, filters.direction, scope])
 
-  const accountNamesById = new Map(safes.map((safe) => [safe.id, safe.name]))
+  const accountNamesById = new Map(accounts.map((account) => [account.id, account.name]))
   const agentNamesById = new Map(agents.map((agent) => [agent.id, agent.name]))
   const tokenSymbolsByKey = new Map(tokens.map((token) => [token.key, token.symbol]))
   const accountNamesByAddress = new Map(
@@ -346,7 +346,7 @@ export default function TransactionsClient() {
 
       <FilterBar
         filters={filters}
-        safes={safes}
+        accounts={accounts}
         agents={agents}
         tokens={tokens}
         loading={filtersLoading}

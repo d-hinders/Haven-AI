@@ -21,7 +21,8 @@ export function FilterPill({
     <button
       onClick={onClick}
       aria-pressed={active}
-      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+      // `min-h-11` below `sm`: a 44px tap target on a phone; the desktop pill keeps its 24px height.
+      className={`min-h-11 rounded-full px-3 py-1 text-xs font-medium transition-colors sm:min-h-0 ${
         active
           ? 'bg-[var(--v2-brand)] text-[var(--v2-ink-on-brand)]'
           : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)] hover:bg-[var(--v2-border)]'

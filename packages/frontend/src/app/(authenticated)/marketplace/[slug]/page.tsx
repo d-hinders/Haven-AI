@@ -38,10 +38,16 @@ export default function MerchantPage() {
   if (error) {
     return (
       <div className="max-w-5xl">
-        <div className="rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
-          <p className="text-sm font-medium text-[var(--v2-danger)]">Could not load this merchant</p>
-          <p className="mt-1 text-sm text-[var(--v2-danger)]">{error}</p>
-        </div>
+        <EmptyState
+          tone="danger"
+          title="Could not load this merchant"
+          body={error}
+          action={
+            <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+              Try again
+            </Button>
+          }
+        />
       </div>
     )
   }

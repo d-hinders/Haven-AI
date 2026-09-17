@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   agentInstruction,
+  categoryLabel,
   freshness,
   isTestnetChain,
   listsTestnet,
@@ -121,6 +122,15 @@ describe('networkToChainId', () => {
     expect(networkToChainId('gnosis')).toBe(100)
     expect(networkToChainId(null)).toBeUndefined()
     expect(networkToChainId('solana')).toBeUndefined()
+  })
+})
+
+describe('categoryLabel', () => {
+  it('keeps acronyms as acronyms and title-cases the rest', () => {
+    expect(categoryLabel('api')).toBe('API')
+    expect(categoryLabel('ai')).toBe('AI')
+    expect(categoryLabel('infrastructure')).toBe('Infrastructure')
+    expect(categoryLabel('media')).toBe('Media')
   })
 })
 

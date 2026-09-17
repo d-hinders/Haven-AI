@@ -88,12 +88,15 @@ const SCENARIOS: Scenario[] = [
       // The network column shows the chain's NAME, never the raw CAIP-2 id.
       await expect(merchantPage.getByText('eip155:')).toHaveCount(0)
       // None of the three offers advertises erc7710 (asset_transfer_methods:
-      // null in the fixture), so every one carries the unpinned-budget line.
+      // null in the fixture), so the merchant-level unpinned-budget line is
+      // present — ONCE, not once per offer — and no offer is tagged.
       await expect(
         merchantPage.getByText(
           'This merchant settles by EIP-3009 — the paying agent needs an unpinned budget.',
+          { exact: true },
         ),
-      ).toHaveCount(3)
+      ).toHaveCount(1)
+      await expect(merchantPage.getByText('unpinned budget', { exact: true })).toHaveCount(0)
       await expect(merchantPage.getByLabel(/Copy agent instruction/)).toHaveCount(3)
     },
   },
@@ -123,6 +126,10 @@ const SCENARIOS: Scenario[] = [
       // The tool name is on screen three times (offer name, Method cell, the
       // agent instruction) — assert the two that carry meaning, exactly.
       await expect(merchantPage.getByRole('cell', { name: 'buy_vpn', exact: true })).toHaveCount(1)
+      // Labelled on the page itself, not only on the grid card (decision 6).
+      await expect(
+        merchantPage.getByText('Haven test merchant — real payments, demo goods'),
+      ).toHaveCount(1)
       await expect(merchantPage.getByText(/via buy_vpn for/)).toHaveCount(1)
       // The fixture's one offer DOES advertise erc7710, so the unpinned-budget
       // line must be absent here — the negative half of the merchant-page case.

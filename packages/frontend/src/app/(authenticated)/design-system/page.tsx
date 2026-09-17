@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterPill } from '@/components/ui/FilterPill'
+import { Monogram } from '@/components/ui/Monogram'
 import { MerchantCard } from '@/components/marketplace/MerchantCard'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
@@ -2619,6 +2620,17 @@ export default function DesignSystemPage() {
               <span className="capitalize">{c}</span>
             </FilterPill>
           ))}
+        </div>
+      </Section>
+
+      <Section
+        title="Monogram"
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. sm (36px) for lists and cards, md (48px) for a page header."
+      >
+        <div className="flex flex-wrap items-center gap-4">
+          <Monogram name="Ampersend Demo API" />
+          <Monogram name="Berget" />
+          <Monogram name="Haven Demo Store" size="md" />
         </div>
       </Section>
 

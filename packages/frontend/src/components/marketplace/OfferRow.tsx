@@ -1,5 +1,6 @@
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { chainName, freshness, networkToChainId } from '@/lib/marketplace'
+import { Tooltip } from '@/components/ui/Tooltip'
+import { chainName, freshness, networkToChainId, VERIFIED_MEANING } from '@/lib/marketplace'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
 /**
@@ -17,7 +18,7 @@ export function OfferRow({
   budget: boolean | null
 }) {
   const degraded = entry.status === 'degraded'
-  const method = entry.protocol === 'mcp' ? entry.tool_name : entry.rail.toUpperCase()
+  const method = entry.protocol === 'mcp' ? entry.tool_name : entry.rail
   // The resource URL for every protocol: an MCP offer's tool name is already
   // the Method cell, so repeating it here printed one string under two headers.
   const path = entry.resource_url
@@ -61,11 +62,13 @@ export function OfferRow({
       <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-3)]">
         {freshness(entry.verified_at)}
         {entry.verified_payable && (
-          <span title="Domain controlled and verified payable" className="ml-2">
-            <StatusBadge tone="success" className="uppercase tracking-wide">
-              Verified
-            </StatusBadge>
-          </span>
+          <Tooltip label={VERIFIED_MEANING}>
+            <span className="ml-2">
+              <StatusBadge tone="success" className="uppercase tracking-wide">
+                Verified
+              </StatusBadge>
+            </span>
+          </Tooltip>
         )}
       </td>
     </tr>

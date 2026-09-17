@@ -80,7 +80,6 @@ describe('OffersTable', () => {
       />,
     )
     expect(row('proved').getByText('Verified')).toBeDefined()
-    expect(row('proved').getByTitle('Domain controlled and verified payable')).toBeDefined()
     // Provenance alone (an ingestion row) does not earn the badge — the proof does.
     expect(row('unproved').queryByText('Verified')).toBeNull()
   })
@@ -101,7 +100,8 @@ describe('OffersTable', () => {
     expect(row('mcp').getByText('create_text')).toBeDefined()
     expect(row('mcp').getByText('https://mcp.text.example/mcp')).toBeDefined()
     expect(row('http').getByText('Base')).toBeDefined()
-    expect(row('http').getByText('X402')).toBeDefined()
+    // The protocol is `x402` everywhere in Haven — never upper-cased.
+    expect(row('http').getByText('x402')).toBeDefined()
     expect(row('http').getByText('https://api.example/fact')).toBeDefined()
     expect(row('nowhere').getByText('—')).toBeDefined()
     expect(screen.queryByText(/eip155:/)).toBeNull()

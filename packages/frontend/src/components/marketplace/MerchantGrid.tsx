@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
-import { chainName, listsTestnet, networkToChainId } from '@/lib/marketplace'
+import { categoryLabel, chainName, listsTestnet, networkToChainId } from '@/lib/marketplace'
 import { MerchantCard } from './MerchantCard'
 import type { Merchant } from '@/hooks/useCatalog'
 
@@ -17,14 +17,20 @@ export function MerchantGrid({
   loading,
   error,
   onSubmit,
+  onRetry,
+  initialCategory = null,
 }: {
   merchants: Merchant[]
   loading: boolean
   error: string | null
   /** Opens the "list your payable service" modal (scope item 4). */
   onSubmit: () => void
+  /** Re-fetches after a failed load; the error state offers it as the way forward. */
+  onRetry?: () => void
+  /** A deep-linked category (`/catalog?category=ai` redirects here with its query intact). */
+  initialCategory?: string | null
 }) {
-  const [category, setCategory] = useState<string | null>(null)
+  const [category, setCategory] = useState<string | null>(initialCategory)
   const [search, setSearch] = useState('')
   const [verifiedOnly, setVerifiedOnly] = useState(false)
   const [chainFilter, setChainFilter] = useState<number | 'all'>('all')
@@ -76,26 +82,61 @@ export function MerchantGrid({
     })
   }, [merchants, category, verifiedOnly, showTestMerchants, chainFilter, search])
 
+  const filtered = category !== null || search.trim() !== '' || verifiedOnly || chainFilter !== 'all'
+  const clearFilters = () => {
+    setCategory(null)
+    setSearch('')
+    setVerifiedOnly(false)
+    setChainFilter('all')
+  }
+
   if (loading) {
+    // The filter row's height is reserved so the cards do not jump when it appears.
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-40 rounded-xl" />
-        ))}
+      <div>
+        <Skeleton className="mb-4 h-9 max-w-xs rounded-lg" />
+        <Skeleton className="mb-4 h-5 w-64 rounded-lg" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-40 rounded-xl" />
+          ))}
+        </div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
-        <p className="text-sm font-medium text-[var(--v2-danger)]">Could not load the marketplace</p>
-        <p className="mt-1 text-sm text-[var(--v2-danger)]">{error}</p>
-      </div>
+      <EmptyState
+        tone="danger"
+        title="Could not load the marketplace"
+        body={error}
+        action={
+          onRetry ? (
+            <Button variant="ghost" size="sm" onClick={onRetry}>
+              Try again
+            </Button>
+          ) : undefined
+        }
+      />
     )
   }
 
   const emptyMarketplace = merchants.length === 0
+  if (emptyMarketplace) {
+    // No filter row over nothing: the one next step is the submit modal.
+    return (
+      <EmptyState
+        title="No merchants listed yet"
+        body="The marketplace is curated — new payable merchants appear here as they are verified."
+        action={
+          <Button variant="ghost" size="sm" onClick={onSubmit}>
+            List your payable service
+          </Button>
+        }
+      />
+    )
+  }
 
   return (
     <div>
@@ -113,13 +154,16 @@ export function MerchantGrid({
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-4 text-xs font-medium text-[var(--v2-ink-2)]">
+        {/* `min-h-11` below `sm`: the label IS the tap target, so a 44px row on a phone. */}
         <Checkbox
           label="Verified only"
+          className="min-h-11 sm:min-h-0"
           checked={verifiedOnly}
           onChange={(e) => setVerifiedOnly(e.target.checked)}
         />
         <Checkbox
           label="Show test merchants"
+          className="min-h-11 sm:min-h-0"
           checked={showTestMerchants}
           onChange={(e) => setShowTestMerchants(e.target.checked)}
         />
@@ -155,21 +199,25 @@ export function MerchantGrid({
           </FilterPill>
           {categories.map((c) => (
             <FilterPill key={c} active={category === c} onClick={() => setCategory(c)}>
-              <span className="capitalize">{c}</span>
+              {categoryLabel(c)}
             </FilterPill>
           ))}
         </div>
       )}
 
-      {emptyMarketplace ? (
+      {visible.length === 0 ? (
         <EmptyState
-          title="No merchants listed yet"
-          body="The marketplace is curated — new payable merchants appear here as they are verified."
+          size="compact"
+          tone="neutral"
+          title="No merchants match this filter"
+          action={
+            filtered ? (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            ) : undefined
+          }
         />
-      ) : visible.length === 0 ? (
-        <div className="rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-6 text-center">
-          <p className="text-sm font-medium text-[var(--v2-ink-2)]">No merchants match this filter</p>
-        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {visible.map((merchant) => (

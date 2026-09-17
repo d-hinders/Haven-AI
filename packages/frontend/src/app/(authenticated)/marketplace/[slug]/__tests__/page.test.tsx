@@ -144,11 +144,12 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(
-      screen.getAllByText(
-        'This merchant settles by EIP-3009 — the paying agent needs an unpinned budget.',
-      ),
-    ).toHaveLength(1)
+    // The merchant-level note renders ONCE (not per offer), and in the mixed
+    // case the offers that need the unpinned budget are the tagged ones.
+    expect(screen.getAllByText(/This merchant settles by EIP-3009 — the paying agent needs an unpinned budget\./)).toHaveLength(1)
+    expect(screen.getAllByText('unpinned budget')).toHaveLength(1)
+    expect(screen.getByTestId('pay-block-offer-1').textContent).toContain('unpinned budget')
+    expect(screen.getByTestId('pay-block-offer-2').textContent).not.toContain('unpinned budget')
   })
 
   it('renders the coming-soon branch with no instruction block and no offers table', () => {

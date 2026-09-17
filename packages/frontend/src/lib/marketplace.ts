@@ -33,6 +33,22 @@ export function networkToChainId(network: string | null | undefined): number | u
   return ALL_CHAINS.find((c) => c.shortName === network)?.chainId
 }
 
+/**
+ * The Verified badge's meaning, spelled out where the badge is (epic #3077's
+ * trust claim): domain control plus a confirmed payable endpoint — never
+ * merchant honesty, quality or settlement reliability.
+ */
+export const VERIFIED_MEANING =
+  'Verified means domain controlled and verified payable — not a claim about quality or settlement.'
+
+/** Display label for a merchant category: acronyms stay acronyms (api → API, not "Api"). */
+export function categoryLabel(category: string): string {
+  const acronyms: Record<string, string> = { api: 'API', ai: 'AI', mcp: 'MCP', vpn: 'VPN' }
+  const lower = category.toLowerCase()
+  if (acronyms[lower]) return acronyms[lower]
+  return category.charAt(0).toUpperCase() + category.slice(1)
+}
+
 export function chainName(chainId: number): string {
   try {
     return getChainConfig(chainId).name

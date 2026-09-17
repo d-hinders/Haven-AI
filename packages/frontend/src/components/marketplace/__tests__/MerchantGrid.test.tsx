@@ -34,6 +34,14 @@ describe('MerchantGrid', () => {
     expect(screen.getByText('Could not load the marketplace')).toBeDefined()
   })
 
+  it('renders the card on the entity-card idiom with the product focus ring, footer pinned', () => {
+    render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
+    const card = screen.getByTestId('merchant-card-merchant-one')
+    expect(card.className).toContain('focus-visible:ring-2')
+    expect(card.className).toContain('shadow-card')
+    expect(card.querySelector('.mt-auto')).not.toBeNull()
+  })
+
   it('renders a merchant card with category, description, offer count and networks', () => {
     render(
       <MerchantGrid
@@ -75,8 +83,9 @@ describe('MerchantGrid', () => {
   it('derives the "Show test merchants" default from data that arrives AFTER mount — the grid mounts on an empty list', () => {
     // The baseline harness saw the demo store hidden with a testnet listed:
     // a `useState(default)` captured `false` on the empty first render.
-    const { rerender } = render(<MerchantGrid merchants={[]} loading={false} error={null} onSubmit={() => {}} />)
-    expect(screen.getByLabelText('Show test merchants')).not.toBeChecked()
+    // The real mount order: loading over an empty list, then the data.
+    const { rerender } = render(<MerchantGrid merchants={[]} loading={true} error={null} onSubmit={() => {}} />)
+    expect(screen.queryByLabelText('Show test merchants')).toBeNull()
     rerender(<MerchantGrid merchants={[merchant({ networks: ['eip155:84532'] }), merchant({ id: 'm-test', slug: 'haven-demo-store', name: 'Haven Demo Store', is_test_merchant: true, networks: ['eip155:84532'] })]} loading={false} error={null} onSubmit={() => {}} />)
     expect(screen.getByLabelText('Show test merchants')).toBeChecked()
     // A user's click still wins over the derived default afterwards.
@@ -146,7 +155,7 @@ describe('MerchantGrid', () => {
     render(<MerchantGrid merchants={merchants} loading={false} error={null} onSubmit={vi.fn()} />)
 
     const categoryGroup = screen.getByRole('group', { name: 'Filter by category' })
-    fireEvent.click(within(categoryGroup).getByRole('button', { name: 'data' }))
+    fireEvent.click(within(categoryGroup).getByRole('button', { name: 'Data' }))
     expect(screen.queryByText('Media Co')).toBeNull()
     expect(screen.getByText('Data Co')).toBeDefined()
 
@@ -159,6 +168,47 @@ describe('MerchantGrid', () => {
     fireEvent.change(screen.getByLabelText('Search merchants'), { target: { value: 'media' } })
     expect(screen.getByText('Media Co')).toBeDefined()
     expect(screen.queryByText('Data Co')).toBeNull()
+  })
+
+  it('offers a retry on a failed load, and hides the filter row over an empty marketplace', () => {
+    const onRetry = vi.fn()
+    const { unmount } = render(
+      <MerchantGrid merchants={[]} loading={false} error="boom" onSubmit={vi.fn()} onRetry={onRetry} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+    unmount()
+
+    render(<MerchantGrid merchants={[]} loading={false} error={null} onSubmit={vi.fn()} />)
+    expect(screen.queryByLabelText('Search merchants')).toBeNull()
+    expect(screen.queryByLabelText('Verified only')).toBeNull()
+    expect(screen.getByRole('button', { name: 'List your payable service' })).toBeDefined()
+  })
+
+  it('offers "Clear filters" when a filter hides every merchant, and it restores the grid', () => {
+    render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Search merchants'), { target: { value: 'nothing here' } })
+    expect(screen.getByText('No merchants match this filter')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(screen.getByText('Merchant One')).toBeDefined()
+    expect((screen.getByLabelText('Search merchants') as HTMLInputElement).value).toBe('')
+  })
+
+  it('honours a deep-linked category and labels acronym categories as acronyms', () => {
+    render(
+      <MerchantGrid
+        merchants={[merchant({ id: 'a', slug: 'a', name: 'A Co', category: 'api' }), merchant({ id: 'b', slug: 'b', name: 'B Co', category: 'ai' })]}
+        loading={false}
+        error={null}
+        onSubmit={vi.fn()}
+        initialCategory="ai"
+      />,
+    )
+    expect(screen.getByText('B Co')).toBeDefined()
+    expect(screen.queryByText('A Co')).toBeNull()
+    const group = screen.getByRole('group', { name: 'Filter by category' })
+    expect(within(group).getByRole('button', { name: 'AI' }).getAttribute('aria-pressed')).toBe('true')
+    expect(within(group).getByRole('button', { name: 'API' })).toBeDefined()
   })
 
   it('opens the submit modal callback', () => {

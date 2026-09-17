@@ -1,61 +1,48 @@
 import Link from 'next/link'
+import { Monogram } from '@/components/ui/Monogram'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { chainName, merchantInitials, networkToChainId } from '@/lib/marketplace'
+import { entityCardClassName } from '@/components/ui/entityCardStyles'
+import { categoryLabel, chainName, networkToChainId } from '@/lib/marketplace'
 import type { Merchant } from '@/hooks/useCatalog'
 
-/** Monogram or logo, same pattern the `/contacts` `Initials` avatar uses. Only Haven-run and Ampersend rows ever carry a `logo_url` — a prospect never does. */
-function MerchantMonogram({ merchant }: { merchant: Merchant }) {
-  if (merchant.logo_url) {
-    // eslint-disable-next-line @next/next/no-img-element -- external merchant
-    // logos are not known ahead of time, so next/image's static domain
-    // allowlist would have to widen per merchant; a plain <img> avoids that.
-    return (
-      <img
-        src={merchant.logo_url}
-        alt=""
-        className="h-9 w-9 flex-shrink-0 rounded-full border border-[var(--v2-border)] object-cover"
-      />
-    )
-  }
-  return (
-    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-brand/20 bg-[var(--v2-brand-soft)]">
-      <span className="text-xs font-semibold text-[var(--v2-brand)]">
-        {merchantInitials(merchant.name)}
-      </span>
-    </div>
-  )
-}
-
-function footerLabel(merchant: Merchant): string {
-  if (merchant.listing_status === 'coming_soon') return 'Coming soon'
-  if (merchant.is_test_merchant) return 'Haven test merchant — real payments, demo goods'
+function offerCount(merchant: Merchant): string {
   return merchant.offer_count === 1 ? '1 offer' : `${merchant.offer_count} offers`
 }
 
+/**
+ * One merchant in the `/marketplace` grid (#3079, epic #3077). The whole card
+ * is the link to the merchant page, on the shared entity-card idiom
+ * (`entityCardClassName`: hover lift, the product focus ring) like `AgentCard`
+ * and the accounts overview. The footer is pinned to the bottom so a row of
+ * cards aligns whatever each one lists above it.
+ */
 export function MerchantCard({ merchant }: { merchant: Merchant }) {
   const networks = merchant.networks
     .map((n) => networkToChainId(n))
     .filter((id): id is number => id !== undefined)
+  const comingSoon = merchant.listing_status === 'coming_soon'
 
   return (
     <Link
       href={`/marketplace/${merchant.slug}`}
       data-testid={`merchant-card-${merchant.slug}`}
-      className="flex flex-col gap-3 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4 transition-colors hover:border-brand/30"
+      className={`${entityCardClassName()} flex flex-col gap-3`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
-          <MerchantMonogram merchant={merchant} />
+          <Monogram name={merchant.name} logoUrl={merchant.logo_url} />
           <div className="min-w-0">
             <h3 className="truncate text-sm font-semibold text-[var(--v2-ink)]">
               {merchant.name}
             </h3>
-            <span className="rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-xs font-medium capitalize text-[var(--v2-ink-2)]">
-              {merchant.category}
+            <span className="rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink-2)]">
+              {categoryLabel(merchant.category)}
             </span>
           </div>
         </div>
         {merchant.verified_payable && (
+          // A link cannot host a tooltip trigger (nested interactive); the
+          // badge's meaning is spelled out on the merchant page the card opens.
           <span title="Domain controlled and verified payable">
             <StatusBadge tone="success" className="uppercase tracking-wide">
               Verified
@@ -79,7 +66,12 @@ export function MerchantCard({ merchant }: { merchant: Merchant }) {
         </div>
       )}
 
-      <p className="text-xs font-medium text-[var(--v2-ink-3)]">{footerLabel(merchant)}</p>
+      <div className="mt-auto space-y-1 text-xs font-medium text-[var(--v2-ink-3)]">
+        <p>{comingSoon ? 'Coming soon' : offerCount(merchant)}</p>
+        {merchant.is_test_merchant && !comingSoon && (
+          <p className="text-[var(--v2-warning)]">Haven test merchant — real payments, demo goods</p>
+        )}
+      </div>
     </Link>
   )
 }

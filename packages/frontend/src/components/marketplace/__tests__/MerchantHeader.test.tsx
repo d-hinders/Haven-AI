@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { MerchantHeader } from '../MerchantHeader'
 import type { Merchant } from '@/hooks/useCatalog'
@@ -27,17 +28,29 @@ describe('MerchantHeader', () => {
     render(<MerchantHeader merchant={merchant()} />)
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole('heading', { level: 1, name: 'Ampersend Demo API' })).toBeDefined()
-    expect(screen.getByText('api')).toBeDefined()
+    expect(screen.getByText('API')).toBeDefined()
     expect(screen.getByText('Fact, joke and quote endpoints.')).toBeDefined()
     expect(screen.getByText('Base')).toBeDefined()
     expect(screen.getByText('Base Sepolia')).toBeDefined()
     expect(screen.queryByText(/eip155:/)).toBeNull()
   })
 
-  it('shows the Verified badge with the honest claim only when verified payable', () => {
+  it('labels a test merchant on the page itself, where the payment is one paste away', () => {
+    const { unmount } = render(<MerchantHeader merchant={merchant({ is_test_merchant: true })} />)
+    expect(screen.getByText('Haven test merchant — real payments, demo goods')).toBeDefined()
+    unmount()
+    render(<MerchantHeader merchant={merchant()} />)
+    expect(screen.queryByText(/Haven test merchant/)).toBeNull()
+  })
+
+  it('shows the Verified badge with the honest claim only when verified payable', async () => {
     const { unmount } = render(<MerchantHeader merchant={merchant()} />)
     expect(screen.getByText('Verified')).toBeDefined()
-    expect(screen.getByTitle('Domain controlled and verified payable')).toBeDefined()
+    // The meaning is a reachable tooltip (keyboard focus opens it), not a
+    // native title, which is mouse-only.
+    expect(screen.queryByTitle('Domain controlled and verified payable')).toBeNull()
+    await userEvent.setup({ delay: null }).tab()
+    expect(screen.getByRole('tooltip').textContent).toContain('domain controlled and verified payable')
     unmount()
     render(<MerchantHeader merchant={merchant({ verified_payable: false })} />)
     expect(screen.queryByText('Verified')).toBeNull()

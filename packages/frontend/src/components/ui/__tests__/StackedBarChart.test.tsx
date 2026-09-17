@@ -498,7 +498,14 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     // name ellipsises inside it, and the figures refuse to shrink or wrap.
     expect(row.className).toMatch(/min-w-0/)
     expect(row.className).not.toMatch(/whitespace-nowrap/)
-    const name = row.querySelector('[data-testid="chart-tooltip-name"]')!
+    // swatch·name·amount live in one non-wrapping span, so the name
+    // truncates against the amount instead of taking a line of its own.
+    const figure = row.querySelector('[data-testid="chart-tooltip-figure"]')!
+    expect(figure.className).toMatch(/inline-flex/)
+    expect(figure.className).toMatch(/min-w-0/)
+    expect(figure.className).not.toMatch(/flex-wrap/)
+    const name = figure.querySelector('[data-testid="chart-tooltip-name"]')!
+    expect(figure.querySelector('[data-testid="chart-tooltip-amount"]')).not.toBeNull()
     expect(name.className).toMatch(/truncate/)
     expect(name.className).toMatch(/min-w-0/)
     const amount = row.querySelector('[data-testid="chart-tooltip-amount"]')!

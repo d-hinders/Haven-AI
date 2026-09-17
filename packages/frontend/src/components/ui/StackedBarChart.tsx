@@ -673,7 +673,7 @@ export function StackedBarChart({
             <p className="text-xs font-semibold text-[var(--v2-ink)]">
               {entry.label}
               {entry.partial && (
-                <span data-testid="chart-tooltip-partial" className="ml-1.5 font-normal text-[var(--v2-ink-3)]">
+                <span data-testid="chart-tooltip-partial" className="ml-1.5 whitespace-nowrap font-normal text-[var(--v2-ink-3)]">
                   · partial day
                 </span>
               )}
@@ -681,7 +681,7 @@ export function StackedBarChart({
                   beside the day — as a trailing chip it read as the last
                   agent's (design review). */}
               {entry.refusals > 0 && (
-                <span data-testid="chart-tooltip-refusals" className="ml-1.5 font-normal text-[var(--v2-ink-2)]">
+                <span data-testid="chart-tooltip-refusals" className="ml-1.5 whitespace-nowrap font-normal text-[var(--v2-ink-2)]">
                   · {entry.refusals} payment{entry.refusals === 1 ? '' : 's'} refused
                 </span>
               )}
@@ -697,7 +697,7 @@ export function StackedBarChart({
               token breakdown wraps onto the chip's next line rather than
               stretching the callout to its width bound (a 560px banner
               over four date labels on the showcase — design review; the
-              bound itself is 22rem, so chips wrap at a readable width). */}
+              bound is 24rem, so chips wrap at a readable width). */}
           <ul data-testid="chart-tooltip-chips" className="mt-1 flex min-w-0 max-w-full flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
               {entry.segments.map((s) => (
                 <li
@@ -705,14 +705,23 @@ export function StackedBarChart({
                   data-testid="chart-tooltip-row"
                   className="inline-flex min-w-0 max-w-full flex-wrap items-baseline gap-x-1.5 gap-y-0.5"
                 >
-                  <span
-                    aria-hidden="true"
-                    className="inline-block h-2 w-2 flex-shrink-0 self-center rounded-full"
-                    style={{ backgroundColor: seriesColor(s.seriesIndex) }}
-                  />
-                  <span data-testid="chart-tooltip-name" className="min-w-0 truncate text-[var(--v2-ink-2)]">{s.name}</span>
-                  <span data-testid="chart-tooltip-amount" className="v2-tabular flex-shrink-0 whitespace-nowrap text-[var(--v2-ink)]">
-                    {formatValue(s.amount)}
+                  {/* swatch·name·amount never wrap against each other: in a
+                      wrapping chip the name's flex-basis is its full width,
+                      so a long name took a line of its own, orphaned the
+                      swatch and pushed the amount to a third line (design
+                      re-check). Inside this non-wrapping span the name
+                      truncates against the amount; only the token breakdown
+                      folds to the chip's next line. */}
+                  <span data-testid="chart-tooltip-figure" className="inline-flex min-w-0 max-w-full items-baseline gap-1.5">
+                    <span
+                      aria-hidden="true"
+                      className="inline-block h-2 w-2 flex-shrink-0 self-center rounded-full"
+                      style={{ backgroundColor: seriesColor(s.seriesIndex) }}
+                    />
+                    <span data-testid="chart-tooltip-name" className="min-w-0 truncate text-[var(--v2-ink-2)]">{s.name}</span>
+                    <span data-testid="chart-tooltip-amount" className="v2-tabular flex-shrink-0 whitespace-nowrap text-[var(--v2-ink)]">
+                      {formatValue(s.amount)}
+                    </span>
                   </span>
                   {s.tokens !== undefined && s.tokens.length > 0 && (
                     <span

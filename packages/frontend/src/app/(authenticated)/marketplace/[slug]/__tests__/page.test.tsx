@@ -119,7 +119,7 @@ describe('MerchantPage', () => {
   it('offers the way back to the marketplace from the merchant page', () => {
     mockUseMerchant.mockReturnValue({ merchant, offers: [offer()], loading: false, error: null, notFound: false, refetch: vi.fn() })
     render(<MerchantPage />)
-    expect(screen.getByRole('link', { name: '← Marketplace' }).getAttribute('href')).toBe('/marketplace')
+    expect(screen.getByRole('link', { name: 'Back to Marketplace' }).getAttribute('href')).toBe('/marketplace')
   })
 
   it('calls notFound() for an unknown slug', () => {

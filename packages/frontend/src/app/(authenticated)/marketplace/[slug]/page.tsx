@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, ArrowLeft } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { notFound as nextNotFound, useParams } from 'next/navigation'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -81,8 +81,12 @@ export default function MerchantPage() {
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
       {/* The way back on a phone, where Marketplace lives in the More drawer. */}
-      <Link href="/marketplace" className="inline-block text-xs font-medium text-[var(--v2-brand)] hover:underline">
-        ← Marketplace
+      <Link
+        href="/marketplace"
+        className="inline-flex items-center gap-1 text-xs font-medium text-[var(--v2-brand)] hover:underline"
+      >
+        <Icon icon={ArrowLeft} className="h-3.5 w-3.5" />
+        Back to Marketplace
       </Link>
       {/* The merchant header IS the page header — one h1 (a second `PageHeader`
           made the name two headings, which the visual spec's anchor refused). */}

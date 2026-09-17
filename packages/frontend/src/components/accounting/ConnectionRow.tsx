@@ -98,6 +98,12 @@ export interface ConnectionRowProps {
   /** The inline feed settings are open under this row. */
   settingsOpen: boolean
   onConnect: () => void
+  /**
+   * For an `api_key` provider (#3017), the paste-modal open — Connect and
+   * Reconnect both resolve through a fresh key, not a redirect. Untouched
+   * for `oauth2` providers.
+   */
+  onConnectWithApiKey?: () => void
   onDisconnect: () => void
   onToggleSettings: () => void
 }
@@ -108,6 +114,7 @@ export function ConnectionRow({
   busy,
   settingsOpen,
   onConnect,
+  onConnectWithApiKey,
   onDisconnect,
   onToggleSettings,
 }: ConnectionRowProps) {
@@ -173,6 +180,10 @@ export function ConnectionRow({
   }
 
   const canConnect = provider.configured
+  // #3017: an api_key provider's Connect/Reconnect opens the paste modal, not
+  // the OAuth redirect. The label stays Connect/Reconnect — the user's
+  // situation is the same; only where the action leads differs.
+  const isApiKeyProvider = provider.authKind === 'api_key'
   const primary =
     action === 'settings' ? (
       <Button
@@ -186,7 +197,11 @@ export function ConnectionRow({
         {settingsOpen ? copy.actions.hideSettings : copy.actions.settings}
       </Button>
     ) : (
-      <Button size="sm" onClick={onConnect} disabled={busy || !canConnect}>
+      <Button
+        size="sm"
+        onClick={isApiKeyProvider ? onConnectWithApiKey : onConnect}
+        disabled={busy || !canConnect || (isApiKeyProvider && !onConnectWithApiKey)}
+      >
         {action === 'reconnect' ? copy.actions.reconnect : copy.actions.connect}
       </Button>
     )

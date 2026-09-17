@@ -5,10 +5,10 @@
  * key, the flow VALIDATES it by asking the provider who the key belongs to
  * (`connector.getCompanyInfo`), refuses a ledger that books in the wrong
  * currency, and only then stores the key encrypted. A key that the provider
- * rejects never lands. No live provider uses this kind today (Accounted,
- * Light and Igdrasil are listed `coming_soon`); the flow exists so that when
- * one goes live it is a connector plus a descriptor, and the route and the
- * storage are already there.
+ * rejects never lands. #3017: Accounted is the first live provider of this
+ * kind — a key that sees ZERO companies is refused the same way (there is no
+ * company to feed), and one that sees SEVERAL is refused by the connector
+ * (`MultiCompanyKeyError`) before anything is stored.
  */
 
 import { getConnection, stampFeedFromIfUnset, upsertConnection, type AccountingConnectionRow } from '../../infra/repositories/accounting-connections.js'

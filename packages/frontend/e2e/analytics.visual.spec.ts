@@ -198,6 +198,16 @@ const COPY = {
    * response's value, not an invented one.
    */
   refusalsRecordedFrom: 'Refusals are recorded from 28 May',
+  /**
+   * The #3055 limit-of-visibility clause in the same footnote: the two
+   * refusal classes the ledger never sees, named by who raises them. The
+   * wording is deliberate on both halves — the price cap lives in the
+   * agent's own runtime, and the budget refusal the hosted tools raise is a
+   * PREPARE-time one, never a quote-time one (the quote tools quote and
+   * refuse nothing). The negative pin below holds that second half.
+   */
+  refusedUnrecorded:
+    "Price-cap refusals in your agent's runtime are not recorded, and neither are budget refusals raised when Haven's hosted tools prepare a purchase.",
   budgetBands: '1 of 2 agents above 75% of their period budget',
   feesOff: 'Haven is not charging fees.',
   gasSponsored: 'Haven sponsored 7 operations',
@@ -314,6 +324,19 @@ const SCENARIOS: Scenario[] = [
         section(page, 'stat-tile-refused').getByText(COPY.refusalsRecordedFrom),
         'the ledger floor the response reports must be named on the face of the tile',
       ).toHaveCount(1)
+      // The #3055 limit-of-visibility clause rides the same footnote: the two
+      // classes the ledger never sees are named rather than silently absent
+      // from the count. The second half is the one this slice adds.
+      await expect(
+        section(page, 'stat-tile-refused').getByText(COPY.refusedUnrecorded),
+        'the footnote must name BOTH unrecorded classes: the price cap the ' +
+          "agent's own runtime applies, and the budget refusal the hosted tools " +
+          'raise at prepare',
+      ).toHaveCount(1)
+      // The phrasing the issue retires, held as a negative: the quote tools
+      // quote and refuse nothing, so naming a quote here would describe a
+      // refusal no code path raises.
+      await expect(section(page, 'stat-tile-refused').getByText(/quote/i)).toHaveCount(0)
       await expect(section(page, 'stat-tile-budget-used').getByText(COPY.budgetBands)).toHaveCount(1)
       await expect(section(page, 'stat-tile-fees-paid-to-haven').getByText(COPY.feesOff)).toHaveCount(1)
       await expect(

@@ -71,6 +71,7 @@ import accountingRoutes from './routes/accounting.js'
 import accountingConnectionsRoutes from './routes/accounting-connections.js'
 import accountingFeedRoutes from './routes/accounting-feed.js'
 import { registerConnector, startRetrySweep, getAccountingOpsCounters, setOpsEventSink } from './modules/accounting/index.js'
+import { AccountedConnector } from './modules/accounting/index.js'
 import { FortnoxConnector } from './modules/accounting/index.js'
 import { fortnoxConfigured } from './modules/accounting/index.js'
 import {
@@ -317,6 +318,13 @@ await app.register(accountingFeedRoutes, { prefix: '/accounting/feed' })
 if (fortnoxConfigured()) {
   registerConnector(new FortnoxConnector())
 }
+// #3017: the Accounted adapter registers UNCONDITIONALLY. Unlike Fortnox it
+// has no deployment credentials to configure — a key is per USER (pasted at
+// connect, stored encrypted), so there is nothing an operator opts into here;
+// `availability: 'live'` plus the per-account accounting feature gate is the
+// whole exposure decision. The connector's push half is #3018; until then it
+// skips, so a registered instance delivers nothing.
+registerConnector(new AccountedConnector())
 // #1328: the legacy /demo/mpp/* MPP demo route is retired (see
 // modules/mpp/challenge.ts's mppDemoRetired() for the authorize-side refusal).
 

@@ -3510,7 +3510,7 @@ export const openapiSpec = {
         operationId: 'listAccountingProviders',
         summary: 'The accounting providers Haven knows about, live or coming soon.',
         description:
-          'Four today: Fortnox (`live`) and Accounted, Light, Igdrasil (`coming_soon` — listed by product decision before any code exists for them). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.',
+          'Four today: Fortnox and Accounted (`live` — Fortnox over OAuth2, Accounted over a pasted API key) and Light, Igdrasil (`coming_soon` — listed by product decision before any code exists for them). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -3607,7 +3607,7 @@ export const openapiSpec = {
         operationId: 'connectAccountingApiKey',
         summary: 'Connect a live API-key provider: validate the key at the provider, then store it encrypted.',
         description:
-          'The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a currency outside the supported list is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers") BEFORE the key is stored — nothing lands, an existing connection is left as it was. No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.',
+          'The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a currency outside the supported list is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers") BEFORE the key is stored — nothing lands, an existing connection is left as it was. A VALID key that can see MORE THAN ONE company is refused too (#3017: 409 `MULTI_COMPANY_KEY` — the feed has no per-push company choice, so create a key scoped to one company). Accounted is live today; Light is listed `coming_soon`. The key is never echoed.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'provider', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: {
@@ -3632,7 +3632,7 @@ export const openapiSpec = {
           '404': { ...errorResponse, description: 'Unknown provider, or the accounting feature is off (#2918, same body shape as `requireAccountingFeed`).' },
           '409': {
             ...providerRefusal,
-            description: 'Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), or the company books in a currency outside the supported list (`UNSUPPORTED_BASE_CURRENCY`, #2864/#2877 — nothing stored).',
+            description: 'Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), the company books in a currency outside the supported list (`UNSUPPORTED_BASE_CURRENCY`, #2864/#2877 — nothing stored), or the key can see more than one company (`MULTI_COMPANY_KEY`, #3017 — nothing stored; create a key scoped to one company).',
           },
           '503': { ...errorResponse, description: 'The provider is live but not configured on this deployment.' },
         },

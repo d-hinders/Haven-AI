@@ -7,11 +7,12 @@ covers:
   - packages/frontend/src/app/(authenticated)/analytics/AnalyticsClient.tsx
   - packages/frontend/src/components/analytics/MerchantsTable.tsx
   - packages/frontend/src/components/analytics/SpendSection.tsx
+  - packages/frontend/src/components/ui/StackedBarChart.tsx
   - packages/frontend/src/lib/analytics-series.ts
   - packages/frontend/src/components/analytics/BalanceSection.tsx
   - packages/backend/src/routes/analytics-overview.ts
   - packages/backend/src/infra/repositories/analytics.ts
-last-verified: "2026-09-16"
+last-verified: "2026-09-17"
 ---
 
 # Analytics
@@ -67,9 +68,21 @@ chart keeps one colour across the chart, its legend and the swatch beside its
 spend figure in the agents table above it. The window starts and ends at the
 moment the page loads, not at midnight, so a bar on the window's first or
 last local day covers part of a day: it is striped and named as partial (the
-note under the chart says which end), never dropped or stretched. Below three
-days of data the chart is not drawn (see the sparse rule below) — a line
-through one point agrees with every trend.
+note under the chart says which end), never dropped or stretched. On a wide
+screen a day's detail opens as a callout anchored over that bar, kept inside
+the plot at either edge; when the bar (or its refusal cap) is tall enough to
+reach under the callout, the callout drops below the bar's top instead — its
+bottom just above the axis when the bar can hold it, otherwise just above
+the legend, over that day's own date label — so the bar's top, its
+height against its neighbours and any refusal cap stay visible while it is
+open. The callout takes no pointer, so hovering the next bar through it
+moves the detail on; a tap pins a day, and a second tap on it, or Escape,
+releases it — on touch too, where no pointer ever leaves. A bar too short
+for either drop (it would cover the whole bar to save a sliver) keeps the
+resting callout and loses its top instead. On a narrow screen the detail
+is a panel below the plot.
+Below three days of data the chart is not drawn (see the sparse rule below)
+— a line through one point agrees with every trend.
 
 **Top merchants.** The recipients your agents paid most, ranked by spent.
 A merchant's label is resolved by the API in a fixed order: your contact's
@@ -118,9 +131,13 @@ not in the sum.
   migration 086 (14 September 2026). A range reaching before that date simply
   has no refusal rows for the days before it — the page shows an honest empty
   there, and neither it nor the API claims a coverage floor it cannot read.
-  Refusals are recorded with attempts. Price-cap refusals raised inside the agent's
-  own runtime are not recorded — the ledger sees what Haven's authorization
-  step saw, and a runtime that declines before asking leaves no row.
+  Refusals are recorded with attempts. Two kinds of refusal never reach the
+  ledger, and the page says so rather than letting the count imply them: a
+  price cap your agent's own runtime applies (it declines before asking
+  Haven, so there is no request for a row to describe), and a budget refusal
+  the hosted MCP raises while preparing a purchase, before any payment has
+  been set up. A payment a rate limit holds back is throttling, not a
+  refusal, and it is not counted as one.
 - **Sponsored gas.** Haven relays agent payments, and the relay's network fee
   is paid by Haven. The page shows this as a count — "Haven sponsored N
   operations' gas" — of relayed operations on value-bearing chains. It is
@@ -143,8 +160,9 @@ not in the sum.
 - It is not an accounting record. The accounting feed and your accountant own
   the books; Analytics is a spending overview, and its numbers are not
   bookings.
-- It does not show agent runtime refusals (price caps), only refusals the
-  ledger recorded.
+- It does not show the refusals the ledger never sees — a price cap your
+  agent's own runtime applies, and a budget refusal the hosted MCP raises at
+  prepare. Its count is only ever refusals the ledger recorded.
 
 ## In the demo
 

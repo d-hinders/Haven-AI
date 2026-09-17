@@ -1,0 +1,1 @@
+{"error":{"code":"UNAUTHORIZED","message":"Din session har gått ut. Logga in igen.","message_en":"Authentication required.","docs_url":"https://app.accounted.se/docs/api/errors/UNAUTHORIZED","request_id":"req_20cb8bc4-393e-45ed-a4ce-65800d35596e"}}

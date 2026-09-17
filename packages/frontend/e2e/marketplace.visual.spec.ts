@@ -82,9 +82,13 @@ const SCENARIOS: Scenario[] = [
       await expect(merchantPage.getByRole('heading', { name: 'Offers' })).toHaveCount(1)
       // `exact` — a substring match also hits the merchant description ("Fact,
       // joke and quote endpoints") and each offer's own description.
-      await expect(merchantPage.getByText('Fact', { exact: true })).toHaveCount(1)
-      await expect(merchantPage.getByText('Joke', { exact: true })).toHaveCount(1)
-      await expect(merchantPage.getByText('Quote', { exact: true })).toHaveCount(1)
+      // Each offer is on screen twice by design: its table row and its
+      // labelled instruction block — one of each, located by id.
+      for (const id of ['offer-ampersend-fact', 'offer-ampersend-joke', 'offer-ampersend-quote']) {
+        await expect(merchantPage.getByTestId(`offer-row-${id}`)).toHaveCount(1)
+        await expect(merchantPage.getByTestId(`pay-block-${id}`)).toHaveCount(1)
+      }
+      await expect(merchantPage.getByText('Fact', { exact: true })).toHaveCount(2)
       // The network column shows the chain's NAME, never the raw CAIP-2 id.
       await expect(merchantPage.getByText('eip155:')).toHaveCount(0)
       // None of the three offers advertises erc7710 (asset_transfer_methods:

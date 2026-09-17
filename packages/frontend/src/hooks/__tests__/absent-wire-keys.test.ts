@@ -25,7 +25,6 @@ vi.mock('@/lib/signer', () => ({
 }))
 vi.mock('@/lib/delegationPasskeySigner', () => ({}))
 
-import { useCatalog } from '@/hooks/useCatalog'
 import { useContacts } from '@/hooks/useContacts'
 import { useAgents } from '@/hooks/useAgents'
 import { useTransactions } from '@/hooks/useTransactions'
@@ -36,18 +35,13 @@ import { useAccountSigners } from '@/hooks/useAccountSigners'
 
 const ADDRESS = '0x1111111111111111111111111111111111111111'
 
+// `useCatalog()` (entries) left with the catalog panel (#3079); its
+// successors `useMerchants` / `useMerchant` are covered in `useCatalog.test.ts`.
 describe('array wire keys default to [] when the response omits them (#3093)', () => {
   beforeEach(() => {
     mockApiGet.mockReset()
   })
 
-  it('useCatalog: entries', async () => {
-    mockApiGet.mockResolvedValue({})
-    const { result } = renderHook(() => useCatalog())
-    await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.entries).toEqual([])
-    expect(result.current.error).toBeNull()
-  })
 
   it('useContacts: contacts', async () => {
     mockApiGet.mockResolvedValue({})

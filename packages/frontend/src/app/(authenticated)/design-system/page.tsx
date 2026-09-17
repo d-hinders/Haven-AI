@@ -16,6 +16,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { FilterPill } from '@/components/ui/FilterPill'
+import { Monogram } from '@/components/ui/Monogram'
+import { MerchantCard } from '@/components/marketplace/MerchantCard'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
@@ -308,6 +311,7 @@ function DotIcon() {
 
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
+  const [dsFilterPillActive, setDsFilterPillActive] = useState<string | null>(null)
   const [infoModalOpen, setInfoModalOpen] = useState(false)
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
@@ -2600,6 +2604,92 @@ export default function DesignSystemPage() {
             />
             </div>
           </div>
+        </div>
+      </Section>
+
+      <Section
+        title="FilterPill"
+        description="Segment pill for a filter row — active/inactive toggle, shared across every list surface that filters by a small set of options (category, verification source, network). Moved to components/ui on its second surface (#3079, epic #3077): CatalogPanel.tsx had it module-local, and the marketplace grid needed the identical pill."
+      >
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Design-system FilterPill example">
+          <FilterPill active={dsFilterPillActive === null} onClick={() => setDsFilterPillActive(null)}>
+            All
+          </FilterPill>
+          {['media', 'data', 'api'].map((c) => (
+            <FilterPill key={c} active={dsFilterPillActive === c} onClick={() => setDsFilterPillActive(c)}>
+              <span className="capitalize">{c}</span>
+            </FilterPill>
+          ))}
+        </div>
+      </Section>
+
+      <Section
+        title="Monogram"
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. sm (36px) for lists and cards, md (48px) for a page header."
+      >
+        <div className="flex flex-wrap items-center gap-4">
+          <Monogram name="Ampersend Demo API" />
+          <Monogram name="Berget" />
+          <Monogram name="Haven Demo Store" size="md" />
+        </div>
+      </Section>
+
+      <Section
+        title="Merchant card (marketplace)"
+        description="The /marketplace grid's card (#3079, epic #3077): monogram or logo, name, category chip, description clamped to two lines, network chips, and one of three footer states — an offer count, 'Coming soon' for a prospect, or the Haven test-merchant label. The Verified badge follows verified_payable — the wire's own proof (#3078) — where the catalog card it replaces read the row's source."
+      >
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <MerchantCard
+            merchant={{
+              id: 'ds-merchant-live',
+              slug: 'ds-merchant-live',
+              name: 'Ampersend Demo API',
+              description: 'Fact, joke and quote endpoints — a live x402 sandbox on Base and Base Sepolia.',
+              website: 'https://app.ampersend.ai',
+              logo_url: null,
+              category: 'api',
+              country: null,
+              listing_status: 'live',
+              is_test_merchant: false,
+              offer_count: 3,
+              networks: ['eip155:84532', 'eip155:8453'],
+              verified_payable: true,
+            }}
+          />
+          <MerchantCard
+            merchant={{
+              id: 'ds-merchant-test',
+              slug: 'ds-merchant-test',
+              name: 'Haven Demo Store',
+              description: 'CloudNest and NordShield — Haven-run fixtures for real payments against demo goods.',
+              website: null,
+              logo_url: null,
+              category: 'infrastructure',
+              country: null,
+              listing_status: 'live',
+              is_test_merchant: true,
+              offer_count: 1,
+              networks: ['eip155:84532'],
+              verified_payable: true,
+            }}
+          />
+          <MerchantCard
+            merchant={{
+              id: 'ds-merchant-coming-soon',
+              slug: 'ds-merchant-coming-soon',
+              name: 'Berget AI',
+              description: 'Sovereign Swedish inference — OpenAI-compatible API on Swedish data centres.',
+              website: 'https://berget.ai',
+              logo_url: null,
+              category: 'ai',
+              country: 'SE',
+              listing_status: 'coming_soon',
+              is_test_merchant: false,
+              offer_count: 0,
+              networks: [],
+              verified_payable: false,
+            }}
+          />
         </div>
       </Section>
 

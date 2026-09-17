@@ -282,6 +282,42 @@ Money and risk clarity:
 - Keep contacts network-neutral in the POC; the Send flow must clearly show the network chosen by the selected Haven wallet before money moves.
 - Use `recipient address`, `wallet address`, and `Haven account`; avoid `Ethereum address` in primary product copy unless the network context specifically requires it.
 
+## Marketplace
+
+Use when the user browses payable merchants and their offers, or hands an agent
+one to pay (#3079, epic #3077). Renamed from Catalog; `/catalog` permanently
+redirects to `/marketplace`.
+
+Structure:
+1. Grid of merchant cards: monogram or logo, name, category chip, two-line
+   description, network chips, and a footer that reads an offer count, "Coming
+   soon" or the Haven test-merchant label.
+2. Filters above the grid: category pills, a network dropdown (only offered
+   when more than one chain is listed), search, "Verified only", and "Show
+   test merchants".
+3. Merchant page: header (monogram/logo, name, category, website, networks,
+   Verified), a "Pay this with Haven" block of one paste-into-agent
+   instruction per offer with a copy button, and an offers table.
+4. A `coming_soon` merchant page shows only its description, website and
+   "Coming soon — not payable yet" — no instruction, no price.
+5. "List your payable service" entry point from the grid and from a merchant
+   page, reusing the existing submission modal.
+
+Money and risk clarity:
+- Every offer's instruction is the exact text an agent pastes to pay it —
+  never a shortened or paraphrased form, so what the user copies is what the
+  agent sends.
+- Show the per-agent "within budget" / "above every agent budget" hint next to
+  the price, never as a claim that a payment will succeed — the on-chain
+  caveat enforcer is what actually decides.
+- Name the settlement method plainly: an offer without `erc7710` support
+  states that the paying agent needs an unpinned budget, since the EIP-3009
+  bridge cannot spend from a recipient-pinned one.
+- A prospect ("Coming soon") must never look payable: no price, no
+  instruction, no offers table.
+- The Verified badge means domain control plus a confirmed payable endpoint —
+  never merchant honesty, quality, or settlement reliability.
+
 ## Approve Payment — RETIRED, kept as history
 
 **Do not build against this recipe.** The approval queue was a legacy Safe /

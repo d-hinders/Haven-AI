@@ -479,6 +479,40 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     expect(screen.queryByTestId('chart-tooltip')).not.toBeNull()
   })
 
+  it('never pins itself: the callout takes no pointer, and a pin is released by a second tap or Escape (#3066)', () => {
+    renderChart()
+    const groups = dayGroups()
+    const svg = document.querySelector('svg')!
+    // Hover paints the callout; entering the callout must not pin it, so
+    // leaving the figure clears it like any hover.
+    fireEvent.mouseEnter(groups[0]!)
+    const tip = screen.getByTestId('chart-tooltip')
+    expect(tip).toHaveTextContent(/Mon 8/)
+    expect(tip.className).toMatch(/pointer-events-none/)
+    fireEvent.mouseEnter(tip)
+    fireEvent.mouseLeave(svg)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // The pointer falls through to the bars beneath: hovering the next day
+    // while the previous day's callout would lie over it moves the hover.
+    fireEvent.mouseEnter(groups[0]!)
+    fireEvent.mouseEnter(groups[1]!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
+    fireEvent.mouseLeave(svg)
+    // A tap pins; the same tap again lets go.
+    fireEvent.mouseDown(groups[2]!)
+    fireEvent.mouseLeave(svg)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Wed 10/)
+    fireEvent.mouseDown(groups[2]!)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // A tap on another day moves the pin; Escape releases it.
+    fireEvent.mouseDown(groups[0]!)
+    fireEvent.mouseDown(groups[1]!)
+    fireEvent.mouseLeave(svg)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
+    fireEvent.keyDown(svg, { key: 'Escape' })
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+  })
+
   it('sits below the plot when the screen is narrow, rather than over it', () => {
     renderChart({ narrow: true })
     fireEvent.mouseDown(dayGroups()[2])

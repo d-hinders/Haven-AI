@@ -377,6 +377,7 @@ export function StackedBarChart({
         setCaret(entries.length - 1)
       } else if (event.key === 'Escape') {
         setCaret(null)
+        setPinned(null)
       }
     },
     [entries.length],
@@ -503,7 +504,10 @@ export function StackedBarChart({
                 className="v2-chart-draw"
                 style={{ transformOrigin: `${xOf(dayIdx) + barW / 2}px ${baseY}px` }}
                 onMouseEnter={() => setHovered(dayIdx)}
-                onMouseDown={() => setPinned(dayIdx)}
+                // A tap pins the day; a second tap on the pinned day lets
+                // it go (the callout takes no pointer, so nothing else can
+                // — #3066).
+                onMouseDown={() => setPinned((prev) => (prev === dayIdx ? null : dayIdx))}
               >
                 {e.segments.map((s) => {
                   const height = scale.max === 0 ? 0 : (s.amount / scale.max) * plotH
@@ -606,7 +610,13 @@ export function StackedBarChart({
 
       {/* The tooltip: on a wide screen a callout over the day it describes;
           on a narrow one, a panel below the plot that a tap pins. One
-          tooltip, two treatments, never a horizontal scroll. */}
+          tooltip, two treatments, never a horizontal scroll. The callout
+          takes no pointer events: it used to pin itself on mouseenter, and
+          since it overlaps the neighbours' bars the pointer could not reach
+          a day the previous day's callout lay over (#3066 — a scrub across
+          the /design-system sample skipped two of seven days). Now the
+          pointer falls through to the bars beneath; a pin is a tap on the
+          day, released by a second tap or Escape. */}
       {entry !== null && (
         <div
           ref={tooltipRef}
@@ -615,7 +625,7 @@ export function StackedBarChart({
           className={
             narrow
               ? 'mt-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3'
-              : `absolute w-max max-w-[60%] -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover${tipTop === null ? ' top-3' : ''}`
+              : `pointer-events-none absolute w-max max-w-[60%] -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover${tipTop === null ? ' top-3' : ''}`
           }
           data-flipped={!narrow && tipTop !== null ? 'true' : undefined}
           // Anchored over the day it describes rather than the plot's
@@ -632,11 +642,6 @@ export function StackedBarChart({
                   ...(tipTop === null ? {} : { top: `${tipTop}px` }),
                 }
           }
-          onMouseEnter={() => setPinned(active)}
-          onMouseLeave={() => {
-            setPinned(null)
-            setHovered(null)
-          }}
         >
           <p className="text-xs font-semibold text-[var(--v2-ink)]">
             {entry.label}

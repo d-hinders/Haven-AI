@@ -75,7 +75,9 @@ reach under the callout, the callout drops below the bar's top instead — its
 bottom just above the axis when the bar can hold it, otherwise just above
 the legend, over that day's own date label — so the bar's top, its
 height against its neighbours and any refusal cap stay visible while it is
-open. A bar too short for either (the drop would cover the whole bar to
+open; the callout takes no pointer, so hovering the next bar through it
+moves the detail on, and a tap pins a day (a second tap or Escape releases
+it). A bar too short for either (the drop would cover the whole bar to
 save a sliver) keeps the resting callout and loses its top instead. On a
 narrow screen the detail is a panel below the plot.
 Below three days of data the chart is not drawn (see the sparse rule below)

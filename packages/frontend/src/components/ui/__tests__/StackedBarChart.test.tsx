@@ -456,7 +456,7 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     expect(tip).toHaveTextContent(/USD 250\.00/)
   })
 
-  it('is two lines, not a table: day and total on the first, agents and refusals as wrapping chips on the second (#3067)', () => {
+  it('is two lines, not a table: day, refusal count and total on the first, agents as wrapping chips on the second (#3067)', () => {
     renderChart()
     fireEvent.keyDown(document.querySelector('svg')!, { key: 'ArrowRight' })
     const tip = screen.getByTestId('chart-tooltip')
@@ -481,6 +481,7 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     const header = screen.getByTestId('chart-tooltip-header')
     expect(header.className).toMatch(/flex-wrap/)
     expect(total.className).toMatch(/ml-auto/)
+
     // One wrapping list of agent chips — no row-per-agent block underneath.
     const list = screen.getByTestId('chart-tooltip-chips')
     expect(list.tagName).toBe('UL')
@@ -500,7 +501,19 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     expect(tip.className).toMatch(/max-w-\[min\(60%,24rem\)\]/)
   })
 
-  it('never lets a long name push the money figure out of the panel: the name truncates, the amount and tokens do not shrink (#3067 review)', () => {
+  it('separates every header unit with one real space — the only place the line may break (#3067 re-check)', () => {
+    // A day that is both partial and refused carries all three units.
+    const partialRefused: StackedBarDay[] = [
+      ...THREE_DAYS.slice(0, 2),
+      { ...THREE_DAYS[1]!, label: 'Wed 10', partial: true },
+    ]
+    render(<StackedBarChart days={partialRefused} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(document.querySelector('svg')!, { key: 'End' })
+    const label = screen.getByTestId('chart-tooltip-partial').parentElement!
+    expect(label.textContent).toBe('Wed 10 · partial day · 4 payments refused')
+  })
+
+  it('never lets a long name push the money figure out of the panel: the name truncates, the amount does not shrink, the tokens fold (#3067 review)', () => {
     renderChart()
     fireEvent.keyDown(document.querySelector('svg')!, { key: 'ArrowRight' })
     const row = screen.getAllByTestId('chart-tooltip-row')[0]!

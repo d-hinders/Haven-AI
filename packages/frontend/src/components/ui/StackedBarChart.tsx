@@ -397,8 +397,8 @@ export function StackedBarChart({
   // top, but only where that leaves at least `TIP_MIN_VISIBLE` of the bar
   // in view above it: its bottom `TIP_GAP` above the axis baseline when the
   // bar is tall enough to hold it, else its bottom just above the legend
-  // — over that day's axis label whole (the label it repeats), never half of
-  // it and never over a legend row. A bar too short for either (the
+  // — over the axis labels beneath it (whole, never half of one; the day's
+  // own it repeats) and never over a legend row. A bar too short for either (the
   // callout would swallow its body, the label and the legend to save a
   // sliver — design review) keeps the resting callout and loses its top
   // instead. The svg scales the viewBox to its CSS box without preserving
@@ -661,9 +661,9 @@ export function StackedBarChart({
                 }
           }
         >
-          {/* Two lines, not a table (#3067): the day and its total on the
-              first, the agents as swatch·name·amount chips that wrap on the
-              second, refusals as the last chip. The old one-row-per-agent
+          {/* Two lines, not a table (#3067): the day, its refusal count and
+              its total on the first, the agents as swatch·name·amount chips
+              that wrap on the second. The old one-row-per-agent
               form stood 113–135px tall on a 200px plot, so on every bar of
               middling height the callout either hid the bar's top or (had
               it dropped) the whole bar — a ~60px callout fits above or

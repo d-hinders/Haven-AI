@@ -121,8 +121,6 @@ company the key belongs to, then stores it encrypted (#3017).
 1. In Accounted, open **Settings → API keys** (`app.accounted.se/settings/api`)
    and choose **Create key**.
 
-   ![The Accounted dashboard's API-keys page, where a key is created and revoked](images/accounted-api-keys.png)
-
 2. Tick exactly the two scopes the feed needs: `companies:read` (so Haven can
    tell whose company it is feeding) and `documents:write` (so it can deliver
    documents). Nothing else is needed today.

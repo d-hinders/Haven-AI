@@ -1,6 +1,6 @@
 ---
 name: release
-description: Ship exactly one Haven production release — decide whether it carries a version bump, run the bump and the contract-doc gate when it does, open the release PR to dev, drive the promotion to main, and verify what landed in production and, when a version moved, on npm. Use when a user asks to cut, publish, or ship a release, bump package versions, get recent work onto npm, or promote dev to production.
+description: Ship exactly one Haven production release — decide whether it carries a version bump, run the bump and the contract-doc gate when it does, open the release PR to dev, drive the promotion to main, and verify what landed in production and on npm. Use when a user asks to cut, publish, or ship a release, bump package versions, get recent work onto npm, or promote dev to production.
 ---
 
 # Release
@@ -127,6 +127,23 @@ npm view @haven_ai/sdk dist-tags --json
 git log --oneline <last-bump-commit>..origin/dev -- \
   packages/sdk packages/signer packages/mcp packages/connect packages/cli
 ```
+
+That git log is a **pre-filter, not the shape test**. It is a path filter over
+the package directories, so it counts test files, READMEs, `tsconfig` and
+CHANGELOGs — none of which reach a tarball. A range whose only package touch is
+a test file gives it a non-empty answer while the shipped delta is zero, and
+bumping on that produces exactly the false changelog record *Which Shape Is This
+Release* exists to prevent. So when it returns anything, run the instrument that
+answers the question:
+
+```sh
+npm run build          # the shipped set is read out of dist/
+npm run release:scope  # origin/main..origin/dev
+```
+
+It works here, before any bump: it reads the promotion range and needs no
+version to have moved. Its shipped delta is the shape — zero files is the
+no-bump release.
 
 If the repo version is already on npm and those packages have commits since the
 bump, a release is needed: `publish.yml` skips versions already published, so
@@ -440,8 +457,9 @@ What it leaves to you:
 
 ## Closeout
 
-Two halves, and the first one is owed by **every** release including a no-bump
-one: **production**, then **npm**.
+Two halves, **both** owed by every release including a no-bump one:
+**production**, then **npm**. The npm half shrinks on a no-bump release; it does
+not disappear.
 
 ### Production — always
 
@@ -467,7 +485,7 @@ The smoke's canary is a real payment, so it is an **operator step**, not
 something this skill performs. Carry it as an unticked box and say plainly that
 it is outstanding; do not report the release closed out while it is.
 
-### npm — only when a version moved
+### npm — always, in proportion to what published
 
 On a no-bump release this half shrinks to one read, but it does not disappear.
 `publish.yml` still **runs** whenever the promoted range touches any file under
@@ -477,7 +495,8 @@ that would catch it having published anyway: read the dist-tags once and confirm
 they did **not** move. An unexpected publish is the finding here; a missing one
 is the expected state.
 
-A green workflow is not proof that five packages published. Verify both ends:
+**On a release that published**, the rest of this section applies in full. A
+green workflow is not proof that five packages published. Verify both ends:
 
 ```sh
 for p in sdk signer mcp connect cli; do npm view @haven_ai/$p dist-tags --json; done

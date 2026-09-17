@@ -180,7 +180,8 @@ export function useDelegationBudget(
       if (!enabled) return
       try {
         const res = await api.get<{ delegations: DelegationBudget[] }>(`/agents/${agentId}/delegations`)
-        setBudgets(res.delegations)
+        // `?? []` — an absent key must degrade, not crash the route (#3093).
+        setBudgets(res.delegations ?? [])
         setBudgetsError(false)
       } catch {
         if (silent) return

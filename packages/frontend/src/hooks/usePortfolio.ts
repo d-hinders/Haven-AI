@@ -55,7 +55,8 @@ export function usePortfolio(
       if (generationRef.current === generation) {
         setTotalUsd(data.totalUsd)
         setTotalEur(data.totalEur)
-        setBreakdown(data.breakdown)
+        // `?? []` — an absent key must degrade, not crash the route (#3093).
+        setBreakdown(data.breakdown ?? [])
         if (silent) setError(null)
       }
     } catch (err) {

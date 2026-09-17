@@ -283,6 +283,12 @@ last-verified: "2026-09-17"
 > directions — an old server against a new backend ignores the field, a new
 > server against an old backend omits it.
 >
+> **Recent re-verification (#3080):** one hosted-server TEST added
+> (`src/tools/catalog-purchase.test.ts`): `haven_discover_tools` reads
+> `GET /catalog` only — never `/merchants` — and so never returns a
+> `coming_soon` prospect. No runtime file under `src/tools/**` changed; the
+> compatibility contract is untouched.
+>
 > **Recent re-verification (#2850):** the CLI's transaction CSV/JSON export
 > relabelled `delegate_sweep` from "allowance funding" to "sweep" — the old
 > label was the retired rail's name for what is now the shared gasless-sweep

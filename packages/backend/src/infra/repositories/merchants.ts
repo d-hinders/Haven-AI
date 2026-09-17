@@ -216,14 +216,25 @@ export async function getMerchantBySlug(
   return result.rows[0] ?? null
 }
 
+/**
+ * `m.listing_status = 'live'` is the zero-offers rule at the SQL level
+ * (#3080): a `coming_soon` prospect has no offers by construction, so it can
+ * never legitimately match through this join, but the filter is defense in
+ * depth — a database where that invariant was ever violated by hand must
+ * still not hand a writer a prospect to attach an offer to. Combined with
+ * `assertMerchantAcceptsOffers` below (the application-level half, called on
+ * every path this function returns through) so the rule holds even if one of
+ * the two is ever edited without the other.
+ */
 const FIND_MERCHANT_BY_HOST_SQL = `
   SELECT ${MERCHANT_COLUMNS}
   FROM merchants m
-  WHERE m.id IN (
-    SELECT merchant_id FROM merchant_catalog WHERE ${HOST_OF_URL_SQL} = $1
-    UNION
-    SELECT merchant_id FROM catalog_submissions WHERE merchant_id IS NOT NULL AND lower(hostname) = $1
-  )
+  WHERE m.listing_status = 'live'
+    AND m.id IN (
+      SELECT merchant_id FROM merchant_catalog WHERE ${HOST_OF_URL_SQL} = $1
+      UNION
+      SELECT merchant_id FROM catalog_submissions WHERE merchant_id IS NOT NULL AND lower(hostname) = $1
+    )
   ORDER BY m.created_at ASC, m.id ASC
   LIMIT 1`
 
@@ -248,11 +259,51 @@ export interface NewMerchantSeed {
 const MAX_SLUG_ATTEMPTS = 25
 
 /**
+ * Thrown by `assertMerchantAcceptsOffers` — a named error so a caller can
+ * branch on it rather than string-matching a generic `Error` (#3080).
+ */
+export class ProspectMerchantWriteError extends Error {
+  constructor(merchantId: string) {
+    super(
+      `merchant ${merchantId} is coming_soon and cannot receive an offer — ` +
+        'a prospect becomes live only through the operator SQL in ' +
+        'docs/product/marketplace.md § Prospects, never implicitly through a catalog write.',
+    )
+    this.name = 'ProspectMerchantWriteError'
+  }
+}
+
+/**
+ * The application-level half of the zero-offers rule (#3080): a cross-table
+ * CHECK cannot express "this merchant has no rows in another table" without a
+ * trigger, so this is the one place a writer proves it before attaching an
+ * offer. Throws `ProspectMerchantWriteError` for a `coming_soon` merchant;
+ * a merchant id that does not exist is a caller bug elsewhere and is left to
+ * surface as a foreign-key violation, not swallowed here.
+ */
+export async function assertMerchantAcceptsOffers(merchantId: string, db: Executor = pool): Promise<void> {
+  const { rows } = await db.query<{ listing_status: MerchantListingStatus }>(
+    `SELECT listing_status FROM merchants WHERE id = $1`,
+    [merchantId],
+  )
+  if (rows[0]?.listing_status === 'coming_soon') {
+    throw new ProspectMerchantWriteError(merchantId)
+  }
+}
+
+/**
  * The one write path. Finds the merchant that already owns `host` (through
  * an offer or a verified submission), else creates one from `seed` with a
  * slug from its name — suffixed `-2`, `-3`, … when the slug is taken by a
  * different merchant (a submission on `berget.ai` must not become the
  * prospect `berget-ai` seeded by #3080; it becomes `berget-ai-2`).
+ *
+ * `assertMerchantAcceptsOffers` guards every return so the zero-offers rule
+ * holds even if `FIND_MERCHANT_BY_HOST_SQL`'s own `listing_status = 'live'`
+ * filter is ever edited without this — defense in depth, not redundant dead
+ * code: a newly created merchant is `live` by the table's own DEFAULT, so
+ * this never fires on the creation path today, but it fires immediately if
+ * that default is ever changed.
  */
 export async function findOrCreateMerchantByHost(
   host: string,
@@ -262,7 +313,10 @@ export async function findOrCreateMerchantByHost(
   const key = host.trim().toLowerCase()
   if (!key) throw new Error('findOrCreateMerchantByHost: host is empty')
   const existing = await db.query<MerchantRow>(FIND_MERCHANT_BY_HOST_SQL, [key])
-  if (existing.rows[0]) return existing.rows[0]
+  if (existing.rows[0]) {
+    await assertMerchantAcceptsOffers(existing.rows[0].id, db)
+    return existing.rows[0]
+  }
 
   const base = slugifyMerchantName(seed.name)
   for (let attempt = 1; attempt <= MAX_SLUG_ATTEMPTS; attempt += 1) {
@@ -275,6 +329,7 @@ export async function findOrCreateMerchantByHost(
         seed.website ?? null,
         seed.category ?? 'api',
       ])
+      await assertMerchantAcceptsOffers(inserted.rows[0].id, db)
       return inserted.rows[0]
     } catch (err) {
       if ((err as { code?: string }).code !== '23505') throw err
@@ -288,7 +343,10 @@ export async function findOrCreateMerchantByHost(
       // that never overlap — a host registry would close it for good
       // (review S3, left as a recorded residual).
       const again = await db.query<MerchantRow>(FIND_MERCHANT_BY_HOST_SQL, [key])
-      if (again.rows[0]) return again.rows[0]
+      if (again.rows[0]) {
+        await assertMerchantAcceptsOffers(again.rows[0].id, db)
+        return again.rows[0]
+      }
     }
   }
   throw new Error(`findOrCreateMerchantByHost: no free slug for ${JSON.stringify(seed.name)} after ${MAX_SLUG_ATTEMPTS} attempts`)

@@ -18,7 +18,7 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
-last-verified: "2026-09-16"
+last-verified: "2026-09-17"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -158,6 +158,16 @@ and the `release` skill.
 > `--doctor` says `stored under the pre-#2908 name safe_address — still read`,
 > pay one x402 call, and confirm the receipt's `payer` field is populated —
 > recorded on #2906 before promotion.
+>
+> **Half of that proof expires with #2914 and half does not, and the
+> difference is the whole point.** The credential-FILE half stands: a file on
+> disk never rewrites itself, so `safe_address` is read permanently and
+> `--doctor` still says so. The ENV half does not: `HAVEN_SAFE_ADDRESS` and
+> `HAVEN_WALLET_ADDRESS` are no longer read at all, so that machine now needs
+> `HAVEN_ACCOUNT_ADDRESS` set. Re-running the O3 proof after the contraction
+> without that change tests a machine that cannot resolve its account, and
+> would read as a regression in the connector rather than the intended
+> retirement.
 
 Prerequisite: the [operator checklist](#operator-checklist-owner-only) below
 has been completed once for the dev environment. If step 5 there is not done,
@@ -189,7 +199,17 @@ against #2911 (phase 3, the schema rename): that PR's only touch to
 (a stray mechanical rename briefly turned it into `.account_id`, which
 `CreateSetupBody` does not declare — caught by `tsc`, reverted before
 merge) — no change to `CONNECTOR_PACKAGE`, `CLI_PACKAGE`,
-`config.connectorChannel`, or `/discovery`:
+`config.connectorChannel`, or `/discovery`. Re-verified again 2026-09-17
+against #2914 (phase 5, the contraction), and this one is **not** identifiers
+only — it changes the WIRE INPUT the sentence above describes.
+`POST /agent-connection-setups` now takes `account_id`; `safe_id` is still
+DECLARED on `CreateSetupBody`, but only so the handler can REFUSE it with a
+400 naming the replacement. Deleting the field instead would have made
+Fastify drop it in silence and create a setup with no account behind it,
+which looks successful until the agent tries to spend. Still no change to
+`CONNECTOR_PACKAGE`, `CLI_PACKAGE`, `config.connectorChannel` or the
+`/discovery` response shape — this section's subject is untouched; the input
+field it happens to cite is not:
 
 ```bash
 curl -s "$BACKEND/discovery" | jq -r '.connector_package, .cli_package'

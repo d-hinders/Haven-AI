@@ -14,18 +14,24 @@
 
 /**
  * Capture group 1 is the host: scheme, optional userinfo, then everything up
- * to the first `/`, `:`, `?` or `#`. The userinfo group is greedy to the
- * LAST `@` before the path (`[^/?#]*@`), which is how WHATWG and RFC 3986
- * split it: with `[^/@?#]*@` (the first cut, review) the first `@` ended the
- * userinfo, so `https://u@services.ampersend.ai:@evil.example/x` read as
- * `services.ampersend.ai` while every client fetches `evil.example` — a
- * third-party Bazaar URL could have listed under a curated merchant's name.
+ * to the first `/`, `\`, `:`, `?` or `#`. Two rules that both come from how
+ * a client (WHATWG) reads the authority, because the host this rule names
+ * MUST be the host the probe fetches — a third-party Bazaar URL must never
+ * list under a curated merchant's name (reviews of #3078):
+ *  - the userinfo group is greedy to the LAST `@` before the path
+ *    (`[^/\\?#]*@`): with a first-`@` cut,
+ *    `https://u@services.ampersend.ai:@evil.example/x` read as
+ *    `services.ampersend.ai` while every client fetches `evil.example`;
+ *  - a backslash ends the authority: WHATWG treats `\` as `/` in a special
+ *    scheme, so `https://evil.example\@services.ampersend.ai/x` is
+ *    `evil.example` to a client — neither the userinfo nor the host class
+ *    may read past one.
  * IDN is kept as written (not punycoded) on both sides; two rows spelling
  * one site differently would found two merchants — a recorded residual.
  * `FROM` is upper-cased because the dependency-parity test reads `from '…'`
  * as an import specifier.
  */
-const HOST_PATTERN = '^[A-Za-z][A-Za-z0-9+.-]*://(?:[^/?#]*@)?([^/:?#]+)'
+const HOST_PATTERN = '^[A-Za-z][A-Za-z0-9+.-]*://(?:[^/\\\\?#]*@)?([^/:?#\\\\]+)'
 
 /** The SQL expression for the lowercased host of `resource_url`, or NULL. */
 export const HOST_OF_URL_SQL = `lower(substring(resource_url FROM '${HOST_PATTERN}'))`

@@ -102,6 +102,27 @@ describe('ingestDiscoveredCatalog', () => {
     ])
   })
 
+  it('keys the merchant by the host a client would fetch, so a crafted Bazaar URL cannot join a curated merchant (#3078 reviews)', async () => {
+    const { db } = fakeDb()
+    const { merchants, calls } = stubMerchants()
+    const crafted = [
+      'https://u@services.ampersend.ai:@evil.example/x',
+      'https://evil.example\\@services.ampersend.ai/y',
+    ]
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/discovery/resources')) {
+        return bazaarPage(crafted.map((resource) => ({ resource, type: 'http', accepts: X402_BODY.accepts, metadata: { name: 'Crafted', description: 'x' } })))
+      }
+      return paid402()
+    })
+    await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, merchants)
+    // Both name evil.example — what `new URL()` and every client resolve —
+    // never services.ampersend.ai.
+    expect(calls.map((c) => c.host)).toEqual(crafted.map((u) => new URL(u).hostname))
+    expect(calls.map((c) => c.host)).toEqual(['evil.example', 'evil.example'])
+  })
+
   it('sets the merchant on every insert through the shared writer, and a second resource on the same host reuses it (#3078)', async () => {
     const { db, inserts } = fakeDb()
     const { merchants, calls } = stubMerchants()

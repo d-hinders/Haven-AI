@@ -90,6 +90,12 @@ describe('merchants repository — pure helpers', () => {
       'https://user:pw@api.example/x',
       'https://api.example/a@b',
       'https://api.example:8443/x?y#z',
+      // A backslash ends the authority for a client (WHATWG: `\\` is `/` in a
+      // special scheme) — both directions of the spoof, second review.
+      'https://evil.example\\@services.ampersend.ai/x',
+      'https://services.ampersend.ai\\@evil.example/',
+      'https://u@services.ampersend.ai#@evil.example/x',
+      'https://u@services.ampersend.ai?@evil.example/x',
     ]
     for (const url of shapes) {
       expect(merchantHostOf(url), url).toBe(new URL(url).hostname)
@@ -134,7 +140,7 @@ describeDb('merchants repository (#3078)', () => {
     expect(third.slug).toBe('weather-api-3')
   })
 
-  it('agrees with HOST_OF_URL_SQL on the plain, port, userinfo, double-@, path-@, IDN and unparseable shapes', async () => {
+  it('the JavaScript and SQL readers agree — one PATTERN constant in two regex engines; this guards engine divergence, not the rule (a wrong rule wrong on both sides passes here and is caught by the new-URL test above)', async () => {
     const urls = [
       'https://Services.Sandbox.Ampersend.ai/api/joke',
       'https://api.example:8443/x?y#z',
@@ -142,6 +148,8 @@ describeDb('merchants repository (#3078)', () => {
       'https://u@services.ampersend.ai:@evil.example/x',
       'https://a@b@c.example/',
       'https://api.example/a@b',
+      'https://evil.example\\@services.ampersend.ai/x',
+      'https://services.ampersend.ai\\@evil.example/',
       'https://bücher.example/x',
       'not a url',
     ]

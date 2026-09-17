@@ -5169,7 +5169,7 @@ export interface operations {
                      * @description Optional recipient pin. Omit (or null) for an open budget.
                      * @example 0x1111111111111111111111111111111111111111
                      */
-                    recipient_address?: string;
+                    recipient_address?: string | null;
                     /** @description Positive atomic token amount; must fit uint96 (the enforcer word size). */
                     budget_atomic: string;
                     /** @description Native refill period; ≥ 60. */

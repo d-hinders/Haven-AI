@@ -6,6 +6,7 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const { mockQuery, mockCompute, mockTreasury, mockEnsureDeployed, mockReadDisabled } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -1640,4 +1641,83 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
       expect(res.statusCode).toBe(400)
     }
   })
+})
+
+/**
+ * The OPEN budget, through the request-validation layer (#3082).
+ *
+ * Every other app in this file registers the routes ALONE. Production does
+ * not: `index.ts` calls `installRequestValidation` first, and that layer
+ * attaches the spec schema to the route in shadow mode as well as enforce.
+ * ajv then coerces the body IN PLACE, so `recipient_address: null` — how the
+ * dashboard asks for an unpinned budget, and the only thing
+ * `DelegationApprovalStep` ever sends — reached the handler as `''` and was
+ * refused by its `!= null` guard.
+ *
+ * So the suite was green while every budget grant on dev returned
+ * `400 recipient_address must be a valid address when set`. The gap was not a
+ * missing assertion; it was an app assembled differently from the one that
+ * serves traffic. These cases assemble it the production way.
+ */
+describe('POST /:id/delegations/build — OPEN budget through request validation (#3082)', () => {
+  for (const mode of ['off', 'shadow', 'enforce'] as const) {
+    describe(`HAVEN_REQUEST_VALIDATION=${mode}`, () => {
+      let app: FastifyInstance
+      beforeAll(async () => {
+        app = Fastify({ logger: false })
+        installRequestValidation(app, { mode })
+        await app.register(agentDelegationRoutes, { prefix: '/agents' })
+      })
+      afterAll(async () => app.close())
+      beforeEach(() => {
+        mockQuery.mockReset()
+        mockCompute.mockReset()
+        mockTreasury.mockReset()
+        mockEnsureDeployed.mockReset()
+        mockCompute.mockResolvedValue(DELEGATE_ACCOUNT)
+        mockEnsureDeployed.mockResolvedValue({ address: TREASURY, alreadyDeployed: true })
+        mockReadDisabled.mockReset()
+        mockReadDisabled.mockResolvedValue(new Set())
+      })
+
+      it('recipient_address: null builds an open budget (201), and the handler still sees null', async () => {
+        mockDb({})
+        const res = await app.inject({
+          method: 'POST',
+          url: `/agents/${AGENT_ID}/delegations/build`,
+          payload: {
+            token_address: USDC,
+            recipient_address: null,
+            budget_atomic: '1000000',
+            period_seconds: 86400,
+          },
+        })
+
+        expect(res.statusCode, res.body).toBe(201)
+        // The stored row proves the handler read `null`, not `''`: an open
+        // budget persists a NULL recipient, and the version read keys on
+        // `IS NOT DISTINCT FROM LOWER($3)` with the same value.
+        const insert = mockQuery.mock.calls.find((c) =>
+          /INSERT INTO agent_delegations/.test(String(c[0])),
+        )!
+        expect(insert).toBeTruthy()
+        expect((insert[1] as unknown[]).includes('')).toBe(false)
+      })
+
+      it('a PINNED budget is unaffected', async () => {
+        mockDb({})
+        const res = await app.inject({
+          method: 'POST',
+          url: `/agents/${AGENT_ID}/delegations/build`,
+          payload: {
+            token_address: USDC,
+            recipient_address: RECIPIENT,
+            budget_atomic: '1000000',
+            period_seconds: 86400,
+          },
+        })
+        expect(res.statusCode, res.body).toBe(201)
+      })
+    })
+  }
 })

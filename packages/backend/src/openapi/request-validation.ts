@@ -15,7 +15,11 @@
  *   shadow  — every route's request is compiled against the spec; a refusal is
  *             logged once (`request_validation.would_refuse`) and counted, and
  *             the request CONTINUES on the normal path — no behaviour change on
- *             any currently-accepted request
+ *             any currently-accepted request. That last clause was ASPIRATIONAL
+ *             until #3082: ajv's `coerceTypes` rewrites the body in place, so
+ *             shadow was editing the payload it claimed only to measure and a
+ *             `null` reached handlers as `''`. It is now enforced by a
+ *             snapshot/restore pair (see the hooks below), not merely stated.
  *   enforce — a refused request gets the 400 envelope instead of the route
  *
  * Per-module `enforcedPrefixes` flips a module regardless of the mode (the
@@ -182,6 +186,18 @@ export function requestSchemaErrorFormatter(
   error.validation = errors
   error.validationContext = dataVar
   return error
+}
+
+/**
+ * The mode this route was registered under, read off the `config` the
+ * `onRoute` hook set at registration. `undefined` for a route the plugin
+ * never touched (schema-less, or mode `off`).
+ */
+function routeMode(request: FastifyRequest): 'enforced' | 'shadow' | undefined {
+  const config = request.routeOptions.config as
+    | { havenRequestValidation?: 'enforced' | 'shadow' }
+    | undefined
+  return config?.havenRequestValidation
 }
 
 /** The `field` a would-refusal names: context plus JSON pointer (`body/amount`). */
@@ -366,11 +382,67 @@ export function installRequestValidation(app: FastifyInstance, options: RequestV
     }
   })
 
+  // ── Shadow must not CHANGE the request it is only supposed to observe (#3082) ──
+  //
+  // The schema above is attached in shadow mode too, and `REQUEST_AJV_OPTIONS`
+  // sets `coerceTypes: 'array'`. ajv coerces IN PLACE, so validating for
+  // measurement rewrites the very payload the handler then reads. Shadow's
+  // documented promise — "no behaviour change on any currently-accepted
+  // request" — was false: `{"recipient_address": null}` reached
+  // `routes/agent-delegations.ts` as `""`, whose `!= null` guard then refused
+  // every OPEN budget with a 400. That is how #3082 blocked agent onboarding
+  // on dev, while the layer reported itself as observation-only.
+  //
+  // Snapshot before validation, restore after it. Not a validator wrapper:
+  // fastify reads `.errors` off the raw ajv function it compiled
+  // (`validateParam`, lib/validation.js:139), and a closure owning no
+  // `.errors` makes refusals pass SILENTLY — measured in spikes 3–4 and the
+  // reason `setValidatorCompiler` above returns the raw fn. Hooks leave that
+  // contract untouched.
+  //
+  // BODY ONLY, deliberately. Querystring, params and headers arrive as
+  // strings on the wire, so coercion is what makes a typed spec parameter
+  // usable at all, and the handler is MEANT to see the coerced value —
+  // `?limit=10` reaching a handler as the number 10 is pinned by
+  // `__tests__/request-validation.test.ts`. A JSON body is already typed by
+  // `JSON.parse`; coercing it only ever rewrites what the client actually
+  // sent.
+  //
+  // Enforce mode still coerces the body. That is deliberate and visible: an
+  // enforced route ANSWERS on the validation result, so the coerced value is
+  // part of a contract a client can see and test, not a silent edit made
+  // while claiming to measure. Slices 2–4 flip routes to enforce one module
+  // at a time and should read this note before each flip.
+  const BODY_SNAPSHOT = Symbol.for('haven.requestValidation.bodySnapshot')
+
+  app.addHook('preValidation', (request: FastifyRequest, _reply, done) => {
+    if (routeMode(request) !== 'shadow') return done()
+    const body: unknown = request.body
+    // Only a structured body can be coerced into a different one; a string or
+    // Buffer body has no properties for ajv to rewrite.
+    if (body === null || typeof body !== 'object') return done()
+    try {
+      ;(request as FastifyRequest & { [k: symbol]: unknown })[BODY_SNAPSHOT] = structuredClone(body)
+    } catch {
+      // A body carrying something structuredClone refuses is not something
+      // ajv's scalar coercion rewrites either. Skipping the snapshot leaves
+      // the request exactly as it is today rather than failing it.
+    }
+    done()
+  })
+
   // One structured line per would-be refusal, then the request continues on
   // its normal path. Runs on every route; the guard makes it a no-op for
   // schema-less and enforce-mode routes (fastify only sets `validationError`
   // when attachValidation let it attach).
   app.addHook('preHandler', (request: FastifyRequest, _reply, done) => {
+    // Restore FIRST: every later hook and the handler itself must see the
+    // client's body, not ajv's edit of it.
+    const carrier = request as FastifyRequest & { [k: symbol]: unknown }
+    if (BODY_SNAPSHOT in carrier) {
+      request.body = carrier[BODY_SNAPSHOT]
+      delete carrier[BODY_SNAPSHOT]
+    }
     const validationError = (request as FastifyRequest & { validationError?: ValidationCarrierError })
       .validationError
     if (validationError) {

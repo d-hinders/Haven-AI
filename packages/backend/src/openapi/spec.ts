@@ -1737,6 +1737,16 @@ export const openapiSpec = {
                   token_address: address,
                   recipient_address: {
                     ...address,
+                    // `['string', 'null']`, not a bare `string` (#3082). The
+                    // description below has always said null is how you ask
+                    // for an open budget, and the dashboard always sent it —
+                    // but the DECLARATION said otherwise, and the validation
+                    // layer reads the declaration. Under `coerceTypes` an
+                    // undeclared null is rewritten to `''`, which then fails
+                    // this pattern, so every open budget was refused.
+                    // `pattern` constrains strings only, so it still applies
+                    // to a real address and ignores null.
+                    type: ['string', 'null'],
                     description: 'Optional recipient pin. Omit (or null) for an open budget.',
                   },
                   budget_atomic: {

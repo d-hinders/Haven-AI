@@ -144,7 +144,7 @@ function balances(treasuryBefore = 1_000_000n, delegateBefore = 0n, treasuryAfte
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockGetAgent.mockResolvedValue({ ok: true, data: { safe_address: TREASURY, delegate_address: DELEGATE } })
+  mockGetAgent.mockResolvedValue({ ok: true, data: { account_address: TREASURY, delegate_address: DELEGATE } })
   mockCallTool.mockImplementation(async (tool: string) =>
     tool === 'haven_pay_mcp_tool' ? quote() : settled(),
   )
@@ -260,7 +260,7 @@ describe('the local signer is really consulted', () => {
   it('fails when the credentials do not belong together', async () => {
     mockGetAgent.mockResolvedValue({
       ok: true,
-      data: { safe_address: TREASURY, delegate_address: '0x' + '77'.repeat(20) },
+      data: { account_address: TREASURY, delegate_address: '0x' + '77'.repeat(20) },
     })
     const r = await x402HostedMcpSigner.run(ctx())
     expect(r.pass).toBe(false)

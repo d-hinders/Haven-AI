@@ -73,24 +73,19 @@ export const COMMANDS = [
 ] as const
 
 // ── Backend response shapes (subset the CLI needs) ──────────────────
-/**
- * A linked Haven account as `GET /user/accounts` lists it. `account_address`
- * is the #2907 twin of `safe_address`; a server from before that release
- * sends only the old name, so both are optional and read through
- * `accountAddressOf` — new first (#2908).
- */
-interface Safe { id: string; safe_address?: string; account_address?: string; chain_id: number; name: string; is_default: boolean }
-function accountAddressOf(s: { account_address?: string | null; safe_address?: string | null }): string {
-  return s.account_address ?? s.safe_address ?? ''
+/** A linked Haven account as `GET /user/accounts` lists it. */
+interface Safe { id: string; account_address?: string; chain_id: number; name: string; is_default: boolean }
+function accountAddressOf(s: { account_address?: string | null }): string {
+  return s.account_address ?? ''
 }
 interface Allowance { token_symbol: string; allowance_amount: string; reset_period_min: number }
 interface Agent { id: string; name: string; status: string; allowances?: Allowance[] }
 interface Balance { symbol: string; formatted: string; balance: string }
 interface Txn {
   hash: string; direction: 'in' | 'out'; valueFormatted: string; asset: string
-  source?: string; timestamp: number; safeName?: string
+  source?: string; timestamp: number; accountName?: string
   from?: string; to?: string; isError?: boolean
-  tokenSymbol?: string; tokenAddress?: string; chainId?: number; safeAddress?: string; accountAddress?: string
+  tokenSymbol?: string; tokenAddress?: string; chainId?: number; accountAddress?: string
   agentName?: string; paymentFlowStatus?: string | null; activityType?: string
 }
 interface CatalogEntry { name: string; category: string; rail: string; price_display?: string | null; status: string }
@@ -493,15 +488,46 @@ async function cmdWhoami(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
 
 // ── Wallets ─────────────────────────────────────────────────────────
 
+/**
+ * Read the `accounts` envelope off `GET /user/accounts`, failing LOUDLY when
+ * it is absent (#2914).
+ *
+ * The envelope key moved `safes` -> `accounts` in the naming contraction, and
+ * this file kept reading the old one. Five call sites destructured an
+ * `undefined` array and every wallets command died on
+ * `Cannot read properties of undefined (reading 'length')` — a stack trace
+ * blaming the CLI for a SERVER shape change, with nothing naming the real
+ * cause. Nothing caught it: `api.get<T>` is an unchecked generic over a
+ * hand-written interface, `@haven_ai/core` cannot be a dependency here
+ * (it is `private: true` and this package publishes), and every fixture in
+ * the suite encoded the old envelope, so the tests were green against a
+ * response shape the server had stopped sending.
+ *
+ * So the envelope is read through one function that says what went wrong.
+ * This is the same principle the rest of the slice applies to the server —
+ * a shape mismatch should be a typed refusal naming the cause, never a
+ * silent `undefined` that surfaces somewhere else.
+ */
+function accountsEnvelope(body: { accounts?: Safe[] }): Safe[] {
+  if (!Array.isArray(body.accounts)) {
+    throw new Error(
+      "GET /user/accounts did not return an `accounts` array. This CLI needs a Haven backend " +
+        'from the release that carries #2914 or later; an older server returns the retired ' +
+        '`safes` envelope. Upgrade the backend, or pin an older @haven_ai/cli.',
+    )
+  }
+  return body.accounts
+}
+
 async function cmdWalletsList(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const { api } = await authed(args, d)
-  const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
-  emit(d, args.flags.json, safes, () =>
-    safes.length === 0
+  const accounts = accountsEnvelope(await api.get<{ accounts?: Safe[] }>('/user/accounts'))
+  emit(d, args.flags.json, accounts, () =>
+    accounts.length === 0
       ? 'No Haven wallets yet.'
       : table(
           ['NAME', 'NETWORK', 'ADDRESS', 'DEFAULT'],
-          safes.map((s) => [s.name, chainName(s.chain_id), truncateAddress(accountAddressOf(s)), s.is_default ? '✓' : '']),
+          accounts.map((s) => [s.name, chainName(s.chain_id), truncateAddress(accountAddressOf(s)), s.is_default ? '✓' : '']),
         ),
   )
   return EXIT.ok
@@ -509,8 +535,8 @@ async function cmdWalletsList(args: ParsedArgs, d: ResolvedDeps): Promise<number
 
 async function cmdWalletsBalances(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const { api } = await authed(args, d)
-  const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
-  const safe = pickSafe(safes, args.flags.safe)
+  const accounts = accountsEnvelope(await api.get<{ accounts?: Safe[] }>('/user/accounts'))
+  const safe = pickSafe(accounts, args.flags.safe)
   if (!safe) {
     if (args.flags.safe) throw new UsageError(`No wallet matches "${args.flags.safe}".`)
     throw new CliApiError('No Haven wallet found.', 404)
@@ -518,9 +544,7 @@ async function cmdWalletsBalances(args: ParsedArgs, d: ResolvedDeps): Promise<nu
   const { balances } = await api.get<{ balances: Balance[] }>(
     `/balances/${accountAddressOf(safe)}?chain_id=${safe.chain_id}`,
   )
-  // #2908: `--json` carries both the account-vocabulary keys and the old ones
-  // for the window (no negotiation exists for stdout); `safe` goes at #2914.
-  emit(d, args.flags.json, { account: safe.name, safe: safe.name, chainId: safe.chain_id, balances }, () =>
+  emit(d, args.flags.json, { account: safe.name, chainId: safe.chain_id, balances }, () =>
     [
       `${safe.name} · ${chainName(safe.chain_id)} · ${truncateAddress(accountAddressOf(safe))}`,
       balances.length === 0
@@ -531,10 +555,10 @@ async function cmdWalletsBalances(args: ParsedArgs, d: ResolvedDeps): Promise<nu
   return EXIT.ok
 }
 
-function pickSafe(safes: Safe[], ref?: string): Safe | undefined {
-  if (!ref) return safes.find((s) => s.is_default) ?? safes[0]
+function pickSafe(accounts: Safe[], ref?: string): Safe | undefined {
+  if (!ref) return accounts.find((s) => s.is_default) ?? accounts[0]
   const lower = ref.toLowerCase()
-  return safes.find((s) => s.id === ref || accountAddressOf(s).toLowerCase() === lower)
+  return accounts.find((s) => s.id === ref || accountAddressOf(s).toLowerCase() === lower)
 }
 
 // ── Wallet funding (#2534) ──────────────────────────────────────────
@@ -559,8 +583,8 @@ function pickSafe(safes: Safe[], ref?: string): Safe | undefined {
  */
 async function cmdWalletsFunding(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const { api } = await authed(args, d)
-  const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
-  const safe = pickSafe(safes, args.flags.safe)
+  const accounts = accountsEnvelope(await api.get<{ accounts?: Safe[] }>('/user/accounts'))
+  const safe = pickSafe(accounts, args.flags.safe)
   if (!safe) {
     if (args.flags.safe) throw new UsageError(`No wallet matches "${args.flags.safe}".`)
     throw new CliApiError('No Haven wallet found.', 404)
@@ -791,8 +815,6 @@ async function cmdBudgetGrant(args: ParsedArgs, d: ResolvedDeps): Promise<number
   // budgets with, never a local table.
   const agent = await api.get<Agent & {
     account_type?: string | null
-    safe_address: string | null
-    safe_chain_id: number | null
     account_address?: string | null
     account_chain_id?: number | null
   }>(`/agents/${id}`)
@@ -802,9 +824,8 @@ async function cmdBudgetGrant(args: ParsedArgs, d: ResolvedDeps): Promise<number
       EXIT.refused,
     )
   }
-  // #2908: new names first, old kept for a pre-#2907 server.
-  const accountAddress = agent.account_address ?? agent.safe_address
-  const accountChainId = agent.account_chain_id ?? agent.safe_chain_id
+  const accountAddress = agent.account_address
+  const accountChainId = agent.account_chain_id
   if (!accountAddress || !accountChainId) {
     throw new HavenCliError(`Agent ${id} has no wallet assigned yet — connect it first.`, EXIT.refused)
   }
@@ -1011,8 +1032,7 @@ async function cmdWalletRename(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
   if (!id || !name) throw new UsageError('Usage: haven wallets rename <id> <name>')
   const { api } = await authed(args, d)
   await api.put(`/user/accounts/${id}`, { name })
-  // #2908: both id keys for the window; `safe_id` goes at #2914.
-  emit(d, args.flags.json, { ok: true, account_id: id, safe_id: id, name }, () => `Wallet ${id} renamed to "${name}".`)
+  emit(d, args.flags.json, { ok: true, account_id: id, name }, () => `Wallet ${id} renamed to "${name}".`)
   return EXIT.ok
 }
 
@@ -1023,26 +1043,22 @@ async function cmdWalletRename(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
  * mirroring `wallets balances`. Throws if `--safe` was given but matches no
  * wallet, so a typo'd filter fails loudly instead of silently returning all rows.
  */
-async function resolveSafeId(args: ParsedArgs, api: CliApi): Promise<string | undefined> {
+async function resolveAccountId(args: ParsedArgs, api: CliApi): Promise<string | undefined> {
   if (!args.flags.safe) return undefined
-  const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
-  const safe = pickSafe(safes, args.flags.safe)
+  const accounts = accountsEnvelope(await api.get<{ accounts?: Safe[] }>('/user/accounts'))
+  const safe = pickSafe(accounts, args.flags.safe)
   if (!safe) throw new UsageError(`No wallet matches "${args.flags.safe}".`)
   return safe.id
 }
 
 async function cmdActivityList(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const { api } = await authed(args, d)
-  const safeId = await resolveSafeId(args, api)
+  const accountId = await resolveAccountId(args, api)
   const params = new URLSearchParams({
     offset: String(args.flags.offset ?? 0),
     limit: String(args.flags.limit ?? 25),
   })
-  // #2908: `accountId` is the #2907 twin (it wins when both are given); the
-  // old key rides along for the window because an unknown query key is
-  // silently IGNORED — a filter the server does not recognise returns every
-  // row, so the old key is what keeps a pre-#2907 server filtering.
-  if (safeId) { params.set('accountId', safeId); params.set('safeId', safeId) }
+  if (accountId) params.set('accountId', accountId)
   if (args.flags.agent) params.set('agentId', args.flags.agent)
   const { transactions } = await api.get<{ transactions: Txn[] }>(`/transactions?${params.toString()}`)
   const visible = args.flags.direction
@@ -1058,7 +1074,7 @@ async function cmdActivityList(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
             t.direction === 'in' ? 'in' : 'out',
             `${t.direction === 'in' ? '+' : '-'}${t.valueFormatted} ${t.asset}`,
             t.source ?? 'transfer',
-            t.safeName ?? '',
+            t.accountName ?? '',
           ]),
         ),
   )
@@ -1068,16 +1084,12 @@ async function cmdActivityList(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
 async function cmdActivityExport(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   if (args.flags.format === 'sie') return exportSie(args, d)
   const { api } = await authed(args, d)
-  const safeId = await resolveSafeId(args, api)
+  const accountId = await resolveAccountId(args, api)
   const params = new URLSearchParams({
     offset: String(args.flags.offset ?? 0),
     limit: String(args.flags.limit ?? 1000),
   })
-  // #2908: `accountId` is the #2907 twin (it wins when both are given); the
-  // old key rides along for the window because an unknown query key is
-  // silently IGNORED — a filter the server does not recognise returns every
-  // row, so the old key is what keeps a pre-#2907 server filtering.
-  if (safeId) { params.set('accountId', safeId); params.set('safeId', safeId) }
+  if (accountId) params.set('accountId', accountId)
   if (args.flags.agent) params.set('agentId', args.flags.agent)
   const { transactions } = await api.get<{ transactions: Txn[] }>(`/transactions?${params.toString()}`)
   const visible = args.flags.direction
@@ -1086,12 +1098,9 @@ async function cmdActivityExport(args: ParsedArgs, d: ResolvedDeps): Promise<num
 
   // Same columns as the dashboard export (#411), minus counterparty_name
   // (no contacts join in the CLI yet).
-  // #2908: `account_address` is appended at the END (same value as
-  // `safe_address`) — the export contract is append-only, never reorder, so
-  // a consumer indexing by position keeps working; `safe_address` goes at #2914.
   const headers = [
     'date', 'type', 'status', 'direction', 'amount', 'token_symbol', 'token_address',
-    'counterparty_address', 'safe_address', 'agent_name', 'tx_hash', 'chain_id', 'account_address',
+    'counterparty_address', 'agent_name', 'tx_hash', 'chain_id', 'account_address',
   ]
   const rows = visible.map((t) => [
     new Date(t.timestamp * 1000).toISOString(),
@@ -1102,11 +1111,10 @@ async function cmdActivityExport(args: ParsedArgs, d: ResolvedDeps): Promise<num
     t.tokenSymbol ?? t.asset ?? '',
     t.tokenAddress ?? '',
     (t.direction === 'in' ? t.from : t.to) ?? '',
-    t.accountAddress ?? t.safeAddress ?? '',
     t.agentName ?? '',
     t.hash,
     t.chainId != null ? String(t.chainId) : '',
-    t.accountAddress ?? t.safeAddress ?? '',
+    t.accountAddress ?? '',
   ])
   d.o.text(toCsv(headers, rows), { format: 'csv', rows: rows.length })
   return EXIT.ok
@@ -1160,7 +1168,7 @@ async function cmdCatalogList(args: ParsedArgs, d: ResolvedDeps): Promise<number
  * Resolve the wallet this setup belongs to, and the token's decimals.
  *
  * The decimals are READ from the backend rather than kept in a table here.
- * `GET /balances/:safeAddress` lists every token the chain is configured for —
+ * `GET /balances/:accountAddress` lists every token the chain is configured for —
  * zero balance included — with its address and decimals, which is the same
  * registry the dashboard modal reads. A local table would be a second source
  * of truth for a number that decides a budget's magnitude, and it would drift
@@ -1170,14 +1178,14 @@ async function resolveWalletAndToken(
   args: ParsedArgs,
   api: CliApi,
   symbol: string,
-): Promise<{ safeId: string; token: BalanceToken }> {
-  const { safes } = await api.get<{ safes: Safe[] }>('/user/accounts')
-  if (safes.length === 0) {
+): Promise<{ accountId: string; token: BalanceToken }> {
+  const accounts = accountsEnvelope(await api.get<{ accounts?: Safe[] }>('/user/accounts'))
+  if (accounts.length === 0) {
     throw new HavenCliError('No wallet on this account yet — finish onboarding first.', EXIT.refused)
   }
   const safe = args.flags.safe
-    ? safes.find((s) => s.id === args.flags.safe || accountAddressOf(s) === args.flags.safe)
-    : (safes.find((s) => s.is_default) ?? safes[0])
+    ? accounts.find((s) => s.id === args.flags.safe || accountAddressOf(s) === args.flags.safe)
+    : (accounts.find((s) => s.is_default) ?? accounts[0])
   if (!safe) throw new UsageError(`No wallet matches --safe ${args.flags.safe}`)
 
   // `chain_id` is REQUIRED here, not decorative. The same account address is
@@ -1196,7 +1204,7 @@ async function resolveWalletAndToken(
     const known = balances.map((b) => b.symbol).join(', ')
     throw new UsageError(`Unknown token ${symbol} on this wallet's chain. Available: ${known || 'none'}`)
   }
-  return { safeId: safe.id, token }
+  return { accountId: safe.id, token }
 }
 
 /** Poll a setup until it leaves the states that are still in flight. */
@@ -1255,17 +1263,13 @@ async function cmdAgentsConnect(args: ParsedArgs, d: ResolvedDeps): Promise<numb
     throw new UsageError('--budget, --token and --period are required (period is whole minutes; 0 means one-time)')
   }
 
-  const { safeId, token } = await resolveWalletAndToken(args, api, args.flags.token)
+  const { accountId, token } = await resolveWalletAndToken(args, api, args.flags.token)
   const amount = parseTokenAmount(args.flags.budget, token.decimals, token.symbol)
   if (!amount.ok) throw new UsageError(amount.message)
 
   const setup = await api.post<CreateSetupResponse>('/agent-connection-setups', {
     name,
-    // #2908: both id keys for the window — `account_id` is the #2907 twin
-    // (landing in P0's second round), `safe_id` is what a server without it
-    // reads; the request works against either.
-    account_id: safeId,
-    safe_id: safeId,
+    account_id: accountId,
     allowances: [
       {
         token_address: token.address ?? '0x0000000000000000000000000000000000000000',

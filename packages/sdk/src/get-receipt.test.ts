@@ -13,7 +13,7 @@ function receipt(signature: string | null): PaymentReceipt {
     paymentId: 'pi1',
     payment: {
       token: 'USDC', tokenAddress: '0xtok', amount: '1', amountSek: '10.60',
-      recipient: '0xmerchant', safe: '0xsafe', chainId: 8453,
+      recipient: '0xmerchant', account: '0xsafe', chainId: 8453,
       settledAt: '2026-06-20T10:00:00.000Z', resourceUrl: 'https://api.example/r',
     },
     authorization: { delegate: DELEGATE.address, signHash: SIGN_HASH, signature },

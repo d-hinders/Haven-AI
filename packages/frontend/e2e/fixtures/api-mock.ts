@@ -2,7 +2,6 @@ import { vi } from 'vitest'
 import type { ApiOperations, ApiSchema } from '@haven_ai/core'
 import {
   testUser,
-  testSafe,
   testAgent,
   dashboardOverview,
   accountingProviders,
@@ -84,13 +83,10 @@ import {
  * at the point of completion; the naming epic's contraction (#2914) removes
  * the twins from the schema and these completions with them:
  *
- * - `testAgent` (`Agent`): missing `safe_chain_id` (required, deprecated twin
- *   of the account's chain id) — completed with `testSafe.chain_id`.
- * - `dashboardOverview.agents[]` (`DashboardAgentPreview`): missing `safeId`
- *   (required, deprecated twin of `accountId`) — completed with `accountId`.
- * - `dashboardOverview.transactions[]` (`Transaction`): missing `safeId` /
- *   `safeAddress` (required, deprecated twins of `accountId` /
- *   `accountAddress`) — completed with those same values.
+ * #2914 removed the deprecated Safe-named twins (`safe_chain_id`, `safeId`,
+ * `safeAddress`, …) from the schema entirely, so the completions that used to
+ * live here are gone too — `haven-api.ts`'s fixtures carry the canonical
+ * `account_*` / `account*` fields directly now.
  * Enum-typed fields (`Agent.status`, `Transaction.type`/`direction`, the
  * accounting `authKind`/`availability`/`status`, the feed's
  * `entitlementMode` and sync `status`) carry `as const` in `haven-api.ts` so
@@ -130,25 +126,16 @@ type AccountingProviderRow = ListProvidersResponse['providers'][number]
 
 const AGENT_DEFAULT = {
   ...testAgent,
-  // TODO(#3027): `testAgent` in haven-api.ts carries no `safe_chain_id`.
-  safe_chain_id: testSafe.chain_id,
 } satisfies Agent
 
 const AGENTS_DEFAULT = { agents: [AGENT_DEFAULT] } satisfies { agents: Agent[] }
 
 const DASHBOARD_AGENT_DEFAULT = {
   ...dashboardOverview.agents[0]!,
-  // TODO(#3027): `dashboardOverview.agents[]` in haven-api.ts carries no
-  // `safeId`.
-  safeId: dashboardOverview.agents[0]!.accountId,
 } satisfies DashboardAgentPreview
 
 const DASHBOARD_TRANSACTION_DEFAULT = {
   ...dashboardOverview.transactions[0]!,
-  // TODO(#3027): `dashboardTransaction` in haven-api.ts carries no `safeId` /
-  // `safeAddress`.
-  safeId: dashboardOverview.transactions[0]!.accountId,
-  safeAddress: dashboardOverview.transactions[0]!.accountAddress,
 } satisfies DashboardTransaction
 
 const DASHBOARD_OVERVIEW_DEFAULT = {

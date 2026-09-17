@@ -72,7 +72,7 @@ describe('Auth routes', () => {
       expect(body.user.id).toBe(USER_UUID)
       expect(body.user.name).toBe('Ada Lovelace')
       expect(body.user.email).toBe('test@example.com')
-      expect(body.user.safes).toEqual([])
+      expect(body.user.accounts).toEqual([])
       expectMatchesSpec('POST', '/auth/signup', body, '201')
     })
 
@@ -225,7 +225,7 @@ describe('Auth routes', () => {
       expect(body.user.name).toBe('Ada Lovelace')
       expect(body.user.email).toBe('test@example.com')
       expect(body.user.wallet_address).toBe('0x1234567890abcdef1234567890abcdef12345678')
-      expect(body.user.safes).toEqual([])
+      expect(body.user.accounts).toEqual([])
       // password_hash should NOT be in the response
       expect(body.user.password_hash).toBeUndefined()
       expectMatchesSpec('POST', '/auth/login', body)
@@ -345,18 +345,16 @@ describe('Auth routes', () => {
       expect(body.id).toBe(USER_UUID)
       expect(body.name).toBe('Ada Lovelace')
       expect(body.email).toBe('test@example.com')
-      expect(body.safes).toEqual([])
+      expect(body.accounts).toEqual([])
       expectMatchesSpec('GET', '/auth/me', body)
     })
 
-    // #2907 (naming P0 finding #2): the session user dual-emits
-    // `account_address` alongside `safe_address` ON THE WIRE, and each entry
-    // in `safes` carries its own `account_address` twin too. Removing
-    // `withSessionAccountAddressAlias(...)` (or the `.map(withAccountAddressAlias)`
-    // on the safes list) from this route leaves `wire-aliases.test.ts` green
-    // (it never calls the route) — this is the request-level check that
-    // catches it.
-    it('#2907: dual-emits account_address at the top level and per-safe', async () => {
+    // #2914 (naming epic #2906 phase 5, the contraction): the twin `#2907`
+    // dual-emitted is gone. The session user carries `account_address` and
+    // `accounts` ONLY — no `safe_address`, no `safes` envelope key, and no
+    // `safe_address` twin on each entry. A request-level check, not just the
+    // mapper's own unit test.
+    it('#2914: account_address and accounts are the only names, top level and per-account', async () => {
       const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
       const SAFE_ADDRESS = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
@@ -401,10 +399,12 @@ describe('Auth routes', () => {
 
       expect(response.statusCode).toBe(200)
       const body = response.json()
-      expect(body.safe_address).toBe(body.account_address)
+      expect(body.safe_address).toBeUndefined()
+      expect(body.safes).toBeUndefined()
       expect(body.account_address).toBe(SAFE_ADDRESS)
-      expect(body.safes).toHaveLength(1)
-      expect(body.safes[0].safe_address).toBe(body.safes[0].account_address)
+      expect(body.accounts).toHaveLength(1)
+      expect(body.accounts[0].safe_address).toBeUndefined()
+      expect(body.accounts[0].account_address).toBe(SAFE_ADDRESS)
     })
 
     it('returns 401 without token', async () => {

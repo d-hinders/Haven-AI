@@ -146,7 +146,7 @@ export default function TransactionDetailPanel({
       open={open}
       onClose={onClose}
       title={transactionTitle(tx)}
-      subtitle={`${tx.safeName} · ${new Date(tx.timestamp * 1000).toLocaleString()}`}
+      subtitle={`${tx.accountName} · ${new Date(tx.timestamp * 1000).toLocaleString()}`}
     >
       <div className="mb-5 flex items-center justify-between gap-3">
         <Amount
@@ -232,7 +232,7 @@ export default function TransactionDetailPanel({
       <Section title="On-chain">
         <DetailRow label="Token" value={tx.tokenSymbol ?? tx.asset} />
         {tx.tokenAddress ? <DetailRow label="Token address" value={addr(tx.tokenAddress)} /> : null}
-        <DetailRow label="Account" value={addr(tx.accountAddress ?? tx.safeAddress)} />
+        <DetailRow label="Account" value={addr(tx.accountAddress)} />
         <DetailRow label="Network" value={`Chain ${tx.chainId}`} />
         <DetailRow label="Transaction" value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.hash} />} />
         <DetailRow label="Date" value={new Date(tx.timestamp * 1000).toLocaleString()} />

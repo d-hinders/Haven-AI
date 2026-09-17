@@ -43,8 +43,8 @@ describe('useContactChains', () => {
     mockUseAuth.mockReturnValue({
       user: {
         accounts: [
-          { id: 's1', safe_address: SAFE_BASE, chain_id: 8453 },
-          { id: 's2', safe_address: SAFE_GNOSIS, chain_id: 100 },
+          { id: 's1', account_address: SAFE_BASE, chain_id: 8453 },
+          { id: 's2', account_address: SAFE_GNOSIS, chain_id: 100 },
         ],
       },
     })

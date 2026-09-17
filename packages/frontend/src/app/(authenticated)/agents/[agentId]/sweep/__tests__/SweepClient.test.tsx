@@ -31,7 +31,7 @@ import SweepClient from '../SweepClient'
 function balance(usdc: string, usdcAtomic: string): DelegateBalance {
   return {
     delegate_address: '0x2222222222222222222222222222222222222222',
-    safe_address: '0x1111111111111111111111111111111111111111',
+    account_address: '0x1111111111111111111111111111111111111111',
     chain_id: 8453,
     eth: '0',
     eth_atomic: '0',

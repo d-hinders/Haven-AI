@@ -16,7 +16,6 @@ const AGENT: HavenAgent = {
   name: 'Sweep agent',
   status: 'active',
   accountAddress: '0xsafe',
-  safeAddress: '0xsafe',
   delegateAddress: '0xdelegate',
   chainId: 8453,
   executionRail: 'legacy',
@@ -60,9 +59,9 @@ describe('DelegateSweepApi', () => {
       expect.any(Array),
       wallet,
     )
-    expect(contract.transfer).toHaveBeenCalledWith(AGENT.safeAddress, 1_500_000n)
+    expect(contract.transfer).toHaveBeenCalledWith(AGENT.accountAddress, 1_500_000n)
     expect(wallet.sendTransaction).toHaveBeenCalledWith({
-      to: AGENT.safeAddress,
+      to: AGENT.accountAddress,
       value: 1_000_000_000_000_000_000n - reserved,
     })
     // Confirmations AND a deadline (#1756) — `wait(1)` alone was unbounded.
@@ -70,7 +69,7 @@ describe('DelegateSweepApi', () => {
     expect(ethTx.wait).toHaveBeenCalledWith(1, DEFAULT_CONFIRMATION_TIMEOUT_MS)
     expect(result).toMatchObject({
       fromAddress: AGENT.delegateAddress,
-      toAddress: AGENT.safeAddress,
+      toAddress: AGENT.accountAddress,
       unconfirmed: false,
       transfers: [
         { asset: 'USDC', amountAtomic: '1500000', txHash: '0xusdc-receipt', confirmation: 'confirmed' },
@@ -94,7 +93,7 @@ describe('DelegateSweepApi', () => {
     }).sweepDelegate()
 
     expect(createErc20Contract).not.toHaveBeenCalled()
-    expect(wallet.sendTransaction).toHaveBeenCalledWith({ to: AGENT.safeAddress, value: 958_000n })
+    expect(wallet.sendTransaction).toHaveBeenCalledWith({ to: AGENT.accountAddress, value: 958_000n })
     // This leg's `wait` resolves null, which is `unconfirmed` since #1756 —
     // stated here so the case is asserted rather than absorbed by a loose
     // `objectContaining`.

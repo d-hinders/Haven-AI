@@ -19,11 +19,11 @@ import { enrichTransactionsWithAccounting } from './accounting.js'
 import { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
 import type { EnrichedTransaction, ParsedTokenFilter, Transaction, SmartAccountRow } from './types.js'
 
-// ── GET / (paginated, filterable feed across every owned Safe) ─────────────
+// ── GET / (paginated, filterable feed across every owned account) ─────────────
 
 export interface AggregateAccountTransactionsResult {
   merged: EnrichedTransaction[]
-  failedSafeIds: string[]
+  failedAccountIds: string[]
   /**
    * Any account's history came back cut off at the explorer window (#2882).
    * Aggregated with OR: one capped account makes the whole feed incomplete,
@@ -41,19 +41,19 @@ export interface AggregateAccountTransactionsResult {
   truncated: boolean
 }
 
-/** Fans `fetchAccountTransactions` out across every Safe, tagging each transaction with its Safe. */
+/** Fans `fetchAccountTransactions` out across every account, tagging each transaction with its account. */
 export async function aggregateAccountTransactions(
   safes: SmartAccountRow[],
   log: FastifyBaseLogger,
   fresh: boolean,
 ): Promise<AggregateAccountTransactionsResult> {
   const merged: EnrichedTransaction[] = []
-  const failedSafeIds: string[] = []
+  const failedAccountIds: string[] = []
   let truncated = false
 
   for (const safe of safes) {
     try {
-      const { transactions, hadFailures, truncated: safeTruncated } = await fetchAccountTransactions({
+      const { transactions, hadFailures, truncated: accountTruncated } = await fetchAccountTransactions({
         accountId: safe.id,
         accountAddress: safe.account_address,
         chainId: safe.chain_id,
@@ -62,10 +62,10 @@ export async function aggregateAccountTransactions(
       })
 
       if (hadFailures) {
-        failedSafeIds.push(safe.id)
+        failedAccountIds.push(safe.id)
       }
 
-      if (safeTruncated) {
+      if (accountTruncated) {
         truncated = true
       }
 
@@ -73,21 +73,21 @@ export async function aggregateAccountTransactions(
         merged.push({
           ...tx,
           chainId: safe.chain_id,
-          safeId: safe.id,
-          safeAddress: safe.account_address,
-          safeName: safe.name,
+          accountId: safe.id,
+          accountAddress: safe.account_address,
+          accountName: safe.name,
         })
       }
     } catch (err) {
-      failedSafeIds.push(safe.id)
+      failedAccountIds.push(safe.id)
       log.warn(
         { err, accountId: safe.id, accountAddress: safe.account_address, chainId: safe.chain_id },
-        'Safe transaction aggregation failed',
+        'Account transaction aggregation failed',
       )
     }
   }
 
-  return { merged, failedSafeIds, truncated }
+  return { merged, failedAccountIds, truncated }
 }
 
 /** x402-merge, sort, dedupe, and agent-enrich the full merged feed (pre-filter, pre-paginate). */
@@ -170,7 +170,7 @@ export function paginateByOffset<T>(items: T[], offset: number, limit: number): 
   return { page, hasMore: items.length > offset + page.length }
 }
 
-// ── GET /:safeAddress (legacy single-Safe, page/limit pagination) ──────────
+// ── GET /:accountAddress (single-account, page/limit pagination) ───────────
 
 export interface AccountTransactionsPageParams {
   userId: string
@@ -184,13 +184,13 @@ export interface AccountTransactionsPageParams {
 }
 
 export interface AccountTransactionsPage {
-  /** Still carries `chainId`/`safeId`/`safeAddress`/`safeName`/`agentId` — the route strips those for serialization. */
+  /** Still carries `chainId`/`accountId`/`accountAddress`/`accountName`/`agentId` — the route strips those for serialization. */
   transactions: EnrichedTransaction[]
   total: number
 }
 
 /**
- * The `/:safeAddress` pipeline: fetch, x402-merge, sort (NOT deduped — matches
+ * The `/:accountAddress` pipeline: fetch, x402-merge, sort (NOT deduped — matches
  * the pre-#992 route, which only dedupes on the multi-Safe `GET /` feed),
  * paginate, then enrich only the paginated page (enrichment runs after
  * pagination here, unlike `mergeSortDedupeAndEnrich`, to avoid attributing
@@ -208,7 +208,7 @@ export async function buildAccountTransactionsPage(
     fresh,
   })
 
-  const userSafe: SmartAccountRow = {
+  const ownedAccount: SmartAccountRow = {
     id: accountId,
     account_address: accountAddress,
     chain_id: chainId,
@@ -216,13 +216,13 @@ export async function buildAccountTransactionsPage(
   }
   const enrichedAllTransactions = await mergeX402Transactions(
     userId,
-    [userSafe],
+    [ownedAccount],
     allTransactions.map((tx) => ({
       ...tx,
       chainId,
-      safeId: accountId,
-      safeAddress: accountAddress,
-      safeName: '',
+      accountId,
+      accountAddress,
+      accountName: '',
     })),
   )
 

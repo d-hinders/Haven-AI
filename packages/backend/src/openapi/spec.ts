@@ -24,26 +24,17 @@ const tokenSymbol = {
 } as const
 
 /**
- * #2907 (naming epic #2906, phase 0). Every Safe-named path, operationId,
- * schema and property gains an `account` twin; the old name is kept for
- * exactly one release as a documented deprecated alias — the #1598 precedent
- * (`readiness` -> `spend_authority_readiness`, same value). One sentence,
- * reused verbatim everywhere so `grep -c "removed in" spec.ts` counts every
- * site: the alias is removed one release after #2908 (the SDK/CLI/MCP
- * consumer slice) ships.
+ * #2914 (naming epic #2906, phase 5 — the CONTRACTION). #2907 gave every
+ * Safe-named path, operationId, schema and property an `account` twin and
+ * kept the old name for exactly one release as a documented deprecated alias.
+ * That release (`0.2.0-alpha.0`) reached `main` on 2026-09-14 and a further
+ * promotion landed 2026-09-16, so the aliases are gone: one name per path,
+ * operation, schema and field.
+ *
+ * `deprecatedSafeAlias` and its 41 call sites went with them. What remains of
+ * the old vocabulary in this file is the `/user/safes*` tombstone block, which
+ * documents the 410 rather than a value.
  */
-const deprecatedSafeAlias = (newName: string): string =>
-  `Deprecated — same value as \`${newName}\`; removed in the release after #2908.`
-
-/**
- * #2907: the account-vocabulary twin of `AgentPaymentNextAction.FundSafeOrRaiseAllowance`.
- * Declared here rather than in `domain/agent-payment-taxonomy.ts` — that file
- * is a strict cross-package mirror pinned key-for-key against `@haven_ai/sdk`
- * (`agent-payment-taxonomy.parity.test.ts`), and the SDK enum is P1's (#2908)
- * surface to change, not P0's. Splicing the new value into the served enum
- * here is additive and does not touch the mirror.
- */
-const FUND_ACCOUNT_OR_RAISE_ALLOWANCE = 'fund_account_or_raise_allowance'
 
 /**
  * Shared between `TransactionBase` and `Transaction` (#2885). The two used to
@@ -53,7 +44,7 @@ const FUND_ACCOUNT_OR_RAISE_ALLOWANCE = 'fund_account_or_raise_allowance'
  * inline `allOf` members open, but every component schema is registered
  * ALREADY closed (`ajv.addSchema(closeObjects(definition))`), so the `$ref`'d
  * `TransactionBase` rejected the four fields its sibling declared —
- * `chainId`/`safeId`/`safeAddress`/`safeName` — on every feed row. The
+ * `chainId`/`accountId`/`accountAddress`/`accountName` — on every feed row. The
  * composed schema could not be asserted at all: a correct payload was a
  * "must NOT have additional properties" failure, which is why the feed route
  * carried no `expectMatchesSpec` and why `fxRateSek`/`fxSource` (#2871) could
@@ -463,7 +454,7 @@ const passportReceipt = {
               type: 'string',
               enum: ['delegation', 'allowance_module', 'session_key'],
               description:
-                "The account's execution rail, verbatim from user_safes. Only 'delegation' is live; " +
+                "The account's execution rail, verbatim from smart_accounts. Only 'delegation' is live; " +
                 "'allowance_module' (#1440) and 'session_key' (#834) are retired and cannot transact. " +
                 'This field named a shorter, non-existent rail value until #2110 — one the column CHECK ' +
                 'has never permitted.',
@@ -493,20 +484,18 @@ const passportReceipt = {
 } as const
 
 
-// ── Safe (account) management building blocks (#1446, twinned #2907) ────────
+// ── Account management building blocks (#1446) ──────────────────────────────
 
 /**
- * Shared by `userSafe` (deprecated) and `account` (#2907 twin) — one flat
- * properties object, not an `allOf` $ref (#2885/#2888: `closeObjects` leaves
- * an inlined `allOf` member open, which false-fails `additionalProperties:
- * false` on a component registered CLOSED). Both field names are always
- * declared on both schemas because the one mapper behind both routes
- * dual-emits every field — see `infra/repositories/user-safes.ts`'s account
+ * The linked-account properties — one flat properties object, not an `allOf`
+ * $ref (#2885/#2888: `closeObjects` leaves an inlined `allOf` member open,
+ * which false-fails `additionalProperties: false` on a component registered
+ * CLOSED). #2914 removed the deprecated alias sibling that shared it —
+ * see `infra/repositories/smart-accounts.ts`'s account
  * alias mapper, equality-tested old === new.
  */
-const accountAliasProperties = {
+const accountProperties = {
   id: { type: 'string', format: 'uuid' },
-  safe_address: { ...address, deprecated: true, description: deprecatedSafeAlias('account_address') },
   account_address: address,
   chain_id: { type: 'integer' },
   name: { type: 'string', description: "Display label; defaults to 'My account' when none is given." },
@@ -514,20 +503,11 @@ const accountAliasProperties = {
   created_at: { type: 'string', format: 'date-time' },
 } as const
 
-/** A linked Safe as every write and the list route return it. DEPRECATED name — identical wire object to `account` (#2907). */
-const userSafe = {
-  type: 'object',
-  deprecated: true,
-  description: deprecatedSafeAlias('account'),
-  required: ['id', 'safe_address', 'chain_id', 'name', 'is_default', 'created_at'],
-  properties: { ...accountAliasProperties },
-} as const
-
-/** #2907 twin of `userSafe` — the account-vocabulary shape every `/user/accounts…` write and the list route return. Identical wire object to `userSafe`. */
+/** A linked account as every `/user/accounts…` write and the list route return it. The deprecated alias schema went with #2914. */
 const account = {
   type: 'object',
   required: ['id', 'account_address', 'chain_id', 'name', 'is_default', 'created_at'],
-  properties: { ...accountAliasProperties },
+  properties: { ...accountProperties },
 } as const
 
 
@@ -536,13 +516,12 @@ const account = {
 /** The FULL profile row — what the profile write returns. */
 const userProfile = {
   type: 'object',
-  required: ['id', 'name', 'email', 'wallet_address', 'safe_address', 'currency_preference', 'created_at'],
+  required: ['id', 'name', 'email', 'wallet_address', 'account_address', 'currency_preference', 'created_at'],
   properties: {
     id: { type: 'string', format: 'uuid' },
     name: { type: ['string', 'null'] },
     email: { type: 'string' },
     wallet_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
-    safe_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', deprecated: true, description: deprecatedSafeAlias('account_address') },
     account_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
     currency_preference: { type: ['string', 'null'] },
     created_at: { type: 'string', format: 'date-time' },
@@ -556,13 +535,12 @@ const userProfile = {
  */
 const userIdentity = {
   type: 'object',
-  required: ['id', 'name', 'email', 'wallet_address', 'safe_address'],
+  required: ['id', 'name', 'email', 'wallet_address', 'account_address'],
   properties: {
     id: { type: 'string', format: 'uuid' },
     name: { type: ['string', 'null'] },
     email: { type: 'string' },
     wallet_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
-    safe_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$', deprecated: true, description: deprecatedSafeAlias('account_address') },
     account_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
   },
 } as const
@@ -734,13 +712,9 @@ const invoiceVerification = {
 
 // ── Session building blocks (#1446) ──────────────────────────────────────────
 
-/**
- * Shared by `sessionSafe` (deprecated) and `sessionAccount` (#2907 twin) —
- * same flat-duplicate rationale as `accountAliasProperties` above.
- */
-const sessionAccountAliasProperties = {
+/** The session projection's properties — same flat-duplicate rationale as `accountProperties` above. */
+const sessionAccountProperties = {
   id: { type: 'string', format: 'uuid' },
-  safe_address: { ...address, deprecated: true, description: deprecatedSafeAlias('account_address') },
   account_address: address,
   chain_id: { type: 'integer' },
   name: { type: 'string' },
@@ -756,56 +730,31 @@ const sessionAccountAliasProperties = {
 } as const
 
 /**
- * A Safe as the session payloads carry it. sessionAccountPayload STRIPS
+ * An account as the session payloads carry it. `sessionAccountPayload` STRIPS
  * owner_address and passkey_count — the raw signer inputs — and replaces them
- * with the two derived answers the UI actually needs. DEPRECATED name —
- * identical wire object to `sessionAccount` (#2907).
+ * with the two derived answers the UI actually needs. The deprecated alias
+ * schema went with #2914.
  */
-const sessionSafe = {
-  type: 'object',
-  deprecated: true,
-  description: deprecatedSafeAlias('sessionAccount'),
-  required: [
-    'id', 'safe_address', 'chain_id', 'name', 'is_default', 'created_at',
-    'account_type', 'value_bearing_chain', 'needs_backup_recommendation',
-  ],
-  properties: { ...sessionAccountAliasProperties },
-} as const
-
-/** #2907 twin of `sessionSafe` — identical wire object. */
 const sessionAccount = {
   type: 'object',
   required: [
     'id', 'account_address', 'chain_id', 'name', 'is_default', 'created_at',
     'account_type', 'value_bearing_chain', 'needs_backup_recommendation',
   ],
-  properties: { ...sessionAccountAliasProperties },
+  properties: { ...sessionAccountProperties },
 } as const
 
 /** The user object every session response carries. */
 const sessionUser = {
   type: 'object',
-  // #2907: `account_address` is declared in `properties` below (always
-  // emitted, dual-emit tested) but deliberately NOT added to `required` —
-  // generated TS consumers (`packages/core/src/api-types.ts`) mark a
-  // required field non-optional, and widening this list ripples into every
-  // literal object typed against the generated shape repo-wide (frontend
-  // fixtures, hooks, components) — a much wider blast radius than this
-  // additive spec slice owns. The mapper equality test is the enforcement.
-  required: ['id', 'name', 'email', 'wallet_address', 'safe_address', 'currency_preference', 'safes'],
+  required: ['id', 'name', 'email', 'wallet_address', 'account_address', 'currency_preference', 'accounts'],
   properties: {
     id: { type: 'string', format: 'uuid' },
     name: { type: ['string', 'null'] },
     email: { type: 'string' },
     wallet_address: { type: ['string', 'null'] },
-    safe_address: { type: ['string', 'null'], deprecated: true, description: deprecatedSafeAlias('account_address') },
     account_address: { type: ['string', 'null'] },
     currency_preference: { type: 'string' },
-    safes: { type: 'array', items: sessionSafe },
-    // #2907: `accounts` twins `safes`, same array; items use the
-    // account-vocabulary `sessionAccount` shape (identical wire object to
-    // `sessionSafe`) so `sessionAccount` — otherwise defined and never
-    // referenced — reaches `packages/core/src/api-types.ts`.
     accounts: { type: 'array', items: sessionAccount },
   },
 } as const
@@ -840,9 +789,6 @@ const activityPayment = {
     x402_merchant_address: { type: ['string', 'null'] },
     chain_id: { type: ['integer', 'null'] },
     token_address: { type: ['string', 'null'] },
-    safe_id: { type: ['string', 'null'], deprecated: true, description: deprecatedSafeAlias('account_id') },
-    safe_address: { type: ['string', 'null'], deprecated: true, description: deprecatedSafeAlias('account_address') },
-    safe_name: { type: ['string', 'null'], deprecated: true, description: deprecatedSafeAlias('account_name') },
     account_id: { type: ['string', 'null'] },
     account_address: { type: ['string', 'null'] },
     account_name: { type: ['string', 'null'] },
@@ -997,17 +943,11 @@ const paymentSignData = {
       required: ['token', 'to', 'amount'],
       properties: {
         account: { ...address, description: 'The delegator account the UserOperation runs on.' },
-        safe: {
-          ...address,
-          deprecated: true,
-          description:
-            'Present on the x402 funding shape only. ' + deprecatedSafeAlias('payer_account'),
-        },
-        // #2907: NOT a rename into `account` above — `account` already means
-        // the *delegate* account address on this funding shape, a different
-        // address (owner review on #2906: renaming into it would make the
-        // SDK's receipt-payer read, `x402-funding-leg.ts:312`, resolve to the
-        // wrong address). `payer_account` is a same-value twin of `safe`.
+        // #2914: `payer_account` replaced the deprecated `safe` key here. It
+        // is deliberately NOT `account` above — `account` already means the
+        // *delegate* account address on this funding shape, a different
+        // address (owner review on #2906: merging the two would make the
+        // SDK's receipt-payer read resolve to the wrong address).
         payer_account: { ...address, description: 'Present on the x402 funding shape only. Same value as the deprecated `safe`.' },
         token: address,
         to: address,
@@ -2695,84 +2635,157 @@ export const openapiSpec = {
         },
       },
     },
-    // ── Safe (account) management (#1446) ───────────────────────────────────
-    // CUSTODY BOUNDARY: Haven labels a linked Safe and nothing more. It never
-    // signed an owner change and, since #1988, no longer constructs one
+    // ── Account management (#1446) ──────────────────────────────────────────
+    // CUSTODY BOUNDARY: Haven labels a linked account and nothing more. It
+    // never signed an owner change and, since #1988, no longer constructs one
     // either. Membership truth was always on-chain (getOwners()). A user who
-    // deletes a Safe from Haven still owns it on-chain, and manages its owners
-    // with their own key wherever they like — which is the property that makes
-    // removing Haven's owner-change builder a narrowing rather than a loss.
+    // deletes an account from Haven still owns it on-chain, and manages its
+    // owners with their own key wherever they like — which is the property
+    // that makes removing Haven's owner-change builder a narrowing rather than
+    // a loss.
     //
     // RETIRED SURFACE (#1440, owner decision 2026-08-14: the Safe rail goes
     // away entirely). Four plain-CRUD operations survive — list, rename,
-    // set-default, unlink — because `user_safes` is shared with the delegation
-    // rail. `deploy` and the import POST are TOMBSTONES: registered, answering
-    // 410, with no implementation behind them since #1988. Every approver
-    // route is deleted outright. Documented anyway, deliberately: the spec
-    // describes the API that exists TODAY, and a 410 a client can still reach
-    // is part of that API.
+    // set-default, unlink — because `smart_accounts` is shared with the
+    // delegation rail. `deploy` and the import POST are TOMBSTONES:
+    // registered, answering 410, with no implementation behind them since
+    // #1988. Every approver route is deleted outright. Documented anyway,
+    // deliberately: the spec describes the API that exists TODAY, and a 410 a
+    // client can still reach is part of that API.
+    //
+    // #2914 (naming P5, the contraction): the `/user/safes*` paths and
+    // `PUT /user/safe` are RETIRED and documented in the tombstone block
+    // below. They are not deleted from this file, because a path that answers
+    // 410 is part of the API a client can still reach — the same reason the
+    // rail tombstones above are documented.
+    // ── RETIRED Safe-vocabulary paths (#2914, naming epic #2906 phase 5) ─────
+    //
+    // #2907 served these and their `/user/accounts…` twins from ONE handler
+    // module for exactly one release. That window is spent, so they answer
+    // 410 with the replacement path instead of serving.
+    //
+    // Documented rather than deleted, for the same reason they are 410 rather
+    // than dropped registrations: a path a client can still reach is part of
+    // the API, and a bare 404 reads as a transient routing error that invites
+    // a retry loop against a path that is never coming back (#834, #1328).
+    // The path parameter is written `{id}` here because the retired mounts no
+    // longer name it — nothing reads it before the refusal.
     '/user/safes': {
       get: {
         tags: ['Dashboard'],
         operationId: 'listUserSafes',
         deprecated: true,
-        summary: "List the Safes linked to the caller's account, oldest first.",
-        description: deprecatedSafeAlias('listUserAccounts') + ' Twin path: GET /user/accounts.',
+        summary: 'RETIRED (#2914) — always answers 410.',
+        description:
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `GET /user/accounts`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
         security: [{ DashboardJwt: [] }],
         responses: {
-          '200': {
-            description: 'Linked Safes ordered by created_at ASC.',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['safes'],
-                  properties: {
-                    safes: { type: 'array', items: userSafe },
-                    // #2907: `accounts` twins `safes`, same array, same items.
-                    accounts: { type: 'array', items: userSafe },
-                  },
-                },
-              },
-            },
-          },
           '401': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The body names `GET /user/accounts`.' },
         },
       },
       post: {
         tags: ['Dashboard'],
         operationId: 'addUserSafe',
         deprecated: true,
-        summary: 'RETIRED — always answers 410. Importing a Safe is closed.',
+        summary: 'RETIRED (#2914) — always answers 410.',
         description:
-          '**RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** The Safe rail is being retired outright, and importing is one of the four ways a Safe could enter Haven; all four are closed. The refusal is a route preHandler, so it precedes every read and write. The route is kept as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries (the #834 session-rail / #1328 mpp_demo pattern); the route itself goes in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Existing linked Safes are unaffected: GET /user/safes, rename, re-default, unlink and every read path behave exactly as before. Historically this was registration only — it moved nothing on-chain and granted Haven no authority over the Safe. ' +
-          deprecatedSafeAlias('addUserAccount') + ' Twin path: POST /user/accounts.',
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `POST /user/accounts`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
         security: [{ DashboardJwt: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['safe_address'],
-                properties: {
-                  safe_address: address,
-                  chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base); must be a supported chain.' },
-                  name: { type: 'string', description: "Trimmed; blank or absent becomes 'My account'." },
-                },
-              },
-            },
-          },
-        },
         responses: {
           '401': errorResponse,
-          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
+          '410': { ...errorResponse, description: 'Always. The body names `POST /user/accounts`.' },
         },
       },
     },
-    // #2907 (naming P0): additive twin of '/user/safes' — same handler
-    // (`userSafesRoutes` registered a second time under this prefix in
-    // `index.ts`), account vocabulary on the wire.
+    '/user/safes/deploy': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'deployUserSafe',
+        deprecated: true,
+        summary: 'RETIRED (#2914) — always answers 410.',
+        description:
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `POST /user/accounts/deploy`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '401': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The body names `POST /user/accounts/deploy`.' },
+        },
+      },
+    },
+    '/user/safes/{id}': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'renameUserSafe',
+        deprecated: true,
+        summary: 'RETIRED (#2914) — always answers 410.',
+        description:
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/accounts/{accountId}`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '401': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The body names `PUT /user/accounts/{accountId}`.' },
+        },
+      },
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'unlinkUserSafe',
+        deprecated: true,
+        summary: 'RETIRED (#2914) — always answers 410.',
+        description:
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `DELETE /user/accounts/{accountId}`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '401': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The body names `DELETE /user/accounts/{accountId}`.' },
+        },
+      },
+    },
+    '/user/safes/{id}/default': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'setDefaultUserSafe',
+        deprecated: true,
+        summary: 'RETIRED (#2914) — always answers 410.',
+        description:
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/accounts/{accountId}/default`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '401': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The body names `PUT /user/accounts/{accountId}/default`.' },
+        },
+      },
+    },
+    '/user/safes/{id}/funding': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getUserSafeFunding',
+        deprecated: true,
+        summary: 'RETIRED (#2914) — always answers 410.',
+        description:
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `GET /user/accounts/{accountId}/funding`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '401': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The body names `GET /user/accounts/{accountId}/funding`.' },
+        },
+      },
+    },
+    '/user/safe': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'updateUserSafe',
+        deprecated: true,
+        summary: 'RETIRED (#2914) — always answers 410.',
+        description:
+          'The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/account`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '401': errorResponse,
+          '410': { ...errorResponse, description: 'Always. The body names `PUT /user/account`.' },
+        },
+      },
+    },
     '/user/accounts': {
       get: {
         tags: ['Dashboard'],
@@ -2786,11 +2799,16 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['safes'],
+                  required: ['accounts', 'safes'],
                   properties: {
-                    safes: { type: 'array', items: account },
-                    // #2907: `accounts` twins `safes`, same array, same items.
                     accounts: { type: 'array', items: account },
+                    safes: {
+                      type: 'array',
+                      items: account,
+                      deprecated: true,
+                      description:
+                        'The same array as `accounts`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.',
+                    },
                   },
                 },
               },
@@ -2802,9 +2820,9 @@ export const openapiSpec = {
       post: {
         tags: ['Dashboard'],
         operationId: 'addUserAccount',
-        summary: 'RETIRED — always answers 410. Importing a Safe is closed.',
+        summary: 'RETIRED — always answers 410. Importing an account is closed.',
         description:
-          '#2907 twin of POST /user/safes (`addUserSafe`) — same handler, same 410 tombstone.',
+          '**RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** Importing was one of the four ways an account could enter Haven on the Safe rail; all four are closed. The refusal is a route preHandler, so it precedes every read and write. Kept as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries (the #834 session-rail / #1328 mpp_demo pattern). Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Existing linked accounts are unaffected: GET /user/accounts, rename, re-default, unlink and every read path behave exactly as before.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -2812,9 +2830,9 @@ export const openapiSpec = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['safe_address'],
+                required: ['account_address'],
                 properties: {
-                  safe_address: address,
+                  account_address: address,
                   chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base); must be a supported chain.' },
                   name: { type: 'string', description: "Trimmed; blank or absent becomes 'My account'." },
                 },
@@ -2828,44 +2846,12 @@ export const openapiSpec = {
         },
       },
     },
-    '/user/safes/deploy': {
-      post: {
-        tags: ['Dashboard'],
-        operationId: 'deployUserSafe',
-        deprecated: true,
-        summary: 'RETIRED — always answers 410. Haven no longer deploys Safes.',
-        description:
-          '**RETIRED (#1984, epic #1440) — always answers 410 and spends no relayer gas.** The refusal is a route preHandler, so it precedes the relayer entirely. Kept as a compatibility tombstone; removed in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Historically the relayer sponsored the deployment and returned the deployed address plus the transaction hash, and owner_address was NOT checked against the caller — an unbounded-by-ownership relayer-gas surface that this retirement closes as a side effect. ' +
-          deprecatedSafeAlias('deployUserAccount') + ' Twin path: POST /user/accounts/deploy.',
-        security: [{ DashboardJwt: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['owner_address'],
-                properties: {
-                  owner_address: address,
-                  chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base); must be a supported chain.' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '401': errorResponse,
-          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
-        },
-      },
-    },
-    // #2907 twin of '/user/safes/deploy' — same handler, same 410 tombstone.
     '/user/accounts/deploy': {
       post: {
         tags: ['Dashboard'],
         operationId: 'deployUserAccount',
         summary: 'RETIRED — always answers 410. Haven no longer deploys Safes.',
-        description: '#2907 twin of POST /user/safes/deploy (`deployUserSafe`) — same handler, same 410 tombstone.',
+        description: '**RETIRED (#1984, epic #1440) — always answers 410 and spends no relayer gas.** The refusal is a route preHandler, so it precedes the relayer entirely. Historically the relayer sponsored the deployment and returned the deployed address plus the transaction hash, and owner_address was NOT checked against the caller — an unbounded-by-ownership relayer-gas surface that this retirement closes as a side effect. Create a Haven account on the delegation rail instead (POST /accounts/hybrid).',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -2888,79 +2874,14 @@ export const openapiSpec = {
         },
       },
     },
-    '/user/safes/{safeId}': {
-      put: {
-        tags: ['Dashboard'],
-        operationId: 'renameUserSafe',
-        deprecated: true,
-        summary: 'Rename a linked Safe.',
-        description: 'Display metadata only — the name exists nowhere on-chain. ' +
-          deprecatedSafeAlias('renameUserAccount') + ' Twin path: PUT /user/accounts/{safeId}.' +
-          ' (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['name'],
-                properties: { name: { type: 'string', minLength: 1, description: 'Trimmed; blank after trimming is a 400.' } },
-              },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'The renamed Safe.',
-            content: { 'application/json': { schema: userSafe } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-      delete: {
-        tags: ['Dashboard'],
-        operationId: 'unlinkUserSafe',
-        deprecated: true,
-        summary: 'Unlink a Safe from the Haven account.',
-        description:
-          'Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key. ' +
-          deprecatedSafeAlias('unlinkUserAccount') + ' Twin path: DELETE /user/accounts/{safeId}.' +
-          ' (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        responses: {
-          '200': {
-            description: 'Safe unlinked.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-          '409': {
-            ...errorResponse,
-            description: 'The Safe remains linked while a delegation, recovery, or re-key is in progress.',
-          },
-        },
-      },
-    },
-    // #2907 twin of '/user/safes/{safeId}' — same handler (registered again
-    // under the `/user/accounts` prefix), only the path segment name differs.
-    '/user/accounts/{safeId}': {
-      // Fastify param stays `safeId` here too — `userSafesRoutes` is the SAME
-      // module registered under both `/user/safes` and `/user/accounts`
-      // prefixes (#2907 twin), so the path variable name is unchanged; only
-      // the mount prefix and operationId carry the account vocabulary.
+    '/user/accounts/{accountId}': {
       put: {
         tags: ['Dashboard'],
         operationId: 'renameUserAccount',
         summary: 'Rename a linked account.',
         description: 'Display metadata only — the name exists nowhere on-chain.',
         security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
+        parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
         requestBody: {
           required: true,
           content: {
@@ -2990,7 +2911,7 @@ export const openapiSpec = {
         description:
           'Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key.',
         security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
+        parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
         responses: {
           '200': {
             description: 'Account unlinked.',
@@ -3006,37 +2927,14 @@ export const openapiSpec = {
         },
       },
     },
-    '/user/safes/{safeId}/default': {
-      put: {
-        tags: ['Dashboard'],
-        operationId: 'setDefaultUserSafe',
-        deprecated: true,
-        summary: 'Make a linked Safe the default.',
-        description: "Exactly one Safe is default per user; setting one clears the previous. " +
-          deprecatedSafeAlias('setDefaultUserAccount') + ' Twin path: PUT /user/accounts/{safeId}/default.' +
-          ' (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id.' }],
-        responses: {
-          '200': {
-            description: 'Default updated.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/SuccessResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-    },
-    // #2907 twin of '/user/safes/{safeId}/default' — same handler.
-    '/user/accounts/{safeId}/default': {
+    '/user/accounts/{accountId}/default': {
       put: {
         tags: ['Dashboard'],
         operationId: 'setDefaultUserAccount',
         summary: 'Make a linked account the default.',
         description: 'Exactly one account is default per user; setting one clears the previous.',
         security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
+        parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
         responses: {
           '200': {
             description: 'Default updated.',
@@ -3048,31 +2946,7 @@ export const openapiSpec = {
         },
       },
     },
-    '/user/safes/{safeId}/funding': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'getSafeFunding',
-        deprecated: true,
-        summary: 'Machine-readable funding facts for one Safe: what to fund, with what, where, and how much.',
-        description:
-          'Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user\'s own wallet or exchange — and this is the single source an agent (or the dashboard\'s empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token\'s balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any token balance ≥ its minimum). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority. ' +
-          deprecatedSafeAlias('getAccountFunding') + ' Twin path: GET /user/accounts/{safeId}/funding.' +
-          ' (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).',
-        security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-Safe id (the delegation-rail account).' }],
-        responses: {
-          '200': {
-            description: 'The funding picture for the linked Safe.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/FundingResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '404': errorResponse,
-        },
-      },
-    },
-    // #2907 twin of '/user/safes/{safeId}/funding' — same handler.
-    '/user/accounts/{safeId}/funding': {
+    '/user/accounts/{accountId}/funding': {
       get: {
         tags: ['Dashboard'],
         operationId: 'getAccountFunding',
@@ -3080,7 +2954,7 @@ export const openapiSpec = {
         description:
           'Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user\'s own wallet or exchange — and this is the single source an agent (or the dashboard\'s empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token\'s balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any token balance ≥ its minimum). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.',
         security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'safeId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id (the delegation-rail account).' }],
+        parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id (the delegation-rail account).' }],
         responses: {
           '200': {
             description: 'The funding picture for the linked account.',
@@ -3092,17 +2966,16 @@ export const openapiSpec = {
         },
       },
     },
-    // The approver routes that lived here — GET /user/safes/known-approvers,
-    // GET|POST /user/safes/{safeId}/approvers, POST
-    // /user/safes/{safeId}/approvers/tx and DELETE
-    // /user/safes/{safeId}/approvers/{address} — are DELETED (#1988, epic
-    // #1440 slice 5), exactly as the caveat above said they would be. They are
-    // gone from the router too, so these are not tombstones: the paths 404.
+    // Four approver routes once lived under this prefix — a known-approvers
+    // list, a per-account list and add, an owner-change transaction builder,
+    // and a per-address removal. They are DELETED (#1988, epic #1440 slice 5),
+    // exactly as the caveat above said they would be. They are gone from the
+    // router too, so these are not tombstones: the paths 404.
     // ── Dashboard account + owner directory (#1446) ─────────────────────────
     // Profile/preference writes are the user's own record. The owner
-    // directory reads Safe owners LIVE from every linked account, so it is
+    // directory reads owners LIVE from every linked account, so it is
     // Safe-rail-shaped and inherits the #1440 retirement caveat recorded on
-    // the /user/safes block: an alias is decoration over on-chain membership,
+    // the /user/accounts block: an alias is decoration over on-chain membership,
     // never a grant.
     '/user/profile': {
       put: {
@@ -3158,44 +3031,12 @@ export const openapiSpec = {
         },
       },
     },
-    '/user/safe': {
-      put: {
-        tags: ['Dashboard'],
-        operationId: 'updateUserSafe',
-        deprecated: true,
-        summary: 'RETIRED — always answers 410. This link is an import.',
-        description:
-          "**RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** This route wrote the legacy users.safe_address column AND linked the Safe into user_safes as the default, emitting the `safe_imported` funnel event: it is an IMPORT, so it retires with the rail. It is named here explicitly because no shipped client calls it, which is exactly what would have made it the hole left open. Kept as a compatibility tombstone; create a Haven account on the delegation rail instead (POST /accounts/hybrid). " +
-          deprecatedSafeAlias('updateUserAccount') + ' Twin path: PUT /user/account.',
-        security: [{ DashboardJwt: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['safe_address'],
-                properties: {
-                  safe_address: address,
-                  chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base).' },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          '401': errorResponse,
-          '410': { ...errorResponse, description: 'Always. The Safe rail is retired; the message names POST /accounts/hybrid.' },
-        },
-      },
-    },
-    // #2907 twin of '/user/safe' — same handler (`retiredSafeInflowHandler('import')`).
     '/user/account': {
       put: {
         tags: ['Dashboard'],
         operationId: 'updateUserAccount',
         summary: 'RETIRED — always answers 410. This link is an import.',
-        description: '#2907 twin of PUT /user/safe (`updateUserSafe`) — same handler, same 410 tombstone.',
+        description: "**RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** This route linked an account as the user's default, emitting the `safe_imported` funnel event: it is an IMPORT, so it retires with the rail. Kept as a compatibility tombstone; create a Haven account on the delegation rail instead (POST /accounts/hybrid).",
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -3203,9 +3044,9 @@ export const openapiSpec = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['safe_address'],
+                required: ['account_address'],
                 properties: {
-                  safe_address: address,
+                  account_address: address,
                   chain_id: { type: 'integer', description: 'Defaults to DEFAULT_CHAIN_ID (Base).' },
                 },
               },
@@ -4428,16 +4269,10 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  // #2907: account_address twins safe_address (declared below,
-                  // always emitted), kept out of `required` for the same
-                  // generated-type-ripple reason as `sessionUser` above.
-                  required: ['id', 'name', 'email', 'wallet_address', 'safe_address', 'currency_preference', 'created_at', 'safes'],
+                  required: ['id', 'name', 'email', 'wallet_address', 'account_address', 'currency_preference', 'created_at', 'accounts'],
                   properties: {
                     ...userProfile.properties,
-                    safe_address: { ...userProfile.properties.safe_address, deprecated: true, description: deprecatedSafeAlias('account_address') },
                     account_address: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
-                    safes: { type: 'array', items: sessionSafe },
-                    // #2907: `accounts` twins `safes`, same array.
                     accounts: { type: 'array', items: sessionAccount },
                   },
                 },
@@ -4472,13 +4307,12 @@ export const openapiSpec = {
                       type: 'array',
                       items: {
                         type: 'object',
-                        required: ['id', 'credential_id', 'signer_address', 'chain_id', 'safe_address', 'created_at'],
+                        required: ['id', 'credential_id', 'signer_address', 'chain_id', 'account_address', 'created_at'],
                         properties: {
                           id: { type: 'string', format: 'uuid' },
                           credential_id: { type: 'string' },
                           signer_address: { type: 'string' },
                           chain_id: { type: 'integer' },
-                          safe_address: { type: ['string', 'null'], deprecated: true, description: deprecatedSafeAlias('account_address') },
                           account_address: { type: ['string', 'null'], description: 'Null until the passkey is bound to an account.' },
                           created_at: { type: 'string', format: 'date-time' },
                         },
@@ -5631,7 +5465,7 @@ export const openapiSpec = {
           // enforcer at redemption) instead of queuing an approval.
           '400': errorResponse,
           '401': errorResponse,
-          '403': { ...errorResponse, description: 'Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082, #2706) the amount exceeds that delegation\'s live remaining period budget — on BOTH settlement schemes now: the erc7710 direct-settlement branch and, since #2706, the EIP-3009 funding leg too. The over-budget refusal is PRE-FUNDING and PRE-PREPARE — no funding redemption is prepared, no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_safe_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. On the funding leg merchant_address names merchantPayTo (the real merchant), while payTo was the funding target. It is a fail-fast convenience, not the gate: the budget delegation\'s ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds to prepare, where the enforcer rules).' },
+          '403': { ...errorResponse, description: 'Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082, #2706) the amount exceeds that delegation\'s live remaining period budget — on BOTH settlement schemes now: the erc7710 direct-settlement branch and, since #2706, the EIP-3009 funding leg too. The over-budget refusal is PRE-FUNDING and PRE-PREPARE — no funding redemption is prepared, no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. On the funding leg merchant_address names merchantPayTo (the real merchant), while payTo was the funding target. It is a fail-fast convenience, not the gate: the budget delegation\'s ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds to prepare, where the enforcer rules).' },
           '409': errorResponse,
           '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '429': errorResponse,
@@ -6224,8 +6058,7 @@ export const openapiSpec = {
         summary: 'List wallet transactions for the signed-in user.',
         security: [{ DashboardJwt: [] }],
         parameters: [
-          { name: 'safeId', in: 'query', schema: uuid, deprecated: true, description: deprecatedSafeAlias('accountId') },
-          { name: 'accountId', in: 'query', schema: uuid, description: "#2907 twin of 'safeId'; both accepted, both filter identically. If both are given, accountId wins." },
+          { name: 'accountId', in: 'query', schema: uuid, description: 'Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none.' },
           { name: 'agentId', in: 'query', schema: { type: 'string' } },
           { name: 'tokenKey', in: 'query', schema: { type: 'string', examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] } },
           { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
@@ -6259,8 +6092,7 @@ export const openapiSpec = {
           'rather than truncated.',
         security: [{ DashboardJwt: [] }],
         parameters: [
-          { name: 'safeId', in: 'query', schema: uuid, deprecated: true, description: deprecatedSafeAlias('accountId') },
-          { name: 'accountId', in: 'query', schema: uuid, description: "#2907 twin of 'safeId'; both accepted, both filter identically. If both are given, accountId wins." },
+          { name: 'accountId', in: 'query', schema: uuid, description: 'Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none.' },
           { name: 'agentId', in: 'query', schema: { type: 'string' } },
           { name: 'tokenKey', in: 'query', schema: { type: 'string', examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] } },
           { name: 'direction', in: 'query', schema: { type: 'string', enum: ['in', 'out'] } },
@@ -6309,34 +6141,10 @@ export const openapiSpec = {
         },
       },
     },
-    '/transactions/{safeAddress}': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'listSafeTransactions',
-        deprecated: true,
-        summary: 'Page-based transaction list for one Safe.',
-        description: deprecatedSafeAlias('listAccountTransactions') + ' Twin path: GET /transactions/{accountAddress}.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [
-          { name: 'safeAddress', in: 'path', required: true, schema: address },
-          { name: 'chain_id', in: 'query', schema: { type: 'integer' } },
-          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
-          { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
-        ],
-        responses: {
-          '200': {
-            description: 'Paginated per-Safe transactions.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/TransactionsPageResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '403': errorResponse,
-        },
-      },
-    },
-    // #2907 twin of '/transactions/{safeAddress}' — same handler
-    // (`transactionRoutes` reads either `:safeAddress` or `:accountAddress`).
+    // #2914: one documented spelling. A single dynamic path segment has no
+    // wire-visible name, so the retired `{safeAddress}` spelling and this one
+    // were always the SAME route — an old client's URL is byte-identical to a
+    // new one's, which is why this path needs no tombstone.
     '/transactions/{accountAddress}': {
       get: {
         tags: ['Dashboard'],
@@ -6376,30 +6184,6 @@ export const openapiSpec = {
         },
       },
     },
-    '/balances/{safeAddress}': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'getSafeBalances',
-        deprecated: true,
-        summary: 'Token balances for one Safe.',
-        description: deprecatedSafeAlias('getAccountBalances') + ' Twin path: GET /balances/{accountAddress}.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [
-          { name: 'safeAddress', in: 'path', required: true, schema: address },
-          { name: 'chain_id', in: 'query', schema: { type: 'integer' }, description: 'Required when the same address is linked on more than one chain.' },
-        ],
-        responses: {
-          '200': {
-            description: 'Balances, native token first.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/BalancesResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '403': errorResponse,
-        },
-      },
-    },
-    // #2907 twin of '/balances/{safeAddress}' — same handler.
     '/balances/{accountAddress}': {
       get: {
         tags: ['Dashboard'],
@@ -6421,30 +6205,6 @@ export const openapiSpec = {
         },
       },
     },
-    '/portfolio/{safeAddress}': {
-      get: {
-        tags: ['Dashboard'],
-        operationId: 'getSafePortfolio',
-        deprecated: true,
-        summary: 'Fiat-valued portfolio breakdown for one Safe.',
-        description: deprecatedSafeAlias('getAccountPortfolio') + ' Twin path: GET /portfolio/{accountAddress}.',
-        security: [{ DashboardJwt: [] }],
-        parameters: [
-          { name: 'safeAddress', in: 'path', required: true, schema: address },
-          { name: 'chain_id', in: 'query', schema: { type: 'integer' }, description: 'Required when the same address is linked on more than one chain.' },
-        ],
-        responses: {
-          '200': {
-            description: 'Portfolio totals and per-token breakdown.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/PortfolioResponse' } } },
-          },
-          '400': errorResponse,
-          '401': errorResponse,
-          '403': errorResponse,
-        },
-      },
-    },
-    // #2907 twin of '/portfolio/{safeAddress}' — same handler.
     '/portfolio/{accountAddress}': {
       get: {
         tags: ['Dashboard'],
@@ -6998,26 +6758,17 @@ export const openapiSpec = {
       },
       AgentPaymentNextAction: {
         type: 'string',
-        // #2907 (naming P0): `fund_account_or_raise_allowance` is additive —
-        // listed in the served enum so clients can switch on it, but the
-        // server KEEPS EMITTING the old `fund_safe_or_raise_allowance`
-        // through this window. One field cannot carry two values at once; an
-        // old mcp-server switching on the compiled literal would otherwise
-        // drop the over-budget guidance it needs to act on (owner review on
-        // #2906). No route takes `AgentNextStep`/`AgentPaymentNextAction` as
-        // request input at all — this is a response-only enum. The flip to
-        // emitting the new value is #2914 — pinned by
-        // `agent-next-action-account-alias.test.ts`.
-        enum: [...Object.values(AgentPaymentNextAction), FUND_ACCOUNT_OR_RAISE_ALLOWANCE] as string[],
+        // #2914 (naming P5): the flip. `fund_account_or_raise_allowance` is
+        // the only spelling now — #2907 listed it additively while the server
+        // kept emitting the old one, because one field cannot carry two
+        // values at once and an mcp-server switching on the compiled literal
+        // would have dropped the over-budget guidance it needs to act on
+        // (owner review on #2906). The consumer release that reads both
+        // spellings shipped in #2908, so the old value is gone from the enum.
+        // No route takes this as request input — it is a response-only enum.
+        enum: Object.values(AgentPaymentNextAction),
         description: 'Stable next action an agent should take for a Haven payment state.',
-        'x-enumDescriptions': {
-          ...AgentPaymentNextActionDescriptions,
-          [FUND_ACCOUNT_OR_RAISE_ALLOWANCE]:
-            'Account-vocabulary twin of `fund_safe_or_raise_allowance` (#2907), same meaning: ' +
-            'stop and tell the user that the account needs to be funded or the agent budget ' +
-            'raised before the payment can succeed. Listed in the enum so clients can switch on ' +
-            'it; the server still only emits `fund_safe_or_raise_allowance` until #2914.',
-        },
+        'x-enumDescriptions': AgentPaymentNextActionDescriptions,
       },
       AgentPaymentRail: {
         type: 'string',
@@ -7345,7 +7096,17 @@ export const openapiSpec = {
         properties: {
           name: { type: 'string', minLength: 1 },
           description: { type: 'string' },
-          safe_id: uuid,
+          account_id: {
+            ...uuid,
+            description:
+              'The linked account the agent spends from. The retired `safe_id` spelling is REFUSED with a 400 naming this field (#2914) rather than ignored.',
+          },
+          safe_id: {
+            ...uuid,
+            deprecated: true,
+            description:
+              'RETIRED (#2914) and REFUSED, not accepted — declared here only so the request-validation layer agrees with the handler, which applies the same reliance rule as `POST /agents`: `safe_id` alone refuses, both-and-matching is accepted, both-and-disagreeing refuses. Undeclared under `additionalProperties: false` it would be rejected by ajv before the handler ever ran.',
+          },
           runtime: { type: 'string' },
           allowances: {
             type: 'array',
@@ -7670,17 +7431,12 @@ export const openapiSpec = {
       },
       Agent: {
         type: 'object',
-        // #2907: every safe_* field gains its account_* twin (declared below,
-        // dual-emitted by one mapper, equality-tested old === new). The
-        // twins are deliberately NOT added to `required` — this schema's
-        // `additionalProperties: true` means closeObjects needs no
-        // declaration to accept them, and widening `required` would flip
-        // every generated-type consumer's field from optional to
-        // non-optional repo-wide, a blast radius this additive spec slice
-        // does not own.
+        // #2914: the `safe_*` twins #2907 added and the dual-emit mapper that
+        // fed them (`openapi/wire-aliases.ts`) are both deleted. `account_*`
+        // is the only spelling on this schema.
         required: [
           'id', 'name', 'delegate_address',
-          'safe_id', 'safe_address', 'safe_name', 'safe_chain_id',
+          'account_id', 'account_address', 'account_name', 'account_chain_id',
           'api_key_prefix', 'status', 'created_at', 'allowances',
         ],
         properties: {
@@ -7688,10 +7444,6 @@ export const openapiSpec = {
           name: { type: 'string' },
           description: { type: ['string', 'null'] },
           delegate_address: { anyOf: [address, { type: 'null' }] },
-          safe_id: { anyOf: [uuid, { type: 'null' }], deprecated: true, description: deprecatedSafeAlias('account_id') },
-          safe_address: { anyOf: [address, { type: 'null' }], deprecated: true, description: deprecatedSafeAlias('account_address') },
-          safe_name: { type: ['string', 'null'], deprecated: true, description: deprecatedSafeAlias('account_name') },
-          safe_chain_id: { type: ['integer', 'null'], deprecated: true, description: deprecatedSafeAlias('account_chain_id') },
           account_id: { anyOf: [uuid, { type: 'null' }] },
           account_address: { anyOf: [address, { type: 'null' }] },
           account_name: { type: ['string', 'null'] },
@@ -7744,11 +7496,16 @@ export const openapiSpec = {
           name: { type: 'string', minLength: 1 },
           description: { type: 'string' },
           delegate_address: address,
-          safe_id: { ...uuid, deprecated: true, description: deprecatedSafeAlias('account_id') },
           account_id: {
             ...uuid,
             description:
-              "#2907 input twin of 'safe_id'; either is accepted alone. Both given and disagreeing is a 400 naming both keys.",
+              'The linked account the agent spends from. The retired `safe_id` spelling is REFUSED with a 400 naming this field (#2914) rather than ignored — an ignored account id would create an unlinked agent that looks successfully created.',
+          },
+          safe_id: {
+            ...uuid,
+            deprecated: true,
+            description:
+              'RETIRED (#2914) and REFUSED, not accepted — declared here only so the request-validation layer agrees with the handler. #2908 told every published client to send both names for the window, so the handler applies a RELIANCE rule: `safe_id` alone is refused with a 400 naming `account_id`, both-and-matching is accepted (the new name is read), both-and-disagreeing is refused. Were this field left undeclared under `additionalProperties: false`, a correctly dual-sending client would raise a `would_refuse` shadow counter today and be rejected outright the moment request validation is set to `enforce` — silently reversing the handler decision above.',
           },
           allowances: {
             type: 'array',
@@ -7771,10 +7528,9 @@ export const openapiSpec = {
        */
       DelegateBalance: {
         type: 'object',
-        required: ['delegate_address', 'safe_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address', 'sweep_min_usdc'],
+        required: ['delegate_address', 'account_address', 'chain_id', 'eth', 'eth_atomic', 'usdc', 'usdc_atomic', 'usdc_address', 'sweep_min_usdc'],
         properties: {
           delegate_address: { type: 'string' },
-          safe_address: { anyOf: [{ type: 'string' }, { type: 'null' }], deprecated: true, description: deprecatedSafeAlias('account_address') },
           account_address: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           chain_id: { type: 'integer' },
           eth: { type: 'string' },
@@ -8043,7 +7799,7 @@ export const openapiSpec = {
             required: ['x402_expected_auth'],
             properties: {
               chain_id: { type: 'integer' },
-              safe_address: address,
+              account_address: address,
               payer: address,
               token: { type: 'string' },
               amount: { type: 'string' },
@@ -8097,7 +7853,7 @@ export const openapiSpec = {
           status: { type: 'string' },
           tx_hash: { type: 'string' },
           chain_id: { type: 'integer' },
-          safe_address: address,
+          account_address: address,
           payer: address,
           token: { type: 'string' },
           amount: { type: 'string' },
@@ -8245,12 +8001,11 @@ export const openapiSpec = {
       },
       MachinePaymentAgent: {
         type: 'object',
-        required: ['id', 'name', 'status', 'safe_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail'],
+        required: ['id', 'name', 'status', 'account_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail'],
         properties: {
           id: uuid,
           name: { type: 'string' },
           status: { type: 'string' },
-          safe_address: { ...address, deprecated: true, description: deprecatedSafeAlias('account_address') },
           account_address: address,
           delegate_address: address,
           /**
@@ -8279,10 +8034,9 @@ export const openapiSpec = {
       },
       AllowanceSummary: {
         type: 'object',
-        required: ['agent_id', 'safe_address', 'delegate_address', 'chain_id', 'allowances'],
+        required: ['agent_id', 'account_address', 'delegate_address', 'chain_id', 'allowances'],
         properties: {
           agent_id: uuid,
-          safe_address: { ...address, deprecated: true, description: deprecatedSafeAlias('account_address') },
           account_address: address,
           delegate_address: address,
           chain_id: { type: 'integer' },
@@ -8531,7 +8285,7 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       TransactionBase: {
-        description: 'Fields shared by every transaction representation. The per-Safe page items (`GET /transactions/{safeAddress}`) are exactly this shape; the aggregated feed adds Safe scope on top (`Transaction`). Flat (not `allOf`-composed with `Transaction`, #2885) so `additionalProperties: false` closes properly — see `transactionBaseProperties` above.',
+        description: 'Fields shared by every transaction representation. The per-account page items (`GET /transactions/{accountAddress}`) are exactly this shape; the aggregated feed adds account scope on top (`Transaction`). Flat (not `allOf`-composed with `Transaction`, #2885) so `additionalProperties: false` closes properly — see `transactionBaseProperties` above.',
         type: 'object',
         required: [...transactionBaseRequired],
         properties: { ...transactionBaseProperties },
@@ -8560,25 +8314,24 @@ export const openapiSpec = {
       Transaction: {
         description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
         type: 'object',
-        // #2907: accountId/accountAddress/accountName twin safeId/safeAddress/safeName
-        // (declared below, always emitted by the one mapper, equality-
-        // tested). Not added to `required` — see the `Agent` schema comment
-        // above for why (generated-type ripple into every consumer).
-        required: [...transactionBaseRequired, 'chainId', 'safeId', 'safeAddress', 'safeName'],
+        required: [...transactionBaseRequired, 'chainId', 'accountId', 'accountAddress', 'accountName'],
         properties: {
           ...transactionBaseProperties,
           chainId: { type: 'integer' },
-          safeId: { ...uuid, deprecated: true, description: deprecatedSafeAlias('accountId') },
-          safeAddress: { ...address, deprecated: true, description: deprecatedSafeAlias('accountAddress') },
-          safeName: { type: 'string', deprecated: true, description: deprecatedSafeAlias('accountName') },
           accountId: uuid,
           accountAddress: address,
           accountName: { type: 'string' },
+          safeName: {
+            type: 'string',
+            deprecated: true,
+            description:
+              'The same value as `accountName`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.',
+          },
           agentId: uuid,
         },
       },
       TransactionsPageResponse: {
-        description: 'Per-Safe paginated transaction list (`GET /transactions/{safeAddress}`). Items carry no Safe scope — the Safe is the path parameter.',
+        description: 'Per-account paginated transaction list (`GET /transactions/{accountAddress}`). Items carry no account scope — the account is the path parameter.',
         type: 'object',
         required: ['transactions', 'total', 'page', 'limit', 'pages'],
         properties: {
@@ -8746,17 +8499,11 @@ export const openapiSpec = {
       },
       DashboardAgentPreview: {
         type: 'object',
-        // #2907: accountId/accountName/accountChainId twin safeId/safeName/safeChainId
-        // (declared below, always emitted, equality-tested). Not added to
-        // `required` — see the `Agent` schema comment for why.
-        required: ['id', 'name', 'status', 'safeId', 'safeName', 'safeChainId', 'allowances'],
+        required: ['id', 'name', 'status', 'accountId', 'accountName', 'accountChainId', 'allowances'],
         properties: {
           id: uuid,
           name: { type: 'string' },
           status: { type: 'string', enum: ['active', 'paused'], description: 'Revoked agents are excluded from the preview query.' },
-          safeId: { type: ['string', 'null'], format: 'uuid', deprecated: true, description: deprecatedSafeAlias('accountId') },
-          safeName: { type: ['string', 'null'], deprecated: true, description: deprecatedSafeAlias('accountName') },
-          safeChainId: { type: ['integer', 'null'], deprecated: true, description: deprecatedSafeAlias('accountChainId') },
           accountId: { type: ['string', 'null'], format: 'uuid' },
           accountName: { type: ['string', 'null'] },
           accountChainId: { type: ['integer', 'null'] },
@@ -9007,9 +8754,6 @@ export const openapiSpec = {
       },
       TransactionsResponse: {
         type: 'object',
-        // #2907: failedAccountIds (declared below, always emitted, equality-
-        // tested) is deliberately NOT in `required` — see the `Agent` schema
-        // comment for why.
         required: [
           'transactions',
           'total',
@@ -9017,7 +8761,7 @@ export const openapiSpec = {
           'limit',
           'hasMore',
           'partialFailure',
-          'failedSafeIds',
+          'failedAccountIds',
           'truncated',
         ],
         properties: {
@@ -9027,7 +8771,6 @@ export const openapiSpec = {
           limit: { type: 'integer' },
           hasMore: { type: 'boolean' },
           partialFailure: { type: 'boolean' },
-          failedSafeIds: { type: 'array', items: uuid, deprecated: true, description: deprecatedSafeAlias('failedAccountIds') },
           failedAccountIds: { type: 'array', items: uuid },
           truncated: {
             type: 'boolean',

@@ -284,7 +284,7 @@ export const AGENT_RESPONSE = {
 
 export const AGENT_ALLOWANCES_RESPONSE = {
   agent_id: 'agt_1',
-  safe_address: '0xSafe',
+  account_address: '0xSafe',
   delegate_address: '0xDelegate',
   chain_id: 8453,
   allowances: [{

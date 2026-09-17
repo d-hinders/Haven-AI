@@ -5,7 +5,6 @@ import { getAgentPaymentStatus } from '../modules/payments/index.js'
 import { agentExecutionRailLabel } from '../rails/execution-rail.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
-import { withAccountAddressAlias } from '../openapi/wire-aliases.js'
 import {
   handleGetAllowances,
   handleReconciliationEvent,
@@ -62,11 +61,11 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       }
     }
 
-    return withAccountAddressAlias({
+    return ({
       id: agent.id,
       name: agent.name,
       status: agent.status,
-      safe_address: agent.account_address,
+      account_address: agent.account_address,
       delegate_address: agent.delegate_address,
       delegate_account_address: delegateAccountAddress,
       chain_id: agent.chain_id,

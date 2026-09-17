@@ -21,7 +21,6 @@ import {
   fetchAccountTransactions,
   mergeX402Transactions,
 } from '../modules/transactions/index.js'
-import { withDashboardAgentAccountAlias, withTransactionAccountAlias } from '../openapi/wire-aliases.js'
 
 const AGENT_PREVIEW_LIMIT = 6
 const TRANSACTION_PREVIEW_LIMIT = 5
@@ -145,9 +144,9 @@ export default async function dashboardRoutes(
         return transactions.map((tx) => ({
           ...tx,
           chainId: safe.chain_id,
-          safeId: safe.id,
-          safeAddress: safe.account_address,
-          safeName: safe.name,
+          accountId: safe.id,
+          accountAddress: safe.account_address,
+          accountName: safe.name,
         }))
       }),
     )
@@ -213,13 +212,13 @@ export default async function dashboardRoutes(
         hasFirstAgentPayment: firstAgentPayment,
       },
       agents: agents.slice(0, AGENT_PREVIEW_LIMIT).map((agent) =>
-        withDashboardAgentAccountAlias({
+        ({
           id: agent.id,
           name: agent.name,
           status: agent.status,
-          safeId: agent.account_id,
-          safeName: agent.safe_name,
-          safeChainId: agent.safe_chain_id,
+          accountId: agent.account_id,
+          accountName: agent.account_name,
+          accountChainId: agent.account_chain_id,
           allowances: (allowancesByAgent.get(agent.id) ?? []).map((allowance) => ({
             tokenSymbol: allowance.token_symbol,
             allowanceAmount: allowance.allowance_amount,
@@ -228,7 +227,7 @@ export default async function dashboardRoutes(
         }),
       ),
       transactions: enrichedTransactions.slice(0, TRANSACTION_PREVIEW_LIMIT).map((tx) =>
-        withTransactionAccountAlias({
+        ({
           hash: tx.hash,
           type: tx.type,
           from: tx.from,
@@ -244,9 +243,9 @@ export default async function dashboardRoutes(
           tokenAddress: tx.tokenAddress,
           tokenSymbol: tx.tokenSymbol,
           chainId: tx.chainId,
-          safeId: tx.safeId,
-          safeAddress: tx.safeAddress,
-          safeName: tx.safeName,
+          accountId: tx.accountId,
+          accountAddress: tx.accountAddress,
+          accountName: tx.accountName,
           agentId: tx.agentId,
           agentName: tx.agentName,
           source: tx.source,

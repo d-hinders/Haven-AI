@@ -23,11 +23,14 @@ describe('signing audit', () => {
       `0x${'aa'.repeat(32)}`,
       {
         delegateAddress: '0x000000000000000000000000000000000000dEaD',
-        safeAddress: '0x000000000000000000000000000000000000Cafe',
+        accountAddress: '0x000000000000000000000000000000000000Cafe',
         chainId: 100,
       },
       new Date('2026-01-02T03:04:05.000Z'),
     )
+    // The in-memory context field is `accountAddress` (#2914); the
+    // serialized JSONL key stays `safe_address` — a permanent, on-disk
+    // spelling, distinct from the in-memory naming.
     expect(entry).toEqual({
       version: 1,
       timestamp: '2026-01-02T03:04:05.000Z',

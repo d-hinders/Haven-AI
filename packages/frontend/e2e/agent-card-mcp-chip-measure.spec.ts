@@ -92,7 +92,7 @@
  * FIXTURE FIDELITY. `mcp_server_name` is selected as `a.mcp_server_name` by
  * `listAgentsForUserAllStatuses` (`infra/repositories/agents.ts:184`), typed
  * `string | null` there and declared `type: ['string','null']` in
- * `openapi/spec.ts:6142`; `status`, `account_type` and `safe_name` come from
+ * `openapi/spec.ts:6142`; `status`, `account_type` and `account_name` come from
  * the same row. `haven-research` is a legal value: 14 chars (<= 64) and
  * matching `/^haven(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/`
  * (`backend/src/routes/agent-connection-setups.ts:143-149`).
@@ -133,8 +133,8 @@ function agentSeed(id: string, over: Record<string, unknown> = {}) {
     name: `Agent ${id}`,
     description: null,
     account_type: 'delegator_hybrid',
-    safe_id: testSafe.id,
-    safe_name: testSafe.name,
+    account_id: testSafe.id,
+    account_name: testSafe.name,
     mcp_server_name: `haven-${id}`,
     mcp_last_seen_at: '2026-07-10T08:12:00.000Z',
     has_stranded_funds: false,

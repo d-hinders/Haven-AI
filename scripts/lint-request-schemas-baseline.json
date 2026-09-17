@@ -91,7 +91,7 @@
     "shadow": 1,
     "typeof": 1
   },
-  "routes/user-safes.ts": {
+  "routes/user-accounts.ts": {
     "shadow": 1,
     "typeof": 1
   },

@@ -9,7 +9,7 @@ const BASE_INPUT: HandoffInput = {
     description: 'Pays for x402 APIs',
     delegateAddress: '0xaDA083091fAd5dE77370716b1BA7AC76C11f0b8b',
     accountAddress: '0xbf35beb0f587db2527b64e58d61f78bbf840860f',
-    safeName: 'Treasury Safe',
+    accountName: 'Treasury Safe',
     chainId: 100,
   },
   policy: {
@@ -33,7 +33,7 @@ describe('buildAgentCredential', () => {
     expect(json.api_key).toBe('sk_agent_TESTKEY_NEVERREAL')
     expect(json.delegate_key).toBe('0xPRIVATEKEY_NEVERREAL')
     expect(json.agent_id).toBe('agt_abc123')
-    expect(json.safe_address).toBe('0xbf35beb0f587db2527b64e58d61f78bbf840860f')
+    expect(json.account_address).toBe('0xbf35beb0f587db2527b64e58d61f78bbf840860f')
     expect(json.api_url).toBe('https://havenbackend.example')
 
     // jsonText must round-trip and use snake_case keys (the MCP loader prefers

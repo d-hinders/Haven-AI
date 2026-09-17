@@ -96,7 +96,7 @@ vi.mock('@/components/transactions/TransactionsTable', () => ({
   }: {
     transactions?: Array<{
       hash: string
-      safeName?: string
+      accountName?: string
       movementOverride?: ReactNode
     }>
   }) => (
@@ -104,7 +104,7 @@ vi.mock('@/components/transactions/TransactionsTable', () => ({
       <div>Transactions table</div>
       {transactions.map((tx) => (
         <div key={tx.hash}>
-          <span>{tx.safeName}</span>
+          <span>{tx.accountName}</span>
           {tx.movementOverride}
         </div>
       ))}
@@ -118,7 +118,7 @@ import AgentDetailClient from '../AgentDetailClient'
 const SAFE = {
   id: 'safe-1',
   name: 'Main account',
-  safe_address: '0x1111111111111111111111111111111111111111',
+  account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 100,
 }
 
@@ -138,9 +138,9 @@ describe('AgentDetailClient last-activity metadata', () => {
           name: 'Research agent',
           description: null,
           delegate_address: '0x2222222222222222222222222222222222222222',
-          safe_id: 'safe-1',
-          safe_address: SAFE.safe_address,
-          safe_name: 'Main account',
+          account_id: 'safe-1',
+          account_address: SAFE.account_address,
+          account_name: 'Main account',
           status: 'active',
           created_at: '2026-05-01T00:00:00Z',
           mcp_last_seen_at: '2026-06-01T10:00:00Z',
@@ -247,7 +247,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockUseDelegateBalance.mockReturnValue({
       balance: {
         delegate_address: '0x2222222222222222222222222222222222222222',
-        safe_address: SAFE.safe_address,
+        account_address: SAFE.account_address,
         chain_id: 8453,
         eth: '0',
         eth_atomic: '0',
@@ -275,7 +275,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockUseDelegateBalance.mockReturnValue({
       balance: {
         delegate_address: '0x2222222222222222222222222222222222222222',
-        safe_address: SAFE.safe_address,
+        account_address: SAFE.account_address,
         chain_id: 8453,
         eth: '0',
         eth_atomic: '0',
@@ -302,7 +302,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockUseDelegateBalance.mockReturnValue({
       balance: {
         delegate_address: '0x2222222222222222222222222222222222222222',
-        safe_address: SAFE.safe_address,
+        account_address: SAFE.account_address,
         chain_id: 8453,
         eth: '0.01',
         eth_atomic: '10000000000000000',
@@ -337,7 +337,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockUseDelegateBalance.mockReturnValue({
       balance: {
         delegate_address: '0x2222222222222222222222222222222222222222',
-        safe_address: SAFE.safe_address,
+        account_address: SAFE.account_address,
         chain_id: 8453,
         eth: '0',
         eth_atomic: '0',
@@ -534,9 +534,9 @@ describe('AgentDetailClient last-activity metadata', () => {
           x402_resource_url: 'https://api.example.com/data',
           x402_merchant_address: '0x2222222222222222222222222222222222222222',
           chain_id: 8453,
-          safe_id: 'safe-old',
-          safe_address: '0x4444444444444444444444444444444444444444',
-          safe_name: 'Previous wallet',
+          account_id: 'safe-old',
+          account_address: '0x4444444444444444444444444444444444444444',
+          account_name: 'Previous wallet',
           explorer_url: null,
           confirmed_at: '2026-05-08T11:49:59Z',
           created_at: '2026-05-08T11:49:00Z',
@@ -570,9 +570,9 @@ describe('AgentDetailClient last-activity metadata', () => {
           x402_resource_url: 'https://api.example.com/data',
           x402_merchant_address: '0x2222222222222222222222222222222222222222',
           chain_id: 8453,
-          safe_id: null,
-          safe_address: '0x4444444444444444444444444444444444444444',
-          safe_name: null,
+          account_id: null,
+          account_address: '0x4444444444444444444444444444444444444444',
+          account_name: null,
           explorer_url: null,
           confirmed_at: '2026-05-08T11:49:59Z',
           created_at: '2026-05-08T11:49:00Z',
@@ -597,9 +597,9 @@ describe('AgentDetailClient last-activity metadata', () => {
           name: 'Delegation agent',
           description: null,
           delegate_address: '0x2222222222222222222222222222222222222222',
-          safe_id: 'safe-1',
-          safe_address: SAFE.safe_address,
-          safe_name: 'Main account',
+          account_id: 'safe-1',
+          account_address: SAFE.account_address,
+          account_name: 'Main account',
           status: 'active',
           created_at: '2026-05-01T00:00:00Z',
           mcp_last_seen_at: null,
@@ -684,7 +684,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockUseDelegateBalance.mockReturnValue({
       balance: {
         delegate_address: '0x2222222222222222222222222222222222222222',
-        safe_address: SAFE.safe_address,
+        account_address: SAFE.account_address,
         chain_id: 8453,
         eth: '0',
         eth_atomic: '0',
@@ -715,9 +715,9 @@ describe('AgentDetailClient last-activity metadata', () => {
           name: 'Delegation agent',
           description: null,
           delegate_address: '0x2222222222222222222222222222222222222222',
-          safe_id: 'safe-1',
-          safe_address: SAFE.safe_address,
-          safe_name: 'Main account',
+          account_id: 'safe-1',
+          account_address: SAFE.account_address,
+          account_name: 'Main account',
           status: 'active',
           created_at: '2026-05-01T00:00:00Z',
           mcp_last_seen_at: null,
@@ -811,9 +811,9 @@ describe('AgentDetailClient first-budget token options (#2473)', () => {
           name: 'Research agent',
           description: null,
           delegate_address: '0x2222222222222222222222222222222222222222',
-          safe_id: 'safe-1',
-          safe_address: SAFE.safe_address,
-          safe_name: 'Main account',
+          account_id: 'safe-1',
+          account_address: SAFE.account_address,
+          account_name: 'Main account',
           status: 'active',
           created_at: '2026-05-01T00:00:00Z',
           mcp_last_seen_at: null,
@@ -864,9 +864,9 @@ describe('AgentDetailClient first-budget token options (#2473)', () => {
           name: 'Research agent',
           description: null,
           delegate_address: '0x2222222222222222222222222222222222222222',
-          safe_id: 'safe-1',
-          safe_address: SAFE.safe_address,
-          safe_name: 'Main account',
+          account_id: 'safe-1',
+          account_address: SAFE.account_address,
+          account_name: 'Main account',
           status: 'active',
           created_at: '2026-05-01T00:00:00Z',
           mcp_last_seen_at: null,

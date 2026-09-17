@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { retiredSafeInflowHandler } from '../middleware/safe-inflow-retired.js'
+import { retiredSafePathHandler } from './user-accounts-retired.js'
 import {
   findCurrencyPreference,
   updateCurrencyPreference,
@@ -8,21 +9,13 @@ import {
   updateUserWalletAddress,
 } from '../infra/repositories/users.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
-import { withSessionAccountAddressAlias } from '../openapi/wire-aliases.js'
 
 /**
- * #2911 (schema rename, epic #2906 phase 3): `withSessionAccountAddressAlias`'s
- * input type still names its field `safe_address` — `openapi/wire-aliases.ts`
- * is the wire contract and is deliberately untouched here. The repository
- * rows it used to read that field directly off of are renamed
- * (`account_address`), so this shim re-derives `safe_address` at the call
- * site — the read changes, the wire mapper and its output do not.
+ * #2914 (naming epic #2906 phase 5, the contraction): these responses carry
+ * `account_address` and nothing else. The `safe_address` twin, the dual-emit
+ * mapper and the shim that fed it are all gone; the repository rows already
+ * use the account vocabulary, so the row is returned unchanged.
  */
-function toSafeAddressed<T extends { account_address: string | null }>(
-  row: T,
-): T & { safe_address: string | null } {
-  return { ...row, safe_address: row.account_address }
-}
 
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
@@ -85,8 +78,7 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
 
     const updated = await updateUserName(normalizedName, sub)
     if (!updated) return userRowVanished()
-    // #2907: userProfile.account_address twins safe_address, same value.
-    return withSessionAccountAddressAlias(toSafeAddressed(updated))
+    return updated
   })
 
   // PUT /user/wallet
@@ -100,19 +92,22 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
 
     const updated = await updateUserWalletAddress(wallet_address, sub)
     if (!updated) return userRowVanished()
-    // #2907: userIdentity.account_address twins safe_address, same value.
-    return withSessionAccountAddressAlias(toSafeAddressed(updated))
+    return updated
   })
 
-  // PUT /user/safe — TOMBSTONE (#1984 closed it, #1988 deleted the body).
-  // The legacy single-Safe link was an IMPORT: it wrote `smart_accounts` through
-  // `linkDefaultUserSafe` and emitted the `safe_imported` funnel event. No
-  // shipped client calls it, which is exactly what would have made it the hole
-  // left open. Kept as a 410 rather than removed, per #834/#1328.
-  app.put('/safe', retiredSafeInflowHandler('import'))
+  // PUT /user/safe — TOMBSTONE, twice over. #1984 closed the flow (the legacy
+  // single-account link was an IMPORT: it wrote `smart_accounts` and emitted
+  // the `safe_imported` funnel event) and #1988 deleted the body; #2914 then
+  // retired the PATH's Safe vocabulary. It answers the NAMING 410 naming
+  // `PUT /user/account`, which is where the rail refusal — a different and
+  // still-true fact — lives. Kept as a 410 rather than removed, per #834/#1328.
+  app.put('/safe', retiredSafePathHandler(
+    'PUT /user/account',
+    'That path is itself retired (#1984): this link is an import, closed with the Safe rail, and no path replaces it. Create a Haven account on the delegation rail with POST /accounts/hybrid.',
+  ))
 
-  // PUT /user/account — #2907 twin of PUT /user/safe. Same handler, same 410
-  // tombstone; `updateUserAccount` in `openapi/spec.ts`.
+  // PUT /user/account — RETIRED (#1984, epic #1440): importing an account is
+  // closed with the Safe rail. `updateUserAccount` in `openapi/spec.ts`.
   app.put('/account', retiredSafeInflowHandler('import'))
 
   // GET /user/preferences

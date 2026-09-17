@@ -165,7 +165,7 @@ export default function TransactionsClient() {
   const tokenSymbolsByKey = new Map(tokens.map((token) => [token.key, token.symbol]))
   const accountNamesByAddress = new Map(
     userAccounts.map((safe) => [
-      `${safe.safe_address.toLowerCase()}:${safe.chain_id}`,
+      `${safe.account_address.toLowerCase()}:${safe.chain_id}`,
       safe.name,
     ]),
   )

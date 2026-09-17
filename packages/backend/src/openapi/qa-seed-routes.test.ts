@@ -114,8 +114,18 @@ describe('the QA seed only calls routes the API still serves', () => {
     const { retired } = await readModules()
     // #1984 closed these; if the detector stops seeing them it has gone blind,
     // and the "seed calls nothing retired" test below would pass vacuously.
-    expect(retired).toContain('POST /user/safes')
+    //
+    // #2914: the `/user/safes*` naming tombstones are counted here too. They
+    // very nearly were not — the module first registered them through
+    // `app.route({ method, url })` over a table, a shape neither this
+    // detector nor `extractRoutes` parses, which left all seven addresses
+    // uncounted in BOTH directions. They are literal
+    // `.<method>('<path>', retiredSafePathHandler(...))` calls now, for
+    // exactly that reason.
+    expect(retired).toContain('POST /user/accounts')
     expect(retired).toContain('POST /safe/deploy')
+    expect(retired).toContain('GET /user/safes')
+    expect(retired).toContain('GET /user/safes/{param}/funding')
   })
 
   it('calls no route the backend has retired', async () => {

@@ -175,15 +175,15 @@ async function ensureUser(cfg: SeedConfig): Promise<string> {
 // ── Phase 2: QA account (Hybrid DeleGator on the delegation rail) ────────────
 interface SessionSafe {
   id: string
-  safe_address: string
+  account_address: string
   chain_id: number
   account_type: string | null
 }
 
 /** The account list as `/auth/me` reports it — the only projection with a rail marker. */
 async function listAccounts(cfg: SeedConfig, token: string): Promise<SessionSafe[]> {
-  const me = await api<{ safes?: SessionSafe[] }>(cfg, 'GET', '/auth/me', { token })
-  return me.safes ?? []
+  const me = await api<{ accounts?: SessionSafe[] }>(cfg, 'GET', '/auth/me', { token })
+  return me.accounts ?? []
 }
 
 function findHybrid(accounts: SessionSafe[]): SessionSafe | undefined {
@@ -197,7 +197,7 @@ async function ensureAccount(
 ): Promise<SessionSafe> {
   const existing = findHybrid(await listAccounts(cfg, token))
   if (existing) {
-    console.log(`  ✓ reusing Hybrid account ${existing.safe_address}`)
+    console.log(`  ✓ reusing Hybrid account ${existing.account_address}`)
     return existing
   }
 
@@ -211,7 +211,7 @@ async function ensureAccount(
   if (!account) {
     throw new Error('Provisioned Hybrid account did not appear in /auth/me')
   }
-  console.log(`  ✓ Hybrid account provisioned: ${account.safe_address}`)
+  console.log(`  ✓ Hybrid account provisioned: ${account.account_address}`)
   return account
 }
 
@@ -271,7 +271,7 @@ async function ensureAgent(
         name: 'QA Agent',
         description: 'Automated QA harness identity (epic #573). Testnet-only.',
         delegate_address: cfg.delegateAddress,
-        safe_id: account.id,
+        account_id: account.id,
         // #2020: no `allowances` — POST /agents refuses a non-empty array now
         // that the mirror is retired. The comment this replaced already said
         // the row was vestigial; the authority that matters is the delegation
@@ -404,7 +404,7 @@ export async function main(): Promise<void> {
       'legacy AllowanceModule credentials (`QA_AGENT_API_KEY` or\n' +
       '`QA_DELEGATE_PRIVATE_KEY`).',
   )
-  console.log('\nAccount (fund with Base Sepolia USDC): ' + account.safe_address)
+  console.log('\nAccount (fund with Base Sepolia USDC): ' + account.account_address)
   console.log('Done.')
 }
 

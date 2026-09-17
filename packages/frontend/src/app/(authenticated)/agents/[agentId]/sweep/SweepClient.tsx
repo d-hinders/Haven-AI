@@ -57,14 +57,14 @@ export default function SweepClient({ agentId }: { agentId: string }) {
   }, [loadBalance])
 
   const usdcStatus = balance ? usdcSweepStatus(balance) : 'none'
-  const hasVerifiedDestination = Boolean(balance?.safe_address)
+  const hasVerifiedDestination = Boolean(balance?.account_address)
   const hasUsdc = usdcStatus === 'recoverable' && hasVerifiedDestination
   const hasEth = Boolean(balance && balance.eth_atomic !== '0')
   const network = balance
     ? resolveChainOrNull(balance.chain_id)?.name ?? `Chain ${balance.chain_id}`
     : null
   const agentLabel = agent?.name ?? 'Your agent'
-  const destination = balance?.safe_address
+  const destination = balance?.account_address
   const pageSubtitle =
     balance && !hasVerifiedDestination
       ? `${agentLabel} · ${network ?? `Chain ${balance.chain_id}`}. Recovery is unavailable without a verified Haven wallet.`

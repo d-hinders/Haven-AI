@@ -328,7 +328,7 @@ export const x402CatalogGuidedPurchase: Scenario = {
     const hosted = new HostedMcpClient(ctx.cfg.hostedMcpUrl, ctx.cfg.delegationAgentApiKey)
 
     const agentInfo = await api.getAgent()
-    const treasury = agentInfo.data.safe_address
+    const treasury = agentInfo.data.account_address
     if (!treasury) {
       return fail("could not read the agent's account address from GET /machine-payments/agent")
     }

@@ -136,7 +136,7 @@ haven agents list | show <id>
 haven agents pause|resume|revoke <id>   # Tier B (backend-only)
 haven agents rotate-key <id>            # Tier B — prints new key once
 haven budget show <agentId>             # Tier A (live remaining)
-haven approvers list <safeId>           # Tier A
+haven approvers list <accountId>        # Tier A
 haven activity list [--safe|--agent|--direction] [--json]
 haven activity export [...] > out.csv   # reuse #411 CSV builder
 haven catalog list [--category]
@@ -174,7 +174,7 @@ Three escalating options; ship the first, design toward the third:
   bin in as `haven connect`).
 - Reuse from `connect`: arg parsing (`args.ts`), secure logging/redaction
   (`redact.ts`), owner-only credential storage (`storage.ts`).
-- No backend changes for Tiers A/B/D — the endpoints exist (auth, user/safes,
+- No backend changes for Tiers A/B/D — the endpoints exist (auth, user/accounts,
   agents, agent-activity, transactions, balances, catalog, analytics, payments).
 - Output: a small `--json` flag + a human formatter; no heavy TUI in v1.
 

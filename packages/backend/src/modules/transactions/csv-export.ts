@@ -45,13 +45,11 @@ export const TRANSACTION_CSV_COLUMNS = [
   'tx_hash',
   'payment_id',
   'agent_name',
-  'safe_address',
   'initiator',
-  // #2907 (naming P0): account-vocabulary twin of `safe_address`, same
-  // value. Appended per the column-order rule above — `safe_address` stays
-  // for one release (deprecated, #2914 drops it) rather than being replaced
-  // in place, which would shift every column after it for an importer keyed
-  // on index.
+  // #2914 (naming P5): `account_address` is the only address column. #2907
+  // appended it beside a deprecated `safe_address` rather than replacing it
+  // in place, precisely so this removal would shift columns ONCE instead of
+  // twice — an importer keyed on column INDEX sees that shift now.
   'account_address',
 ] as const
 
@@ -108,13 +106,11 @@ export function transactionCsvRow(
     tx_hash: tx.hash,
     payment_id: tx.paymentId ?? '',
     agent_name: tx.agentName ?? '',
-    safe_address: tx.safeAddress,
     // The raw attribution enum — `human` | `agent` | `unknown`, empty for
     // inbound and unattributed rows. Never the display string "You", so the
     // export stays unambiguous for an accountant reading it cold.
     initiator: tx.initiatedBy ?? '',
-    // #2907: same value as `safe_address` above — dual-emit, not a rename.
-    account_address: tx.safeAddress,
+    account_address: tx.accountAddress,
   }
 }
 

@@ -28,9 +28,7 @@ function tx(overrides: Partial<AggregatedTransaction> = {}): AggregatedTransacti
     chainId: 8453,
     accountId: 'safe-id',
     accountAddress: '0x135a9215604711AC70d970e12Caa812c53537EF4',
-    safeId: 'safe-id',
-    safeAddress: '0x135a9215604711AC70d970e12Caa812c53537EF4',
-    safeName: 'Main Haven wallet',
+    accountName: 'Main Haven wallet',
     ...overrides,
   }
 }

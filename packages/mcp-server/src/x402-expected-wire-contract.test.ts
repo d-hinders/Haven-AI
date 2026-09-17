@@ -155,7 +155,7 @@ async function backendAuthorizeBody(rail: 'delegation' | 'legacy') {
     status: 'pending_signature',
     expires_at: EXPIRES_AT,
     chain_id: 84532,
-    safe_address: '0x' + 'a1'.repeat(20),
+    account_address: '0x' + 'a1'.repeat(20),
     payer: '0x' + 'a1'.repeat(20),
     token: 'USDC',
     amount: '0.001',

@@ -335,7 +335,7 @@ field. Both halves are guarded by tests in `openapi/spec.test.ts`.
 
 **`Transaction` used to be the `$ref` case, and it could not be asserted at all
 (#2885).** `Transaction` (`GET /transactions`, the aggregated feed) was
-`allOf: [{ $ref: TransactionBase }, { chainId, safeId, safeAddress, safeName }]`
+`allOf: [{ $ref: TransactionBase }, { chainId, accountId, accountAddress, accountName }]`
 — composed so the ~25 shared fields were written once (#984). Because the
 `$ref`'d `TransactionBase` was closed, every feed row failed on the four fields
 the sibling declared, so the route carried no `expectMatchesSpec`, and
@@ -445,9 +445,9 @@ The contract exposes three authentication schemes:
 - `DashboardJwt` authenticates the user for account management, setup, and
   dashboard read operations. Since #984 the dashboard read surface is
   documented in the spec itself (tag `Dashboard`: `/dashboard/overview`,
-  `/balances/{safeAddress}`, `/portfolio/{safeAddress}`,
-  `/transactions/filters`, `/transactions/{safeAddress}`,
-  `/safe/{safeAddress}/details`) — it is the source for the frontend's
+  `/balances/{accountAddress}`, `/portfolio/{accountAddress}`,
+  `/transactions/filters`, `/transactions/{accountAddress}`,
+  `/safe/{accountAddress}/details`) — it is the source for the frontend's
   generated response types, so it must describe what the routes actually
   emit, not an idealization (e.g. `from`/`to` can be the empty string;
   `amountSek` is present on enriched rows).

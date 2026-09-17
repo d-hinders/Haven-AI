@@ -310,9 +310,8 @@ export class X402FundingLeg {
     const to = execResult?.to ?? raw.to ?? this.delegateAddress ?? ''
     const explorerUrl = execResult?.explorer_url ?? raw.explorer_url ?? explorerUrlOrEmpty(chainId, txHash)
     const merchantTo = execResult?.merchant_to ?? raw.merchant_to ?? option.payTo
-    // #2908: new name before old at every level — `account_address` then
-    // `components.payer_account` (the #2907 twin) before `safe_address` /
-    // `components.safe`. NEVER `components.account`: that is the delegate.
+    // `account_address` then `components.payer_account`. NEVER
+    // `components.account`: that is the delegate.
     const payer = readX402ReceiptPayer(raw)
 
     return buildX402Receipt({

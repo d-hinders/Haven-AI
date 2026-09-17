@@ -55,7 +55,7 @@ export interface AgentCredentialJson {
   api_key: string
   delegate_key: string
   delegate_address: string
-  safe_address: string
+  account_address: string
   chain_id: number
   network: string | null
   api_url: string | null
@@ -125,7 +125,7 @@ export function buildAgentCredential(input: HandoffInput): AgentCredentialArtifa
     api_key: credentials.apiKey,
     delegate_key: credentials.delegatePrivateKey,
     delegate_address: agent.delegateAddress,
-    safe_address: agent.accountAddress,
+    account_address: agent.accountAddress,
     chain_id: agent.chainId,
     network: resolveNetworkName(agent.chainId),
     api_url: apiBaseUrl ?? null,

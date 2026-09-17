@@ -19,7 +19,7 @@ function receipt(over: Partial<PaymentReceipt['authorization']> = {}): PaymentRe
       amount: '1',
       amountSek: '10.60',
       recipient: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
-      safe: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+      account: '0x135a9215604711AC70d970e12Caa812c53537EF4',
       chainId: 100,
       settledAt: '2026-06-20T10:00:00.000Z',
       resourceUrl: 'https://api.example/resource',

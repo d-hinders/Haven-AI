@@ -334,46 +334,26 @@ describe('owner_cli route census (#2526)', () => {
       'POST /agents',
       'GET /agents',
       'POST /agent-connection-setups',
-      'GET /user/safes',
       // #2534: the funding hand-off, load-bearing because it is the one entry
       // whose reach is an agent pasting instructions at its human.
-      'GET /user/safes/{safeId}/funding',
+      'GET /user/accounts/{accountId}/funding',
       'POST /agents/{id}/delegations/build',
       'POST /agents/{id}/delegations/{hash}/revoke',
-      // #2907: the account-vocabulary twin mount carries identical authority
-      // to its `/user/safes*` counterpart above — pinned by name so a future
-      // edit to the list cannot silently drop one side of the pair again.
+      // #2914 (naming epic #2906 phase 5, the contraction): the ONE surviving
+      // name. `#2907`'s `/user/safes*` twin mount is gone — those paths answer
+      // a 410 naming tombstone (`user-accounts-retired.ts`) and are counted by
+      // this census, so the assertion below that they are NOT on the
+      // allow-list is a real check rather than a vacuous one.
       'GET /user/accounts',
-      'GET /user/accounts/{safeId}/funding',
     ]) {
       expect(OWNER_CLI_ALLOWED_ROUTES.map(key)).toContain(entry)
       expect(real, `${entry} must still exist`).toContain(entry)
     }
-  })
-
-  it('#2907: an owner_cli token gets IDENTICAL treatment on the safe/account twin paths', async () => {
-    // The bug this closes: `routeAllowsOwnerCli` compares the registered
-    // route's literal URL, so listing `/user/safes*` alone left the identical
-    // `/user/accounts*` mount refusing the same token for the same data. This
-    // is the enforcement-level half of that parity claim (no HTTP, no DB) —
-    // the full request/response parity lives in
-    // `routes/__tests__/user-safes-funding.test.ts`.
-    const routes = await census()
-    const byPrefix = new Map(routes.map((r) => [key(r), r]))
-    const pairs: [string, string][] = [
-      ['GET /user/safes', 'GET /user/accounts'],
-      ['GET /user/safes/{safeId}/funding', 'GET /user/accounts/{safeId}/funding'],
-    ]
-    for (const [safePath, accountPath] of pairs) {
-      const safeRoute = byPrefix.get(safePath)
-      const accountRoute = byPrefix.get(accountPath)
-      expect(safeRoute, safePath).toBeDefined()
-      expect(accountRoute, accountPath).toBeDefined()
-      expect(routeAllowsOwnerCli(asRequest(safeRoute!))).toBe(
-        routeAllowsOwnerCli(asRequest(accountRoute!)),
-      )
-      expect(routeAllowsOwnerCli(asRequest(accountRoute!))).toBe(true)
-    }
+    // The retired `/user/safes*` names must NOT be on the allow-list — an
+    // allow-list entry for a permanently-410 path grants nothing while
+    // reading as coverage, the one failure mode this list must not have.
+    expect(OWNER_CLI_ALLOWED_ROUTES.map(key)).not.toContain('GET /user/safes')
+    expect(OWNER_CLI_ALLOWED_ROUTES.map(key)).not.toContain('GET /user/safes/{safeId}/funding')
   })
 })
 

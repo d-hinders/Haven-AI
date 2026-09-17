@@ -85,7 +85,7 @@ export function useDelegateBalance(agentId: string | null): UseDelegateBalanceRe
   // A balance without the bound Safe address is readable for diagnosis, but
   // it is not eligible for a recovery CTA: the sweep destination cannot be
   // verified after an account unlink.
-  const hasVerifiedDestination = Boolean(balance?.safe_address)
+  const hasVerifiedDestination = Boolean(balance?.account_address)
   const hasRecoverableUsdc = sweepStatus === 'recoverable' && hasVerifiedDestination
   const hasBelowMinimumUsdc = sweepStatus === 'below_minimum' && hasVerifiedDestination
 

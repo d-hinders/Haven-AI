@@ -894,7 +894,7 @@ async function main(): Promise<void> {
         [`smoke-1060-${Date.now()}@haven.test`],
       )
     ).rows[0].id
-    const safeId = (
+    const accountId = (
       await fx.query<{ id: string }>(
         `INSERT INTO smart_accounts (user_id, account_address, chain_id, name, is_default, account_type, execution_rail)
          VALUES ($1, $2, 84532, 'smoke', false, 'delegator_hybrid', 'delegation') RETURNING id`,
@@ -905,7 +905,7 @@ async function main(): Promise<void> {
       await fx.query<{ id: string }>(
         `INSERT INTO agents (user_id, name, delegate_address, api_key_hash, api_key_prefix, account_id)
          VALUES ($1, 'smoke-1060', $2, 'smoke-hash-1060', 'sk_smoke', $3) RETURNING id`,
-        [userId, '0x' + 'dd'.repeat(20), safeId],
+        [userId, '0x' + 'dd'.repeat(20), accountId],
       )
     ).rows[0].id
 

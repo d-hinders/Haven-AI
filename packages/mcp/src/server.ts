@@ -194,7 +194,7 @@ export async function runConsentGate(
       apiKey: credentials.apiKey,
       apiUrl: credentials.apiUrl,
       agentId: credentials.agentId,
-      safeAddress: credentials.accountAddress ?? credentials.safeAddress,
+      accountAddress: credentials.accountAddress,
       delegateAddress: credentials.delegateAddress,
       chainId: credentials.chainId,
       allowanceSummary: credentials.allowanceSummary,

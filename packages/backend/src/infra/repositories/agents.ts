@@ -36,8 +36,8 @@ export interface AgentRow {
   delegate_address: string | null
   account_id: string | null
   account_address: string | null
-  safe_name: string | null
-  safe_chain_id: number | null
+  account_name: string | null
+  account_chain_id: number | null
   account_type: string | null
   api_key_prefix: string | null
   status: string
@@ -65,13 +65,13 @@ export interface AgentAllowanceRow {
 
 export interface AccountInfoRow {
   account_address: string | null
-  safe_name: string | null
-  safe_chain_id: number | null
+  account_name: string | null
+  account_chain_id: number | null
 }
 
 export interface DelegateAgentRow {
   delegate_address: string | null
-  safe_chain_id: number | null
+  account_chain_id: number | null
   account_address: string | null
 }
 
@@ -254,7 +254,7 @@ export async function insertPendingDelegationForOwnedNonRevokedAgent(
  * The list read: NO status filter (#1069 — pending_approval agents included).
  */
 export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.description, a.delegate_address,
-              a.account_id, us.account_address, us.name as safe_name, us.chain_id AS safe_chain_id,
+              a.account_id, us.account_address, us.name as account_name, us.chain_id AS account_chain_id,
               us.account_type,
               a.api_key_prefix, a.status, a.created_at, a.archived_at, a.mcp_server_name,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
@@ -285,7 +285,7 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
  * The single read: NO status filter, same as the list (#1069).
  */
 export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.description, a.delegate_address,
-              a.account_id, us.account_address, us.name as safe_name, us.chain_id AS safe_chain_id,
+              a.account_id, us.account_address, us.name as account_name, us.chain_id AS account_chain_id,
               us.account_type,
               a.api_key_prefix, a.status, a.created_at, a.archived_at, a.mcp_server_name,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
@@ -311,7 +311,7 @@ export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.desc
  * exclusion made sweep reachable only while the agent was healthy, which is
  * when nobody needs it.
  */
-export const FIND_DELEGATE_AGENT_FOR_USER_SQL = `SELECT a.delegate_address, us.chain_id AS safe_chain_id, us.account_address, us.account_type
+export const FIND_DELEGATE_AGENT_FOR_USER_SQL = `SELECT a.delegate_address, us.chain_id AS account_chain_id, us.account_address, us.account_type
        FROM agents a
        LEFT JOIN smart_accounts us ON a.account_id = us.id
        WHERE a.user_id = $1 AND a.id = $2
@@ -478,7 +478,7 @@ export const INSERT_AGENT_WITH_KEY_SQL = `INSERT INTO agents (user_id, name, des
                    -- here is the honest answer, not a placeholder.
                    NULL::text AS mcp_server_name`
 
-export const FIND_ACCOUNT_INFO_SQL = `SELECT account_address, name AS safe_name, chain_id AS safe_chain_id
+export const FIND_ACCOUNT_INFO_SQL = `SELECT account_address, name AS account_name, chain_id AS account_chain_id
              FROM smart_accounts WHERE id = $1`
 
 export interface NewAgent {
@@ -542,8 +542,8 @@ export async function createAgent(
       : null
     const accountInfo = accountInfoResult?.rows[0] ?? {
       account_address: null,
-      safe_name: null,
-      safe_chain_id: null,
+      account_name: null,
+      account_chain_id: null,
     }
 
     return { agent, accountInfo }
@@ -560,7 +560,7 @@ export const UPDATE_AGENT_PROFILE_SQL = `WITH updated AS (
                      mcp_server_name
          )
          SELECT updated.id, updated.name, updated.description, updated.delegate_address,
-                updated.account_id, us.account_address, us.name AS safe_name, us.chain_id AS safe_chain_id,
+                updated.account_id, us.account_address, us.name AS account_name, us.chain_id AS account_chain_id,
                 us.account_type,
                 updated.api_key_prefix, updated.status, updated.created_at,
                 -- #1878/#1694: the display name is editable, the wiring name is

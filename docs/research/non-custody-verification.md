@@ -65,7 +65,7 @@ What the codebase shows today:
   (nullable). Per policy, "API auth is identity, signature is authority" — but
   the plaintext column should be fully retired.
 - **Control surface already exposed.** `/safe/:addr/details` (owners,
-  threshold), `GET /user/safes` (the caller's linked accounts — delegation-rail
+  threshold), `GET /user/accounts` (the caller's linked accounts; the `/user/safes*` prefix answers 410 since #2914 — delegation-rail
   only since #2413), on-chain
   allowances, and the agents API already return everything a "verify your
   control" view needs. (`/user/safes/:id/approvers` was on this list until

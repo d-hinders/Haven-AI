@@ -111,7 +111,7 @@ export const x402Erc7710Sdk: Scenario = {
 
     // ── 2. Baselines, including the one the whole leg turns on ───────────────
     const agent = await haven.getAgent()
-    const treasury = agent.safeAddress
+    const treasury = agent.accountAddress
     if (!treasury) return fail("could not read the agent's account address")
     if (agent.executionRail !== 'delegation') {
       return skip(`QA delegation identity is on the '${agent.executionRail}' rail, not delegation`)

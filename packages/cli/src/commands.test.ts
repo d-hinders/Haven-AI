@@ -170,7 +170,7 @@ describe('login', () => {
 })
 
 describe('budget grant/revoke (#2539)', () => {
-  const AGENT = { id: 'a1', name: 'Scout', status: 'active', account_type: 'delegator_hybrid', safe_address: '0x' + 'aa'.repeat(20), safe_chain_id: 84532 }
+  const AGENT = { id: 'a1', name: 'Scout', status: 'active', account_type: 'delegator_hybrid', account_address: '0x' + 'aa'.repeat(20), account_chain_id: 84532 }
   const HASH = '0x' + 'ab'.repeat(32)
   const BUILT = {
     delegation_hash: HASH,
@@ -339,11 +339,29 @@ describe('budget grant/revoke (#2539)', () => {
 })
 
 describe('read commands', () => {
+  it('an OLD server\'s `safes` envelope fails LOUDLY, naming the cause (#2914)', async () => {
+    // The regression this exists for: the envelope key moved `safes` ->
+    // `accounts` and this file kept reading the old one, so every wallets
+    // command died on "Cannot read properties of undefined (reading
+    // 'length')" — a stack trace blaming the CLI for a server shape change.
+    // Every fixture in this suite encoded the old envelope, so the suite was
+    // green against a response the server had stopped sending; asserting the
+    // REFUSAL is what makes the fixture's shape load-bearing.
+    const { deps, err } = harness({
+      makeApi: () => fakeApi({ 'GET /user/accounts': { safes: [{ id: 's1', account_address: '0xABC', chain_id: 8453, name: 'Main', is_default: true }] } }),
+    })
+    expect(await run(['wallets', 'list'], deps)).not.toBe(0)
+    const message = err.join('\n')
+    expect(message).toContain('did not return an `accounts` array')
+    expect(message).toContain('#2914')
+    expect(message).not.toContain('Cannot read properties of undefined')
+  })
+
   it('lists wallets as a table and as json', async () => {
-    const safes = [
-      { id: 's1', safe_address: '0x1111111111111111111111111111111111111111', chain_id: 8453, name: 'Main', is_default: true },
+    const accounts = [
+      { id: 's1', account_address: '0x1111111111111111111111111111111111111111', chain_id: 8453, name: 'Main', is_default: true },
     ]
-    const mk = () => fakeApi({ 'GET /user/accounts': { safes } })
+    const mk = () => fakeApi({ 'GET /user/accounts': { accounts } })
 
     const human = harness({ makeApi: mk })
     await run(['wallets', 'list'], human.deps)
@@ -352,7 +370,7 @@ describe('read commands', () => {
 
     const json = harness({ makeApi: mk })
     await run(['wallets', 'list', '--json'], json.deps)
-    expect(JSON.parse(json.out.join('\n'))).toEqual(safes)
+    expect(JSON.parse(json.out.join('\n'))).toEqual(accounts)
   })
 
   describe('wallets funding (#2534)', () => {
@@ -374,7 +392,7 @@ describe('read commands', () => {
         get: async <T,>(path: string) => {
           calls.push(`GET ${path}`)
           if (path === '/user/accounts') {
-            return { safes: [{ id: 's1', safe_address: FUNDING.account_address, chain_id: 8453, name: 'Main', is_default: true }] } as T
+            return { accounts: [{ id: 's1', account_address: FUNDING.account_address, chain_id: 8453, name: 'Main', is_default: true }] } as T
           }
           if (path === '/user/accounts/s1/funding') {
             const state = states[Math.min(i, states.length - 1)]
@@ -419,7 +437,7 @@ describe('read commands', () => {
       expect(await run(['wallets', 'funding', '--safe', 'nope', '--json'], empty.deps)).toBe(2)
 
       const none = harness({
-        makeApi: () => fakeApi({ 'GET /user/accounts': { safes: [] } }),
+        makeApi: () => fakeApi({ 'GET /user/accounts': { accounts: [] } }),
       })
       const code = await run(['wallets', 'funding', '--json'], none.deps)
       expect(code).not.toBe(0)
@@ -539,13 +557,33 @@ describe('read commands', () => {
     expect(parsed[0].hash).toBe('0xa')
   })
 
-  it.each([
-    ['old-only server shape', { safe_address: '0xABC' }],
-    ['new-only server shape', { account_address: '0xABC' }],
-    ['both', { account_address: '0xABC', safe_address: '0xold' }],
-  ])('reads the wallet address from either name — %s (#2908)', async (_label, twins) => {
+  it('renders the ACCOUNT column from accountName — the server stopped sending safeName (#2914)', async () => {
+    // The table's ACCOUNT column read `safeName` while the feed emitted it.
+    // #2914 renamed that field to `accountName`, and a stale read here fails
+    // in the quietest possible way: every row renders a BLANK account, with
+    // no error anywhere and an exit code of 0. Nothing else in this suite
+    // touches the column, which is how the stale read survived the rename —
+    // so this asserts the rendered cell, not the request.
+    const transactions = [
+      {
+        hash: '0xa',
+        direction: 'out',
+        valueFormatted: '5',
+        asset: 'USDC',
+        timestamp: 1_700_000_000,
+        accountName: 'Treasury',
+      },
+    ]
+    const { deps, out } = harness({ makeApi: () => fakeApi({ 'GET /transactions': { transactions } }) })
+    expect(await run(['activity', 'list'], deps)).toBe(0)
+    const rendered = out.join('\n')
+    expect(rendered).toContain('ACCOUNT')
+    expect(rendered).toContain('Treasury')
+  })
+
+  it('reads the wallet address from account_address (#2914: the only name left)', async () => {
     const api = fakeApi({
-      'GET /user/accounts': { safes: [{ id: 's1', ...twins, chain_id: 100, name: 'Main', is_default: true }] },
+      'GET /user/accounts': { accounts: [{ id: 's1', account_address: '0xABC', chain_id: 100, name: 'Main', is_default: true }] },
       'GET /balances/0xABC': { balances: [] },
     })
     const { deps, out } = harness({ makeApi: () => api })
@@ -556,18 +594,31 @@ describe('read commands', () => {
     expect(await run(['wallets', 'balances', '--safe', '0xabc'], deps)).toBe(0)
   })
 
-  it('resolves activity --safe by address to an accountId filter (both keys for the #2908 window)', async () => {
+  it('an OLD-only server (safe_address alone) no longer resolves a wallet address (#2914)', async () => {
+    // The compat window is closed: `safe_address` is not read at all, so the
+    // account address resolves to '' — an explicit, visible failure (the
+    // balances call hits an unmocked/malformed path) rather than a silently
+    // reused stale field.
     const api = fakeApi({
-      'GET /user/accounts': { safes: [{ id: 's1', safe_address: '0xABC', chain_id: 100, name: 'Main', is_default: true }] },
+      'GET /user/accounts': { accounts: [{ id: 's1', safe_address: '0xABC', chain_id: 100, name: 'Main', is_default: true }] },
+    })
+    const { deps } = harness({ makeApi: () => api })
+    expect(await run(['wallets', 'balances'], deps)).not.toBe(0)
+    expect(api.calls).toContain('GET /balances/?chain_id=100')
+  })
+
+  it('resolves activity --safe by address to an accountId filter', async () => {
+    const api = fakeApi({
+      'GET /user/accounts': { accounts: [{ id: 's1', account_address: '0xABC', chain_id: 100, name: 'Main', is_default: true }] },
       'GET /transactions': { transactions: [] },
     })
     const { deps } = harness({ makeApi: () => api })
     expect(await run(['activity', 'list', '--safe', '0xabc'], deps)).toBe(0)
     const txCall = api.calls.find((c) => c.startsWith('GET /transactions'))
     expect(txCall).toContain('accountId=s1')
-    // The old key rides along: an unknown query key is silently ignored, so a
-    // pre-#2907 server would otherwise answer with EVERY row.
-    expect(txCall).toContain('safeId=s1')
+    // #2914: the old query key is gone — a pre-#2907 server is no longer a
+    // supported target, so there is nothing left to keep filtering for it.
+    expect(txCall).not.toContain('safeId=s1')
   })
 
   it('passes --offset through to the transactions query', async () => {
@@ -579,7 +630,7 @@ describe('read commands', () => {
   })
 
   it('errors when activity --safe matches no wallet', async () => {
-    const api = fakeApi({ 'GET /user/accounts': { safes: [] } })
+    const api = fakeApi({ 'GET /user/accounts': { accounts: [] } })
     const { deps, err } = harness({ makeApi: () => api })
     // A --safe that matches nothing is a bad argument: usage (2).
     expect(await run(['activity', 'list', '--safe', 'nope'], deps)).toBe(2)
@@ -606,7 +657,7 @@ describe('read commands', () => {
         hash: '0xabc', direction: 'out', valueFormatted: '12.50', asset: 'USDC',
         tokenSymbol: 'USDC', tokenAddress: '0xtok', timestamp: 1_700_000_000,
         from: '0xsafe', to: '0xmerchant', source: 'x402', chainId: 8453,
-        safeAddress: '0xsafe', agentName: '=cmd()',
+        accountAddress: '0xsafe', agentName: '=cmd()',
       },
     ]
     const { deps, out } = harness({ makeApi: () => fakeApi({ 'GET /transactions': { transactions } }) })
@@ -963,7 +1014,7 @@ describe('haven login — device flow', () => {
 })
 
 describe('agents connect (#2527)', () => {
-  const SAFES = { safes: [{ id: 's1', safe_address: '0xsafe', chain_id: 84532, name: 'Wallet', is_default: true }] }
+  const SAFES = { accounts: [{ id: 's1', account_address: '0xsafe', chain_id: 84532, name: 'Wallet', is_default: true }] }
   const BALANCES = {
     balances: [
       { symbol: 'ETH', address: null, decimals: 18 },
@@ -1037,13 +1088,13 @@ describe('agents connect (#2527)', () => {
     expect(api.calls).toContain('GET /balances/0xsafe?chain_id=84532')
   })
 
-  it('sends account_id AND safe_id, same value, so the request works against a server with either (#2908)', async () => {
+  it('sends account_id only (#2914: safe_id retired)', async () => {
     const { api, bodies } = recordingApi(ROUTES)
     const { deps } = harness({ makeApi: () => api })
     expect(await run([...CONNECT_ARGV, '--json'], deps)).toBe(0)
-    const body = bodies[0].body as { account_id: string; safe_id: string }
+    const body = bodies[0].body as { account_id: string; safe_id?: string }
     expect(body.account_id).toBe('s1')
-    expect(body.safe_id).toBe('s1')
+    expect(body).not.toHaveProperty('safe_id')
   })
 
   it('asks for balances on the WALLET\'s chain, which is not optional', async () => {

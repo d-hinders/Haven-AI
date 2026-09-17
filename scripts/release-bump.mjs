@@ -332,8 +332,9 @@ async function updateRuntimeManifest(newVersion) {
  * the script had already written and already verified.
  *
  * What this does NOT do, deliberately: satisfy the contract-doc gate on its own.
- * The gate requires BOTH contract docs, and the CASP shard remains entirely
- * hand-written — as does this doc's own `last-verified` note, which says what
+ * The gate implicates THREE contract docs (this write clears one of them by
+ * presence; `package-dev-channel.md` and the CASP shard are hand-written), and
+ * the shard remains entirely hand-written — as does this doc's own `last-verified` note, which says what
  * the release carries and why the perimeter is unaffected. Those are the parts
  * that need judgement; a table of four identical version strings is not.
  */
@@ -869,19 +870,33 @@ async function main() {
   log('  Next steps — publishing is NOT one of them:')
   log('')
   log('    1. git diff --stat            review the bump')
-  log('    2. Write the two contract docs, or the blocking coupling gate fails.')
-  log('       The mechanical half is already done; what is left needs judgement:')
-  log('         docs/operations/mcp-runtime-compatibility.md')
+  log('    2. Write the TWO remaining contract docs, or the blocking gate fails.')
+  log('       A release implicates three; this bump already cleared the first:')
+  log('         docs/operations/mcp-runtime-compatibility.md  [cleared by this bump]')
   log('           the manifest table is ALREADY re-pinned and verified against the')
-  log('           source constants. Still yours: re-read the table, update its')
-  log('           last-verified date, and record what this release carries and')
-  log('           what did NOT move in the release PR and shard.')
+  log('           source constants, which satisfies the gate by presence. Still')
+  log('           yours: re-read the table, and record what this release carries')
+  log('           and what did NOT move in the release PR and shard. Bump its')
+  log('           last-verified only if you re-verified the doc (#1366).')
+  log('         docs/operations/package-dev-channel.md')
+  log('           coupled by CONNECTOR_VERSION in connect/src/runtime.ts, which')
+  log('           this bump just rewrote. NOT written for you. A scoped note on')
+  log('           what you re-verified; a bare date bump satisfies the gate but')
+  log('           is the rubber stamp #1366 rates worse than a stale date.')
   // #1789: named for the VERSION, never the PR number. The shard must exist
   // before the PR is opened — the coupling gate blocks the PR without it — so a
   // PR-numbered name cannot be written at the moment it is needed. This line is
   // where a release-cutter actually reads the convention, which is why it is
   // guarded: the docs were corrected once while this string kept teaching the
   // retired rule to the next person who ran the bump.
+  //
+  // That happened AGAIN on 2026-09-17, one line up rather than here: the docs
+  // were corrected to name three contract docs (#3061) while the log above
+  // still said "the two contract docs" and enumerated two, so the operator who
+  // followed this output wrote two and hit the blocking gate on the third. The
+  // guard covers the shard NAME, not the count beside it. Whatever this block
+  // prints is the live instruction; correcting a doc without correcting it
+  // here fixes the record and not the behaviour.
   log(`         docs/regulatory/casp-changelog/<date>-${newVersion}-release.md`)
   log('           a new shard, ending in a perimeter verdict')
   log('    3. npm run docs:coupling      must exit 0')

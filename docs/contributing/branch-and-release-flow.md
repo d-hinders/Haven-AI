@@ -154,6 +154,18 @@ the epic when its last sub-issue lands on `dev`.
 > (the dev → main promotion) won't re-close anything; the issues are already
 > closed from the dev-merge.
 
+> **Re-verification (contract-doc count correction, 2026-09-17):** this doc is
+> coupled because `scripts/release-bump.mjs` is in its `covers:` and that script
+> was edited — its *printed* next-steps block said "the two contract docs" and
+> enumerated two, while the docs had been corrected to three. Only operator-facing
+> log strings and comments changed; no version, pin, channel, dist-tag, build
+> order or credential path moves, and `release-bump.test.mjs` is 76/76.
+> **Nothing in this document was made false or stale by that edit** — it carries
+> no contract-doc count of its own, which is why it needed no content change.
+> `last-verified` deliberately NOT bumped: this is a scoped check of one script
+> edit, not a re-verification of the document, and #1366 rates a rubber-stamped
+> date worse than a stale one.
+
 ## Promotion to production (`dev → main`)
 
 1. Open a **`dev → main` PR** (a human step). Its diff is the promotion manifest

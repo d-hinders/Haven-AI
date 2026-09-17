@@ -160,6 +160,100 @@ describe('ConnectionRow states', () => {
   })
 })
 
+describe('ConnectionRow — api_key providers (#3017)', () => {
+  const accountedProvider = () =>
+    provider({
+      id: 'accounted',
+      displayName: 'Accounted',
+      authKind: 'api_key',
+      requiredScopes: [],
+      capabilities: { attachments: false, verify: false, revoke: false, companyInfo: true },
+    })
+  const accountedConnection = (overrides: Partial<React.ComponentProps<typeof ConnectionRow>['connection']> = {}) =>
+    connection({
+      provider: 'accounted',
+      displayName: 'Accounted',
+      authKind: 'api_key',
+      grantedScope: null,
+      ...overrides,
+    })
+
+  function renderAccountedRow(props: Partial<React.ComponentProps<typeof ConnectionRow>> = {}) {
+    const handlers = {
+      onConnect: vi.fn(),
+      onConnectWithApiKey: vi.fn(),
+      onDisconnect: vi.fn(),
+      onToggleSettings: vi.fn(),
+    }
+    render(
+      <LocaleProvider>
+        <ConnectionRow
+          provider={accountedProvider()}
+          connection={null}
+          busy={false}
+          settingsOpen={false}
+          {...handlers}
+          {...props}
+        />
+      </LocaleProvider>,
+    )
+    return handlers
+  }
+
+  const accountedActions = () => screen.getByTestId('connection-actions-accounted')
+
+  it('Connect opens the paste modal — onConnectWithApiKey, never the OAuth redirect', () => {
+    const h = renderAccountedRow()
+    expect(screen.getByText('Connect to feed settled payments to Accounted.')).toBeInTheDocument()
+    expect(accountedActions()).toHaveAttribute('data-action', 'connect')
+    within(accountedActions()).getByRole('button', { name: 'Connect' }).click()
+    expect(h.onConnectWithApiKey).toHaveBeenCalledTimes(1)
+    expect(h.onConnect).not.toHaveBeenCalled()
+  })
+
+  it('Reconnect on a broken api_key row opens the same paste modal — a fresh key is the fix', () => {
+    const h = renderAccountedRow({ connection: accountedConnection({ status: 'revoked_at_provider', isActiveDestination: false }) })
+    expect(screen.getByText(/Access was revoked in Accounted/)).toBeInTheDocument()
+    expect(accountedActions()).toHaveAttribute('data-action', 'reconnect')
+    within(accountedActions()).getByRole('button', { name: 'Reconnect' }).click()
+    expect(h.onConnectWithApiKey).toHaveBeenCalledTimes(1)
+    expect(h.onConnect).not.toHaveBeenCalled()
+  })
+
+  it('a connected api_key row reads like any connected row — company name and Settings', () => {
+    renderAccountedRow({
+      connection: accountedConnection({ externalCompanyId: '732b80b7-d0f7-45b9-8083-571f8d28d001', externalCompanyName: 'Optikerhuset Österlen AB' }),
+    })
+    expect(screen.getByText('Connected')).toBeInTheDocument()
+    expect(screen.getByText(/Connected to Optikerhuset Österlen AB/)).toBeInTheDocument()
+    expect(within(accountedActions()).getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+  })
+
+  it('an api_key row without the paste handler disables Connect — the wiring contract, not a dead button', () => {
+    renderAccountedRow({ onConnectWithApiKey: undefined })
+    expect(within(accountedActions()).getByRole('button', { name: 'Connect' })).toBeDisabled()
+  })
+
+  it('an oauth2 row ignores the paste handler — Connect still drives the redirect (#2868 unchanged)', () => {
+    const handlers = { onConnect: vi.fn(), onDisconnect: vi.fn(), onToggleSettings: vi.fn() }
+    render(
+      <LocaleProvider>
+        <ConnectionRow
+          provider={provider()}
+          connection={null}
+          busy={false}
+          settingsOpen={false}
+          onConnectWithApiKey={handlers.onConnect}
+          {...handlers}
+        />
+      </LocaleProvider>,
+    )
+    within(screen.getByTestId('connection-actions-fortnox')).getByRole('button', { name: 'Connect' }).click()
+    expect(handlers.onConnect).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('connection-actions-fortnox')).toHaveAttribute('data-action', 'connect')
+  })
+})
+
 describe('ConnectionRow — coming soon providers', () => {
   it.each(COMING_SOON)('$displayName is listed with a one-line description and a disabled Connect', (p) => {
     renderRow({ provider: p, connection: null })

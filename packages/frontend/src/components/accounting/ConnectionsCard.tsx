@@ -59,6 +59,7 @@ import { SettingsRow } from '@/app/(authenticated)/settings/SettingsSection'
 import { BackfillDialog } from './BackfillDialog'
 import { ConnectionRow } from './ConnectionRow'
 import { ConnectionSettings } from './ConnectionSettings'
+import { ApiKeyConnectModal } from './ApiKeyConnectModal'
 
 /** The callback's query, as this card reads it. Exported so the feed page forwards the same keys. */
 export const CONNECT_OUTCOME_PARAMS = ['provider', 'connect', 'reason'] as const
@@ -104,6 +105,7 @@ export function ConnectionsCard() {
     refreshing: connectionsRefreshing,
     error: connectionsError,
     connect,
+    connectWithApiKey,
     disconnect,
     updateSettings,
     backfill,
@@ -114,6 +116,8 @@ export function ConnectionsCard() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [pendingDisconnect, setPendingDisconnect] = useState<AccountingProvider | null>(null)
   const [backfillFor, setBackfillFor] = useState<AccountingProvider | null>(null)
+  /** #3017: the api_key provider whose paste modal is open (at most one). */
+  const [apiKeyConnectFor, setApiKeyConnectFor] = useState<AccountingProvider | null>(null)
   const [outcome, setOutcome] = useState<ConnectOutcome | null>(null)
   /** The outcome the backfill dialog has already been opened for — asked once, never re-asked. */
   const askedRef = useRef<ConnectOutcome | null>(null)
@@ -253,6 +257,9 @@ export function ConnectionsCard() {
                   busy={busyProvider === provider.id}
                   settingsOpen={settingsOpen}
                   onConnect={() => void run(provider.id, () => connect(provider.id), copy.connectError(provider.displayName))}
+                  onConnectWithApiKey={
+                    provider.authKind === 'api_key' ? () => setApiKeyConnectFor(provider) : undefined
+                  }
                   onDisconnect={() => setPendingDisconnect(provider)}
                   onToggleSettings={() => setOpenSettings((open) => (open === provider.id ? null : provider.id))}
                 />
@@ -308,6 +315,20 @@ export function ConnectionsCard() {
           providerName={backfillFor.displayName}
           onClose={() => setBackfillFor(null)}
           onBackfill={(since) => backfill(backfillFor.id, since)}
+        />
+      ) : null}
+
+      {apiKeyConnectFor ? (
+        // #3017: the paste modal owns its error display (per error_code, in
+        // its own panel), so a refusal here must NOT also land in the card's
+        // actionError band — the modal stays open with the field intact.
+        // Success closes it; the refetched row does the announcing (the row
+        // shows the company name like Fortnox does).
+        <ApiKeyConnectModal
+          open
+          providerName={apiKeyConnectFor.displayName}
+          onClose={() => setApiKeyConnectFor(null)}
+          onConnect={(apiKey) => connectWithApiKey(apiKeyConnectFor.id, apiKey)}
         />
       ) : null}
     </SettingsSection>

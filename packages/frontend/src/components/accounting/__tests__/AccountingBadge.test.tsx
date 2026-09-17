@@ -82,6 +82,8 @@ describe('AccountingBadge', () => {
     renderWithLocale(<AccountingBadge accounting={accounting({ provider: 'visma' })} />)
     expect(screen.getByRole('link')).toHaveTextContent('In Visma')
     expect(providerDisplayName('fortnox')).toBe('Fortnox')
+    // #3017: the second live provider is spelled from the map, not capitalised ad hoc.
+    expect(providerDisplayName('accounted')).toBe('Accounted')
     expect(providerDisplayName('bokio')).toBe('Bokio')
   })
 

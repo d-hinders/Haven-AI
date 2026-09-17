@@ -278,6 +278,132 @@ describe('StackedBarChart — the desktop callout is clamped by its own measured
   })
 })
 
+describe('StackedBarChart — the desktop callout drops above the baseline when the described bar is tall (#3063)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // The fixture's totals are 150 / 250 / 450 on a 600 scale, a 200px svg:
+  // bar tops at CSS y 132.7 / 106.1 / 52.7 (Tue 9 also carries a refusal
+  // cap 10 viewBox units higher: 97.0); baseline 172.7, svg bottom 200,
+  // legend top 212 (a dropped callout stops 6px above it: 206). A 90px callout at rest spans 12..102 and needs 6px of
+  // clearance (bottom 108), so it hides Tue 9 and Wed 10 but not Mon 8. A
+  // dropped callout must leave 12px of the day's marks above it and clear
+  // the bar's own top by 6.
+  function layOut() {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200)
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(90)
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(200)
+  }
+
+  it('rests at top-3 over a short bar and drops to the baseline over a tall one, keeping the bar top and its cap visible', () => {
+    layOut()
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    let tip = getByTestId('chart-tooltip')
+    expect(tip.className).toContain('top-3')
+    expect(tip.style.top).toBe('')
+    expect(tip.getAttribute('data-flipped')).toBeNull()
+    fireEvent.keyDown(svg, { key: 'End' })
+    tip = getByTestId('chart-tooltip')
+    expect(tip.className).not.toContain('top-3')
+    expect(tip.getAttribute('data-flipped')).toBe('true')
+    // Baseline at viewBox 190 of 220 → CSS 172.7; minus the 90px callout
+    // and the 6px gap: the callout's top sits at 76.7px, its bottom 6px
+    // above the axis — and 24px under the bar's top (52.7px), more than
+    // the 12px it must leave.
+    expect(tip.style.top).toBe('76.7px')
+    // The horizontal clamp is untouched by the flip (200px callout in a
+    // 600px wrapper → half 17.2%, so End clamps to 100 − 17.2).
+    expect(tip.style.left).toMatch(/^82\.8/)
+  })
+
+  it('drops to just above the legend — over the label whole, not a legend row — when the bar cannot hold the callout above the baseline', () => {
+    layOut()
+    // A 120px callout over Wed 10 (bar top 52.7): above the baseline it
+    // would start at 46.7 and cover the top; with its bottom 6px above the
+    // legend (206) it starts at 86, leaving 33px of the bar.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(120)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    fireEvent.keyDown(container.querySelector('svg')!, { key: 'End' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip.getAttribute('data-flipped')).toBe('true')
+    expect(tip.style.top).toBe('86px')
+  })
+
+  it('rests over a bar it would otherwise swallow: a drop that cannot leave 12px of the bar in view is not made', () => {
+    layOut()
+    // A 130px callout over Mon 8 (bar top 132.7): at rest it hides 22px of
+    // the top; dropped, even to the legend (top 76) it would cover the
+    // whole bar and the label — so it rests.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(130)
+    const swallowed = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(swallowed.container.querySelector('svg')!, { key: 'Home' })
+    let tip = swallowed.getByTestId('chart-tooltip')
+    expect(tip.getAttribute('data-flipped')).toBeNull()
+    expect(tip.className).toContain('top-3')
+    swallowed.unmount()
+    // A 145px callout over Wed 10 (bar top 52.7) lands at 61 above the
+    // legend: 8.3px of the bar — clear of its top edge, but under the 12px
+    // that reads as a bar — so it rests too.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(145)
+    const sliver = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(sliver.container.querySelector('svg')!, { key: 'End' })
+    tip = sliver.getByTestId('chart-tooltip')
+    expect(tip.getAttribute('data-flipped')).toBeNull()
+  })
+
+  it('counts the refusal cap as part of the bar: a day whose CAP alone would hide flips too', () => {
+    layOut()
+    // Tue 9's bar top is at 106.1, the 90px callout's resting bottom at
+    // 108 → drops on the bar alone. Shrink the callout to 80px (bottom at
+    // 98): the bar clears it, the cap (97.0) does not — so it still drops
+    // with the cap (to just above the legend: 126, leaving the cap and 20px
+    // of the bar) and rests without it.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(80)
+    const withCap = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(withCap.container.querySelector('svg')!, { key: 'ArrowRight' })
+    expect(withCap.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBe('true')
+    expect(withCap.getByTestId('chart-tooltip').style.top).toBe('126px')
+    withCap.unmount()
+    // The cap counts towards the 12px of marks but never stands in for the
+    // bar's own top edge: a 95px callout lands at 111 — 14px under the
+    // cap, but only 4.9px under the bar's top — so it rests.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(95)
+    const tooTall = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(tooTall.container.querySelector('svg')!, { key: 'ArrowRight' })
+    expect(tooTall.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBeNull()
+    tooTall.unmount()
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(80)
+    const noCap = THREE_DAYS.map((d, i) => (i === 1 ? { ...d, refusals: 0 } : d))
+    const without = render(<StackedBarChart days={noCap} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(without.container.querySelector('svg')!, { key: 'ArrowRight' })
+    expect(without.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBeNull()
+  })
+
+  it('never flips the narrow panel, and rests where nothing has a height (jsdom, first paint)', () => {
+    layOut()
+    const narrow = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} narrow />)
+    fireEvent.keyDown(narrow.container.querySelector('svg')!, { key: 'End' })
+    const panel = narrow.getByTestId('chart-tooltip')
+    expect(panel.getAttribute('data-flipped')).toBeNull()
+    expect(panel.style.top).toBe('')
+    narrow.unmount()
+    vi.restoreAllMocks()
+    const bare = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(bare.container.querySelector('svg')!, { key: 'End' })
+    const tip = bare.getByTestId('chart-tooltip')
+    expect(tip.className).toContain('top-3')
+    expect(tip.getAttribute('data-flipped')).toBeNull()
+  })
+})
+
 describe('StackedBarChart — ticks fit the gutter at 390 (#3051 design review)', () => {
   it('formats ticks with formatTick when given, and widens the gutter on the narrow treatment', () => {
     const compact = (n: number) => `$${Math.round(n)}`
@@ -351,6 +477,64 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     // panel is not a hover that has to be held open.
     fireEvent.mouseLeave(document.querySelector('svg')!)
     expect(screen.queryByTestId('chart-tooltip')).not.toBeNull()
+  })
+
+  it('never pins itself: the callout takes no pointer, and a pin is released by a second tap or Escape (#3066)', () => {
+    renderChart()
+    const groups = dayGroups()
+    const svg = document.querySelector('svg')!
+    // Hover paints the callout; entering the callout must not pin it, so
+    // leaving the figure clears it like any hover.
+    fireEvent.mouseEnter(groups[0]!)
+    const tip = screen.getByTestId('chart-tooltip')
+    expect(tip).toHaveTextContent(/Mon 8/)
+    expect(tip.className).toMatch(/pointer-events-none/)
+    fireEvent.mouseEnter(tip)
+    fireEvent.mouseLeave(svg)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // The pointer falls through to the bars beneath: hovering the next day
+    // while the previous day's callout would lie over it moves the hover.
+    fireEvent.mouseEnter(groups[0]!)
+    fireEvent.mouseEnter(groups[1]!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
+    fireEvent.mouseLeave(svg)
+    // A tap pins; the same tap again lets go.
+    fireEvent.mouseDown(groups[2]!)
+    fireEvent.mouseLeave(svg)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Wed 10/)
+    fireEvent.mouseDown(groups[2]!)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // A tap on another day moves the pin; Escape releases it.
+    fireEvent.mouseDown(groups[0]!)
+    fireEvent.mouseDown(groups[1]!)
+    fireEvent.mouseLeave(svg)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
+    fireEvent.keyDown(svg, { key: 'Escape' })
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // A touch tap synthesises mouseenter → mousedown with no mouseleave
+    // between taps: the second tap must still take the callout down, so
+    // the release drops the hover too.
+    fireEvent.mouseEnter(groups[1]!)
+    fireEvent.mouseDown(groups[1]!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
+    fireEvent.mouseDown(groups[1]!)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+  })
+
+  it('lets a pin and a caret go when the days change, so a shorter range does not strand the reveal on a day that is gone', () => {
+    const fourDays: StackedBarDay[] = [
+      ...THREE_DAYS,
+      { label: 'Thu 11', series: [{ id: 'alpha', name: 'Research agent', amount: 20, seriesIndex: 0 }] },
+    ]
+    const { rerender } = renderChart({}, fourDays)
+    fireEvent.mouseDown(dayGroups()[3]!)
+    fireEvent.mouseLeave(document.querySelector('svg')!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Thu 11/)
+    rerender(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel={SUMMARY} formatValue={fmt} />)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // Hover works again at once — the stale pin is not outranking it.
+    fireEvent.mouseEnter(dayGroups()[0]!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Mon 8/)
   })
 
   it('sits below the plot when the screen is narrow, rather than over it', () => {

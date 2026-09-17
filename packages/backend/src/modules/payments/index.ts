@@ -9,3 +9,7 @@ export * from './receipt.js'
 // two re-exports above (verified against agent-payment-status.js/receipt.js
 // when this was added), so the star re-export cannot collide.
 export * from './refusal-ledger.js'
+// The refusal choke point (#3053, epic #3056 slice 2): every policy refusal
+// in delegation-authorize.ts / routes/payments.ts goes through refuse(),
+// which records the ledger row and returns the already-decided response.
+export * from './refuse.js'

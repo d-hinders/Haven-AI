@@ -1216,8 +1216,9 @@ const FIXTURE_CONTACTS = [
  * generic empty shape. Pure — unit-testable without a browser.
  */
 /**
- * Accounting connections (#2868; backend #2862–#2867). The registry lists
- * Fortnox live and three coming-soon providers exactly as
+ * Accounting connections (#2868; backend #2862–#2867, #3017). The registry
+ * lists Fortnox and Accounted live — Fortnox over OAuth2, Accounted over a
+ * pasted API key (#3017) — and Light/Igdrasil coming soon, exactly as
  * `GET /accounting/providers` does; the connection row is the CONNECTED state
  * with a company, a push and a suggested account — the row the Settings card
  * renders by default. The other four states are stages of the
@@ -1231,7 +1232,15 @@ export const FIXTURE_ACCOUNTING_PROVIDERS = [
     capabilities: { attachments: true, verify: true, revoke: true, companyInfo: true },
     availability: 'live', requiredScopes: ['bookkeeping', 'companyinformation', 'archive'], configured: true,
   },
-  ...['Accounted', 'Light', 'Igdrasil'].map((displayName) => ({
+  // #3017: Accounted is the second live provider, and the first of the
+  // api_key kind — a pasted `gnubok_sk_*` key, no redirect. The harness
+  // renders the registry as it is, not as it was.
+  {
+    id: 'accounted', displayName: 'Accounted', authKind: 'api_key',
+    capabilities: { attachments: false, verify: false, revoke: false, companyInfo: true },
+    availability: 'live', requiredScopes: [], configured: true,
+  },
+  ...['Light', 'Igdrasil'].map((displayName) => ({
     id: displayName.toLowerCase(), displayName, authKind: 'oauth2',
     capabilities: { attachments: false, verify: false, revoke: false, companyInfo: false },
     availability: 'coming_soon', requiredScopes: [], configured: false,
@@ -2748,6 +2757,9 @@ const SETTINGS_ACCOUNTING_STAGES = {
     updatedAt: '2026-06-12T03:00:00.000Z',
     settings: { suggestedAccount: null, autoFeed: true },
   },
+  // #3017: the Accounted row — not connected, waiting for a pasted key. The
+  // paste modal opens from THIS row's Connect.
+  'api-key-modal': null,
   // The card's two OFF states (#2869): no connection row at all, and the
   // FEED STATUS answer is what makes the state — `hosted && !enabled` lists
   // every provider as Coming soon with no action; `!hosted` lists none.
@@ -2818,7 +2830,7 @@ async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
 export const SCENARIOS = {
   'settings-accounting': {
     description:
-      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), and the two feed OFF states — Coming soon and self-hosted (#2869)',
+      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), the Accounted paste modal (#3017), and the two feed OFF states — Coming soon and self-hosted (#2869)',
     stages: SETTINGS_ACCOUNTING_STAGES,
     /** Exposed so the fixture-contract test can pin each stage. */
     stage: setSettingsAccountingStage,
@@ -2862,8 +2874,11 @@ export const SCENARIOS = {
       // Each stage waits on its own distinguishing copy AND its action, and
       // refuses the neighbouring states' actions — a stage that quietly
       // rendered the previous one would otherwise file under the wrong name.
+      // #3017: the chip wait is scoped to the FORTNOX row — with Accounted
+      // live too, its "Not connected" chip is a second match on the card.
+      const fortnoxRow = card.getByTestId('connection-row-fortnox')
       const expectState = async (stage, chip, action, refused) => {
-        await card.getByText(chip, { exact: true }).waitFor({ timeout: 15_000 })
+        await fortnoxRow.getByText(chip, { exact: true }).waitFor({ timeout: 15_000 })
         await fortnoxActions.getByRole('button', { name: action, exact: true }).waitFor({ timeout: 15_000 })
         for (const name of refused) {
           await refuseIfPresent(fortnoxActions.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
@@ -2906,6 +2921,26 @@ export const SCENARIOS = {
       await openStage('disconnected')
       await card.getByText(/What was fed earlier stays in Haven/).waitFor({ timeout: 15_000 })
       await expectState('disconnected', 'Not connected', 'Connect', ['Reconnect', 'Settings', 'Disconnect'])
+
+      // ── the Accounted paste modal (#3017) ─────────────────────────────────
+      // The Accounted row waits for a pasted key; its Connect opens the modal
+      // (no redirect), the Fortnox row's Connect keeps driving OAuth.
+      await openStage('api-key-modal')
+      const accountedActions = card.getByTestId('connection-actions-accounted')
+      await card.getByText(/Connect to feed settled payments to Accounted\./).waitFor({ timeout: 15_000 })
+      await accountedActions.getByRole('button', { name: 'Connect', exact: true }).waitFor({ timeout: 15_000 })
+      // Two live rows now: Fortnox's assertions must stay scoped to its row.
+      await refuseIfPresent(accountedActions.getByRole('button', { name: 'Reconnect', exact: true }), 'settings-accounting · api-key-modal · Reconnect')
+      await accountedActions.getByRole('button', { name: 'Connect', exact: true }).click()
+      const apiKeyDialog = page.getByTestId('api-key-connect-modal')
+      await apiKeyDialog.getByRole('heading', { name: 'Connect Accounted with an API key' }).waitFor({ timeout: 15_000 })
+      // The steps are the evidence: where the keys page is, the two scopes
+      // verbatim, the revoke note.
+      await apiKeyDialog.getByText(/Tick exactly companies:read, documents:write\./).waitFor({ timeout: 15_000 })
+      await apiKeyDialog.getByText(/revoke the key in your Accounted dashboard/).waitFor({ timeout: 15_000 })
+      await apiKeyDialog.locator('input[type="password"]').waitFor({ timeout: 15_000 })
+      await card.scrollIntoViewIfNeeded()
+      await shoot(apiKeyDialog, 'api-key-modal')
 
       // ── the backfill choice on a first connect ────────────────────────────
       await openStage('first-connect', '?provider=fortnox&connect=connected')

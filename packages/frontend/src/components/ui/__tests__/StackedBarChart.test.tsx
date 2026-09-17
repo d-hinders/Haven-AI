@@ -404,22 +404,41 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
     expect(tip.style.top).toBe('116px')
   })
 
-  it('counts a neighbour\'s CAP as hidden even when its bar top is below the box, and never a bar that is not there (#3076 review)', () => {
+  it('counts a neighbour\'s CAP as hidden even when its bar top is below the box (#3076 review)', () => {
     layOut()
     // A (250, capless): top 106.1 — inside the baseline box (76.7..166.7)
     // only. C (15 + a refusal): a 4px bar whose top (168.7) is BELOW the
-    // baseline box but whose cap (159.6) is inside it, and both inside the
-    // legend box (116..206). Z (0 spent, one refusal): no bar — its cap
-    // (163.6) is inside both boxes, its "top" (the baseline, 172.7) must
-    // not score for the legend box. Baseline slot hides A + C(cap) + Z(cap)
-    // = 3; legend slot hides C + Z(cap) = 2 → legend wins. A bar-only rule
-    // scores 1 v 2 and keeps the baseline; a rule that scores Z's phantom
-    // bar makes it 3 v 3, a tie, and keeps the baseline too.
+    // baseline box but whose cap (159.6) is inside it; both inside the
+    // legend box (116..206). Baseline slot hides A + C(cap) = 2, legend
+    // slot hides C = 1 → legend wins. A bar-only rule scores 1 v 1 and
+    // keeps the baseline.
     const days: StackedBarDay[] = [
       { label: 'A', series: [{ id: 'x', name: 'x', amount: 250, seriesIndex: 0 }] },
       { label: 'B', series: [{ id: 'x', name: 'x', amount: 450, seriesIndex: 0 }] },
       { label: 'C', refusals: 1, series: [{ id: 'x', name: 'x', amount: 15, seriesIndex: 0 }] },
-      { label: 'Z', refusals: 1, series: [] },
+    ]
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={days} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    fireEvent.keyDown(container.querySelector('svg')!, { key: 'ArrowRight' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip).toHaveTextContent(/^B/)
+    expect(tip.style.top).toBe('116px')
+  })
+
+  it('never scores the "top" of a day that drew no bar (#3076 review)', () => {
+    layOut()
+    // A (250): top 106.1, inside the baseline box only. Z (nothing spent,
+    // nothing refused — an empty day a gap-filled range would emit): no
+    // bar, no cap; its phantom top is the baseline (172.7), inside the
+    // legend box only. Baseline slot hides A = 1, legend slot hides
+    // nothing → legend wins. Scoring the phantom makes it 1 v 1 and keeps
+    // the baseline.
+    const days: StackedBarDay[] = [
+      { label: 'A', series: [{ id: 'x', name: 'x', amount: 250, seriesIndex: 0 }] },
+      { label: 'B', series: [{ id: 'x', name: 'x', amount: 450, seriesIndex: 0 }] },
+      { label: 'Z', series: [] },
     ]
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
     const { container, getByTestId } = render(

@@ -464,27 +464,29 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     const total = screen.getByTestId('chart-tooltip-total')
     expect(total).toHaveTextContent('USD 250.00')
     expect(total.parentElement!.textContent).toMatch(/^Tue 9/)
-    // One wrapping row: the agents as a list, the refusal count beside the
-    // list (not one of its items) — no row-per-agent block underneath.
-    const chips = screen.getByTestId('chart-tooltip-chips')
-    expect(chips.className).toMatch(/flex-wrap/)
-    expect(chips.className).not.toMatch(/flex-col/)
-    const list = chips.querySelector('ul')!
+    // The day's refusal count belongs to the day: it sits on the first
+    // line beside the label, never as a trailing chip that reads as the
+    // last agent's.
+    const refusals = screen.getByTestId('chart-tooltip-refusals')
+    expect(refusals.parentElement).toBe(total.parentElement!.firstElementChild)
+    expect(refusals.parentElement!.textContent).toMatch(/^Tue 9.*4 payments refused$/)
+    // One wrapping list of agent chips — no row-per-agent block underneath.
+    const list = screen.getByTestId('chart-tooltip-chips')
+    expect(list.tagName).toBe('UL')
     expect(list.className).toMatch(/flex-wrap/)
     expect(list.className).not.toMatch(/flex-col/)
     expect(Array.from(list.children).map((li) => li.getAttribute('data-testid'))).toEqual([
       'chart-tooltip-row',
       'chart-tooltip-row',
     ])
-    const refusals = screen.getByTestId('chart-tooltip-refusals')
-    expect(refusals.tagName).toBe('P')
-    expect(refusals.parentElement).toBe(chips)
-    expect(list.nextElementSibling).toBe(refusals)
     // The chips carry swatch, name and amount — the name stays (the legend
     // is below the plot, the chip is where the eye is).
     expect(list.children[0]).toHaveTextContent(/Research agent.*200\.00/)
-    // Nothing of the old block form remains after the row.
-    expect(chips.nextElementSibling).toBeNull()
+    // Nothing of the old block form remains after the list.
+    expect(list.nextElementSibling).toBeNull()
+    // The callout is capped narrower than the plot's 60% so chips wrap at
+    // a readable width instead of stretching into a banner.
+    expect(tip.className).toMatch(/max-w-\[min\(60%,24rem\)\]/)
   })
 
   it('never lets a long name push the money figure out of the panel: the name truncates, the amount and tokens do not shrink (#3067 review)', () => {
@@ -499,11 +501,14 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     const name = row.querySelector('[data-testid="chart-tooltip-name"]')!
     expect(name.className).toMatch(/truncate/)
     expect(name.className).toMatch(/min-w-0/)
-    for (const id of ['chart-tooltip-amount', 'chart-tooltip-tokens']) {
-      const el = row.querySelector(`[data-testid="${id}"]`)!
-      expect(el.className).toMatch(/whitespace-nowrap/)
-      expect(el.className).toMatch(/flex-shrink-0/)
-    }
+    const amount = row.querySelector('[data-testid="chart-tooltip-amount"]')!
+    expect(amount.className).toMatch(/whitespace-nowrap/)
+    expect(amount.className).toMatch(/flex-shrink-0/)
+    // The token breakdown wraps onto the chip's next line instead of
+    // widening the callout — the chip itself is a wrapping row.
+    expect(row.className).toMatch(/flex-wrap/)
+    const tokens = row.querySelector('[data-testid="chart-tooltip-tokens"]')!
+    expect(tokens.className).not.toMatch(/whitespace-nowrap/)
   })
 
   it('moves the caret and stops at the ends of the range', () => {

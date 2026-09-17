@@ -643,7 +643,7 @@ export function StackedBarChart({
           className={
             narrow
               ? 'mt-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3'
-              : `pointer-events-none absolute w-max max-w-[60%] -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover${tipTop === null ? ' top-3' : ''}`
+              : `pointer-events-none absolute w-max max-w-[min(60%,24rem)] -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover${tipTop === null ? ' top-3' : ''}`
           }
           data-flipped={!narrow && tipTop !== null ? 'true' : undefined}
           // Anchored over the day it describes rather than the plot's
@@ -677,24 +677,33 @@ export function StackedBarChart({
                   · partial day
                 </span>
               )}
+              {/* The day's refusal count belongs to the day, so it sits
+                  beside the day — as a trailing chip it read as the last
+                  agent's (design review). */}
+              {entry.refusals > 0 && (
+                <span data-testid="chart-tooltip-refusals" className="ml-1.5 font-normal text-[var(--v2-ink-2)]">
+                  · {entry.refusals} payment{entry.refusals === 1 ? '' : 's'} refused
+                </span>
+              )}
             </p>
             <p data-testid="chart-tooltip-total" className="v2-tabular whitespace-nowrap text-xs font-semibold text-[var(--v2-ink)]">
               {currency} {formatValue(entry.total)}
             </p>
           </div>
-          {/* The agents are a list; the refusal count is not one of them,
-              so it sits beside the list as its own item of the same
-              wrapping row. A chip may not run off the panel: the name
-              truncates, the money figure never does (a 36-char id fallback
-              or a long agent name pushed the amount out of the 390 panel —
-              the whitespace-nowrap trap of #2038, caught in review). */}
-          <div data-testid="chart-tooltip-chips" className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
-            <ul className="flex min-w-0 max-w-full flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          {/* A chip may not run off the panel: the name truncates, the
+              money figure never does (a 36-char id fallback or a long agent
+              name pushed the amount out of the 390 panel — the
+              whitespace-nowrap trap of #2038, caught in review), and the
+              token breakdown wraps onto the chip's next line rather than
+              stretching the callout to its width bound (a 560px banner
+              over four date labels on the showcase — design review; the
+              bound itself is 22rem, so chips wrap at a readable width). */}
+          <ul data-testid="chart-tooltip-chips" className="mt-1 flex min-w-0 max-w-full flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
               {entry.segments.map((s) => (
                 <li
                   key={s.seriesId}
                   data-testid="chart-tooltip-row"
-                  className="inline-flex min-w-0 max-w-full items-baseline gap-1.5"
+                  className="inline-flex min-w-0 max-w-full flex-wrap items-baseline gap-x-1.5 gap-y-0.5"
                 >
                   <span
                     aria-hidden="true"
@@ -708,7 +717,7 @@ export function StackedBarChart({
                   {s.tokens !== undefined && s.tokens.length > 0 && (
                     <span
                       data-testid="chart-tooltip-tokens"
-                      className="v2-tabular flex-shrink-0 whitespace-nowrap text-[var(--v2-ink-3)]"
+                      className="v2-tabular min-w-0 text-[var(--v2-ink-3)]"
                     >
                       {'('}
                       {s.tokens.map(([token, amount]) => `${formatValue(amount)} ${token}`).join(' + ')}
@@ -717,16 +726,7 @@ export function StackedBarChart({
                   )}
                 </li>
               ))}
-            </ul>
-            {entry.refusals > 0 && (
-              <p
-                data-testid="chart-tooltip-refusals"
-                className="whitespace-nowrap text-[var(--v2-ink-2)]"
-              >
-                {entry.refusals} payment{entry.refusals === 1 ? '' : 's'} refused
-              </p>
-            )}
-          </div>
+          </ul>
         </div>
       )}
 

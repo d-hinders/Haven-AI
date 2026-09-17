@@ -1083,13 +1083,38 @@ version constants a bump rewrites in `mcp/`, `signer/`, `connect/` and
 `mcp-server/src/`.
 
 **Naming them here makes a load-bearing dependency deliberate.** Since #1790 the
-bump *writes* one of the two release contract docs, and the coupling gate excuses
-a doc on **file presence alone** — so the only thing still forcing human-written
-content into a release PR is this doc's `covers:` breadth. That is pinned by a
-test (`scripts/docs/coupling-gate.test.mjs`, which this sentence now names as
-its pin, #2680), but the entries it rests on exist
+bump *writes* one of the **three** release contract docs, and the coupling gate
+excuses a doc on **file presence alone** — so the only thing still forcing a
+human-written *argument* into a release PR is this doc's `covers:` breadth. That
+is pinned by a test (`scripts/docs/coupling-gate.test.mjs`, which this sentence
+now names as its pin, #2680), but the entries it rests on exist
 for unrelated reasons and nothing in the list said so. Now the release path is
 named in the list that guarantees it.
+
+**This paragraph said "two" until 2026-09-17, and the correction sharpens the
+claim rather than only counting better.** A release bump implicates three
+contract docs, and they are forced in three different ways — measured with the
+gate's own reckoning over the files every bump writes
+(`node scripts/docs/coupling-gate.mjs --strict --changed=packages/connect/src/runtime.ts,packages/signer/src/server.ts`
+— two files this document's own `covers:` already reaches, so naming them here
+adds no claim it cannot back):
+
+| doc | how a release satisfies it | what that forces |
+|---|---|---|
+| `mcp-runtime-compatibility.md` | the bump writes the manifest table (#1790) | nothing — presence alone, by construction |
+| `package-dev-channel.md` | a hand edit; the bump writes no part of it | an **edit**, which presence lets be a bare date bump |
+| this document | a new `casp-changelog/` shard | an **argument** |
+
+`package-dev-channel.md` is the one the old sentence dropped: the bump rewrites
+`CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which sits in that
+doc's `covers:`, so every release couples it — 0.1.37, 0.2.0 and 0.2.1 all had
+to touch it, and the first two satisfied it with a `last-verified` bump and
+nothing else. That is exactly why the original claim survives in its corrected
+form rather than collapsing: a second doc *does* force a human to edit
+something, but presence-satisfaction means that edit need carry no content, so
+**the shard remains the only mechanism forcing a perimeter argument.** Naming
+the distinction is the point — "forces an edit" and "forces content" are
+different guarantees, and only the second is what this section relies on.
 
 > **A CASP shard is never generated, and must never become generated.** #1790
 > established that a bump may write a contract doc; that precedent stops at the

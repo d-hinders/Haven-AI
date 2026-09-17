@@ -103,6 +103,19 @@ const PAD = { top: 14, right: 10, bottom: 30, left: 48 }
 const PAD_NARROW = { ...PAD, left: 78 }
 /** The cap above a bar that refused something, in viewBox units. */
 const REFUSAL_MARKER_H = 7
+/** The desktop callout's resting offset under the wrapper's top edge — the
+ *  CSS px behind its `top-3`; the clearance it keeps from the bar's highest
+ *  mark (resting) or the axis baseline (dropped, #3063); and the least of a
+ *  bar's top a dropped callout must leave in view — one `top-3` unit, enough
+ *  to read as "a bar continues here" rather than a line (design review). */
+const TIP_REST_TOP = 12
+const TIP_GAP = 6
+const TIP_MIN_VISIBLE = 12
+/** The legend's `mt-3` under the svg: the whitespace a dropped callout may
+ *  run into (its bottom `TIP_GAP` above the legend's top edge, so it floats
+ *  over the label rather than standing on the first row) without covering
+ *  a row. */
+const LEGEND_GAP = 12
 
 const AXIS_COLOR = 'var(--v2-border)'
 const INK = 'var(--v2-ink)'
@@ -267,6 +280,14 @@ export function StackedBarChart({
   // the same number and the setter bails out). Before the first measurement
   // — and in jsdom, where every box is 0 wide — the max-width bound applies.
   const [tipHalfPct, setTipHalfPct] = useState(30)
+  // The callout's top, in CSS px from the wrapper's top, when the bar it
+  // describes is tall enough to reach under the resting `top-3` position:
+  // then the callout drops to sit just above the axis baseline instead, so
+  // the bar's top — its height against the neighbours, and the refusal cap
+  // the callout itself mentions — stays visible while the callout is open
+  // (#3063). `null` is the resting position. Measured after paint like the
+  // half-width; in jsdom nothing has a height and the resting position stands.
+  const [tipTop, setTipTop] = useState<number | null>(null)
   useLayoutEffect(() => {
     const tip = tooltipRef.current
     const wrapper = tip?.parentElement
@@ -360,6 +381,47 @@ export function StackedBarChart({
     },
     [entries.length],
   )
+
+  // The vertical drop (#3063). The resting callout hangs 12px (`top-3`) under
+  // the wrapper's top edge; if the described bar's top — or its refusal cap
+  // — would sit under the callout's box, the callout drops below the bar's
+  // top, but only where that leaves at least `TIP_MIN_VISIBLE` of the bar
+  // in view above it: its bottom `TIP_GAP` above the axis baseline when the
+  // bar is tall enough to hold it, else its bottom just above the legend
+  // — over that day's axis label whole (the label it repeats), never half of
+  // it and never over a legend row. A bar too short for either (the
+  // callout would swallow its body, the label and the legend to save a
+  // sliver — design review) keeps the resting callout and loses its top
+  // instead. The svg scales the viewBox to its CSS box without preserving
+  // the ratio, so a viewBox y maps to CSS by `y / VIEW_H * clientHeight`.
+  // Every input is a layout read or a value the render already fixed, so the
+  // second pass reads the same number and the setter bails out — the same
+  // fixed point as the half-width above.
+  useLayoutEffect(() => {
+    const tip = tooltipRef.current
+    const svg = svgRef.current
+    if (narrow || !tip || !svg || entry === null || svg.clientHeight === 0) {
+      setTipTop(null)
+      return
+    }
+    const cssY = (y: number) => (y / VIEW_H) * svg.clientHeight
+    const barTop = cssY(yOf(entry.total))
+    // The highest mark the day draws: its refusal cap when it has one.
+    const markTop = cssY(yOf(entry.total) - (entry.refusals > 0 ? REFUSAL_MARKER_H + 3 : 0))
+    const restingBottom = TIP_REST_TOP + tip.offsetHeight + TIP_GAP
+    if (restingBottom <= markTop) {
+      setTipTop(null)
+      return
+    }
+    // Both candidates leave `TIP_MIN_VISIBLE` of the day's marks in view and
+    // clear the BAR's top edge by `TIP_GAP` — a cap counts towards the marks
+    // but never stands in for the bar's own top.
+    const least = Math.max(barTop + TIP_GAP, markTop + TIP_MIN_VISIBLE)
+    const aboveBaseline = cssY(baseY) - tip.offsetHeight - TIP_GAP
+    const onLegendTop = svg.clientHeight + LEGEND_GAP - TIP_GAP - tip.offsetHeight
+    const top = aboveBaseline >= least ? aboveBaseline : onLegendTop >= least ? onLegendTop : null
+    setTipTop(top === null ? null : Number(top.toFixed(1)))
+  })
 
   // The sparse-data render guard: a range with too few days to carry a shape
   // contributes nothing to the page at all (the acceptance criterion for this
@@ -553,18 +615,21 @@ export function StackedBarChart({
           className={
             narrow
               ? 'mt-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3'
-              : 'absolute top-3 w-max max-w-[60%] -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover'
+              : `absolute w-max max-w-[60%] -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover${tipTop === null ? ' top-3' : ''}`
           }
+          data-flipped={!narrow && tipTop !== null ? 'true' : undefined}
           // Anchored over the day it describes rather than the plot's
           // centre (which covered its neighbours' bars and refusal caps —
           // #3051 design review), clamped by the callout's own measured
           // half-width so it stays inside the plot at either edge without
-          // sliding onto a neighbour.
+          // sliding onto a neighbour; dropped above the baseline when the
+          // described bar is tall enough to hide under it (#3063).
           style={
             narrow || active === null
               ? undefined
               : {
                   left: `${Math.min(100 - tipHalfPct, Math.max(tipHalfPct, ((xOf(active) + barW / 2) / VIEW_W) * 100))}%`,
+                  ...(tipTop === null ? {} : { top: `${tipTop}px` }),
                 }
           }
           onMouseEnter={() => setPinned(active)}

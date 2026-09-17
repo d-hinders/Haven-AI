@@ -696,3 +696,88 @@ budget-read latency (hypothesis, unmeasured). C2–C5: pending owner decision.
   0 reruns, 0 failures.
 - deferral census → 4 of 80 merged PR bodies defer an item to another slice.
 - sizing → 33 files; source 3,383 / tests 4,830 lines.
+
+## 2026-09-17 — agent surface, second pass (safe-retirement, MCP hosted + local, signer, demo merchant; owner mandate 2026-09-12)
+
+Full report: [`docs/bug-reports/quality-scan-2026-09-17-agent-surface.md`](../bug-reports/quality-scan-2026-09-17-agent-surface.md)
+— file:line evidence lives there; this entry stays path-free. Measured on
+`origin/dev` @ `4ed69592`. Method: live exercise on dev through the hosted
+QA MCP (discovery, quotes, allowances, receipts; no intent created, nothing
+signed — the connected signer serves the mainnet agent), five block-1
+mutations in the main checkout behind `cp` backups with byte-identical
+restores, blocks 2, 3, 4 and 6 in scope, incident clustering over 120
+`area:mcp` issues since 2026-08-01, workflow archaeology over 200 runs.
+
+**Excluded this run:** every 2026-09-13 item — F1 and F2 `shipped` (#2960;
+#2970/#2972/#2968), F3 still pending the owner, B1–B13 all shipped (B10 via
+#2997, which the first draft of this run's report had mis-read as open: the
+guard now covers the pattern, the unchanged file count is not a gap), and
+proposals 4/7/8/9 still undecided. #1219, #1442, #1554, #2720, #2806, #3028
+(`shipped` / in flight) not re-surfaced.
+
+**Finding 1 — the agent's next step is named but never spelled.** Re-surfaced
+as the argument half of the 2026-09-13 F3 / proposal 1, on a live delta after
+the argument-spelling convergence (#2366) was declared done.
+- Evidence (`grep -rn "<field>:" <package>/src --include='*.ts' | grep -v test`,
+  camelCase builders included): hosted MCP 46 `next_action` sites, 15 name a
+  tool, 14 carry arguments; signer 4 / 0 / 0; local runtime 5 / 0 / 0;
+  `suggested_tool` 25 sites across the three packages, `suggested_arguments`
+  0. Live: discovery hands the agent `resource_url`, the suggested tool takes
+  `url`, the strict refusal explains bodies and idempotency. Cost: thirteen
+  issues in the class in five weeks (#2282, #2343, #2348, #2349, #2353, #2366,
+  #2393; #1308, #1588, #2550, #2557, #2975, #3001).
+- Disposition: **approved by the owner 2026-09-17 → epic #3105**, slices
+  #3100 (foothold, ships independently), #3101, #3102, #3103, #3104. Drive with
+  `ship-next epic=#3105`. Becomes `shipped` when the epic closes.
+
+**Candidates and defects (one PR each), filed on the owner's word 2026-09-17:**
+- D1 → **#3097** — the paid x402 retry adopts the merchant-declared resource
+  URL with no scheme check; the Ampersend sandbox declares `http://` (live,
+  308 to https), so the hosted quote → pay path sends `PAYMENT-SIGNATURE` in
+  clear on the first hop.
+- C1 → **#3098** — two money-path perimeters: the CASP guardrails doc's
+  `covers:` and the classifier's glob file disagree on five package globs; the
+  demo merchant's settlement file is outside every glob (block 6 in scope: 3
+  verb files, 1 outside), and #2969/#2979 shipped without the label.
+- C2 → **#3099** — block-1 survivor: the demo merchant's settled-cache cleanup
+  clause deletes green (33/33); *not load-bearing at the tested condition*.
+- D2 → **#3100** — discovery `resource_url` vs the suggested tool's `url`
+  (also the epic's first slice).
+
+**Probed clean** (block → command → number, all at `4ed69592`):
+- sizing → `find <package>/src -name '*.ts' ! -name '*.test.ts' ! -path '*__tests__*' | xargs wc -l`
+  / tests → signer 3,042 / 4,417 (09-13: 2,864 / 4,091); mcp 1,863 / 3,577
+  (1,762 / 3,386); mcp-server 6,830 / 13,407 (6,128 / 11,903);
+  demo-merchant-mcp 3,556 / 3,746 (3,169 / 2,767).
+- block 1 (guard falsifiability) → the block's candidate script → 149
+  candidates (the naming-P5 landing touched most); 5 in-scope mutations →
+  **4 caught** (retired dual-send disagreement, signer consent refusal, local
+  MCP missing delegate key, signer typed-data digest commitment — the last
+  only after `npm run build -w packages/sdk`; a stale dist errors the signer
+  suite first), **1 survivor** (C2 above, diagnosed).
+- block 2 (`covers:` completeness) → the block's loop under `bash` → 8
+  contract docs; in scope the runtime-compatibility contract cites 28, covers
+  22, 17 cited-but-not-covered (09-15: 17 of 27 — unchanged, not re-reported).
+- block 3 (stale numbers) → the four package READMEs + the runtime doc → 0
+  figure-bearing lines; ledger re-derivations are the sizing deltas above.
+- block 4 (retired vocabulary) → the block's term list → 184 files (192 on
+  09-15), 46 historical / 138 live (146); positive control 36 shards; in
+  scope 15 live files, all enforcement tests, drop migrations or comments;
+  `npm run lint:retired-rail-prose` → 33 hits / 31 files (34 / 32), green;
+  the rename census → 752 surviving hits, all in allowed classes; #2851 closed.
+- block 5 (merge-method drift) → not taken (out of scope; 09-15 baseline).
+- block 6 (nets with holes) → in scope: 3 money-verb files, 1 outside every
+  glob (C1); the doc perimeter and the JSON perimeter differ on 5 package globs.
+- block 7 (chain health) → not taken.
+- incident clustering → 120 `area:mcp` issues since 2026-08-01 (69 Aug, 51
+  Sep); by title class x402 32, signer 23, settle 19, erc7710 18,
+  quote/prepare 17, connect 17, next_* 12, catalog 11, demo merchant 10. The
+  `qa-dev` money-flow cluster (20 `qa-failure` issues 2026-08-12 → 09-08) is
+  **closed**: one standing tracker (#2767) and
+  `gh run list --workflow qa-dev.yml --limit 40` → 40 / 40 success.
+- workflow archaeology → last 200 Actions runs: 16 attempt > 1 (docs quality
+  4, copy lint 3, docs coupling 3, DS coupling 3 — parked-run re-runs after
+  bot baseline pushes), 4 failures; `ci.yml` last 60: 45 / 5 / 10 cancelled;
+  4 of 135 in-scope commits since 08-15 mention flake or rerun.
+- comment archaeology → `TODO|FIXME|HACK` in the four packages → 0; the most
+  repeated warning (×4) explains a refusal, not a workaround.

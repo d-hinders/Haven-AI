@@ -1,11 +1,18 @@
 ---
 name: release
-description: Cut and ship one npm release of Haven's five published packages — decide the version, run the bump, satisfy the contract-doc gate, open the release PR to dev, drive the promotion to main, and verify what actually landed on npm. Use when a user asks to cut, publish, or ship a release, bump package versions, or get recent work onto npm.
+description: Ship exactly one Haven production release — decide whether it carries a version bump, run the bump and the contract-doc gate when it does, open the release PR to dev, drive the promotion to main, and verify what landed in production and, when a version moved, on npm. Use when a user asks to cut, publish, or ship a release, bump package versions, get recent work onto npm, or promote dev to production.
 ---
 
 # Release
 
-Cut exactly one release and see it onto npm, then stop.
+Ship exactly one release to production, then stop.
+
+**A release is the outcome users see; a promotion is one step inside it.** The
+promotion (`dev → main`) is the mechanism, and it fires two independent
+consequences: packages **publish** to npm, and the backend, hosted MCP and
+dashboard **deploy** from their branches. Keep the three words apart — they are
+not synonyms, and the runbook's own title carries the hierarchy: *"Promoting
+`dev → main` (production release)"*.
 
 The mechanics live in [`scripts/README.md`](../../../scripts/README.md); the
 branch model lives in
@@ -13,6 +20,33 @@ branch model lives in
 This skill routes between them and adds the judgement they do not encode. When
 the two disagree with each other, the branch-and-release doc wins on branch
 questions and `scripts/README.md` wins on script questions.
+
+## Which Shape Is This Release
+
+Decide this first, because it selects the path — and the answer is measured at
+the door, not assumed from what the work felt like.
+
+- **Carries a version bump.** Something in the diff reaches a published
+  package's tarball. Run the whole skill: choose the version, cut the bump,
+  satisfy the contract-doc gate, open the release PR, promote, then verify npm
+  **and** production.
+- **Carries no bump.** Nothing in the diff reaches a tarball — the change is
+  backend, dashboard, hosted MCP, docs or tests. Skip *Choose The Version*, *Cut
+  The Bump* and *Satisfy The Contract-Doc Gate*: with no version moving there is
+  no bump for the gate to be coupled to, and the change's own pull request
+  already cleared its docs obligations on the way into `dev`. Go straight to
+  *Promotion To Production*, and at *Closeout* verify production only.
+
+The scope script decides it, not you. Its shipped delta is the test: zero files
+means no tarball moves, so a bump would publish versions whose contents are
+identical to the ones already on npm — five changelog entries describing a change
+their own package does not contain. That is not a tidier record, it is a false
+one. Run it as *Promotion To Production* § *Re-measure the scope at the door*
+already requires, and let its answer pick the path.
+
+**A no-bump release is still a release.** It reaches users, it cuts a `prod-*`
+GitHub Release like every promotion, and it owes production verification in
+full. The only thing it does not owe is an npm check, because nothing published.
 
 ## Read State Directly, Every Time
 
@@ -379,6 +413,38 @@ What it leaves to you:
   promotion merge. Re-point it at current `main` before merging it.
 
 ## Closeout
+
+Two halves, and the first one is owed by **every** release including a no-bump
+one: **production**, then **npm**.
+
+### Production — always
+
+The merge is not the finish. `promoting-dev-to-main.md` § *Merge, deploy, and
+verify prod* and § *Run the prod smoke on the right hostname* own the post-merge
+checklist; work them there rather than from here. They cover watching the
+Railway and Vercel deploys land, confirming migrations applied cleanly and how
+to recover a non-transactional one that died part-way, reading the boot log for
+the unset-public-RPC warnings (the evidence is the **absence** of that line in
+the deploy log, not the presence of a variable in a dashboard), the prod smoke
+itself, which of the three Vercel hostnames is the trap, and the rollback path.
+
+**A green deploy status is not the prod smoke.** The deploy platform reporting
+success says a process started; it says nothing about whether a user can log in,
+see balances, or complete a payment. A release reported closed out on deploy
+statuses alone has skipped this section — that is exactly what happened on the
+promotion of 2026-09-17 (#3092), where both deploys were confirmed green, the
+npm tags were correctly confirmed unmoved, and the smoke, the boot-log check and
+the error-log watch were never run because nothing in the path named them.
+
+The smoke's canary is a real payment, so it is an **operator step**, not
+something this skill performs. Carry it as an unticked box and say plainly that
+it is outstanding; do not report the release closed out while it is.
+
+### npm — only when a version moved
+
+Skip this half entirely on a no-bump release: nothing published, and the
+correct observation is that the dist-tags did **not** move. An unexpected
+publish is what would be worth catching there.
 
 A green workflow is not proof that five packages published. Verify both ends:
 

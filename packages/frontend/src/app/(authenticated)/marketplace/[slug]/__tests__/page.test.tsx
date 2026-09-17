@@ -90,6 +90,8 @@ describe('MerchantPage', () => {
     })
     render(<MerchantPage />)
     expect(screen.queryByText('Ampersend Demo API')).toBeNull()
+    // The loading shell is marked busy (skeletons are aria-hidden).
+    expect(screen.getByRole('status').getAttribute('aria-busy')).toBe('true')
   })
 
   it('renders an error state', () => {

@@ -40,7 +40,10 @@ export default function MerchantPage() {
 
   if (loading) {
     return (
-      <div className="max-w-5xl space-y-4">
+      // `aria-busy` + `role="status"`: the skeletons are aria-hidden, so the
+      // capture harness's content floor must not certify this frame (and a
+      // screen reader must hear that the merchant is still loading).
+      <div className="max-w-5xl space-y-4" role="status" aria-busy="true" aria-label="Loading merchant">
         <BackToMarketplace />
         <Skeleton className="h-16 rounded-xl" />
         <Skeleton className="h-64 rounded-xl" />

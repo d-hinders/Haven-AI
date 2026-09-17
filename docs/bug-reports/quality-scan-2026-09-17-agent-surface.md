@@ -65,7 +65,7 @@ decisions, not stalled work.
 
 ## 2. Finding that meets the bar
 
-### F1 — The agent's next step is named but never spelled: every `suggested_tool` ships without arguments, and the two non-hosted surfaces never name a tool at all
+### F1 — The agent's next step is named but never spelled: both discovery hints ship without arguments, and the two non-hosted surfaces never name a tool at all
 
 This is the **argument half of the 2026-09-13 F3 / proposal 1** ("response
 contract v2"), re-surfaced with the delta the live run produced after the
@@ -75,12 +75,15 @@ argument-spelling "convergence" (#2366, 2026-09-01) was declared done.
 
 | surface | `next_action` sites | of which name a `next_tool` | of which carry `next_arguments` | `suggested_tool` sites | with `suggested_arguments` |
 |---|---|---|---|---|---|
-| hosted MCP (`mcp-server`) | 46 | 15 | 14 | 19 | **0** |
-| signer | 4 | **0** | 0 | 2 | **0** |
-| local MCP (`mcp`) | 5 | **0** | 0 | 4 | **0** |
+| hosted MCP (`mcp-server`) | 46 | 15 raw (13 emissions) | 14 raw (12 real; 3 emit `payment_id: null`) | 1 | **0** |
+| signer | 4 raw (5 decision sites) | **0** | 0 | 0 | **0** |
+| local MCP (`mcp`) | 5 raw (1 decision site) | **0** | 0 | 1 | **0** |
 
-- 25 `suggested_tool` sites across the three packages, none with arguments; the
-  discovery payload hands the agent `resource_url` and points at a tool whose
+(Raw = the grep in the heading; "emissions"/"decision sites" exclude the builder's own line, a comment, a type field and pass-throughs — the spec review of epic #3105 measured the split. The wider `suggested_tool\|suggestedTool` grep returns 25 hits; 23 of them are type declarations, the `wrongTool()` helper and its error class, so the first draft's "25 sites" was an instrument artefact.)
+
+- Two discovery emission sites (hosted `catalog-purchase.ts:163`, local
+  `mcp/src/tools.ts:421`), neither with arguments; the hosted payload hands the
+  agent `resource_url` (and the row id as `id`) and points at a tool whose
   only required key is `url` (`contracts.ts`: `haven_quote_x402 → url, method,
   headers, body`; local `mcp/src/tools.ts:67` the same).
 - 31 of 46 hosted `next_action` sites name no tool; the signer's four and the
@@ -97,8 +100,8 @@ weeks: argument spelling #2282, #2343, #2348, #2349, #2353, #2366, #2393
 (2026-08-11 → 09-15). #2366 closed as "converge the local and hosted argument
 spellings"; the discovery → quote hop still fails on the first field an agent
 copies. The repo's own MCP instructions say "follow `next_action`,
-`next_tool`, `next_arguments` first; prose is fallback" — for 34 of 55
-next-step sites there is nothing structured to follow.
+`next_tool`, `next_arguments` first; prose is fallback" — for 40 of 55
+next-step sites ((46+4+5) − 15) there is nothing structured to follow.
 
 **Unlock, proven in-repo:** `buildAgentGuidance({ nextTool, nextArguments })`
 already exists in the hosted server (14 of the 15 tool-naming sites use it) and
@@ -108,10 +111,13 @@ every hosted tool's input schema is a typed `toolSchemas[name]` (`contracts.ts`,
 not a live refusal.
 
 **Slicing (disjoint):**
-1. Typed `NextStep` builder keyed on the target tool's schema; convert the 15
-   hosted sites; a compile-time twin test (TS2322 on a wrong key).
-2. Discovery and quotes carry `suggested_arguments` in the target tool's
-   vocabulary (`{ url }`, `{ catalog_id }`, `{ merchant_url, tool_name, arguments }`).
+1. Typed `NextStep` builder in the SDK keyed on the target tool's schema —
+   after the three `toolSchemas` annotations stop erasing their key sets (a
+   wrong key compiles clean today, proven by the spec review); convert the 13
+   hosted emissions; compile-time twins.
+2. Discovery carries `suggested_arguments` that the suggested tool accepts
+   verbatim — so the hints point at cap-free tools (`haven_quote_catalog_purchase
+   { catalog_id }`, `haven_quote_x402 { url }`; the local runtime its own).
 3. Schema-derived strict refusals: name the declared keys and the nearest
    alias (`resource_url → url`), generated from the Zod diff rather than prose.
 4. Signer and local runtime: `next_tool` on every `next_action` site (the

@@ -719,10 +719,12 @@ proposals 4/7/8/9 still undecided. #1219, #1442, #1554, #2720, #2806, #3028
 as the argument half of the 2026-09-13 F3 / proposal 1, on a live delta after
 the argument-spelling convergence (#2366) was declared done.
 - Evidence (`grep -rn "<field>:" <package>/src --include='*.ts' | grep -v test`,
-  camelCase builders included): hosted MCP 46 `next_action` sites, 15 name a
-  tool, 14 carry arguments; signer 4 / 0 / 0; local runtime 5 / 0 / 0;
-  `suggested_tool` 25 sites across the three packages, `suggested_arguments`
-  0. Live: discovery hands the agent `resource_url`, the suggested tool takes
+  camelCase builders included): hosted MCP 46 `next_action` sites, 15 raw
+  tool-naming hits (13 emissions), 14 raw argument hits (12 real, 3 emit a
+  null id); signer 4 raw / 5 decision sites / 0 tools; local runtime 5 raw /
+  1 decision site / 0 tools; discovery emission sites 2, `suggested_arguments`
+  0 (the wider grep's 25 hits are mostly declarations — recorded as the
+  artefact it was; the spec review of the epic measured the split). Live: discovery hands the agent `resource_url`, the suggested tool takes
   `url`, the strict refusal explains bodies and idempotency. Cost: thirteen
   issues in the class in five weeks (#2282, #2343, #2348, #2349, #2353, #2366,
   #2393; #1308, #1588, #2550, #2557, #2975, #3001).

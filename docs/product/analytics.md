@@ -69,7 +69,9 @@ spend figure in the agents table above it. The window starts and ends at the
 moment the page loads, not at midnight, so a bar on the window's first or
 last local day covers part of a day: it is striped and named as partial (the
 note under the chart says which end), never dropped or stretched. On a wide
-screen a day's detail opens as a callout anchored over that bar, kept inside
+screen a day's detail opens as a two-line callout — the day and its total,
+then each agent's share as a chip and the refusal count — anchored over that
+bar, kept inside
 the plot at either edge; when the bar (or its refusal cap) is tall enough to
 reach under the callout, the callout drops below the bar's top instead — its
 bottom just above the axis when the bar can hold it, otherwise just above

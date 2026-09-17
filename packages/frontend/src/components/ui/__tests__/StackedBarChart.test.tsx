@@ -456,6 +456,32 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     expect(tip).toHaveTextContent(/USD 250\.00/)
   })
 
+  it('is two lines, not a table: day and total on the first, agents and refusals as wrapping chips on the second (#3067)', () => {
+    renderChart()
+    fireEvent.keyDown(document.querySelector('svg')!, { key: 'ArrowRight' })
+    const tip = screen.getByTestId('chart-tooltip')
+    // The total shares the first line with the day label.
+    const total = screen.getByTestId('chart-tooltip-total')
+    expect(total).toHaveTextContent('USD 250.00')
+    expect(total.parentElement!.textContent).toMatch(/^Tue 9/)
+    // Every agent is a chip in one wrapping list, and the refusal count is
+    // the last chip of the same list — no row-per-agent block underneath.
+    const chips = screen.getByTestId('chart-tooltip-chips')
+    expect(chips.className).toMatch(/flex-wrap/)
+    const items = Array.from(chips.children)
+    expect(items.map((li) => li.getAttribute('data-testid'))).toEqual([
+      'chart-tooltip-row',
+      'chart-tooltip-row',
+      'chart-tooltip-refusals',
+    ])
+    // The chips carry swatch, name and amount — the name stays (the legend
+    // is below the plot, the chip is where the eye is).
+    expect(items[0]).toHaveTextContent(/Research agent.*200\.00/)
+    // Nothing of the old block form remains after the chips.
+    expect(chips.nextElementSibling).toBeNull()
+    expect(tip.querySelector('.border-t')).toBeNull()
+  })
+
   it('moves the caret and stops at the ends of the range', () => {
     renderChart()
     const svg = document.querySelector('svg')!

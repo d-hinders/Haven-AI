@@ -661,54 +661,62 @@ export function StackedBarChart({
                 }
           }
         >
-          <p className="text-xs font-semibold text-[var(--v2-ink)]">
-            {entry.label}
-            {entry.partial && (
-              <span data-testid="chart-tooltip-partial" className="ml-1.5 font-normal text-[var(--v2-ink-3)]">
-                · partial day
-              </span>
-            )}
-          </p>
-          <ul className="mt-1.5 space-y-1">
+          {/* Two lines, not a table (#3067): the day and its total on the
+              first, the agents as swatch·name·amount chips that wrap on the
+              second, refusals as the last chip. The old one-row-per-agent
+              form stood 113–135px tall on a 200px plot, so on every bar of
+              middling height the callout either hid the bar's top or (had
+              it dropped) the whole bar — a ~60px callout fits above or
+              below almost any bar and the drop rule (#3063) has room to
+              work. The values in full are in the data table below. */}
+          <div className="flex items-baseline justify-between gap-4">
+            <p className="text-xs font-semibold text-[var(--v2-ink)]">
+              {entry.label}
+              {entry.partial && (
+                <span data-testid="chart-tooltip-partial" className="ml-1.5 font-normal text-[var(--v2-ink-3)]">
+                  · partial day
+                </span>
+              )}
+            </p>
+            <p data-testid="chart-tooltip-total" className="v2-tabular whitespace-nowrap text-xs font-semibold text-[var(--v2-ink)]">
+              {currency} {formatValue(entry.total)}
+            </p>
+          </div>
+          <ul data-testid="chart-tooltip-chips" className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
             {entry.segments.map((s) => (
               <li
                 key={s.seriesId}
                 data-testid="chart-tooltip-row"
-                className="flex items-baseline gap-2 text-xs"
+                className="inline-flex items-baseline gap-1.5 whitespace-nowrap"
               >
                 <span
                   aria-hidden="true"
-                  className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
+                  className="inline-block h-2 w-2 flex-shrink-0 self-center rounded-full"
                   style={{ backgroundColor: seriesColor(s.seriesIndex) }}
                 />
-                <span className="min-w-0 flex-1 truncate text-[var(--v2-ink-2)]">{s.name}</span>
-                <span className="v2-tabular whitespace-nowrap text-[var(--v2-ink)]">
-                  {formatValue(s.amount)}
-                </span>
+                <span className="text-[var(--v2-ink-2)]">{s.name}</span>
+                <span className="v2-tabular text-[var(--v2-ink)]">{formatValue(s.amount)}</span>
                 {s.tokens !== undefined && s.tokens.length > 0 && (
                   <span
                     data-testid="chart-tooltip-tokens"
-                    className="v2-tabular whitespace-nowrap text-[var(--v2-ink-3)]"
+                    className="v2-tabular text-[var(--v2-ink-3)]"
                   >
-                    {' ('}
+                    {'('}
                     {s.tokens.map(([token, amount]) => `${formatValue(amount)} ${token}`).join(' + ')}
                     {')'}
                   </span>
                 )}
               </li>
             ))}
+            {entry.refusals > 0 && (
+              <li
+                data-testid="chart-tooltip-refusals"
+                className="whitespace-nowrap text-[var(--v2-ink-2)]"
+              >
+                {entry.refusals} payment{entry.refusals === 1 ? '' : 's'} refused
+              </li>
+            )}
           </ul>
-          {entry.refusals > 0 && (
-            <p
-              data-testid="chart-tooltip-refusals"
-              className="mt-1.5 text-xs text-[var(--v2-ink-2)]"
-            >
-              {entry.refusals} payment{entry.refusals === 1 ? '' : 's'} refused
-            </p>
-          )}
-          <p className="mt-1.5 border-t border-[var(--v2-border)] pt-1.5 text-xs font-semibold text-[var(--v2-ink)]">
-            {currency} {formatValue(entry.total)}
-          </p>
         </div>
       )}
 

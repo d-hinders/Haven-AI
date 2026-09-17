@@ -53,9 +53,12 @@ export function usePortfolio(
         `/portfolio/${accountAddress}${chainQuery}`,
       )
       if (generationRef.current === generation) {
-        setTotalUsd(data.totalUsd)
-        setTotalEur(data.totalEur)
-        setBreakdown(data.breakdown)
+        // `?? 0` — `formatFiat` on the accounts overview calls
+        // `.toLocaleString` on these; an absent key took `/accounts` down (#3093 review).
+        setTotalUsd(data.totalUsd ?? 0)
+        setTotalEur(data.totalEur ?? 0)
+        // `?? []` — an absent key must degrade, not crash the route (#3093).
+        setBreakdown(data.breakdown ?? [])
         if (silent) setError(null)
       }
     } catch (err) {

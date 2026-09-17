@@ -13,6 +13,8 @@
  * are gated behind `config.catalogDiscoveryEnabled` by the caller.
  */
 import { config } from '../../config.js'
+import type { Executor } from '../../infra/transaction.js'
+import { findOrCreateMerchantByHost, merchantHostOf } from '../../infra/repositories/merchants.js'
 import { SUPPORTED_CHAIN_IDS } from '../../domain/chains.js'
 import {
   probeCatalogEntry,
@@ -90,6 +92,8 @@ export interface DiscoveryResult {
   skippedExisting: number
   /** On an unsupported network (e.g. Solana) — can't pay, never probed. */
   skippedUnsupported: number
+  /** #3078: a resource whose URL host the merchant rule cannot read — never inserted. */
+  skippedUnparseableHost: number
   /** A candidate that did not answer a parsable 402. */
   failedProbe: number
 }
@@ -135,10 +139,29 @@ export async function fetchBazaarResources(
  * not-yet-known ones into the catalog. Idempotent: existing resource URLs are
  * skipped, and the insert is `ON CONFLICT DO NOTHING` as a second guard.
  */
+/**
+ * The merchant writer the cron goes through (#3078). Injectable so the unit
+ * test's fake db does not have to answer the repository's SQL; production
+ * uses the real `findOrCreateMerchantByHost`.
+ */
+export interface DiscoveryMerchantWriter {
+  findOrCreateMerchantByHost: (
+    host: string,
+    seed: { name: string; description?: string | null; category?: string },
+    db: QueryableLike,
+  ) => Promise<{ id: string }>
+}
+
+const defaultMerchantWriter: DiscoveryMerchantWriter = {
+  findOrCreateMerchantByHost: (host, seed, db) =>
+    findOrCreateMerchantByHost(host, seed, db as unknown as Executor),
+}
+
 export async function ingestDiscoveredCatalog(
   db: QueryableLike,
   fetchImpl: typeof fetch = fetch,
   maxItems = DEFAULT_MAX_ITEMS,
+  merchants: DiscoveryMerchantWriter = defaultMerchantWriter,
 ): Promise<DiscoveryResult> {
   const result: DiscoveryResult = {
     scanned: 0,
@@ -146,6 +169,7 @@ export async function ingestDiscoveredCatalog(
     ingested: 0,
     skippedExisting: 0,
     skippedUnsupported: 0,
+    skippedUnparseableHost: 0,
     failedProbe: 0,
   }
 
@@ -192,11 +216,21 @@ export async function ingestDiscoveredCatalog(
       `x402 resource discovered via the Bazaar (${name}).`
     const category = categoryFromTags(item.tags)
 
+    // #3078: every catalog writer sets the merchant — the column is NOT NULL.
+    // The host is the find key, so a second resource on a host already in
+    // the catalog joins its merchant rather than founding another.
+    const host = merchantHostOf(resourceUrl)
+    if (host === null) {
+      result.skippedUnparseableHost += 1
+      continue
+    }
+    const merchant = await merchants.findOrCreateMerchantByHost(host, { name, description, category }, db)
+
     await db.query(
       `INSERT INTO merchant_catalog
          (name, description, category, resource_url, rail, protocol, tool_name,
-          price_display, price_atomic, asset, network, asset_transfer_methods, status, verified_at)
-       VALUES ($1, $2, $3, $4, 'x402', 'http', NULL, $5, $6, $7, $8, $9, 'active', now())
+          price_display, price_atomic, asset, network, asset_transfer_methods, status, verified_at, merchant_id)
+       VALUES ($1, $2, $3, $4, 'x402', 'http', NULL, $5, $6, $7, $8, $9, 'active', now(), $10)
        ON CONFLICT DO NOTHING`,
       [
         name,
@@ -208,6 +242,7 @@ export async function ingestDiscoveredCatalog(
         probe.asset ?? null,
         probe.network ?? network,
         probe.assetTransferMethods?.join(',') ?? null,
+        merchant.id,
       ],
     )
     known.add(resourceUrl)

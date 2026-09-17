@@ -104,6 +104,36 @@ describe('haven_discover_tools', () => {
     expect(result.data[0].tool_arguments).toEqual({ prompt: 'hello' })
   })
 
+  it('carries the merchant wire-shaped when the backend sends one, and omits it when it does not (#3078)', async () => {
+    const base = {
+      id: 'cat_1', name: 'fact', description: 'One fact', category: 'api',
+      resource_url: 'https://services.sandbox.ampersend.ai/api/fact', rail: 'x402', protocol: 'http',
+      tool_name: null, tool_arguments: null, price_display: '0.001 USDC', price_atomic: '1000',
+      asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', network: 'eip155:84532', status: 'active',
+      verified_at: null, source: 'operator', domain_verified: false, verified_payable: false,
+    }
+    stubFetch({
+      'GET /catalog': {
+        status: 200,
+        body: {
+          entries: [
+            { ...base, merchant: { id: 'm_1', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false } },
+            { ...base, id: 'cat_2', merchant: { id: 'm_2', slug: 'haven-demo-store', name: 'Haven demo store', listing_status: 'live', is_test_merchant: true } },
+            { ...base, id: 'cat_3' },
+          ],
+        },
+      },
+    })
+    const result = ok<Array<Record<string, unknown>>>(await handlers().haven_discover_tools({}))
+    expect(result.data[0].merchant).toEqual({
+      id: 'm_1', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false,
+    })
+    // The structural signal for skipping Haven's own test content rides along.
+    expect((result.data[1].merchant as { is_test_merchant: boolean }).is_test_merchant).toBe(true)
+    // An older backend sends none: the key is absent, never null.
+    expect('merchant' in result.data[2]).toBe(false)
+  })
+
   it('forwards case-insensitive category/search filters as one read-only GET', async () => {
     stubFetch({
       'GET /catalog': { status: 200, body: { entries: [] } },
@@ -122,6 +152,41 @@ describe('haven_discover_tools', () => {
     await handlers().haven_discover_tools({ search: '' })
     expect(recordedCalls()[0]?.url).toBe('http://haven.test/catalog?search=')
     expect(recordedCalls()).toHaveLength(1)
+  })
+
+  it('returns no prospect even with HAVEN_MARKETPLACE_PROSPECTS on: it reads GET /catalog only, never GET /merchants (#3080)', async () => {
+    // Prospects have zero offers by construction, so they never appear in
+    // `GET /catalog` regardless of the flag — the merchants route is the only
+    // listing surface for them, and this tool has no reason to call it. The
+    // fixture below is what `GET /catalog` returns on a dev deployment with
+    // the flag on: real offers only, `berget-ai` and `redpine` absent.
+    stubFetch({
+      'GET /catalog': {
+        status: 200,
+        body: {
+          entries: [
+            {
+              id: 'cat_1', name: 'Ampersend — fact', description: 'One fact', category: 'api',
+              resource_url: 'https://services.sandbox.ampersend.ai/api/fact', rail: 'x402', protocol: 'http',
+              tool_name: null, tool_arguments: null, price_display: '0.001 USDC', price_atomic: '1000',
+              asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', network: 'eip155:84532', status: 'active',
+              verified_at: null,
+              merchant: { id: 'm_amp', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false },
+            },
+          ],
+        },
+      },
+    })
+
+    const result = ok<Array<{ merchant?: { slug: string } }>>(await handlers().haven_discover_tools({}))
+
+    expect(result.data.map((e) => e.merchant?.slug)).toEqual(['ampersend-demo-api'])
+    expect(result.data.some((e) => e.merchant?.slug === 'berget-ai' || e.merchant?.slug === 'redpine')).toBe(false)
+    // The one call this tool ever makes is GET /catalog; it never touches
+    // /merchants, so a prospect could not reach it even if the fixture leaked one.
+    expect(recordedCalls()).toHaveLength(1)
+    expect(recordedCalls()[0]?.url).toMatch(/^http:\/\/haven\.test\/catalog(\?|$)/)
+    expect(recordedCalls().some((call) => call.url.includes('/merchants'))).toBe(false)
   })
 })
 

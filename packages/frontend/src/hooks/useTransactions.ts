@@ -63,7 +63,8 @@ export function useTransactions(
         `/transactions/${accountAddress}?${params.toString()}`,
       )
       if (requestIdRef.current !== requestId) return
-      setTransactions(data.transactions)
+      // `?? []` — an absent key must degrade, not crash the route (#3093).
+      setTransactions(data.transactions ?? [])
       setPages(data.pages)
       setTotal(data.total)
     } catch (err) {

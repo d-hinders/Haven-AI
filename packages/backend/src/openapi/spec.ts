@@ -1737,6 +1737,16 @@ export const openapiSpec = {
                   token_address: address,
                   recipient_address: {
                     ...address,
+                    // `['string', 'null']`, not a bare `string` (#3082). The
+                    // description below has always said null is how you ask
+                    // for an open budget, and the dashboard always sent it —
+                    // but the DECLARATION said otherwise, and the validation
+                    // layer reads the declaration. Under `coerceTypes` an
+                    // undeclared null is rewritten to `''`, which then fails
+                    // this pattern, so every open budget was refused.
+                    // `pattern` constrains strings only, so it still applies
+                    // to a real address and ignores null.
+                    type: ['string', 'null'],
                     description: 'Optional recipient pin. Omit (or null) for an open budget.',
                   },
                   budget_atomic: {
@@ -2799,16 +2809,9 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['accounts', 'safes'],
+                  required: ['accounts'],
                   properties: {
                     accounts: { type: 'array', items: account },
-                    safes: {
-                      type: 'array',
-                      items: account,
-                      deprecated: true,
-                      description:
-                        'The same array as `accounts`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.',
-                    },
                   },
                 },
               },
@@ -6124,7 +6127,7 @@ export const openapiSpec = {
       get: {
         tags: ['Dashboard'],
         operationId: 'getTransactionFilterOptions',
-        summary: 'Filter metadata (safes, agents, tokens) for the transactions view.',
+        summary: 'Filter metadata (accounts, agents, tokens) for the transactions view.',
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
@@ -6358,7 +6361,7 @@ export const openapiSpec = {
         summary: 'List curated payable services agents can discover and pay.',
         description:
           'Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. ' +
-          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: \'test-fixture\'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly, and clients that pre-filter should treat the category as the structural signal.',
+          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: \'test-fixture\'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.',
         security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
         parameters: [
           { name: 'category', in: 'query', schema: { type: 'string' } },
@@ -6467,6 +6470,67 @@ export const openapiSpec = {
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/CatalogEntry' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '403': agentAuthForbidden,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/merchants': {
+      get: {
+        tags: ['Catalog'],
+        operationId: 'listMerchants',
+        summary: 'List the marketplace\'s merchants.',
+        description:
+          'The sell side of the catalog (#3078, epic #3077): every live merchant with at least one non-delisted offer on a chain this deployment lists (HAVEN_MARKETPLACE_CHAIN_IDS, else HAVEN_DEPLOY_CHAIN_IDS, else every chain) or a verified self-submitted offer, ordered real merchants first, then test merchants. Readable without a credential, like `GET /catalog`. `coming_soon` prospects appear only for an authenticated dashboard user when HAVEN_MARKETPLACE_PROSPECTS is on and no mainnet chain is listed. Read-only; nothing here creates payments or signatures.',
+        security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Merchants.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['merchants'],
+                  properties: {
+                    merchants: { type: 'array', items: { $ref: '#/components/schemas/Merchant' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '403': agentAuthForbidden,
+        },
+      },
+    },
+    '/merchants/{slug}': {
+      get: {
+        tags: ['Catalog'],
+        operationId: 'getMerchant',
+        summary: 'One merchant and its offers.',
+        description:
+          'The merchant and its non-delisted offers on the chains this deployment lists (an agent: its own chain), plus its verified self-submitted offers. A credential-less caller gets the offers in the public catalog shape. 404 — never 403 — for an unknown slug, a live merchant with nothing to show on these chains, or a prospect the caller may not see (the URL must not confirm a prospect exists).',
+        security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
+        parameters: [
+          { name: 'slug', in: 'path', required: true, schema: { type: 'string', pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Merchant and offers.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['merchant', 'offers'],
+                  properties: {
+                    merchant: { $ref: '#/components/schemas/Merchant' },
+                    offers: { type: 'array', items: { $ref: '#/components/schemas/CatalogEntry' } },
+                  },
+                },
               },
             },
           },
@@ -6593,6 +6657,67 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      CatalogEntryMerchant: {
+        type: 'object',
+        required: ['id', 'slug', 'name', 'listing_status', 'is_test_merchant'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          slug: { type: 'string' },
+          name: { type: 'string' },
+          listing_status: {
+            type: 'string',
+            enum: ['live', 'coming_soon'],
+            description:
+              'Named apart from `CatalogEntry.status` (active|degraded|delisted) on purpose. A `coming_soon` merchant has no offers, so an entry never carries it in practice.',
+          },
+          is_test_merchant: {
+            type: 'boolean',
+            description:
+              'True for Haven-run test content: the Haven demo store (real payments, demo goods) and the stranded-funds fixture. The structural signal for clients that pre-filter test content.',
+          },
+        },
+      },
+      Merchant: {
+        type: 'object',
+        required: [
+          'id', 'slug', 'name', 'description', 'website', 'logo_url', 'category', 'country',
+          'listing_status', 'is_test_merchant', 'offer_count', 'networks', 'verified_payable',
+        ],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          slug: { type: 'string', description: 'URL key: `/merchants/{slug}` and `/marketplace/<slug>`.' },
+          name: { type: 'string' },
+          description: { type: 'string' },
+          website: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          logo_url: {
+            anyOf: [{ type: 'string' }, { type: 'null' }],
+            description: 'Only Haven-run and Ampersend rows carry one; prospects never do (monogram only).',
+          },
+          category: { type: 'string' },
+          country: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO 3166-1 alpha-2, when known.' },
+          listing_status: {
+            type: 'string',
+            enum: ['live', 'coming_soon'],
+            description:
+              '`coming_soon` is a prospect Haven is talking to — shown only to an authenticated dashboard user on a deployment that lists no mainnet chain and has HAVEN_MARKETPLACE_PROSPECTS on; never an agreement, never payable, never in an agent read or the credential-less shape.',
+          },
+          is_test_merchant: { type: 'boolean' },
+          offer_count: {
+            type: 'integer',
+            description:
+              'Non-delisted offers on the chains this deployment lists (an agent: its own chain) plus verified self-submitted offers. Zero for a prospect.',
+          },
+          networks: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Distinct CAIP-2 networks of the listed operator offers, e.g. ["eip155:84532"]. Ingestion offers carry none.',
+          },
+          verified_payable: {
+            type: 'boolean',
+            description: 'Any offer verified payable — the same observation `CatalogEntry.verified_payable` records, at merchant level.',
+          },
+        },
+      },
       CatalogEntry: {
         type: 'object',
         /**
@@ -6605,6 +6730,7 @@ export const openapiSpec = {
           'id', 'name', 'description', 'category', 'resource_url', 'rail', 'protocol', 'status',
           'tool_name', 'tool_arguments', 'price_display', 'price_atomic', 'asset', 'network',
           'asset_transfer_methods', 'verified_at', 'source', 'domain_verified', 'verified_payable',
+          'merchant',
         ],
         properties: {
           id: { type: 'string', format: 'uuid' },
@@ -6612,6 +6738,11 @@ export const openapiSpec = {
           description: { type: 'string' },
           category: { type: 'string' },
           resource_url: { type: 'string' },
+          merchant: {
+            anyOf: [{ $ref: '#/components/schemas/CatalogEntryMerchant' }, { type: 'null' }],
+            description:
+              'The merchant this entry belongs to (#3078, epic #3077): every operator row has one after migration 088; an ingestion row has one once it is verified payable. Null only for a row the merchant join could not resolve.',
+          },
           rail: { type: 'string', enum: ['x402', 'mpp'] },
           protocol: { type: 'string', enum: ['http', 'mcp'] },
           tool_name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -6656,6 +6787,17 @@ export const openapiSpec = {
         type: 'object',
         required: ['resource_url'],
         properties: {
+          merchant_name: {
+            type: 'string',
+            maxLength: 120,
+            description:
+              'Optional (#3078): the seller\'s display name. Used to name the merchant when the submission is verified payable and no merchant owns the host yet; ignored when one does (the host proves the seller). Distinct from `website`.',
+          },
+          merchant_website: {
+            type: 'string',
+            maxLength: 2048,
+            description: 'Optional (#3078): the seller\'s public site, https. Same rules as `merchant_name`.',
+          },
           resource_url: {
             type: 'string',
             description:
@@ -7341,9 +7483,9 @@ export const openapiSpec = {
           install_status: { $ref: '#/components/schemas/AgentConnectionInstallStatus' },
           approval: {
             type: 'object',
-            required: ['safe_tx_hash', 'tx_hash', 'status'],
+            required: ['account_tx_hash', 'tx_hash', 'status'],
             properties: {
-              safe_tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
+              account_tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
               tx_hash: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{64}$' },
               status: { type: 'string' },
             },
@@ -8321,12 +8463,6 @@ export const openapiSpec = {
           accountId: uuid,
           accountAddress: address,
           accountName: { type: 'string' },
-          safeName: {
-            type: 'string',
-            deprecated: true,
-            description:
-              'The same value as `accountName`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.',
-          },
           agentId: uuid,
         },
       },
@@ -8433,9 +8569,9 @@ export const openapiSpec = {
       },
       TransactionFilterOptionsResponse: {
         type: 'object',
-        required: ['safes', 'agents', 'tokens'],
+        required: ['accounts', 'agents', 'tokens'],
         properties: {
-          safes: {
+          accounts: {
             type: 'array',
             items: {
               type: 'object',

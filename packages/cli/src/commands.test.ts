@@ -557,7 +557,7 @@ describe('read commands', () => {
     expect(parsed[0].hash).toBe('0xa')
   })
 
-  it('renders the ACCOUNT column from accountName — the server stopped sending safeName (#2914)', async () => {
+  it('renders the ACCOUNT column from accountName — the server stopped sending safeName (#2914 follow-up)', async () => {
     // The table's ACCOUNT column read `safeName` while the feed emitted it.
     // #2914 renamed that field to `accountName`, and a stale read here fails
     // in the quietest possible way: every row renders a BLANK account, with

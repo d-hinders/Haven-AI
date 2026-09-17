@@ -62,11 +62,17 @@ export const AUTH_MARKED_PREFIXES = [
   // #2947: the analytics page shell. Registered here or the route ships
   // un-disallowed in robots and without the auth marker on its shell.
   '/analytics',
-  '/catalog',
   '/contacts',
   '/dashboard',
   '/design-system',
   '/device',
+  // #3079: renamed from `/catalog`. Unlike `/reporting` below, `/catalog`
+  // does NOT stay on disk as its own redirect page — `next.config.ts`
+  // `redirects()` 308s it to `/marketplace` before any route in this group
+  // ever runs — so it is removed here rather than kept alongside the new
+  // entry: this list is pinned bidirectionally to the directory listing
+  // (see the guard test), and an entry with no backing directory fails it.
+  '/marketplace',
   '/profile',
   // #2859 renamed the feed page's route. `/reporting` remains on disk as a
   // redirect to `/accounting`, so the filesystem-pinned list carries both.

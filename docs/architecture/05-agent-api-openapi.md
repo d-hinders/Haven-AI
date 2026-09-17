@@ -26,6 +26,7 @@ covers:
   - .github/workflows/ci.yml
   - scripts/generate-api-types.mjs
   - packages/core/src/api-types.ts
+  - packages/frontend/src/lib/api.ts
   - packages/backend/src/routes/dashboard.ts
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
@@ -33,7 +34,7 @@ covers:
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-09-11"
+last-verified: "2026-09-17"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -295,6 +296,15 @@ via `scripts/generate-api-types.mjs`), and a blocking CI drift check
 regenerating. Editing the spec now changes the dashboard's compile-time types
 — an inaccurate spec entry fails the frontend typecheck, which is exactly the
 pressure that keeps the contract honest.
+
+That pressure is on **response** types only. Request bodies are posted as
+`unknown` (`packages/frontend/src/lib/api.ts` — `post`, `put` and `patch` all take
+`body?: unknown`),
+so no generated type ever constrains what the dashboard SENDS. #3082 is the
+worked example: `recipient_address` was declared `string` on
+`POST /agents/{id}/delegations/build` while the dashboard sent `null` for an
+open budget, every typecheck stayed green, and the mismatch only surfaced once
+a runtime validator started reading the declaration.
 
 ### What The Response-Shape Assertion Can And Cannot Catch (#1444)
 

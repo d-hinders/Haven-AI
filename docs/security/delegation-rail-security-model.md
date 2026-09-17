@@ -12,13 +12,14 @@ covers:
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/user-accounts.ts
+  - packages/backend/src/routes/transactions.ts
+  - packages/backend/src/middleware/retired-safe-names.ts
   - packages/backend/src/modules/agents/rekey-*.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
   - packages/backend/src/infra/repositories/smart-accounts.ts
-  - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/backend/src/rails/hybrid-transfers.ts
   - packages/backend/src/infra/repositories/hybrid-signers.ts
@@ -309,6 +310,44 @@ chain.
 > responses this document quotes carry `account_address` / `account_id` and
 > nothing else. Read the paragraph above as the record of what #2911 did; read
 > this one for what the wire does today.
+>
+> **Extended by the #2914 follow-up (2026-09-17), same day.** #2914 left three
+> retired RESPONSE names standing: `safes` on `GET /user/accounts`, `safeName`
+> on the `GET /transactions` feed, and `safes` on `GET /transactions/filters`.
+> All three are gone now — the first two were deliberate one-release twins for
+> the published CLI, the third was simply missed and found in review. So "carry
+> `account_address` / `account_id` and nothing else" is true of the ENVELOPE
+> keys too, not just the row fields. Nothing in this document's security
+> argument moves: an envelope key is not an authority boundary, the queries are
+> still `WHERE user_id = $1`, and the retired REQUEST names are still refused
+> with a 400 rather than ignored — which is the part that matters here, since
+> an ignored `safeId` filter would widen a query the ownership scope is
+> supposed to narrow. This document's coverage list gains
+> `routes/transactions.ts` and `middleware/retired-safe-names.ts` in the same
+> change, because those two files are what make the claims above true and
+> neither was declared.
+>
+> **Scope of this re-read** (so the `last-verified` date is not carrying an
+> unstated claim; it is NOT bumped — it already reads 2026-09-17 from an
+> earlier change today): the envelope keys on `GET /user/accounts`,
+> `GET /transactions` and `GET /transactions/filters`; that every query behind
+> them is still scoped to the caller's `user_id`; and that the retired request
+> names are still refused with a 400. Nothing else in this document was
+> re-read. On the scoping: the two list queries bind it as `$1`, while the
+> x402 legs behind `GET /transactions` bind it as `$2` alongside an account-id
+> `ANY(...)` — the same ownership property, written differently. An earlier
+> draft of this note said `WHERE user_id = $1` flatly; review measured it.
+
+> **Re-verified #3093 (frontend hooks: array wire keys default to `[]`):** this
+> diff touched one file in this document's coverage list,
+> `hooks/useDelegationBudget.ts`, by one expression: `setBudgets(res.delegations)`
+> became `setBudgets(res.delegations ?? [])`, so a `GET /agents/{id}/delegations`
+> answer without the key renders an empty budget card instead of sending the
+> route into the ErrorBoundary. Nothing this document describes moves —
+> `pickSigningPath`, the passkey/EOA dispatch, the grant/revoke ceremonies and
+> the signer-set read (`/account-signers`) are untouched; a missing key was
+> never a security state, only a crash. Scope of this note: that one
+> expression. Nothing else in this document was re-verified.
 
 > **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
 > migration):** this diff touched one file in this document's coverage list,

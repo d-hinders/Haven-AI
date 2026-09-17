@@ -106,7 +106,7 @@ describe('Sidebar', () => {
       a.getAttribute('href'),
     )
     const nav = links.filter((href) =>
-      ['/dashboard', '/accounts', '/transactions', '/analytics', '/agents', '/approvals', '/catalog', '/contacts', '/accounting', '/custody'].includes(href ?? ''),
+      ['/dashboard', '/accounts', '/transactions', '/analytics', '/agents', '/approvals', '/marketplace', '/contacts', '/accounting', '/custody'].includes(href ?? ''),
     )
     // '/approvals' and '/custody' stay in the FILTER above deliberately: the
     // filter is what makes this assertion able to see a re-added Approvals
@@ -115,7 +115,8 @@ describe('Sidebar', () => {
     expect(nav).toEqual([
       '/dashboard', '/analytics',
       '/accounts', '/transactions', '/accounting',
-      '/agents', '/catalog', '/contacts',
+      // #3079: renamed from '/catalog'.
+      '/agents', '/marketplace', '/contacts',
     ])
     // Header order in the DOM: Overview, then Money, then Agents — and
     // Dashboard sits UNDER the Overview header, not above it (the pre-#2947
@@ -141,8 +142,8 @@ describe('Sidebar', () => {
    * five mobile TABS already cover (`MobileTabBar`'s `TAB_ROUTES` — Dashboard,
    * Accounts, Transactions, Agents) are filtered OUT, and what remains must
    * read in the same section order desktop uses for them — Analytics (end of
-   * Overview), Accounting (end of Money), then Catalog, Contacts (end of
-   * Agents) — with Settings and Profile
+   * Overview), Accounting (end of Money), then Marketplace, Contacts (end of
+   * Agents; Marketplace renamed from Catalog by #3079) — with Settings and Profile
    * after, in the unchanged bottom section.
    */
   it('the More sheet lists the remaining items in the same section order as desktop', () => {
@@ -152,7 +153,7 @@ describe('Sidebar', () => {
     const remaining = Array.from(nav.querySelectorAll('a'))
       .map((a) => a.getAttribute('href'))
       .filter((href): href is string => href !== null && !tabRoutes.has(href))
-    expect(remaining).toEqual(['/analytics', '/accounting', '/catalog', '/contacts'])
+    expect(remaining).toEqual(['/analytics', '/accounting', '/marketplace', '/contacts'])
     // Settings and Profile — the unchanged bottom section — come after, in the
     // drawer's footer rather than the labeled `<nav>`.
     const settingsLink = screen.getByRole('link', { name: 'Settings' })

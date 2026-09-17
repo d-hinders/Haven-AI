@@ -51,9 +51,10 @@ export function useAccountSigners(accountAddress: string, chainId: number, userE
   // stranding the account at a permanent null signer set (#1079).
   const reload = useCallback(async () => {
     try {
-      setSigners(
-        await api.get<AccountSigners>(`/accounts/hybrid/${accountAddress}/signers?chain_id=${chainId}`),
-      )
+      const res = await api.get<AccountSigners>(`/accounts/hybrid/${accountAddress}/signers?chain_id=${chainId}`)
+      // `passkeys ?? []` — `pickSigningPath` reads `.length` during render;
+      // an answer without the array must degrade, not crash the route (#3093).
+      setSigners({ ...res, passkeys: res.passkeys ?? [] })
       setLoadError(false)
     } catch {
       setSigners(null)

@@ -1533,9 +1533,79 @@ export const FIXTURE_ANALYTICS_OVERVIEW_EMPTY = {
   balance_by_day: [],
 }
 
+/**
+ * Marketplace fixtures (#3079): two live merchants (one on both chains, one
+ * Haven test merchant on Sepolia) and a `coming_soon` prospect, in the
+ * `GET /merchants` / `GET /merchants/{slug}` wire shapes (core `Merchant`,
+ * `CatalogEntry`). `verified_at` is fixed; route captures are not pixel
+ * baselines, so the relative "verified Nd ago" is allowed to drift here.
+ */
+const FIXTURE_MERCHANTS = [
+  {
+    id: 'merchant-ampersend', slug: 'ampersend-demo-api', name: 'Ampersend Demo API',
+    description: 'Fact, joke and quote endpoints — a live x402 sandbox on Base and Base Sepolia.',
+    website: 'https://app.ampersend.ai', logo_url: null, category: 'api', country: null,
+    listing_status: 'live', is_test_merchant: false, offer_count: 2,
+    networks: ['eip155:8453', 'eip155:84532'], verified_payable: true,
+  },
+  {
+    id: 'merchant-haven-demo-store', slug: 'haven-demo-store', name: 'Haven Demo Store',
+    description: 'CloudNest and NordShield — Haven-run fixtures for real payments against demo goods.',
+    website: 'https://demo-merchant-dev.example', logo_url: null, category: 'infrastructure', country: 'SE',
+    listing_status: 'live', is_test_merchant: true, offer_count: 1,
+    networks: ['eip155:84532'], verified_payable: true,
+  },
+  {
+    id: 'merchant-berget-ai', slug: 'berget-ai', name: 'Berget AI',
+    description: 'Sovereign Swedish inference — OpenAI-compatible API on Swedish data centres.',
+    website: 'https://berget.ai', logo_url: null, category: 'ai', country: 'SE',
+    listing_status: 'coming_soon', is_test_merchant: false, offer_count: 0,
+    networks: [], verified_payable: false,
+  },
+]
+const FIXTURE_MERCHANT_OFFERS = [
+  {
+    id: 'offer-ampersend-fact', name: 'Fact', description: 'Returns one random fact.', category: 'api',
+    resource_url: 'https://services.sandbox.ampersend.ai/api/fact',
+    merchant: { id: 'merchant-ampersend', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false },
+    rail: 'x402', protocol: 'http', tool_name: null, tool_arguments: null,
+    price_display: '$0.001 USDC', price_atomic: '1000', asset: 'USDC', network: 'eip155:84532',
+    asset_transfer_methods: null, status: 'active', verified_at: '2026-09-15T12:00:00.000Z',
+    source: 'operator', domain_verified: true, verified_payable: true,
+  },
+  {
+    id: 'offer-ampersend-quote', name: 'Quote', description: 'Returns one inspirational quote.', category: 'api',
+    resource_url: 'https://services.ampersend.ai/api/quote',
+    merchant: { id: 'merchant-ampersend', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false },
+    rail: 'x402', protocol: 'http', tool_name: null, tool_arguments: null,
+    price_display: '$0.001 USDC', price_atomic: '1000', asset: 'USDC', network: 'eip155:8453',
+    asset_transfer_methods: null, status: 'active', verified_at: '2026-09-15T12:00:00.000Z',
+    source: 'operator', domain_verified: true, verified_payable: true,
+  },
+  {
+    id: 'offer-nordshield-vpn', name: 'buy_vpn', description: 'One month of VPN access.', category: 'infrastructure',
+    resource_url: 'https://demo-merchant-dev.example/mcp',
+    merchant: { id: 'merchant-haven-demo-store', slug: 'haven-demo-store', name: 'Haven Demo Store', listing_status: 'live', is_test_merchant: true },
+    rail: 'x402', protocol: 'mcp', tool_name: 'buy_vpn', tool_arguments: null,
+    price_display: '$0.10 USDC', price_atomic: '100000', asset: 'USDC', network: 'eip155:84532',
+    asset_transfer_methods: 'eip3009,erc7710', status: 'active', verified_at: '2026-09-15T12:00:00.000Z',
+    source: 'operator', domain_verified: true, verified_payable: true,
+  },
+]
+
 export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (mode === 'empty') return null
   const [pathname] = apiPath.split('?')
+  // Marketplace (#3079): the grid and one merchant page, keyed so a route
+  // capture of `/marketplace` and `/marketplace/<slug>` shows the populated
+  // surface rather than the empty fallback (a design reviewer's capture of
+  // the populated grid was otherwise only the playwright baselines).
+  if (pathname === '/merchants') return { merchants: FIXTURE_MERCHANTS }
+  if (pathname.startsWith('/merchants/')) {
+    const slug = pathname.slice('/merchants/'.length)
+    const merchant = FIXTURE_MERCHANTS.find((m) => m.slug === slug)
+    if (merchant) return { merchant, offers: FIXTURE_MERCHANT_OFFERS.filter((o) => o.merchant.slug === slug) }
+  }
   if (pathname === '/chains') return { deployable: [FIXTURE_ACCOUNT.chain_id] }
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
@@ -1569,7 +1639,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname === '/transactions/filters') {
     return {
-      safes: [{ id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name, address: FIXTURE_ACCOUNT.account_address, chainId: FIXTURE_ACCOUNT.chain_id }],
+      accounts: [{ id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name, address: FIXTURE_ACCOUNT.account_address, chainId: FIXTURE_ACCOUNT.chain_id }],
       agents: FIXTURE_AGENTS.map((a) => ({ id: a.id, name: a.name, status: a.status })),
       tokens: [
         { key: `usdc:${FIXTURE_ACCOUNT.chain_id}`, symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', chainId: FIXTURE_ACCOUNT.chain_id, isNative: false },
@@ -1683,18 +1753,30 @@ export const FIXTURE_EMPTY_FALLBACK = {
   // route is deliberately unkeyed in `fixtureFor` above — so no hook reads it,
   // and a collection key for an endpoint that answers 404 reads as coverage of
   // a flow the product cannot reach.
-  safes: [], agents: [], transactions: [], contacts: [],
+  accounts: [], agents: [], transactions: [], contacts: [],
+  // #2914 follow-up: `failedAccountIds` is `GET /transactions`' partial-failure
+  // key. Its absence here is what made the empty /transactions capture render
+  // the ErrorBoundary. The hook now defaults it too, so this is belt AND
+  // braces — deliberately, because the fixture is what a reviewer looks at.
+  failedAccountIds: [],
   recipients: [], delegations: [], owners: [], passkeys: [], tokens: [],
   payments: [], receipts: [], catalog: [], activity: [],
-  // #2295: `entries` is `GET /catalog`'s collection key — `useCatalog` does
-  // `setEntries(res.entries)` (`hooks/useCatalog.ts:47`). It was missing, so
-  // `/catalog` fell through to this shape, stored `undefined`, and
+  // #2295: `entries` is `GET /catalog`'s collection key. It was missing, so
+  // `/catalog` fell through to this shape, stored `undefined`, and the old
   // `CatalogPanel`'s `entries.map` took the whole route down into the error
   // boundary. Exactly the #1075 failure this block's own comment describes,
   // one key over: the sibling `catalog: []` above is not the key the hook
   // reads, which is why it looked covered. Found by haven-design-reviewer on
-  // #2295 while trying to capture the surface that issue changes.
+  // #2295 while trying to capture the surface that issue changes. #3079
+  // deleted that panel (`/catalog` now redirects to `/marketplace`); the key
+  // stays because the endpoint still answers with it.
   entries: [],
+  // #3079: `merchants` is `GET /merchants`' collection key — `useMerchants`
+  // does `setMerchants(res.merchants)`; the same trap as `entries` above.
+  merchants: [],
+  // `GET /merchants/{slug}` answers `{ merchant, offers }`; a fallback without
+  // them left the merchant page blank (the same trap, one key over again).
+  merchant: null, offers: [],
   // #2868: `useAccountingProviders` / `useAccountingConnections` do
   // `setProviders(res.providers)` / `setConnections(res.connections)`; under
   // `SCREENSHOT_FIXTURE=empty` the Settings page reads these, and a missing
@@ -4546,7 +4628,7 @@ export const SCENARIOS = {
   },
   'catalog-budget-states': {
     description:
-      'The /catalog card grid with all three budget states side by side — within budget, above budget, and unknown (#2295)',
+      'A merchant page\'s offers table with all three budget states side by side — within budget, above budget, and unknown (#2295; re-pointed from the /catalog card grid by #3079)',
     // ── Why this scenario exists ─────────────────────────────────────────
     //
     // Before #2295, `withinBudget` compared a HUMAN-DECIMAL `allowance_amount`
@@ -4558,10 +4640,16 @@ export const SCENARIOS = {
     // stale unnoticed while dead, still promising the retired approval queue.
     //
     // A route capture cannot evidence this on its own: the shared fixture
-    // serves no catalog entries, so `/catalog` photographs its empty state.
-    // Three entries against one agent's single 25 USDC budget produce all
+    // serves no merchants, so `/marketplace` photographs its empty state.
+    // Three offers against one agent's single 25 USDC budget produce all
     // three states in one frame, which is the only way to judge whether they
     // read as answer / answer / absence rather than as error states.
+    //
+    // #3079 moved the hint from the `/catalog` card to the merchant page's
+    // `OfferRow` (`withinBudget` itself moved byte-identical to
+    // `lib/marketplace.ts`), so the scenario now answers `GET /merchants/{slug}`
+    // and captures `/marketplace/{slug}`. The three fixture offers are the
+    // same three, under one fixture merchant.
     api(apiPath) {
       if (apiPath === '/agents') {
         // ONE active agent, ONE USDC budget, in the shape `GET /agents`
@@ -4587,16 +4675,28 @@ export const SCENARIOS = {
           ],
         }
       }
-      if (apiPath === '/catalog') {
+      if (apiPath === '/merchants/budget-fixture') {
+        const merchant = {
+          id: 'merchant-budget-fixture', slug: 'budget-fixture', name: 'Budget fixture',
+          description: 'Three offers priced to reach every budget state.',
+          website: 'https://mcp.text.example', logo_url: null, category: 'media', country: null,
+          listing_status: 'live', is_test_merchant: false, offer_count: 3,
+          networks: [`eip155:${FIXTURE_ACCOUNT.chain_id}`], verified_payable: false,
+        }
         const base = {
           category: 'media', rail: 'x402', protocol: 'mcp', tool_name: 'create_text',
           tool_arguments: null, asset_transfer_methods: null,
           network: `eip155:${FIXTURE_ACCOUNT.chain_id}`, status: 'active',
           verified_at: '2026-08-30T09:00:00.000Z',
           source: 'operator', domain_verified: false, verified_payable: false,
+          merchant: {
+            id: merchant.id, slug: merchant.slug, name: merchant.name,
+            listing_status: 'live', is_test_merchant: false,
+          },
         }
         return {
-          entries: [
+          merchant,
+          offers: [
             {
               ...base, id: 'cat-within', name: 'Text generation',
               description: 'Generate short-form text. Priced well inside the agent budget.',
@@ -4626,29 +4726,29 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/catalog`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await page.goto(`${BASE_URL}/marketplace/budget-fixture`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      // Wait on the two ANSWERING states by their copy, not on the grid. The
-      // grid renders as soon as entries arrive, and the pre-#2295 defect
+      // Wait on the two ANSWERING states by their copy, not on the table. The
+      // table renders as soon as offers arrive, and the pre-#2295 defect
       // rendered a complete, plausible-looking grid with no budget line on any
-      // card — so a capture that waited on the cards alone would have
+      // card — so a capture that waited on the rows alone would have
       // photographed the bug and called it evidence.
       await page.getByText('Within your agent budget').first().waitFor({ timeout: 20_000 })
       await page.getByText(/^Above every agent budget/).first().waitFor({ timeout: 20_000 })
 
-      // Positive control for the ABSENCE. The third card must render (its name
+      // Positive control for the ABSENCE. The third row must render (its name
       // is on screen) while carrying neither budget line — otherwise "no
-      // warning" would be indistinguishable from "card never rendered".
-      const unknownCard = page.locator('[data-testid="catalog-card-cat-unknown"]')
-      await unknownCard.waitFor({ timeout: 20_000 })
-      if ((await unknownCard.getByText(/agent budget/).count()) > 0) {
+      // warning" would be indistinguishable from "row never rendered".
+      const unknownRow = page.locator('[data-testid="offer-row-cat-unknown"]')
+      await unknownRow.waitFor({ timeout: 20_000 })
+      if ((await unknownRow.getByText(/agent budget/).count()) > 0) {
         throw new Error(
-          'catalog-budget-states: the EURe card rendered a budget line; the unknown state is not absent',
+          'catalog-budget-states: the EURe row rendered a budget line; the unknown state is not absent',
         )
       }
 
-      await shoot(page.locator('main').first(), 'grid')
+      await shoot(page.locator('main').first(), 'table')
     },
   },
   /**

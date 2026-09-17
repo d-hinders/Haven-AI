@@ -168,20 +168,23 @@ const ALLOWED = [
 const ALLOWED_CEILING = new Map([
   ['packages/backend/src/infra/repositories/smart-accounts.ts', 1],
   ['packages/backend/src/infra/repositories/transaction-history.ts', 3],
-  // 5 -> 10 (#2914 review, B1): the module gained the two RESPONSE twins
-  // kept for one more release, and a twin cannot be described without
-  // writing the name it keeps (`safes`, `safeName`). These are the only
-  // two retired names still EMITTED anywhere; the removal condition is at
-  // the call site. Everything else in this file names a retired input in
-  // order to refuse it.
-  ['packages/backend/src/middleware/retired-safe-names.ts', 10],
+  // 5 -> 10 (#2914 review, B1), then 10 -> 6 (#2914 follow-up): the headroom
+  // was for the two RESPONSE twins, which a twin cannot describe without
+  // writing the name it keeps. Both helpers are DELETED now and nothing here
+  // is emitted — every remaining hit names a retired INPUT in order to
+  // refuse it. The ceiling comes back down with them: leaving it at 10 would
+  // be four slots of unearned headroom behind a sentence that no longer
+  // described the file.
+  ['packages/backend/src/middleware/retired-safe-names.ts', 6],
   ['packages/backend/src/modules/transactions/csv-export.ts', 1],
-  // 9 -> 14 (#2914 review, B1+S1): two `safe_id` request properties
-  // declared so ajv agrees with the handlers that deliberately ACCEPT a
-  // dual-send (undeclared under `additionalProperties: false` they would be
-  // refused before the handler ran), plus the two response twins. Declaring
-  // a name in order to refuse it is the opposite of putting it back.
-  ['packages/backend/src/openapi/spec.ts', 14],
+  // 9 -> 14 (#2914 review, B1+S1), then 14 -> 11 (#2914 follow-up): what
+  // remains is the two `safe_id` REQUEST properties, declared so ajv agrees
+  // with the handlers that deliberately ACCEPT a dual-send (undeclared under
+  // `additionalProperties: false` they would be refused before the handler
+  // ran), plus tombstone prose. The two response twins and `safe_tx_hash` are
+  // gone, so their share of the headroom goes with them. Declaring a name in
+  // order to refuse it is the opposite of putting it back.
+  ['packages/backend/src/openapi/spec.ts', 11],
   ['packages/backend/src/routes/agent-connection-setups.ts', 8],
   ['packages/backend/src/routes/agents.ts', 7],
   ['packages/backend/src/routes/transactions.ts', 9],

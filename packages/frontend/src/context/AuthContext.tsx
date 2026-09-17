@@ -56,8 +56,9 @@ export interface User {
   wallet_address: string | null
   account_address: string | null
   /**
-   * The list is read from the #2907 `accounts` envelope key, which the
-   * backend always emits alongside the deprecated `safes` twin (same array).
+   * The list is read from the #2907 `accounts` envelope key, which is the
+   * only one the backend emits: the `safes` twin went with #2914 on these
+   * session payloads and with its follow-up everywhere else.
    */
   accounts: SmartAccount[]
   currency_preference?: 'USD' | 'EUR'

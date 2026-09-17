@@ -19,6 +19,7 @@ covers:
   - packages/connect/src/installed-clients.test.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/backend/src/routes/transactions.ts
+  - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/domain/agent-payment-taxonomy.ts
@@ -267,6 +268,26 @@ last-verified: "2026-09-17"
 > local twin is unaffected — the #1301 bounded discovery helper it shares still
 > lives in `@haven_ai/sdk`, so the skew-flatness this document asserts is a
 > property of the SDK helper, not of which mcp-server file calls it.
+>
+> **Recent re-verification (#3078):** the merchant layer adds ONE field to
+> the catalog entry — `merchant { id, slug, name, listing_status,
+> is_test_merchant }` — on the SDK's `HavenCatalogEntry` (OPTIONAL there:
+> an installed SDK against a backend that predates migration 088 gets the
+> field absent, never null — `client-characterization.test.ts` pins both
+> readings) and on the hosted `haven_discover_tools` map in
+> `src/tools/catalog-purchase.ts` (wire-shaped, spread in only when the SDK
+> carries it). Additive on the read side only: no tool name, schema, strict/
+> permissive split, expected-context version or signer contract changes, and
+> the local server's `haven_pay_mcp_tool` twin and the #1301 discovery helper
+> are untouched. The skew-flatness this document asserts holds in both
+> directions — an old server against a new backend ignores the field, a new
+> server against an old backend omits it.
+>
+> **Recent re-verification (#3080):** one hosted-server TEST added
+> (`src/tools/catalog-purchase.test.ts`): `haven_discover_tools` reads
+> `GET /catalog` only — never `/merchants` — and so never returns a
+> `coming_soon` prospect. No runtime file under `src/tools/**` changed; the
+> compatibility contract is untouched.
 >
 > **Recent re-verification (#2850):** the CLI's transaction CSV/JSON export
 > relabelled `delegate_sweep` from "allowance funding" to "sweep" — the old
@@ -560,6 +581,71 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.3.0-alpha.0 release, 2026-09-17):** this release is a
+> **BREAK**, and the version says so — MINOR under the 0.x convention, the same
+> reason 0.2.0-alpha.0 was. It carries the naming-P5 contraction (#2914 /
+> #3075), which ends the compatibility window 0.2.0-alpha.0 opened.
+>
+> **What an old client now meets.** Retired paths answer **410** with a typed
+> body naming their replacement; retired REQUEST names are **refused with 400**
+> naming the new field rather than ignored; the next-action enum emits
+> `fund_account_or_raise_allowance`, and the SDK stops translating it for you.
+> **That last one is a response-only enum** — `openapi/spec.ts` says so at the
+> enum itself, "No route takes this as request input" — so nothing rejects an
+> old value on input; what went is the SDK's client-side normaliser
+> `canonicalAgentPaymentNextAction`, with `isFundAccountOrRaiseAllowance`. A
+> 0.3.0 SDK against a pre-0.3.0 server therefore passes the old value through
+> unrecognised rather than mapping it. Measured against the published `@haven_ai/sdk@0.2.1-alpha.0` tarball,
+> **seven exported declarations are removed and none added**
+> (`AgentPaymentNextActionAccountAlias`, `AgentPaymentNextActionWire`,
+> `accountAddressTwins`, `canonicalAgentPaymentNextAction`,
+> `isFundAccountOrRaiseAllowance`, `readAccountAddress`, `readAccountId`).
+>
+> **Two response names deliberately SURVIVE this release**, and that is the one
+> skew statement a reader must not miss: the `safes` envelope key on
+> `GET /user/accounts` and `safeName` on the `GET /transactions` feed. (A third
+> retired name also survives — the `safes` key on `GET /transactions/filters` —
+> but it is read only by the dashboard, which ships from the same branch as the
+> backend, so it carries no published-client skew and is not part of this
+> contract. It is named in the release shard.) Both twins are
+> declared `deprecated` in the spec, and both are still emitted, because
+> `@haven_ai/cli@0.2.1-alpha.0` — what `latest` resolved to before this release
+> — reads them, and a published client cannot dual-READ the way a request can
+> dual-send. Their removal condition is written at the call site in
+> `packages/backend/src/middleware/retired-safe-names.ts`: the release AFTER
+> this one, once `npm view @haven_ai/cli dist-tags` shows `latest` at or past
+> 0.3.0-alpha.0. This release is what makes that true.
+>
+> **Update, same day — the follow-up release closes this.** 0.3.0-alpha.0
+> published and `npm view @haven_ai/cli dist-tags` reads `latest:
+> 0.3.0-alpha.0`, a CLI whose `accountsEnvelope()` reads `accounts`. The
+> removal condition above is met, so the FOLLOW-UP release — cut the same
+> day, immediately after this one, not "next" in any later reader's sense —
+> removes both twins AND the third name, and
+> `middleware/retired-safe-names.ts` exports no twin helper at all. It also
+> removes a FOURTH retired response name nothing had noticed: `safe_tx_hash`
+> on `GET /agent-connection-setups/{id}`'s `approval` object, which outlived
+> the epic by reading migration 084's `account_tx_hash` column through the
+> old wire key. No published package read it, so it was renamed outright.
+> `last-verified` is not bumped for this block: it already reads 2026-09-17,
+> and this records what the two releases carry rather than a re-verification
+> of the document. What that leaves is worth stating, because it is the shape
+> of the contract rather than an incident: the `/user/safes*` TOMBSTONE PATHS
+> stay 410 and the retired REQUEST names stay refused with a 400 — a path is
+> what an old client types and a request can be sent twice, so those are
+> answered, not deleted. Only the response bodies contracted. One consequence
+> for a reader pinning versions: a pre-0.3.0 CLI against the follow-up
+> backend breaks exactly as described above, and there is no longer a
+> backend release where it does not — the one-release window WAS the window.
+>
+> **The version-skew contract is therefore ASYMMETRIC for one release**: a 0.3.0 client against a 0.3.0 backend is consistent,
+> and a pre-0.3.0 client against a 0.3.0 backend now fails **loudly and typed**
+> rather than silently — which is the intended end state of #2906, not a
+> regression. The signer's supported expected-context versions are untouched by
+> this epic and by this release. `last-verified` is NOT bumped: it already reads
+> 2026-09-17 from an earlier change today, and this note records what this
+> release carries rather than a re-verification of the document.
+
 **Do not re-pin the four `@haven_ai/*` rows by hand.** Since
 [#1790](https://github.com/d-hinders/Haven-AI/issues/1790) `npm run release:bump`
 writes them, and a check compares each row against its own constant — on every
@@ -571,10 +657,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.2.1-alpha.0` |
-| `@haven_ai/mcp` | `0.2.1-alpha.0` |
-| `@haven_ai/sdk` | `0.2.1-alpha.0` |
-| `@haven_ai/signer` | `0.2.1-alpha.0` |
+| `@haven_ai/connect` | `0.3.0-alpha.0` |
+| `@haven_ai/mcp` | `0.3.0-alpha.0` |
+| `@haven_ai/sdk` | `0.3.0-alpha.0` |
+| `@haven_ai/signer` | `0.3.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

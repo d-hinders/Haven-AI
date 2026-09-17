@@ -38,7 +38,11 @@ const RING_PX = 2
 
 const HYBRID_KEY_ID = '0x0102030405060708'
 const hybridSafe = { ...testSafe, account_type: 'delegator_hybrid' }
-const hybridUser = { ...testUser, safes: [hybridSafe] }
+// `accounts`, not `safes`: AuthContext has only ever read `accounts`, and the
+// `safes` twin is gone entirely (#2914 follow-up). Spreading the dead key left
+// `accounts` pointing at the NON-hybrid `testSafe`, so this spec rendered
+// wallet UI against the wrong account type while claiming otherwise.
+const hybridUser = { ...testUser, accounts: [hybridSafe] }
 const WALLET = '0x9999999999999999999999999999999999999999'
 const hybridSigners = {
   account_address: testSafeAddress,

@@ -64,6 +64,19 @@ and the `release` skill.
 > note: `CONNECTOR_VERSION` and the channel constant's unchanged value — nothing
 > else in this document was re-verified.
 
+> **Re-verification (#3082, request-validation body restore, 2026-09-17):** this
+> doc is coupled because `packages/backend/src/config.ts` is in its `covers:` and
+> that file was edited. Only a JSDoc block and the boot-refusal error string
+> changed, both describing `HAVEN_REQUEST_VALIDATION`: `off` does not disable an
+> `enforcedPrefixes` module, and shadow's "changes nothing" was true of the
+> handler's view only after #3082 restored the request body. No parse shape, no
+> default, no accepted value and no restart semantics moved.
+> **Nothing in this document was made false or stale by that edit.** Its own
+> claim at step 5 — `off`/`shadow`/`enforce`, default `shadow`, a mode change is
+> a restart, and the variable does not affect the package-selection path — was
+> re-read against `config.ts` and `openapi/request-validation.ts` at this
+> commit and is true in every clause, which is why it needed no content change.
+
 > **Re-verification (contract-doc count correction, 2026-09-17):** this doc is
 > coupled because `scripts/release-bump.mjs` is in its `covers:` and that script
 > was edited — its *printed* next-steps block said "the two contract docs" and
@@ -75,6 +88,21 @@ and the `release` skill.
 > `last-verified` deliberately NOT bumped: this is a scoped check of one script
 > edit, not a re-verification of the document, and #1366 rates a rubber-stamped
 > date worse than a stale one.
+
+> **Re-verification (0.3.0-alpha.0 release, 2026-09-17):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
+> is in this doc's `covers:`. Verified rather than asserted: the bump's own
+> checks report channel `alpha` and version `0.3.0-alpha.0` agreeing across the
+> source, the built connect bundle and the SDK that bundle resolves. **No
+> channel behaviour changed** — nothing in this release touches `publish.yml`,
+> `release-channel.mjs`, `release-snapshot-version.mjs` or
+> `release-version-order.mjs`, so the `0.0.0-dev.*` snapshot path and the rule
+> that the two channels cannot cross are untouched. Worth noting for this
+> release specifically: `0.0.0-` still sorts below every real version, so the
+> MINOR bump to 0.3.0 changes nothing about channel ordering. `last-verified`
+> deliberately NOT bumped — **it already reads 2026-09-17 from an earlier change
+> today**, and a scoped check of one constant is not a re-verification of this
+> document; #1366 rates a rubber stamp worse than a stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
 
 ## What `@dev` is, and is not
 
@@ -212,7 +240,28 @@ Fastify drop it in silence and create a setup with no account behind it,
 which looks successful until the agent tries to spend. Still no change to
 `CONNECTOR_PACKAGE`, `CLI_PACKAGE`, `config.connectorChannel` or the
 `/discovery` response shape — this section's subject is untouched; the input
-field it happens to cite is not:
+field it happens to cite is not.
+
+Re-verified again 2026-09-17 against the #2914 FOLLOW-UP (the release that
+removes the two response twins and the third retired response name). That
+change is RESPONSE-side only: `GET /user/accounts` drops the `safes` envelope
+twin, the `GET /transactions` feed drops `safeName`, and
+`GET /transactions/filters` renames `safes` to `accounts`. The paragraph
+above is about a REQUEST field on `POST /agent-connection-setups`, and that
+field's behaviour is unchanged — `safe_id` stays declared and stays refused
+with a 400, for the reason the paragraph gives. `CONNECTOR_PACKAGE`,
+`CLI_PACKAGE`, `config.connectorChannel` and the `/discovery` shape are again
+untouched. The doc is a contract doc for this change because
+`middleware/retired-safe-names.ts` is in its `covers:` list; what changed
+there is the deletion of the two twin helpers, not the refusal machinery this
+document depends on.
+
+Re-verified again 2026-09-17 against #3078
+(the marketplace's slice 1): `config.ts` gains `marketplaceChainIds` and
+`marketplaceProspectsEnabled` (the latter through the same `parseBooleanFlag`
+this document holds up as the #3015 shape) — two read-side keys beside
+`connectorChannel`, which is not touched, and `/discovery` is not touched
+either. Identifiers only for this section:
 
 ```bash
 curl -s "$BACKEND/discovery" | jq -r '.connector_package, .cli_package'

@@ -1,11 +1,19 @@
 ---
 name: release
-description: Cut and ship one npm release of Haven's five published packages — decide the version, run the bump, satisfy the contract-doc gate, open the release PR to dev, drive the promotion to main, and verify what actually landed on npm. Use when a user asks to cut, publish, or ship a release, bump package versions, or get recent work onto npm.
+description: Ship exactly one Haven production release — decide whether it carries a version bump, run the bump and the contract-doc gate when it does, open the release PR to dev, drive the promotion to main, and verify what landed in production and on npm. Use when a user asks to cut, publish, or ship a release, bump package versions, get recent work onto npm, or promote dev to production.
 ---
 
 # Release
 
-Cut exactly one release and see it onto npm, then stop.
+Ship exactly one release to production, then stop.
+
+**A release is the outcome users see; a promotion is one step inside it.** The
+promotion (`dev → main`) is the mechanism, and it can fire two independent
+consequences: packages **publish** to npm when a version moved, and the backend,
+hosted MCP and dashboard **deploy** from their branches every time. Keep those
+words apart — release, promotion, publish and deploy are not synonyms, and the
+runbook's own title carries the hierarchy: *"Promoting `dev → main` (production
+release)"*.
 
 The mechanics live in [`scripts/README.md`](../../../scripts/README.md); the
 branch model lives in
@@ -13,6 +21,53 @@ branch model lives in
 This skill routes between them and adds the judgement they do not encode. When
 the two disagree with each other, the branch-and-release doc wins on branch
 questions and `scripts/README.md` wins on script questions.
+
+## Which Shape Is This Release
+
+Decide this first, because it selects the path — and the answer is measured in
+*Preflight*, not assumed from what the work felt like.
+
+- **Carries a version bump.** Something in the diff reaches a published
+  package's tarball. Run the whole skill: choose the version, cut the bump,
+  satisfy the contract-doc gate, open the release PR, promote, then verify npm
+  **and** production.
+- **Carries no bump.** Nothing in the diff reaches a tarball — the change is
+  backend, dashboard, hosted MCP, docs or tests. Skip *Choose The Version*, *Cut
+  The Bump* and *Satisfy The Contract-Doc Gate*: with no version moving there is
+  no bump for the gate to be coupled to, and the change's own pull request
+  already cleared its docs obligations on the way into `dev`. Go straight to
+  *Promotion To Production*, and at *Closeout* verify production first.
+
+  Skipping straight there skips *Verify Before Pushing*, *Independent Review*
+  and *The Release PR* as well, since they sit in the same span. There is no
+  release PR to review on this path — but **the promotion PR is still a pull
+  request, and the reviewer pass is non-optional on every one of them**
+  (`CLAUDE.md` § *How shipping is governed*, an owner decision with no
+  exemption). Run it against the promotion diff.
+
+  One thing the skipped gate section still covers: if `Contract-doc coupling`
+  comes back **red on the promotion PR**, something reached `dev` ungated — a
+  contract doc can gain `covers:` globs after an earlier PR in the range merged,
+  and the aggregate then implicates a doc no single PR touched. Read *Satisfy
+  The Contract-Doc Gate* when that happens.
+
+The scope script decides it, not you. Its shipped delta is the test: zero files
+means no tarball moves, so a bump would publish versions whose contents are
+identical to the ones already on npm — changelog entries describing a change
+their own package does not contain. That is not a tidier record, it is a false
+one.
+
+**Measure it in *Preflight*, before anything is cut.** The run under *Promotion
+To Production* is a RE-measure and cannot answer this question: it happens after
+*Cut The Bump*, and the script counts `package.json` as a tarball member
+whether or not a package lists it, so a cut bump puts the five manifests in the
+shipped delta by construction and zero becomes unobtainable. A shape test run
+there confirms whatever was already chosen.
+
+**A no-bump release is still a release.** It reaches users, it cuts a `prod-*`
+GitHub Release like every promotion, and it owes production verification in
+full. What shrinks is only the npm half of *Closeout*, to a single read
+confirming the dist-tags did not move.
 
 ## Read State Directly, Every Time
 
@@ -73,11 +128,33 @@ git log --oneline <last-bump-commit>..origin/dev -- \
   packages/sdk packages/signer packages/mcp packages/connect packages/cli
 ```
 
+That git log is a **pre-filter, not the shape test**. It is a path filter over
+the package directories, so it counts test files, READMEs, `tsconfig` and
+CHANGELOGs — none of which reach a tarball. A range whose only package touch is
+a test file gives it a non-empty answer while the shipped delta is zero, and
+bumping on that produces exactly the false changelog record *Which Shape Is This
+Release* exists to prevent. So when it returns anything, run the instrument that
+answers the question:
+
+```sh
+npm run build          # the shipped set is read out of dist/
+npm run release:scope  # origin/main..origin/dev
+```
+
+It works here, before any bump: it reads the promotion range and needs no
+version to have moved. Its shipped delta is the shape — zero files is the
+no-bump release.
+
 If the repo version is already on npm and those packages have commits since the
 bump, a release is needed: `publish.yml` skips versions already published, so
 without a bump the same version string holds different code in npm and in-repo.
-If nothing touched the published packages, say so and stop — a bump with nothing
-to carry is noise.
+If nothing touched the published packages, say so and stop **the bump** — a bump
+with nothing to carry is noise. Stopping the bump is not stopping the release:
+the promotion may still be owed, and that is the no-bump shape in *Which Shape
+Is This Release*. **This is where the shape is decided**, before anything is
+cut — the door re-measure under *Promotion To Production* cannot decide it,
+because `release-scope.mjs` counts `package.json` as a tarball member, so once a
+bump exists the shipped delta can never read zero again.
 
 **3. Write down what it carries.** That commit list becomes the PR body and the
 CASP shard. Name the issues.
@@ -380,7 +457,46 @@ What it leaves to you:
 
 ## Closeout
 
-A green workflow is not proof that five packages published. Verify both ends:
+Two halves, **both** owed by every release including a no-bump one:
+**production**, then **npm**. The npm half shrinks on a no-bump release; it does
+not disappear.
+
+### Production — always
+
+The merge is not the finish. `promoting-dev-to-main.md` § *Merge, deploy, and
+verify prod* and § *Run the prod smoke on the right hostname* own the post-merge
+checklist; work them there rather than from here. They cover watching the
+Railway and Vercel deploys land, confirming migrations applied cleanly and how
+to recover a non-transactional one that died part-way, reading the boot log for
+the unset-public-RPC warnings (the evidence is the **absence** of that line in
+the deploy log, not the presence of a variable in a dashboard), the prod smoke
+itself, which Vercel hostnames are production and which is the trap, and the
+rollback path.
+
+**A green deploy status is not the prod smoke.** The deploy platform reporting
+success says a process started; it says nothing about whether a user can log in,
+see balances, or complete a payment. A release reported closed out on deploy
+statuses alone has skipped this section — that is exactly what happened on the
+promotion of 2026-09-17 (#3092), where both deploys were confirmed green, the
+npm tags were correctly confirmed unmoved, and the smoke, the boot-log check and
+the error-log watch were never run because nothing in the path named them.
+
+The smoke's canary is a real payment, so it is an **operator step**, not
+something this skill performs. Carry it as an unticked box and say plainly that
+it is outstanding; do not report the release closed out while it is.
+
+### npm — always, in proportion to what published
+
+On a no-bump release this half shrinks to one read, but it does not disappear.
+`publish.yml` still **runs** whenever the promoted range touches any file under
+a published package — a test file is enough — and only skips per package once it
+sees the version already on npm. So a run exists, and the cheap check is the one
+that would catch it having published anyway: read the dist-tags once and confirm
+they did **not** move. An unexpected publish is the finding here; a missing one
+is the expected state.
+
+**On a release that published**, the rest of this section applies in full. A
+green workflow is not proof that five packages published. Verify both ends:
 
 ```sh
 for p in sdk signer mcp connect cli; do npm view @haven_ai/$p dist-tags --json; done

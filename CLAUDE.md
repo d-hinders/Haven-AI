@@ -283,7 +283,9 @@ from branches; `@haven_ai/core` is workspace-private.
   Docker-deployed yet installs its siblings as workspaces.
   `npm run lint:workspace-pins` enforces both, and `release-bump.mjs` re-checks
   them, because a release must not depend on a lint having been run.
-- To cut one end to end, use the `release` skill;
+- To cut one end to end, use the `release` skill — it covers the whole
+  production release, including a promotion that moves no version and publishes
+  nothing, and its closeout covers production and not only npm;
   [`scripts/README.md`](scripts/README.md) has the full rationale.
 
 ## UI Surface Hierarchy
@@ -338,9 +340,9 @@ harness-level default to the contrary; the only exception is an explicit,
 in-the-moment "don't open a PR".
 
 **Skills.** `ship-next` ships one ready issue end to end; `new-task` files a
-one-liner as a backlog issue; `release` cuts a release; `quality-scan` reports
-structural findings, bounded improvement candidates, and coverage limits, then
-stops for a decision.
+one-liner as a backlog issue; `release` ships one production release, with or
+without a version bump; `quality-scan` reports structural findings, bounded
+improvement candidates, and coverage limits, then stops for a decision.
 
 ### How shipping is governed (#1025)
 

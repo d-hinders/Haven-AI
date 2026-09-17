@@ -86,6 +86,9 @@ describe('MerchantGrid', () => {
     // The real mount order: loading over an empty list, then the data.
     const { rerender } = render(<MerchantGrid merchants={[]} loading={true} error={null} onSubmit={() => {}} />)
     expect(screen.queryByLabelText('Show test merchants')).toBeNull()
+    // The loading shell is marked busy: the skeletons are aria-hidden, and
+    // the capture harness's content floor must not certify this frame.
+    expect(screen.getByRole('status').getAttribute('aria-busy')).toBe('true')
     rerender(<MerchantGrid merchants={[merchant({ networks: ['eip155:84532'] }), merchant({ id: 'm-test', slug: 'haven-demo-store', name: 'Haven Demo Store', is_test_merchant: true, networks: ['eip155:84532'] })]} loading={false} error={null} onSubmit={() => {}} />)
     expect(screen.getByLabelText('Show test merchants')).toBeChecked()
     // A user's click still wins over the derived default afterwards.

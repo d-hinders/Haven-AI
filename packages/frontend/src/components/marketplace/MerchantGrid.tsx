@@ -96,8 +96,11 @@ export function MerchantGrid({
     // The filter chrome's height is reserved so the cards do not jump when it
     // appears: search row, toggles/network row, category pills (measured on
     // the loaded page — the second row is the tall one, not the first).
+    // `aria-busy` + `role="status"`: the skeletons are `aria-hidden`, so
+    // without this the capture harness's content floor certified a
+    // header-only page as finished; it refuses content still marked busy.
     return (
-      <div>
+      <div role="status" aria-busy="true" aria-label="Loading merchants">
         <Skeleton className="mb-4 h-9 max-w-xs rounded-lg" />
         <Skeleton className="mb-4 h-9 w-80 rounded-lg" />
         <Skeleton className="mb-4 h-6 w-64 rounded-full" />

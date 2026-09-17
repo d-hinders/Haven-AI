@@ -116,10 +116,23 @@ describe('MerchantPage', () => {
     expect(mockNotFound).not.toHaveBeenCalled()
   })
 
-  it('offers the way back to the marketplace from the merchant page', () => {
-    mockUseMerchant.mockReturnValue({ merchant, offers: [offer()], loading: false, error: null, notFound: false, refetch: vi.fn() })
-    render(<MerchantPage />)
-    expect(screen.getByRole('link', { name: 'Back to Marketplace' }).getAttribute('href')).toBe('/marketplace')
+  it('offers the way back to the marketplace from EVERY branch — success, loading, error, merchant-less', () => {
+    const states = [
+      { merchant, offers: [offer()], loading: false, error: null, notFound: false, refetch: vi.fn() },
+      { merchant: null, offers: [], loading: true, error: null, notFound: false, refetch: vi.fn() },
+      { merchant: null, offers: [], loading: false, error: 'boom', notFound: false, refetch: vi.fn() },
+      { merchant: null, offers: [], loading: false, error: null, notFound: false, refetch: vi.fn() },
+    ]
+    for (const state of states) {
+      mockUseMerchant.mockReturnValue(state)
+      const { unmount } = render(<MerchantPage />)
+      const link = screen.getByRole('link', { name: 'Back to Marketplace' })
+      expect(link.getAttribute('href')).toBe('/marketplace')
+      // The Button primitive, not a hand-rolled 16 px link: it carries the
+      // 44 px hit area and the focus ring on a phone.
+      expect(link.className).toContain('focus-visible:')
+      unmount()
+    }
   })
 
   it('calls notFound() for an unknown slug', () => {

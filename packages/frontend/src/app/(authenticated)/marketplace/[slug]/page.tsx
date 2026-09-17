@@ -1,8 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
-import { AlertTriangle, ArrowLeft } from 'lucide-react'
+import { AlertTriangle, ChevronLeft } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { notFound as nextNotFound, useParams } from 'next/navigation'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -15,6 +14,23 @@ import CatalogSubmitModal from '@/components/CatalogSubmitModal'
 import { useAgents } from '@/hooks/useAgents'
 import { useMerchant } from '@/hooks/useCatalog'
 
+/**
+ * The way back on a phone, where Marketplace lives in the More drawer —
+ * rendered by EVERY branch of the page (loading, error, merchant-less,
+ * success), the `Button` primitive (44 px hit area, focus ring), the same
+ * shape as the sweep page's "Back to agent".
+ */
+function BackToMarketplace() {
+  return (
+    <div className="mb-4">
+      <Button href="/marketplace" variant="tertiary" size="sm" className="-ml-3">
+        <Icon icon={ChevronLeft} className="h-3.5 w-3.5" />
+        Back to Marketplace
+      </Button>
+    </div>
+  )
+}
+
 export default function MerchantPage() {
   const params = useParams<{ slug: string }>()
   const slug = params.slug
@@ -25,6 +41,7 @@ export default function MerchantPage() {
   if (loading) {
     return (
       <div className="max-w-5xl space-y-4">
+        <BackToMarketplace />
         <Skeleton className="h-16 rounded-xl" />
         <Skeleton className="h-64 rounded-xl" />
       </div>
@@ -41,6 +58,7 @@ export default function MerchantPage() {
   if (error) {
     return (
       <div className="max-w-5xl">
+        <BackToMarketplace />
         <EmptyState
           icon={<Icon icon={AlertTriangle} className="h-5 w-5" />}
           tone="danger"
@@ -61,6 +79,7 @@ export default function MerchantPage() {
     // it is still a state a user can land on, so it is designed, not blank.
     return (
       <div className="max-w-5xl">
+        <BackToMarketplace />
         <EmptyState
           icon={<Icon icon={AlertTriangle} className="h-5 w-5" />}
           tone="danger"
@@ -80,14 +99,7 @@ export default function MerchantPage() {
 
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
-      {/* The way back on a phone, where Marketplace lives in the More drawer. */}
-      <Link
-        href="/marketplace"
-        className="inline-flex items-center gap-1 text-xs font-medium text-[var(--v2-brand)] hover:underline"
-      >
-        <Icon icon={ArrowLeft} className="h-3.5 w-3.5" />
-        Back to Marketplace
-      </Link>
+      <BackToMarketplace />
       {/* The merchant header IS the page header — one h1 (a second `PageHeader`
           made the name two headings, which the visual spec's anchor refused). */}
       <MerchantHeader merchant={merchant} />

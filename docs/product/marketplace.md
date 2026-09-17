@@ -151,21 +151,28 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
 - **Merchant page** (`app/(authenticated)/marketplace/[slug]/page.tsx`,
   `MerchantHeader.tsx`, `PayWithHavenBlock.tsx`, `OffersTable.tsx`) — header
   (monogram/logo, name, category, website link, networks, Verified with its
-  meaning as a reachable tooltip, and the Haven test-merchant label on a test
-  merchant — where a payment is one paste away), a "Pay this with Haven"
+  meaning as VISIBLE text under the description — never only a tooltip — and
+  the Haven test-merchant note as a wrapping line on a test merchant, where a
+  payment is one paste away), a "Pay this with Haven"
   block with one paste-into-agent instruction per offer, each labelled with
   the offer's name and price and printed in full (`agentInstruction()`, moved
   to `lib/marketplace.ts`) with a copy button, the line "This merchant
   settles by EIP-3009 — the paying agent needs an unpinned budget" **once**
   when any offer's `asset_transfer_methods` lacks `erc7710` (the offers that
-  need it are tagged when the merchant is mixed), and an offers table (Offer ·
-  Method · Description · Price · Network · Freshness — the network cell names
-  the chain) reusing `withinBudget()` for the per-agent budget hint. A `coming_soon` merchant renders its description, website and
+  need it are tagged when the merchant is mixed), and the offers: a table from
+  `md` up (Offer · Method · Description · Price · Network · Freshness — the
+  network cell names the chain) and one stacked card per offer below `md`,
+  both reusing `withinBudget()` for the per-agent budget hint so the warning
+  is never behind a horizontal scroll on a phone. A `coming_soon` merchant renders its description, website and
   "Coming soon — not payable yet" — no instruction block, no offers table, no
   price. Loading, empty, error (with "Try again") and unknown-slug (404 via
   `next/navigation`'s `notFound()`, landing on the segment's own
   `not-found.tsx` with "Back to Marketplace") states are covered by unit
-  tests, not baselines.
+  tests, not baselines — except the unknown slug, whose `notFound()` →
+  `not-found.tsx` join is a visual-spec scenario (`merchant-not-found`).
+  The visual spec freezes the clock (`page.clock.setFixedTime`) and asserts
+  the literal "verified 2d ago", because the Freshness cell is
+  `Date.now()`-relative and the fixtures carry fixed `verified_at` values.
 - `CatalogPanel.tsx` and `app/(authenticated)/catalog/page.tsx` are deleted;
   `CatalogCard` is now `components/marketplace/OfferRow.tsx`;
   `hooks/useCatalog.ts` gains `useMerchants()` / `useMerchant(slug)`.

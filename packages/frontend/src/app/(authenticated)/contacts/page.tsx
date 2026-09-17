@@ -45,7 +45,6 @@ function ContactIcon() {
   )
 }
 
-
 interface ContactModalProps {
   mode: 'add' | 'edit'
   initial?: { id: string; name: string; address: string }

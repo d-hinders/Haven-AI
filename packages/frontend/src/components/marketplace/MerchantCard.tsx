@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { Monogram } from '@/components/ui/Monogram'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
-import { categoryLabel, chainName, networkToChainId } from '@/lib/marketplace'
+import { categoryLabel, chainName, networkToChainId, VERIFIED_MEANING } from '@/lib/marketplace'
 import type { Merchant } from '@/hooks/useCatalog'
 
 function offerCount(merchant: Merchant): string {
@@ -32,7 +32,7 @@ export function MerchantCard({ merchant }: { merchant: Merchant }) {
         <div className="flex min-w-0 items-center gap-3">
           <Monogram name={merchant.name} logoUrl={merchant.logo_url} />
           <div className="min-w-0">
-            <h3 className="truncate text-sm font-semibold text-[var(--v2-ink)]">
+            <h3 className="line-clamp-2 text-sm font-semibold text-[var(--v2-ink)]">
               {merchant.name}
             </h3>
             <span className="rounded-full bg-[var(--v2-surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink-2)]">
@@ -43,13 +43,17 @@ export function MerchantCard({ merchant }: { merchant: Merchant }) {
         {merchant.verified_payable && (
           // A link cannot host a tooltip trigger (nested interactive); the
           // badge's meaning is spelled out on the merchant page the card opens.
-          <span title="Domain controlled and verified payable">
+          <span title={VERIFIED_MEANING}>
             <StatusBadge tone="success" className="uppercase tracking-wide">
               Verified
             </StatusBadge>
           </span>
         )}
       </div>
+
+      {merchant.is_test_merchant && !comingSoon && (
+        <p className="text-xs font-medium text-[var(--v2-warning)]">Haven test merchant — real payments, demo goods</p>
+      )}
 
       <p className="line-clamp-2 text-xs text-[var(--v2-ink-3)]">{merchant.description}</p>
 
@@ -66,12 +70,10 @@ export function MerchantCard({ merchant }: { merchant: Merchant }) {
         </div>
       )}
 
-      <div className="mt-auto space-y-1 text-xs font-medium text-[var(--v2-ink-3)]">
-        <p>{comingSoon ? 'Coming soon' : offerCount(merchant)}</p>
-        {merchant.is_test_merchant && !comingSoon && (
-          <p className="text-[var(--v2-warning)]">Haven test merchant — real payments, demo goods</p>
-        )}
-      </div>
+      {/* One line, pinned: the comparable datum in a row aligns across cards. */}
+      <p className="mt-auto text-xs font-medium text-[var(--v2-ink-3)]">
+        {comingSoon ? 'Coming soon' : offerCount(merchant)}
+      </p>
     </Link>
   )
 }

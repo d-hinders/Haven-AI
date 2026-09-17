@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { AlertTriangle } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { notFound as nextNotFound, useParams } from 'next/navigation'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -39,6 +41,7 @@ export default function MerchantPage() {
     return (
       <div className="max-w-5xl">
         <EmptyState
+          icon={<Icon icon={AlertTriangle} className="h-5 w-5" />}
           tone="danger"
           title="Could not load this merchant"
           body={error}

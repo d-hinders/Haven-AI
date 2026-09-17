@@ -1,6 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { AlertTriangle } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { FilterPill } from '@/components/ui/FilterPill'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -91,11 +93,14 @@ export function MerchantGrid({
   }
 
   if (loading) {
-    // The filter row's height is reserved so the cards do not jump when it appears.
+    // The filter chrome's height is reserved so the cards do not jump when it
+    // appears: search row, toggles/network row, category pills (measured on
+    // the loaded page — the second row is the tall one, not the first).
     return (
       <div>
         <Skeleton className="mb-4 h-9 max-w-xs rounded-lg" />
-        <Skeleton className="mb-4 h-5 w-64 rounded-lg" />
+        <Skeleton className="mb-4 h-9 w-80 rounded-lg" />
+        <Skeleton className="mb-4 h-6 w-64 rounded-full" />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="h-40 rounded-xl" />
@@ -108,6 +113,7 @@ export function MerchantGrid({
   if (error) {
     return (
       <EmptyState
+        icon={<Icon icon={AlertTriangle} className="h-5 w-5" />}
         tone="danger"
         title="Could not load the marketplace"
         body={error}

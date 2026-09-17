@@ -8,10 +8,12 @@ import CatalogSubmitModal from '@/components/CatalogSubmitModal'
 import { useMerchants } from '@/hooks/useCatalog'
 
 /**
- * `/marketplace` (#3079, epic #3077). Rendered inside `Suspense` because
- * `useSearchParams` needs a boundary under static rendering: the old
- * `/catalog?category=ai` links redirect here with their query intact
- * (`next.config.ts`), and the grid honours it rather than dropping the filter.
+ * The grid half of `/marketplace` (#3079, epic #3077). Rendered inside
+ * `Suspense` because `useSearchParams` needs a boundary under static
+ * rendering: the old `/catalog?category=ai` links redirect here with their
+ * query intact (`next.config.ts`), and the grid honours it rather than
+ * dropping the filter. The page header sits above the boundary so the
+ * static shell paints something.
  */
 function MarketplaceContent() {
   const { merchants, loading, error, refetch } = useMerchants()
@@ -19,12 +21,7 @@ function MarketplaceContent() {
   const initialCategory = useSearchParams()?.get('category') ?? null
 
   return (
-    <div className="max-w-5xl" data-testid="marketplace-page">
-      <PageHeader
-        title="Marketplace"
-        subtitle="Merchants your agents can pay — one instruction per offer."
-      />
-
+    <>
       <MerchantGrid
         merchants={merchants}
         loading={loading}
@@ -39,14 +36,20 @@ function MarketplaceContent() {
         onClose={() => setSubmitOpen(false)}
         onVerifiedPayable={() => void refetch()}
       />
-    </div>
+    </>
   )
 }
 
 export default function MarketplacePage() {
   return (
-    <Suspense fallback={null}>
-      <MarketplaceContent />
-    </Suspense>
+    <div className="max-w-5xl" data-testid="marketplace-page">
+      <PageHeader
+        title="Marketplace"
+        subtitle="Merchants your agents can pay — one instruction per offer."
+      />
+      <Suspense fallback={null}>
+        <MarketplaceContent />
+      </Suspense>
+    </div>
   )
 }

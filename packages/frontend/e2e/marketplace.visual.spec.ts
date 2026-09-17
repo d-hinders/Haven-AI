@@ -38,12 +38,25 @@ import { THEME_STORAGE_KEY } from '../src/lib/theme-bootstrap'
 const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{ name: string; width: number; height: number }>
 const DESKTOP_ONLY = VIEWPORTS.filter((vp) => vp.name === 'desktop')
 
+/**
+ * The frozen clock is load-bearing (the `product-routes` / `analytics`
+ * lesson): `OfferRow`'s Freshness column renders `freshness(verified_at)`
+ * against `Date.now()`, and the fixtures carry FIXED `verified_at` values
+ * (2026-09-15T12:00Z), so an unfrozen capture reads "verified 2d ago" today
+ * and "verified 3d ago" tomorrow — a required gate red on a calendar
+ * boundary. Pinned before `goto` (the page reads `Date.now()` on first
+ * render) and ASSERTED by the literal string on every offers scenario, so a
+ * clock that stops working fails by name rather than as a pixel diff.
+ */
+const FROZEN_NOW = new Date('2026-09-17T12:00:00.000Z')
+const FROZEN_FRESHNESS = 'verified 2d ago'
+
 const PIXEL_THRESHOLD = 0.02
 const FULL_PAGE_MAX_DIFF_PIXELS = 150
 const ANCHOR_TIMEOUT_MS = 60_000
 
 type Scenario = {
-  name: 'marketplace-grid' | 'merchant-page' | 'merchant-coming-soon' | 'merchant-test-merchant'
+  name: 'marketplace-grid' | 'merchant-page' | 'merchant-coming-soon' | 'merchant-test-merchant' | 'merchant-not-found'
   path: string
   viewports: ReadonlyArray<{ name: string; width: number; height: number }>
   heading: string
@@ -88,7 +101,8 @@ const SCENARIOS: Scenario[] = [
         await expect(merchantPage.getByTestId(`offer-row-${id}`)).toHaveCount(1)
         await expect(merchantPage.getByTestId(`pay-block-${id}`)).toHaveCount(1)
       }
-      await expect(merchantPage.getByText('Fact', { exact: true })).toHaveCount(2)
+      // The frozen clock is in effect (see FROZEN_NOW).
+      await expect(merchantPage.getByText(FROZEN_FRESHNESS).first()).toBeVisible()
       // The network column shows the chain's NAME, never the raw CAIP-2 id.
       await expect(merchantPage.getByText('eip155:')).toHaveCount(0)
       // None of the three offers advertises erc7710 (asset_transfer_methods:
@@ -122,7 +136,9 @@ const SCENARIOS: Scenario[] = [
   {
     name: 'merchant-test-merchant',
     path: `/marketplace/${havenDemoStore.slug}`,
-    viewports: DESKTOP_ONLY,
+    // Both viewports: the safety label is the one line whose job is to stop a
+    // real-money paste against demo goods, and a badge once clipped it at 390.
+    viewports: VIEWPORTS,
     heading: havenDemoStore.name,
     async assert(page) {
       const merchantPage = page.getByTestId('merchant-page')
@@ -131,9 +147,8 @@ const SCENARIOS: Scenario[] = [
       // agent instruction) — assert the two that carry meaning, exactly.
       await expect(merchantPage.getByRole('cell', { name: 'buy_vpn', exact: true })).toHaveCount(1)
       // Labelled on the page itself, not only on the grid card (decision 6).
-      await expect(
-        merchantPage.getByText('Haven test merchant — real payments, demo goods'),
-      ).toHaveCount(1)
+      await expect(merchantPage.getByTestId('test-merchant-note')).toBeInViewport()
+      await expect(merchantPage.getByText(FROZEN_FRESHNESS).first()).toBeVisible()
       await expect(merchantPage.getByText(/via buy_vpn for/)).toHaveCount(1)
       // The fixture's one offer DOES advertise erc7710, so the unpinned-budget
       // line must be absent here — the negative half of the merchant-page case.
@@ -142,6 +157,20 @@ const SCENARIOS: Scenario[] = [
           'This merchant settles by EIP-3009 — the paying agent needs an unpinned budget.',
         ),
       ).toHaveCount(0)
+    },
+  },
+  {
+    name: 'merchant-not-found',
+    path: '/marketplace/does-not-exist',
+    viewports: DESKTOP_ONLY,
+    heading: 'Merchant not found',
+    // `notFound()` thrown from the client page must land on the segment's
+    // own `not-found.tsx` inside the app shell — the join the unit tests
+    // cannot see (they mock `next/navigation`). The fixture 404s any unknown
+    // slug.
+    async assert(page) {
+      await expect(page.getByTestId('marketplace-not-found')).toHaveCount(1)
+      await expect(page.getByRole('link', { name: 'Back to Marketplace' })).toBeVisible()
     },
   },
 ]
@@ -166,8 +195,8 @@ test.describe('marketplace visual regression', () => {
     for (const vp of scenario.viewports) {
       test(`${scenario.name} renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
         const scheme = schemeOf(testInfo)
-        // Ten committed baselines total (six light, four dark): every scenario
-        // in light, but only the four DESKTOP shots in dark — no mobile dark
+        // Committed baselines: every scenario in light (desktop, plus mobile
+        // where listed), and only the DESKTOP shots in dark — no mobile dark
         // baseline exists for this spec (unlike `analytics.visual.spec.ts`,
         // which committed all twelve). Skipped rather than filtered out of
         // `scenario.viewports`, so the desktop-only scenarios' `viewports`
@@ -180,6 +209,7 @@ test.describe('marketplace visual regression', () => {
         const label = `${scenario.name} · ${vp.name} · ${scheme}`
 
         await page.setViewportSize({ width: vp.width, height: vp.height })
+        await page.clock.setFixedTime(FROZEN_NOW)
         await page.goto(scenario.path)
 
         await expect(

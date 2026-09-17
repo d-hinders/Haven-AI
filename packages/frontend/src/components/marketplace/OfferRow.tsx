@@ -1,5 +1,4 @@
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { Tooltip } from '@/components/ui/Tooltip'
 import { chainName, freshness, networkToChainId, VERIFIED_MEANING } from '@/lib/marketplace'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
@@ -62,13 +61,13 @@ export function OfferRow({
       <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-3)]">
         {freshness(entry.verified_at)}
         {entry.verified_payable && (
-          <Tooltip label={VERIFIED_MEANING}>
-            <span className="ml-2">
-              <StatusBadge tone="success" className="uppercase tracking-wide">
-                Verified
-              </StatusBadge>
-            </span>
-          </Tooltip>
+          // The meaning is visible text under the merchant header; a tooltip
+          // per row was four identical tab stops on one page.
+          <span className="ml-2" title={VERIFIED_MEANING}>
+            <StatusBadge tone="success" className="uppercase tracking-wide">
+              Verified
+            </StatusBadge>
+          </span>
         )}
       </td>
     </tr>

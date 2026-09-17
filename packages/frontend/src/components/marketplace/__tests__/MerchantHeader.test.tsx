@@ -1,5 +1,4 @@
 import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { MerchantHeader } from '../MerchantHeader'
 import type { Merchant } from '@/hooks/useCatalog'
@@ -37,23 +36,27 @@ describe('MerchantHeader', () => {
 
   it('labels a test merchant on the page itself, where the payment is one paste away', () => {
     const { unmount } = render(<MerchantHeader merchant={merchant({ is_test_merchant: true })} />)
-    expect(screen.getByText('Haven test merchant — real payments, demo goods')).toBeDefined()
+    // A wrapping paragraph, not a one-line badge (a badge clipped it at 390).
+    const note = screen.getByTestId('test-merchant-note')
+    expect(note.tagName).toBe('P')
+    expect(note.textContent).toBe('Haven test merchant — real payments, demo goods')
     unmount()
     render(<MerchantHeader merchant={merchant()} />)
     expect(screen.queryByText(/Haven test merchant/)).toBeNull()
   })
 
-  it('shows the Verified badge with the honest claim only when verified payable', async () => {
+  it('shows the Verified badge with the honest claim only when verified payable', () => {
     const { unmount } = render(<MerchantHeader merchant={merchant()} />)
     expect(screen.getByText('Verified')).toBeDefined()
-    // The meaning is a reachable tooltip (keyboard focus opens it), not a
-    // native title, which is mouse-only.
-    expect(screen.queryByTitle('Domain controlled and verified payable')).toBeNull()
-    await userEvent.setup({ delay: null }).tab()
-    expect(screen.getByRole('tooltip').textContent).toContain('domain controlled and verified payable')
+    // The meaning is VISIBLE text on the page (a tooltip is not a home for
+    // essential copy), reachable without hover, focus or tap.
+    expect(screen.getByTestId('verified-meaning').textContent).toContain(
+      'not a claim about quality or settlement',
+    )
     unmount()
     render(<MerchantHeader merchant={merchant({ verified_payable: false })} />)
     expect(screen.queryByText('Verified')).toBeNull()
+    expect(screen.queryByTestId('verified-meaning')).toBeNull()
   })
 
   it('links the website in a new tab without the scheme, and omits the link when there is none', () => {

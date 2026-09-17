@@ -84,6 +84,23 @@ describe('OffersTable', () => {
     expect(row('unproved').queryByText('Verified')).toBeNull()
   })
 
+  it('renders the same offers as stacked cards for phone widths, budget hint included', () => {
+    render(
+      <OffersTable
+        offers={[offer({ id: 'within' }), offer({ id: 'above', price_atomic: '99000000' })]}
+        agents={oneAgent}
+      />,
+    )
+    const list = screen.getByTestId('offers-list')
+    expect(list.className).toContain('md:hidden')
+    expect(screen.getByTestId('offers-table').className).toMatch(/\bhidden\b.*md:block/)
+    const above = within(screen.getByTestId('offer-card-above'))
+    expect(above.getByText('Above every agent budget — a payment would be declined')).toBeDefined()
+    expect(above.getByText('Base Sepolia')).toBeDefined()
+    expect(above.getByText('create_text')).toBeDefined()
+    expect(within(screen.getByTestId('offer-card-within')).getByText('Within your agent budget')).toBeDefined()
+  })
+
   it('names the network and splits an MCP offer into Method (tool) and path (resource URL)', () => {
     render(
       <OffersTable

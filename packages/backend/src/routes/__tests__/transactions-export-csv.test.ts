@@ -196,7 +196,7 @@ function x402Rows(count: number) {
     agent_name: 'Buyer',
     account_id: BASE_SAFE_ID,
     account_address: BASE_SAFE,
-    safe_name: 'Base account',
+    account_name: 'Base account',
     chain_id: 8453,
     token_symbol: 'USDC',
     token_address: '0xusdc',
@@ -405,24 +405,31 @@ describe('GET /transactions/export.csv', () => {
     )
   })
 
-  it('?accountId= and ?safeId= for the same id produce the identical export', async () => {
+  // #2914 (naming epic #2906 phase 5, the contraction) ends the #2907 parity
+  // window: `?safeId=` is now REFUSED with a 400 naming `accountId`, never
+  // silently ignored — an ignored filter would return every account's rows,
+  // which is the exact failure mode the refusal exists to prevent.
+  it('?safeId= is refused with a 400 naming accountId, not silently ignored', async () => {
     stubExplorers()
     routeDbQueries({ smart_accounts: BOTH_SAFES })
     const bySafeId = await get(`?fresh=1&safeId=${BASE_SAFE_ID}`)
 
+    expect(bySafeId.statusCode).toBe(400)
+    expect(bySafeId.json().replacement).toBe('accountId')
+    // The important guard: NOT a 200 carrying every row the caller owns.
+    expect(bySafeId.headers['x-export-row-count']).toBeUndefined()
+
     stubExplorers()
     routeDbQueries({ smart_accounts: BOTH_SAFES })
     const byAccountId = await get(`?fresh=1&accountId=${BASE_SAFE_ID}`)
-
-    expect(byAccountId.statusCode).toBe(bySafeId.statusCode)
-    expect(byAccountId.headers['x-export-row-count']).toBe(bySafeId.headers['x-export-row-count'])
-    expect(byAccountId.body).toBe(bySafeId.body)
+    expect(byAccountId.statusCode).toBe(200)
+    expect(byAccountId.headers['x-export-row-count']).toBe('1')
   })
 
-  it('400s an invalid ?accountId= the same way it does an invalid ?safeId=', async () => {
+  it('400s an invalid ?accountId=', async () => {
     const response = await get('?accountId=not-a-uuid')
     expect(response.statusCode).toBe(400)
-    expect(response.json()).toEqual({ error: 'Invalid safeId' })
+    expect(response.json()).toEqual({ error: 'Invalid accountId' })
   })
 
   it('resolves the counterparty name from the address book', async () => {
@@ -457,7 +464,11 @@ describe('GET /transactions/export.csv', () => {
     const response = await get('?fresh=1&chainId=100')
     const { header, records } = parseCsv(response.body.slice(1))
 
-    expect(records[0][header.indexOf('safe_address')]).toBe(GNOSIS_SAFE)
+    // #2914: `account_address` is the only address column — the deprecated
+    // `safe_address` twin is gone from the header entirely, so `indexOf`
+    // would return -1 and silently read the LAST cell of the row.
+    expect(header).not.toContain('safe_address')
+    expect(records[0][header.indexOf('account_address')]).toBe(GNOSIS_SAFE)
   })
 
   it('exports every row the pipeline yields, well past one page of the list', async () => {
@@ -483,12 +494,12 @@ describe('GET /transactions/export.csv', () => {
   it('names the far side of a transfer between two of the user\'s own accounts', async () => {
     // Scoped to one account, paying the user's OWN second account. The
     // dashboard table resolves names from all of the user's accounts, so the
-    // export has to as well — resolving from the `safeId`-narrowed list would
-    // leave counterparty_name empty while the screen says "Savings".
+    // export has to as well — resolving from the `accountId`-narrowed list
+    // would leave counterparty_name empty while the screen says "Savings".
     stubTransferBetweenOwnAccounts()
     routeDbQueries({ smart_accounts: TWO_BASE_SAFES })
 
-    const response = await get(`?fresh=1&safeId=${BASE_SAFE_ID}`)
+    const response = await get(`?fresh=1&accountId=${BASE_SAFE_ID}`)
     const { header, records } = parseCsv(response.body.slice(1))
 
     expect(records).toHaveLength(1)
@@ -526,7 +537,7 @@ describe('GET /transactions/export.csv', () => {
   })
 
   it.each([
-    ['?safeId=not-a-uuid', 'Invalid safeId'],
+    ['?accountId=not-a-uuid', 'Invalid accountId'],
     ['?agentId=not-a-uuid', 'Invalid agentId'],
     ['?tokenKey=nonsense', 'Invalid tokenKey'],
     ['?direction=sideways', 'Invalid direction'],

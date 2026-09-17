@@ -50,7 +50,7 @@ function identity(overrides: Partial<AgentIdentity> = {}): AgentIdentity {
     id: AGENT_ID,
     name: 'Research agent',
     status: 'active',
-    safe_address: '0x9999999999999999999999999999999999999999',
+    account_address: '0x9999999999999999999999999999999999999999',
     delegate_address: OLD_DELEGATE,
     chain_id: 84532,
     execution_rail: 'delegation',
@@ -243,6 +243,46 @@ describe('finishRekey (#1700)', () => {
     expect(signerJson.x402_binding_signer).toBe('0x8888888888888888888888888888888888888888')
     expect(identityJson.agent_budget).toHaveLength(1)
     expect(identityJson.api_url).toBe(API_URL)
+  })
+
+  // Regression for the #2914 review finding: `AgentIdentity.account_address`
+  // is a LIVE server read (`GET /machine-payments/agent`), which as of #2914
+  // is the ONLY name the server sends. Every other test in this file seeds a
+  // stored credential set that already carries `accountAddress`, so
+  // `stored.accountAddress ?? identity.account_address` never actually
+  // reaches the `identity.account_address` half — a stale/wrong fallback
+  // there would have gone undetected by every other case above. This one
+  // seeds WITHOUT a stored address so the hosted identity is the only source.
+  it('falls back to the hosted identity account_address when the stored set has none', async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), 'haven-rekey-no-address-'))
+    const seeded = await writeCredentialFiles({
+      baseDir,
+      agentId: AGENT_ID,
+      apiKey: OLD_API_KEY,
+      delegateKey: OLD_KEY,
+      delegateAddress: OLD_DELEGATE,
+      // No accountAddress — models an agent connected before any account
+      // address was ever recorded locally.
+      chainId: 84532,
+      apiUrl: API_URL,
+      hostedMcpUrl: `${API_URL}/mcp`,
+    })
+
+    await startRekey(
+      { credentialsDir: baseDir, agentId: AGENT_ID },
+      { createApi: () => apiReturning(identity()), generateKey: generateNewKey },
+    )
+
+    const hostedAddress = '0x' + '77'.repeat(20)
+    await finishRekey(
+      { credentialsDir: baseDir, agentId: AGENT_ID, newApiKey: NEW_API_KEY },
+      finishDeps(apiReturning(identity({ delegate_address: NEW_DELEGATE, account_address: hostedAddress }))),
+    )
+
+    const identityJson = JSON.parse(await readFile(join(seeded.identityPath), 'utf8'))
+    const agentJson = JSON.parse(await readFile(join(seeded.agentPath), 'utf8'))
+    expect(identityJson.account_address).toBe(hostedAddress)
+    expect(agentJson.account_address).toBe(hostedAddress)
   })
 
   it('consumes the pending key, so a second finish cannot replay it', async () => {

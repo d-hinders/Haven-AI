@@ -43,7 +43,7 @@ function textNodesJoined(el: HTMLElement): string {
 
 const SAFE: SmartAccount = {
   id: 'safe-id',
-  safe_address: '0xa0e99A227fc546017Fd68D49711C1857208F0eB9',
+  account_address: '0xa0e99A227fc546017Fd68D49711C1857208F0eB9',
   chain_id: 8453,
   name: 'Based',
   is_default: true,
@@ -78,7 +78,7 @@ describe('ReceiveFundsModal', () => {
     expect(screen.getByRole('heading', { name: 'Receive funds' })).toBeInTheDocument()
     expect(screen.getByText('Based')).toBeInTheDocument()
     expect(screen.getAllByText('Base').length).toBeGreaterThan(0)
-    expect(screen.getByText(SAFE.safe_address)).toBeInTheDocument()
+    expect(screen.getByText(SAFE.account_address)).toBeInTheDocument()
     expect(screen.getByText('ETH')).toBeInTheDocument()
     expect(screen.getByText('USDC')).toBeInTheDocument()
     expect(screen.getByText('Before you send')).toBeInTheDocument()
@@ -99,7 +99,7 @@ describe('ReceiveFundsModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy address' }))
 
-    expect(writeText).toHaveBeenCalledWith(SAFE.safe_address)
+    expect(writeText).toHaveBeenCalledWith(SAFE.account_address)
     expect(screen.getByRole('button', { name: 'Address copied' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Show QR code' }))
@@ -152,7 +152,7 @@ describe('ReceiveFundsModal', () => {
       expect(words).toMatch(/\bBased\b/)
 
       // A4 — no address, in any of the four ways this screen offers one.
-      expect(screen.queryByText(SAFE.safe_address)).not.toBeInTheDocument()
+      expect(screen.queryByText(SAFE.account_address)).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Copy address' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Show QR code' })).not.toBeInTheDocument()
       expect(screen.queryByRole('link', { name: 'View on explorer' })).not.toBeInTheDocument()

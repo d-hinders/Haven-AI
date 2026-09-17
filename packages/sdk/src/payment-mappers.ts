@@ -9,7 +9,6 @@ import type {
   RawPaymentStatusResult,
   RawStatusResponse,
 } from './types.js'
-import { canonicalAgentPaymentNextAction } from './types.js'
 
 /** #2960: one mapper, reused by every raw shape carrying `parties`. */
 function mapParties(raw: RawPaymentParties | undefined): PaymentParties | undefined {
@@ -60,10 +59,7 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     rail: raw.rail,
     status: raw.status,
     phase: raw.phase,
-    // #2908: the account-vocabulary alias collapses onto the canonical value
-    // so every `=== AgentPaymentNextAction.X` downstream keeps working when
-    // the server flips its emit at #2914.
-    nextAction: canonicalAgentPaymentNextAction(raw.next_action),
+    nextAction: raw.next_action,
     amount: raw.amount,
     token: raw.token,
     resourceUrl: raw.resource_url,

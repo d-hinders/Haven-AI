@@ -294,7 +294,7 @@ describe('haven_prepare_catalog_purchase', () => {
   ) {
     return {
       agent_id: 'agt_1',
-      safe_address: '0xSafe',
+      account_address: '0xSafe',
       delegate_address: '0xDelegate',
       chain_id: 8453,
       allowances: [{
@@ -525,7 +525,7 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.success).toBe(false)
     if (payload.success) throw new Error('expected failure')
     expect(payload.code).toBe('DELEGATION_BUDGET_EXCEEDED')
-    expect(payload.next_action).toBe(AgentPaymentNextAction.FundSafeOrRaiseAllowance)
+    expect(payload.next_action).toBe(AgentPaymentNextAction.FundAccountOrRaiseAllowance)
     // Mutation-tested ordering: no funding intent was created — the refusal
     // fires before createX402Intent, unlike the legacy queue-and-proceed path.
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
@@ -1529,7 +1529,7 @@ describe('#2051 — cap binds the authorized option', () => {
   function allowances(remaining: string, rail: 'legacy' | 'delegation') {
     return {
       agent_id: 'agt_1',
-      safe_address: '0xSafe',
+      account_address: '0xSafe',
       delegate_address: '0xDelegate',
       chain_id: 8453,
       allowances: [
@@ -2014,7 +2014,7 @@ describe('#2054 — erc7710-only merchants', () => {
     function allowances(remaining: string, rail: 'legacy' | 'delegation') {
       return {
         agent_id: 'agt_1',
-        safe_address: '0xSafe',
+        account_address: '0xSafe',
         delegate_address: '0xDelegate',
         chain_id: 8453,
         allowances: [
@@ -2264,7 +2264,7 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
           status: 200,
           body: {
             agent_id: 'agt_1',
-            safe_address: '0xSafe',
+            account_address: '0xSafe',
             delegate_address: '0xDelegate',
             chain_id: 8453,
             allowances: [],
@@ -2341,7 +2341,7 @@ describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
   function allowances(remaining: string) {
     return {
       agent_id: 'agt_1',
-      safe_address: '0xSafe',
+      account_address: '0xSafe',
       delegate_address: '0xDelegate',
       chain_id: 8453,
       allowances: [

@@ -7,6 +7,7 @@ import {
   ConnectionNotActivatableError,
   ConnectionSettingsError,
   InvalidApiKeyError,
+  MultiCompanyKeyError,
   OAUTH_STATE_PURPOSE,
   OAUTH_STATE_TTL_SECONDS,
   ProviderNotConnectableError,
@@ -214,6 +215,11 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
         const refusal = providerRefusal(err)
         if (refusal) return reply.code(refusal.status).send(refusal.body)
         if (err instanceof InvalidApiKeyError) return reply.code(400).send({ error: err.message, error_code: err.code })
+        // #3017: the key is valid but can see MORE THAN ONE company — the
+        // feed has no per-push company choice, so this is the user's call to
+        // make (create a key scoped to one company), not a retry. 409, like
+        // the other "state conflicts with what the user asked for" answers.
+        if (err instanceof MultiCompanyKeyError) return reply.code(409).send({ error: err.message, error_code: err.code })
         if (err instanceof UnsupportedBaseCurrencyError) return reply.code(409).send({ error: err.message, error_code: err.code })
         throw err
       }

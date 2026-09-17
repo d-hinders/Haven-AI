@@ -94,7 +94,7 @@ export interface X402PaymentIntentRow {
   agent_name: string
   account_id: string
   account_address: string
-  safe_name: string
+  account_name: string
   chain_id: number
   token_symbol: string
   token_address: string
@@ -248,20 +248,20 @@ export const FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL = `SELECT pi.id,
          AND pi.status = 'confirmed'`
 
 /**
- * `userId` is REQUIRED — `pi.user_id = $2`. `safeIds` further scopes the
+ * `userId` is REQUIRED — `pi.user_id = $2`. `accountIds` further scopes the
  * join to Safes the caller actually owns (`us.id = ANY($3)`); both together
  * are what stop a same-hash collision on another tenant's payment intent.
  */
 export async function findPaymentIntentAgentMatches(
   txHashes: string[],
   userId: string,
-  safeIds: string[],
+  accountIds: string[],
   db: Executor = pool,
 ): Promise<PaymentIntentAgentRow[]> {
   const result = await db.query<PaymentIntentAgentRow>(FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL, [
     txHashes,
     userId,
-    safeIds,
+    accountIds,
   ])
   return result.rows
 }
@@ -294,13 +294,13 @@ export const FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL = `SELECT ds.id,
 export async function findDelegateSweepAgentMatches(
   txHashes: string[],
   userId: string,
-  safeIds: string[],
+  accountIds: string[],
   db: Executor = pool,
 ): Promise<DelegateSweepAgentRow[]> {
   const result = await db.query<DelegateSweepAgentRow>(FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL, [
     txHashes,
     userId,
-    safeIds,
+    accountIds,
   ])
   return result.rows
 }
@@ -313,7 +313,7 @@ export const FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL = `SELECT pi.id,
             a.name AS agent_name,
             us.id AS account_id,
             us.account_address,
-            us.name AS safe_name,
+            us.name AS account_name,
             COALESCE(pi.chain_id, us.chain_id) AS chain_id,
             pi.token_symbol,
             pi.token_address,
@@ -349,15 +349,15 @@ export const FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL = `SELECT pi.id,
        AND pi.tx_hash IS NOT NULL
      ORDER BY COALESCE(pi.confirmed_at, pi.created_at) DESC`
 
-/** `userId` is REQUIRED — `pi.user_id = $1`, further scoped to `safeIds`. */
+/** `userId` is REQUIRED — `pi.user_id = $1`, further scoped to `accountIds`. */
 export async function findConfirmedX402PaymentIntents(
   userId: string,
-  safeIds: string[],
+  accountIds: string[],
   db: Executor = pool,
 ): Promise<X402PaymentIntentRow[]> {
   const result = await db.query<X402PaymentIntentRow>(
     FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL,
-    [userId, safeIds],
+    [userId, accountIds],
   )
   return result.rows
 }

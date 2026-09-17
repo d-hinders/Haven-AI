@@ -64,7 +64,6 @@ describe('loadCredentials', () => {
       delegateKey: '0xdelegate',
       agentId: 'agent-1',
       accountAddress: '0xSafe',
-      safeAddress: '0xSafe',
       chainId: 100,
       network: 'Gnosis',
       apiUrl: 'https://haven.example',
@@ -102,7 +101,6 @@ describe('loadCredentials', () => {
       delegateKey: '0xdelegate',
       agentId: 'agent-1',
       accountAddress: '0xSafe',
-      safeAddress: '0xSafe',
       delegateAddress: '0xDelegate',
       chainId: 100,
       network: 'Gnosis',
@@ -230,7 +228,7 @@ describe('loadCredentials', () => {
     process.env.HAVEN_API_KEY = 'sk_agent_env'
     process.env.HAVEN_DELEGATE_KEY = '0xdelegate-env'
     process.env.HAVEN_AGENT_ID = 'agent-env'
-    process.env.HAVEN_SAFE_ADDRESS = '0xSafeEnv'
+    process.env.HAVEN_ACCOUNT_ADDRESS = '0xSafeEnv'
     process.env.HAVEN_API_URL = 'https://haven.env.example'
 
     await expect(loadCredentials(undefined)).resolves.toEqual({
@@ -238,7 +236,6 @@ describe('loadCredentials', () => {
       delegateKey: '0xdelegate-env',
       agentId: 'agent-env',
       accountAddress: '0xSafeEnv',
-      safeAddress: '0xSafeEnv',
       apiUrl: 'https://haven.env.example',
       sourcePath: undefined,
     })
@@ -322,17 +319,18 @@ describe('warnIfCredentialFilePermissive', () => {
 })
 
 /**
- * #2908 (naming epic #2906): every reader takes an OLD-shape and a NEW-shape
- * input. This runtime's credential shape had no `accountAddress` key before
- * this slice (the epic's review point), so both keys are asserted explicitly
- * rather than assumed from the signer's shape. File fallbacks are permanent;
- * env fallbacks are dropped at #2914.
+ * #2914 (naming epic #2906, phase 5 — the CONTRACTION): the credential-FILE
+ * fallbacks (`safe_address` / `safeAddress`) stay PERMANENT — a file on disk
+ * never rewrites itself — but the env fallbacks (`HAVEN_WALLET_ADDRESS` /
+ * `HAVEN_SAFE_ADDRESS`) were window-scoped and are retired as of this
+ * release: they no longer resolve an account address at all.
  *
  * Mutations run by hand before the PR: dropping `account_address` from
  * `readAccountAddressField` fails the new-shape tests; dropping
- * `safe_address` fails the old-shape tests.
+ * `safe_address` fails the old-shape tests; reintroducing either retired env
+ * fallback fails the "no longer resolves" env cases below.
  */
-describe('account address naming window (#2908)', () => {
+describe('account address naming — file fallback permanent, env fallback retired (#2914)', () => {
   const originalEnv = new Map<string, string | undefined>()
   beforeEach(() => {
     originalEnv.clear()
@@ -368,16 +366,14 @@ describe('account address naming window (#2908)', () => {
     return { identityPath, signerPath }
   }
 
-  it('OLD-shape single file: safe_address only — read, permanently, into BOTH keys', async () => {
+  it('OLD-shape single file: safe_address only — read, permanently', async () => {
     const creds = await loadCredentials(await singleFile({ safe_address: '0xOld' }))
     expect(creds.accountAddress).toBe('0xOld')
-    expect(creds.safeAddress).toBe('0xOld')
   })
 
   it('NEW-shape single file: account_address only', async () => {
     const creds = await loadCredentials(await singleFile({ account_address: '0xNew' }))
     expect(creds.accountAddress).toBe('0xNew')
-    expect(creds.safeAddress).toBe('0xNew')
   })
 
   it('BOTH in the single file: the new name wins', async () => {
@@ -388,7 +384,6 @@ describe('account address naming window (#2908)', () => {
   it('OLD-shape split files: safe_address in both', async () => {
     const creds = await loadCredentials(await splitFiles({ safe_address: '0xOld' }, { safe_address: '0xold' }))
     expect(creds.accountAddress).toBe('0xOld')
-    expect(creds.safeAddress).toBe('0xOld')
   })
 
   it('NEW-shape split files: account_address in both', async () => {
@@ -411,20 +406,22 @@ describe('account address naming window (#2908)', () => {
     expect(readAccountAddressField({})).toBeUndefined()
   })
 
-  it('OLD-shape env: HAVEN_SAFE_ADDRESS only', async () => {
+  // A REFUSAL, not an undefined result — see the signer's copy of these two
+  // for what an undefined account address costs on the sweep path.
+  it('RETIRED env: HAVEN_SAFE_ADDRESS alone REFUSES at load, naming the replacement', async () => {
     process.env.HAVEN_API_KEY = 'sk_agent_env'
     process.env.HAVEN_DELEGATE_KEY = '0xdelegate-env'
     process.env.HAVEN_SAFE_ADDRESS = '0xOldEnv'
-    const creds = await loadCredentials(undefined)
-    expect(creds.accountAddress).toBe('0xOldEnv')
-    expect(creds.safeAddress).toBe('0xOldEnv')
+    await expect(loadCredentials(undefined)).rejects.toThrow(
+      /HAVEN_SAFE_ADDRESS is retired[\s\S]*HAVEN_ACCOUNT_ADDRESS/,
+    )
   })
 
-  it('OLD-shape env: HAVEN_WALLET_ADDRESS only', async () => {
+  it('RETIRED env: HAVEN_WALLET_ADDRESS alone REFUSES at load', async () => {
     process.env.HAVEN_API_KEY = 'sk_agent_env'
     process.env.HAVEN_DELEGATE_KEY = '0xdelegate-env'
     process.env.HAVEN_WALLET_ADDRESS = '0xWalletEnv'
-    expect((await loadCredentials(undefined)).accountAddress).toBe('0xWalletEnv')
+    await expect(loadCredentials(undefined)).rejects.toThrow(/HAVEN_WALLET_ADDRESS is retired/)
   })
 
   it('NEW-shape env: HAVEN_ACCOUNT_ADDRESS only (the survivor)', async () => {
@@ -434,10 +431,43 @@ describe('account address naming window (#2908)', () => {
     expect((await loadCredentials(undefined)).accountAddress).toBe('0xNewEnv')
   })
 
-  it('the env chain is exactly HAVEN_ACCOUNT_ADDRESS ?? HAVEN_WALLET_ADDRESS ?? HAVEN_SAFE_ADDRESS', () => {
-    expect(readAccountAddressEnv({ HAVEN_ACCOUNT_ADDRESS: 'a', HAVEN_WALLET_ADDRESS: 'w', HAVEN_SAFE_ADDRESS: 's' })).toBe('a')
-    expect(readAccountAddressEnv({ HAVEN_WALLET_ADDRESS: 'w', HAVEN_SAFE_ADDRESS: 's' })).toBe('w')
-    expect(readAccountAddressEnv({ HAVEN_SAFE_ADDRESS: 's' })).toBe('s')
+  it('HAVEN_ACCOUNT_ADDRESS is the only name read', () => {
+    expect(readAccountAddressEnv({ HAVEN_ACCOUNT_ADDRESS: 'a' })).toBe('a')
     expect(readAccountAddressEnv({})).toBeUndefined()
+  })
+
+  // The retired env names are REFUSED, not ignored — the same rule the
+  // backend applies to retired request names, and here the stakes are
+  // higher. `accountAddress` is what the sweep tool passes as
+  // `expectedSafe`, and an undefined `expectedSafe` SKIPS the check that a
+  // sweep's `to` matches the account in the local credential. Ignoring these
+  // would cost an operator a money-path cross-check with no signal at all.
+  it('refuses a retired env name set ALONE, naming the replacement', () => {
+    for (const name of ['HAVEN_WALLET_ADDRESS', 'HAVEN_SAFE_ADDRESS']) {
+      expect(() => readAccountAddressEnv({ [name]: '0xabc' })).toThrow(
+        /retired \(#2906\)[\s\S]*HAVEN_ACCOUNT_ADDRESS/,
+      )
+    }
+    expect(() => readAccountAddressEnv({ HAVEN_WALLET_ADDRESS: 'w', HAVEN_SAFE_ADDRESS: 's' })).toThrow(
+      /retired \(#2906\)/,
+    )
+  })
+
+  it('accepts a retired name set ALONGSIDE the new one when they agree — reliance, not presence', () => {
+    // A handoff or shell profile that still exports the old name next to the
+    // new one is not a stale caller; refusing it would punish the operator
+    // who migrated without cleaning up.
+    expect(
+      readAccountAddressEnv({ HAVEN_ACCOUNT_ADDRESS: '0xABC', HAVEN_SAFE_ADDRESS: '0xabc' }),
+    ).toBe('0xABC')
+    expect(
+      readAccountAddressEnv({ HAVEN_ACCOUNT_ADDRESS: '0xabc', HAVEN_WALLET_ADDRESS: '0xabc' }),
+    ).toBe('0xabc')
+  })
+
+  it('refuses a retired name that DISAGREES with HAVEN_ACCOUNT_ADDRESS', () => {
+    expect(() =>
+      readAccountAddressEnv({ HAVEN_ACCOUNT_ADDRESS: '0xabc', HAVEN_SAFE_ADDRESS: '0xdef' }),
+    ).toThrow(/different addresses/)
   })
 })

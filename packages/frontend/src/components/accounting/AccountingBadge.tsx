@@ -37,6 +37,7 @@ export const ACCOUNTING_PAGE_HREF = '/accounting'
 /** Ledger provider key → display name. Anything unmapped is capitalised. */
 const PROVIDER_NAMES: Record<string, string> = {
   fortnox: 'Fortnox',
+  accounted: 'Accounted',
 }
 
 export function providerDisplayName(provider: string): string {

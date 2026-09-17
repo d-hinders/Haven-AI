@@ -139,7 +139,7 @@ beforeEach(() => {
   mockSettle.mockReset()
   mockGetPayment.mockReset()
   mockBalanceOf.mockReset()
-  mockGetAgent.mockResolvedValue({ ok: true, status: 200, data: { safe_address: TREASURY } })
+  mockGetAgent.mockResolvedValue({ ok: true, status: 200, data: { account_address: TREASURY } })
   mockGetPayment.mockResolvedValue({ ok: true, status: 200, data: { status: 'submitted', to: MERCHANT } })
 })
 

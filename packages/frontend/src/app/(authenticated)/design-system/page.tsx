@@ -27,7 +27,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
-import { StackedBarChart } from '@/components/ui/StackedBarChart'
+import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import { AreaChart } from '@/components/ui/AreaChart'
 import type { AreaPoint } from '@/components/ui/AreaChart'
@@ -44,6 +44,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
+import { formatAnalyticsTick } from '@/lib/analytics-format'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 
 import { WalletPopover } from '@/components/WalletButton'
@@ -2453,15 +2454,38 @@ export default function DesignSystemPage() {
 
       <Section
         title="StackedBarChart"
-        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the agents table's share column. Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail; on a narrow screen the tooltip becomes a panel pinned below the plot."
+        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the swatch beside its spend figure in the agents table (SeriesSwatch, exported from this file — the table reads the same index the chart paints with; never beside a name, where a dot reads as a status light). A partial day — the window's cut first or last day — is striped with the series token at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar or its cap would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top and its refusal cap stay visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
       >
         <Card hover={false} className="p-5">
           <StackedBarChart
-            days={DS_CHART_DAYS}
+            days={DS_CHART_DAYS.map((d, i) => (i === DS_CHART_DAYS.length - 1 ? { ...d, partial: true } : d))}
             currency="USD"
             ariaLabel={DS_CHART_SUMMARY}
             formatValue={dsMoney}
+            formatTick={(n) => formatAnalyticsTick(n, 'USD')}
           />
+          {/* The narrow treatment, as the page mounts it below `lg`: wider
+              tick gutter, dot legend, tap-to-pin panel. */}
+          <div className="mt-4 max-w-[320px]">
+            <StackedBarChart
+              days={DS_CHART_DAYS.map((d, i) => (i === DS_CHART_DAYS.length - 1 ? { ...d, partial: true } : d))}
+              currency="USD"
+              ariaLabel={DS_CHART_SUMMARY}
+              formatValue={dsMoney}
+              formatTick={(n) => formatAnalyticsTick(n, 'USD')}
+              narrow
+            />
+          </div>
+          {/* The swatch a table row carries to key itself to the chart above —
+              the same `seriesColor(index)` the segments and the legend read. */}
+          <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]">
+            {DS_CHART_DAYS[0]?.series.map((s) => (
+              <li key={s.id} className="inline-flex items-center gap-1.5">
+                <SeriesSwatch seriesIndex={s.seriesIndex} />
+                <span>{s.name} — table row swatch</span>
+              </li>
+            ))}
+          </ul>
         </Card>
       </Section>
 

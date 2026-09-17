@@ -64,7 +64,7 @@ function agentWireBody() {
     id: 'agent-1',
     name: 'Characterization agent',
     status: 'active',
-    safe_address: '0x0000000000000000000000000000000000000001',
+    account_address: '0x0000000000000000000000000000000000000001',
     delegate_address: '0x0000000000000000000000000000000000000002',
     chain_id: 8453,
     execution_rail: 'legacy',

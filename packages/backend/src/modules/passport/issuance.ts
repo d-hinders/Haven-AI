@@ -215,7 +215,7 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
     if (!facts.account_address) throw new Error('agent has no bound treasury account')
 
     // The agent's OWN smart account — the erc7710 delegator, derived from the
-    // delegate EOA. NOT `safe_address`, which is the treasury it spends from.
+    // delegate EOA. NOT `account_address`, which is the treasury it spends from.
     // Delegation-rail only; EOA-only agents legitimately have none.
     //
     // If this cannot be derived we FAIL (retryably) rather than issue a

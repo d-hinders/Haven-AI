@@ -700,18 +700,128 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * List the Safes linked to the caller's account, oldest first.
+         * RETIRED (#2914) — always answers 410.
          * @deprecated
-         * @description Deprecated — same value as `listUserAccounts`; removed in the release after #2908. Twin path: GET /user/accounts.
+         * @description The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `GET /user/accounts`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.
          */
         get: operations["listUserSafes"];
         put?: never;
         /**
-         * RETIRED — always answers 410. Importing a Safe is closed.
+         * RETIRED (#2914) — always answers 410.
          * @deprecated
-         * @description **RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** The Safe rail is being retired outright, and importing is one of the four ways a Safe could enter Haven; all four are closed. The refusal is a route preHandler, so it precedes every read and write. The route is kept as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries (the #834 session-rail / #1328 mpp_demo pattern); the route itself goes in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Existing linked Safes are unaffected: GET /user/safes, rename, re-default, unlink and every read path behave exactly as before. Historically this was registration only — it moved nothing on-chain and granted Haven no authority over the Safe. Deprecated — same value as `addUserAccount`; removed in the release after #2908. Twin path: POST /user/accounts.
+         * @description The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `POST /user/accounts`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.
          */
         post: operations["addUserSafe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/user/safes/deploy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * RETIRED (#2914) — always answers 410.
+         * @deprecated
+         * @description The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `POST /user/accounts/deploy`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.
+         */
+        post: operations["deployUserSafe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/user/safes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * RETIRED (#2914) — always answers 410.
+         * @deprecated
+         * @description The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/accounts/{accountId}`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.
+         */
+        put: operations["renameUserSafe"];
+        post?: never;
+        /**
+         * RETIRED (#2914) — always answers 410.
+         * @deprecated
+         * @description The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `DELETE /user/accounts/{accountId}`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.
+         */
+        delete: operations["unlinkUserSafe"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/user/safes/{id}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * RETIRED (#2914) — always answers 410.
+         * @deprecated
+         * @description The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/accounts/{accountId}/default`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.
+         */
+        put: operations["setDefaultUserSafe"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/user/safes/{id}/funding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * RETIRED (#2914) — always answers 410.
+         * @deprecated
+         * @description The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `GET /user/accounts/{accountId}/funding`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.
+         */
+        get: operations["getUserSafeFunding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/user/safe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * RETIRED (#2914) — always answers 410.
+         * @deprecated
+         * @description The Safe-vocabulary paths are retired: Haven accounts are addressed as accounts. Use `PUT /user/account`, which takes the same request. **Read the replacement own schema before swapping the path** — the list envelope key moved from safes to accounts, and three of these replacements (POST /user/accounts, POST /user/accounts/deploy, PUT /user/account) are themselves 410 from the Safe-rail inflow closure (#1984), so the refusal body names the live alternative instead. The body carries replacement as a field so a client can route on it without parsing prose, and authMiddleware still runs FIRST — an anonymous caller gets 401 and never learns which paths this deployment used to serve.
+         */
+        put: operations["updateUserSafe"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -729,31 +839,10 @@ export type paths = {
         get: operations["listUserAccounts"];
         put?: never;
         /**
-         * RETIRED — always answers 410. Importing a Safe is closed.
-         * @description #2907 twin of POST /user/safes (`addUserSafe`) — same handler, same 410 tombstone.
+         * RETIRED — always answers 410. Importing an account is closed.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** Importing was one of the four ways an account could enter Haven on the Safe rail; all four are closed. The refusal is a route preHandler, so it precedes every read and write. Kept as a compatibility tombstone rather than removed — a 410 tells an old client the flow is permanently gone, where a 404 reads as a transient routing error and invites retries (the #834 session-rail / #1328 mpp_demo pattern). Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Existing linked accounts are unaffected: GET /user/accounts, rename, re-default, unlink and every read path behave exactly as before.
          */
         post: operations["addUserAccount"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/safes/deploy": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * RETIRED — always answers 410. Haven no longer deploys Safes.
-         * @deprecated
-         * @description **RETIRED (#1984, epic #1440) — always answers 410 and spends no relayer gas.** The refusal is a route preHandler, so it precedes the relayer entirely. Kept as a compatibility tombstone; removed in deletion slice #1988. Create a Haven account on the delegation rail instead (POST /accounts/hybrid). Historically the relayer sponsored the deployment and returned the deployed address plus the transaction hash, and owner_address was NOT checked against the caller — an unbounded-by-ownership relayer-gas surface that this retirement closes as a side effect. Deprecated — same value as `deployUserAccount`; removed in the release after #2908. Twin path: POST /user/accounts/deploy.
-         */
-        post: operations["deployUserSafe"];
         delete?: never;
         options?: never;
         head?: never;
@@ -771,7 +860,7 @@ export type paths = {
         put?: never;
         /**
          * RETIRED — always answers 410. Haven no longer deploys Safes.
-         * @description #2907 twin of POST /user/safes/deploy (`deployUserSafe`) — same handler, same 410 tombstone.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and spends no relayer gas.** The refusal is a route preHandler, so it precedes the relayer entirely. Historically the relayer sponsored the deployment and returned the deployed address plus the transaction hash, and owner_address was NOT checked against the caller — an unbounded-by-ownership relayer-gas surface that this retirement closes as a side effect. Create a Haven account on the delegation rail instead (POST /accounts/hybrid).
          */
         post: operations["deployUserAccount"];
         delete?: never;
@@ -780,33 +869,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/user/safes/{safeId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Rename a linked Safe.
-         * @deprecated
-         * @description Display metadata only — the name exists nowhere on-chain. Deprecated — same value as `renameUserAccount`; removed in the release after #2908. Twin path: PUT /user/accounts/{safeId}. (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).
-         */
-        put: operations["renameUserSafe"];
-        post?: never;
-        /**
-         * Unlink a Safe from the Haven account.
-         * @deprecated
-         * @description Removes the link and its Haven-side metadata. **The Safe itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default Safe promotes another one. Unlinking is refused while an agent has a pending or active budget delegation, an in-flight recovery, or an in-flight re-key. Deprecated — same value as `unlinkUserAccount`; removed in the release after #2908. Twin path: DELETE /user/accounts/{safeId}. (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).
-         */
-        delete: operations["unlinkUserSafe"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/accounts/{safeId}": {
+    "/user/accounts/{accountId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -830,28 +893,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/user/safes/{safeId}/default": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Make a linked Safe the default.
-         * @deprecated
-         * @description Exactly one Safe is default per user; setting one clears the previous. Deprecated — same value as `setDefaultUserAccount`; removed in the release after #2908. Twin path: PUT /user/accounts/{safeId}/default. (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).
-         */
-        put: operations["setDefaultUserSafe"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/accounts/{safeId}/default": {
+    "/user/accounts/{accountId}/default": {
         parameters: {
             query?: never;
             header?: never;
@@ -871,28 +913,7 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/user/safes/{safeId}/funding": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Machine-readable funding facts for one Safe: what to fund, with what, where, and how much.
-         * @deprecated
-         * @description Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user's own wallet or exchange — and this is the single source an agent (or the dashboard's empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token's balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any token balance ≥ its minimum). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority. Deprecated — same value as `getAccountFunding`; removed in the release after #2908. Twin path: GET /user/accounts/{safeId}/funding. (the path parameter keeps its name `{safeId}` on the twin route too — P0 maps routes literally for the owner_cli allow-list census and the route-inventory discovery, both of which key on the exact registered path; renaming the param is P1/#2913 scope, not this slice).
-         */
-        get: operations["getSafeFunding"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/user/accounts/{safeId}/funding": {
+    "/user/accounts/{accountId}/funding": {
         parameters: {
             query?: never;
             header?: never;
@@ -952,27 +973,6 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/user/safe": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * RETIRED — always answers 410. This link is an import.
-         * @deprecated
-         * @description **RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** This route wrote the legacy users.safe_address column AND linked the Safe into user_safes as the default, emitting the `safe_imported` funnel event: it is an IMPORT, so it retires with the rail. It is named here explicitly because no shipped client calls it, which is exactly what would have made it the hole left open. Kept as a compatibility tombstone; create a Haven account on the delegation rail instead (POST /accounts/hybrid). Deprecated — same value as `updateUserAccount`; removed in the release after #2908. Twin path: PUT /user/account.
-         */
-        put: operations["updateUserSafe"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/user/account": {
         parameters: {
             query?: never;
@@ -983,7 +983,7 @@ export type paths = {
         get?: never;
         /**
          * RETIRED — always answers 410. This link is an import.
-         * @description #2907 twin of PUT /user/safe (`updateUserSafe`) — same handler, same 410 tombstone.
+         * @description **RETIRED (#1984, epic #1440) — always answers 410 and writes nothing.** This route linked an account as the user's default, emitting the `safe_imported` funnel event: it is an IMPORT, so it retires with the rail. Kept as a compatibility tombstone; create a Haven account on the delegation rail instead (POST /accounts/hybrid).
          */
         put: operations["updateUserAccount"];
         post?: never;
@@ -1174,7 +1174,7 @@ export type paths = {
         };
         /**
          * The accounting providers Haven knows about, live or coming soon.
-         * @description Four today: Fortnox (`live`) and Accounted, Light, Igdrasil (`coming_soon` — listed by product decision before any code exists for them). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.
+         * @description Four today: Fortnox and Accounted (`live` — Fortnox over OAuth2, Accounted over a pasted API key) and Light, Igdrasil (`coming_soon` — listed by product decision before any code exists for them). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.
          */
         get: operations["listAccountingProviders"];
         put?: never;
@@ -1256,7 +1256,7 @@ export type paths = {
         put?: never;
         /**
          * Connect a live API-key provider: validate the key at the provider, then store it encrypted.
-         * @description The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a currency outside the supported list is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers") BEFORE the key is stored — nothing lands, an existing connection is left as it was. No live provider uses this kind today — Light is listed `coming_soon` — so the normal answer is 409 `PROVIDER_NOT_LIVE`; the route exists so a provider going live is a connector plus a descriptor. The key is never echoed.
+         * @description The key is validated by asking the provider who it belongs to; a key the provider rejects never lands (400). A company that books in a currency outside the supported list is refused (409 `UNSUPPORTED_BASE_CURRENCY`, "Haven feeds SEK, EUR, USD, DKK, NOK and GBP ledgers") BEFORE the key is stored — nothing lands, an existing connection is left as it was. A VALID key that can see MORE THAN ONE company is refused too (#3017: 409 `MULTI_COMPANY_KEY` — the feed has no per-push company choice, so create a key scoped to one company). Accounted is live today; Light is listed `coming_soon`. The key is never echoed.
          */
         post: operations["connectAccountingApiKey"];
         delete?: never;
@@ -2425,27 +2425,6 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/transactions/{safeAddress}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Page-based transaction list for one Safe.
-         * @deprecated
-         * @description Deprecated — same value as `listAccountTransactions`; removed in the release after #2908. Twin path: GET /transactions/{accountAddress}.
-         */
-        get: operations["listSafeTransactions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/transactions/{accountAddress}": {
         parameters: {
             query?: never;
@@ -2480,27 +2459,6 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
-    "/balances/{safeAddress}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Token balances for one Safe.
-         * @deprecated
-         * @description Deprecated — same value as `getAccountBalances`; removed in the release after #2908. Twin path: GET /balances/{accountAddress}.
-         */
-        get: operations["getSafeBalances"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/balances/{accountAddress}": {
         parameters: {
             query?: never;
@@ -2510,27 +2468,6 @@ export type paths = {
         };
         /** Token balances for one account. */
         get: operations["getAccountBalances"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/portfolio/{safeAddress}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Fiat-valued portfolio breakdown for one Safe.
-         * @deprecated
-         * @description Deprecated — same value as `getAccountPortfolio`; removed in the release after #2908. Twin path: GET /portfolio/{accountAddress}.
-         */
-        get: operations["getSafePortfolio"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2823,7 +2760,7 @@ export type components = {
          * @description Stable next action an agent should take for a Haven payment state.
          * @enum {string}
          */
-        AgentPaymentNextAction: "sign_and_submit_payment" | "check_status_later" | "none" | "wait_for_user_approval" | "wait_for_user_to_complete_payment" | "retry_original_x402_request" | "stop_and_tell_user" | "request_again_if_user_still_wants_it" | "retry_with_explicit_context" | "payment_window_expired" | "fund_safe_or_raise_allowance" | "sweep_stranded_funds" | "awaiting_settlement_evidence" | "fund_account_or_raise_allowance";
+        AgentPaymentNextAction: "sign_and_submit_payment" | "check_status_later" | "none" | "wait_for_user_approval" | "wait_for_user_to_complete_payment" | "retry_original_x402_request" | "stop_and_tell_user" | "request_again_if_user_still_wants_it" | "retry_with_explicit_context" | "payment_window_expired" | "fund_account_or_raise_allowance" | "sweep_stranded_funds" | "awaiting_settlement_evidence";
         /**
          * @description Stable rail identifier for Haven agent payment states.
          * @enum {string}
@@ -2995,7 +2932,16 @@ export type components = {
         CreateAgentConnectionSetupRequest: {
             name: string;
             description?: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The linked account the agent spends from. The retired `safe_id` spelling is REFUSED with a 400 naming this field (#2914) rather than ignored.
+             */
+            account_id?: string;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description RETIRED (#2914) and REFUSED, not accepted — declared here only so the request-validation layer agrees with the handler, which applies the same reliance rule as `POST /agents`: `safe_id` alone refuses, both-and-matching is accepted, both-and-disagreeing refuses. Undeclared under `additionalProperties: false` it would be rejected by ajv before the handler ever ran.
+             */
             safe_id?: string;
             runtime?: string;
             allowances?: components["schemas"]["AgentConnectionAllowanceInput"][];
@@ -3172,30 +3118,10 @@ export type components = {
             name: string;
             description?: string | null;
             delegate_address: string | null;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `account_id`; removed in the release after #2908.
-             */
-            safe_id: string | null;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-             */
-            safe_address: string | null;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `account_name`; removed in the release after #2908.
-             */
-            safe_name: string | null;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `account_chain_id`; removed in the release after #2908.
-             */
-            safe_chain_id: number | null;
-            account_id?: string | null;
-            account_address?: string | null;
-            account_name?: string | null;
-            account_chain_id?: number | null;
+            account_id: string | null;
+            account_address: string | null;
+            account_name: string | null;
+            account_chain_id: number | null;
             account_type?: string | null;
             api_key_prefix: string | null;
             /** @enum {string} */
@@ -3217,15 +3143,15 @@ export type components = {
             delegate_address: string;
             /**
              * Format: uuid
-             * @deprecated
-             * @description Deprecated — same value as `account_id`; removed in the release after #2908.
-             */
-            safe_id?: string;
-            /**
-             * Format: uuid
-             * @description #2907 input twin of 'safe_id'; either is accepted alone. Both given and disagreeing is a 400 naming both keys.
+             * @description The linked account the agent spends from. The retired `safe_id` spelling is REFUSED with a 400 naming this field (#2914) rather than ignored — an ignored account id would create an unlinked agent that looks successfully created.
              */
             account_id?: string;
+            /**
+             * Format: uuid
+             * @deprecated
+             * @description RETIRED (#2914) and REFUSED, not accepted — declared here only so the request-validation layer agrees with the handler. #2908 told every published client to send both names for the window, so the handler applies a RELIANCE rule: `safe_id` alone is refused with a 400 naming `account_id`, both-and-matching is accepted (the new name is read), both-and-disagreeing is refused. Were this field left undeclared under `additionalProperties: false`, a correctly dual-sending client would raise a `would_refuse` shadow counter today and be rejected outright the moment request validation is set to `enforce` — silently reversing the handler decision above.
+             */
+            safe_id?: string;
             /** @description RETIRED (#1440/#2020): per-token allowances died with the Safe rail. A non-empty array is refused with 400 — grant the agent a budget delegation after creation instead. The field survives (empty-only) so older clients sending `allowances: []` keep working. */
             allowances?: {
                 [key: string]: unknown;
@@ -3233,12 +3159,7 @@ export type components = {
         };
         DelegateBalance: {
             delegate_address: string;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-             */
-            safe_address: string | null;
-            account_address?: string | null;
+            account_address: string | null;
             chain_id: number;
             eth: string;
             eth_atomic: string;
@@ -3293,12 +3214,6 @@ export type components = {
                      * @example 0x1111111111111111111111111111111111111111
                      */
                     account?: string;
-                    /**
-                     * @deprecated
-                     * @description Present on the x402 funding shape only. Deprecated — same value as `payer_account`; removed in the release after #2908.
-                     * @example 0x1111111111111111111111111111111111111111
-                     */
-                    safe?: string;
                     /**
                      * @description Present on the x402 funding shape only. Same value as the deprecated `safe`.
                      * @example 0x1111111111111111111111111111111111111111
@@ -3529,7 +3444,7 @@ export type components = {
         X402SignablePayment: components["schemas"]["SignablePaymentIntent"] & {
             chain_id?: number;
             /** @example 0x1111111111111111111111111111111111111111 */
-            safe_address?: string;
+            account_address?: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             payer?: string;
             token?: string;
@@ -3571,7 +3486,7 @@ export type components = {
             tx_hash: string;
             chain_id?: number;
             /** @example 0x1111111111111111111111111111111111111111 */
-            safe_address?: string;
+            account_address?: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             payer?: string;
             token?: string;
@@ -3688,14 +3603,8 @@ export type components = {
             id: string;
             name: string;
             status: string;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-             * @example 0x1111111111111111111111111111111111111111
-             */
-            safe_address: string;
             /** @example 0x1111111111111111111111111111111111111111 */
-            account_address?: string;
+            account_address: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             delegate_address: string;
             delegate_account_address: string | null;
@@ -3709,14 +3618,8 @@ export type components = {
         AllowanceSummary: {
             /** Format: uuid */
             agent_id: string;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-             * @example 0x1111111111111111111111111111111111111111
-             */
-            safe_address: string;
             /** @example 0x1111111111111111111111111111111111111111 */
-            account_address?: string;
+            account_address: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             delegate_address: string;
             chain_id: number;
@@ -3898,7 +3801,7 @@ export type components = {
             explorer_url: string;
             idempotent_replay?: boolean;
         };
-        /** @description Fields shared by every transaction representation. The per-Safe page items (`GET /transactions/{safeAddress}`) are exactly this shape; the aggregated feed adds Safe scope on top (`Transaction`). Flat (not `allOf`-composed with `Transaction`, #2885) so `additionalProperties: false` closes properly — see `transactionBaseProperties` above. */
+        /** @description Fields shared by every transaction representation. The per-account page items (`GET /transactions/{accountAddress}`) are exactly this shape; the aggregated feed adds account scope on top (`Transaction`). Flat (not `allOf`-composed with `Transaction`, #2885) so `additionalProperties: false` closes properly — see `transactionBaseProperties` above. */
         TransactionBase: {
             hash: string;
             /** @enum {string} */
@@ -4014,32 +3917,20 @@ export type components = {
             fxSource?: string | null;
             accounting?: components["schemas"]["TransactionAccounting"];
             chainId: number;
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Deprecated — same value as `accountId`; removed in the release after #2908.
-             */
-            safeId: string;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `accountAddress`; removed in the release after #2908.
-             * @example 0x1111111111111111111111111111111111111111
-             */
-            safeAddress: string;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `accountName`; removed in the release after #2908.
-             */
-            safeName: string;
             /** Format: uuid */
-            accountId?: string;
+            accountId: string;
             /** @example 0x1111111111111111111111111111111111111111 */
-            accountAddress?: string;
-            accountName?: string;
+            accountAddress: string;
+            accountName: string;
+            /**
+             * @deprecated
+             * @description The same value as `accountName`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.
+             */
+            safeName?: string;
             /** Format: uuid */
             agentId?: string;
         };
-        /** @description Per-Safe paginated transaction list (`GET /transactions/{safeAddress}`). Items carry no Safe scope — the Safe is the path parameter. */
+        /** @description Per-account paginated transaction list (`GET /transactions/{accountAddress}`). Items carry no account scope — the account is the path parameter. */
         TransactionsPageResponse: {
             transactions: components["schemas"]["TransactionBase"][];
             total: number;
@@ -4154,26 +4045,10 @@ export type components = {
              * @enum {string}
              */
             status: "active" | "paused";
-            /**
-             * Format: uuid
-             * @deprecated
-             * @description Deprecated — same value as `accountId`; removed in the release after #2908.
-             */
-            safeId: string | null;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `accountName`; removed in the release after #2908.
-             */
-            safeName: string | null;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `accountChainId`; removed in the release after #2908.
-             */
-            safeChainId: number | null;
             /** Format: uuid */
-            accountId?: string | null;
-            accountName?: string | null;
-            accountChainId?: number | null;
+            accountId: string | null;
+            accountName: string | null;
+            accountChainId: number | null;
             allowances: components["schemas"]["DashboardAgentAllowance"][];
         };
         DashboardOverviewResponse: {
@@ -4336,12 +4211,7 @@ export type components = {
             limit: number;
             hasMore: boolean;
             partialFailure: boolean;
-            /**
-             * @deprecated
-             * @description Deprecated — same value as `failedAccountIds`; removed in the release after #2908.
-             */
-            failedSafeIds: string[];
-            failedAccountIds?: string[];
+            failedAccountIds: string[];
             /** @description At least one account's explorer read stopped at the pagination budget with the source still offering more, so these rows and `total` are a capped view rather than the full history (#2884). Independent of `partialFailure`. */
             truncated: boolean;
         };
@@ -5299,7 +5169,7 @@ export interface operations {
                      * @description Optional recipient pin. Omit (or null) for an open budget.
                      * @example 0x1111111111111111111111111111111111111111
                      */
-                    recipient_address?: string;
+                    recipient_address?: string | null;
                     /** @description Positive atomic token amount; must fit uint96 (the enforcer word size). */
                     budget_atomic: string;
                     /** @description Native refill period; ≥ 60. */
@@ -7472,7 +7342,7 @@ export interface operations {
                             chainId: number | null;
                             controls: {
                                 /**
-                                 * @description The account's execution rail, verbatim from user_safes. Only 'delegation' is live; 'allowance_module' (#1440) and 'session_key' (#834) are retired and cannot transact. This field named a shorter, non-existent rail value until #2110 — one the column CHECK has never permitted.
+                                 * @description The account's execution rail, verbatim from smart_accounts. Only 'delegation' is live; 'allowance_module' (#1440) and 'session_key' (#834) are retired and cannot transact. This field named a shorter, non-existent rail value until #2110 — one the column CHECK has never permitted.
                                  * @enum {string}
                                  */
                                 rail: "delegation" | "allowance_module" | "session_key";
@@ -7551,56 +7421,23 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Linked Safes ordered by created_at ASC. */
-            200: {
+            /** @description Error response */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        safes: {
-                            /** Format: uuid */
-                            id: string;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            safe_address: string;
-                            /** @example 0x1111111111111111111111111111111111111111 */
-                            account_address?: string;
-                            chain_id: number;
-                            /** @description Display label; defaults to 'My account' when none is given. */
-                            name: string;
-                            /** @description The first account a user links becomes the default. */
-                            is_default: boolean;
-                            /** Format: date-time */
-                            created_at: string;
-                        }[];
-                        accounts?: {
-                            /** Format: uuid */
-                            id: string;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            safe_address: string;
-                            /** @example 0x1111111111111111111111111111111111111111 */
-                            account_address?: string;
-                            chain_id: number;
-                            /** @description Display label; defaults to 'My account' when none is given. */
-                            name: string;
-                            /** @description The first account a user links becomes the default. */
-                            is_default: boolean;
-                            /** Format: date-time */
-                            created_at: string;
-                        }[];
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };
-            /** @description Error response */
-            401: {
+            /** @description Always. The body names `GET /user/accounts`. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7623,18 +7460,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    safe_address: string;
-                    /** @description Defaults to DEFAULT_CHAIN_ID (Base); must be a supported chain. */
-                    chain_id?: number;
-                    /** @description Trimmed; blank or absent becomes 'My account'. */
-                    name?: string;
-                };
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Error response */
             401: {
@@ -7651,7 +7477,253 @@ export interface operations {
                     };
                 };
             };
-            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
+            /** @description Always. The body names `POST /user/accounts`. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    deployUserSafe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Always. The body names `POST /user/accounts/deploy`. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    renameUserSafe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Always. The body names `PUT /user/accounts/{accountId}`. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    unlinkUserSafe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Always. The body names `DELETE /user/accounts/{accountId}`. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    setDefaultUserSafe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Always. The body names `PUT /user/accounts/{accountId}/default`. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getUserSafeFunding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Always. The body names `GET /user/accounts/{accountId}/funding`. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    updateUserSafe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Always. The body names `PUT /user/account`. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -7684,15 +7756,9 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        safes: {
+                        accounts: {
                             /** Format: uuid */
                             id: string;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            safe_address?: string;
                             /** @example 0x1111111111111111111111111111111111111111 */
                             account_address: string;
                             chain_id: number;
@@ -7703,15 +7769,13 @@ export interface operations {
                             /** Format: date-time */
                             created_at: string;
                         }[];
-                        accounts?: {
+                        /**
+                         * @deprecated
+                         * @description The same array as `accounts`. RETIRED (#2914) and kept for exactly one more release. `@haven_ai/cli` on `latest` reads this name and, unlike a request parameter, a published client cannot dual-read — so removing it now would break it with no bounded end (the backend deploys from a branch; the CLI fix publishes on the later promotion, which can be half green). Removal is the release after the one that carries #2914.
+                         */
+                        safes: {
                             /** Format: uuid */
                             id: string;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            safe_address?: string;
                             /** @example 0x1111111111111111111111111111111111111111 */
                             account_address: string;
                             chain_id: number;
@@ -7753,61 +7817,11 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @example 0x1111111111111111111111111111111111111111 */
-                    safe_address: string;
+                    account_address: string;
                     /** @description Defaults to DEFAULT_CHAIN_ID (Base); must be a supported chain. */
                     chain_id?: number;
                     /** @description Trimmed; blank or absent becomes 'My account'. */
                     name?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    deployUserSafe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    owner_address: string;
-                    /** @description Defaults to DEFAULT_CHAIN_ID (Base); must be a supported chain. */
-                    chain_id?: number;
                 };
             };
         };
@@ -7894,189 +7908,13 @@ export interface operations {
             };
         };
     };
-    renameUserSafe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id. */
-                safeId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Trimmed; blank after trimming is a 400. */
-                    name: string;
-                };
-            };
-        };
-        responses: {
-            /** @description The renamed Safe. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        id: string;
-                        /**
-                         * @deprecated
-                         * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                         * @example 0x1111111111111111111111111111111111111111
-                         */
-                        safe_address: string;
-                        /** @example 0x1111111111111111111111111111111111111111 */
-                        account_address?: string;
-                        chain_id: number;
-                        /** @description Display label; defaults to 'My account' when none is given. */
-                        name: string;
-                        /** @description The first account a user links becomes the default. */
-                        is_default: boolean;
-                        /** Format: date-time */
-                        created_at: string;
-                    };
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    unlinkUserSafe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id. */
-                safeId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Safe unlinked. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description The Safe remains linked while a delegation, recovery, or re-key is in progress. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     renameUserAccount: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 /** @description Linked-account id. */
-                safeId: string;
+                accountId: string;
             };
             cookie?: never;
         };
@@ -8098,12 +7936,6 @@ export interface operations {
                     "application/json": {
                         /** Format: uuid */
                         id: string;
-                        /**
-                         * @deprecated
-                         * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                         * @example 0x1111111111111111111111111111111111111111
-                         */
-                        safe_address?: string;
                         /** @example 0x1111111111111111111111111111111111111111 */
                         account_address: string;
                         chain_id: number;
@@ -8169,7 +8001,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description Linked-account id. */
-                safeId: string;
+                accountId: string;
             };
             cookie?: never;
         };
@@ -8246,81 +8078,13 @@ export interface operations {
             };
         };
     };
-    setDefaultUserSafe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id. */
-                safeId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Default updated. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     setDefaultUserAccount: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 /** @description Linked-account id. */
-                safeId: string;
+                accountId: string;
             };
             cookie?: never;
         };
@@ -8333,74 +8097,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    getSafeFunding: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Linked-Safe id (the delegation-rail account). */
-                safeId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The funding picture for the linked Safe. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FundingResponse"];
                 };
             };
             /** @description Error response */
@@ -8456,7 +8152,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description Linked-account id (the delegation-rail account). */
-                safeId: string;
+                accountId: string;
             };
             cookie?: never;
         };
@@ -8546,12 +8242,7 @@ export interface operations {
                         name: string | null;
                         email: string;
                         wallet_address: string | null;
-                        /**
-                         * @deprecated
-                         * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                         */
-                        safe_address: string | null;
-                        account_address?: string | null;
+                        account_address: string | null;
                         currency_preference: string | null;
                         /** Format: date-time */
                         created_at: string;
@@ -8633,12 +8324,7 @@ export interface operations {
                         name: string | null;
                         email: string;
                         wallet_address: string | null;
-                        /**
-                         * @deprecated
-                         * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                         */
-                        safe_address: string | null;
-                        account_address?: string | null;
+                        account_address: string | null;
                     };
                 };
             };
@@ -8689,56 +8375,6 @@ export interface operations {
             };
         };
     };
-    updateUserSafe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @example 0x1111111111111111111111111111111111111111 */
-                    safe_address: string;
-                    /** @description Defaults to DEFAULT_CHAIN_ID (Base). */
-                    chain_id?: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Always. The Safe rail is retired; the message names POST /accounts/hybrid. */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     updateUserAccount: {
         parameters: {
             query?: never;
@@ -8750,7 +8386,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @example 0x1111111111111111111111111111111111111111 */
-                    safe_address: string;
+                    account_address: string;
                     /** @description Defaults to DEFAULT_CHAIN_ID (Base). */
                     chain_id?: number;
                 };
@@ -9907,7 +9543,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), or the company books in a currency outside the supported list (`UNSUPPORTED_BASE_CURRENCY`, #2864/#2877 — nothing stored). */
+            /** @description Refused: the provider is not live (`PROVIDER_NOT_LIVE`), the flow does not match its auth kind (`WRONG_AUTH_KIND`), the company books in a currency outside the supported list (`UNSUPPORTED_BASE_CURRENCY`, #2864/#2877 — nothing stored), or the key can see more than one company (`MULTI_COMPANY_KEY`, #3017 — nothing stored; create a key scoped to one company). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11198,44 +10834,11 @@ export interface operations {
                             name: string | null;
                             email: string;
                             wallet_address: string | null;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                             */
-                            safe_address: string | null;
-                            account_address?: string | null;
+                            account_address: string | null;
                             currency_preference: string;
-                            safes: {
+                            accounts: {
                                 /** Format: uuid */
                                 id: string;
-                                /**
-                                 * @deprecated
-                                 * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                                 * @example 0x1111111111111111111111111111111111111111
-                                 */
-                                safe_address: string;
-                                /** @example 0x1111111111111111111111111111111111111111 */
-                                account_address?: string;
-                                chain_id: number;
-                                name: string;
-                                is_default: boolean;
-                                /** Format: date-time */
-                                created_at: string;
-                                account_type: string | null;
-                                /** @description Derived from the chain — is real value at stake here. */
-                                value_bearing_chain: boolean;
-                                /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
-                                needs_backup_recommendation: boolean | null;
-                            }[];
-                            accounts?: {
-                                /** Format: uuid */
-                                id: string;
-                                /**
-                                 * @deprecated
-                                 * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                                 * @example 0x1111111111111111111111111111111111111111
-                                 */
-                                safe_address?: string;
                                 /** @example 0x1111111111111111111111111111111111111111 */
                                 account_address: string;
                                 chain_id: number;
@@ -11330,44 +10933,11 @@ export interface operations {
                             name: string | null;
                             email: string;
                             wallet_address: string | null;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                             */
-                            safe_address: string | null;
-                            account_address?: string | null;
+                            account_address: string | null;
                             currency_preference: string;
-                            safes: {
+                            accounts: {
                                 /** Format: uuid */
                                 id: string;
-                                /**
-                                 * @deprecated
-                                 * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                                 * @example 0x1111111111111111111111111111111111111111
-                                 */
-                                safe_address: string;
-                                /** @example 0x1111111111111111111111111111111111111111 */
-                                account_address?: string;
-                                chain_id: number;
-                                name: string;
-                                is_default: boolean;
-                                /** Format: date-time */
-                                created_at: string;
-                                account_type: string | null;
-                                /** @description Derived from the chain — is real value at stake here. */
-                                value_bearing_chain: boolean;
-                                /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
-                                needs_backup_recommendation: boolean | null;
-                            }[];
-                            accounts?: {
-                                /** Format: uuid */
-                                id: string;
-                                /**
-                                 * @deprecated
-                                 * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                                 * @example 0x1111111111111111111111111111111111111111
-                                 */
-                                safe_address?: string;
                                 /** @example 0x1111111111111111111111111111111111111111 */
                                 account_address: string;
                                 chain_id: number;
@@ -11453,46 +11023,13 @@ export interface operations {
                         name: string | null;
                         email: string;
                         wallet_address: string | null;
-                        /**
-                         * @deprecated
-                         * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                         */
-                        safe_address: string | null;
-                        account_address?: string | null;
+                        account_address: string | null;
                         currency_preference: string | null;
                         /** Format: date-time */
                         created_at: string;
-                        safes: {
+                        accounts: {
                             /** Format: uuid */
                             id: string;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            safe_address: string;
-                            /** @example 0x1111111111111111111111111111111111111111 */
-                            account_address?: string;
-                            chain_id: number;
-                            name: string;
-                            is_default: boolean;
-                            /** Format: date-time */
-                            created_at: string;
-                            account_type: string | null;
-                            /** @description Derived from the chain — is real value at stake here. */
-                            value_bearing_chain: boolean;
-                            /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
-                            needs_backup_recommendation: boolean | null;
-                        }[];
-                        accounts?: {
-                            /** Format: uuid */
-                            id: string;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                             * @example 0x1111111111111111111111111111111111111111
-                             */
-                            safe_address?: string;
                             /** @example 0x1111111111111111111111111111111111111111 */
                             account_address: string;
                             chain_id: number;
@@ -11563,13 +11100,8 @@ export interface operations {
                             credential_id: string;
                             signer_address: string;
                             chain_id: number;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                             */
-                            safe_address: string | null;
                             /** @description Null until the passkey is bound to an account. */
-                            account_address?: string | null;
+                            account_address: string | null;
                             /** Format: date-time */
                             created_at: string;
                         }[];
@@ -11638,21 +11170,6 @@ export interface operations {
                             x402_merchant_address?: string | null;
                             chain_id?: number | null;
                             token_address?: string | null;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_id`; removed in the release after #2908.
-                             */
-                            safe_id?: string | null;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                             */
-                            safe_address?: string | null;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_name`; removed in the release after #2908.
-                             */
-                            safe_name?: string | null;
                             account_id?: string | null;
                             account_address?: string | null;
                             account_name?: string | null;
@@ -11833,21 +11350,6 @@ export interface operations {
                             x402_merchant_address?: string | null;
                             chain_id?: number | null;
                             token_address?: string | null;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_id`; removed in the release after #2908.
-                             */
-                            safe_id?: string | null;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_address`; removed in the release after #2908.
-                             */
-                            safe_address?: string | null;
-                            /**
-                             * @deprecated
-                             * @description Deprecated — same value as `account_name`; removed in the release after #2908.
-                             */
-                            safe_name?: string | null;
                             account_id?: string | null;
                             account_address?: string | null;
                             account_name?: string | null;
@@ -13975,7 +13477,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082, #2706) the amount exceeds that delegation's live remaining period budget — on BOTH settlement schemes now: the erc7710 direct-settlement branch and, since #2706, the EIP-3009 funding leg too. The over-budget refusal is PRE-FUNDING and PRE-PREPARE — no funding redemption is prepared, no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_safe_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. On the funding leg merchant_address names merchantPayTo (the real merchant), while payTo was the funding target. It is a fail-fast convenience, not the gate: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds to prepare, where the enforcer rules). */
+            /** @description Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082, #2706) the amount exceeds that delegation's live remaining period budget — on BOTH settlement schemes now: the erc7710 direct-settlement branch and, since #2706, the EIP-3009 funding leg too. The over-budget refusal is PRE-FUNDING and PRE-PREPARE — no funding redemption is prepared, no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. On the funding leg merchant_address names merchantPayTo (the real merchant), while payTo was the funding target. It is a fail-fast convenience, not the gate: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds to prepare, where the enforcer rules). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -15351,12 +14853,7 @@ export interface operations {
     listTransactions: {
         parameters: {
             query?: {
-                /**
-                 * @deprecated
-                 * @description Deprecated — same value as `accountId`; removed in the release after #2908.
-                 */
-                safeId?: string;
-                /** @description #2907 twin of 'safeId'; both accepted, both filter identically. If both are given, accountId wins. */
+                /** @description Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none. */
                 accountId?: string;
                 agentId?: string;
                 tokenKey?: string;
@@ -15414,12 +14911,7 @@ export interface operations {
     exportTransactionsCsv: {
         parameters: {
             query?: {
-                /**
-                 * @deprecated
-                 * @description Deprecated — same value as `accountId`; removed in the release after #2908.
-                 */
-                safeId?: string;
-                /** @description #2907 twin of 'safeId'; both accepted, both filter identically. If both are given, accountId wins. */
+                /** @description Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none. */
                 accountId?: string;
                 agentId?: string;
                 tokenKey?: string;
@@ -15545,78 +15037,6 @@ export interface operations {
             };
         };
     };
-    listSafeTransactions: {
-        parameters: {
-            query?: {
-                chain_id?: number;
-                page?: number;
-                limit?: number;
-                fresh?: "1" | "true";
-            };
-            header?: never;
-            path: {
-                safeAddress: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Paginated per-Safe transactions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TransactionsPageResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     listAccountTransactions: {
         parameters: {
             query?: {
@@ -15724,76 +15144,6 @@ export interface operations {
             };
         };
     };
-    getSafeBalances: {
-        parameters: {
-            query?: {
-                /** @description Required when the same address is linked on more than one chain. */
-                chain_id?: number;
-            };
-            header?: never;
-            path: {
-                safeAddress: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Balances, native token first. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BalancesResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     getAccountBalances: {
         parameters: {
             query?: {
@@ -15815,76 +15165,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BalancesResponse"];
-                };
-            };
-            /** @description Error response */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Error response */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    getSafePortfolio: {
-        parameters: {
-            query?: {
-                /** @description Required when the same address is linked on more than one chain. */
-                chain_id?: number;
-            };
-            header?: never;
-            path: {
-                safeAddress: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Portfolio totals and per-token breakdown. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PortfolioResponse"];
                 };
             };
             /** @description Error response */

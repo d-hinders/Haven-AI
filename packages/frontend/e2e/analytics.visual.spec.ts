@@ -40,7 +40,7 @@
  * `product-routes.visual.spec.ts` captures whole pages (`/dashboard`,
  * `/transactions`); `settings-accounting.visual.spec.ts` clips one card. This
  * page is the former's shape — the thing at risk is the composition of the
- * whole report (four tiles, two tables, one chart, in that order), not a card
+ * whole report (four tiles, the agents table, the spend chart, the merchants table, the balance chart, in that order), not a card
  * isolated from its neighbours — so it is captured with `fullPage: true`,
  * un-clipped (#1738) and proven non-blank before it is allowed to stand as a
  * baseline (#1936/#1943).
@@ -68,11 +68,11 @@
  *     `last_payment_at` values would otherwise re-bucket on a calendar
  *     boundary and change the baseline with the wall clock. The frozen instant
  *     is chosen one day and some hours past the fixture window's `to`, which
- *     puts the two agents' rows in two DIFFERENT `timeAgo` buckets ("1d ago",
- *     "22h ago") — a frozen clock that freezes both rows onto the same string
+ *     puts the two agents' rows in two DIFFERENT `timeAgo` buckets ("2d ago",
+ *     "1d ago" — the `COPY.frozenLastPayment*` strings below) — a frozen clock that freezes both rows onto the same string
  *     would pin the calendar and prove nothing about the column.
  *   - Everything else the page paints is absolute already, by the fixture's
- *     own contract (`ANALYTICS_RANGE` is a fixed window ending 2026-07-11, and
+ *     own contract (`ANALYTICS_RANGE` is a fixed window ending 2026-07-10T14:30Z, and
  *     every date on the response is an absolute ISO string), so no other cell
  *     moves with the date of the run.
  *   - Fonts settled, network idle, no skeleton left on screen: the three
@@ -151,9 +151,10 @@ const FULL_PAGE_MAX_DIFF_PIXELS = 150
 const PIXEL_THRESHOLD = 0.02
 
 /**
- * The frozen instant. One day and nine hours past the fixture window's `to`
- * (2026-07-11T00:00:00Z), which puts the two agents' `last_payment_at` rows
- * into different `timeAgo` buckets — see the Determinism note in the header.
+ * The frozen instant. One day and eighteen-and-a-half hours past the fixture
+ * window's `to` (2026-07-10T14:30:00Z; `timeAgo` reads `last_payment_at`, not
+ * `range.to`, so the distance only has to keep the two agents' rows in
+ * different `timeAgo` buckets — see the Determinism note in the header).
  */
 const FROZEN_NOW = new Date('2026-07-12T09:00:00.000Z')
 
@@ -197,6 +198,16 @@ const COPY = {
    * response's value, not an invented one.
    */
   refusalsRecordedFrom: 'Refusals are recorded from 28 May',
+  /**
+   * The #3055 limit-of-visibility clause in the same footnote: the two
+   * refusal classes the ledger never sees, named by who raises them. The
+   * wording is deliberate on both halves — the price cap lives in the
+   * agent's own runtime, and the budget refusal the hosted tools raise is a
+   * PREPARE-time one, never a quote-time one (the quote tools quote and
+   * refuse nothing). The negative pin below holds that second half.
+   */
+  refusedUnrecorded:
+    "Price-cap refusals in your agent's runtime are not recorded, and neither are budget refusals raised when Haven's hosted tools prepare a purchase.",
   budgetBands: '1 of 2 agents above 75% of their period budget',
   feesOff: 'Haven is not charging fees.',
   gasSponsored: 'Haven sponsored 7 operations',
@@ -204,6 +215,9 @@ const COPY = {
   agentRetired: 'Data-feed agent',
   merchantsHeading: 'Top merchants',
   balanceHeading: 'Balance over time',
+  spendHeading: 'Spend over time',
+  /** The fixture window ends at 14:30Z with `tz: UTC`, so the last bucket (10 Jul) is a partial day: one striped bar and this note (#3051). */
+  spendPartialNote: 'The last bar is striped',
   nordshield: 'NordShield VPN',
   emptyTitle: 'No agent activity in this range',
   emptyBody: 'This window has no payments, refusals or fees to report.',
@@ -310,6 +324,19 @@ const SCENARIOS: Scenario[] = [
         section(page, 'stat-tile-refused').getByText(COPY.refusalsRecordedFrom),
         'the ledger floor the response reports must be named on the face of the tile',
       ).toHaveCount(1)
+      // The #3055 limit-of-visibility clause rides the same footnote: the two
+      // classes the ledger never sees are named rather than silently absent
+      // from the count. The second half is the one this slice adds.
+      await expect(
+        section(page, 'stat-tile-refused').getByText(COPY.refusedUnrecorded),
+        'the footnote must name BOTH unrecorded classes: the price cap the ' +
+          "agent's own runtime applies, and the budget refusal the hosted tools " +
+          'raise at prepare',
+      ).toHaveCount(1)
+      // The phrasing the issue retires, held as a negative: the quote tools
+      // quote and refuse nothing, so naming a quote here would describe a
+      // refusal no code path raises.
+      await expect(section(page, 'stat-tile-refused').getByText(/quote/i)).toHaveCount(0)
       await expect(section(page, 'stat-tile-budget-used').getByText(COPY.budgetBands)).toHaveCount(1)
       await expect(section(page, 'stat-tile-fees-paid-to-haven').getByText(COPY.feesOff)).toHaveCount(1)
       await expect(
@@ -322,6 +349,21 @@ const SCENARIOS: Scenario[] = [
       // `analytics-page`, not here (#3038 structure run: scoping it to the
       // tiles grid resolves 0 and every populated capture times out on it).
       await expect(tiles.getByText(COPY.tilesDeltaCaption)).toHaveCount(2)
+
+      // ── Spend over time (#3051): the chart slice D built, on the page ────
+      // One heading, the desktop/narrow chart pair with exactly one visible
+      // at this viewport, and the refusal marker caps the fixture's two
+      // refusal days earn (two per rendering).
+      const spend = section(page, 'analytics-spend-section')
+      await expect(spend).toHaveCount(1)
+      await expect(spend.getByRole('heading', { name: COPY.spendHeading })).toHaveCount(1)
+      await expect(spend.getByTestId('stacked-bar-chart').filter({ visible: true })).toHaveCount(1)
+      await expect(spend.getByTestId('chart-refusal-marker')).toHaveCount(4)
+      // The partial-day treatment on the capture itself: the window's last
+      // bucket is cut (14:30Z end), so exactly one day per rendering is marked
+      // and the note names that end.
+      await expect(spend.locator('[data-testid="chart-day"][data-partial="true"]')).toHaveCount(2)
+      await expect(spend.getByText(COPY.spendPartialNote, { exact: false })).toHaveCount(1)
 
       // ── The range control, in its resting state ───────────────────────────
       // The default window is 30d (`DEFAULT_ANALYTICS_RANGE`) and the fixture's

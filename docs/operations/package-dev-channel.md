@@ -18,7 +18,10 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
-last-verified: "2026-09-16"
+  - packages/signer/src/credentials.ts
+  - packages/mcp/src/credentials.ts
+  - packages/backend/src/middleware/retired-safe-names.ts
+last-verified: "2026-09-17"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -60,6 +63,46 @@ and the `release` skill.
 > whole-document re-verification this release did not perform. Scope of this
 > note: `CONNECTOR_VERSION` and the channel constant's unchanged value — nothing
 > else in this document was re-verified.
+
+> **Re-verification (#3082, request-validation body restore, 2026-09-17):** this
+> doc is coupled because `packages/backend/src/config.ts` is in its `covers:` and
+> that file was edited. Only a JSDoc block and the boot-refusal error string
+> changed, both describing `HAVEN_REQUEST_VALIDATION`: `off` does not disable an
+> `enforcedPrefixes` module, and shadow's "changes nothing" was true of the
+> handler's view only after #3082 restored the request body. No parse shape, no
+> default, no accepted value and no restart semantics moved.
+> **Nothing in this document was made false or stale by that edit.** Its own
+> claim at step 5 — `off`/`shadow`/`enforce`, default `shadow`, a mode change is
+> a restart, and the variable does not affect the package-selection path — was
+> re-read against `config.ts` and `openapi/request-validation.ts` at this
+> commit and is true in every clause, which is why it needed no content change.
+
+> **Re-verification (contract-doc count correction, 2026-09-17):** this doc is
+> coupled because `scripts/release-bump.mjs` is in its `covers:` and that script
+> was edited — its *printed* next-steps block said "the two contract docs" and
+> enumerated two, while the docs had been corrected to three. Only operator-facing
+> log strings and comments changed; no version, pin, channel, dist-tag, build
+> order or credential path moves, and `release-bump.test.mjs` is 76/76.
+> **Nothing in this document was made false or stale by that edit** — it carries
+> no contract-doc count of its own, which is why it needed no content change.
+> `last-verified` deliberately NOT bumped: this is a scoped check of one script
+> edit, not a re-verification of the document, and #1366 rates a rubber-stamped
+> date worse than a stale one.
+
+> **Re-verification (0.3.0-alpha.0 release, 2026-09-17):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
+> is in this doc's `covers:`. Verified rather than asserted: the bump's own
+> checks report channel `alpha` and version `0.3.0-alpha.0` agreeing across the
+> source, the built connect bundle and the SDK that bundle resolves. **No
+> channel behaviour changed** — nothing in this release touches `publish.yml`,
+> `release-channel.mjs`, `release-snapshot-version.mjs` or
+> `release-version-order.mjs`, so the `0.0.0-dev.*` snapshot path and the rule
+> that the two channels cannot cross are untouched. Worth noting for this
+> release specifically: `0.0.0-` still sorts below every real version, so the
+> MINOR bump to 0.3.0 changes nothing about channel ordering. `last-verified`
+> deliberately NOT bumped — **it already reads 2026-09-17 from an earlier change
+> today**, and a scoped check of one constant is not a re-verification of this
+> document; #1366 rates a rubber stamp worse than a stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
 
 ## What `@dev` is, and is not
 
@@ -146,6 +189,16 @@ and the `release` skill.
 > `--doctor` says `stored under the pre-#2908 name safe_address — still read`,
 > pay one x402 call, and confirm the receipt's `payer` field is populated —
 > recorded on #2906 before promotion.
+>
+> **Half of that proof expires with #2914 and half does not, and the
+> difference is the whole point.** The credential-FILE half stands: a file on
+> disk never rewrites itself, so `safe_address` is read permanently and
+> `--doctor` still says so. The ENV half does not: `HAVEN_SAFE_ADDRESS` and
+> `HAVEN_WALLET_ADDRESS` are no longer read at all, so that machine now needs
+> `HAVEN_ACCOUNT_ADDRESS` set. Re-running the O3 proof after the contraction
+> without that change tests a machine that cannot resolve its account, and
+> would read as a regression in the connector rather than the intended
+> retirement.
 
 Prerequisite: the [operator checklist](#operator-checklist-owner-only) below
 has been completed once for the dev environment. If step 5 there is not done,
@@ -177,7 +230,17 @@ against #2911 (phase 3, the schema rename): that PR's only touch to
 (a stray mechanical rename briefly turned it into `.account_id`, which
 `CreateSetupBody` does not declare — caught by `tsc`, reverted before
 merge) — no change to `CONNECTOR_PACKAGE`, `CLI_PACKAGE`,
-`config.connectorChannel`, or `/discovery`:
+`config.connectorChannel`, or `/discovery`. Re-verified again 2026-09-17
+against #2914 (phase 5, the contraction), and this one is **not** identifiers
+only — it changes the WIRE INPUT the sentence above describes.
+`POST /agent-connection-setups` now takes `account_id`; `safe_id` is still
+DECLARED on `CreateSetupBody`, but only so the handler can REFUSE it with a
+400 naming the replacement. Deleting the field instead would have made
+Fastify drop it in silence and create a setup with no account behind it,
+which looks successful until the agent tries to spend. Still no change to
+`CONNECTOR_PACKAGE`, `CLI_PACKAGE`, `config.connectorChannel` or the
+`/discovery` response shape — this section's subject is untouched; the input
+field it happens to cite is not:
 
 ```bash
 curl -s "$BACKEND/discovery" | jq -r '.connector_package, .cli_package'

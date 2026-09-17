@@ -89,8 +89,8 @@ function activityMovement(item: PaymentActivityItem, walletName: string) {
 }
 
 function activityWalletName(item: PaymentActivityItem, fallbackName: string): string {
-  if (item.safe_name) return item.safe_name
-  if (item.safe_address) return `Haven wallet ${truncate(item.safe_address)}`
+  if (item.account_name) return item.account_name
+  if (item.account_address) return `Haven wallet ${truncate(item.account_address)}`
   return fallbackName
 }
 
@@ -114,7 +114,7 @@ function activityToTransaction(
   return {
     hash: item.tx_hash ?? `activity-${item.type}-${item.id}`,
     type: 'erc20',
-    from: item.safe_address ?? '',
+    from: item.account_address ?? '',
     to: item.to,
     value: item.amount_raw ?? '0',
     valueFormatted: item.amount,
@@ -130,11 +130,9 @@ function activityToTransaction(
     x402ResourceUrl: item.x402_resource_url ?? null,
     x402MerchantAddress: item.x402_merchant_address ?? null,
     chainId: item.chain_id ?? 0,
-    accountId: item.safe_id ?? '',
-    accountAddress: item.safe_address ?? '',
-    safeId: item.safe_id ?? '',
-    safeAddress: item.safe_address ?? '',
-    safeName: rowWalletName,
+    accountId: item.account_id ?? '',
+    accountAddress: item.account_address ?? '',
+    accountName: rowWalletName,
     agentId: item.agent_id,
     paymentId: item.id,
     paymentProofStatus: item.payment_proof_status ?? null,
@@ -297,10 +295,10 @@ export default function AgentDetailClient({ agentId }: Props) {
   } = useAgents()
   const agent = agents.find((item) => item.id === agentId) ?? null
   const safe = useMemo(
-    () => user?.accounts.find((item) => item.id === agent?.safe_id) ?? null,
-    [agent?.safe_id, user?.accounts],
+    () => user?.accounts.find((item) => item.id === agent?.account_id) ?? null,
+    [agent?.account_id, user?.accounts],
   )
-  const chainId = safe?.chain_id ?? agent?.safe_chain_id ?? DEFAULT_CHAIN_ID
+  const chainId = safe?.chain_id ?? agent?.account_chain_id ?? DEFAULT_CHAIN_ID
   const chainConfig = useMemo(() => {
     try {
       return getChainConfig(chainId)
@@ -407,7 +405,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
 
   const currentAgent = rotatedKeyPatch ? { ...agent, ...rotatedKeyPatch } : agent
-  const walletName = currentAgent.safe_name ?? safe?.name ?? 'Unassigned Haven wallet'
+  const walletName = currentAgent.account_name ?? safe?.name ?? 'Unassigned Haven wallet'
   const networkName = chainConfig?.name ?? 'Unknown network'
   const budgetLines = currentAgent.allowances.map((allowance) => {
     const decimals =

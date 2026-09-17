@@ -26,23 +26,14 @@ import {
 } from '../infra/repositories/users.js'
 import { listSessionAccountsForUser } from '../infra/repositories/smart-accounts.js'
 import { sessionAccountPayload } from '../modules/accounts/index.js'
-import { withAccountAddressAlias, withAccountsEnvelopeAlias, withSessionAccountAddressAlias } from '../openapi/wire-aliases.js'
 
 /**
- * #2911 (schema rename, epic #2906 phase 3): `withAccountAddressAlias`'s and
- * `withSessionAccountAddressAlias`'s input types still name their field
- * `safe_address` — `openapi/wire-aliases.ts` is the wire contract and is
- * deliberately untouched here (it dual-emits both wire names from whatever
- * it is handed). The repository rows they used to read that field directly
- * off of are renamed (`account_address`), so this shim re-derives the
- * `safe_address` field at the call site — the read changes, the wire mapper
- * and its output do not.
+ * #2914 (naming epic #2906 phase 5, the contraction): the session user and
+ * its account list carry ONE name each now — `account_address` and the
+ * `accounts` envelope key. The dual-emit mappers in `openapi/wire-aliases.ts`
+ * and the `toSafeAddressed` shim that fed them are deleted; the repository
+ * rows already use the account vocabulary, so nothing is projected here.
  */
-function toSafeAddressed<T extends { account_address: string | null }>(
-  row: T,
-): T & { safe_address: T['account_address'] } {
-  return { ...row, safe_address: row.account_address }
-}
 
 const SALT_ROUNDS = 10
 
@@ -174,15 +165,15 @@ export default async function authRoutes(
 
     return reply.code(201).send({
       token,
-      user: withAccountsEnvelopeAlias(withSessionAccountAddressAlias({
+      user: {
         id: user.id,
         name: user.name,
         email: user.email,
         wallet_address: null,
-        safe_address: null,
+        account_address: null,
         currency_preference: 'USD',
-        safes: [],
-      })),
+        accounts: [],
+      },
     })
   })
 
@@ -214,19 +205,19 @@ export default async function authRoutes(
       { expiresIn: '7d' },
     )
 
-    const safes = (await listSessionAccountsForUser(user.id)).map(sessionAccountPayload).map(toSafeAddressed).map(withAccountAddressAlias)
+    const accounts = (await listSessionAccountsForUser(user.id)).map(sessionAccountPayload)
 
     return {
       token,
-      user: withAccountsEnvelopeAlias(withSessionAccountAddressAlias({
+      user: {
         id: user.id,
         name: user.name,
         email: user.email,
         wallet_address: user.wallet_address,
-        safe_address: user.account_address,
+        account_address: user.account_address,
         currency_preference: user.currency_preference ?? 'USD',
-        safes,
-      })),
+        accounts,
+      },
     }
   })
 
@@ -242,9 +233,9 @@ export default async function authRoutes(
       throw { statusCode: 404, message: 'User not found' }
     }
 
-    const safes = (await listSessionAccountsForUser(sub)).map(sessionAccountPayload).map(toSafeAddressed).map(withAccountAddressAlias)
+    const accounts = (await listSessionAccountsForUser(sub)).map(sessionAccountPayload)
 
-    return withAccountsEnvelopeAlias(withSessionAccountAddressAlias(toSafeAddressed({ ...profile, safes })))
+    return { ...profile, accounts }
   })
   /**
    * Device-authorization flow (#2526, RFC 8628 shaped).

@@ -278,8 +278,14 @@ describe('Analytics — the populated page', () => {
     expect(tile.textContent).toMatch(/2 refused payments · across 3 attempts/)
     expect(tile.textContent).toMatch(/\$3\.00 attempted/)
     // The limit of the count, stated rather than left to be inferred: what
-    // the runtime refused on its own never reached this ledger.
+    // the runtime refused on its own never reached this ledger — and neither
+    // did the budget refusal the hosted tools raise at prepare (#3055).
     expect(tile.textContent).toMatch(/Price-cap refusals in your agent/)
+    expect(tile.textContent).toMatch(/budget refusals raised when Haven's hosted tools prepare a purchase/)
+    // The phrasing the issue retires: the quote tools quote and refuse
+    // nothing, so a footnote that blames the quote describes a refusal no
+    // code path raises.
+    expect(tile.textContent).not.toMatch(/quote/i)
   })
 
   it('names the ledger floor when the endpoint reports one, and stays silent when it does not (#3013)', () => {
@@ -302,10 +308,12 @@ describe('Analytics — the populated page', () => {
     render(<AnalyticsClient />)
     const tile = screen.getByTestId('stat-tile-refused')
     expect(tile.textContent).not.toMatch(/Refusals are recorded from/)
-    // The rest of the refusal sentence stays: the count and the price-cap
-    // limit are independent of the ledger floor.
+    // The rest of the refusal sentence stays: the count and BOTH unrecorded
+    // classes are independent of the ledger floor — an empty ledger does not
+    // make the two paths the page cannot see any more visible (#3055).
     expect(tile.textContent).toMatch(/2 refused payments/)
     expect(tile.textContent).toMatch(/Price-cap refusals in your agent/)
+    expect(tile.textContent).toMatch(/budget refusals raised when Haven's hosted tools prepare a purchase/)
   })
 
   it('renders the budget bands as a count of agents over their own budgets', () => {
@@ -326,6 +334,22 @@ describe('Analytics — the populated page', () => {
     // The free things the product did pay for, still reported while it is off.
     expect(tile.textContent).toMatch(/Haven sponsored 7 operations' gas/)
     expect(within(tile).queryByText(/^\+|^-/)).toBeNull()
+  })
+
+  it('mounts the spend chart off the same response, below the agents table and above merchants (#3051; recipe item 5)', () => {
+    render(<AnalyticsClient />)
+    const spend = screen.getByTestId('analytics-spend-section')
+    expect(within(spend).getByRole('heading', { name: 'Spend over time' })).toBeTruthy()
+    // Desktop + narrow: the same complementary pair the balance section keeps.
+    expect(within(spend).getAllByTestId('stacked-bar-chart')).toHaveLength(2)
+    // Four fixture days, two with refusals: two marker caps per rendering.
+    expect(within(spend).getAllByTestId('chart-refusal-marker')).toHaveLength(4)
+    // Order: table, then the chart, then merchants — the table is the first
+    // screen's reading surface (screen-recipes.md § Analytics, item 5).
+    const table = screen.getByTestId('analytics-agents-section')
+    const merchants = screen.getByTestId('analytics-merchants-section')
+    expect(table.compareDocumentPosition(spend) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(spend.compareDocumentPosition(merchants) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('shows the trend figures and the agents table once there are three days of data', () => {
@@ -366,6 +390,7 @@ describe('Analytics — the sparse window', () => {
   it('withholds the table along with the charts, rather than leaving a blank region to diagnose', () => {
     render(<AnalyticsClient />)
     const page = screen.getByTestId('analytics-page')
+    expect(within(page).queryByTestId('analytics-spend-section')).toBeNull()
     expect(within(page).queryByText('Research agent')).toBeNull()
     expect(within(page).queryByText('Data-feed agent')).toBeNull()
   })

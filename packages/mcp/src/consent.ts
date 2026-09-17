@@ -43,7 +43,7 @@ export interface ConsentInput {
   /** Agent identity from the credential file, when present. */
   agentId?: string
   /** Haven wallet (Safe) the agent spends from. */
-  safeAddress?: string
+  accountAddress?: string
   /** Agent's delegate EOA — the local signer. */
   delegateAddress?: string
   /** Chain the agent operates on. */
@@ -93,7 +93,7 @@ export function computeConsentHash(input: ConsentInput): string {
     input.apiKeyPrefix,
     input.apiUrl ?? '',
     input.agentId ?? '',
-    (input.safeAddress ?? '').toLowerCase(),
+    (input.accountAddress ?? '').toLowerCase(),
     (input.delegateAddress ?? '').toLowerCase(),
     input.chainId ?? '',
   ].join('|')
@@ -114,7 +114,7 @@ export function renderConsentBlock(input: ConsentInput, hash: string): string {
   ]
   if (input.apiUrl) lines.push(`Haven API: ${input.apiUrl}`)
   if (input.agentId) lines.push(`Agent ID:  ${input.agentId}`)
-  if (input.safeAddress) lines.push(`Haven wallet (Safe): ${input.safeAddress}`)
+  if (input.accountAddress) lines.push(`Haven wallet (Safe): ${input.accountAddress}`)
   if (input.delegateAddress) lines.push(`Delegate (local signer): ${input.delegateAddress}`)
   if (typeof input.chainId === 'number') lines.push(`Chain ID:  ${input.chainId}`)
   lines.push('')
@@ -238,8 +238,8 @@ export interface CredentialIdentitySeed {
   apiKey: string
   apiUrl?: string
   agentId?: string
-  /** Safe address from the credential file, used as a fallback. */
-  safeAddress?: string
+  /** Account address from the credential file, used as a fallback. */
+  accountAddress?: string
   /** Delegate address from the credential file, used before live allowance metadata is available. */
   delegateAddress?: string
   /** Chain from the credential file, used as a fallback. */
@@ -265,7 +265,7 @@ export async function consentInputFromClient(
   toolNames: readonly HavenMcpToolName[],
 ): Promise<ConsentInput> {
   let allowanceSummary: ConsentInput['allowanceSummary'] = seed.allowanceSummary ?? []
-  let safeAddress = seed.safeAddress
+  let accountAddress = seed.accountAddress
   let delegateAddress: string | undefined = seed.delegateAddress
   let chainId: number | undefined = seed.chainId
 
@@ -277,7 +277,7 @@ export async function consentInputFromClient(
         ? (summary as HavenAllowance[])
         : []
     if (isAllowanceSummary(summary)) {
-      safeAddress = summary.accountAddress ?? summary.safeAddress ?? safeAddress
+      accountAddress = summary.accountAddress ?? accountAddress
       delegateAddress = summary.delegateAddress
       chainId = typeof summary.chainId === 'number' ? summary.chainId : chainId
     }
@@ -300,7 +300,7 @@ export async function consentInputFromClient(
     apiKeyPrefix: derivePrefix(seed.apiKey),
     apiUrl: seed.apiUrl,
     agentId: seed.agentId,
-    safeAddress,
+    accountAddress,
     delegateAddress,
     chainId,
     toolNames,

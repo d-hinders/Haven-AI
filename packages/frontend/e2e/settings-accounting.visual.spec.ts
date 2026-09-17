@@ -128,7 +128,15 @@ test.describe('settings accounting connection states', () => {
       { ...accountingConnection, status: 'disconnected', isActiveDestination: false, grantedScope: null, tokenExpiresAt: null },
     ])
     const card = await openSettings(page)
-    await expect(card.getByText('Not connected', { exact: true })).toHaveCount(1)
+    // #3017: Accounted became live over an api key, so the card now shows a
+    // second `Not connected` chip — Accounted's own no-row chip (ConnectionRow
+    // renders `Not connected` / `Connect` for a provider with no connection
+    // record). The state under test is Fortnox's, so the instrument re-anchors
+    // on the seeded row instead of the card, and pins the Accounted row's chip
+    // explicitly: a third unexpected `Not connected` stays a red test rather
+    // than a baseline of the wrong thing (this file's own contract above).
+    await expect(card.getByTestId('connection-row-fortnox').getByText('Not connected', { exact: true })).toHaveCount(1)
+    await expect(card.getByTestId('connection-row-accounted').getByText('Not connected', { exact: true })).toHaveCount(1)
     await expect(card.getByText(/What was fed earlier stays in Haven/)).toHaveCount(1)
     const actions = card.getByTestId('connection-actions-fortnox')
     await expect(actions.getByRole('button', { name: 'Connect', exact: true })).toHaveCount(1)

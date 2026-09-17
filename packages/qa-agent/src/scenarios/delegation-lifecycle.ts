@@ -55,7 +55,7 @@ export const delegationLifecycle: Scenario = {
     if ('error' in identity) return fail(identity.error)
     const { owner, delegate, token, agentId, grantAndActivate } = identity
     const agentKey = identity.agentApiKey
-    const safe = { safe_address: identity.safeAddress }
+    const safe = { account_address: identity.accountAddress }
 
     async function userCall<T>(method: string, path: string, jwt: string | null, body?: unknown) {
       const res = await fetch(`${api}${path}`, {
@@ -74,7 +74,7 @@ export const delegationLifecycle: Scenario = {
 
     // ── fund the throwaway treasury from the STANDING identity ───────────────
     const funding = await payAs(
-      ctx.cfg.delegationAgentApiKey, ctx.cfg.delegationDelegateKey, safe.safe_address, FUND_HUMAN,
+      ctx.cfg.delegationAgentApiKey, ctx.cfg.delegationDelegateKey, safe.account_address, FUND_HUMAN,
     )
     if (!funding.ok) return fail(`funding the throwaway treasury failed: ${funding.error}`)
 
@@ -83,8 +83,8 @@ export const delegationLifecycle: Scenario = {
       const res = await fetch(`${api}/machine-payments/agent`, {
         headers: { authorization: `Bearer ${ctx.cfg.delegationAgentApiKey}` },
       })
-      const data = (await res.json().catch(() => ({}))) as { safe_address?: string }
-      return data.safe_address
+      const data = (await res.json().catch(() => ({}))) as { account_address?: string }
+      return data.account_address
     })()
     if (!standingTreasury) return fail('could not resolve the standing treasury as payment recipient')
 

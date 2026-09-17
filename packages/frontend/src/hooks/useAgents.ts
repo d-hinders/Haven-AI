@@ -29,7 +29,7 @@ interface CreateAgentParams {
   name: string
   description?: string
   delegate_address: string
-  safe_id?: string
+  account_id?: string
   allowances?: {
     token_address: string
     token_symbol: string

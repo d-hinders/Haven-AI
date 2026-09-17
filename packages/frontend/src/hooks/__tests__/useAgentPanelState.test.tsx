@@ -26,7 +26,7 @@ import type { Agent } from '@/hooks/useAgents'
 const SAFE = {
   id: 'safe-1',
   name: 'Main account',
-  safe_address: '0x1111111111111111111111111111111111111111',
+  account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 100,
 }
 
@@ -36,10 +36,10 @@ function baseAgent(overrides: Partial<Agent> = {}): Agent {
     name: 'Research agent',
     description: null,
     delegate_address: '0x2222222222222222222222222222222222222222',
-    safe_id: 'safe-1',
-    safe_address: SAFE.safe_address,
-    safe_name: 'Main account',
-    safe_chain_id: 100,
+    account_id: 'safe-1',
+    account_address: SAFE.account_address,
+    account_name: 'Main account',
+    account_chain_id: 100,
     status: 'active',
     created_at: '2026-05-01T00:00:00Z',
     allowances: [],
@@ -69,22 +69,22 @@ describe('useAgentPanelState', () => {
   })
 
   describe('agentUsesActiveAccount', () => {
-    it('matches by safe_id first', () => {
+    it('matches by account_id first', () => {
       const { result } = renderHook(() => useAgentPanelState())
-      expect(result.current.agentUsesActiveAccount(baseAgent({ safe_id: 'safe-1' }))).toBe(true)
-      expect(result.current.agentUsesActiveAccount(baseAgent({ safe_id: 'safe-other' }))).toBe(false)
+      expect(result.current.agentUsesActiveAccount(baseAgent({ account_id: 'safe-1' }))).toBe(true)
+      expect(result.current.agentUsesActiveAccount(baseAgent({ account_id: 'safe-other' }))).toBe(false)
     })
 
-    it('falls back to address + chain when there is no safe_id', () => {
+    it('falls back to address + chain when there is no account_id', () => {
       const { result } = renderHook(() => useAgentPanelState())
       expect(
         result.current.agentUsesActiveAccount(
-          baseAgent({ safe_id: null as unknown as string, safe_address: SAFE.safe_address.toUpperCase(), safe_chain_id: 100 }),
+          baseAgent({ account_id: null as unknown as string, account_address: SAFE.account_address.toUpperCase(), account_chain_id: 100 }),
         ),
       ).toBe(true)
       expect(
         result.current.agentUsesActiveAccount(
-          baseAgent({ safe_id: null as unknown as string, safe_address: SAFE.safe_address, safe_chain_id: 8453 }),
+          baseAgent({ account_id: null as unknown as string, account_address: SAFE.account_address, account_chain_id: 8453 }),
         ),
       ).toBe(false)
     })

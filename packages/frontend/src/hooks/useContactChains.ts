@@ -24,7 +24,7 @@ export function useContactChains(perSafeLimit = 100): {
   const safes = user?.accounts ?? []
   // Re-derive when the set of (address, chain) pairs changes.
   const key = safes
-    .map((s) => `${s.safe_address.toLowerCase()}:${s.chain_id}`)
+    .map((s) => `${s.account_address.toLowerCase()}:${s.chain_id}`)
     .sort()
     .join('|')
 
@@ -49,7 +49,7 @@ export function useContactChains(perSafeLimit = 100): {
       current.map(async (safe) => {
         try {
           const data = await api.get<TransactionsResponse>(
-            `/transactions/${safe.safe_address}?page=1&limit=${perSafeLimit}&chain_id=${encodeURIComponent(
+            `/transactions/${safe.account_address}?page=1&limit=${perSafeLimit}&chain_id=${encodeURIComponent(
               String(safe.chain_id),
             )}`,
           )

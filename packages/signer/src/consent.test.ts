@@ -26,7 +26,7 @@ function captureWriter() {
 
 const input: SignerConsentInput = {
   delegateAddress: '0x000000000000000000000000000000000000dEaD',
-  safeAddress: '0x000000000000000000000000000000000000Cafe',
+  accountAddress: '0x000000000000000000000000000000000000Cafe',
   agentId: 'agt_test',
   chainId: 100,
   network: 'Gnosis Chain',
@@ -51,7 +51,7 @@ describe('signer consent gate', () => {
     expect(
       computeSignerConsentHash({
         ...input,
-        safeAddress: '0x000000000000000000000000000000000000bEEF',
+        accountAddress: '0x000000000000000000000000000000000000bEEF',
       }),
     ).not.toBe(baseHash)
     expect(computeSignerConsentHash({ ...input, chainId: 8453 })).not.toBe(baseHash)

@@ -19,7 +19,7 @@ export function compareEnrichedTransactions(
   a: EnrichedTransaction,
   b: EnrichedTransaction,
 ): number {
-  return compareTransactions(a, b) || a.safeAddress.localeCompare(b.safeAddress)
+  return compareTransactions(a, b) || a.accountAddress.localeCompare(b.accountAddress)
 }
 
 export function transactionDedupKey(tx: Transaction): string {
@@ -34,7 +34,7 @@ export function transactionDedupKey(tx: Transaction): string {
 }
 
 export function enrichedTransactionIdentityKey(tx: EnrichedTransaction): string {
-  return [tx.chainId, tx.safeId, transactionDedupKey(tx)].join(':')
+  return [tx.chainId, tx.accountId, transactionDedupKey(tx)].join(':')
 }
 
 export function paymentAgentIdentityKey(

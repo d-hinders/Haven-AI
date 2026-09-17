@@ -2,7 +2,8 @@
  * #2960 — one party vocabulary for "who paid" a Haven payment, emitted
  * additively on every surface that today names a lone `payer*` address.
  *
- * This is a SIBLING to `wire-aliases.ts`, not an addition to it, for a
+ * This was a SIBLING to `wire-aliases.ts` (deleted by #2914), not an addition
+ * to it, for a
  * reason worth stating: `wire-aliases.ts`'s own header scopes it to the
  * `safe` -> `account` dual-emit, where every mapper produces a SAME-VALUE
  * twin of one existing field. The four parties here are not same-value

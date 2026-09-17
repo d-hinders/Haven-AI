@@ -4,20 +4,8 @@ export interface HavenCredentialFile {
   apiKey: string
   delegateKey: string
   agentId?: string
-  /**
-   * The Haven account (smart account) the agent spends from — #2908, the
-   * account-vocabulary name, added EXPLICITLY here (this shape and the
-   * signer's are separate types; the epic's review found they must not be
-   * assumed to match). Same value as `safeAddress`.
-   */
+  /** The Haven account (smart account) the agent spends from. */
   accountAddress?: string
-  /**
-   * @deprecated #2908 — same value as {@link HavenCredentialFile.accountAddress}.
-   * Removed from this shape in the release after the one carrying #2908
-   * (#2914). The credential-FILE keys are read permanently — see
-   * `readAccountAddressField`.
-   */
-  safeAddress?: string
   delegateAddress?: string
   chainId?: number
   network?: string
@@ -84,9 +72,9 @@ interface RawCredentialFile {
  *   1. Explicit `path` argument (typically from `--credentials <path>`).
  *   2. `HAVEN_CREDENTIALS` env var pointing at a credential JSON file.
  *   3. Inline env vars: `HAVEN_API_KEY` + `HAVEN_DELEGATE_KEY` (+ optional
- *      `HAVEN_AGENT_ID`, `HAVEN_ACCOUNT_ADDRESS` — or, until #2914, its
- *      pre-#2908 spellings `HAVEN_WALLET_ADDRESS` / `HAVEN_SAFE_ADDRESS` —
- *      and `HAVEN_API_URL`).
+ *      `HAVEN_AGENT_ID`, `HAVEN_ACCOUNT_ADDRESS` and `HAVEN_API_URL`). The
+ *      pre-#2908 spellings `HAVEN_WALLET_ADDRESS` / `HAVEN_SAFE_ADDRESS` are
+ *      retired as of #2914.
  *
  * The inline-env path exists so that runtime config snippets emitted by the
  * Haven dashboard (Claude Desktop / Cursor / generic MCP configs) can be a
@@ -152,7 +140,6 @@ async function loadCredentialsFromFile(path: string): Promise<HavenCredentialFil
       delegateKey,
       agentId: stringField(raw.agent_id ?? raw.agentId),
       accountAddress,
-      safeAddress: accountAddress,
       delegateAddress: stringField(raw.delegate_address ?? raw.delegateAddress),
       chainId: numberField(raw.chain_id ?? raw.chainId),
       network: stringField(raw.network),
@@ -187,13 +174,11 @@ async function loadCredentialsFromSplitFiles(identityPath: string, signerPath: s
       identity.agent_id ?? identity.agentId,
       signer.agent_id ?? signer.agentId,
     ),
-    ...accountAddressTwins(
-      matchingStringField(
-        'account_address',
-        readAccountAddressField(identity),
-        readAccountAddressField(signer),
-        { caseInsensitive: true },
-      ),
+    accountAddress: matchingStringField(
+      'account_address',
+      readAccountAddressField(identity),
+      readAccountAddressField(signer),
+      { caseInsensitive: true },
     ),
     delegateAddress: matchingStringField(
       'delegate_address',
@@ -257,7 +242,7 @@ function loadCredentialsFromEnv(): HavenCredentialFile | null {
     apiKey,
     delegateKey,
       agentId: stringField(process.env.HAVEN_AGENT_ID),
-      ...accountAddressTwins(readAccountAddressEnv(process.env)),
+      accountAddress: readAccountAddressEnv(process.env),
       chainId: numberField(process.env.HAVEN_CHAIN_ID),
       network: stringField(process.env.HAVEN_NETWORK),
       apiUrl: stringField(process.env.HAVEN_API_URL),
@@ -284,18 +269,48 @@ export function readAccountAddressField(
 }
 
 /**
- * The account address off the environment, new name first:
- * `HAVEN_ACCOUNT_ADDRESS` (the survivor, decided on #2906), then the two
- * names the dashboard handoff emitted before #2908 — `HAVEN_WALLET_ADDRESS`
- * and `HAVEN_SAFE_ADDRESS`, which are dropped at #2914.
+ * The account address off the environment: `HAVEN_ACCOUNT_ADDRESS` (the
+ * survivor, decided on #2906). The two names the dashboard handoff emitted
+ * before #2908 — `HAVEN_WALLET_ADDRESS` and `HAVEN_SAFE_ADDRESS` — were
+ * window-scoped and are retired as of #2914.
  */
 export function readAccountAddressEnv(env: NodeJS.ProcessEnv): string | undefined {
-  return stringField(env.HAVEN_ACCOUNT_ADDRESS ?? env.HAVEN_WALLET_ADDRESS ?? env.HAVEN_SAFE_ADDRESS)
-}
+  const current = stringField(env.HAVEN_ACCOUNT_ADDRESS)
 
-/** Both camelCase names, one value (or neither key when there is no value). */
-function accountAddressTwins(address: string | undefined): Pick<HavenCredentialFile, 'accountAddress' | 'safeAddress'> {
-  return { accountAddress: address, safeAddress: address }
+  // Retired, but REFUSED rather than ignored — the same rule the backend
+  // applies to retired request names, for the same reason and with more at
+  // stake. Silently dropping these would not merely leave the address unset:
+  // `accountAddress` is what `haven_sign_sweep_delegate` passes as
+  // `expectedSafe`, and an undefined `expectedSafe` SKIPS the check that a
+  // sweep's `to` matches the account in the local credential (see
+  // `core.ts`). An operator who upgrades without touching env would lose a
+  // money-path cross-check and get no signal at all.
+  //
+  // The verdict keys on RELIANCE, not presence, so a handoff that still
+  // exports both names alongside the new one keeps working:
+  //   retired alone      -> throw
+  //   both, same value   -> accept the new one
+  //   both, disagreeing  -> throw
+  for (const name of ['HAVEN_WALLET_ADDRESS', 'HAVEN_SAFE_ADDRESS'] as const) {
+    const retired = stringField(env[name])
+    if (!retired) continue
+    if (!current) {
+      throw new Error(
+        `${name} is retired (#2906) — Haven accounts are addressed as accounts, not Safes. ` +
+          'Set HAVEN_ACCOUNT_ADDRESS to the same value. Refusing rather than ignoring it, ' +
+          'because an unset account address silently skips the sweep-destination check.',
+      )
+    }
+    if (retired.toLowerCase() !== current.toLowerCase()) {
+      throw new Error(
+        `${name} and HAVEN_ACCOUNT_ADDRESS were both set to different addresses. ` +
+          'Remove the retired name, or make them match — picking one silently would hide ' +
+          'the mismatch.',
+      )
+    }
+  }
+
+  return current
 }
 
 function stringField(value: unknown): string | undefined {

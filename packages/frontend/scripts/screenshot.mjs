@@ -712,7 +712,7 @@ export function formatDeletionReport(deleted) {
 export const FIXTURE_ACCOUNT = {
   id: 'safe-fixture',
   name: 'Operating wallet',
-  safe_address: '0x1111111111111111111111111111111111111111',
+  account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 84532,
   is_default: true,
   // #2264: the rail marker belongs on the object itself. Every consumer below
@@ -730,7 +730,7 @@ export const FIXTURE_USER = {
   name: 'Screenshot Fixture',
   email: 'fixture@haven.test',
   wallet_address: null,
-  safe_address: FIXTURE_ACCOUNT.safe_address,
+  account_address: FIXTURE_ACCOUNT.account_address,
   // Delegation-rail on the `/auth/me`-shaped safes list only — so the account
   // page's Backup & recovery card (#1089) has something real to render,
   // without perturbing FIXTURE_ACCOUNT's identity shape (pinned against the e2e
@@ -745,7 +745,6 @@ export const FIXTURE_USER = {
   // produce. The harness caught this itself ("a fixture-shape gap or a real
   // client bug"), which is what that check is for.
   accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'delegator_hybrid' }],
-  safes: [{ ...FIXTURE_ACCOUNT, account_type: 'delegator_hybrid' }],
   currency_preference: 'USD',
   created_at: '2026-05-01T10:00:00.000Z',
 }
@@ -772,7 +771,7 @@ const T0 = Date.parse('2026-07-10T09:00:00.000Z') / 1000 // fixed anchor, in sec
 const tx = (i, over = {}) => ({
   hash: `0x${String(i).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
   type: 'erc20',
-  from: FIXTURE_ACCOUNT.safe_address,
+  from: FIXTURE_ACCOUNT.account_address,
   to: ADDR.recipient,
   value: '25000000',
   valueFormatted: '25.00',
@@ -786,8 +785,8 @@ const tx = (i, over = {}) => ({
   // AggregatedTransaction extras (harmless on the plain Transaction shape):
   chainId: FIXTURE_ACCOUNT.chain_id,
   accountId: FIXTURE_ACCOUNT.id,
-  accountAddress: FIXTURE_ACCOUNT.safe_address,
-  safeName: FIXTURE_ACCOUNT.name,
+  accountAddress: FIXTURE_ACCOUNT.account_address,
+  accountName: FIXTURE_ACCOUNT.name,
   ...over,
 })
 // #2870: the accounting badge's three states on three agent rows — pushed
@@ -800,14 +799,14 @@ export const FIXTURE_TXS = [
     agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports',
     paymentId: 'pay-1', accounting: accounting('pushed', { externalRef: 'fortnox:supplierinvoice:11' }),
   }),
-  tx(2, { direction: 'in', from: ADDR.contact, to: FIXTURE_ACCOUNT.safe_address, valueFormatted: '150.00', value: '150000000' }),
+  tx(2, { direction: 'in', from: ADDR.contact, to: FIXTURE_ACCOUNT.account_address, valueFormatted: '150.00', value: '150000000' }),
   tx(3, { agentName: 'Ops agent', paymentId: 'pay-3', accounting: accounting('pending') }),
   tx(4, { asset: 'ETH', tokenSymbol: undefined, type: 'native', decimals: 18, value: '12000000000000000', valueFormatted: '0.012' }),
   tx(5, {
     isError: true, agentName: 'Research agent',
     paymentId: 'pay-5', accounting: accounting('failed', { error: 'Fortnox answered 502 — will retry on the next sync' }),
   }),
-  tx(6, { direction: 'in', from: ADDR.merchant, to: FIXTURE_ACCOUNT.safe_address, valueFormatted: '75.50', value: '75500000' }),
+  tx(6, { direction: 'in', from: ADDR.merchant, to: FIXTURE_ACCOUNT.account_address, valueFormatted: '75.50', value: '75500000' }),
 ]
 
 export const FIXTURE_AGENTS = [
@@ -847,9 +846,9 @@ export const FIXTURE_AGENTS = [
     //   `/agents/:id/delegate-balance` was unkeyed in `fixtureFor` and
     //   `FIXTURE_EMPTY_FALLBACK` has no `usdc_atomic`, making `undefined !== '0'`
     //   true. Both halves are fixed together, below and in `fixtureFor`.
-    delegate_address: ADDR.researchDelegate, safe_id: FIXTURE_ACCOUNT.id,
-    safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
-    safe_chain_id: FIXTURE_ACCOUNT.chain_id, account_type: 'delegator_hybrid',
+    delegate_address: ADDR.researchDelegate, account_id: FIXTURE_ACCOUNT.id,
+    account_address: FIXTURE_ACCOUNT.account_address, account_name: FIXTURE_ACCOUNT.name,
+    account_chain_id: FIXTURE_ACCOUNT.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_a1b2c3', status: 'active',
     created_at: '2026-06-02T10:00:00.000Z',
     // #1878: a NAMED pair — the case multi-agent wiring exists for.
@@ -895,9 +894,9 @@ export const FIXTURE_AGENTS = [
     // state is a pre-column legacy artefact (`000_initial.ts:40`) rather than
     // something a current write path can produce: this agent is seeded with no
     // payment intents, so nothing else contradicts it.
-    delegate_address: null, safe_id: FIXTURE_ACCOUNT.id,
-    safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
-    safe_chain_id: FIXTURE_ACCOUNT.chain_id, account_type: 'delegator_hybrid',
+    delegate_address: null, account_id: FIXTURE_ACCOUNT.id,
+    account_address: FIXTURE_ACCOUNT.account_address, account_name: FIXTURE_ACCOUNT.name,
+    account_chain_id: FIXTURE_ACCOUNT.chain_id, account_type: 'delegator_hybrid',
     api_key_prefix: 'hvn_g7h8i9', status: 'paused',
     created_at: '2026-04-30T10:00:00.000Z', mcp_last_seen_at: null,
     // #2106: a PAUSED agent whose on-chain delegation is still live. That
@@ -939,8 +938,8 @@ export const FIXTURE_OVERVIEW = {
   actionableApprovals: 0, pendingApprovals: 0,
   onboardingProgress: { hasFirstAgentPayment: true },
   agents: FIXTURE_AGENTS.map((a) => ({
-    id: a.id, name: a.name, status: a.status, accountId: a.safe_id,
-    safeName: a.safe_name, safeChainId: a.safe_chain_id,
+    id: a.id, name: a.name, status: a.status, accountId: a.account_id,
+    accountName: a.account_name, accountChainId: a.account_chain_id,
     allowances: a.allowances.map((x) => ({
       tokenSymbol: x.token_symbol, allowanceAmount: x.allowance_amount, resetPeriodMin: x.reset_period_min,
     })),
@@ -964,7 +963,7 @@ export const FIXTURE_AGENT_ACTIVITY = [
     reason: null, status: 'confirmed', tx_hash: `0x${'a1'.repeat(32)}`,
     source: 'x402', x402_resource_url: 'https://api.example.dev/reports',
     x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_ACCOUNT.chain_id,
-    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
+    account_id: FIXTURE_ACCOUNT.id, account_address: FIXTURE_ACCOUNT.account_address, account_name: FIXTURE_ACCOUNT.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
     // #2126: BOTH fields were fabricated. `payment_proof_status` mirrors
     // `machine_payment_evidence.proof_status`, whose only constructible values
@@ -1010,7 +1009,7 @@ export const FIXTURE_AGENT_ACTIVITY = [
     amount_raw: '12000000', amount: '12.00', to: ADDR.recipient,
     reason: null, status: 'failed', tx_hash: null, source: 'api',
     x402_resource_url: null, x402_merchant_address: null, chain_id: FIXTURE_ACCOUNT.chain_id,
-    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
+    account_id: FIXTURE_ACCOUNT.id, account_address: FIXTURE_ACCOUNT.account_address, account_name: FIXTURE_ACCOUNT.name,
     explorer_url: null, confirmed_at: null, payment_proof_status: null,
     payment_flow_status: null, payment_attention_reason: null,
     created_at: '2026-07-10T07:45:00.000Z',
@@ -1022,7 +1021,7 @@ export const FIXTURE_AGENT_ACTIVITY = [
     reason: null, status: 'confirmed', tx_hash: `0x${'b2'.repeat(32)}`,  // #2120: see pay-1
     source: 'api', x402_resource_url: null, x402_merchant_address: null,
     chain_id: FIXTURE_ACCOUNT.chain_id,
-    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
+    account_id: FIXTURE_ACCOUNT.id, account_address: FIXTURE_ACCOUNT.account_address, account_name: FIXTURE_ACCOUNT.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'b2'.repeat(32)}`,
     // #2126: null, not 'paid'. `source: 'api'` is not in
     // `MACHINE_PAYMENT_RAILS` (`x402 | mpp_demo | mpp_crypto | spt`,
@@ -1096,7 +1095,7 @@ export const FIXTURE_AGENT_ACTIVITY = [
     reason: null, status: 'confirmed', tx_hash: `0x${'c3'.repeat(32)}`,
     source: 'x402', x402_resource_url: 'https://api.example.dev/datasets',
     x402_merchant_address: ADDR.merchant, chain_id: FIXTURE_ACCOUNT.chain_id,
-    safe_id: FIXTURE_ACCOUNT.id, safe_address: FIXTURE_ACCOUNT.safe_address, safe_name: FIXTURE_ACCOUNT.name,
+    account_id: FIXTURE_ACCOUNT.id, account_address: FIXTURE_ACCOUNT.account_address, account_name: FIXTURE_ACCOUNT.name,
     explorer_url: `https://sepolia.basescan.org/tx/0x${'c3'.repeat(32)}`,
     confirmed_at: '2026-07-09T09:16:00.000Z', payment_proof_status: 'payment_confirmed',
     payment_flow_status: 'needs_attention',
@@ -1173,7 +1172,7 @@ export const FIXTURE_DELEGATE_BALANCES = {
   // The recoverable-funds incident, and the ONLY agent that renders the banner.
   'agent-research': {
     delegate_address: ADDR.researchDelegate,
-    safe_address: FIXTURE_ACCOUNT.safe_address,
+    account_address: FIXTURE_ACCOUNT.account_address,
     chain_id: FIXTURE_ACCOUNT.chain_id,
     eth: '0',
     eth_atomic: '0',
@@ -1185,10 +1184,10 @@ export const FIXTURE_DELEGATE_BALANCES = {
   // A delegate that holds nothing — the ordinary steady state, and the
   // CONTROL for the row above: `hasRecoverableUsdc` is false here for the
   // reason the product says it is ('0' === '0'), not because a key is missing.
-  // #2202: `safe_address` and `chain_id` follow the agent to its OWN account.
-  // The route echoes `agent.safe_address` off the joined `user_safes` row
+  // #2202: `account_address` and `chain_id` follow the agent to its OWN account.
+  // The route echoes `agent.account_address` off the joined `user_safes` row
   // (`routes/agents.ts:160`) and answers `chain_id` as
-  // `agent.safe_chain_id ?? DEFAULT_CHAIN_ID` (`:143`, echoed at `:161`) — the
+  // `agent.account_chain_id ?? DEFAULT_CHAIN_ID` (`:143`, echoed at `:161`) — the
   // coalesce never fires for a real account, which always has a chain, but the
   // read is not a bare echo and the citation should not say it is
   // `agent-retired` has no delegate address, so the route never reaches the
@@ -1216,8 +1215,9 @@ const FIXTURE_CONTACTS = [
  * generic empty shape. Pure — unit-testable without a browser.
  */
 /**
- * Accounting connections (#2868; backend #2862–#2867). The registry lists
- * Fortnox live and three coming-soon providers exactly as
+ * Accounting connections (#2868; backend #2862–#2867, #3017). The registry
+ * lists Fortnox and Accounted live — Fortnox over OAuth2, Accounted over a
+ * pasted API key (#3017) — and Light/Igdrasil coming soon, exactly as
  * `GET /accounting/providers` does; the connection row is the CONNECTED state
  * with a company, a push and a suggested account — the row the Settings card
  * renders by default. The other four states are stages of the
@@ -1231,7 +1231,15 @@ export const FIXTURE_ACCOUNTING_PROVIDERS = [
     capabilities: { attachments: true, verify: true, revoke: true, companyInfo: true },
     availability: 'live', requiredScopes: ['bookkeeping', 'companyinformation', 'archive'], configured: true,
   },
-  ...['Accounted', 'Light', 'Igdrasil'].map((displayName) => ({
+  // #3017: Accounted is the second live provider, and the first of the
+  // api_key kind — a pasted `gnubok_sk_*` key, no redirect. The harness
+  // renders the registry as it is, not as it was.
+  {
+    id: 'accounted', displayName: 'Accounted', authKind: 'api_key',
+    capabilities: { attachments: false, verify: false, revoke: false, companyInfo: true },
+    availability: 'live', requiredScopes: [], configured: true,
+  },
+  ...['Light', 'Igdrasil'].map((displayName) => ({
     id: displayName.toLowerCase(), displayName, authKind: 'oauth2',
     capabilities: { attachments: false, verify: false, revoke: false, companyInfo: false },
     availability: 'coming_soon', requiredScopes: [], configured: false,
@@ -1370,17 +1378,19 @@ export const FIXTURE_ACCOUNTING_FEED_ATTENTION = {
 //     to it too: a fixture whose parts disagree with its own total would
 //     photograph a page no backend could serve.
 //   - Dates are ABSOLUTE (the capture-stability rule above): the range is a
-//     fixed 30-day window ending 2026-07-11, so "last seen", day buckets and
+//     fixed 30-day window ending 2026-07-10T14:30Z — off midnight on purpose
+//     (#3051), so the last `by_day` bucket is a partial day and the capture
+//     shows the striped bar and its note — so "last seen", day buckets and
 //     the balance series render identically on the day the PNG is taken.
 //   - `basis.tz` is 'UTC' — a headless capture browser sends no zone, and the
 //     endpoint defaults to UTC; the doc (docs/product/analytics.md) states the
 //     page sends the user's zone in a real browser.
 export const ANALYTICS_RANGE = {
-  from: '2026-06-11T00:00:00.000Z',
-  to: '2026-07-11T00:00:00.000Z',
+  from: '2026-06-10T14:30:00.000Z',
+  to: '2026-07-10T14:30:00.000Z',
   days: 30,
-  previous_from: '2026-05-12T00:00:00.000Z',
-  previous_to: '2026-06-11T00:00:00.000Z',
+  previous_from: '2026-05-11T14:30:00.000Z',
+  previous_to: '2026-06-10T14:30:00.000Z',
 }
 export const FIXTURE_ANALYTICS_MERCHANTS = [
   {
@@ -1411,12 +1421,21 @@ export const FIXTURE_ANALYTICS_BY_DAY = [
 ]
 // 30 absolute daily snapshot values, deterministic (no randomness — a capture
 // must re-render identically), ending on the dashboard's own account total so
-// the two screens never disagree in a capture. Dates run 2026-06-12 →
-// 2026-07-11 UTC (the range's own window) by epoch arithmetic, not date-string
-// arithmetic — `2026-06-${12 + i}` would roll past the month's end silently.
+// the two screens never disagree in a capture. Dates run 2026-06-11 →
+// 2026-07-10 UTC (the range's own window: `from` + 1 day through the date of
+// `to`) by epoch arithmetic, not date-string arithmetic — `2026-06-${11 + i}`
+// would roll past the month's end silently.
 const ANALYTICS_BALANCE_START = 12_354.52
 const ANALYTICS_BALANCE_END = FIXTURE_OVERVIEW.totals.usd
-const ANALYTICS_BALANCE_DAY_MS = Date.UTC(2026, 5, 12) // range `from` + 1 day
+// Derived from the range, not typed beside it: the day AFTER `from`'s date,
+// so an edit to ANALYTICS_RANGE cannot leave the series outside the window
+// the endpoint would return (re-verification of #3051 found the previous
+// hand-typed literal a day past `to`, green on every suite).
+const ANALYTICS_BALANCE_DAY_MS = Date.UTC(
+  new Date(ANALYTICS_RANGE.from).getUTCFullYear(),
+  new Date(ANALYTICS_RANGE.from).getUTCMonth(),
+  new Date(ANALYTICS_RANGE.from).getUTCDate() + 1,
+)
 const analyticsBalanceDate = (i) => new Date(ANALYTICS_BALANCE_DAY_MS + i * 86_400_000).toISOString().slice(0, 10)
 // Wire shape (B #2946): `value` is a numeric STRING like every money field on
 // the response, so the generator's number is stringified here, not at render.
@@ -1546,11 +1565,11 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname === '/transactions') {
     // The aggregated feed (useTransactionsFeed).
-    return { transactions: FIXTURE_TXS, total: FIXTURE_TXS.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedSafeIds: [], truncated: false }
+    return { transactions: FIXTURE_TXS, total: FIXTURE_TXS.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedAccountIds: [], truncated: false }
   }
   if (pathname === '/transactions/filters') {
     return {
-      safes: [{ id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name, address: FIXTURE_ACCOUNT.safe_address, chainId: FIXTURE_ACCOUNT.chain_id }],
+      safes: [{ id: FIXTURE_ACCOUNT.id, name: FIXTURE_ACCOUNT.name, address: FIXTURE_ACCOUNT.account_address, chainId: FIXTURE_ACCOUNT.chain_id }],
       agents: FIXTURE_AGENTS.map((a) => ({ id: a.id, name: a.name, status: a.status })),
       tokens: [
         { key: `usdc:${FIXTURE_ACCOUNT.chain_id}`, symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', chainId: FIXTURE_ACCOUNT.chain_id, isNative: false },
@@ -1566,7 +1585,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     // The account-scoped signer set (#1081/#1089) — one passkey, so the
     // Backup & recovery card renders its "only one way to approve" state.
     return {
-      account_address: FIXTURE_ACCOUNT.safe_address,
+      account_address: FIXTURE_ACCOUNT.account_address,
       chain_id: FIXTURE_ACCOUNT.chain_id,
       owner_address: null,
       passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
@@ -2280,7 +2299,6 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false, col
       })
     }
     if (api === '/auth/me') return json(FIXTURE_USER)
-    if (api === '/user/safes') return json({ safes: FIXTURE_USER.accounts })
     const populated = fixtureFor(api + search)
     // #2194: the SAME `instanceof` check the scenario branch above makes, for
     // the same reason and one layer down. `fixtureFor` can now seed a route's
@@ -2441,7 +2459,7 @@ const CONNECT_COMMAND = `npx -y @haven_ai/connect@alpha --setup ${CONNECT_SETUP_
  */
 const BACKUP_RECOVERY_STAGES = {
   healthy: {
-    account_address: FIXTURE_ACCOUNT.safe_address,
+    account_address: FIXTURE_ACCOUNT.account_address,
     chain_id: FIXTURE_ACCOUNT.chain_id,
     owner_address: '0x' + 'ee'.repeat(20),
     // Both dates are noon UTC so the rendered day cannot slide either way with
@@ -2459,7 +2477,7 @@ const BACKUP_RECOVERY_STAGES = {
   // this is the minimum that renders it — and `owner_address: null` rather
   // than an omitted key, because the absence is the claim.
   'one-way': {
-    account_address: FIXTURE_ACCOUNT.safe_address,
+    account_address: FIXTURE_ACCOUNT.account_address,
     chain_id: FIXTURE_ACCOUNT.chain_id,
     owner_address: null,
     passkeys: [
@@ -2602,7 +2620,7 @@ function connectorRepairHintScenarios() {
           haven_wallet: {
             id: FIXTURE_ACCOUNT.id,
             name: FIXTURE_ACCOUNT.name,
-            address: FIXTURE_ACCOUNT.safe_address,
+            address: FIXTURE_ACCOUNT.account_address,
             chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
@@ -2635,7 +2653,7 @@ function connectorRepairHintScenarios() {
       }
       if (apiPath === '/agents/agent-research/account-signers') {
         return {
-          account_address: FIXTURE_ACCOUNT.safe_address,
+          account_address: FIXTURE_ACCOUNT.account_address,
           chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: null,
           passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
@@ -2737,6 +2755,9 @@ const SETTINGS_ACCOUNTING_STAGES = {
     updatedAt: '2026-06-12T03:00:00.000Z',
     settings: { suggestedAccount: null, autoFeed: true },
   },
+  // #3017: the Accounted row — not connected, waiting for a pasted key. The
+  // paste modal opens from THIS row's Connect.
+  'api-key-modal': null,
   // The card's two OFF states (#2869): no connection row at all, and the
   // FEED STATUS answer is what makes the state — `hosted && !enabled` lists
   // every provider as Coming soon with no action; `!hosted` lists none.
@@ -2807,7 +2828,7 @@ async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
 export const SCENARIOS = {
   'settings-accounting': {
     description:
-      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), and the two feed OFF states — Coming soon and self-hosted (#2869)',
+      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), the Accounted paste modal (#3017), and the two feed OFF states — Coming soon and self-hosted (#2869)',
     stages: SETTINGS_ACCOUNTING_STAGES,
     /** Exposed so the fixture-contract test can pin each stage. */
     stage: setSettingsAccountingStage,
@@ -2851,8 +2872,11 @@ export const SCENARIOS = {
       // Each stage waits on its own distinguishing copy AND its action, and
       // refuses the neighbouring states' actions — a stage that quietly
       // rendered the previous one would otherwise file under the wrong name.
+      // #3017: the chip wait is scoped to the FORTNOX row — with Accounted
+      // live too, its "Not connected" chip is a second match on the card.
+      const fortnoxRow = card.getByTestId('connection-row-fortnox')
       const expectState = async (stage, chip, action, refused) => {
-        await card.getByText(chip, { exact: true }).waitFor({ timeout: 15_000 })
+        await fortnoxRow.getByText(chip, { exact: true }).waitFor({ timeout: 15_000 })
         await fortnoxActions.getByRole('button', { name: action, exact: true }).waitFor({ timeout: 15_000 })
         for (const name of refused) {
           await refuseIfPresent(fortnoxActions.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
@@ -2895,6 +2919,26 @@ export const SCENARIOS = {
       await openStage('disconnected')
       await card.getByText(/What was fed earlier stays in Haven/).waitFor({ timeout: 15_000 })
       await expectState('disconnected', 'Not connected', 'Connect', ['Reconnect', 'Settings', 'Disconnect'])
+
+      // ── the Accounted paste modal (#3017) ─────────────────────────────────
+      // The Accounted row waits for a pasted key; its Connect opens the modal
+      // (no redirect), the Fortnox row's Connect keeps driving OAuth.
+      await openStage('api-key-modal')
+      const accountedActions = card.getByTestId('connection-actions-accounted')
+      await card.getByText(/Connect to feed settled payments to Accounted\./).waitFor({ timeout: 15_000 })
+      await accountedActions.getByRole('button', { name: 'Connect', exact: true }).waitFor({ timeout: 15_000 })
+      // Two live rows now: Fortnox's assertions must stay scoped to its row.
+      await refuseIfPresent(accountedActions.getByRole('button', { name: 'Reconnect', exact: true }), 'settings-accounting · api-key-modal · Reconnect')
+      await accountedActions.getByRole('button', { name: 'Connect', exact: true }).click()
+      const apiKeyDialog = page.getByTestId('api-key-connect-modal')
+      await apiKeyDialog.getByRole('heading', { name: 'Connect Accounted with an API key' }).waitFor({ timeout: 15_000 })
+      // The steps are the evidence: where the keys page is, the two scopes
+      // verbatim, the revoke note.
+      await apiKeyDialog.getByText(/Tick exactly companies:read, documents:write\./).waitFor({ timeout: 15_000 })
+      await apiKeyDialog.getByText(/revoke the key in your Accounted dashboard/).waitFor({ timeout: 15_000 })
+      await apiKeyDialog.locator('input[type="password"]').waitFor({ timeout: 15_000 })
+      await card.scrollIntoViewIfNeeded()
+      await shoot(apiKeyDialog, 'api-key-modal')
 
       // ── the backfill choice on a first connect ────────────────────────────
       await openStage('first-connect', '?provider=fortnox&connect=connected')
@@ -3245,7 +3289,7 @@ export const SCENARIOS = {
           // loaded — which is the only state the footer string exists in.
           hasMore: offset === 0,
           partialFailure: false,
-          failedSafeIds: [],
+          failedAccountIds: [],
           truncated: true,
         }
       }
@@ -3553,7 +3597,7 @@ export const SCENARIOS = {
       // otherwise have DELETED the refusal's only rendered evidence.
       if (apiPath === '/agents/agent-retired/account-signers') {
         return {
-          account_address: FIXTURE_ACCOUNT.safe_address,
+          account_address: FIXTURE_ACCOUNT.account_address,
           chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [],
@@ -3561,7 +3605,7 @@ export const SCENARIOS = {
       }
       if (apiPath.endsWith('/account-signers')) {
         return {
-          account_address: FIXTURE_ACCOUNT.safe_address,
+          account_address: FIXTURE_ACCOUNT.account_address,
           chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [
@@ -3672,7 +3716,7 @@ export const SCENARIOS = {
     api(apiPath) {
       if (apiPath.startsWith('/accounts/hybrid/') && apiPath.endsWith('/signers')) {
         return {
-          account_address: FIXTURE_ACCOUNT.safe_address,
+          account_address: FIXTURE_ACCOUNT.account_address,
           chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
@@ -3728,7 +3772,7 @@ export const SCENARIOS = {
           haven_wallet: {
             id: FIXTURE_ACCOUNT.id,
             name: FIXTURE_ACCOUNT.name,
-            address: FIXTURE_ACCOUNT.safe_address,
+            address: FIXTURE_ACCOUNT.account_address,
             chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
@@ -3759,7 +3803,7 @@ export const SCENARIOS = {
           haven_wallet: {
             id: FIXTURE_ACCOUNT.id,
             name: FIXTURE_ACCOUNT.name,
-            address: FIXTURE_ACCOUNT.safe_address,
+            address: FIXTURE_ACCOUNT.account_address,
             chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
@@ -3870,7 +3914,7 @@ export const SCENARIOS = {
           haven_wallet: {
             id: FIXTURE_ACCOUNT.id,
             name: FIXTURE_ACCOUNT.name,
-            address: FIXTURE_ACCOUNT.safe_address,
+            address: FIXTURE_ACCOUNT.account_address,
             chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
@@ -3907,7 +3951,7 @@ export const SCENARIOS = {
       // connect-wallet fallback instead of the Approve button this issue is about.
       if (apiPath === '/agents/agent-research/account-signers') {
         return {
-          account_address: FIXTURE_ACCOUNT.safe_address,
+          account_address: FIXTURE_ACCOUNT.account_address,
           chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: null,
           passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
@@ -3967,7 +4011,7 @@ export const SCENARIOS = {
     'Recover funds route when the agent has no verified Haven wallet destination (#2258)',
     {
       delegate_address: '0x2222222222222222222222222222222222222222',
-      safe_address: null,
+      account_address: null,
       chain_id: 8453,
       eth: '0',
       eth_atomic: '0',
@@ -4033,7 +4077,7 @@ export const SCENARIOS = {
           haven_wallet: {
             id: FIXTURE_ACCOUNT.id,
             name: FIXTURE_ACCOUNT.name,
-            address: FIXTURE_ACCOUNT.safe_address,
+            address: FIXTURE_ACCOUNT.account_address,
             chain_id: FIXTURE_ACCOUNT.chain_id,
             network: 'Base Sepolia',
           },
@@ -4144,7 +4188,7 @@ export const SCENARIOS = {
               haven_wallet: {
                 id: FIXTURE_ACCOUNT.id,
                 name: FIXTURE_ACCOUNT.name,
-                address: FIXTURE_ACCOUNT.safe_address,
+                address: FIXTURE_ACCOUNT.account_address,
                 chain_id: FIXTURE_ACCOUNT.chain_id,
                 network: 'Base Sepolia',
               },
@@ -4226,7 +4270,7 @@ export const SCENARIOS = {
         // Owner-only set: an EOA owner, zero enrolled passkeys — #2068's
         // shape, where the connected wallet's identity is the whole answer.
         return {
-          account_address: FIXTURE_ACCOUNT.safe_address,
+          account_address: FIXTURE_ACCOUNT.account_address,
           chain_id: FIXTURE_ACCOUNT.chain_id,
           owner_address: '0x' + 'ee'.repeat(20),
           passkeys: [],
@@ -4313,9 +4357,7 @@ export const SCENARIOS = {
     // (`041_hybrid_accounts.ts:29`) and the wire type requires the field
     // (`core/src/api-types.ts:10025`). The legacy rail has a name; this uses it.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
-      // Same both-endpoints reasoning as the unresolved twin below.
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4366,8 +4408,7 @@ export const SCENARIOS = {
       // one thing that differs, and `screenshot-fixture.test.ts` pins that.
       const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }
       delete safeWithoutChain.chain_id
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain], safes: [safeWithoutChain] }
-      if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4390,8 +4431,7 @@ export const SCENARIOS = {
     // #2202 — see `add-funds` for why it is SET rather than dropped) so the
     // hero renders its action buttons instead of `PasskeyOtherDeviceNotice`.
     api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4438,8 +4478,7 @@ export const SCENARIOS = {
       // one thing that differs, and `screenshot-fixture.test.ts` pins that.
       const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }
       delete safeWithoutChain.chain_id
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain], safes: [safeWithoutChain] }
-      if (apiPath === '/user/safes') return { safes: [safeWithoutChain] }
+      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain] }
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -4488,9 +4527,8 @@ export const SCENARIOS = {
         return { ...FIXTURE_OVERVIEW, onboardingProgress: { hasFirstAgentPayment: false } }
       }
       if (apiPath === '/auth/me') {
-        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }], safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       }
-      if (apiPath === '/user/safes') return { safes: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
       return undefined
     },
     async run({ page, vp, shoot }) {

@@ -406,10 +406,6 @@ describe('HavenClient structural boundary', () => {
       'AgentPaymentFailureCodeDescriptions',
       'AgentPaymentFailureCodeSchema',
       'AgentPaymentNextAction',
-      // #2908: the account-vocabulary alias of `fund_safe_or_raise_allowance`,
-      // kept beside the taxonomy (not inside it) because the backend mirror is
-      // parity-pinned to the const; the two helpers collapse/match both.
-      'AgentPaymentNextActionAccountAlias',
       'AgentPaymentNextActionDescriptions',
       'AgentPaymentNextActionSchema',
       'AgentPaymentPhase',
@@ -460,13 +456,10 @@ describe('HavenClient structural boundary', () => {
       'X402_PAYMENT_REQUIRED_HEADER_NAME',
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
-      // #2908: the dual-name read/emit helpers (`account-naming.ts`).
-      'accountAddressTwins',
       'addressFromKey',
       'buildSweepAuthorizationMessage',
       'buildSweepTypedData',
       'buildX402ExpectedMessage',
-      'canonicalAgentPaymentNextAction',
       'compareNodeVersions',
       'composeDescription',
       'connectorRerunCommand',
@@ -480,15 +473,12 @@ describe('HavenClient structural boundary', () => {
       'havenTools',
       'isConnectorChannel',
       'isErc7710Option',
-      'isFundAccountOrRaiseAllowance',
       'isSupportedNodeVersion',
       'isSweepableChain',
       'isZeroSettlementTxHash', // #2970
       'normalizePaymentRequired',
       'parsePaymentRequired',
       'parsePaymentRequiredResponse',
-      'readAccountAddress',
-      'readAccountId',
       'readX402ReceiptPayer',
       'resolveConnectorChannel',
       'resolveTokenFromAddress',
@@ -539,8 +529,6 @@ describe('HavenClient structural boundary', () => {
     expect(typeOnlyExportNames(source)).toEqual([
       'AgentNextStep',
       'AgentPaymentEnumSchema',
-      // #2908: the taxonomy widened by the account-vocabulary alias.
-      'AgentPaymentNextActionWire',
       'AgentPaymentSummary',
       'AgentPaymentWarning',
       'AgentPurchaseSummary',

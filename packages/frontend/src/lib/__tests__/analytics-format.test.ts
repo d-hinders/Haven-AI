@@ -11,6 +11,8 @@ import {
   percentChange,
   rangeCaption,
   refusalsCaption,
+  formatAnalyticsTick,
+  formatAnalyticsValue,
 } from '../analytics-format'
 
 /**
@@ -247,5 +249,19 @@ describe('refusalsCaption', () => {
     expect(refusalsCaption(2, 2)).toBe('2 refused payments')
     expect(refusalsCaption(1, 1)).toBe('1 refused payment')
     expect(refusalsCaption(0, 0)).toBe('0 refused payments')
+  })
+})
+
+describe('formatAnalyticsTick — the y-axis tick, without cents (#3051)', () => {
+  it('prints whole currency units in USD, never the cents a figure carries', () => {
+    expect(formatAnalyticsTick(100, 'USD')).toBe('$100')
+    expect(formatAnalyticsTick(1240, 'USD')).toBe('$1,240')
+    // A figure in the same voice keeps its cents — the tick deliberately does not.
+    expect(formatAnalyticsValue(100, 'USD')).toBe('$100.00')
+  })
+
+  it('keeps the EUR form (symbol after, no-break space) with no fraction digits', () => {
+    expect(formatAnalyticsTick(100, 'EUR')).toBe('100\u00a0€')
+    expect(formatAnalyticsTick(1240, 'EUR')).toBe('1.240\u00a0€')
   })
 })

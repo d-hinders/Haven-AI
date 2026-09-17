@@ -15,7 +15,7 @@ covers:
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/rails/delegation-policy.ts
-  - packages/backend/src/routes/user-safes.ts
+  - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/backend/src/config.ts
   - packages/connect/src/runtime.ts
@@ -167,7 +167,7 @@ flowchart LR
   legacy Safe with a known wallet owner can be managed through Safe's own
   interface with that wallet; a Safe owned only by a Haven passkey currently
   has no self-serve exit there, and unknown owner access must not be assumed
-  ([Haven wallet routes](../../packages/backend/src/routes/user-safes.ts)).
+  ([Haven wallet routes](../../packages/backend/src/routes/user-accounts.ts)).
 - **User-authorized execution depends on signer type and threshold.** An EOA
   owner submits the Safe transaction through its connected wallet. A passkey
   signs locally and Haven relays the already-signed transaction. A Safe with a

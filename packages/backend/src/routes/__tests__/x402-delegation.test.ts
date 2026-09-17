@@ -385,7 +385,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
       expect(res.json()).toMatchObject({
         error_code: 'delegation_budget_exceeded',
         phase: 'insufficient_funds',
-        next_action: 'fund_safe_or_raise_allowance',
+        next_action: 'fund_account_or_raise_allowance',
         rail: 'x402',
         token: 'USDC',
         amount_atomic: '100000',
@@ -543,7 +543,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
       expect(res.json()).toMatchObject({
         error_code: 'delegation_budget_exceeded',
         phase: 'insufficient_funds',
-        next_action: 'fund_safe_or_raise_allowance',
+        next_action: 'fund_account_or_raise_allowance',
         rail: 'x402',
         token: 'USDC',
         amount_atomic: '100000',
@@ -584,11 +584,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
       })
       expect(res.statusCode).toBe(201)
       expect(res.json().sign_data.signature_scheme).toBe('eip712_userop')
-      // #2907: payer_account is a same-value twin of `safe` on a REAL
-      // response, not a source regex — mutation-proven by pointing
-      // payer_account at the delegate account instead.
+      // #2914 (naming epic #2906 phase 5, the contraction): `components.safe`
+      // is gone — `payer_account` is the only name now, on a REAL response,
+      // not a source regex.
       const components = res.json().sign_data.components
-      expect(components.payer_account).toBe(components.safe)
+      expect(components.safe).toBeUndefined()
+      expect(components.payer_account).toBeDefined()
       expect(components.payer_account).not.toBe(components.account)
     })
 
@@ -685,6 +686,55 @@ describe('x402 delegation-rail settlement (#830)', () => {
       expect(res.json().error).toMatch(/funding authorization failed/)
       expect(res.json().details).toContain('aa_sendUserOperation timeout')
       expect(mockCreateIntent).not.toHaveBeenCalled()
+    })
+
+    // #3052 (epic #3056 slice 1) THE DEGRADED-READ PROMOTION BOX. The
+    // #2706 pre-check in front of the prepare is the leg's named refusal for
+    // an over-budget funding redemption — but only when the enforcer read is
+    // usable. With `fromChain: false` the read is degraded, the pre-check
+    // fails open (pinned above), and the ONLY gate left is the period enforcer
+    // inside `prepareDelegationPayment`, whose revert arrives at the 502
+    // catch. Before #3052 that revert was booked for the byte-identical
+    // `POST /payments` sibling (`routes/payments.ts`, the classifier with no
+    // wrapping) and recorded nothing here, so the degraded-read path — the
+    // path #2706 says this catch is now actually reached on — had no audit
+    // trail at all. This is the promotion box the epic names for that path:
+    // degraded read + enforcer revert ⇒ the catch asks for
+    // `delegation_budget_exceeded` with the x402 source and the real merchant.
+    // Mutation-proven: removing the catch's writer turns this test red (the
+    // assertion on the ask, and the real row in the module harness suite
+    // `modules/x402/__tests__/delegation-authorize-refusal-ledger.test.ts`).
+    it('a DEGRADED read (fromChain:false) plus an enforcer revert at the prepare seam is booked as delegation_budget_exceeded (#3052)', async () => {
+      primeFundingLeg()
+      // The degraded read: the number is a fallback and must not refuse
+      // (the case above pins that), so control passes to the prepare.
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '1', fromChain: false })
+      // The enforcer's own revert text, the way viem surfaces it: wrapped in
+      // the estimation error, the period-budget custom error inside.
+      mockPrepareFunding.mockRejectedValue(
+        new Error('EstimateGasExecutionError: ERC20PeriodTransferEnforcer:transfer-amount-exceeded'),
+      )
+      mockRecordRefusal.mockImplementation(() => {})
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer ' + ['sk', 'agent', 'test', 'key', '0001'].join('_') },
+        payload: authorizeBody({ payTo: DELEGATE_EOA, merchantPayTo: MERCHANT }),
+      })
+      // The refusal response itself is the 502 it has always been — the
+      // writer classifies the error, it does not act on it.
+      expect(res.statusCode).toBe(502)
+      expect(res.json().error).toMatch(/funding authorization failed/)
+      expect(mockPrepareFunding).toHaveBeenCalledTimes(1)
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+      expect(mockRecordRefusal).toHaveBeenCalledTimes(1)
+      const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
+      expect(ask).toMatchObject({
+        reason: 'delegation_budget_exceeded',
+        source: 'x402_authorize',
+        merchantTo: MERCHANT.toLowerCase(),
+        accountAddress: '0x' + 'aa'.repeat(20),
+      })
+      expect(ask.detail).toEqual({ error_code: 'delegation_budget_exceeded' })
     })
   })
 
@@ -1593,11 +1643,11 @@ describe('x402 delegation-rail settlement (#830)', () => {
     // The whole point: NO fresh sponsored estimation ran.
     expect(mockPrepareFunding).not.toHaveBeenCalled()
     expect(mockCreateIntent).not.toHaveBeenCalled()
-    // #2907: payer_account is a same-value twin of `safe` on the REPLAY
-    // response too, not a source regex — mutation-proven by pointing
-    // payer_account at the delegate account instead.
+    // #2914 (naming epic #2906 phase 5, the contraction): `components.safe`
+    // is gone on the REPLAY response too — `payer_account` is the only name.
     const components = body.sign_data.components
-    expect(components.payer_account).toBe(components.safe)
+    expect(components.safe).toBeUndefined()
+    expect(components.payer_account).toBeDefined()
     expect(components.payer_account).not.toBe(components.account)
   })
 
@@ -2602,7 +2652,7 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
       expect(ask.detail).toEqual({
         error_code: 'delegation_budget_exceeded',
         phase: 'insufficient_funds',
-        next_action: 'fund_safe_or_raise_allowance',
+        next_action: 'fund_account_or_raise_allowance',
         remaining_atomic: '50000',
       })
     })
@@ -2686,11 +2736,153 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
       mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
       const res = await app.inject({
         method: 'POST', url: '/x402/authorize',
-        headers: { authorization: 'Bearer «redacted:sk_…»' },
+        headers: { authorization: 'Bearer ' + ['sk', 'agent', 'test', 'key', '0001'].join('_') },
         payload: authorizeBody(),
       })
       expect(res.statusCode).toBe(201)
       expect(mockRecordRefusal).not.toHaveBeenCalled()
+    })
+
+    // ── #3052 (epic #3056 slice 1): the two EIP-3009 funding-leg refusals
+    // that had no writer while their siblings for the identical condition
+    // did. Same characterization contract as everything above: the response is
+    // byte-identical with the ledger succeeding AND failing, and the write ask
+    // carries the named reason, the x402 source, and the REAL merchant (never
+    // the funding EOA — `payTo` on this leg is the agent's own delegate).
+    // The row landing is proven against real Postgres in
+    // modules/x402/__tests__/delegation-authorize-refusal-ledger.test.ts.
+
+    /** Persistent rejection at the prepare seam: both injections of one test
+     *  must answer the same 502 (a Once-rejection would let the second fall
+     *  through to the base implementation and answer a different status). */
+    function fundingPrepareReverts(message: string) {
+      mockSelect.mockResolvedValue({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
+      mockPrepareFunding.mockRejectedValue(new Error(message))
+    }
+
+    it('the funding-leg prepare revert (expired caveat) is booked as delegation_expired; the 502 is byte-identical with a broken ledger (#3052)', async () => {
+      // The classifier's four-way contract at this call site: the timestamp
+      // enforcer's revert text names a refusal, so the catch books it. The
+      // 502 response — a raw redacted vendor dump — is untouched either way.
+      fundingPrepareReverts(
+        "before execution's timestamp is before this caveat's beforeThreshold",
+      )
+      const body = authorizeBody({ payTo: FUNDING_EOA, merchantPayTo: MERCHANT })
+
+      mockRecordRefusal.mockImplementation(() => {})
+      const withLedger = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer ' + ['sk', 'agent', 'test', 'key', '0001'].join('_') },
+        payload: body,
+      })
+      expect(withLedger.statusCode).toBe(502)
+      expect(withLedger.json().error).toMatch(/funding authorization failed/)
+      expect(mockRecordRefusal).toHaveBeenCalledTimes(1)
+      const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
+      expect(ask).toMatchObject({
+        userId: 'user-1',
+        agentId: 'agent-1',
+        chainId: 84532,
+        tokenSymbol: 'USDC',
+        amountAtomic: '100000',
+        accountAddress: '0x' + 'aa'.repeat(20),
+        // The issue calls this out by name: on this leg `payTo` is the
+        // agent's own funding EOA; the ledger must name the real merchant.
+        merchantTo: MERCHANT.toLowerCase(),
+        resourceUrl: 'https://merchant.example/resource',
+        reason: 'delegation_expired',
+        source: 'x402_authorize',
+      })
+      expect(ask.detail).toEqual({ error_code: 'delegation_expired' })
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+
+      mockRecordRefusal.mockReset()
+      mockRecordRefusal.mockImplementation(() => {
+        Promise.reject(new Error('payment_refusals write exploded')).catch(() => {})
+      })
+      const withBrokenLedger = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer ' + ['sk', 'agent', 'test', 'key', '0001'].join('_') },
+        payload: body,
+      })
+      expect(withBrokenLedger.statusCode).toBe(502)
+      expect(JSON.stringify(withBrokenLedger.json())).toBe(JSON.stringify(withLedger.json()))
+    })
+
+    it('an unclassifiable prepare failure (an outage, not a revert) still 502s and writes NOTHING (#3052)', async () => {
+      // The null half of the classifier's contract AT THIS CALL SITE (the
+      // classifier's unit contract is pinned in refusal-ledger.test.ts): the
+      // guardrails refused nothing, the infrastructure broke, and recording it
+      // would pollute the refusal ledger with outages. Same 502 shape, zero
+      // ledger asks.
+      fundingPrepareReverts('fetch failed: bundler unreachable (ETIMEDOUT)')
+      mockRecordRefusal.mockImplementation(() => {})
+      const res = await app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer ' + ['sk', 'agent', 'test', 'key', '0001'].join('_') },
+        payload: authorizeBody({ payTo: FUNDING_EOA, merchantPayTo: MERCHANT }),
+      })
+      expect(res.statusCode).toBe(502)
+      expect(res.json().error).toMatch(/funding authorization failed/)
+      expect(mockRecordRefusal).not.toHaveBeenCalled()
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+    })
+
+    it('the no-fundable-delegation 403 on the 3009 leg is booked as no_delegation_for_target; the body is unchanged by a broken ledger (#3052)', async () => {
+      // `prepareDelegationPayment` resolving null: no open (unpinned) budget
+      // can fund the EOA. The condition the erc7710 branch above and the
+      // POST /payments sibling both booked from the start; this leg answered
+      // it with nothing in the audit trail. Same reason, same source, the
+      // merchant — never the funding EOA.
+      mockSelect.mockResolvedValue({
+        delegation_hash: `0x${'12'.repeat(32)}`,
+        delegation_json: JSON.stringify(signedBudget),
+        recipient_address: null,
+      })
+      mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
+      mockPrepareFunding.mockResolvedValue(null)
+      const body = authorizeBody({ payTo: FUNDING_EOA, merchantPayTo: MERCHANT })
+      const inject403 = async () => {
+        const res = await app.inject({
+          method: 'POST', url: '/x402/authorize',
+          headers: { authorization: 'Bearer ' + ['sk', 'agent', 'test', 'key', '0001'].join('_') },
+          payload: body,
+        })
+        expect(res.statusCode).toBe(403)
+        expect(res.json().error).toMatch(/no delegation able to fund EIP-3009 settlement/)
+        return JSON.stringify(res.json())
+      }
+
+      mockRecordRefusal.mockImplementation(() => {})
+      const withLedger = await inject403()
+      expect(mockRecordRefusal).toHaveBeenCalledTimes(1)
+      const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
+      expect(ask).toMatchObject({
+        userId: 'user-1',
+        agentId: 'agent-1',
+        chainId: 84532,
+        tokenSymbol: 'USDC',
+        amountAtomic: '100000',
+        accountAddress: '0x' + 'aa'.repeat(20),
+        merchantTo: MERCHANT.toLowerCase(),
+        resourceUrl: 'https://merchant.example/resource',
+        reason: 'no_delegation_for_target',
+        source: 'x402_authorize',
+      })
+      expect(ask.detail).toEqual({ error_code: 'no_delegation_for_target' })
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+
+      mockRecordRefusal.mockReset()
+      mockRecordRefusal.mockImplementation(() => {
+        Promise.reject(new Error('payment_refusals write exploded')).catch(() => {})
+      })
+      const withBrokenLedger = await inject403()
+      expect(withBrokenLedger).toBe(withLedger)
     })
   })
 })

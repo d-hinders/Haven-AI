@@ -12,7 +12,7 @@ import { parseIsoTimestamp, paymentAgentIdentityKey } from './ordering.js'
 import type { EnrichedTransaction, SmartAccountRow } from './types.js'
 
 function x402FundingIdentityKey(tx: EnrichedTransaction): string {
-  return paymentAgentIdentityKey(tx.hash, tx.safeId, tx.chainId)
+  return paymentAgentIdentityKey(tx.hash, tx.accountId, tx.chainId)
 }
 
 export async function fetchConfirmedX402Transactions(
@@ -21,8 +21,8 @@ export async function fetchConfirmedX402Transactions(
 ): Promise<EnrichedTransaction[]> {
   if (safes.length === 0) return []
 
-  const safeIds = safes.map((safe) => safe.id)
-  const paymentIntentRows = await findConfirmedX402PaymentIntents(userId, safeIds)
+  const accountIds = safes.map((safe) => safe.id)
+  const paymentIntentRows = await findConfirmedX402PaymentIntents(userId, accountIds)
   // #2055: the approval-request half of x402 history is gone with the table
   // (queue-history readability waived, owner decision on #2021).
 
@@ -59,9 +59,9 @@ export async function fetchConfirmedX402Transactions(
       x402ResourceUrl: row.x402_resource_url,
       x402MerchantAddress: row.x402_merchant_address,
       chainId: row.chain_id,
-      safeId: row.account_id,
-      safeAddress: row.account_address,
-      safeName: row.safe_name,
+      accountId: row.account_id,
+      accountAddress: row.account_address,
+      accountName: row.account_name,
       agentId: row.agent_id,
       agentName: row.agent_name,
       paymentId: row.id,

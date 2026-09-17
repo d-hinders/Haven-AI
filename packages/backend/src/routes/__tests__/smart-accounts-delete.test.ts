@@ -22,18 +22,18 @@ vi.mock('../../db.js', () => ({
 // #1988 deleted `relaySafeDeploy`; the route no longer imports the accounts
 // module, so there is nothing left to mock.
 
-import userSafesRoutes from '../user-safes.js'
+import userAccountsRoutes from '../user-accounts.js'
 
 const SAFE_ID = '11111111-1111-1111-1111-111111111111'
 
-describe('DELETE /user/safes/:safeId', () => {
+describe('DELETE /user/accounts/:safeId', () => {
   let app: FastifyInstance
   let token: string
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
-    await app.register(userSafesRoutes, { prefix: '/user/safes' })
+    await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
     token = app.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })
   })
 
@@ -55,7 +55,7 @@ describe('DELETE /user/safes/:safeId', () => {
 
     const response = await app.inject({
       method: 'DELETE',
-      url: `/user/safes/${SAFE_ID}`,
+      url: `/user/accounts/${SAFE_ID}`,
       headers: { authorization: `Bearer ${token}` },
     })
 
@@ -78,7 +78,7 @@ describe('DELETE /user/safes/:safeId', () => {
 
     const response = await app.inject({
       method: 'DELETE',
-      url: `/user/safes/${SAFE_ID}`,
+      url: `/user/accounts/${SAFE_ID}`,
       headers: { authorization: `Bearer ${token}` },
     })
 
@@ -98,7 +98,7 @@ describe('DELETE /user/safes/:safeId', () => {
 
     const response = await app.inject({
       method: 'DELETE',
-      url: `/user/safes/${SAFE_ID}`,
+      url: `/user/accounts/${SAFE_ID}`,
       headers: { authorization: `Bearer ${token}` },
     })
 

@@ -94,7 +94,7 @@ function ledgerInput(userId: string, agentId: string, overrides: Record<string, 
     detail: {
       error_code: 'delegation_budget_exceeded',
       phase: 'insufficient_funds',
-      next_action: 'fund_safe_or_raise_allowance',
+      next_action: 'fund_account_or_raise_allowance',
       remaining_atomic: '50000',
       amount: '0.10',
       components: { account: '0xwhatever' },
@@ -175,7 +175,7 @@ describeDb('refusal ledger fire-and-forget contract (#2945)', () => {
     expect(row.detail).toEqual({
       error_code: 'delegation_budget_exceeded',
       phase: 'insufficient_funds',
-      next_action: 'fund_safe_or_raise_allowance',
+      next_action: 'fund_account_or_raise_allowance',
       remaining_atomic: '50000',
     })
     expect(row.reason).toBe('delegation_budget_exceeded')

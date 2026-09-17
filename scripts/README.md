@@ -272,18 +272,38 @@ form for a second attempt at a version that failed to publish.
 
 ### The contract-doc gate
 
-Two **contract docs** are coupled to the published packages, and the blocking
+**Three** contract docs are coupled to the published packages, and the blocking
 `Contract-doc coupling` check fails until a PR that touches those packages also
-touches them. A version bump touches all five, so **every release PR needs
-both** — this is not optional and not conditional:
+satisfies each. A version bump touches all five packages, so **every release PR
+needs all three** — not optional, not conditional, and **this paragraph said
+"two" until 2026-09-16**, having silently dropped `package-dev-channel.md`.
+
+The count is the gate's, not a memory:
+
+```sh
+node scripts/docs/coupling-gate.mjs --strict \
+  --changed=packages/connect/src/runtime.ts,packages/sdk/package.json,packages/signer/src/server.ts
+# BLOCKING: 3 contract doc(s) …
+```
+
+Two are edited directly; the third is cleared by the shard:
 
 1. **`docs/operations/mcp-runtime-compatibility.md`** — the *Supported Runtime
    Manifest* table is **re-pinned by the bump** ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)),
    so do not copy those four numbers by hand. Still yours: re-read the table,
-   update its `last-verified` date, and record in the release PR and shard what
-   the release carries and that no tool, capability, or version-skew surface
-   moved. See *The manifest table writes itself* below.
-2. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md`** — a new
+   and record in the release PR and shard what the release carries and whether
+   any tool, capability or version-skew surface moved — on a release that does
+   move one, say which, rather than reaching for "nothing moved". Bump
+   `last-verified` only if you re-verified the document; if it already reads
+   today from an earlier change, say so and leave it, per the rule in item 2.
+   See *The manifest table writes itself* below.
+2. **`docs/operations/package-dev-channel.md`** — the doc the old "two" dropped.
+   The bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`),
+   which sits in this doc's `covers:`, so every release couples it; the 0.1.37,
+   0.2.0 and 0.2.1 releases all touched it. Write a scoped note naming what you
+   re-verified. If `last-verified` already reads today from an earlier change,
+   say so and leave it — a rubber-stamped date is worse than a stale one.
+3. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md`** — a new
    shard, named for the **version** and not the PR number (#1789): the gate
    blocks the PR until the shard exists, so the shard has to be written *before*
    there is a PR number to name it after. The version is known from the moment

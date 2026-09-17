@@ -8,6 +8,46 @@ alone.
 
 ## Unreleased
 
+## 0.3.0-alpha.0 — 2026-09-17
+
+### Fixed
+
+- **BREAKING for older backends, and a fix against current ones (#2914).**
+  `GET /user/accounts` returns an `accounts` envelope; this package still read
+  `safes`, which broke `wallets list`, `wallets balances`, `wallets funding`,
+  `activity list --safe`, `activity export --safe` and `agents connect` with a
+  `TypeError`. The envelope is now read through one function that fails with a
+  sentence naming the cause instead of a stack trace.
+
+### Removed
+
+- The dual-name emission promised by 0.2.0-alpha.0 is gone, one release later
+  as stated there: `--json` and the CSV header carry `account_id` /
+  `account_address` only (the `safe_address` CSV column is dropped, shifting
+  column indexes for an importer keyed on position), `/transactions` is
+  queried with `?accountId=` only, and the connection-setup body sends
+  `account_id` only.
+
+### Compatibility note
+
+- **Requests.** The server accepts `safeId` / `safe_id` **beside** the new name
+  when both agree, so the dual-sending 0.2.x CLI keeps working against a
+  contracted backend; sending only the retired name is refused with a typed
+  400.
+- **Responses.** A published client cannot dual-READ, so two names it depends
+  on are not contracted in this release: the `safes` envelope key on
+  `GET /user/accounts` (0.2.1-alpha.0 destructures it at five call sites and
+  would throw) and `safeName` on the `GET /transactions` feed (it renders the
+  ACCOUNT column from that name and would print every row blank). Both are
+  emitted alongside `accounts` / `accountName` for one more release and are
+  removed in the release after this one, by which time `latest` reads the new
+  names.
+- Together those mean **there is no release-ordering constraint** — neither
+  side has to ship first. An earlier draft of this entry claimed that on the
+  strength of the request half alone; review caught that the response half
+  imposed exactly such a constraint, and the fix was to remove the constraint
+  rather than to document it.
+
 ## 0.2.1-alpha.0 — 2026-09-16
 
 - **No source change in this release.** `@haven_ai/cli` is republished so its version and

@@ -85,7 +85,7 @@ function authorizeResponse() {
     payment_id: 'pay_321',
     status: 'pending_signature',
     chain_id: 8453,
-    safe_address: safeAddress,
+    account_address: safeAddress,
     token: 'USDC',
     amount: '0.02',
     to: delegateAddress,
@@ -95,7 +95,7 @@ function authorizeResponse() {
       signature_scheme: 'eip712_userop',
       typed_data: userOpTypedData,
       components: {
-        safe: safeAddress,
+        payer_account: safeAddress,
         token: paymentRequired.accepts[0].asset,
         to: delegateAddress,
         amount: paymentRequired.accepts[0].amount,

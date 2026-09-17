@@ -11,14 +11,14 @@ covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/routes/agents.ts
-  - packages/backend/src/routes/user-safes.ts
+  - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/modules/agents/rekey-*.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
   - packages/backend/src/infra/repositories/smart-accounts.ts
-  - packages/backend/src/routes/user-safes.ts
+  - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/backend/src/rails/hybrid-transfers.ts
   - packages/backend/src/infra/repositories/hybrid-signers.ts
@@ -35,7 +35,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-14"
+last-verified: "2026-09-17"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -302,6 +302,13 @@ chain.
 > old table or columns now name the new ones with the old in parentheses. The
 > wire keys this document quotes (`safe_address`, `safe_id` on responses) are
 > still emitted — the #2907 alias mappers are untouched and fed by local shims.
+>
+> **Superseded by #2914 (2026-09-17), appended rather than rewritten:** that
+> last sentence was true when it was written and is not now. The contraction
+> deleted `openapi/wire-aliases.ts` and the local shims with it, so the
+> responses this document quotes carry `account_address` / `account_id` and
+> nothing else. Read the paragraph above as the record of what #2911 did; read
+> this one for what the wire does today.
 
 > **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
 > migration):** this diff touched one file in this document's coverage list,
@@ -460,7 +467,7 @@ names the consequence and asks for confirmation, and the API does not refuse
 
 **Read surface (#1079).** The signer set is additionally readable at account
 level via `GET /accounts/hybrid/:address/signers` — owner-scoped (dashboard
-JWT + ownership check on `smart_accounts`, `user_safes` before #2911) and returning **public-key material
+JWT + ownership check on `smart_accounts`) and returning **public-key material
 plus per-credential enrollment time** (`key_id`, P256 x/y, owner address, and
 `created_at` since #1679 — a timestamp the UI uses to label rows
 "Passkey · added {date}"; nothing secret, nothing spend-enabling). It powers
@@ -802,8 +809,7 @@ moment the user has nothing at risk and no context for what a backup protects.
   on the server's classification instead of re-deriving chain semantics
   client-side.
 - **The waiver column survives as history, not as an unblock.**
-  `smart_accounts.single_signer_waiver_at` (migration 046; the table was
-  `user_safes` until #2911) is still written when an
+  `smart_accounts.single_signer_waiver_at` (migration 046) is still written when an
   acknowledgement is sent, and nothing requires it to proceed. It no longer
   silences the recommendation either — it never made an account recoverable; it
   only recorded that someone had been told once, and the risk is ongoing.
@@ -905,6 +911,12 @@ hard backstop.
 > actually reachable through both names, which is the whole point of an
 > additive rename. Proven with a parity test that fails 4 assertions when the
 > twin entries are removed.
+>
+> **Superseded at #2914:** the contraction removed the `/user/safes` pair from
+> `OWNER_CLI_ALLOWED_ROUTES` rather than keeping both, so the allow-list now
+> carries the `/user/accounts` names alone and matches §9 exactly. A reader
+> should not act on the "adding the two twin entries" instruction above — it
+> records what #2907 did, not what the list holds today.
 
 > **Re-verified #2850:** this diff touched two files in this document's
 > covered-paths list — `routes/agent-rekey.ts` and `routes/agents.ts` — each by
@@ -1058,8 +1070,8 @@ the sponsored revocation, the CLI prints the dashboard signing link, and the
 signature happens in the owner's browser, every time. **The human keeps
 every signature**, which is the same boundary §3 draws for the delegation
 itself. Since #2534 it can also read the
-funding instructions for one of the owner's Safes
-(`GET /user/safes/{safeId}/funding`): balances, chain facts and the documented
+funding instructions for one of the owner's accounts
+(`GET /user/accounts/{accountId}/funding`): balances, chain facts and the documented
 minimum-useful amounts a human acts on — the same read-only category as the
 rest of the list, moving no money and touching no delegation state.
 

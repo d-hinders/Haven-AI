@@ -222,7 +222,7 @@ export const x402Delegation3009GraceResume: Scenario = {
     if (amount <= 0n) return fail(`invalid EIP-3009 amount in merchant challenge: ${option.amount}`)
 
     const agent = await api.getAgent()
-    const treasury = agent.data.safe_address
+    const treasury = agent.data.account_address
     if (!treasury) return fail('could not read the agent account from GET /machine-payments/agent')
     const [treasuryBefore, merchantBefore, delegateBefore] = (await Promise.all([
       usdc.balanceOf(treasury), usdc.balanceOf(option.payTo), usdc.balanceOf(delegate.address),

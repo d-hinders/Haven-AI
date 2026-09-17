@@ -62,7 +62,7 @@ const X402_ROW: X402PaymentIntentRow = {
   agent_name: 'Alice',
   account_id: 'safe-1',
   account_address: '0xsafe',
-  safe_name: 'Main',
+  account_name: 'Main',
   chain_id: 8453,
   token_symbol: 'USDC',
   token_address: '0xusdc',
@@ -114,7 +114,7 @@ const SWEEP_ROW: DelegateSweepAgentRow = {
 /** Raw transaction shape before the aggregation step tags Safe scope on it. */
 type RawTx = Omit<
   EnrichedTransaction,
-  'chainId' | 'safeId' | 'safeAddress' | 'safeName' | 'agentId' | 'agentName'
+  'chainId' | 'accountId' | 'accountAddress' | 'accountName' | 'agentId' | 'agentName'
 >
 
 /** Tag a raw transaction with the Safe scope the aggregation step adds. */
@@ -122,9 +122,9 @@ function withSafe(tx: RawTx): EnrichedTransaction {
   return {
     ...tx,
     chainId: 8453,
-    safeId: 'safe-1',
-    safeAddress: '0xsafe',
-    safeName: 'Main',
+    accountId: 'safe-1',
+    accountAddress: '0xsafe',
+    accountName: 'Main',
   }
 }
 

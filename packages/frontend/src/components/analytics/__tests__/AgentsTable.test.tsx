@@ -3,6 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { AgentsTable } from '../AgentsTable'
+import { seriesColor } from '@/components/ui/StackedBarChart'
+import { orderAgentsForDisplay, seriesIndexByAgent } from '@/lib/analytics-series'
+import type { AnalyticsDayBucket } from '@/types/analytics'
 import type { AnalyticsAgentRow } from '@/types/analytics'
 import { FIXTURE_ANALYTICS_OVERVIEW } from '../../../../scripts/screenshot.mjs'
 
@@ -191,6 +194,47 @@ describe('AgentsTable — the desktop table', () => {
       th.className.includes('min-width:974px'),
     )
     expect(staged.map((th) => th.textContent)).toEqual(['Share', 'Top merchant'])
+  })
+})
+
+describe('AgentsTable — one colour per agent, shared with the spend chart (#3051)', () => {
+  it('puts the series swatch beside each plotted agent\'s SPEND figure, in both renderings, from the one shared map — never beside the name', () => {
+    const agents = orderAgentsForDisplay([RESEARCH, RETIRED])
+    const map = seriesIndexByAgent(agents, FIXTURE_ANALYTICS_OVERVIEW.by_day as AnalyticsDayBucket[])
+    const { container } = render(<AgentsTable agents={agents} currency="USD" seriesIndexById={map} />)
+    const desktop = desktopOf(container)!
+    const mobile = mobileOf(container)!
+    const desktopSwatches = desktop.querySelectorAll('[data-testid="series-swatch"]')
+    const mobileSwatches = mobile.querySelectorAll('[data-testid="series-swatch"]')
+    expect(desktopSwatches).toHaveLength(2)
+    expect(mobileSwatches).toHaveLength(2)
+    expect(Array.from(desktopSwatches).map((el) => el.getAttribute('data-series-index'))).toEqual(['0', '1'])
+    expect(Array.from(mobileSwatches).map((el) => el.getAttribute('data-series-index'))).toEqual(['0', '1'])
+    // Desktop: the swatch shares a cell with the spend figure, not the name
+    // link (a dot beside a name is the status-light idiom).
+    const spendCell = desktopSwatches[0]!.closest('td')!
+    expect(spendCell.textContent).toContain('$')
+    expect(spendCell.querySelector('a')).toBeNull()
+    expect(desktop.querySelector('a [data-testid="series-swatch"]')).toBeNull()
+    // The swatch sits in a fixed slot BEFORE the figure, so the figure's
+    // right edge stays on the header's like every other numeric column.
+    const figure = spendCell.querySelector('.v2-tabular')!
+    expect(desktopSwatches[0]!.compareDocumentPosition(figure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The colour is the chart's own token by index — the same
+    // `seriesColor(0)` the first stacked segment is filled with.
+    expect((desktopSwatches[0] as HTMLElement).style.backgroundColor).toBe(seriesColor(0))
+  })
+
+  it('renders no swatch for an agent the chart does not plot, and none at all without the map', () => {
+    const agents = orderAgentsForDisplay([RESEARCH, RETIRED])
+    const onlyResearch = seriesIndexByAgent(agents, [{ date: '2026-07-07', spent_by_agent: { [RESEARCH.id]: '1.00' }, refusals: 0 }])
+    const one = render(<AgentsTable agents={agents} currency="USD" seriesIndexById={onlyResearch} />)
+    expect(desktopOf(one.container)!.querySelectorAll('[data-testid="series-swatch"]')).toHaveLength(1)
+    // The unplotted agent keeps the EMPTY slot, so its figure lines up too.
+    expect(desktopOf(one.container)!.querySelectorAll('[data-testid="series-swatch-slot"]')).toHaveLength(2)
+    one.unmount()
+    const none = mount()
+    expect(none.container.querySelectorAll('[data-testid="series-swatch"]')).toHaveLength(0)
   })
 })
 

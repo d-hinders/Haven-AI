@@ -34,7 +34,7 @@ export const testRecipientAddress = '0x2222222222222222222222222222222222222222'
  */
 export const testSafe = {
   id: 'safe-main',
-  safe_address: testSafeAddress,
+  account_address: testSafeAddress,
   chain_id: 8453,
   name: 'Operations',
   is_default: true,
@@ -47,9 +47,8 @@ export const testUser = {
   name: 'Ada Lovelace',
   email: 'ada@haven.test',
   wallet_address: null,
-  safe_address: testSafeAddress,
+  account_address: testSafeAddress,
   accounts: [testSafe],
-  safes: [testSafe],
   currency_preference: 'USD',
   created_at: '2026-05-01T10:00:00.000Z',
 }
@@ -59,15 +58,16 @@ export const testAgent = {
   name: 'Research agent',
   description: 'Runs paid research with a fixed allowance.',
   delegate_address: '0x3333333333333333333333333333333333333333',
-  safe_id: testSafe.id,
-  safe_address: testSafeAddress,
-  safe_name: testSafe.name,
+  account_id: testSafe.id,
+  account_address: testSafeAddress,
+  account_name: testSafe.name,
+  account_chain_id: testSafe.chain_id,
   api_key_prefix: 'haven_e2e',
   status: 'active' as const,
   // #2264: the agent's rail marker. It is not an `agents` column — every
   // agent-row read selects it as `us.account_type` off the joined `user_safes`
   // row (`infra/repositories/agents.ts`), so it must agree with `testSafe`,
-  // which this agent names via `safe_id` — one account answers one value,
+  // which this agent names via `account_id` — one account answers one value,
   // and since #2459 there is no opt-down shape left to disagree with.
   account_type: 'delegator_hybrid',
   created_at: '2026-05-02T10:00:00.000Z',
@@ -113,7 +113,7 @@ export const dashboardTransaction = {
   chainId: 8453,
   accountId: testSafe.id,
   accountAddress: testSafeAddress,
-  safeName: testSafe.name,
+  accountName: testSafe.name,
   source: 'x402',
   x402ResourceUrl: 'https://research.example/report',
   x402MerchantAddress: testRecipientAddress,
@@ -178,8 +178,8 @@ export const dashboardOverview = {
       name: testAgent.name,
       status: testAgent.status,
       accountId: testSafe.id,
-      safeName: testSafe.name,
-      safeChainId: testSafe.chain_id,
+      accountName: testSafe.name,
+      accountChainId: testSafe.chain_id,
       // #2264: same derived projection as `testAgent.allowances`, in the
       // dashboard route's camelCase wire shape (`routes/dashboard.ts`).
       allowances: [
@@ -214,7 +214,18 @@ export const accountingProvider = {
 
 export const accountingProviders = [
   accountingProvider,
-  ...['Accounted', 'Light', 'Igdrasil'].map((displayName) => ({
+  // #3017: Accounted is live over a pasted API key — the registry's real shape.
+  {
+    ...accountingProvider,
+    id: 'accounted',
+    displayName: 'Accounted',
+    authKind: 'api_key' as const,
+    capabilities: { attachments: false, verify: false, revoke: false, companyInfo: true },
+    availability: 'live' as const,
+    requiredScopes: [],
+    configured: true,
+  },
+  ...['Light', 'Igdrasil'].map((displayName) => ({
     ...accountingProvider,
     id: displayName.toLowerCase(),
     displayName,
@@ -566,7 +577,7 @@ export async function mockHavenApi(page: Page) {
         limit: 25,
         hasMore: false,
         partialFailure: false,
-        failedSafeIds: [],
+        failedAccountIds: [],
         // Required since #2882. `false` is the honest default here: the
         // fixture serves one transaction, well inside the explorer window.
         truncated: false,
@@ -701,7 +712,7 @@ export async function mockHavenApi(page: Page) {
       await fulfillJson(route, {
         owners: [],
         partialFailure: false,
-        failedSafeIds: [],
+        failedAccountIds: [],
       })
       return
     }
@@ -851,7 +862,7 @@ export async function serveAgentDetailResponses(page: Page, agentId: string) {
     if (path === `/agents/${agentId}/delegate-balance`) {
       await fulfillJson(route, {
         delegate_address: '0x3333333333333333333333333333333333333333',
-        safe_address: testSafeAddress,
+        account_address: testSafeAddress,
         chain_id: testSafe.chain_id,
         eth: '0',
         eth_atomic: '0',
@@ -934,9 +945,9 @@ export async function serveAgentDetailResponses(page: Page, agentId: string) {
             x402_resource_url: 'https://api.example.dev/reports',
             x402_merchant_address: testRecipientAddress,
             chain_id: testSafe.chain_id,
-            safe_id: testSafe.id,
-            safe_address: testSafeAddress,
-            safe_name: testSafe.name,
+            account_id: testSafe.id,
+            account_address: testSafeAddress,
+            account_name: testSafe.name,
             explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
             confirmed_at: '2026-07-10T08:20:00.000Z',
             payment_proof_status: 'payment_confirmed',

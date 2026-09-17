@@ -81,9 +81,9 @@ export interface TransactionAccounting {
 
 export interface EnrichedTransaction extends Transaction {
   chainId: number
-  safeId: string
-  safeAddress: string
-  safeName: string
+  accountId: string
+  accountAddress: string
+  accountName: string
   agentId?: string
   agentName?: string
   /**

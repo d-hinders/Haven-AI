@@ -1263,7 +1263,7 @@ describe('human-unit spending caps (#1351)', () => {
         status: 200,
         body: {
           agent_id: 'agt_1',
-          safe_address: '0xSafe',
+          account_address: '0xSafe',
           delegate_address: '0xDelegate',
           chain_id: 8453,
           allowances: [{
@@ -1355,7 +1355,7 @@ describe('human-unit spending caps (#1351)', () => {
           status: 200,
           body: {
             agent_id: 'agt_1',
-            safe_address: '0xSafe',
+            account_address: '0xSafe',
             delegate_address: '0xDelegate',
             chain_id: 8453,
             allowances: [{

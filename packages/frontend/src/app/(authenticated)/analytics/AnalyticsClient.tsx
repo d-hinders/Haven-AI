@@ -22,12 +22,15 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { StatTile } from '@/components/ui/StatTile'
 import { AgentsTable } from '@/components/analytics/AgentsTable'
 import { BalanceSection } from '@/components/analytics/BalanceSection'
+import { SpendSection } from '@/components/analytics/SpendSection'
+import { orderAgentsForDisplay, seriesIndexByAgent } from '@/lib/analytics-series'
 import { MerchantsTable } from '@/components/analytics/MerchantsTable'
 import { RangeControl } from '@/components/analytics/RangeControl'
-// The floor slice D fixed for "too little data to chart", read here so the
-// wrapper below carries no empty margin when BalanceSection decides not to
-// draw. Importing the constant rather than comparing to `3` is what keeps the
-// page and the primitive on one rule with one home.
+// The floor slice D fixed for "too little data to chart" — ONE home: the
+// page's sparse rule and every section's own guard read this constant, so
+// the tiles-only branch and the primitives' "render nothing" agree by
+// construction rather than by two literals happening to both be 3 (#3051
+// removed the page's own copy).
 import { MIN_CHARTABLE_DAYS } from '@/components/charts/chart-scale'
 import {
   AnalyticsErrorState,
@@ -70,24 +73,46 @@ import {
  * loading → one skeleton in the final layout's shape; failed (or never
  * answered) → one error state with one retry; answered with no activity at
  * all → one empty state, not four tiles asserting zeros; answered with fewer
- * than `MIN_DAYS_FOR_CHARTS` days of history → tiles only, with the reason on
+ * than `MIN_CHARTABLE_DAYS` days of history → tiles only, with the reason on
  * screen; else the populated page. The states are mutually exclusive because
  * what they report about the request is: the empty state says the endpoint
  * answered and found nothing, the error state says it did not answer, and a
  * page of honest zeros is exactly what a failure is mistaken for.
  */
 
-/**
- * Below this many days carrying data the charts band stays empty (#2948's
- * rule, taken from slice D): a line through one point agrees with every
- * trend, so it proves none. The tiles still render — a total over one day is
- * still the total over that day — and `SparseDataLine` says out what the
- * reader is not being shown and why.
- */
-const MIN_DAYS_FOR_CHARTS = 3
-
 /** The window's length for the caption, keyed off the control's own values. */
 const RANGE_DAYS: Record<AnalyticsRangeValue, 7 | 30 | 90> = { '7d': 7, '30d': 30, '90d': 90 }
+
+/**
+ * The Refused tile's limit-of-visibility clause (#3055, epic #3056 slice 4),
+ * shared by both arms of `refusedFootnote` — one string, not two literals, so
+ * the tile cannot say one thing beside a count and another beside a zero.
+ *
+ * The tile counts rows in the `payment_refusals` ledger, and the ledger only
+ * holds what the guardrails themselves refused. Two classes of refusal are
+ * raised outside it, and the count silently omits both, so the tile says it:
+ *
+ *   (a) a price cap the agent's own runtime applies. The cap lives in the
+ *       agent's code and its SDK; a runtime that declines before ever asking
+ *       Haven leaves no row anywhere, because there is no request to read.
+ *   (b) a budget the hosted tools decline at PREPARE — the step in
+ *       `haven_prepare_catalog_purchase` that compares the purchase against
+ *       the live delegation budget and refuses it (step 6). This is a
+ *       prepare-time refusal, never a quote-time one: the quote tools only
+ *       quote and refuse nothing, so the sentence must not name a quote.
+ *
+ * Who refuses is stated with each class, because the two are refused by
+ * different parties: (a) by the agent itself, (b) by Haven's hosted tools
+ * before any intent exists. Both are recorded nowhere; both are therefore
+ * named here rather than counted on the face of the tile.
+ *
+ * The clause is deliberately a temporary one. When epic #3056 slice 3 gives
+ * the hosted prepare-time refusal its server-side writer, (b) stops being
+ * unrecorded and this string narrows back to the price-cap sentence alone —
+ * that revert is the plan, and it is carried in #3055's issue, not here.
+ */
+const UNRECORDED_REFUSALS_NOTE =
+  "Price-cap refusals in your agent's runtime are not recorded, and neither are budget refusals raised when Haven's hosted tools prepare a purchase."
 
 /** The four figures, in the order the reader scans them. */
 function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currency: 'USD' | 'EUR' }) {
@@ -143,10 +168,10 @@ function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currenc
         {` · ${formatAnalyticsAmount(totals.refused_amount, currency)} attempted`}
         {refusalLedgerFloor}
         {' · '}
-        {"Price-cap refusals in your agent's runtime are not recorded."}
+        {UNRECORDED_REFUSALS_NOTE}
       </>
     ) : (
-      "Price-cap refusals in your agent's runtime are not recorded."
+      UNRECORDED_REFUSALS_NOTE
     )
 
   const bands = totals.budget_bands
@@ -279,7 +304,17 @@ export default function AnalyticsClient() {
   } else if (isEmptyWindow(data)) {
     body = <NoActivityEmptyState />
   } else {
-    const sparse = analyticsDaysWithData(data) < MIN_DAYS_FOR_CHARTS
+    // Below the floor the charts band stays empty (#2948's rule): a line
+    // through one point agrees with every trend, so it proves none. The tiles
+    // still render — a total over one day is still the total over that day —
+    // and `SparseDataLine` says out what the reader is not being shown.
+    const sparse = analyticsDaysWithData(data) < MIN_CHARTABLE_DAYS
+    // One order and one colour map for every section that names an agent:
+    // the wire's `agents[]` is unordered (no ORDER BY in the repository), and
+    // a colour keyed on wire position would move between two requests.
+    const agents = orderAgentsForDisplay(data.agents)
+    const seriesIndexById = seriesIndexByAgent(agents, data.by_day)
+    const rangeDays = days === 7 || days === 90 ? days : 30
     body = (
       <>
         <TileGrid data={data} currency={currency} />
@@ -289,19 +324,30 @@ export default function AnalyticsClient() {
           </div>
         ) : (
           <>
-            {/* ── Charts band (slice D, #2948) ──────────────────────────────
-                `StackedBarChart` + `AreaChart` mount here when
-                `feat/2948-analytics-charts` (head 00ec5433) lands: the
-                day-buckets the endpoint already returns in `by_day`, keyed
-                to the agents in the table below. Slice C owns the position;
-                D adds its imports and its JSX inside this block only. The
-                sparse branch above keeps this band empty for fewer than
-                MIN_DAYS_FOR_CHARTS days of data. */}
-            {data.agents.length > 0 && (
+            {agents.length > 0 && (
               <div className="mt-4" data-testid="analytics-agents-section">
-                <AgentsTable agents={data.agents} currency={currency} />
+                <AgentsTable agents={agents} currency={currency} seriesIndexById={seriesIndexById} />
               </div>
             )}
+            {/* Below the table, per screen-recipes.md § Analytics item 5
+                (table first, then the spend chart, merchants, balance): the
+                table is the page's primary reading surface and stays on the
+                first screen; the chart is the same figures over time. No `by_day.length`
+                guard here: the sparse branch above already requires
+                MIN_CHARTABLE_DAYS entries in it, so the section's own floor
+                can never fire on this path (the balance guard below is a
+                DIFFERENT array). */}
+            <div className="mt-4">
+              <SpendSection
+                byDay={data.by_day}
+                agents={agents}
+                seriesIndexById={seriesIndexById}
+                range={data.range}
+                tz={data.basis.tz}
+                currency={currency}
+                rangeDays={rangeDays}
+              />
+            </div>
             {/* ── Merchants and balance (slice E, #2949) ────────────────────
                 The two sections the wire contract parked here, now mounted:
                 the top-merchants table over `merchants` and the
@@ -313,13 +359,13 @@ export default function AnalyticsClient() {
                 endpoint did not populate would be the page asserting figures
                 it was not given. The "Top merchants" heading is E's own, on
                 the card, and the sparse branch above keeps the whole band
-                empty for fewer than MIN_DAYS_FOR_CHARTS days of data —
+                empty for fewer than MIN_CHARTABLE_DAYS days of data —
                 including these. */}
             {data.merchants.length > 0 && (
               <div className="mt-4" data-testid="analytics-merchants-section">
                 <MerchantsTable
                   merchants={data.merchants}
-                  agents={data.agents}
+                  agents={agents}
                   currency={currency}
                 />
               </div>
@@ -329,7 +375,7 @@ export default function AnalyticsClient() {
                 <BalanceSection
                   balanceByDay={data.balance_by_day}
                   currency={currency}
-                  rangeDays={days === 7 || days === 90 ? days : 30}
+                  rangeDays={rangeDays}
                 />
               </div>
             )}

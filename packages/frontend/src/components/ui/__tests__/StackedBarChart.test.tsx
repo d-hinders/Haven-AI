@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { StackedBarChart } from '../StackedBarChart'
 import type { StackedBarDay } from '../StackedBarChart'
 
@@ -205,6 +205,326 @@ describe('StackedBarChart — the drawing says what the data says', () => {
   })
 })
 
+describe('StackedBarChart — a partial day is drawn as one (#3051)', () => {
+  it('hatches the bar with its own series token, marks the group, and names it in the data table and the tooltip', () => {
+    const days: StackedBarDay[] = THREE_DAYS.map((d) => ({ ...d }))
+    days[0] = { ...days[0]!, partial: true }
+    const { container, getByTestId } = render(
+      <StackedBarChart days={days} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const groups = container.querySelectorAll('[data-testid="chart-day"]')
+    expect(groups[0]!.getAttribute('data-partial')).toBe('true')
+    expect(groups[1]!.getAttribute('data-partial')).toBeNull()
+    const cutSegment = groups[0]!.querySelector('[data-testid="chart-segment"]')!
+    const fullSegment = groups[1]!.querySelector('[data-testid="chart-segment"]')!
+    // Striped, not faded: the partial segment fills from a <pattern> whose
+    // base rect is the SAME series token the full segment is filled with, so
+    // the mark is identical on both themes and the token's contrast holds.
+    expect(cutSegment.getAttribute('data-hatched')).toBe('true')
+    expect(fullSegment.getAttribute('data-hatched')).toBeNull()
+    const fill = cutSegment.getAttribute('fill')!
+    expect(fill).toMatch(/^url\(#.*-hatch-\d+\)$/)
+    const patternId = fill.slice(5, -1)
+    const pattern = container.querySelector(`[data-testid="chart-hatch-pattern"][id="${patternId}"]`)!
+    expect(pattern.querySelector('rect')!.getAttribute('fill')).toBe(fullSegment.getAttribute('fill'))
+    expect(pattern.querySelector('line')!.getAttribute('stroke')).toBe('var(--v2-bg)')
+    // Opacity is no longer the encoding: both segments carry the resting value.
+    expect(cutSegment.getAttribute('fill-opacity')).toBe(fullSegment.getAttribute('fill-opacity'))
+    const table = getByTestId('chart-data-table')
+    expect(table.textContent).toContain(`${days[0]!.label} (partial day)`)
+    expect(table.textContent).not.toContain(`${days[1]!.label} (partial day)`)
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    expect(getByTestId('chart-tooltip-partial').textContent).toContain('partial day')
+  })
+})
+
+describe('StackedBarChart — the desktop callout is clamped by its own measured width (#3051 design re-review)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('anchors the callout over its day and clamps by the measured half-width, not a fixed 30/70', () => {
+    // jsdom lays nothing out: every box is 0 wide, so the effect bails and
+    // the max-width bound (30%) stands. Give the wrapper 600px and the
+    // callout 300px — a 25% half-width — and the clamp must follow.
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(300)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    // Day 0's centre (22.7% of a three-bar plot) sits inside 25%, so the
+    // clamp binds: the callout's left edge lands on the wrapper's (plus
+    // the half-percent cushion) — neither the fixed 30% nor the raw centre.
+    expect(getByTestId('chart-tooltip').style.left).toBe('25.5%')
+    fireEvent.keyDown(svg, { key: 'End' })
+    expect(getByTestId('chart-tooltip').style.left).toBe('74.5%')
+    // The callout is the wrapper's child — the box the measurement and the
+    // `left: %` both resolve against — not the plot's.
+    expect(getByTestId('chart-tooltip').parentElement).toBe(getByTestId('stacked-bar-chart'))
+  })
+
+  it('falls back to the max-width bound where nothing has a width (jsdom, first paint)', () => {
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    expect(getByTestId('chart-tooltip').style.left).toBe('30%')
+    fireEvent.keyDown(svg, { key: 'End' })
+    expect(getByTestId('chart-tooltip').style.left).toBe('70%')
+  })
+})
+
+describe('StackedBarChart — the desktop callout drops above the baseline when the described bar is tall (#3063)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // The fixture's totals are 150 / 250 / 450 on a 600 scale, a 200px svg:
+  // bar tops at CSS y 132.7 / 106.1 / 52.7 (Tue 9 also carries a refusal
+  // cap 10 viewBox units higher: 97.0); baseline 172.7, svg bottom 200,
+  // legend top 212 (a dropped callout stops 6px above it: 206). A 90px callout at rest spans 12..102 and needs 6px of
+  // clearance (bottom 108), so it hides Tue 9 and Wed 10 but not Mon 8. A
+  // dropped callout must leave 12px of the day's marks above it and clear
+  // the bar's own top by 6.
+  function layOut() {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200)
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(90)
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(200)
+  }
+
+  it('rests at top-3 over a short bar and drops to the baseline over a tall one, keeping the bar top and its cap visible', () => {
+    layOut()
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'Home' })
+    let tip = getByTestId('chart-tooltip')
+    expect(tip.className).toContain('top-3')
+    expect(tip.style.top).toBe('')
+    expect(tip.getAttribute('data-flipped')).toBeNull()
+    fireEvent.keyDown(svg, { key: 'End' })
+    tip = getByTestId('chart-tooltip')
+    expect(tip.className).not.toContain('top-3')
+    expect(tip.getAttribute('data-flipped')).toBe('true')
+    // Baseline at viewBox 190 of 220 → CSS 172.7; minus the 90px callout
+    // and the 6px gap: the callout's top sits at 76.7px, its bottom 6px
+    // above the axis — and 24px under the bar's top (52.7px), more than
+    // the 12px it must leave.
+    expect(tip.style.top).toBe('76.7px')
+    // The horizontal clamp is untouched by the flip (200px callout in a
+    // 600px wrapper → half 17.2%, so End clamps to 100 − 17.2).
+    expect(tip.style.left).toMatch(/^82\.8/)
+  })
+
+  it('drops to just above the legend — over the label whole, not a legend row — when the bar cannot hold the callout above the baseline', () => {
+    layOut()
+    // A 120px callout over Wed 10 (bar top 52.7): above the baseline it
+    // would start at 46.7 and cover the top; with its bottom 6px above the
+    // legend (206) it starts at 86, leaving 33px of the bar.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(120)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    fireEvent.keyDown(container.querySelector('svg')!, { key: 'End' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip.getAttribute('data-flipped')).toBe('true')
+    expect(tip.style.top).toBe('86px')
+  })
+
+  it('rests over a bar it would otherwise swallow: a drop that cannot leave 12px of the bar in view is not made', () => {
+    layOut()
+    // A 130px callout over Mon 8 (bar top 132.7): at rest it hides 22px of
+    // the top; dropped, even to the legend (top 76) it would cover the
+    // whole bar and the label — so it rests.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(130)
+    const swallowed = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(swallowed.container.querySelector('svg')!, { key: 'Home' })
+    let tip = swallowed.getByTestId('chart-tooltip')
+    expect(tip.getAttribute('data-flipped')).toBeNull()
+    expect(tip.className).toContain('top-3')
+    swallowed.unmount()
+    // A 145px callout over Wed 10 (bar top 52.7) lands at 61 above the
+    // legend: 8.3px of the bar — clear of its top edge, but under the 12px
+    // that reads as a bar — so it rests too.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(145)
+    const sliver = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(sliver.container.querySelector('svg')!, { key: 'End' })
+    tip = sliver.getByTestId('chart-tooltip')
+    expect(tip.getAttribute('data-flipped')).toBeNull()
+  })
+
+  it('prefers the slot above the legend when the baseline slot would hide a neighbour\'s top (#3076)', () => {
+    layOut()
+    // A 360px callout (the 60% cap of a 600px wrapper) spans 30–70%: at
+    // Wed 10 it reaches over Tue 9 (x 260–376), whose cap top (97.0) lies
+    // inside the baseline slot's box (76.7..166.7) — so that slot would hide
+    // a neighbour's top. Above the legend (116) it hides none: Mon 8's top
+    // (132.7) is outside the span. The legend slot wins.
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'End' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip.getAttribute('data-flipped')).toBe('true')
+    expect(tip.style.top).toBe('116px')
+    // The narrow 200px callout of the test above does not reach Tue 9, so
+    // the baseline slot keeps winning there (76.7px) — a tie goes to it.
+  })
+
+  it('counts a neighbour\'s BAR top as hidden, not only its cap: a cap floating above the box does not clear the bar under it (#3076)', () => {
+    layOut()
+    // Described: a tall middle bar B. Neighbour A (capless, top 132.7) sits
+    // inside both slots' boxes (baseline 76.7..166.7, legend 116..206).
+    // Neighbour C carries a cap: its bar top (79.9) sits inside the
+    // baseline box but its cap (70.8) floats just above it — the floating
+    // cap over a hidden bar the review saw. A 400px callout spans both.
+    // Counting bar tops, the baseline slot hides A and C, the legend slot
+    // only A: legend wins. Counting caps only, each slot hides one (A) and
+    // the baseline slot keeps the tie.
+    const capless: StackedBarDay[] = [
+      { label: 'A', series: [{ id: 'x', name: 'x', amount: 150, seriesIndex: 0 }] },
+      { label: 'B', series: [{ id: 'x', name: 'x', amount: 450, seriesIndex: 0 }] },
+      { label: 'C', refusals: 1, series: [{ id: 'x', name: 'x', amount: 348, seriesIndex: 0 }] },
+    ]
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={capless} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    fireEvent.keyDown(container.querySelector('svg')!, { key: 'ArrowRight' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip).toHaveTextContent(/^B/)
+    expect(tip.style.top).toBe('116px')
+  })
+
+  it('counts a neighbour\'s CAP as hidden even when its bar top is below the box (#3076 review)', () => {
+    layOut()
+    // A (250, capless): top 106.1 — inside the baseline box (76.7..166.7)
+    // only. C (15 + a refusal): a 4px bar whose top (168.7) is BELOW the
+    // baseline box but whose cap (159.6) is inside it; both inside the
+    // legend box (116..206). Baseline slot hides A + C(cap) = 2, legend
+    // slot hides C = 1 → legend wins. A bar-only rule scores 1 v 1 and
+    // keeps the baseline.
+    const days: StackedBarDay[] = [
+      { label: 'A', series: [{ id: 'x', name: 'x', amount: 250, seriesIndex: 0 }] },
+      { label: 'B', series: [{ id: 'x', name: 'x', amount: 450, seriesIndex: 0 }] },
+      { label: 'C', refusals: 1, series: [{ id: 'x', name: 'x', amount: 15, seriesIndex: 0 }] },
+    ]
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={days} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    fireEvent.keyDown(container.querySelector('svg')!, { key: 'ArrowRight' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip).toHaveTextContent(/^B/)
+    expect(tip.style.top).toBe('116px')
+  })
+
+  it('never scores the "top" of a day that drew no bar (#3076 review)', () => {
+    layOut()
+    // A (250): top 106.1, inside the baseline box only. Z (nothing spent,
+    // nothing refused — an empty day a gap-filled range would emit): no
+    // bar, no cap; its phantom top is the baseline (172.7), inside the
+    // legend box only. Baseline slot hides A = 1, legend slot hides
+    // nothing → legend wins. Scoring the phantom makes it 1 v 1 and keeps
+    // the baseline.
+    const days: StackedBarDay[] = [
+      { label: 'A', series: [{ id: 'x', name: 'x', amount: 250, seriesIndex: 0 }] },
+      { label: 'B', series: [{ id: 'x', name: 'x', amount: 450, seriesIndex: 0 }] },
+      { label: 'Z', series: [] },
+    ]
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={days} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    fireEvent.keyDown(container.querySelector('svg')!, { key: 'ArrowRight' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip).toHaveTextContent(/^B/)
+    expect(tip.style.top).toBe('116px')
+  })
+
+  it('counts the refusal cap as part of the bar: a day whose CAP alone would hide flips too', () => {
+    layOut()
+    // Tue 9's bar top is at 106.1, the 90px callout's resting bottom at
+    // 108 → drops on the bar alone. Shrink the callout to 80px (bottom at
+    // 98): the bar clears it, the cap (97.0) does not — so it still drops
+    // with the cap (to just above the legend: 126, leaving the cap and 20px
+    // of the bar) and rests without it.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(80)
+    const withCap = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(withCap.container.querySelector('svg')!, { key: 'ArrowRight' })
+    expect(withCap.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBe('true')
+    expect(withCap.getByTestId('chart-tooltip').style.top).toBe('126px')
+    withCap.unmount()
+    // The cap counts towards the 12px of marks but never stands in for the
+    // bar's own top edge: a 95px callout lands at 111 — 14px under the
+    // cap, but only 4.9px under the bar's top — so it rests.
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(95)
+    const tooTall = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(tooTall.container.querySelector('svg')!, { key: 'ArrowRight' })
+    expect(tooTall.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBeNull()
+    tooTall.unmount()
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(80)
+    const noCap = THREE_DAYS.map((d, i) => (i === 1 ? { ...d, refusals: 0 } : d))
+    const without = render(<StackedBarChart days={noCap} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(without.container.querySelector('svg')!, { key: 'ArrowRight' })
+    expect(without.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBeNull()
+  })
+
+  it('never flips the narrow panel, and rests where nothing has a height (jsdom, first paint)', () => {
+    layOut()
+    const narrow = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} narrow />)
+    fireEvent.keyDown(narrow.container.querySelector('svg')!, { key: 'End' })
+    const panel = narrow.getByTestId('chart-tooltip')
+    expect(panel.getAttribute('data-flipped')).toBeNull()
+    expect(panel.style.top).toBe('')
+    narrow.unmount()
+    vi.restoreAllMocks()
+    const bare = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(bare.container.querySelector('svg')!, { key: 'End' })
+    const tip = bare.getByTestId('chart-tooltip')
+    expect(tip.className).toContain('top-3')
+    expect(tip.getAttribute('data-flipped')).toBeNull()
+  })
+})
+
+describe('StackedBarChart — ticks fit the gutter at 390 (#3051 design review)', () => {
+  it('formats ticks with formatTick when given, and widens the gutter on the narrow treatment', () => {
+    const compact = (n: number) => `$${Math.round(n)}`
+    const wide = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} formatTick={compact} />,
+    )
+    const wideTicks = wide.getAllByTestId('chart-tick-label')
+    expect(wideTicks.every((t) => /^\$\d+$/.test(t.textContent ?? ''))).toBe(true)
+    const wideGutter = (wideTicks[0] as HTMLElement).style.width
+    wide.unmount()
+    const narrow = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} formatTick={compact} narrow />,
+    )
+    const narrowGutter = (narrow.getAllByTestId('chart-tick-label')[0] as HTMLElement).style.width
+    expect(parseFloat(narrowGutter)).toBeGreaterThan(parseFloat(wideGutter))
+    // The bars still start to the right of the wider gutter.
+    const firstBar = narrow.container.querySelector('[data-testid="chart-segment"]')!
+    expect(Number(firstBar.getAttribute('x'))).toBeGreaterThan(70)
+  })
+
+  it('falls back to formatValue for ticks when no tick formatter is given', () => {
+    const { getAllByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    // Every tick goes through `fmt` (which prints cents) when no compact
+    // formatter is given.
+    expect(getAllByTestId('chart-tick-label').every((t) => /\.\d\d$/.test(t.textContent ?? ''))).toBe(true)
+  })
+})
+
 describe('StackedBarChart — the tooltip, opened two ways', () => {
   it('reveals a day to a keyboard caret, with amounts, tokens, and refusals', () => {
     renderChart()
@@ -225,6 +545,92 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     )
     expect(screen.getByTestId('chart-tooltip-refusals')).toHaveTextContent('4 payments refused')
     expect(tip).toHaveTextContent(/USD 250\.00/)
+  })
+
+  it('is two lines, not a table: day, refusal count and total on the first, agents as wrapping chips on the second (#3067)', () => {
+    renderChart()
+    fireEvent.keyDown(document.querySelector('svg')!, { key: 'ArrowRight' })
+    const tip = screen.getByTestId('chart-tooltip')
+    // The total shares the first line with the day label.
+    const total = screen.getByTestId('chart-tooltip-total')
+    expect(total).toHaveTextContent('USD 250.00')
+    expect(total.parentElement!.textContent).toMatch(/^Tue 9/)
+    // The day's refusal count belongs to the day: it sits on the first
+    // line beside the label, never as a trailing chip that reads as the
+    // last agent's.
+    const refusals = screen.getByTestId('chart-tooltip-refusals')
+    expect(refusals.parentElement).toBe(total.parentElement!.firstElementChild)
+    // Units are separated by a real space (the only place the line may
+    // break) and each unit holds together; the row wraps and the <p> may
+    // shrink, so the total is never pushed out of the box.
+    expect(refusals.parentElement!.textContent).toBe('Tue 9 · 4 payments refused')
+    expect(refusals.className).toMatch(/whitespace-nowrap/)
+    expect(refusals.parentElement!.className).toMatch(/min-w-0/)
+    const dateUnit = refusals.parentElement!.firstElementChild!
+    expect(dateUnit.textContent).toBe('Tue 9')
+    expect(dateUnit.className).toMatch(/whitespace-nowrap/)
+    const header = screen.getByTestId('chart-tooltip-header')
+    expect(header.className).toMatch(/flex-wrap/)
+    expect(total.className).toMatch(/ml-auto/)
+
+    // One wrapping list of agent chips — no row-per-agent block underneath.
+    const list = screen.getByTestId('chart-tooltip-chips')
+    expect(list.tagName).toBe('UL')
+    expect(list.className).toMatch(/flex-wrap/)
+    expect(list.className).not.toMatch(/flex-col/)
+    expect(Array.from(list.children).map((li) => li.getAttribute('data-testid'))).toEqual([
+      'chart-tooltip-row',
+      'chart-tooltip-row',
+    ])
+    // The chips carry swatch, name and amount — the name stays (the legend
+    // is below the plot, the chip is where the eye is).
+    expect(list.children[0]).toHaveTextContent(/Research agent.*200\.00/)
+    // Nothing of the old block form remains after the list.
+    expect(list.nextElementSibling).toBeNull()
+    // The callout is capped narrower than the plot's 60% so chips wrap at
+    // a readable width instead of stretching into a banner.
+    expect(tip.className).toMatch(/max-w-\[min\(60%,24rem\)\]/)
+  })
+
+  it('separates every header unit with one real space — the only place the line may break (#3067 re-check)', () => {
+    // A day that is both partial and refused carries all three units.
+    const partialRefused: StackedBarDay[] = [
+      ...THREE_DAYS.slice(0, 2),
+      { ...THREE_DAYS[1]!, label: 'Wed 10', partial: true },
+    ]
+    render(<StackedBarChart days={partialRefused} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(document.querySelector('svg')!, { key: 'End' })
+    const label = screen.getByTestId('chart-tooltip-partial').parentElement!
+    expect(label.textContent).toBe('Wed 10 · partial day · 4 payments refused')
+  })
+
+  it('never lets a long name push the money figure out of the panel: the name truncates, the amount does not shrink, the tokens fold (#3067 review)', () => {
+    renderChart()
+    fireEvent.keyDown(document.querySelector('svg')!, { key: 'ArrowRight' })
+    const row = screen.getAllByTestId('chart-tooltip-row')[0]!
+    // jsdom lays nothing out, so the guard is the class contract that a
+    // browser turns into geometry: the chip may shrink (min-w-0), the
+    // name ellipsises inside it, and the figures refuse to shrink or wrap.
+    expect(row.className).toMatch(/min-w-0/)
+    expect(row.className).not.toMatch(/whitespace-nowrap/)
+    // swatch·name·amount live in one non-wrapping span, so the name
+    // truncates against the amount instead of taking a line of its own.
+    const figure = row.querySelector('[data-testid="chart-tooltip-figure"]')!
+    expect(figure.className).toMatch(/inline-flex/)
+    expect(figure.className).toMatch(/min-w-0/)
+    expect(figure.className).not.toMatch(/flex-wrap/)
+    const name = figure.querySelector('[data-testid="chart-tooltip-name"]')!
+    expect(figure.querySelector('[data-testid="chart-tooltip-amount"]')).not.toBeNull()
+    expect(name.className).toMatch(/truncate/)
+    expect(name.className).toMatch(/min-w-0/)
+    const amount = row.querySelector('[data-testid="chart-tooltip-amount"]')!
+    expect(amount.className).toMatch(/whitespace-nowrap/)
+    expect(amount.className).toMatch(/flex-shrink-0/)
+    // The token breakdown wraps onto the chip's next line instead of
+    // widening the callout — the chip itself is a wrapping row.
+    expect(row.className).toMatch(/flex-wrap/)
+    const tokens = row.querySelector('[data-testid="chart-tooltip-tokens"]')!
+    expect(tokens.className).not.toMatch(/whitespace-nowrap/)
   })
 
   it('moves the caret and stops at the ends of the range', () => {
@@ -248,6 +654,64 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     // panel is not a hover that has to be held open.
     fireEvent.mouseLeave(document.querySelector('svg')!)
     expect(screen.queryByTestId('chart-tooltip')).not.toBeNull()
+  })
+
+  it('never pins itself: the callout takes no pointer, and a pin is released by a second tap or Escape (#3066)', () => {
+    renderChart()
+    const groups = dayGroups()
+    const svg = document.querySelector('svg')!
+    // Hover paints the callout; entering the callout must not pin it, so
+    // leaving the figure clears it like any hover.
+    fireEvent.mouseEnter(groups[0]!)
+    const tip = screen.getByTestId('chart-tooltip')
+    expect(tip).toHaveTextContent(/Mon 8/)
+    expect(tip.className).toMatch(/pointer-events-none/)
+    fireEvent.mouseEnter(tip)
+    fireEvent.mouseLeave(svg)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // The pointer falls through to the bars beneath: hovering the next day
+    // while the previous day's callout would lie over it moves the hover.
+    fireEvent.mouseEnter(groups[0]!)
+    fireEvent.mouseEnter(groups[1]!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
+    fireEvent.mouseLeave(svg)
+    // A tap pins; the same tap again lets go.
+    fireEvent.mouseDown(groups[2]!)
+    fireEvent.mouseLeave(svg)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Wed 10/)
+    fireEvent.mouseDown(groups[2]!)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // A tap on another day moves the pin; Escape releases it.
+    fireEvent.mouseDown(groups[0]!)
+    fireEvent.mouseDown(groups[1]!)
+    fireEvent.mouseLeave(svg)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
+    fireEvent.keyDown(svg, { key: 'Escape' })
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // A touch tap synthesises mouseenter → mousedown with no mouseleave
+    // between taps: the second tap must still take the callout down, so
+    // the release drops the hover too.
+    fireEvent.mouseEnter(groups[1]!)
+    fireEvent.mouseDown(groups[1]!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
+    fireEvent.mouseDown(groups[1]!)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+  })
+
+  it('lets a pin and a caret go when the days change, so a shorter range does not strand the reveal on a day that is gone', () => {
+    const fourDays: StackedBarDay[] = [
+      ...THREE_DAYS,
+      { label: 'Thu 11', series: [{ id: 'alpha', name: 'Research agent', amount: 20, seriesIndex: 0 }] },
+    ]
+    const { rerender } = renderChart({}, fourDays)
+    fireEvent.mouseDown(dayGroups()[3]!)
+    fireEvent.mouseLeave(document.querySelector('svg')!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Thu 11/)
+    rerender(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel={SUMMARY} formatValue={fmt} />)
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull()
+    // Hover works again at once — the stale pin is not outranking it.
+    fireEvent.mouseEnter(dayGroups()[0]!)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Mon 8/)
   })
 
   it('sits below the plot when the screen is narrow, rather than over it', () => {

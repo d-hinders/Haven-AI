@@ -97,7 +97,7 @@ export function useAccountOperationGate(args: {
     return (user?.accounts ?? []).some(
       (account) =>
         account.chain_id === args.chainId &&
-        account.safe_address.toLowerCase() === accountAddress,
+        account.account_address.toLowerCase() === accountAddress,
     )
   }, [args.chainId, args.accountAddress, user?.accounts])
 
@@ -111,7 +111,7 @@ export function useAccountOperationGate(args: {
       passkeys.find(
         (passkey) =>
           passkey.chain_id === args.chainId &&
-          passkey.safe_address?.toLowerCase() === accountAddress,
+          passkey.account_address?.toLowerCase() === accountAddress,
       ) ?? null
     )
   }, [args.chainId, args.accountAddress, passkeys])

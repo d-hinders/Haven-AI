@@ -33,7 +33,7 @@ const PASSKEY_ROW = {
   credential_id: 'credential-123',
   signer_address: PASSKEY_SIGNER_ADDRESS,
   chain_id: 100,
-  safe_address: SAFE_ADDRESS,
+  account_address: SAFE_ADDRESS,
   created_at: '2026-05-05T00:00:00.000Z',
 }
 
@@ -133,7 +133,7 @@ describe('useAccountOperationGate', () => {
   const HYBRID_KEY_ID = '0x0102030405060708'
   const HYBRID_SAFE_ROW = {
     id: 'safe-hybrid',
-    safe_address: HYBRID_ADDRESS,
+    account_address: HYBRID_ADDRESS,
     chain_id: 84532,
     name: 'Delegation account',
     is_default: true,

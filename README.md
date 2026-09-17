@@ -393,7 +393,7 @@ Dashboard endpoints use the signed-in user's JWT. The OpenAPI contract is served
 | Surface | Auth | Examples |
 |---|---|---|
 | Dashboard auth | None/JWT | `/auth/signup`, `/auth/login`, `/auth/me` |
-| Haven wallets | JWT | `/user/safes` (list/rename/re-default/unlink), balances and account views. Creating or importing a Safe is **retired** — `/user/safes` POST, `/user/safes/deploy`, `/safe/deploy` and `PUT /user/safe` all answer 410 (#1984), with the implementations behind them deleted (#1988); new accounts come from `/accounts/hybrid` |
+| Haven wallets | JWT | `/user/accounts` (list/rename/re-default/unlink), balances and account views. The whole `/user/safes*` prefix and `PUT /user/safe` answer **410** naming their replacement (#2914) — the Safe vocabulary is retired from the wire. Creating or importing an account is separately **retired** — `POST /user/accounts`, `/user/accounts/deploy`, `/safe/deploy` and `PUT /user/account` all answer 410 (#1984). Create a Haven account on the delegation rail with `POST /accounts/hybrid`. |
 | Agents | JWT | `/agents`, `/agents/:id`, `/agents/:id/pause`, `/agents/:id/resume`, `/agents/:id/revoke`, `/agents/:id/rotate-key` |
 | Agent payments | API key | `/payments`, `/payments/:id/sign`, `/payments/:id`, `/payments` |
 | Agent info | API key | `/machine-payments/agent`, `/machine-payments/allowances`, `/machine-payments/receipts`, `/machine-payments/:id/status`, resume-state endpoints |

@@ -33,6 +33,11 @@
       "file": "packages/backend/src/openapi/spec.ts",
       "symbol": "transactionBaseProperties",
       "note": "The OpenAPI contract, already drift-gated by check:api-types. Read here rather than the generated core/src/api-types.ts so the guard fires where a developer adds the field."
+    },
+    "cli": {
+      "label": "CLI --json output",
+      "file": "packages/cli/src/commands.ts",
+      "note": "A THIRD surface, and a different axis from the two above: those pair a receipt FIELD with a transaction field; this one records the CASING CONVENTION each command emits. Kept as a separate section rather than forced into `concepts[]`, which has no place for it."
     }
   },
   "concepts": [
@@ -263,6 +268,202 @@
       "fxRateSek": "The rate amountSek was struck at (#2871).",
       "fxSource": "Where that rate came from.",
       "accounting": "Accounting-feed sync state joined by paymentId (#2870)."
+    }
+  },
+  "cliConventions": {
+    "$comment": [
+      "The CLI's `--json` casing split, declared rather than left as an accident",
+      "(#3133, owner decision 2026-09-18: KEEP the split \u2014 no rename, no dual-emit,",
+      "no breaking change). `/user/accounts` already took one breaking rename this",
+      "quarter (#2914/#3091), costing a dual-emit, a release boundary and a",
+      "dist-tags verification; a second to the same surface inside two epics is not",
+      "worth the tidiness. Normalising would also make the CLI stop being a",
+      "pass-through and start owning a presentation contract that diverges from the",
+      "OpenAPI response schema \u2014 which is what `interface Txn` already does badly.",
+      "",
+      "ANCHORED ON FUNCTION NAMES, NOT LINE NUMBERS. #3133's own line anchors were",
+      "wrong three times across two correction passes; a guard keyed on them would",
+      "go red on an unrelated edit above, which trains people to update the anchor",
+      "rather than read it. The guard finds each envelope's enclosing function, so",
+      "the declaration survives any edit that does not move the emit itself.",
+      "",
+      "PASS-THROUGH vs SELF-CONSTRUCTED. `emit()` forwards straight to the output",
+      "layer with no re-mapping, so a list command's casing IS the backend's and is",
+      "not the CLI's to choose. The `{ ok: true, \u2026 }` envelopes are the CLI's own",
+      "construction, and those are what this section ratchets."
+    ],
+    "decided": "2026-09-18",
+    "decidedOn": 3133,
+    "passthrough": {
+      "$comment": [
+        "Commands that forward the backend response unchanged. Their casing is the",
+        "OpenAPI response schema's, recorded here so the split is legible per command",
+        "-- recorded, not enforced: there is no CLI decision for a guard to hold.",
+        "",
+        "ONE ENTRY IS NEITHER, and sits here only because it is not an envelope:",
+        "`activity export --format csv` builds its headers IN THE CLI over a camelCase",
+        "source (convention `snake-csv`), and it is the one entry in this section the",
+        "guard does check -- name for name and in order, against `const headers` in",
+        "commands.ts. It was declared here from the start with nothing comparing it to",
+        "the code, so the page could promise enforcement over a list free to drift.",
+        "`interface Safe` / `interface Txn` in commands.ts are a NON-EXHAUSTIVE subset",
+        "the CLI happens to read \u2014 the emitted JSON carries every key the backend",
+        "sends \u2014 so they are not the authoritative shape and must not be read as it."
+      ],
+      "wallets list": {
+        "convention": "snake",
+        "keys": "account_address, chain_id, is_default",
+        "reason": "Forwarded from GET /user/accounts unchanged (cmdWalletsList via accountsEnvelope). The casing is the backend's; the CLI does not re-map."
+      },
+      "activity list": {
+        "convention": "camel",
+        "keys": "accountAddress, chainId, tokenSymbol",
+        "reason": "Forwarded from GET /transactions unchanged (cmdActivityList). Same mechanism as wallets list, opposite convention, because the two backend surfaces differ \u2014 which is the divergence #3130 exists to record."
+      },
+      "activity export --format csv": {
+        "convention": "snake-csv",
+        "keys": "date, type, status, direction, amount, token_symbol, token_address, counterparty_address, agent_name, tx_hash, chain_id, account_address",
+        "reason": "A THIRD convention: snake_case CSV headers built in the CLI, over a camelCase JSON source. Headers are a file-format contract read by spreadsheets and importers, not a JSON shape, so they do not follow the payload they are derived from."
+      }
+    },
+    "envelopes": {
+      "$comment": [
+        "Object literals the CLI CONSTRUCTS ITSELF and passes to `emit()`, an `emit*`",
+        "helper, `d.o.data()` or `d.o.text()` -- its own shape, not the backend's.",
+        "One entry per emitting FUNCTION; a function emitting more than one",
+        "contributes all of their keys. The guard",
+        "censuses the source and fails when a function emits one that is not declared",
+        "here, so a new envelope cannot pick a convention by copying its neighbour.",
+        "",
+        "The predicate is the LITERAL, not the `{ ok: true` prefix. Keying on that",
+        "prefix missed SEVEN EMITTERS -- functions, not call sites, which is the unit",
+        "this section is keyed on -- every one of which chooses a convention:",
+        "`cmdWalletsBalances`, `cmdWhoami`, the `emitGrant`/`emitRevoke` preparation",
+        "pair, `cmdAgentsConnect`, and the two export `meta` literals",
+        "(`cmdActivityExport`, `exportSie`) -- none of them carries an `ok` key. It",
+        "could not see a wrapped literal at all either. Seven, not three and not the",
+        "five a later draft wrote: this paragraph has now been wrong twice, the second",
+        "time while correcting the first, exactly as the deviceLogin entry below",
+        "records itself having done.",
+        "",
+        "The guard compares KEY SETS, not only function names, so the `keys` string",
+        "on each entry is checked against the source. Comparing names alone let a key",
+        "be added to an ALREADY-declared envelope with a green run, leaving `reason`",
+        "describing a shape that no longer ships. Write `keys` as bare names, commas",
+        "between them and `;` between envelopes, with any aside in parentheses: a",
+        "group the parser cannot read is REFUSED, never silently shrunk."
+      ],
+      "cmdActivityExport": {
+        "convention": "snake",
+        "keys": "format, rows",
+        "reason": "The META half of `d.o.text(body, meta)`. output.ts wraps it as `{ ok: true, ...meta, content }`, so these ARE top-level --json keys even though the wrapper itself is built elsewhere -- which is why calling the whole export wrapper 'outside the census' hid them. Snake because `rows` is one word today and sets the precedent for the next key added here; the CSV headers inside `content` are a separate file-format contract with their own reason."
+      },
+      "exportSie": {
+        "convention": "snake",
+        "keys": "format",
+        "reason": "The SIE branch of the same export, and it passes NO `rows` -- the key set differs by format, which a reader who parsed one branch and assumed the other would get wrong. One key and no casing yet, declared so the next one has to choose rather than copy."
+      },
+      "cmdGuide": {
+        "convention": "none",
+        "keys": "ok, format, content",
+        "reason": "No multi-word key, so it exhibits no casing at all. Declared so the census covers every emitter rather than only the interesting ones, and so a key added here later has to choose deliberately."
+      },
+      "deviceLogin": {
+        "convention": "mixed",
+        "keys": "ok, verification_url, user_code, device_code, interval, expires_at (the --no-wait device-start envelope); status, device_code, retry_after (the client-deadline pending envelope); ok, email, expires_at, user, apiBaseUrl (the completed-auth envelope)",
+        "reason": "Emits THREE envelopes, not two -- an earlier draft of this entry said two and undercounted its own subject while correcting someone else's count. Two are pure snake (device-start, and the pending envelope when the client deadline passes); the third mixes conventions inside a single object, expires_at beside apiBaseUrl. All three are declared because a function's second and third envelopes are just as much a convention choice as its first."
+      },
+      "devicePollOnce": {
+        "convention": "mixed",
+        "keys": "status, device_code, retry_after (the still-pending envelope); ok, email, expires_at, user, apiBaseUrl (the completed-auth one)",
+        "reason": "Also two: a snake pending envelope and the shared completed-auth literal that mixes expires_at with apiBaseUrl."
+      },
+      "cmdLogin": {
+        "convention": "mixed",
+        "keys": "ok, email, expires_at, user, apiBaseUrl",
+        "reason": "The completed-auth literal again -- the third of the three sites that mix expires_at with apiBaseUrl inside one object."
+      },
+      "cmdLogout": {
+        "convention": "snake",
+        "keys": "ok, signed_out",
+        "reason": "Pure snake. #3133 listed this among the auth envelopes that mix; it does not \u2014 it carries no camel key. Recorded because the correction matters: the intra-object mixing is THREE sites, not four."
+      },
+      "cmdAgentLifecycle": {
+        "convention": "snake",
+        "keys": "ok, agent_id, status",
+        "reason": "Pause/resume. #3133 called this function cmdAgentPauseResume; the name is cmdAgentLifecycle. Its anchor correction was right that this is not the revoke site."
+      },
+      "cmdAgentRevoke": {
+        "convention": "snake",
+        "keys": "ok, agent_id, status",
+        "reason": "Hybrid envelope: a bare `ok` beside snake_case identifiers."
+      },
+      "cmdAgentRename": {
+        "convention": "snake",
+        "keys": "ok, agent_id, name",
+        "reason": "Hybrid envelope: a bare `ok` beside a snake_case identifier, same shape as cmdAgentRevoke on the rename verb."
+      },
+      "cmdWalletRename": {
+        "convention": "snake",
+        "keys": "ok, account_id, name",
+        "reason": "Hybrid envelope on the wallet noun \u2014 `account_id`, the post-#2914 spelling, beside a bare `ok`."
+      },
+      "cmdContactsRemove": {
+        "convention": "snake",
+        "keys": "ok, contact_id, removed",
+        "reason": "Hybrid envelope on the contact noun: `contact_id` beside a bare `ok` and a bare `removed`."
+      },
+      "cmdWhoami": {
+        "convention": "snake",
+        "keys": "id, email, expires_at, api_url",
+        "reason": "Pure snake, and notably `api_url` here against `apiBaseUrl` in the auth envelopes -- the same concept under two spellings on the same surface. Declared rather than converged: #3133's decision is that the split stays. The literal is pure snake; it also spreads the backend profile object, so the emitted JSON carries whatever keys that carries."
+      },
+      "cmdWalletsBalances": {
+        "convention": "camel",
+        "keys": "account, chainId, balances",
+        "reason": "The one command that RE-MAPS: it reads safe.chain_id from the backend and emits chainId. So the CLI is a pass-through everywhere except here, which is why the documentation states that exception rather than claiming a blanket rule."
+      },
+      "emitGrant": {
+        "convention": "snake",
+        "keys": "agent_id, status",
+        "reason": "Budget-grant preparation. Self-constructed snake keys with no `ok`, so an `{ ok: true` census could not see it. The literal is snake; it spreads the backend build object, so the emitted JSON carries that too."
+      },
+      "emitRevoke": {
+        "convention": "snake",
+        "keys": "agent_id, delegation_hash, status (spread over the prepared backend response)",
+        "reason": "Revocation preparation: CLI-chosen snake keys spread over a whole backend response. Neither a plain envelope nor a plain pass-through, and invisible to an `{ ok: true` census."
+      },
+      "cmdAgentsConnect": {
+        "convention": "snake",
+        "keys": "setup_id, approval_url, connector_command, connector_exit_code, outcome, relay",
+        "reason": "The whole user-visible result of `agents connect --run --json`. Built into a local `const` and handed to an emit helper rather than written inline, which is why an inline-only census could not see it -- `connector_exit_code` and `relay` are invented here and come back from no backend under those names. `outcome` is a NESTED object (ConnectorOutcome) and only the container key is recorded -- its own keys are read by scripts too, and are outside this census the way every nested literal is."
+      }
+    },
+    "onDisk": {
+      "$comment": [
+        "Shapes the census cannot reach, each with the reason it cannot. Not `--json`",
+        "command output in the `commands.ts` sense: two are built in `output.ts`, which",
+        "the scanner does not read, and one is a file on disk that no release channel",
+        "can rewrite.",
+        "",
+        "`keys` here is PROSE and is not parsed -- these entries are documentation,",
+        "not inputs to the key-set comparison the `envelopes` entries go through."
+      ],
+      "credential file account address": {
+        "convention": "snake",
+        "keys": "account_address, with a permanent safe_address fallback",
+        "reason": "packages/connect/src/doctor.ts declares both keys and reads the pre-#2908 name permanently (#2906 decision 2a): the next --rekey or setup rewrites it as account_address, but an un-rekeyed install keeps the old spelling forever. No release channel can reach it."
+      },
+      "export wrapper": {
+        "convention": "snake",
+        "keys": "ok, format, content \u2014 plus rows on the CSV branch only",
+        "reason": "Built in packages/cli/src/output.ts, not commands.ts, so it is outside the census by construction -- the scanner reads one file. It wraps BOTH the CSV and the SIE export -- and the SIE branch passes no `rows`, so the key set differs by format -- and a reader who only saw the header list would parse the wrong thing: the body is inside `content`."
+      },
+      "failure envelope": {
+        "convention": "snake",
+        "keys": "ok (false), error.code, error.message, error.hint",
+        "reason": "Also built in output.ts, and the single most-parsed --json shape an agent sees, because it is what every failed command returns. Outside the census for the same structural reason as the export wrapper, and recorded here so 'what does a failure look like' has an answer on this page."
+      }
     }
   }
 }

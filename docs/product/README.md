@@ -32,6 +32,7 @@ This is the durable product UX entrypoint for Haven and the index for the `docs/
 - UI review checklist: [design-review.md](./design-review.md)
 - Account recovery (user-facing model): [account-recovery.md](./account-recovery.md)
 - Replacing an agent's signing key: [agent-key-rotation.md](./agent-key-rotation.md) — the sibling to account recovery, and routinely confused with it
+- CLI `--json` casing conventions: [cli-json-conventions.md](./cli-json-conventions.md) — which command returns which convention, and why the split is deliberate
 - Redesign implementation history (archived): [../archive/redesign-handoff.md](../archive/redesign-handoff.md)
 
 When these docs overlap, use this order of authority:

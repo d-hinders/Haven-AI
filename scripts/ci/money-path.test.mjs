@@ -389,6 +389,100 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
+  test('the demo merchant\'s settlement file is RUNTIME money-path — a change to it gates promotion (#3098)', () => {
+    // The #2300 shape, one package over. packages/demo-merchant-mcp/src/x402.ts
+    // verifies the buyer's authorization and SUBMITS it on-chain (settleOnce),
+    // and the prod instance runs on Base mainnet (#1458). #2969/#2977 (the
+    // zero-hash settlement sentinel) and #2979/#2980 (settlement readiness)
+    // changed its settlement semantics with no money-path label, no CASP shard
+    // and no qa-freshness count — the file was outside every glob while the
+    // CASP guardrails doc's `covers:` had listed it since #1736. Runtime, not
+    // control: the demo merchant deploys from `dev` on Railway and the
+    // money-flow harness pays it through QA_DEMO_MERCHANT_URL, so a green run
+    // really does cover it. Mutation: remove packages/demo-merchant-mcp/src/**
+    // from the JSON and this fails by name.
+    const runtime = loadMoneyPathGlobs()
+    for (const f of ['packages/demo-merchant-mcp/src/x402.ts', 'packages/demo-merchant-mcp/src/server.ts']) {
+      assert.ok(
+        moneyPathFiles([f], runtime).length === 1,
+        `${f} must be matched by a RUNTIME money-path glob — it settles the buyer's ` +
+          'authorization on-chain and the money-flow harness exercises it (#3098)',
+      )
+    }
+    const plumbing = ['packages/demo-merchant-mcp/README.md', 'packages/demo-merchant-mcp/package.json']
+    assert.deepEqual(
+      moneyPathFiles(plumbing, [...runtime, ...loadMoneyPathControlGlobs()]),
+      [],
+      'demo-merchant build/prose plumbing must stay off the perimeter — the glob is src/**, not the package (#3098)',
+    )
+  })
+
+  test('every package-wide glob in the CASP perimeter doc is on the money-path list, or named here as doc-only (#3098)', () => {
+    // The FOURTH copy, read in the OTHER direction. The test above this
+    // block's #1899 twin asks "is every money-path file in `covers:`?" and
+    // nothing asked "is every package `covers:` spans on the money-path
+    // list?" — so the guardrails doc could name a whole package as perimeter
+    // that the classifier, the labeler and qa-freshness had never heard of.
+    // It did: packages/demo-merchant-mcp/src/** was in `covers:` and on no
+    // glob, and the file that settles on-chain shipped two semantic changes
+    // unlabelled (#3098). A package the doc calls money-path and the machinery
+    // does not is the #1030 shape with the copies swapped.
+    //
+    // Scoped to package-wide globs (`packages/<pkg>/**`, `packages/<pkg>/src/**`)
+    // because those are the entries that claim a perimeter; the doc's named
+    // backend files are individually argued in its prose and are not the
+    // classifier's business. A doc-only package is ALLOWED — the doc reasons
+    // about client packages the deployed harness never runs — but it is named
+    // here with its reason, never silent.
+    const DOC_ONLY = new Map([
+      // Client-side packages: run inside the agent's own process, not deployed
+      // by Haven, so the money-flow harness's "did the green run cover this?"
+      // has no answer for them. The doc covers them because the CASP perimeter
+      // question (does Haven hold or move funds?) still applies to what they
+      // ship; the machinery lists only packages/sdk/src/signer.ts of the SDK
+      // because that file is spend authority (the signing schemes), the rest
+      // is transport. Widening any of these to `globs` is an owner decision:
+      // every SDK/connector/CLI/local-runtime PR would then owe a covering QA
+      // run the harness cannot give it.
+      ['packages/sdk/src/**', 'client library; only signer.ts is on the runtime list — see #3098'],
+      ['packages/cli/src/**', 'client CLI; not deployed by Haven — see #3098'],
+      ['packages/connect/src/**', 'the dashboard\'s connector, runs on the user\'s machine — see #3098'],
+      ['packages/mcp/src/**', 'the local MCP runtime, runs in the agent\'s process — see #3098'],
+    ])
+
+    const doc = 'docs/regulatory/casp-risk-guardrails.md'
+    const parsed = parseFrontMatter(read(doc))
+    assert.ok(parsed.ok, `${doc}: front matter did not parse — ${parsed.error}`)
+    const packageWide = (parsed.data.covers || []).filter((g) => /^packages\/[^/]+\/(src\/)?\*\*$/.test(g))
+    assert.ok(packageWide.length >= 5, `${doc}: read ${packageWide.length} package-wide covers entries — the shape changed`)
+
+    const all = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
+    const files = trackedFiles()
+    const offList = []
+    for (const glob of packageWide) {
+      if (DOC_ONLY.has(glob)) continue
+      const matched = files.filter((f) => matchesGlob(f, glob))
+      assert.ok(matched.length > 0, `${doc}: ${glob} matches no tracked file`)
+      const unlisted = matched.filter((f) => moneyPathFiles([f], all).length === 0)
+      if (unlisted.length) offList.push(`${glob} (e.g. ${unlisted[0]})`)
+    }
+    assert.deepEqual(
+      offList,
+      [],
+      `${doc} spans packages the money-path list does not: the doc asks the CASP ` +
+        'perimeter question of them while the classifier, the labeler and qa-freshness ' +
+        'never will. Add the glob to .github/money-path-globs.json (and labeler.yml and ' +
+        'the SKILL.md Merge Gate), or name it in DOC_ONLY here with the reason it stays ' +
+        'doc-only (#3098).',
+    )
+
+    // The named exclusions must still be real entries — a DOC_ONLY line for a
+    // glob the doc no longer carries is the phantom shape (#1897) in reverse.
+    for (const glob of DOC_ONLY.keys()) {
+      assert.ok(packageWide.includes(glob), `DOC_ONLY names ${glob}, which ${doc} no longer covers — drop the entry`)
+    }
+  })
+
   test('a count-based fifth-copy detector is pointed the wrong way (#1904)', () => {
     // The FIFTH copy — the one that does not exist yet, and the reason #1904
     // closed without shipping a gate.

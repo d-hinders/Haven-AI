@@ -715,6 +715,14 @@ you need the reasoning. Never edit one without the other — CI will not let you
   frontend decision surfaces could not make. Scoped to `src/**` on a measured
   3-of-113-commits delta for the package's README/Dockerfile/config files —
   the command and window are in the JSON note);
+- `packages/demo-merchant-mcp/src/**` (the demo merchant's settlement surface —
+  #3098. `x402.ts` verifies the buyer's authorization and submits it on-chain,
+  and the prod instance runs on Base mainnet; the CASP guardrails doc had
+  covered the package since #1736 while the classifier never had, and two
+  settlement-semantics changes (#2969/#2977, #2979/#2980) shipped unlabelled
+  through that gap. Runtime `globs`, not control: it deploys from `dev` on
+  Railway and the money-flow harness pays it through `QA_DEMO_MERCHANT_URL`.
+  Scoped to `src/**` like the hosted MCP entry);
 - `db/migrations/`;
 - the safeguard's own control surface — `scripts/release-bump.mjs`,
   `scripts/release-version-order.mjs` (the forward-only version rule #2580 lifted

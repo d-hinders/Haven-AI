@@ -42,7 +42,7 @@ describe('shared Haven tool descriptions', () => {
     // deliberately compact — the full party vocabulary (delegate,
     // delegateAccount, merchant) lives in the HavenPaymentReceipt type doc.
     // If you lengthen the fragment, the hosted description-size mean gate
-    // (mcp-server description-size.test.ts, ≤874 bytes/tool) is the bound
+    // (mcp-server description-size.test.ts, ≤875 bytes/tool) is the bound
     // that will fail — trim elsewhere first and re-verify there.
     const desc = composeDescription(toolDescriptions.listReceipts)
 

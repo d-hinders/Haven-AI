@@ -64,11 +64,22 @@ and the `release` skill.
 > note: `CONNECTOR_VERSION` and the channel constant's unchanged value — nothing
 > else in this document was re-verified.
 
+> **Re-verification (#3135, request-validation flip re-key, 2026-09-18):** this
+> doc is coupled again through the same `covers:` entry on
+> `packages/backend/src/config.ts`, and again only a JSDoc block and the
+> boot-refusal error string changed: the per-module override is now keyed on
+> the route FILE (`enforcedModules: ['routes/contacts.ts', …]`) rather than the
+> mount prefix. The accepted values, the default, the restart semantics and the
+> variable's irrelevance to package selection are all untouched, so **nothing in
+> this document was made false or stale by that edit** — step 5's claim was
+> re-read against the merged tree and holds.
+
 > **Re-verification (#3082, request-validation body restore, 2026-09-17):** this
 > doc is coupled because `packages/backend/src/config.ts` is in its `covers:` and
 > that file was edited. Only a JSDoc block and the boot-refusal error string
 > changed, both describing `HAVEN_REQUEST_VALIDATION`: `off` does not disable an
-> `enforcedPrefixes` module, and shadow's "changes nothing" was true of the
+> `enforcedPrefixes` module (re-keyed to `enforcedModules` by #3135), and
+> shadow's "changes nothing" was true of the
 > handler's view only after #3082 restored the request body. No parse shape, no
 > default, no accepted value and no restart semantics moved.
 > **Nothing in this document was made false or stale by that edit.** Its own

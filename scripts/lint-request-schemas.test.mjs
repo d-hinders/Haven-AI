@@ -27,9 +27,9 @@ import {
   registeredRoutes,
   prefixesFromIndex,
   importNameFromIndex,
-  enforcedPrefixesFromIndex,
-  prefixIsEnforced,
+  enforcedModulesFromIndex,
   operationHasRequestConstraints,
+  ownSchemaRoutes,
   typeofLines,
 } from './lint-request-schemas.mjs'
 
@@ -44,9 +44,11 @@ const BASE = 'scripts/lint-request-schemas-baseline.json'
 //                 (spec'd: a requestBody). Shadowed, and carrying two
 //                 `typeof` guard lines: the slice-2 work waiting to happen.
 //   contacts.ts — POST / (spec'd: a requestBody) but the module is ENFORCED
-//                 via `enforcedPrefixes` in the fixture index.ts, exactly as
+//                 via `enforcedModules` in the fixture index.ts, exactly as
 //                 the real one is: the proof module. shadow: 0 by WIRING,
-//                 which is what the mutation test below removes.
+//                 which is what the mutation test below removes. The key is
+//                 the route FILE since #3135 — a prefix could not express
+//                 epic #3028's slice partition.
 
 const INDEX = `import { installRequestValidation } from './openapi/request-validation.js'
 import probeRoutes from './routes/probe.js'
@@ -54,13 +56,13 @@ import contactRoutes from './routes/contacts.js'
 const app = { register: () => {}, setErrorHandler: () => {} }
 installRequestValidation(app, {
   mode: 'shadow',
-  enforcedPrefixes: ['/contacts'],
+  enforcedModules: ['routes/contacts.ts'],
 })
 await app.register(probeRoutes, { prefix: '/probe' })
 await app.register(contactRoutes, { prefix: '/contacts' })
 `
 
-const INDEX_WITHOUT_ENFORCED = INDEX.replace("  enforcedPrefixes: ['/contacts'],\n", '')
+const INDEX_WITHOUT_ENFORCED = INDEX.replace("  enforcedModules: ['routes/contacts.ts'],\n", '')
 
 const SPEC = `export const openapiSpec = {
   openapi: '3.1.0',
@@ -207,16 +209,21 @@ describe('index.ts readers', () => {
     assert.equal(importNameFromIndex(src, 'probe'), null)
   })
 
-  it('enforcedPrefixesFromIndex: reads the install option; absent install = []', () => {
-    assert.deepEqual(enforcedPrefixesFromIndex(INDEX), ['/contacts'])
-    assert.deepEqual(enforcedPrefixesFromIndex(INDEX_WITHOUT_ENFORCED), [])
-    assert.deepEqual(enforcedPrefixesFromIndex('const app = 1'), [])
+  it('enforcedModulesFromIndex: reads the install option; absent install = []', () => {
+    assert.deepEqual(enforcedModulesFromIndex(INDEX), ['routes/contacts.ts'])
+    assert.deepEqual(enforcedModulesFromIndex(INDEX_WITHOUT_ENFORCED), [])
+    assert.deepEqual(enforcedModulesFromIndex('const app = 1'), [])
   })
 
-  it('prefixIsEnforced: the plugin\u2019s own rule — exact mount or beneath, not a shared stem', () => {
-    assert.equal(prefixIsEnforced('/contacts', ['/contacts']), true)
-    assert.equal(prefixIsEnforced('/contacts/sub', ['/contacts']), true)
-    assert.equal(prefixIsEnforced('/contacts-elsewhere', ['/contacts']), false)
+  it('enforcedModulesFromIndex: reads the REAL index.ts, the rollout\u2019s state (#3135)', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const real = await readFile(
+      new URL('../packages/backend/src/index.ts', import.meta.url),
+      'utf8',
+    )
+    // Exact FILE keys — the same strings the baseline uses. If this ever
+    // reads a prefix again, the gate and the plugin have split.
+    assert.deepEqual(enforcedModulesFromIndex(real), ['routes/contacts.ts', 'routes/merchants.ts'])
   })
 })
 
@@ -245,6 +252,31 @@ describe('operationHasRequestConstraints', () => {
     assert.equal(operationHasRequestConstraints({}), false)
     assert.equal(operationHasRequestConstraints({ parameters: [{ name: 'x' }] }), false)
   })
+
+  it("resolves a $ref'd parameter against components.parameters (#3135)", () => {
+    // A $ref node carries no `in`, so before #3135 both this gate and the
+    // plugin dropped it — and a $ref is how every AgentId/PaymentId/SetupId
+    // path parameter in the real spec is written.
+    const components = { AgentId: { name: 'id', in: 'path', schema: { type: 'string' } } }
+    const operation = { parameters: [{ $ref: '#/components/parameters/AgentId' }] }
+    assert.equal(operationHasRequestConstraints(operation, components), true)
+    // Unresolvable, and with no component map at all: skipped, never thrown.
+    assert.equal(operationHasRequestConstraints(operation, {}), false)
+    assert.equal(operationHasRequestConstraints(operation), false)
+  })
+})
+
+describe('ownSchemaRoutes (#3135)', () => {
+  it('counts a route options object declaring its own `schema:`', () => {
+    assert.equal(ownSchemaRoutes("app.post('/x', {\n  schema: { body: {} },\n}, handler)"), 1)
+  })
+
+  it('does NOT count a comment mentioning schema:', () => {
+    // `payments.ts` carries exactly such a comment — the reason the slice-1
+    // report could say "0 routes with a Fastify schema" while grep said 1.
+    assert.equal(ownSchemaRoutes('// the route declares no schema: the plugin injects it'), 0)
+    assert.equal(ownSchemaRoutes(' * schema: is injected by the plugin'), 0)
+  })
 })
 
 describe('typeofLines', () => {
@@ -264,7 +296,10 @@ describe('CLI over an owned fixture (#2720: spawn the script)', () => {
       files: fixtureFiles(),
     })
     assert.equal(status, 0, out)
-    assert.match(out, /1 shadow module\(s\), 2 typeof line\(s\) across 2 file\(s\)/)
+    assert.match(
+      out,
+      /1 shadow module\(s\), 2 typeof line\(s\), 0 own-schema route\(s\), 0 unspecced route\(s\) across 2 file\(s\)/,
+    )
     assert.match(out, /✓ request-validation rollout has not regressed/)
   })
 
@@ -282,10 +317,10 @@ describe('CLI over an owned fixture (#2720: spawn the script)', () => {
     assert.match(out, /routes\/probe\.ts \[typeof\]: baseline 1, now 2/)
   })
 
-  test('MUTATION: removing enforcedPrefixes re-enters the proof module in shadow and reddens', () => {
+  test('MUTATION: removing enforcedModules re-enters the proof module in shadow and reddens', () => {
     // The gate's whole story about `routes/contacts.ts: shadow: 0` hangs on
     // the wiring in index.ts. This is the mutation the card requires: strip
-    // the enforcedPrefixes from the fixture install and the gate must go red
+    // the enforcedModules from the fixture install and the gate must go red
     // naming contacts — proving the scanner reads the wiring, not a constant.
     const { status, out } = runGuard(GATE, {
       also: ALSO,

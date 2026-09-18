@@ -52,6 +52,7 @@ export {
 } from './reconciliation.js'
 export { prepareSweep, submitSweep } from './sweep.js'
 export { handleBudgetPrecheck } from './budget-precheck.js'
+export { budgetPrecheckBodyError } from './budget-precheck-guards.js'
 
 export type {
   MachinePaymentRail,

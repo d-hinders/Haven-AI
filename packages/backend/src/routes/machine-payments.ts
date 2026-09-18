@@ -8,6 +8,7 @@ import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   handleGetAllowances,
   handleBudgetPrecheck,
+  budgetPrecheckBodyError,
   handleReconciliationEvent,
   handleSend,
   attachEvidenceHandler,
@@ -287,25 +288,14 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     { config: moneyPathRateLimit },
     async (request, reply) => {
       const agent = request.agent as AgentContext
-      const body = request.body ?? {}
-      if (!body.token || typeof body.token !== 'string' || !isValidAddress(body.token)) {
-        return reply.code(400).send({ error: 'token must be a valid contract address' })
-      }
-      if (
-        !body.amountAtomic ||
-        typeof body.amountAtomic !== 'string' ||
-        !/^[0-9]+$/.test(body.amountAtomic)
-      ) {
-        return reply.code(400).send({ error: 'amountAtomic must be a non-negative integer string' })
-      }
-      if (body.resourceUrl !== undefined && typeof body.resourceUrl !== 'string') {
-        return reply.code(400).send({ error: 'resourceUrl must be a string' })
-      }
-      if (body.merchantTo !== undefined && typeof body.merchantTo !== 'string') {
-        return reply.code(400).send({ error: 'merchantTo must be a string' })
-      }
-      if (body.chainId !== undefined && typeof body.chainId !== 'number') {
-        return reply.code(400).send({ error: 'chainId must be a number' })
+      // #3054 body guards relocated verbatim to the mpp module
+      // (budgetPrecheckBodyError) so the #3029 request-schemas ratchet keeps
+      // its shrink-only baseline for this file — checks and 400 bodies
+      // unchanged.
+      const body = (request.body ?? {}) as BudgetPrecheckBody
+      const bodyError = budgetPrecheckBodyError(body)
+      if (bodyError) {
+        return reply.code(400).send(bodyError)
       }
 
       const result = await handleBudgetPrecheck(agent, body)

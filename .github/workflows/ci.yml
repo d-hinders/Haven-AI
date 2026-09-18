@@ -396,7 +396,7 @@ jobs:
           npm run lint:migration-constraint-scope
           npm run lint:migration-constraint-scope:test
 
-      - name: Request-schema ratchet (#3029)
+      - name: Request-schema ratchet + route-module table (#3029, #3135)
         # Blocking, shrink-only baseline over the request-validation rollout
         # (epic #3028): per route file, whether any registered route is still
         # SHADOWED by the request-validation plugin and how many hand-rolled
@@ -404,7 +404,10 @@ jobs:
         # ladders, so the baseline only ever shrinks; removing the proof
         # module's enforcedModules wiring re-enters it in shadow and reddens
         # this gate. Self-tested for the same reason as lint:deps above — the
-        # self-test SPAWNS the CLI (#2720's rule).
+        # self-test SPAWNS the CLI (#2720's rule). It also runs
+        # check:route-modules (#3135), so a route added, moved or renamed
+        # without regenerating openapi/route-modules.generated.ts reddens here
+        # — the plugin resolves enforcedModules through that table.
         run: |
           npm run lint:request-schemas
           npm run lint:request-schemas:test

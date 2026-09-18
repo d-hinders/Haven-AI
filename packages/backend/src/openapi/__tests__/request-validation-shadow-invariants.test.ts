@@ -35,6 +35,9 @@ type Json = Record<string, any>
 
 const spec = openapiSpec as unknown as { paths: Record<string, Json> }
 
+/** Separates a row's route file from the fallback expression it cites. */
+const SITE_SEPARATOR = ' — '
+
 /**
  * Every request-side `default:` the served spec declares, as
  * `'<METHOD> <path> <in>:<name>' → default`. Walks the operation's and the
@@ -207,11 +210,28 @@ describe('shadow-mutation invariants (#3135, partner finding S5)', () => {
   it('every reviewed row cites a fallback expression still present in the file it names', async () => {
     // This is what stops the row above being a record of nothing: the `handler`
     // column is only worth asserting against if something binds it to the code.
-    for (const [key, row] of Object.entries(DEFAULT_VS_HANDLER_FALLBACK)) {
-      const [file, quoted] = row.site.split(' — ')
+    //
+    // COUNTS, not presence. Review round 2 found that four rows cite an
+    // expression occurring TWICE in `agent-activity.ts` — the `{id}/activity`
+    // and `/feed` handlers are textually identical — so mutating only one of
+    // the pair left the file green. Requiring at least one occurrence per
+    // citing row closes that: two rows citing `.limit) || 30` need two of them,
+    // and changing either site reddens.
+    const citingRows = new Map<string, number>()
+    for (const row of Object.values(DEFAULT_VS_HANDLER_FALLBACK)) {
+      citingRows.set(row.site, (citingRows.get(row.site) ?? 0) + 1)
+    }
+    for (const [site, expected] of citingRows) {
+      // `indexOf`, not `split`, so a future `site` carrying a second ' — '
+      // truncates nothing and cannot redden for the wrong reason.
+      const separator = site.indexOf(SITE_SEPARATOR)
+      const file = site.slice(0, separator)
+      const quoted = site.slice(separator + SITE_SEPARATOR.length)
       const expression = quoted.replace(/^`|`$/g, '')
       const source = await readFile(new URL(`../../${file}`, import.meta.url), 'utf8')
-      expect(source, `${key} — ${file} no longer contains ${quoted}`).toContain(expression)
+      const found = source.split(expression).length - 1
+      expect(found, `${file} contains ${quoted} ${found}×, but ${expected} reviewed row(s) cite it`)
+        .toBeGreaterThanOrEqual(expected)
     }
   })
 

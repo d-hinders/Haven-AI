@@ -176,8 +176,10 @@ describe('the flip is keyed on the route FILE (#3135, epic #3028 decision 7)', (
     // The failure mode the old `startsWith` key had: a listed key must not
     // drag a differently-named sibling along with it.
     expect(moduleIsEnforced('routes/contacts-archive.ts', ['routes/contacts.ts'])).toBe(false)
-    // An operation the generated table does not attribute is never enforced —
-    // a stale table under-enforces rather than refusing unflipped traffic.
+    // An operation the generated table does not attribute is never enforced,
+    // which is what the assertion below proves. That is the UNATTRIBUTED case
+    // only: a MOVED route keeps its old attribution and stays enforced under a
+    // file nobody listed — see `routeModuleFor`'s JSDoc for both directions.
     expect(moduleIsEnforced(undefined, ['routes/contacts.ts'])).toBe(false)
   })
 

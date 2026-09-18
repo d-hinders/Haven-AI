@@ -11,6 +11,7 @@ covers:
   - packages/backend/src/config.ts
   - packages/backend/src/openapi/request-validation.ts
   - packages/backend/src/openapi/route-modules.generated.ts
+  - packages/backend/scripts/generate-route-modules.ts
   - packages/backend/src/index.ts
 last-verified: "2026-09-18"
 ---

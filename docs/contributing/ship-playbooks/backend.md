@@ -21,8 +21,11 @@ Loaded by `ship-next` for `area:backend` issues.
   `npm run generate:route-modules` and commit the result whenever you add,
   move, rename or delete a route; `npm run check:route-modules` and
   `openapi/__tests__/route-modules.generated.test.ts` both fail on a stale
-  table. A missing entry fails quietly in the safe direction — the route is
-  never enforced — which is why the gate exists rather than a runtime warning.
+  table. A *missing* entry fails quietly in the safe direction — the route is
+  never enforced. A *moved* one does not: the stale table keeps the old
+  attribution, so the route stays enforced under a file nobody listed. Both are
+  invisible at runtime, which is why the staleness itself is what gets gated
+  rather than the lookup.
 - **Generated wire types (#984).** Any edit to `openapi/spec.ts` must regenerate the shared wire types: run `npm run generate:api-types` and commit the resulting `packages/core/src/api-types.ts`. CI's **blocking** `npm run check:api-types` drift gate fails the PR if the spec and the generated types disagree. Never hand-edit `api-types.ts`.
 - **Package gate.** `npm run typecheck -w packages/backend` and `npm run test -w packages/backend` must pass. **Run `typecheck` as the LAST step, after every test file is written or edited** — `vitest`/`tsx` strip types and do NOT type-check, so a green test run says nothing about type errors in the test itself. `tsc` is the only thing that checks `*.test.ts`; a type error there (a wrong config field, a stale mock shape) fails CI's typecheck but never the test run (#781, the #776 miss).
 - **SQL schema drift.** When the diff adds or changes a money-path query, add it to the curated list in `packages/backend/scripts/db-schema-smoke.ts` — CI applies the migrations and `PREPARE`s each query against a real Postgres, so a column/type mismatch fails in CI instead of dev (mocked route tests never validate SQL against the schema — how `agents.safe_address` reached dev, #757). Run locally against a throwaway DB with `DATABASE_URL=… npm run db:schema-smoke -w packages/backend`. Since epic #1219 the smoke is no longer the only real-database check: repository *behaviour* (idempotency, locking, transactions) is proven on the real-DB harness — see [`testing-strategy.md`](../testing-strategy.md) for which check owns what.

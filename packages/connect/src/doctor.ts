@@ -920,7 +920,12 @@ export async function runDoctor(
   const input2 = { ...input, runtime }
 
   // ── Runtime config (read once; every agent's wiring is judged against it) ─
-  const configPath = runtimeConfigPathFor(input2.runtime, homeDir)
+  // #3145 review: `runtimeConfigPathFor` switches on the RAW string, so a
+  // documented alias (`--runtime codex`) used to resolve to no path and take
+  // the "CLI-managed" skip while ~/.codex/config.toml sat unread. The path is
+  // looked up by the NORMALIZED id; the report keeps the flag verbatim.
+  const normalizedRuntime = normalizeRuntimeName(input2.runtime)
+  const configPath = runtimeConfigPathFor(normalizedRuntime ?? input2.runtime, homeDir)
   let configText: string | null = null
   if (configPath !== null) {
     try {
@@ -1059,8 +1064,7 @@ export async function runDoctor(
   // (`--runtime codex-clii` — args.ts does not validate the value). Only the
   // second earns the honest skip and the advisory below; the third is a
   // failure that names the allowed values, like the unknown case.
-  const normalizedRuntime = normalizeRuntimeName(input2.runtime)
-  const runtimeOwnsNoConfig = normalizedRuntime !== null && runtimeConfigPathFor(normalizedRuntime, homeDir) === null
+  const runtimeOwnsNoConfig = normalizedRuntime !== null && configPath === null
   if (configPath === null && input2.runtime !== '' && normalizedRuntime === null) {
     checks.push({
       id: 'runtime_config',
@@ -1422,7 +1426,9 @@ export async function runRepair(
   // the exact class of harm a repair tool must never cause. Detect and
   // refuse: the local wrapper (bin/haven-mcp) and its mcp-runtime sidecar
   // are the tell.
-  const configPath = runtimeConfigPathFor(input2.runtime, homeDir)
+  // Looked up by the normalized id for the same reason as in runDoctor: an
+  // alias must not skip this refusal and clobber a local topology.
+  const configPath = runtimeConfigPathFor(normalizeRuntimeName(input2.runtime) ?? input2.runtime, homeDir)
   if (configPath) {
     try {
       const existing = await readFile(configPath, 'utf8')

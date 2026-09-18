@@ -2044,6 +2044,19 @@ describe('doctor verdict levels (#3121)', () => {
     expect(report.ok).toBe(false)
   })
 
+  it('a documented ALIAS of a config-owning runtime reads that config (--runtime codex → ~/.codex/config.toml), never the CLI-managed skip', async () => {
+    // #3145 review: `runtimeConfigPathFor` switches on the raw string; the
+    // alias used to resolve to no path and report a green skip with the file
+    // unread (#3120's class). With two live keys it now behaves as codex-cli.
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const report = await runDoctor({ runtime: 'codex' }, { homeDir, ...deps })
+    expect(report.runtime).toBe('codex') // the flag stays verbatim in the report
+    const config = report.checks.find((c) => c.id === 'runtime_config')
+    expect(config?.level).toBe('ok')
+    expect(config?.detail).toContain('config.toml references the hosted server')
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.level).toBe('failed')
+  })
+
   it('MUTATION PROOF (the twin): the SAME two directories on codex-cli, whose config names only agent-1, stay a failure', async () => {
     const { homeDir, deps } = await homeWithSecondLiveDirectory()
     const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })

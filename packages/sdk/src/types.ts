@@ -787,6 +787,25 @@ export interface HavenPaymentReceipt {
   selectedPayment?: Record<string, unknown> | null
   paymentProofHeaderName: string | null
   protocolReceiptHeaderName: string | null
+  /**
+   * #3125 — the merchant's `PAYMENT-RESPONSE` object relayed VERBATIM:
+   * opaque, unvalidated, unverified, MERCHANT-CONTROLLED third-party data.
+   * Haven neither authors nor verifies anything inside it, including
+   * `protocolReceiptPayload.payer` —
+   * that `payer` is the merchant's claim, NOT Haven's record, and is not
+   * {@link payerAddress} (Haven's own, authoritative; field observation
+   * 2026-09-18: the two held different addresses on every row read). For who
+   * paid, read `parties` ({@link PaymentParties}) — `treasuryAccount`,
+   * `delegate`, `delegateAccount`, `merchant` are Haven-derived and
+   * authoritative; anything inside this object is not.
+   *
+   * Deliberately NOT namespaced or key-prefixed on the wire (#3125): the
+   * relay must stay the merchant's object verbatim (its `transaction` key
+   * feeds `settlementTxHash`), and prefixing the envelope could not prefix
+   * the merchant-controlled keys inside it — the `payer` collision lives
+   * there, so provenance is made legible at the read surfaces instead (this
+   * comment and the tool descriptions).
+   */
   protocolReceiptPayload?: Record<string, unknown> | null
   merchantStatus: number | null
   confirmedAt: string | null

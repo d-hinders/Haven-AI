@@ -224,7 +224,7 @@ export async function quoteMcpToolCall(
 /**
  * #3097: the pre-intent form of the SDK's `assertSecureX402RetryTarget`, as a
  * hosted refusal. Module-private on purpose: it has exactly one caller
- * (quoteMcpToolCall, twice), so it is not a shared helper for the #2808
+ * (quoteMcpToolCall), so it is not a shared helper for the #2808
  * ownership map — the rule itself is the SDK's, tested there.
  */
 function assertSecureMerchantUrl(merchantUrl: string): void {

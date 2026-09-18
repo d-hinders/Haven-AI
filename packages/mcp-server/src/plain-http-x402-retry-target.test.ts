@@ -301,5 +301,6 @@ describe('haven_complete_mcp_tool — the post-funding escape is annotated (#309
     expect(result.phase).toBe('not_delivered')
     expect(result.next_action).toBe('retry_with_explicit_context')
     expect(result.suggested_tool).toBe('haven_quote_mcp_tool')
+    expect(result.rail).toBe('erc7710')
   })
 })

@@ -154,6 +154,22 @@ function nextStepWireFields(step: NextStep): Pick<ToolFailure, 'next_tool' | 'ne
   }
 }
 
+/** #3102: the typed step for a payment-state refusal, from the per-action default table. */
+function stateErrorNextStep(nextAction: string, paymentId: string | undefined): NextStep {
+  const action = nextAction as AgentPaymentNextAction
+  if (action === AgentPaymentNextAction.CheckStatusLater && paymentId) {
+    return refusalNextStep({ nextAction: action, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } })
+  }
+  if (action === AgentPaymentNextAction.SweepStrandedFunds) {
+    return refusalNextStep({ nextAction: action, nextTool: 'haven_sweep_delegate', nextArguments: {} })
+  }
+  return refusalNextStep({
+    nextAction: action,
+    nextTool: null,
+    nextToolOmittedReason: 'the payment is in a state this tool cannot act on; next_action and message say what can',
+  })
+}
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -196,6 +212,11 @@ export function normalizeError(err: unknown): ToolFailure {
       next_action: err.nextAction,
       rail: err.state.rail,
       idempotency_key: err.state.idempotencyKey,
+      // #3102: the SDK's state error names an action the backend chose; the
+      // step follows decision 9's default table (check_status_later → the
+      // status read, sweep_stranded_funds → the sweep) and says why none
+      // follows otherwise — so no hosted refusal carries a bare next_action.
+      ...nextStepWireFields(stateErrorNextStep(err.nextAction, err.paymentId)),
     }
   }
   if (err instanceof HavenApiError) {

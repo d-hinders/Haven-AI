@@ -2046,7 +2046,7 @@ what each server's instructions say and why they differ in length.
 > quoted), `request_url` / `retry_url` / `resource_url_differs_from_request` on
 > the quote, `retry_url` on pay and resume, and the `INSECURE_RETRY_TARGET`
 > refusal of a public `http://` retry target — the same rule on the SDK's
-> `MerchantTransport.deliverPayment` seam, which the local runtime crosses. The
+> `McpMerchantTransport.deliverPayment` seam, which the local runtime crosses. The
 > local/hosted divergence this document describes is unchanged: the local
 > runtime always retried the caller's URL; the hosted surface now carries it.
 > Scope of this note: those fields and that refusal. Nothing else in this

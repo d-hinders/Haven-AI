@@ -62,16 +62,6 @@ import {
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
-
-// #3097: `resource_url_differs_from_request` is emitted only when a request
-// URL existed to compare against. On the pay-from-declaration path nothing was
-// compared, and a literal `false` there read as "the merchant agrees with what
-// you quoted" (haven-reviewer on #3112).
-function differsFromRequest(target: X402RetryTarget): { resource_url_differs_from_request?: boolean } {
-  return target.resourceUrlDiffersFromRequest === undefined
-    ? {}
-    : { resource_url_differs_from_request: target.resourceUrlDiffersFromRequest }
-}
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import {
@@ -89,6 +79,16 @@ import {
   settlementPredictionFields,
   wrongTool,
 } from './support/quote-response.js'
+
+// #3097: `resource_url_differs_from_request` is emitted only when a request
+// URL existed to compare against. On the pay-from-declaration path nothing was
+// compared, and a literal `false` there read as "the merchant agrees with what
+// you quoted" (haven-reviewer on #3112).
+function differsFromRequest(target: X402RetryTarget): { resource_url_differs_from_request?: boolean } {
+  return target.resourceUrlDiffersFromRequest === undefined
+    ? {}
+    : { resource_url_differs_from_request: target.resourceUrlDiffersFromRequest }
+}
 
 /**
  * The tools this capability owns, as a tuple so the set is data rather than a

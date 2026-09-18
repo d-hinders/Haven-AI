@@ -171,8 +171,11 @@ export async function quoteMcpToolCall(
   // signed header is POSTed back to it by haven_complete_mcp_tool. Refuse a
   // public http:// merchant here, before the unpaid probe and long before any
   // intent, rather than at the SDK's deliverPayment seam where the funding leg
-  // has already confirmed (haven-reviewer on #3112). Re-checked on the
-  // discovered endpoint below, which may differ in scheme from the input.
+  // has already confirmed (haven-reviewer on #3112). NOT re-checked on the
+  // discovered endpoint: discoverMerchantMcpUrl keeps only an mcp_url whose
+  // origin — scheme included — equals the input's, so a discovered endpoint
+  // cannot differ in scheme from an input this line admitted (a re-check
+  // there was a guard no test could fail; round 2 of the same review).
   assertSecureMerchantUrl(merchantUrl)
   // This is an MCP-tool purchase, so always negotiate the Streamable-HTTP
   // lifecycle before its unpaid tools/call — exact MCP endpoints can use any
@@ -198,7 +201,6 @@ export async function quoteMcpToolCall(
     }
     const inputUrl = merchantUrl
     merchantUrl = discovered
-    assertSecureMerchantUrl(merchantUrl)
     try {
       const quote = await probe()
       return { quote, merchantUrl }

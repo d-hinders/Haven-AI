@@ -703,7 +703,8 @@ export const STRICT_INPUT_TOOLS = {
   haven_resume_x402_payment:
     'A resume rebuilds the merchant retry from the STORED payment (by payment_id) or from ' +
     'the resume_state you hand back verbatim — resource, amount, payee and the signed ' +
-    'header are read from there, never from arguments. A payment_header, payment_required ' +
+    'header are read from there, never from arguments; the one argument it does read is ' +
+    'url, the https retry target you quoted. A payment_header, payment_required ' +
     'or merchant_url sent alongside used to be dropped in silence while the retry proceeded ' +
     'against the stored one.',
   haven_get_payment_status:
@@ -961,14 +962,14 @@ const RESUME_X402_DESCRIPTION = [
   'Resume an authorized x402 payment: retrieve the signing context so the signer can rebuild the',
   'merchant payment header and the agent can retry the merchant.',
   'Only call this after haven_get_payment_status reports nextAction=retry_original_x402_request —',
-  'that means Haven funding confirmed but no merchant response was ever recorded, typically because',
-  'the process crashed between funding and the merchant retry. Any other nextAction reports a',
-  'conflict instead of returning context; do not call this speculatively and do not pay again.',
+  'Haven funding confirmed but no merchant response was recorded (a crash between funding and',
+  'the retry). Any other nextAction reports a conflict; never call this speculatively or pay again.',
+  'Optional url: the https URL you quoted, used as x402.retry_url over the merchant\'s declaration.',
   'Returns { payment_id, payment_required, x402 } in the haven_pay_x402_quote shape. Then call',
   'haven_sign_x402 with this payment_id — the funding leg is already spent, so this signs nothing',
   'new on-chain and its signature must not be re-submitted. Take payment_header from ITS result',
-  'and retry x402.retry_url with it. Do NOT pass its x402_binding to',
-  'haven_x402_sign_header: that binding is already spent, and the call can only refuse.',
+  'and retry x402.retry_url with it. Do NOT pass its x402_binding to haven_x402_sign_header:',
+  'it can only refuse.',
   // #2292: same obligation as the first-attempt path — a resumed retry Haven did not make is
   // just as unobservable as the original one.
   'Then report the outcome with haven_report_x402_outcome.',

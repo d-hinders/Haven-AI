@@ -737,7 +737,8 @@ the argument-spelling convergence (#2366) was declared done.
 - D1 → **#3097** — the paid x402 retry adopts the merchant-declared resource
   URL with no scheme check; the Ampersend sandbox declares `http://` (live,
   308 to https), so the hosted quote → pay path sends `PAYMENT-SIGNATURE` in
-  clear on the first hop. Shipped: PR #3112.
+  clear on the first hop.
+  - **2026-09-18:** D1 `shipped` — PR #3112.
 - C1 → **#3098** — two money-path perimeters: the CASP guardrails doc's
   `covers:` and the classifier's glob file disagree on five package globs; the
   demo merchant's settlement file is outside every glob (block 6 in scope: 3

@@ -203,6 +203,23 @@ describe('haven_resume_x402_payment — the same rule on the resume path', () =>
     expect(result.message).toContain('haven_sweep_delegate')
   })
 
+  it('answers a payment that needs no retry with the readiness conflict, never with the retry refusal', async () => {
+    // Round 2 (#3112): the readiness gate runs BEFORE the retry-target refusal,
+    // so an http-declaring merchant's already-settled payment is reported as
+    // "not ready to resume", not as an insecure retry it will never make.
+    stubFetch({
+      'GET /machine-payments/pay_done/status': {
+        status: 200,
+        body: { payment_id: 'pay_done', status: 'settled', next_action: 'none', tx_hash: '0xfunded', rail: 'x402' },
+      },
+    })
+    const result = fail(
+      await handlers().haven_resume_x402_payment({ resume_state: state('pay_done', 'http://merchant.com/paid') }),
+    )
+    expect(result.code).not.toBe('INSECURE_RETRY_TARGET')
+    expect(result.statusCode).toBe(409)
+  })
+
   it('keeps an https resume byte-compatible apart from the added retry_url', async () => {
     stubFetch(funded('pay_ok'))
     const result = ok<{ x402: Record<string, unknown> }>(
@@ -259,5 +276,30 @@ describe('haven_complete_mcp_tool — the post-funding escape is annotated (#309
     expect(result.phase).toBe('funded_but_unsettled')
     expect(result.next_action).toBe('sweep_stranded_funds')
     expect(result.suggested_tool).toBe('haven_get_payment_status')
+  })
+
+  it('on erc7710 (no funding leg) reports not_delivered and points back at the quote', async () => {
+    stubFetch({
+      'POST /x402/pay_7710/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
+      'GET /payments/pay_7710': { status: 200, body: { payment_id: 'pay_7710', status: 'settled' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockRejectedValue(
+      new HavenInsecureRetryTargetError('http://merchant.com/mcp'),
+    )
+    const result = fail(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: '0x' + 'ab'.repeat(65),
+        merchant_url: 'http://merchant.com/mcp',
+        tool_name: 'facts',
+        arguments: {},
+      }),
+    )
+    expect(result.code).toBe('INSECURE_RETRY_TARGET')
+    expect(result.paymentId).toBe('pay_7710')
+    expect(result.phase).toBe('not_delivered')
+    expect(result.next_action).toBe('retry_with_explicit_context')
+    expect(result.suggested_tool).toBe('haven_quote_mcp_tool')
   })
 })

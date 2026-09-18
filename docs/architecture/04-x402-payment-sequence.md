@@ -294,7 +294,9 @@ the agent retries — beside `resource_url` and
 `resource_url_differs_from_request`. A retry target that is not `https` (nor
 loopback / a reserved test host) is refused with `INSECURE_RETRY_TARGET` before
 any intent exists; on the SDK and local paths the same rule sits on the one
-seam every paid retry crosses (`MerchantTransport.deliverPayment`). The live
+seam every paid retry crosses (`McpMerchantTransport.deliverPayment`; on the
+MCP-merchant family that is after funding, and the hosted completion tool then
+reports `funded_but_unsettled` with sweep guidance). The live
 case: the Ampersend sandbox declares `http://` for a resource it serves over
 https, and its `http://` answers 308 → https — a client that adopted the
 declaration sent the signed header in clear on the first hop.
@@ -1893,7 +1895,9 @@ error instead of quietly routing a payment at the wrong chain's bundler.
 > (the URL the agent quoted), the quote returns `request_url` / `retry_url` /
 > `resource_url_differs_from_request`, pay and resume return `retry_url`, and a
 > public `http://` retry target is refused (`INSECURE_RETRY_TARGET`) before an
-> intent exists — on the SDK side at `MerchantTransport.deliverPayment`. The
+> intent exists on the hosted surface, and on the SDK side at
+> `McpMerchantTransport.deliverPayment` (after funding on the MCP-merchant
+> family, annotated by the hosted completion tool). The
 > flows above are otherwise unchanged: selection, caps, funding, signing and
 > settlement evidence keep their positions; the paragraph "Where the paid retry
 > goes" is the new statement. Scope of this note: that paragraph and the

@@ -300,10 +300,13 @@ Isolation rules that are non-negotiable for a payments product:
 
   **`enforce` is not global, despite the name.** A route is enforced only when
   its prefix is in the plugin's `enforcedPrefixes`, which `index.ts` sets to
-  `['/contacts']` — `mode` gates the `off` early-return and the counters and
-  nothing else. Setting `HAVEN_REQUEST_VALIDATION=enforce` today therefore
-  refuses exactly what `shadow` refuses. Epic #3028 slices 2–4 widen the
-  prefix list; the variable is not the switch that does it.
+  `['/contacts', '/merchants']` since #3084 (before that, `['/contacts']`) —
+  `mode` gates the `off` early-return and the counters and nothing else.
+  Setting `HAVEN_REQUEST_VALIDATION=enforce` today therefore refuses exactly
+  what `shadow` refuses, and since #3084 that includes off-spec
+  `/merchants/{slug}` requests (the required `slug` must match its pattern).
+  Epic #3028 slices 2–4 widen the prefix list; the variable is not the switch
+  that does it.
 
   Any other value refuses the boot rather than falling
   back — a misspelled `enforce` must not silently mean `shadow`. **A mode
@@ -333,6 +336,21 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > `index.ts` now sets `['/contacts', '/merchants']` — flagged, not edited.
   > Nothing in this file was edited except this note and the
   > `last-verified` date.
+
+  > **Re-verified #3018 (2026-09-18, round-3 follow-up):** the staleness
+  > flagged in the blockquote above is fixed in this edit. The sentence now
+  > names `['/contacts', '/merchants']` with the #3084 attribution and
+  > re-derives the consequence: the refusal-set identity holds because an
+  > enforced prefix refuses in every mode (`mode` gates only the `off`
+  > early-return and the counters), and the widened enforcement is
+  > non-vacuous — `/merchants/{slug}`'s required `slug` path parameter is
+  > pattern-constrained in the spec. Re-read at dev tip ec41ee72 against
+  > `packages/backend/src/index.ts` (the `installRequestValidation` options),
+  > the plugin's `onRoute` wiring in
+  > `packages/backend/src/openapi/request-validation.ts` (enforcement is
+  > prefix-determined and mode-independent), the `/merchants` path items in
+  > `packages/backend/src/openapi/spec.ts`, and the read-only GET
+  > registrations in `packages/backend/src/routes/merchants.ts`.
 
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 

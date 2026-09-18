@@ -69,7 +69,13 @@ export function FlowCard() {
         }}
       />
 
-      <div className="rounded-[14px] border border-[var(--v2-border)] bg-white shadow-[0_24px_48px_-24px_rgba(16,24,40,0.18),0_2px_6px_-2px_rgba(16,24,40,0.06)]">
+      {/* Card fill is the page's own ground token (#3139): this card is a
+          lifted surface, not do-not-invert content — the glow behind it is a
+          low-alpha radial tint that blends into either theme's ground. The
+          bespoke light-theme-only shadow is likewise a raised-card cue keyed
+          to the light ground; on the dark ground elevation is the token
+          hairline (`--v2-shadow-card`), which the dark palette redeclares. */}
+      <div className="rounded-[14px] border border-[var(--v2-border)] bg-bg shadow-card">
         {/* Header */}
         <div className="flex items-center justify-between px-5 h-11 border-b border-[var(--v2-border)]">
           <div className="flex items-center gap-2">
@@ -194,8 +200,8 @@ function FlowRow({
   const dot =
     state === 'done'
       ? success
-        ? 'bg-[var(--v2-success)] text-white'
-        : 'bg-[var(--v2-brand)] text-white'
+        ? 'bg-[var(--v2-success)] text-[var(--v2-ink-on-brand)]'
+        : 'bg-[var(--v2-brand)] text-[var(--v2-ink-on-brand)]'
       : state === 'active'
       ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] ring-2 ring-brand/30'
       : 'bg-[var(--v2-surface)] text-[var(--v2-ink-3)] border border-[var(--v2-border)]'

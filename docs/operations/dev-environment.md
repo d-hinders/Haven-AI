@@ -335,6 +335,21 @@ vars (client id/secret + redirect to the dev backend's
 dev Railway backend, using a **separate dev Fortnox app** — never the prod
 credentials. The feed was live-proven against dev on 2026-07-16.
 
+  > **Re-verified #3126 (2026-09-18):** round 3 of PR #3148 regenerated
+  > `packages/backend/src/openapi/route-modules.generated.ts` — the branch
+  > added `GET /machine-payments/balance-coverage` to
+  > `routes/machine-payments.ts`, and #3138's generator tracks route files,
+  > so the committed table was STALE against the registered routes (the
+  > Backend-checks gate caught it on the PR). Regeneration ran
+  > `npm run generate:route-modules` (deriving from `src/index.ts` +
+  > `src/routes/*.ts` source) and adds exactly one row —
+  > `"GET /machine-payments/balance-coverage": "routes/machine-payments.ts"`
+  > — and `npm run check:route-modules` exits 0 at the new head. The plugin
+  > resolves `enforcedModules` through this table, so the new route is
+  > visible to request-validation in the same commit that registers it. The
+  > generator script, `request-validation.ts`, `index.ts` and `config.ts`
+  > claims above were re-read and are untouched by this PR.
+  >
   > **Re-verified #3018 (2026-09-18):** the only `index.ts` change in PR
   > #3110 is the comment block above `registerConnector(new AccountedConnector())`
   > — it now describes the #3018 WORM document delivery (the receipt underlag

@@ -72,7 +72,10 @@ last-verified: "2026-09-18"
 > object `{ receipts, total, hasMore, nextCursor }` instead of the bare
 > receipts array: `total` is how many receipts Haven holds for the agent
 > (`0` = none exist; there is no indexing delay behind this list), `hasMore`
-> says the page was cut at `limit`, and `nextCursor` is fed back as `cursor`.
+> says the page was cut at `limit`, and `nextCursor` is fed back as `cursor` —
+> which the backend refuses with 400 if it is not a uuid or names no receipt
+> of this agent, so a stale cursor is an error rather than a silently empty
+> page (an older hosted deploy answered it with an empty page).
 > Both runtimes call the SDK's new `listReceiptsPage()`; the SDK's
 > `listReceipts()` keeps returning the array, and the HTTP envelope
 > (`GET /machine-payments/receipts`) is additive (`total`, `has_more`,
@@ -89,8 +92,10 @@ last-verified: "2026-09-18"
 > summary uses) and `HavenAgentAllowanceSummary` gains `id` and
 > `tokenAddress`, pinned field for field on one fixture. The shared
 > description fragments (`listReceipts`, `getAgent`, `getAllowances`) were
-> re-cut under the #1591 mean cap (873.52 ≤ 874 bytes at the delivered
-> head) — the `getAgent` prose lost phrasing, not guidance. Nothing else in
+> re-cut under the #1591 mean cap — `packages/mcp-server/src/description-size.test.ts`
+> carries the measured mean (873.91 ≤ 874 at the delivered head; the test,
+> not this sentence, is the instrument) — the `getAgent` prose lost
+> phrasing, not guidance. Nothing else in
 > this document was re-verified in this pass.
 >
 > **Recent re-verification (#3054):** the hosted guided prepare's over-budget

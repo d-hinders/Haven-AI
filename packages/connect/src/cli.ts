@@ -67,8 +67,13 @@ function levelMarker(level: DoctorLevel): string {
 
 /** Advisories across the flat list and every wired agent's checks — the same set the rolled-up level reads. */
 function advisoryCount(report: DoctorReport): number {
-  const wired = report.agents.filter((agent) => agent.classification === 'wired').flatMap((agent) => agent.checks)
-  return [...report.checks, ...wired].filter((check) => check.level === 'advisory').length
+  // The primary directory's checks ARE the flat list (doctor.ts copies them by
+  // id), so it is excluded here or the single-agent case counts itself twice
+  // (#3145 review, finding 1) — the same set the "Other agents" section prints.
+  const others = report.agents
+    .filter((agent) => agent.classification === 'wired' && agent.directory !== report.credentialDirectory)
+    .flatMap((agent) => agent.checks)
+  return [...report.checks, ...others].filter((check) => check.level === 'advisory').length
 }
 
 export async function runCli(

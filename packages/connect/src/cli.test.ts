@@ -768,6 +768,26 @@ describe('--doctor verdict levels (#3121)', () => {
     expect(report.checks.find((c) => c.id === 'credentials')).toMatchObject({ level: 'ok', ok: true })
   })
 
+  it('the summary counts the primary agent ONCE — its checks are the flat list (review finding 1)', async () => {
+    // A real runDoctor report lists the primary in agents[] WITH its checks;
+    // the mocks above gave it none, which is why the double count slipped.
+    const stdout: string[] = []
+    const base = reportWith('advisory')
+    const spy = vi.spyOn(doctorModule, 'runDoctor').mockResolvedValue({
+      ...base,
+      agents: [{ ...base.agents[0], checks: base.checks }],
+    })
+    try {
+      const exitCode = await runCli(['--doctor', '--runtime', 'codex-cli'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(0)
+      const out = stdout.join('')
+      expect(out.match(/^! /gm)).toHaveLength(1)
+      expect(out).toContain('No failures. 1 advisory finding(s)')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it('a WIRED agent\'s advisory in agents[] is shown with "!" and does not fail the run', async () => {
     const stdout: string[] = []
     const base = reportWith('ok')

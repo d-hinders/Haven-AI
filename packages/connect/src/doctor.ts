@@ -1053,13 +1053,31 @@ export async function runDoctor(
     }
   }
 
-  if (configPath === null && input2.runtime === '') {
+  // #3121 review, finding 2: `configPath === null` has THREE causes, not two —
+  // unknown (''), a recognised runtime that owns no config file (claude-code,
+  // other), and a runtime string the connector does not recognise at all
+  // (`--runtime codex-clii` — args.ts does not validate the value). Only the
+  // second earns the honest skip and the advisory below; the third is a
+  // failure that names the allowed values, like the unknown case.
+  const normalizedRuntime = normalizeRuntimeName(input2.runtime)
+  const runtimeOwnsNoConfig = normalizedRuntime !== null && runtimeConfigPathFor(normalizedRuntime, homeDir) === null
+  if (configPath === null && input2.runtime !== '' && normalizedRuntime === null) {
+    checks.push({
+      id: 'runtime_config',
+      label: 'Runtime MCP config',
+      level: 'failed',
+      detail:
+        `Runtime '${input2.runtime}' is not one the connector recognises. The runtime config was NOT checked. ` +
+        `Re-run the doctor naming the runtime — one of: ${RUNTIME_FLAG_VALUE_LIST.join(', ')}.`,
+      repair: `Re-run the doctor naming the runtime — one of: ${RUNTIME_FLAG_VALUE_LIST.join(', ')}.`,
+    })
+  } else if (configPath === null && input2.runtime === '') {
     // #3120: the fabricated pass lived here. configPath is null for TWO
     // indistinguishable reasons — a CLI-managed runtime that really has no
     // file-based config (claude-code, other), and an UNKNOWN runtime ("nobody
     // said"). Only the first justifies a green skip; the second must say it
-    // could not look. ok:false (not a new advisory level — #3121 owns that)
-    // so an unknown runtime can never ride a green exit code again.
+    // could not look. `level: 'failed'` — deliberately NOT #3121's advisory
+    // level, so an unknown runtime can never ride a green exit code again.
     checks.push({
       id: 'runtime_config',
       label: 'Runtime MCP config',
@@ -1209,7 +1227,10 @@ export async function runDoctor(
     // only the severity of the check that reads it. With a readable config
     // the classification is evidence, and a live unwired key stays a failure
     // for every non-wired classification.
-    const classificationUnreliable = configText === null
+    // Demoted only for a RECOGNISED runtime that owns no config file; an
+    // unrecognised runtime string or an unknown runtime keeps the failure
+    // (review finding 2 — a typo must not green-wash a live key).
+    const classificationUnreliable = configText === null && runtimeOwnsNoConfig
     const supersededLevel: DoctorLevel =
       supersededLive.length === 0 ? 'ok' : classificationUnreliable ? 'advisory' : 'failed'
     checks.push({

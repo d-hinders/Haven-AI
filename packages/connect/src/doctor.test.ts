@@ -1953,13 +1953,16 @@ describe('doctor verdict levels (#3121)', () => {
       expect(report.ok).toBe(false)
     })
 
-    it('retired: tombstoned but the key still authenticates → failed (a tombstone is a marker, not a revocation)', async () => {
+    it('tombstoned with the key still present (classified superseded, never retired) → failed: a tombstone is a marker, not a revocation', async () => {
       const { homeDir, oldDir, deps } = await homeWithSecondLiveDirectory()
       const { writeAgentTombstone } = await import('./tombstone.js')
       await writeAgentTombstone({ directory: oldDir, agentId: 'agent-old', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
       const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+      // `retired` is only ever a directory WITHOUT an api key (doctor.ts: the
+      // tombstone decides inside the no-key branch), so a live retired entry
+      // cannot exist; with a key it is superseded-with-tombstone (#1688).
       const entry = report.agents.find((a) => a.agentId === 'agent-old')
-      expect(entry?.classification).not.toBe('wired')
+      expect(entry?.classification).toBe('superseded')
       const check = report.checks.find((c) => c.id === 'superseded_agents')
       expect(check?.level).toBe('failed')
       expect(check?.detail).toContain('tombstoned — key material still present')
@@ -2012,6 +2015,33 @@ describe('doctor verdict levels (#3121)', () => {
     expect(check?.repair).toMatch(/Check agent-old on the Haven agent page/)
     expect(report.level).toBe('advisory')
     expect(report.ok).toBe(true)
+  })
+
+  it("'other' (manual runtime, no connector-owned config) is demoted the same way as claude-code", async () => {
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const report = await runDoctor({ runtime: 'other' }, { homeDir, ...deps })
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.level).toBe('advisory')
+    expect(check?.detail).toContain("Runtime 'other' has no config file the connector can read")
+    expect(report.ok).toBe(true)
+  })
+
+  it('MUTATION PROOF (review finding 2): an UNRECOGNISED runtime string does not demote — runtime_config fails and the live key stays a failure', async () => {
+    // `configPath` is null for a typo too (`runtimeConfigPathFor` has a null
+    // default) and args.ts does not validate the value, so `--runtime
+    // codex-clii` is CLI-reachable. Before this pin it read as "CLI-managed",
+    // demoted superseded_agents to advisory and exited 0 with a second key
+    // still spend-capable on a runtime demonstrably not using it.
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const report = await runDoctor({ runtime: 'codex-clii' }, { homeDir, ...deps })
+    const config = report.checks.find((c) => c.id === 'runtime_config')
+    expect(config?.level).toBe('failed')
+    expect(config?.detail).toContain("Runtime 'codex-clii' is not one the connector recognises")
+    expect(config?.detail).toContain('NOT checked')
+    expect(config?.repair).toContain('claude-code, codex-cli')
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.level).toBe('failed')
+    expect(report.level).toBe('failed')
+    expect(report.ok).toBe(false)
   })
 
   it('MUTATION PROOF (the twin): the SAME two directories on codex-cli, whose config names only agent-1, stay a failure', async () => {

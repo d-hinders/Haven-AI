@@ -258,7 +258,7 @@ export function helpText(): string {
     '                             Only available for Claude Code and Codex. Default is hosted MCP + local signer.',
     '  --json                     Emit one versioned, secret-free result object on stdout; progress stays on stderr.',
     '  --doctor                   Diagnose an existing setup (read-only, no token): config, credentials,',
-    '                             signer runtime, hosted MCP, and a live signer handshake. Exits non-zero on any failure.',
+    '                             signer runtime, hosted MCP, and a live signer handshake. Exits non-zero only on a failed check; an advisory (!) exits 0.',
     '  --repair                   Repair, then re-diagnose (implies --doctor): reinstall the pinned signer',
     '                             runtime, rewrite the wrapper and runtime config from stored credentials.',
     '                             Hosted topology only (refuses to touch a --local config). No keys, no token.',

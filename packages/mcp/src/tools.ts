@@ -203,6 +203,12 @@ export interface ToolFailure {
   status?: string
   phase?: string
   nextAction?: string
+  /**
+   * #3103 (epic #3105, decision 10): the same value as `nextAction`, spelled
+   * the way the hosted server and the signer spell it. Dual-emitted for one
+   * release (the #2908 pattern) before `nextAction` is dropped.
+   */
+  next_action?: string
   /** #3101 (epic #3105, decision 7): the typed next-step family, additive; `next_tool` never null. */
   next_tool?: string
   next_tool_server?: string
@@ -787,7 +793,11 @@ function normalizeError(err: unknown): ToolFailure {
       message: err.message,
       statusCode: err.statusCode,
       nextAction: err.nextAction,
+      next_action: err.nextAction,
       retry_with_new_quote: err.retryWithNewQuote,
+      // #3103: the local runtime's one decision site — no tool can act until
+      // the merchant recovers; the message carries retry_after_s.
+      next_tool_omitted_reason: 'the merchant needs to recover first; re-quote after the retry_after_s in the message',
     }
   }
 
@@ -801,6 +811,7 @@ function normalizeError(err: unknown): ToolFailure {
       status: err.status,
       phase: err.phase,
       nextAction: err.nextAction,
+      next_action: err.nextAction,
       resume_state: err.resumeState,
       body: err.body,
     }
@@ -827,6 +838,10 @@ function normalizeError(err: unknown): ToolFailure {
         stringOrUndefined(body?.nextAction) ??
         stringOrUndefined(body?.next_action) ??
         AgentPaymentNextAction.StopAndTellUser,
+      next_action:
+        stringOrUndefined(body?.nextAction) ??
+        stringOrUndefined(body?.next_action) ??
+        AgentPaymentNextAction.StopAndTellUser,
       body: err.body,
     }
   }
@@ -846,6 +861,7 @@ function normalizeError(err: unknown): ToolFailure {
     code: 'UNKNOWN_ERROR',
     message: err instanceof Error ? err.message : String(err),
     nextAction: AgentPaymentNextAction.StopAndTellUser,
+    next_action: AgentPaymentNextAction.StopAndTellUser,
   }
 }
 

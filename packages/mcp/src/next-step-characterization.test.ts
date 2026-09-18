@@ -4,15 +4,17 @@ import { createToolHandlers } from './tools.js'
 
 /**
  * #3103 (epic #3105, slice 4/5) — CHARACTERIZATION of the local runtime's one
- * `next_action` DECISION site (`MerchantNotReadyError`, `tools.ts`) before the
- * typed step and the decision-10 spelling convergence land. Today the local
- * failure envelope spells it `nextAction` and carries no `next_action`, no
- * `next_tool*` and no `next_tool_omitted_reason`.
+ * `next_action` DECISION site (`MerchantNotReadyError`, `tools.ts`), written
+ * before the typed step and the decision-10 spelling convergence (commit
+ * c163a2cd) and carried across them: `nextAction` is byte-identical, and the
+ * envelope now ALSO carries `next_action` (the same value, dual-emitted for
+ * one release) and `next_tool_omitted_reason`; no tool is named — nothing
+ * can act until the merchant recovers.
  */
 describe('local runtime refusal wire — characterization (#3103)', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('merchant_not_ready: nextAction only, no next_action twin, no typed step', async () => {
+  it('merchant_not_ready: nextAction unchanged, next_action twin added, the omission stated (RE-DECIDED: additive)', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: unknown, init: RequestInit = {}) => {
       const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined
       if (body?.method === 'initialize') return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -25,8 +27,8 @@ describe('local runtime refusal wire — characterization (#3103)', () => {
     expect(out.code).toBe('MERCHANT_NOT_READY')
     expect(out.nextAction).toBe('stop_and_tell_user')
     expect(out.retry_with_new_quote).toBe(true)
-    expect(out.next_action).toBeUndefined()
+    expect(out.next_action).toBe('stop_and_tell_user')
     expect(out.next_tool).toBeUndefined()
-    expect(out.next_tool_omitted_reason).toBeUndefined()
+    expect(out.next_tool_omitted_reason).toMatch(/merchant needs to recover first/)
   })
 })

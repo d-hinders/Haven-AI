@@ -28,6 +28,7 @@ import {
   type HavenIdentity,
   type FetchedSignContext,
 } from './sign-context.js'
+import { nextStepWireFields, signerRefusalStep } from './next-step.js'
 
 /**
  * Local signer tool set. These run on the agent's machine, next to the key,
@@ -735,6 +736,12 @@ function normalizeError(err: unknown): ToolFailure {
       received_version: err.receivedVersion,
       fallback: err.fallback,
       next_action: AgentPaymentNextAction.StopAndTellUser,
+      // #3103: no tool can fix a version skew from inside the call.
+      ...nextStepWireFields(signerRefusalStep({
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: 'update @haven_ai/signer by re-running the connector, then repeat the same call',
+      })),
     }
   }
   if (err instanceof HavenSignContextError) {
@@ -752,6 +759,13 @@ function normalizeError(err: unknown): ToolFailure {
       ...(err.retry_with_new_quote ? { retry_with_new_quote: true } : {}),
       ...(err.http_status !== undefined ? { http_status: err.http_status } : {}),
       ...(err.backend_error_code !== undefined ? { backend_error_code: err.backend_error_code } : {}),
+      // #3103: the typed step the error decided beside its action.
+      ...(err.next_tool ? { next_tool: err.next_tool } : {}),
+      ...(err.next_tool_server ? { next_tool_server: err.next_tool_server } : {}),
+      ...(err.next_tool_name ? { next_tool_name: err.next_tool_name } : {}),
+      ...(err.next_tool_server_role ? { next_tool_server_role: err.next_tool_server_role } : {}),
+      ...(err.next_arguments ? { next_arguments: err.next_arguments } : {}),
+      ...(err.next_tool_omitted_reason ? { next_tool_omitted_reason: err.next_tool_omitted_reason } : {}),
     }
   }
   if (err instanceof HavenSigningError) {
@@ -772,6 +786,12 @@ function normalizeError(err: unknown): ToolFailure {
             next_action: AgentPaymentNextAction.PaymentWindowExpired,
             retry_with_new_quote: true,
             suggested_tool: 'haven_pay_mcp_tool',
+            // #3103: same omission as the hosted window-expired helper.
+            ...nextStepWireFields(signerRefusalStep({
+              nextAction: AgentPaymentNextAction.PaymentWindowExpired,
+              nextTool: null,
+              nextToolOmittedReason: 're-run the hosted quote tool you called with the same idempotency_key; which one depends on the flow (suggested_tool names the MCP one)',
+            })),
           }
         : {}),
     }

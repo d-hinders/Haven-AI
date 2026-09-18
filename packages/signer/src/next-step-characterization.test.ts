@@ -5,7 +5,9 @@ import { createToolHandlers, type ToolFailure } from './tools.js'
 
 /**
  * #3103 (epic #3105, slice 4/5) — CHARACTERIZATION of the signer's refusal
- * wire BEFORE the typed next step lands. The signer decides a `next_action`
+ * wire, written BEFORE the typed next step landed (commit c163a2cd) and
+ * carried across it: every field pinned there is byte-identical, and each
+ * refusal now ALSO carries a typed step. The signer decides a `next_action`
  * at five sites (`sign-context.ts:98,101,105` on `HavenSignContextError`;
  * `tools.ts` version mismatch and the window-expired `HavenError` branch).
  * The four sign-context codes are driven here through `haven_sign`, the path
@@ -37,16 +39,42 @@ export const SIGN_CONTEXT_SITES = [
 ] as const
 
 const PINNED = ['code', 'next_action', 'fallback', 'retry_with_new_quote', 'http_status', 'backend_error_code'] as const
+const TRANSPORT_REASON = 're-run the SAME hosted quote tool with the same idempotency_key and include_signing_payload: true, then pass its typed_data_b64 to this signer'
+const EXPIRED_REASON = 're-run the hosted quote tool you called with the same idempotency_key; which one depends on the flow'
+/** The typed step each site adds (RE-DECIDED: additive on every site). */
+const STEP: Record<string, Record<string, unknown>> = {
+  'sign-context.ts transport timeout': { next_tool_omitted_reason: TRANSPORT_REASON },
+  'sign-context.ts unreachable': { next_tool_omitted_reason: TRANSPORT_REASON },
+  'sign-context.ts refused 410 (expired)': { next_tool_omitted_reason: EXPIRED_REASON },
+  'sign-context.ts refused other': { next_tool: 'mcp__haven__haven_get_payment_status', next_tool_server: 'haven', next_tool_name: 'haven_get_payment_status', next_tool_server_role: 'hosted', next_arguments: { payment_id: 'pay_3103' } },
+  'sign-context.ts malformed body': { next_tool_omitted_reason: TRANSPORT_REASON },
+}
+const STEP_KEYS = ['next_tool', 'next_tool_server', 'next_tool_name', 'next_tool_server_role', 'next_arguments', 'next_tool_omitted_reason'] as const
 
 describe('signer refusal wire — characterization (#3103)', () => {
+  it('registry walk: every refusal names a hosted tool whose arguments parse under the declared strict shape, or says why none follows', async () => {
+    const { z } = await import('zod')
+    const { SIGNER_HOSTED_HANDOFF_SHAPES } = await import('./next-step.js')
+    for (const fixture of SIGN_CONTEXT_SITES) {
+      const out = (await refusal(fixture.fetch)) as unknown as Record<string, unknown>
+      if (out.next_tool) {
+        const name = out.next_tool_name as keyof typeof SIGNER_HOSTED_HANDOFF_SHAPES
+        expect(SIGNER_HOSTED_HANDOFF_SHAPES[name], fixture.site).toBeDefined()
+        expect(z.object(SIGNER_HOSTED_HANDOFF_SHAPES[name]).strict().safeParse(out.next_arguments).success, fixture.site).toBe(true)
+        expect(out.next_tool_server_role).toBe('hosted')
+      } else {
+        expect(typeof out.next_tool_omitted_reason, fixture.site).toBe('string')
+      }
+    }
+  })
+
   for (const fixture of SIGN_CONTEXT_SITES) {
     it(fixture.site, async () => {
       const out = (await refusal(fixture.fetch)) as unknown as Record<string, unknown>
       const picked = Object.fromEntries(PINNED.filter((k) => out[k] !== undefined).map((k) => [k, out[k]]))
       expect(picked).toEqual(fixture.expect)
-      // Pre-#3103: no signer refusal names a next tool or says why not.
-      expect(out.next_tool).toBeUndefined()
-      expect(out.next_tool_omitted_reason).toBeUndefined()
+      const step = Object.fromEntries(STEP_KEYS.filter((k) => out[k] !== undefined).map((k) => [k, out[k]]))
+      expect(step).toEqual(STEP[fixture.site])
       expect(JSON.stringify(out)).not.toContain(IDENTITY.apiKey)
     })
   }

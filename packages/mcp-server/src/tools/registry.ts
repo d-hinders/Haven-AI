@@ -112,10 +112,14 @@ export function strictRefusalMessage(name: StrictInputToolName, keys?: readonly 
   // #3100: name the declared keys, and the alias of every rejected key that
   // has one — the hint an agent copying a field from another response needs.
   const declared = Object.keys(toolSchemas[name])
-  const aliases = named
+  // Aliases are resolved over ALL rejected keys, not the truncated echo: the
+  // alias clause is the sentence this refusal exists to carry, and it stays
+  // short by construction (only declared-key matches survive). Sentence case
+  // on the first clause only.
+  const aliases = (keys ?? [])
     .map((k) => ({ rejected: k, alias: declaredAliasFor(name, k) }))
     .filter((a): a is { rejected: string; alias: string } => a.alias !== undefined)
-    .map((a) => `Send "${a.rejected}" as "${a.alias}"`)
+    .map((a, i) => `${i === 0 ? 'Send' : 'send'} "${a.rejected}" as "${a.alias}"`)
   const hint = aliases.length > 0 ? ` ${aliases.join('; ')}.` : ''
   return (
     `${subject}${hint} It declares: ${declared.join(', ')}. ` +

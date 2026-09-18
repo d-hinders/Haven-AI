@@ -79,6 +79,12 @@ describe('the false sentence is gone and the table is honest', () => {
     const text = strictRefusalMessage('haven_quote_x402', junk)
     expect(text).toContain('"junk_4" and 3 more.')
     expect(text).not.toContain('junk_5')
+    // The alias clause is resolved over every rejected key, not the echo (round 3).
+    const late = strictRefusalMessage('haven_quote_x402', [...junk, 'resource_url'])
+    expect(late).toContain('Send "resource_url" as "url"')
+    // Sentence case on the first clause only.
+    const two = strictRefusalMessage('haven_quote_catalog_purchase', ['id', 'catalogId'])
+    expect(two).toContain('Send "id" as "catalog_id"; send "catalogId" as "catalog_id".')
   })
 
   it('never resolves a prototype-chain name as an alias (#3113 review)', () => {

@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { acknowledgeLocalSignerConsent } from './signer-consent.js'
+import { CONNECT_OUTCOME_FILENAME } from './storage.js'
 import { describeAccountAddressKey, runDoctor, runRepair, type DoctorDeps } from './doctor.js'
 
 const API_KEY = 'sk_agent_1234567890abcdef1234567890abcdef'
@@ -1639,5 +1640,212 @@ describe('credential address naming report (#2908)', () => {
     expect(describeAccountAddressKey({}, { safe_address: '0x1' })).toContain('pre-#2908 name safe_address')
     expect(describeAccountAddressKey({ safe_address: '0x1' }, undefined)).toContain('pre-#2908 name safe_address')
     expect(describeAccountAddressKey({}, {})).toBe('no account address stored')
+  })
+})
+
+/**
+ * #3120: `--doctor` with no `--runtime` used to fabricate a green
+ * "CLI-managed" runtime_config verdict. The absent flag reached the doctor as
+ * '', `runtimeConfigPathFor('')` fell through to null, and the doctor could
+ * not tell "nobody said" from Claude Code's real CLI-managed skip. The doctor
+ * now resolves the runtime from the `ConnectOutcome` record the setup parked
+ * in the agent credential directory (`last-connect-outcome.json`), and
+ * unknown stays unknown: no fabricated pass, no truncated repair command.
+ *
+ * These tests drive `runDoctor`/`runRepair` directly because the shipped CLI
+ * refuses flagless `--doctor` in the argument parser (args.ts) — the doctor
+ * layer is where the empty-runtime path is reachable, and the premise note in
+ * the PR body records that split.
+ */
+describe('runtime resolution when --runtime is absent (#3120)', () => {
+  it('resolves the recorded runtime from the primary directory and it reaches runtimeConfigPathFor', async () => {
+    const { homeDir, dir } = await healthyHome()
+    // The codex config healthyHome seeds would satisfy a codex resolution;
+    // the record says cursor, so the check must go look at the CURSOR file.
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ schema_version: 1, outcome: 'complete', runtime: 'cursor' }))
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    expect(report.runtime).toBe('cursor')
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.detail).toContain(join(homeDir, '.cursor', 'mcp.json'))
+  })
+
+  it('an explicit --runtime wins over the recorded value, verbatim', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    expect(report.runtime).toBe('codex-cli')
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.detail).toContain(join(homeDir, '.codex', 'config.toml'))
+  })
+
+  it('a record carrying an alias is resolved through the same table an explicit flag uses', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'Cowork' }))
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    // Verbatim in the report (the doctor reports what was recorded)...
+    expect(report.runtime).toBe('Cowork')
+    // ...but normalized where the registry consumes it: cowork is claude-code,
+    // which has no file-based config this connector owns.
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.ok).toBe(true)
+    expect(rc?.detail).toContain("'Cowork'")
+    expect(rc?.detail).toContain('CLI-managed')
+  })
+
+  it('no flag and no record: runtime_config stops claiming a pass and names the inspected directory', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    expect(report.runtime).toBe('')
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.ok).toBe(false)
+    expect(rc?.detail).toContain('Runtime is unknown')
+    expect(rc?.detail).toContain(homeDir)
+    expect(rc?.detail).toContain(CONNECT_OUTCOME_FILENAME)
+    expect(report.ok).toBe(false)
+  })
+
+  it('missing, unreadable, malformed or runtime-less records all degrade to unknown, never throw', async () => {
+    const cases: Array<[string, string | undefined]> = [
+      ['missing record', undefined],
+      ['malformed json', '{not json'],
+      ['json array, not object', '[1,2,3]'],
+      ['no runtime field', JSON.stringify({ outcome: 'complete' })],
+      ['non-string runtime', JSON.stringify({ runtime: 7 })],
+      ['empty runtime string', JSON.stringify({ runtime: '' })],
+      ['unrecognized runtime name', JSON.stringify({ runtime: 'terminal-bench' })],
+    ]
+    for (const [label, content] of cases) {
+      const { homeDir, dir } = await healthyHome()
+      if (content !== undefined) await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), content)
+      const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+      expect(report.runtime, label).toBe('')
+      const rc = report.checks.find((c) => c.id === 'runtime_config')
+      expect(rc?.ok, label).toBe(false)
+      expect(rc?.detail, label).toContain('Runtime is unknown')
+      await rm(homeDir, { recursive: true, force: true })
+    }
+  })
+
+  it('an unreadable record (mode 000) degrades to unknown too', async () => {
+    const { homeDir, dir } = await healthyHome()
+    const recordPath = join(dir, CONNECT_OUTCOME_FILENAME)
+    await writeFile(recordPath, JSON.stringify({ runtime: 'cursor' }))
+    await chmod(recordPath, 0o000)
+    try {
+      const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+      expect(report.runtime).toBe('')
+      const rc = report.checks.find((c) => c.id === 'runtime_config')
+      expect(rc?.ok).toBe(false)
+      expect(rc?.detail).toContain('Runtime is unknown')
+    } finally {
+      await chmod(recordPath, 0o644)
+    }
+  })
+
+  it("'other' is a RESOLVED runtime — the manual profile's honest skip, not unknown (decision pinned)", async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'other' }))
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    expect(report.runtime).toBe('other')
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.ok).toBe(true)
+    expect(rc?.detail).toContain('manual runtime')
+    expect(rc?.detail).not.toContain('unknown')
+  })
+
+  it('claude-code keeps the CLI-managed skip unchanged (scope boundary), naming the resolved runtime', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'claude-code' }))
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    expect(report.runtime).toBe('claude-code')
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.ok).toBe(true)
+    expect(rc?.detail).toContain("'claude-code'")
+    expect(rc?.detail).toContain('CLI-managed')
+  })
+
+  it('two credential directories resolve their runtimes independently — no bleed', async () => {
+    const { homeDir, dir } = await healthyHome()
+    const other = await seedCredentials(homeDir, 'agent-2')
+    const otherRuntime = await seedRuntime(homeDir, other)
+    // The newest agent owns the bare pair now, so IT is the wired primary the
+    // report describes.
+    await seedCodexConfig(homeDir, otherRuntime.wrapperPath)
+    await writeFile(join(other, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'hermes' }))
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
+
+    const newest = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    expect(newest.credentialDirectory).toBe(other)
+    expect(newest.runtime).toBe('hermes')
+
+    // Pointed at the older directory explicitly, the OLDER record answers.
+    const viaDir = await runDoctor({ runtime: '', credentialsDir: dir }, { homeDir, ...healthyDeps() })
+    expect(viaDir.runtime).toBe('cursor')
+  })
+
+  it('the restart check says "unknown" instead of "no restart requirement" when the runtime is unknown', async () => {
+    const { homeDir } = await healthyHome()
+    // env: {} matters: restartRequiredForRuntime falls back to env DETECTION
+    // for an unknown runtime (registry semantics — a shell that looks like a
+    // runtime gets that runtime's answer). The doctor's own resolution never
+    // guesses, and with no detection signal the degraded detail renders.
+    const report = await runDoctor({ runtime: '' }, { homeDir, env: {}, ...healthyDeps() })
+    const restart = report.checks.find((c) => c.id === 'restart')
+    expect(restart?.ok).toBe(true)
+    expect(restart?.detail).toContain('Runtime is unknown')
+    expect(restart?.detail).not.toContain('No restart requirement known')
+  })
+
+  it('no rendered check string ever carries a bare --runtime (the paste-truncation bug)', async () => {
+    // Unknown runtime: every degraded verdict renders.
+    const { homeDir: homeA } = await healthyHome()
+    const unknown = await runDoctor({ runtime: '' }, { homeDir: homeA, ...healthyDeps() })
+    // Known runtime with failing checks: every repair path renders with a value.
+    const { homeDir: homeB } = await healthyHome()
+    const known = await runDoctor({ runtime: 'codex-cli' }, { homeDir: homeB, ...healthyDeps() })
+    for (const report of [unknown, known]) {
+      const lines: string[] = []
+      for (const check of report.checks) lines.push(check.detail, check.repair ?? '')
+      for (const agent of report.agents) for (const check of agent.checks) lines.push(check.detail, check.repair ?? '')
+      lines.push(JSON.stringify(report))
+      for (const line of lines) {
+        // A `--runtime` whose value is missing — flag at end-of-line, trailing
+        // only whitespace, or followed by another flag — is the truncated
+        // command this issue forbids. `--runtime codex-cli` is fine.
+        expect(line, JSON.stringify(line)).not.toMatch(/--runtime(?:\s*$|\s+--)/)
+      }
+    }
+  })
+})
+
+describe('runtime resolution in --repair (#3120)', () => {
+  it('resolves the recorded runtime, states which runtime it resolved and from where, and repairs with it', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'codex-cli' }))
+    const runCommand = vi.fn(async () => undefined)
+    const repair = await runRepair({ runtime: '' }, { homeDir, runCommand })
+    expect(repair.ok).toBe(true)
+    const joined = repair.messages.join('\n')
+    expect(joined).toContain("resolved 'codex-cli'")
+    expect(joined).toContain(CONNECT_OUTCOME_FILENAME)
+  })
+
+  it('refuses BEFORE any write or spawn when the runtime is unknown — repair never guesses', async () => {
+    const { homeDir } = await healthyHome()
+    const runCommand = vi.fn(async () => undefined)
+    const repair = await runRepair({ runtime: '' }, { homeDir, runCommand })
+    expect(repair.ok).toBe(false)
+    expect(repair.messages.join('\n')).toContain('Runtime is unknown')
+    expect(repair.messages.join('\n')).toContain('codex-cli')
+    expect(runCommand).not.toHaveBeenCalled()
+  })
+
+  it('an explicit --runtime skips the record entirely — no resolved-from note', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
+    const runCommand = vi.fn(async () => undefined)
+    const repair = await runRepair({ runtime: 'codex-cli' }, { homeDir, runCommand })
+    expect(repair.ok).toBe(true)
+    expect(repair.messages.join('\n')).not.toContain('resolved')
   })
 })

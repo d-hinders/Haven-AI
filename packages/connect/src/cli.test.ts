@@ -653,3 +653,36 @@ describe('every subcommand reports its failure on stdout under --json (#2184)', 
     }
   })
 })
+
+/**
+ * #3120 premise note, pinned as behavior: the SHIPPED CLI refuses flagless
+ * `--doctor` in the argument parser (args.ts, in place since #1597), so the
+ * fabricated-green path the issue describes is reachable only through
+ * `runDoctor` directly (library callers, tests). The doctor layer now resolves
+ * the runtime from the setup record anyway — the parser guard and the doctor's
+ * honest unknown-runtime verdicts are two doors to the same protection. These
+ * tests pin the parser door so the split cannot silently drift.
+ */
+describe('--doctor/--repair runtime requirement (#3120 premise note)', () => {
+  it('the parser refuses flagless --doctor, naming the flag and what it is for', async () => {
+    const stderr: string[] = []
+    const stdout: string[] = []
+    const exitCode = await runCli(['--doctor'], {
+      stdout: (m) => stdout.push(m),
+      stderr: (m) => stderr.push(m),
+    })
+    expect(exitCode).toBe(1)
+    expect(stdout).toHaveLength(0)
+    expect(stderr.join('')).toContain('--doctor/--repair need --runtime <runtime>')
+  })
+
+  it('the parser refuses flagless --repair the same way', async () => {
+    const stderr: string[] = []
+    const exitCode = await runCli(['--repair'], {
+      stdout: () => undefined,
+      stderr: (m) => stderr.push(m),
+    })
+    expect(exitCode).toBe(1)
+    expect(stderr.join('')).toContain('--doctor/--repair need --runtime <runtime>')
+  })
+})

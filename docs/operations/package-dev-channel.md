@@ -21,7 +21,7 @@ covers:
   - packages/signer/src/credentials.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
-last-verified: "2026-09-17"
+last-verified: "2026-09-18"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -397,6 +397,15 @@ records — is in the connector's own README:
 > against the manifest — a dev-channel snapshot that is intact but behind the
 > pin now reads as version drift, not `stale or empty`; the override path
 > described above is unchanged (it already compared against the sidecar).
+
+> **Re-verified #3120:** the doctor/repair surfaces this loop uses keep their
+> contracts. `--doctor` (and `--doctor --repair`) now resolve the runtime from
+> the agent directory's `last-connect-outcome.json` when the `--runtime` flag
+> is absent, and an unknown runtime makes `--repair` refuse before any write or
+> npm spawn — the override flow above always names its runtime, so it never
+> enters that path. The section's commands keep explicit `--runtime <name>`
+> flags and behave exactly as written; the snapshot channel rules, the five
+> guards and `HAVEN_CONNECTOR_CHANNEL` did not move.
 
 
 The two loops compose: `@dev` picks the connector, the override picks the

@@ -306,7 +306,15 @@ export function runtimeVerificationInstruction(runtime: RuntimeId): string {
   return `In ${label}, run the read-only \`haven_get_agent\` and \`haven_get_allowances\` tools to confirm the Haven wallet and live budget. Do not sign, fund, or create a payment to verify setup.`
 }
 
-function normalizeRuntimeName(runtime: string | undefined): RuntimeId | null {
+/**
+ * #3120: exported for the doctor's runtime resolution — when `--runtime` is
+ * absent, the connector resolves the runtime the setup actually recorded, and
+ * the recorded value must go through the same alias table an explicit flag
+ * would (`Cowork` → `claude-code`, `desktop` → `claude-desktop`, …). Returns
+ * null for empty/unknown names; it NEVER env-detects (that is
+ * `normalizeRuntime`'s job, which wraps this).
+ */
+export function normalizeRuntimeName(runtime: string | undefined): RuntimeId | null {
   const key = runtime?.trim().toLowerCase()
   if (!key) return null
   return RUNTIME_ALIASES[key.replace(/\s+/g, '-')] ?? null

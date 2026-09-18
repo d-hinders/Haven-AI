@@ -59,7 +59,7 @@ import {
 } from './support/cap-price.js'
 import { getUsableCatalogMcpEntry } from './support/catalog-entry.js'
 import { HostedToolError, runTool } from './support/errors.js'
-import { buildAgentGuidance } from './support/guidance.js'
+import { buildAgentGuidance, paymentStatusHandoff } from './support/guidance.js'
 import {
   buildX402SigningContext,
   quoteMcpToolCall,
@@ -320,7 +320,7 @@ export function createCatalogPurchaseHandlers(
                 : {}),
               ...buildAgentGuidance({
                 nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-                nextTool: 'mcp__haven-signer__haven_sign',
+                nextTool: 'haven_sign',
                 nextArguments: { payment_id: prepared.paymentId },
                 safeToContinue: true,
                 reason:
@@ -405,7 +405,7 @@ export function createCatalogPurchaseHandlers(
             // before parsing any prose.
             ...buildAgentGuidance({
               nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-              nextTool: 'mcp__haven-signer__haven_sign_x402',
+              nextTool: 'haven_sign_x402',
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
@@ -447,8 +447,8 @@ export function createCatalogPurchaseHandlers(
               // is a payload that contradicts itself, and the field wins.
               ...buildAgentGuidance({
                 nextAction: AgentPaymentNextAction.StopAndTellUser,
-                nextTool: 'mcp__haven__haven_get_payment_status',
-                nextArguments: { payment_id: err.paymentId ?? null },
+                // #3101: omitted + reason when the id is unknown (decision 3).
+                ...paymentStatusHandoff(err.paymentId),
                 safeToContinue: false,
                 reason:
                   'The amount exceeds the remaining budget, so the payment was declined. ' +
@@ -776,7 +776,7 @@ export function createCatalogPurchaseHandlers(
               allowance: allowanceBlock,
               ...buildAgentGuidance({
                 nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-                nextTool: 'mcp__haven-signer__haven_sign',
+                nextTool: 'haven_sign',
                 nextArguments: { payment_id: prepared.paymentId },
                 safeToContinue: true,
                 reason:
@@ -857,7 +857,7 @@ export function createCatalogPurchaseHandlers(
             // before parsing any prose.
             ...buildAgentGuidance({
               nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-              nextTool: 'mcp__haven-signer__haven_sign_x402',
+              nextTool: 'haven_sign_x402',
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               reason:
@@ -905,8 +905,8 @@ export function createCatalogPurchaseHandlers(
               // earlier, before any intent existed.
               ...buildAgentGuidance({
                 nextAction: AgentPaymentNextAction.StopAndTellUser,
-                nextTool: 'mcp__haven__haven_get_payment_status',
-                nextArguments: { payment_id: err.paymentId ?? null },
+                // #3101: omitted + reason when the id is unknown (decision 3).
+                ...paymentStatusHandoff(err.paymentId),
                 safeToContinue: false,
                 reason:
                   'The amount exceeds the remaining budget, so the payment was declined. ' +

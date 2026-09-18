@@ -54,7 +54,17 @@ promotion. `new-task` writes this section from the slices' operator-step notes.
 ship-next's closeout reports the epic "ready to close" only when every box here
 is ticked (`node scripts/ci/epic-promotion-checklist.mjs`), and otherwise lists
 the unticked ones; the epic stays open across the promotion until a human ticks
-the last box. -->
+the last box.
+
+EVERY BOX MUST BE ABLE TO REACH A TICKED STATE TRUTHFULLY (#2906). A box records
+a DISPOSITION — done, or waived / no longer applicable with the reason and a
+link — not only a success. Epic #2906 was unclosable for five days because a
+waived step stayed phrased as "proof recorded on this issue": the owner had
+waived it, so no work could make that sentence true and the checker reported
+not-ready forever. When a step is waived or stops applying, REWRITE THE BOX to
+say so and tick it. Equally, do not write a box that is already true before the
+work — it is ticked on unchanged code and measures nothing. Each box should be
+false today and true only when the step is done. -->
 
 - [ ] Operator step: <what> — done in <where>
 - [ ] Product verification on `dev`: <runbook or QA scenario> — run by <whom>

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify, { type FastifyInstance } from 'fastify'
+import { ethers } from 'ethers'
 import fastifyJwt from '@fastify/jwt'
 
 const mockQuery = vi.fn()
@@ -206,4 +207,78 @@ describe('agent activity routes', () => {
     expect(body.activity[0].safe_name).toBeUndefined()
     expect(mockQuery.mock.calls.some(([sql]) => /approval_requests/i.test(String(sql)))).toBe(false)
   })
+
+  /**
+   * #3129: this feed renders the SAME payments as the transaction feed, on
+   * `/agents/[agentId]`. The transaction feed normalises its addresses at the
+   * row boundary; if this route passed `payment_intents` casing through, one
+   * payment would read `0xabcd…1234` on the agent screen and `0xAbCd…1234` on
+   * `/transactions` — the defect would have moved, not closed.
+   */
+  it.each([
+    ['per-agent', '/agent-activity/agent-1/activity', 'SELECT id FROM agents', [{ id: 'agent-1' }]],
+    [
+      'all-agent feed',
+      '/agent-activity/feed?limit=10',
+      'SELECT id, name FROM agents',
+      [{ id: 'agent-1', name: 'Research agent' }],
+    ],
+  ] as const)(
+    'emits every address in one canonical form on the %s mapper, from a row that mixes both (#3129)',
+    async (_label, url, agentSql, agentRows) => {
+      // A merchant address with hex LETTERS in it: the file's other constants
+      // are all-digit, so their checksummed and lowercase forms are identical
+      // and could not tell the two apart.
+      const lowercaseMerchant = '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
+      const lowercaseAccount = '0xab5801a7d398351b8be11c439e05c5b3259aec9b'
+      const lowercaseToken = TOKEN_ADDRESS.toLowerCase()
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes(agentSql)) {
+          return { rows: [...agentRows] }
+        }
+        if (sql.includes('FROM payment_intents pi')) {
+          return {
+            rows: [
+              paymentRow({
+                // The mix the field run found: account/token checksummed,
+                // counterparty and merchant lowercase, in ONE row.
+                // Lowercase, and letter-bearing: the file's own constants are
+                // all-digit (`0x1111…`), whose two forms are byte-identical, so
+                // asserting on them would pass with the fix reverted.
+                account_address: lowercaseAccount,
+                token_address: lowercaseToken,
+                to_address: lowercaseMerchant,
+                x402_merchant_address: lowercaseMerchant,
+              }),
+            ],
+          }
+        }
+        if (sql.includes('FROM agent_tool_invocations')) {
+          return { rows: [] }
+        }
+        throw new Error(`Unexpected query: ${sql}`)
+      })
+
+      const response = await app.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: `Bearer ${token}` },
+      })
+
+      expect(response.statusCode).toBe(200)
+      const row = response.json().activity[0]
+
+      const expectedMerchant = ethers.getAddress(lowercaseMerchant)
+      expect(row.to).toBe(expectedMerchant)
+      expect(row.x402_merchant_address).toBe(expectedMerchant)
+      expect(row.account_address).toBe(ethers.getAddress(lowercaseAccount))
+      expect(row.token_address).toBe(ethers.getAddress(lowercaseToken))
+
+      // CONTROL: every fixture form really differs from its canonical form, so
+      // all four assertions above can fail.
+      for (const raw of [lowercaseMerchant, lowercaseAccount, lowercaseToken]) {
+        expect(ethers.getAddress(raw)).not.toBe(raw)
+        }
+    },
+  )
 })

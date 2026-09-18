@@ -7,6 +7,30 @@
  * flat `lib/` was folded away by #998) — this module only consumes its public
  * fetchers.
  *
+ * #3129: every value this module lifts out of an explorer response goes
+ * through `normalize.ts` HERE, at the boundary where explorer data becomes a
+ * `Transaction`, rather than at each read site — so a field added later
+ * cannot silently skip it. Three classes, all present in this one function:
+ *
+ * - **Addresses** (`from`, `to`, `tokenAddress`) → `toCanonicalAddress`. The
+ *   providers disagree about casing (Blockscout checksums, Etherscan
+ *   lowercases), so the same field's form varied by CHAIN and one row could
+ *   carry both forms at once.
+ * - **`blockNumber`** → `toBlockNumber`. Was a bare `parseInt`, so a
+ *   malformed v1 row produced `NaN` on a field the spec declared a required
+ *   integer.
+ * - **`timestamp`** → `toUnixSeconds`. Same bare `parseInt`, and `NaN` here
+ *   makes `compareTransactions` inconsistent.
+ *
+ * Everything else the loops copy was already guarded at its own boundary and
+ * was re-checked for this issue: `value` (`?? '0'`), `from`/`to` (`?? ''`),
+ * `tokenDecimal` (`|| 18`), `tokenSymbol`/`functionName` (`?? ''`), `isError`
+ * (an equality test, not a parse). `hash` is emitted exactly as the provider
+ * sent it — a hash has no checksummed form, so there is nothing to settle on
+ * the wire; what #3129 settled is the KEY, where `transactionDedupKey` now
+ * lowercases like `paymentAgentIdentityKey` and the two frontend twins
+ * already did.
+ *
  * #2849 (safe-retirement slice 3) removed the Safe Transaction Service leg:
  * it was fetched unconditionally for every account, but a Hybrid DeleGator
  * is unknown to that service, so the leg failed on every delegation-rail
@@ -26,6 +50,7 @@ import {
 import { getChain } from '../../domain/chains.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { createCache } from '../../platform/cache.js'
+import { toBlockNumber, toCanonicalAddress, toUnixSeconds } from './normalize.js'
 import { buildTransactionCacheKey } from './cache-key.js'
 import { compareTransactions, transactionDedupKey } from './ordering.js'
 import type {
@@ -108,15 +133,15 @@ export async function fetchAccountTransactions({
       transactions.push({
         hash: tx.hash,
         type: 'native',
-        from: tx.from,
-        to: tx.to,
+        from: toCanonicalAddress(tx.from),
+        to: toCanonicalAddress(tx.to),
         value: tx.value,
         valueFormatted: formatTokenValue(tx.value, nativeToken.decimals),
         asset: nativeToken.symbol,
         decimals: nativeToken.decimals,
         direction: tx.to.toLowerCase() === addrLower ? 'in' : 'out',
-        timestamp: parseInt(tx.timeStamp, 10),
-        blockNumber: parseInt(tx.blockNumber, 10),
+        timestamp: toUnixSeconds(tx.timeStamp),
+        blockNumber: toBlockNumber(tx.blockNumber),
         isError: tx.isError === '1',
       })
     }
@@ -127,15 +152,15 @@ export async function fetchAccountTransactions({
       transactions.push({
         hash: tx.hash,
         type: 'internal',
-        from: tx.from,
-        to: tx.to,
+        from: toCanonicalAddress(tx.from),
+        to: toCanonicalAddress(tx.to),
         value: tx.value,
         valueFormatted: formatTokenValue(tx.value, nativeToken.decimals),
         asset: nativeToken.symbol,
         decimals: nativeToken.decimals,
         direction: tx.to.toLowerCase() === addrLower ? 'in' : 'out',
-        timestamp: parseInt(tx.timeStamp, 10),
-        blockNumber: parseInt(tx.blockNumber, 10),
+        timestamp: toUnixSeconds(tx.timeStamp),
+        blockNumber: toBlockNumber(tx.blockNumber),
         isError: tx.isError === '1',
       })
     }
@@ -148,17 +173,17 @@ export async function fetchAccountTransactions({
       transactions.push({
         hash: tx.hash,
         type: 'erc20',
-        from: tx.from,
-        to: tx.to,
+        from: toCanonicalAddress(tx.from),
+        to: toCanonicalAddress(tx.to),
         value: tx.value,
         valueFormatted: formatTokenValue(tx.value, decimals),
         asset: symbol,
         decimals,
         direction: tx.to.toLowerCase() === addrLower ? 'in' : 'out',
-        timestamp: parseInt(tx.timeStamp, 10),
-        blockNumber: parseInt(tx.blockNumber, 10),
+        timestamp: toUnixSeconds(tx.timeStamp),
+        blockNumber: toBlockNumber(tx.blockNumber),
         isError: false,
-        tokenAddress: tx.contractAddress,
+        tokenAddress: toCanonicalAddress(tx.contractAddress),
         tokenSymbol: symbol,
       })
     }

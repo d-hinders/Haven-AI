@@ -66,7 +66,7 @@ const transactionBaseProperties = {
   decimals: { type: 'integer' },
   direction: { type: 'string', enum: ['in', 'out'] },
   timestamp: { type: 'integer' },
-  blockNumber: { type: 'integer', description: '0 for x402-synthesized rows with no on-chain receipt yet.' },
+  blockNumber: { type: ['integer', 'null'], description: 'On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero.' },
   isError: { type: 'boolean' },
   tokenAddress: address,
   tokenSymbol: { type: 'string' },

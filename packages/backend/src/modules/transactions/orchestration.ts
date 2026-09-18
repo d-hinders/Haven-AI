@@ -13,6 +13,7 @@ import {
 } from '../../infra/repositories/transaction-history.js'
 import { getChain } from '../../domain/chains.js'
 import { fetchAccountTransactions } from './aggregate.js'
+import { toCanonicalAddress } from './normalize.js'
 import { compareEnrichedTransactions, enrichedTransactionIdentityKey } from './ordering.js'
 import { enrichTransactionsWithAgents } from './enrichment.js'
 import { enrichTransactionsWithAccounting } from './accounting.js'
@@ -74,7 +75,14 @@ export async function aggregateAccountTransactions(
           ...tx,
           chainId: safe.chain_id,
           accountId: safe.id,
-          accountAddress: safe.account_address,
+          // #3129: the third place an address reaches the wire row. The two
+          // ROW producers normalise, but `accountAddress` is attached here,
+          // during assembly, so it skipped the boundary entirely. It is
+          // checksummed in practice only because `computeHybridAccountAddress`
+          // happens to write it that way — every lookup is
+          // `LOWER(account_address) = LOWER($2)`, so nothing enforces it, and
+          // one row written lowercase would put both forms in one response.
+          accountAddress: toCanonicalAddress(safe.account_address),
           accountName: safe.name,
         })
       }
@@ -221,7 +229,24 @@ export async function buildAccountTransactionsPage(
       ...tx,
       chainId,
       accountId,
-      accountAddress,
+      // #3129: as above — and this one is the URL path parameter, so its
+      // casing is whatever the caller typed.
+      //
+      // The `fetchAccountTransactions({ accountAddress })` call sites are
+      // deliberately left raw, and not because normalising them would be
+      // risky: it would be behaviour-neutral, since `buildTransactionCacheKey`
+      // lowercases and the in/out compare goes through `addrLower`. They are
+      // left alone because that value is an INPUT — it reaches a cache key, a
+      // direction compare, an explorer URL and a log line, never a row — so
+      // normalising it would add a call that guarantees nothing. (The same
+      // raw value also becomes `ownedAccount.account_address` below: that is
+      // the one path by which it could reach a row, and it does not, because
+      // `mergeX402Transactions` reads only `safe.id` from those rows and each
+      // x402 row takes its own `accountAddress` from the normalised
+      // `row.account_address`.) The other two input sites are the
+      // `fetchAccountTransactions` calls in `aggregateAccountTransactions`
+      // and in the token-filter collector.
+      accountAddress: toCanonicalAddress(accountAddress),
       accountName: '',
     })),
   )

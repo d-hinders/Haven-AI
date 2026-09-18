@@ -122,7 +122,13 @@ function activityToTransaction(
     decimals: 0,
     direction: 'out',
     timestamp: Number.isFinite(createdMs) ? Math.floor(createdMs / 1000) : 0,
-    blockNumber: 0,
+    // #3129: `null`, not `0`. This row is synthesized from an activity record,
+    // which carries no block — the same "unknown" the backend's x402 row now
+    // reports, so the two producers of a blockless row agree. Nothing in the
+    // frontend reads `blockNumber` (it is required by the wire type, not
+    // rendered), so this changes no pixel; it removes the last producer still
+    // claiming block zero for a row that has no block.
+    blockNumber: null,
     isError,
     tokenAddress: item.token_address ?? undefined,
     agentName,

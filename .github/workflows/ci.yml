@@ -413,6 +413,16 @@ jobs:
           npm run lint:request-schemas:test
           npm run check:route-modules
 
+      - name: Typed next-step ratchet (#3104, epic #3105)
+        # Blocking, shrink-only, baseline at zero: every next-step emission in
+        # the hosted server, the signer and the local runtime names its tool
+        # (arguments in that tool's vocabulary) or says why none follows, and
+        # both discovery maps carry suggested_arguments. Self-tested for the
+        # same reason as lint:deps above — the self-test SPAWNS the CLI.
+        run: |
+          npm run lint:next-steps
+          npm run lint:next-steps:test
+
       - name: DB schema smoke (migrations + money-path query PREPARE, #773)
         # Applies every migration to the real Postgres service, then PREPAREs the
         # curated money-path queries so column/type drift fails here instead of

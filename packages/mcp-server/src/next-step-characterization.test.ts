@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AgentPaymentNextAction } from '@haven_ai/sdk'
-import { buildAgentGuidance, paymentStatusHandoff } from './tools/support/guidance.js'
+import { buildAgentGuidance } from './tools/support/guidance.js'
+import { EMISSION_SITES } from './test-support/next-step-fixtures.js'
 
 /**
  * #3101 (epic #3105, slice 2/5) — CHARACTERIZATION of the 17 hosted
@@ -26,41 +27,6 @@ const SUMMARY = {
   network: 'base',
 } as unknown as Parameters<typeof buildAgentGuidance>[0]['summary']
 
-const SIGNER = (name: string) => ({
-  next_tool: `mcp__haven-signer__${name}`,
-  next_tool_server: 'haven-signer',
-  next_tool_name: name,
-  next_tool_server_role: 'signer',
-})
-const HOSTED = (name: string) => ({
-  next_tool: `mcp__haven__${name}`,
-  next_tool_server: 'haven',
-  next_tool_name: name,
-  next_tool_server_role: 'hosted',
-})
-
-export const EMISSION_SITES = [
-  { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
-  { site: 'catalog-purchase.ts prepare 3009', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign_x402', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign_x402'), next_arguments: { payment_id: 'pay_1' } } },
-  { site: 'catalog-purchase.ts prepare window-expired (payment_id unknown)', action: AgentPaymentNextAction.StopAndTellUser, handoff: paymentStatusHandoff(undefined), expect: { next_tool_omitted_reason: 'no payment_id is known for this refusal, so haven_get_payment_status cannot be named; nothing was funded or signed' } } /* RE-DECIDED: was next_tool + { payment_id: null } */,
-  { site: 'catalog-purchase.ts pay erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
-  { site: 'catalog-purchase.ts pay 3009', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign_x402', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign_x402'), next_arguments: { payment_id: 'pay_1' } } },
-  { site: 'catalog-purchase.ts pay window-expired (payment_id unknown)', action: AgentPaymentNextAction.StopAndTellUser, handoff: paymentStatusHandoff(undefined), expect: { next_tool_omitted_reason: 'no payment_id is known for this refusal, so haven_get_payment_status cannot be named; nothing was funded or signed' } } /* RE-DECIDED: was next_tool + { payment_id: null } */,
-  { site: 'plain-http-x402.ts pay erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
-  { site: 'plain-http-x402.ts pay 3009', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign_x402', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign_x402'), next_arguments: { payment_id: 'pay_1' } } },
-  { site: 'plain-http-x402.ts pay window-expired (payment_id unknown)', action: AgentPaymentNextAction.StopAndTellUser, handoff: paymentStatusHandoff(undefined), expect: { next_tool_omitted_reason: 'no payment_id is known for this refusal, so haven_get_payment_status cannot be named; nothing was funded or signed' } } /* RE-DECIDED: was next_tool + { payment_id: null } */,
-  { site: 'plain-http-x402.ts report outcome rejected', action: AgentPaymentNextAction.SweepStrandedFunds, tool: 'haven_sweep_delegate', args: {}, expect: { ...HOSTED('haven_sweep_delegate'), next_arguments: {} } },
-  { site: 'plain-http-x402.ts report outcome accepted (no tool)', action: AgentPaymentNextAction.None, tool: null, reason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows', expect: { next_tool_omitted_reason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' } } /* RE-DECIDED: additive reason, no tool before either */,
-  { site: 'paid-mcp-completion.ts pending', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
-  { site: 'paid-mcp-completion.ts settle held-hash, can report', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: '0x' + 'ab'.repeat(32) }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: '0x' + 'ab'.repeat(32) } } },
-  { site: 'paid-mcp-completion.ts settle held-hash, cannot report', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
-  { site: 'paid-mcp-completion.ts settle funding pending', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
-  // The four no-tool sites (no `nextTool:` line before #3101; the required input surfaced them).
-  { site: 'paid-mcp-completion.ts complete settled', action: AgentPaymentNextAction.None, tool: null, reason: 'the purchase is settled; no Haven tool follows', expect: { next_tool_omitted_reason: 'the purchase is settled; no Haven tool follows' } } /* RE-DECIDED: additive reason */,
-  { site: 'paid-mcp-completion.ts settle erc7710 settled', action: AgentPaymentNextAction.None, tool: null, reason: 'the purchase is settled; no Haven tool follows', expect: { next_tool_omitted_reason: 'the purchase is settled; no Haven tool follows' } } /* RE-DECIDED: additive reason */,
-  { site: 'paid-mcp-completion.ts settle 3009 settled', action: AgentPaymentNextAction.None, tool: null, reason: 'the purchase is settled; no Haven tool follows', expect: { next_tool_omitted_reason: 'the purchase is settled; no Haven tool follows' } } /* RE-DECIDED: additive reason */,
-  { site: 'state-direct-recovery.ts own HTTP retry', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: null, reason: 'the next step is your own HTTP retry of the merchant with the payment_header above, not a Haven tool', expect: { next_tool_omitted_reason: 'the next step is your own HTTP retry of the merchant with the payment_header above, not a Haven tool' } } /* RE-DECIDED: additive reason */,
-] as const
 
 /**
  * The census the figure "17 emission sites" comes from: every

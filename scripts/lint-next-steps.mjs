@@ -1,0 +1,205 @@
+#!/usr/bin/env node
+// Shrink-only ratchet over the typed next-step contract (#3104, epic #3105).
+//
+// Every place a Haven MCP surface tells an agent what to call next must name
+// the tool with arguments in that tool's vocabulary, or say why no tool
+// follows (`next_tool_omitted_reason`). The three packages reached that state
+// through #3100–#3103; this gate keeps them there. The numerator is DEFINED,
+// not grepped loosely:
+//
+//   unnamed — an emission block that carries a `next_action` decision and
+//     names neither a tool nor a reason. A block is: a builder call
+//     (`buildAgentGuidance(`, `refusalNextStep(`, `signerRefusalStep(`), a
+//     `new HostedToolError({` whose literal carries `nextAction:`, a signer
+//     `next_action: AgentPaymentNextAction.…` object literal, or a local
+//     `nextAction: AgentPaymentNextAction.…` object literal. It is NAMED when
+//     the balanced block contains `nextTool:`, `nextStep:`,
+//     `nextToolOmittedReason:`, `next_tool_omitted_reason:`, a `…Handoff(` /
+//     `…Step(` spread, or `nextStepWireFields(`.
+//   discovery_without_arguments — a `suggested_tool:` inside a discovery
+//     entry literal (one carrying `resource_url:`) with no
+//     `suggested_arguments:` (the two discovery maps, decision 4).
+//
+// The `wrongTool()` failure hints carry the caller's own arguments and are
+// outside the numerator by decision 7. Positive control: run it with
+// `--root <a tree at the epic's base 4ed69592>` — both counters are non-zero
+// there (quoted in PR #3104's body); at the epic's head both are 0 and the
+// committed baseline is all zeros, so any regrowth is a new violation.
+//
+// Baseline shape: `{ "<file>": { unnamed: n, discovery_without_arguments: n } }`
+// (scripts/lib/ratchet.mjs). `--update` rewrites it from the scan;
+// `--update --accept-new` is the only way to grow it.
+import { readFile, readdir } from 'node:fs/promises'
+import { join, dirname, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  newViolations,
+  hasShrunk,
+  writeBaseline,
+  loadBaseline,
+  updateRefusals,
+  ACCEPT_NEW_BASELINE_FLAG,
+  firstRunRefusalMessage,
+  runGate,
+} from './lib/ratchet.mjs'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+export const DEFAULT_ROOT = join(HERE, '..')
+export const BASELINE_PATH = join(HERE, 'lint-next-steps-baseline.json')
+
+/** The surfaces the epic converted; relative to the repo root. */
+export const SCAN_TARGETS = [
+  'packages/mcp-server/src/tools.ts',
+  'packages/mcp-server/src/tools',
+  'packages/signer/src/sign-context.ts',
+  'packages/signer/src/tools.ts',
+  'packages/mcp/src/tools.ts',
+]
+
+const BLOCK_OPENERS = [
+  /buildAgentGuidance\(\s*\{/g,
+  /refusalNextStep\(\s*\{/g,
+  /signerRefusalStep\(\s*\{/g,
+  /new HostedToolError\(\s*\{/g,
+]
+const NAMED = /nextTool:|nextStep:|nextToolOmittedReason:|next_tool_omitted_reason:|\.\.\.[A-Za-z]+(Handoff|Step)\(|nextStepWireFields\(/
+const DECISION_IN_LITERAL = /(nextAction|next_action):\s*AgentPaymentNextAction\./g
+
+/** Returns the source slice of the balanced `{…}` starting at `open` (index of `{`). */
+export function balancedBlock(source, open) {
+  let depth = 0
+  for (let i = open; i < source.length; i += 1) {
+    const c = source[i]
+    if (c === '{') depth += 1
+    else if (c === '}') {
+      depth -= 1
+      if (depth === 0) return source.slice(open, i + 1)
+    }
+  }
+  return source.slice(open)
+}
+
+/** Enclosing `{…}` literal of a match position: walk back to the nearest unmatched `{`. */
+function enclosingLiteral(source, at) {
+  let depth = 0
+  for (let i = at; i >= 0; i -= 1) {
+    const c = source[i]
+    if (c === '}') depth += 1
+    else if (c === '{') {
+      if (depth === 0) return balancedBlock(source, i)
+      depth -= 1
+    }
+  }
+  return ''
+}
+
+export function scanSource(source) {
+  const counts = { unnamed: 0, discovery_without_arguments: 0 }
+  const seen = new Set()
+  const consider = (block, key) => {
+    if (seen.has(key)) return
+    seen.add(key)
+    if (!NAMED.test(block)) counts.unnamed += 1
+  }
+  for (const re of BLOCK_OPENERS) {
+    for (const m of source.matchAll(re)) {
+      const open = m.index + m[0].length - 1
+      const block = balancedBlock(source, open)
+      // A HostedToolError literal counts only when it carries a next_action decision.
+      if (/HostedToolError/.test(m[0]) && !/nextAction:|nextStep:/.test(block)) continue
+      consider(block, open)
+    }
+  }
+  // Signer / local decision literals outside the builder family.
+  for (const m of source.matchAll(DECISION_IN_LITERAL)) {
+    const block = enclosingLiteral(source, m.index)
+    const open = source.lastIndexOf('{', m.index)
+    if (/buildAgentGuidance|refusalNextStep|signerRefusalStep/.test(source.slice(Math.max(0, open - 40), open))) continue
+    consider(block, open)
+  }
+  // Discovery entries only: a `suggested_tool:` inside a literal that also
+  // carries `resource_url:` (the catalog row shape). The failure envelopes'
+  // `suggested_tool` hints (errors.ts, the signer) are not discovery and are
+  // outside this counter.
+  for (const m of source.matchAll(/suggested_tool:/g)) {
+    const block = enclosingLiteral(source, m.index)
+    if (!/resource_url:/.test(block)) continue
+    if (!/suggested_arguments:/.test(block)) counts.discovery_without_arguments += 1
+  }
+  return counts
+}
+
+async function listFiles(root, target) {
+  const abs = join(root, target)
+  try {
+    const entries = await readdir(abs, { withFileTypes: true })
+    const out = []
+    for (const e of entries) {
+      const p = join(target, e.name)
+      if (e.isDirectory()) out.push(...(await listFiles(root, p)))
+      else if (e.name.endsWith('.ts') && !e.name.endsWith('.test.ts')) out.push(p)
+    }
+    return out
+  } catch {
+    return [target]
+  }
+}
+
+export async function scan(root = DEFAULT_ROOT) {
+  const counts = {}
+  for (const target of SCAN_TARGETS) {
+    for (const file of await listFiles(root, target)) {
+      let source
+      try {
+        source = await readFile(join(root, file), 'utf8')
+      } catch {
+        continue
+      }
+      const c = scanSource(source)
+      if (c.unnamed || c.discovery_without_arguments) counts[file] = c
+    }
+  }
+  return counts
+}
+
+const REMEDY =
+  'A next-step emission names neither a tool nor next_tool_omitted_reason, or a discovery ' +
+  'entry carries no suggested_arguments. Name the tool through the builder (a bare action ' +
+  'is what the agent cannot follow), or say why no tool follows. Never grow this baseline.'
+
+async function main() {
+  const args = process.argv.slice(2)
+  const rootFlag = args.find((a) => a.startsWith('--root='))
+  const root = rootFlag ? rootFlag.slice('--root='.length) : DEFAULT_ROOT
+  const counts = await scan(root)
+  const total = Object.values(counts).reduce((n, c) => n + c.unnamed + c.discovery_without_arguments, 0)
+  if (args.includes('--update')) {
+    const { firstRun, refusal } = updateRefusals(BASELINE_PATH, counts, args.includes(ACCEPT_NEW_BASELINE_FLAG))
+    if (refusal) {
+      console.error(refusal)
+      process.exitCode = 1
+      return
+    }
+    writeBaseline(BASELINE_PATH, counts)
+    console.log(`lint:next-steps baseline ${firstRun ? 'initialized' : 'updated'}: ${total} unnamed/argument-less emission(s) across ${Object.keys(counts).length} file(s)`)
+    return
+  }
+  const baseline = loadBaseline(BASELINE_PATH)
+  if (baseline === null) {
+    console.error(firstRunRefusalMessage(true))
+    process.exitCode = 1
+    return
+  }
+  const violations = newViolations(counts, baseline)
+  if (violations.length) {
+    console.error(`✗ lint:next-steps — ${violations.length} new violation(s):`)
+    for (const v of violations) console.error(`  ${v.file} ${v.key}: ${v.count} (baseline allows ${v.allowed})`)
+    console.error(`\n${REMEDY}`)
+    process.exitCode = 1
+    return
+  }
+  const shrunk = hasShrunk(counts, baseline)
+  console.log(`✓ lint:next-steps — every next-step emission names a tool or a reason (${total} allowed by baseline${shrunk ? '; baseline can shrink, run --update' : ''}) at ${relative(process.cwd(), root) || '.'}`)
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) runGate('lint:next-steps', main)

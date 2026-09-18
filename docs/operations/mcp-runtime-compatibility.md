@@ -1753,6 +1753,46 @@ true (unlike the signer's compatibility numbers above, which are point-in-time
 by design). See [`07-edge-signer.md`](../architecture/07-edge-signer.md) for
 what each server's instructions say and why they differ in length.
 
+## Typed next steps — the agent contract and its ratchet (epic #3105)
+
+Every response a Haven MCP surface returns tells the agent what to call next
+in structured fields, and those fields are typed end to end (#3100–#3104):
+
+- **The contract.** `next_action` (from `AgentPaymentNextAction`) is always
+  present. When a tool follows, `next_tool` (`mcp__<server>__<tool>`, the
+  default server names), `next_tool_server`, `next_tool_name`,
+  `next_tool_server_role` (`hosted` | `signer` — the field to resolve against
+  your own server names) and `next_arguments` (spelled in the named tool's own
+  vocabulary and accepted by it verbatim) ride together. When no tool follows,
+  `next_tool` is absent — never null — and `next_tool_omitted_reason` says why.
+  A refusal carries the same fields a success does. Discovery entries carry
+  `suggested_tool` + `suggested_arguments` under the same rule, or
+  `suggested_tool_omitted_reason`.
+- **Where it is built.** The SDK's `createNextStepBuilder`
+  (`packages/sdk/src/next-step.ts`) over a target map; the hosted server, the
+  signer and the local runtime each declare the shapes they hand off to, and a
+  wrong key, a missing required key, an unregistered tool or an omitted
+  `nextTool` is a compile error at the site. Cross-surface handoffs are pinned
+  both ways in `packages/mcp-server/src/next-step-signer-parity.test.ts`:
+  every hosted emission fixture (17 success sites, 28 refusal steps) is built
+  for real and its `next_arguments` parsed with the named tool's strict schema
+  on the surface its role names (hosted → hosted, hosted → signer from the
+  signer's built package); the signer's declared hosted shapes parse under the
+  hosted schemas; the local runtime's discovery hints parse under its own
+  tools. Decision 9 rides along: an action with a default-table mapping names
+  its tool.
+- **The ratchet.** `npm run lint:next-steps` (`scripts/lint-next-steps.mjs`,
+  shrink-only, baseline `scripts/lint-next-steps-baseline.json` committed at
+  **zero**) counts, per file, emission blocks that name neither a tool nor a
+  reason (`unnamed`) and discovery entries without `suggested_arguments`
+  (`discovery_without_arguments`) across the hosted tools, the signer and the
+  local runtime. The numerator is defined in the script header, not grepped
+  loosely; the `wrongTool()` failure hints (the caller's own arguments) are
+  outside it by decision 7. Recorded run at the epic's head (#3104): **0 / 0**.
+  Positive control at the epic's base `4ed69592` (`--root=<tree>`): **43
+  unnamed + 2 discovery entries across 10 files**. The gate runs in CI beside
+  the request-schema ratchet and is self-tested (`lint:next-steps:test`).
+
 ## Troubleshooting
 
 - **A stale local `dist/` masquerading as version skew (#1188).** The symptoms
@@ -2157,6 +2197,18 @@ what each server's instructions say and why they differ in length.
 > key, cap, funding, signing or settlement decision changes; the local
 > runtime is untouched (slice #3103). Scope of this note: those fields.
 > Nothing else in this document was re-verified.
+
+> **Re-verification (#3104, cross-surface handoff parity and the ratchet,
+> 2026-09-18):** this diff adds `scripts/lint-next-steps.mjs` (+ test +
+> zero baseline, wired in `ci.yml` and `package.json`), moves the hosted
+> next-step fixtures to `packages/mcp-server/src/test-support/next-step-fixtures.ts`,
+> and extends `packages/mcp-server/src/next-step-signer-parity.test.ts` into
+> the cross-surface walk: every hosted emission fixture is built for real and
+> its arguments parsed with the named tool's strict schema on the surface its
+> role names. No emission, tool name, schema key or decision changes; the epic's
+> contract as it stands after #3100–#3103 is what the walk and the ratchet
+> hold. Scope of this note: the tests and the gate. Nothing else in this
+> document was re-verified.
 
 > **Re-verification (#3103, the signer and the local runtime name a next tool,
 > 2026-09-18):** this diff adds `packages/signer/src/next-step.ts` (the signer's

@@ -3,13 +3,13 @@
  * directories are seen, S4), keeps anything a credential directory's sidecar
  * names or the current pin, removes the rest, reports through #3121's levels.
  */
-import { mkdir, mkdtemp, readFile, writeFile, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, writeFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { runtimeSpecOverrideDirectoryKey } from './runtime-spec-override.js'
-import { pruneSignerRuntimes, referencedRuntimeDirectories, rollUpPruneLevel, signerRuntimeRoot } from './prune-runtimes.js'
+import { normalizeRuntimePath, pruneSignerRuntimes, referencedRuntimeDirectories, rollUpPruneLevel, signerRuntimeRoot } from './prune-runtimes.js'
 
 async function seedRuntimeDir(root: string, key: string, bytes = 1024): Promise<string> {
   const dir = join(root, key, 'node_modules', '@haven_ai', 'signer', 'dist')
@@ -111,8 +111,10 @@ describe('pruneSignerRuntimes (#3123)', () => {
     await mkdir(explicitDir, { recursive: true })
     await writeFile(join(explicitDir, 'signer-runtime.json'), JSON.stringify({ runtime_directory: b }))
 
-    expect([...(await referencedRuntimeDirectories(homeDir)).keys()]).toEqual([a])
-    expect([...(await referencedRuntimeDirectories(homeDir, explicitDir)).keys()]).toEqual([b])
+    const norm = (p: string) => normalizeRuntimePath(p)
+    expect([...(await referencedRuntimeDirectories(homeDir)).keys()]).toEqual([await norm(a)])
+    // #3151 review: the explicit directory's parent is read IN ADDITION to the default root — a union.
+    expect([...(await referencedRuntimeDirectories(homeDir, explicitDir)).keys()].sort()).toEqual([await norm(a), await norm(b)].sort())
     const report = await pruneSignerRuntimes({ dryRun: true }, { homeDir })
     const byKey = Object.fromEntries(report.entries.map((e) => [e.key, e]))
     expect(byKey['0.0.0-dev.3.aaaaaaa'].action).toBe('kept')
@@ -128,5 +130,97 @@ describe('pruneSignerRuntimes (#3123)', () => {
     expect(rollUpPruneLevel([])).toBe('ok')
     expect(rollUpPruneLevel([{ level: 'ok' }, { level: 'advisory' }])).toBe('advisory')
     expect(rollUpPruneLevel([{ level: 'advisory' }, { level: 'failed' }])).toBe('failed')
+  })
+})
+
+describe('reference rules hardened by the #3151 review', () => {
+  async function seedRuntimeDir2(root: string, key: string, bytes = 1024): Promise<string> {
+    const dir = join(root, key, 'node_modules', '@haven_ai', 'signer', 'dist')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'cli.js'), 'x'.repeat(bytes))
+    return join(root, key)
+  }
+
+  it('BLOCKING fix: an explicit --credentials-dir elsewhere does NOT blind the prune to the default root — a live default-root agent keeps its runtime', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-prune-union-'))
+    const root = signerRuntimeRoot(homeDir)
+    const live = await seedRuntimeDir2(root, '0.0.0-dev.live.aaaaaaa')
+    const elsewhereRuntime = await seedRuntimeDir2(root, '0.0.0-dev.elsewhere.bbbbbbb')
+    const stale = await seedRuntimeDir2(root, '0.0.0-dev.stale.ccccccc')
+    // Default-root agent references `live`; an agent in an unrelated parent references `elsewhereRuntime`.
+    const liveAgent = join(homeDir, '.haven', 'agents', 'agent-live')
+    await mkdir(liveAgent, { recursive: true })
+    await writeFile(join(liveAgent, 'signer-runtime.json'), JSON.stringify({ runtime_directory: live }))
+    const elsewhere = await mkdtemp(join(tmpdir(), 'haven-prune-elsewhere-'))
+    const explicitDir = join(elsewhere, 'agent-x')
+    await mkdir(explicitDir, { recursive: true })
+    await writeFile(join(explicitDir, 'signer-runtime.json'), JSON.stringify({ runtime_directory: elsewhereRuntime }))
+
+    const report = await pruneSignerRuntimes({ dryRun: false }, { homeDir, credentialsDir: explicitDir })
+    const byKey = Object.fromEntries(report.entries.map((e) => [e.key, e]))
+    expect(byKey['0.0.0-dev.live.aaaaaaa'].action).toBe('kept')
+    expect(byKey['0.0.0-dev.elsewhere.bbbbbbb'].action).toBe('kept')
+    expect(byKey['0.0.0-dev.stale.ccccccc'].action).toBe('removed')
+    await expect(stat(live)).resolves.toBeDefined()
+    await expect(stat(elsewhereRuntime)).resolves.toBeDefined()
+    await expect(stat(stale)).rejects.toThrow()
+  })
+
+  it('a credential directory with a MISSING or CORRUPT sidecar but an intact wrapper still keeps the runtime the wrapper launches', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-prune-wrapper-'))
+    const root = signerRuntimeRoot(homeDir)
+    const viaWrapper = await seedRuntimeDir2(root, '0.0.0-dev.wrapped.aaaaaaa')
+    const viaCorrupt = await seedRuntimeDir2(root, '0.0.0-dev.corrupt.bbbbbbb')
+    for (const [name, runtime, sidecar] of [
+      ['agent-nosidecar', viaWrapper, null],
+      ['agent-corrupt', viaCorrupt, '{ not json'],
+    ] as const) {
+      const dir = join(homeDir, '.haven', 'agents', name, 'bin')
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'haven-signer.mjs'), `#!/usr/bin/env node\nimport('${join(runtime, 'node_modules', '@haven_ai', 'signer', 'dist', 'cli.js')}')\n`)
+      if (sidecar !== null) await writeFile(join(homeDir, '.haven', 'agents', name, 'signer-runtime.json'), sidecar)
+    }
+    const report = await pruneSignerRuntimes({ dryRun: true }, { homeDir })
+    const byKey = Object.fromEntries(report.entries.map((e) => [e.key, e]))
+    expect(byKey['0.0.0-dev.wrapped.aaaaaaa']).toMatchObject({ action: 'kept', referencedBy: [join(homeDir, '.haven', 'agents', 'agent-nosidecar')] })
+    expect(byKey['0.0.0-dev.corrupt.bbbbbbb']).toMatchObject({ action: 'kept', referencedBy: [join(homeDir, '.haven', 'agents', 'agent-corrupt')] })
+  })
+
+  it('a sidecar path with a trailing slash, or an unresolved form, still matches the enumerated directory', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-prune-normalize-'))
+    const root = signerRuntimeRoot(homeDir)
+    const dir = await seedRuntimeDir2(root, '0.0.0-dev.slash.aaaaaaa')
+    const dir2 = await seedRuntimeDir2(root, '0.0.0-dev.dots.bbbbbbb')
+    const dir3 = await seedRuntimeDir2(root, '0.0.0-dev.real.ccccccc')
+    // The realpath spelling (macOS: /var → /private/var) vs the tmpdir spelling the root is enumerated under.
+    const realDir3 = await realpath(dir3)
+    for (const [name, ref] of [['agent-slash', `${dir}/`], ['agent-dots', join(root, 'x', '..', '0.0.0-dev.dots.bbbbbbb')], ['agent-real', realDir3]] as const) {
+      const a = join(homeDir, '.haven', 'agents', name)
+      await mkdir(a, { recursive: true })
+      await writeFile(join(a, 'signer-runtime.json'), JSON.stringify({ runtime_directory: ref }))
+    }
+    const report = await pruneSignerRuntimes({ dryRun: true }, { homeDir })
+    expect(report.entries.every((e) => e.action === 'kept' || e.key === MCP_RUNTIME_MANIFEST.signerVersion)).toBe(true)
+    expect(report.entries.map((e) => e.key).sort()).toEqual(['0.0.0-dev.dots.bbbbbbb', '0.0.0-dev.real.ccccccc', '0.0.0-dev.slash.aaaaaaa'])
+    expect(report.entries.map((e) => e.action)).toEqual(['kept', 'kept', 'kept'])
+    await expect(stat(dir)).resolves.toBeDefined()
+    await expect(stat(dir2)).resolves.toBeDefined()
+    expect(realDir3 === dir3 || report.entries.find((e) => e.key === '0.0.0-dev.real.ccccccc')?.referencedBy.length === 1).toBe(true)
+  })
+
+  it('measure: false (the doctor path) sizes nothing and reports 0 bytes; measure defaults to true for the CLI and sizes only what it would remove', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-prune-measure-'))
+    const root = signerRuntimeRoot(homeDir)
+    const kept = await seedRuntimeDir2(root, '0.0.0-dev.kept.aaaaaaa', 5000)
+    await seedRuntimeDir2(root, '0.0.0-dev.gone.bbbbbbb', 7000)
+    const a = join(homeDir, '.haven', 'agents', 'agent-kept')
+    await mkdir(a, { recursive: true })
+    await writeFile(join(a, 'signer-runtime.json'), JSON.stringify({ runtime_directory: kept }))
+    const unmeasured = await pruneSignerRuntimes({ dryRun: true, measure: false }, { homeDir })
+    expect(unmeasured.entries.map((e) => e.bytes)).toEqual([0, 0])
+    const measured = await pruneSignerRuntimes({ dryRun: true }, { homeDir })
+    const byKey = Object.fromEntries(measured.entries.map((e) => [e.key, e]))
+    expect(byKey['0.0.0-dev.gone.bbbbbbb'].bytes).toBe(7000)
+    expect(byKey['0.0.0-dev.kept.aaaaaaa'].bytes).toBe(0) // kept directories are never walked
   })
 })

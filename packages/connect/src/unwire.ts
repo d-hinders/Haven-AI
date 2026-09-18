@@ -308,7 +308,9 @@ export async function unwireAgent(input: UnwireInput): Promise<UnwireOutcome> {
   // #3123 ORDER (S3): the runtime configs and the Hermes env — the copies of
   // the API key that live in world-readable editor files — were scrubbed
   // ABOVE, before this decision, so a refusal here leaves the key in the
-  // 0o600 credential file only, never in a config. The decision itself asks
+  // 0o600 credential file and in any config this run could not clean (those
+  // are reported `refused` / `unreadable` above, never silently). The
+  // decision itself asks
   // the one question the connector can answer with the probe it already has
   // and refuses on every answer but "nothing to preserve" (option c).
   const teardown = await decideTeardown(identity, input)
@@ -352,8 +354,8 @@ async function decideTeardown(identity: IdentityFile | null, input: UnwireInput)
         status: 'retained',
         probe: 'ok',
         detail:
-          'This agent is still ACTIVE on the backend: its API key and delegate key still spend, so destroying them ' +
-          'would be a live spend-authority change. Key material kept in this directory (0o600); its MCP wiring above is gone.',
+          'This agent is still ACTIVE on the backend: its API key and delegate key still carry spend authority, so ' +
+          'destroying them would be a live spend-authority change. Key material kept in this directory (0o600); its MCP wiring above is gone.',
         remedy:
           'Revoke the agent on the Haven agent page (connect never revokes), then re-run --unwire; or, to delete ' +
           `the key anyway, re-run with ${DESTROY_FLAG}.`,
@@ -363,9 +365,10 @@ async function decideTeardown(identity: IdentityFile | null, input: UnwireInput)
         status: 'retained',
         probe: 'unauthorized',
         detail:
-          'This key no longer authenticates on normal routes (revoked, archived, paused, or rotated — the backend ' +
-          'does not say which). A stranded delegate balance MAY still exist and the connector CANNOT check: ' +
-          'this directory holds the only local credential the sweep-recovery routes still accept. Key material kept.',
+          'This key no longer authenticates on normal routes (revoked, archived, paused, pending approval, rotated, ' +
+          'or not a key the backend knows — it does not say which). A stranded delegate balance MAY still exist and ' +
+          'the connector CANNOT check: this directory may hold the only local credential the sweep-recovery routes ' +
+          'would still accept. Key material kept.',
         remedy:
           'Recover any stranded balance first (haven_sweep_delegate from a runtime still wired to this agent, or the ' +
           `Haven agent page), then re-run with ${DESTROY_FLAG} to remove the key material.`,

@@ -222,3 +222,15 @@ describe('parseArgs --destroy-key-material / --prune-signer-runtimes (#3123)', (
     expect(() => parseArgs(['--dry-run'], {})).toThrow(/only applies to --prune-signer-runtimes/)
   })
 })
+
+describe('#3123 flags are refused, never silently discarded, on the --rekey path (#3151 review)', () => {
+  it('--destroy-key-material with --rekey / --rekey-finish throws instead of vanishing', () => {
+    expect(() => parseArgs(['--rekey', '--destroy-key-material'], {})).toThrow(/only applies to --unwire/)
+    expect(() => parseArgs(['--rekey-finish', '--api-key', 'sk_new', '--destroy-key-material'], {})).toThrow(/only applies to --unwire/)
+  })
+  it('--dry-run with --rekey throws; --prune-signer-runtimes with --rekey or a --setup token throws', () => {
+    expect(() => parseArgs(['--rekey', '--dry-run'], {})).toThrow(/only applies to --prune-signer-runtimes/)
+    expect(() => parseArgs(['--rekey', '--prune-signer-runtimes'], {})).toThrow(/its own operation/)
+    expect(() => parseArgs(['--prune-signer-runtimes', '--setup', 'tok'], {})).toThrow(/takes no --setup token/)
+  })
+})

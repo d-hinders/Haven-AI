@@ -21,6 +21,7 @@ import {
   UnreadableRuntimeConfigError,
   mergeHermesEnv,
   mergeHermesYaml,
+  mergeCodexTomlHosted,
   removeCodexToml,
   removeHermesEnv,
   removeHermesYaml,
@@ -428,6 +429,28 @@ describe('teardown refuses before destroying the recovery credential (#3123)', (
       expect(await readFile(envPath, 'utf8')).not.toContain('sk_live_agent')
       const identity = JSON.parse(await readFile(join(dir, 'identity.json'), 'utf8'))
       expect(identity.agent_id).toBe('agent-research')
+    }
+  })
+
+  it('S3 with a config that really carries the key (Codex TOML, Bearer header): scrubbed before the decision on a retained teardown, and gone after a forced one', async () => {
+    for (const mode of ['retained', 'forced'] as const) {
+      const homeDir = await mkdtemp(join(tmpdir(), `haven-unwire-codex-${mode}-`))
+      const { dir, wrapper } = await seedProbeableAgent(homeDir)
+      const codexDir = join(homeDir, '.codex')
+      await mkdir(codexDir, { recursive: true })
+      const toml = mergeCodexTomlHosted('[mcp_servers.other]\nurl = "https://x"\n', HOSTED_URL, 'sk_live_agent', { command: wrapper, args: [] }, RESEARCH)
+      expect(toml).toContain('sk_live_agent') // the seed is real: the raw key is in the file
+      await writeFile(join(codexDir, 'config.toml'), toml)
+      const result = await unwireAgent({
+        directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones'),
+        destroyKeyMaterial: mode === 'forced',
+        probeHostedIdentity: async () => ({ status: 'ok', agentId: 'agent-research', delegateAddress: '0x' + 'cd'.repeat(20) }),
+      })
+      expect(result.teardown.status).toBe(mode)
+      const after = await readFile(join(codexDir, 'config.toml'), 'utf8')
+      expect(after).not.toContain('sk_live_agent')
+      expect(after).toContain('[mcp_servers.other]')
+      expect(result.runtimes.some((r) => r.runtime === 'codex-cli' && r.status === 'removed')).toBe(true)
     }
   })
 

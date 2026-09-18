@@ -9,28 +9,43 @@
  * empty before this file).
  *
  * The rule is the safe one: a directory is KEPT when any credential
- * directory's `signer-runtime.json` names it as `runtime_directory` —
- * wired, superseded, retired, whatever its classification, because "a
- * directory nobody is using" is exactly what the doctor exists to decide,
- * not this — or when it is the manifest's current pin (what `--repair`
- * would install into). Everything else under the root is removed, or listed
- * under `--dry-run`. Enumeration walks the ROOT, never the manifest's version
- * list, so override-keyed directories are seen (S4).
+ * directory names it — through its `signer-runtime.json` `runtime_directory`
+ * OR through the path its `bin/haven-signer.mjs` wrapper launches (a
+ * directory with a missing or corrupt sidecar but an intact wrapper still
+ * depends on its runtime; #3151 review) — wired, superseded, retired,
+ * whatever its classification, because "a directory nobody is using" is
+ * exactly what the doctor exists to decide, not this — or when it is the
+ * manifest's current pin (what `--repair` would install into). Credential
+ * directories are read from the default root AND, when `--credentials-dir`
+ * names an agent elsewhere, from that directory's parent as well — a union,
+ * never either/or, so pointing the prune at one agent cannot blind it to the
+ * others (#3151 review). Paths are normalized (resolved, realpath where the
+ * directory exists, no trailing slash) on both sides of the comparison.
+ * Everything else under the root is removed, or listed under `--dry-run`.
+ * Enumeration walks the ROOT, never the manifest's version list, so
+ * override-keyed directories are seen (S4).
  *
- * A running signer whose directory is removed: on POSIX the process keeps
- * its open files and keeps serving until it restarts; since only
- * UNREFERENCED directories are removed, no credential directory's wrapper
- * points at one, so no configured agent can be started against a removed
- * directory. On a platform where the removal fails (`EBUSY`), the entry is
- * reported `failed` and the exit code says so; nothing else is affected.
+ * The prune trusts those two reference sources; it does not read runtime
+ * configs. A running signer whose directory is removed: on POSIX the process
+ * keeps its open files and keeps serving until it restarts; a removed
+ * directory is one no sidecar and no wrapper named, so a configured agent is
+ * not started against it. On a platform where the removal fails (`EBUSY`),
+ * the entry is reported `failed` and the exit code says so; nothing else is
+ * affected.
+ *
+ * Sizes: `directoryBytes` walks every file (hundreds of thousands on a
+ * developer machine — ~30 s measured on a 2 GB root, #3151 review), so it
+ * runs only for the directories the run would remove, and only when the
+ * caller asks (`measure: true`, the CLI). The doctor's dry run passes
+ * `measure: false` and reports names only.
  *
  * Findings use #3121's three levels rather than a second scale: `removed` and
  * `kept` are `ok`, a `would_remove` under --dry-run is an `advisory`
  * (worth reading, nothing broken), a `failed` removal is `failed`.
  */
-import { readdir, readFile, rm, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import type { DoctorLevel } from './doctor.js'
 
@@ -98,27 +113,66 @@ async function directoryBytes(directory: string): Promise<number> {
   return total
 }
 
-/** Every `runtime_directory` any credential directory's sidecar names, keyed to the directories naming it. */
-export async function referencedRuntimeDirectories(homeDir: string, credentialsDir?: string): Promise<Map<string, string[]>> {
-  const root = credentialsDir ? join(credentialsDir, '..') : join(homeDir, '.haven', 'agents')
-  const referenced = new Map<string, string[]>()
-  let entries: string[] = []
+/** Resolve, strip trailing separators, and follow symlinks when the path exists — so both sides compare alike. */
+export async function normalizeRuntimePath(path: string): Promise<string> {
+  const resolved = resolve(path).replace(/[\\/]+$/, '')
   try {
-    entries = await readdir(root)
+    return await realpath(resolved)
   } catch {
-    return referenced
+    return resolved
   }
-  for (const entry of entries) {
-    const directory = join(root, entry)
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Every runtime directory any credential directory names — through its
+ * sidecar's `runtime_directory` or the path its wrapper launches — keyed by
+ * the normalized directory, valued by the credential directories naming it.
+ * Reads the default root AND the explicit directory's parent (a union).
+ */
+export async function referencedRuntimeDirectories(homeDir: string, credentialsDir?: string): Promise<Map<string, string[]>> {
+  const roots = new Set<string>([join(homeDir, '.haven', 'agents')])
+  if (credentialsDir) roots.add(dirname(resolve(credentialsDir)))
+  const referenced = new Map<string, string[]>()
+  const runtimeRoot = await normalizeRuntimePath(signerRuntimeRoot(homeDir))
+  // A wrapper may spell the root as written at install time (before symlink
+  // resolution — macOS's /var vs /private/var) or as its realpath; match both.
+  const rootSpellings = [...new Set([resolve(signerRuntimeRoot(homeDir)), runtimeRoot])]
+  const wrapperRe = new RegExp(`(?:${rootSpellings.map(escapeRegExp).join('|')})[\\/]+([^\\/'"\\s]+)`, 'g')
+  const add = async (runtimeDirectory: string, by: string) => {
+    const key = await normalizeRuntimePath(runtimeDirectory)
+    const list = referenced.get(key) ?? []
+    if (!list.includes(by)) list.push(by)
+    referenced.set(key, list)
+  }
+  for (const root of roots) {
+    let entries: string[] = []
     try {
-      const sidecar = JSON.parse(await readFile(join(directory, 'signer-runtime.json'), 'utf8')) as { runtime_directory?: unknown }
-      if (typeof sidecar.runtime_directory === 'string' && sidecar.runtime_directory.length > 0) {
-        const list = referenced.get(sidecar.runtime_directory) ?? []
-        list.push(directory)
-        referenced.set(sidecar.runtime_directory, list)
-      }
+      entries = await readdir(root)
     } catch {
-      // No sidecar, or unreadable: this directory references nothing.
+      continue
+    }
+    for (const entry of entries) {
+      const directory = join(root, entry)
+      try {
+        const sidecar = JSON.parse(await readFile(join(directory, 'signer-runtime.json'), 'utf8')) as { runtime_directory?: unknown }
+        if (typeof sidecar.runtime_directory === 'string' && sidecar.runtime_directory.length > 0) {
+          await add(sidecar.runtime_directory, directory)
+        }
+      } catch {
+        // No sidecar, or unreadable: the wrapper below is the second source.
+      }
+      try {
+        const wrapper = await readFile(join(directory, 'bin', 'haven-signer.mjs'), 'utf8')
+        // The wrapper launches `<runtime root>/<key>/node_modules/...`; every
+        // root child it names is a reference, whatever the sidecar says.
+        for (const match of wrapper.matchAll(wrapperRe)) await add(join(runtimeRoot, match[1]), directory)
+      } catch {
+        // No wrapper: nothing more to learn from this directory.
+      }
     }
   }
   return referenced
@@ -135,11 +189,12 @@ export function rollUpPruneLevel(entries: ReadonlyArray<Pick<PruneEntry, 'level'
  * removing; otherwise unreferenced directories are removed one by one and a
  * removal that throws is reported `failed` rather than aborting the run.
  */
-export async function pruneSignerRuntimes(input: { dryRun: boolean }, deps: PruneDeps = {}): Promise<PruneReport> {
+export async function pruneSignerRuntimes(input: { dryRun: boolean; measure?: boolean }, deps: PruneDeps = {}): Promise<PruneReport> {
   const homeDir = deps.homeDir ?? homedir()
   const root = signerRuntimeRoot(homeDir)
+  const measure = input.measure ?? true
   const referenced = await referencedRuntimeDirectories(homeDir, deps.credentialsDir)
-  const pin = join(root, MCP_RUNTIME_MANIFEST.signerVersion)
+  const pin = await normalizeRuntimePath(join(root, MCP_RUNTIME_MANIFEST.signerVersion))
   const remove = deps.rm ?? (async (directory: string) => rm(directory, { recursive: true, force: false }))
   const entries: PruneEntry[] = []
   let keys: string[] = []
@@ -152,19 +207,21 @@ export async function pruneSignerRuntimes(input: { dryRun: boolean }, deps: Prun
   let reclaimedBytes = 0
   for (const key of keys) {
     const directory = join(root, key)
-    const bytes = await directoryBytes(directory)
-    const referencedBy = referenced.get(directory) ?? []
+    const normalized = await normalizeRuntimePath(directory)
+    const referencedBy = referenced.get(normalized) ?? []
     const kind = classifyKey(key)
-    if (referencedBy.length > 0 || directory === pin) {
+    if (referencedBy.length > 0 || normalized === pin) {
       entries.push({
-        directory, key, kind, bytes, referencedBy,
+        directory, key, kind, bytes: 0, referencedBy,
         action: 'kept', level: 'ok',
         detail: referencedBy.length > 0
-          ? `kept — named by ${referencedBy.length} credential director${referencedBy.length === 1 ? 'y' : 'ies'}`
+          ? `kept — named by ${referencedBy.length} credential director${referencedBy.length === 1 ? 'y' : 'ies'} (sidecar or wrapper)`
           : 'kept — the connector\'s current pinned version (what --repair installs)',
       })
       continue
     }
+    // Sized only here — a directory the run would remove — and only when asked.
+    const bytes = measure ? await directoryBytes(directory) : 0
     if (input.dryRun) {
       entries.push({
         directory, key, kind, bytes, referencedBy,

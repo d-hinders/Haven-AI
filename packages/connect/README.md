@@ -217,7 +217,8 @@ backend change) and **refuses to destroy the key material on every answer**:
 
 The refusal is exit 1 with the wiring already gone; the key stays in the
 0o600 credential file only (the config and Hermes-env copies are scrubbed
-first, so a refusal never leaves the key in a world-readable editor file),
+first, so a refusal leaves the key in the credential file and in any config
+this run could not clean — those are reported `✗` above, never silently),
 and `--doctor` keeps reporting the directory as `superseded` until the key is
 revoked or destroyed — that is the honest state. **`--destroy-key-material`**
 proceeds on every answer, states what it destroyed and that local recovery
@@ -249,8 +250,12 @@ level: kept/removed are `ok`, a dry-run candidate is an `advisory`, a removal
 that failed (a signer process still holding the directory open on a platform
 that refuses the unlink) is `failed` and the only thing that exits 1. On
 POSIX a running signer keeps its open files until it restarts, and since only
-unreferenced directories go, no configured agent's wrapper points at a
-removed one. It is its own flag — never part of `--repair`, never
+only directories no sidecar and no wrapper names go, a configured agent is
+not started against a removed one. The prune trusts those two reference
+sources (the sidecar's `runtime_directory` and the path the wrapper
+launches — so a directory whose sidecar is missing or corrupt but whose
+wrapper is intact keeps its runtime); it reads the default agents root AND
+the parent of an explicit `--credentials-dir`, a union, never either/or. It is its own flag — never part of `--repair`, never
 automatic; `--doctor` reports unused directories as an advisory
 (`signer_runtime_unused`) that names this command. `--json` emits
 `{ pruned: true, version: 1, root, dry_run, level, removed, reclaimed_bytes, entries[] }`.

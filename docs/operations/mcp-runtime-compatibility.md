@@ -2168,8 +2168,9 @@ to call next in structured fields, and those fields are typed end to end
   > "safe to delete"). Only a directory with no stored API key + URL proceeds
   > unprobed, as before. The refusal exits 1 with the wiring gone and the key
   > left in the 0o600 credential file only — the config and Hermes-env copies
-  > are scrubbed BEFORE the decision (S3), so a refusal never leaves the key in
-  > a world-readable editor file; `--doctor` then reports the directory as
+  > are scrubbed BEFORE the decision (S3), so a refusal leaves the key in the
+  > credential file and in any config this run could not clean (reported
+  > `refused` / `unreadable`, never silently); `--doctor` then reports the directory as
   > `superseded` until the key is revoked or destroyed, which is the honest
   > state. `--destroy-key-material` proceeds on every answer and states that
   > local recovery ends. `--json` carries an additive `teardown: { status:
@@ -2178,11 +2179,14 @@ to call next in structured fields, and those fields are typed end to end
   > stays out of `--unwire`'s scope, stated in the README. Companion:
   > `--prune-signer-runtimes [--dry-run]` reclaims
   > `~/.haven/signer-runtime/<key>` directories no credential directory's
-  > sidecar names (walking the ROOT, so `override-<hash>` directories from
-  > #2424 are seen), never one any credential directory names nor the current
-  > pin, reporting each entry through #3121's levels (a failed removal is the
-  > only exit 1); `--doctor` surfaces unused directories as the
-  > `signer_runtime_unused` advisory. Also re-read in this pass: the
+  > sidecar or wrapper names (walking the ROOT, so `override-<hash>`
+  > directories from #2424 are seen; the default agents root and an explicit
+  > `--credentials-dir`'s parent are read as a union; paths normalized on both
+  > sides), never one any credential directory names nor the current pin,
+  > reporting each entry through #3121's levels (a failed removal is the only
+  > exit 1); `--doctor` surfaces unused directories as the
+  > `signer_runtime_unused` advisory, names only — the size walk runs only in
+  > the prune itself. Also re-read in this pass: the
   > `--replace` paragraph under the wiring-collision section (now states that
   > `--replace`'s teardown is unconditional and unprobed) and the JSON-envelope
   > bullet above (a retained teardown is the second non-zero-exit case).

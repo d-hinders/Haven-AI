@@ -1335,18 +1335,20 @@ export async function runDoctor(
   // Reported here so the doctor's own repair advice can be completed without
   // hand-editing directories; absent when there is nothing to reclaim, so a
   // single-agent install reads exactly as before.
-  const prune = await pruneSignerRuntimes({ dryRun: true }, { homeDir, credentialsDir: input.credentialsDir })
+  // `measure: false`: names only. Sizing walks every file under the root
+  // (~30 s on a 2 GB developer root, measured in the #3151 review) and the
+  // doctor is the command a user runs when something is already broken.
+  const prune = await pruneSignerRuntimes({ dryRun: true, measure: false }, { homeDir, credentialsDir: input.credentialsDir })
   const unused = prune.entries.filter((entry) => entry.action === 'would_remove')
   if (unused.length > 0) {
-    const bytes = unused.reduce((sum, entry) => sum + entry.bytes, 0)
     checks.push({
       id: 'signer_runtime_unused',
       label: 'Unused signer-runtime directories',
       level: 'advisory',
       detail:
         `${unused.length} signer-runtime director${unused.length === 1 ? 'y' : 'ies'} under ${prune.root} that no credential ` +
-        `directory names (${Math.round(bytes / 1024 / 1024)} MB): ${unused.map((entry) => entry.key).join(', ')}. ` +
-        'Nothing is broken; they are left over from earlier pins or overrides.',
+        `directory names: ${unused.map((entry) => entry.key).join(', ')}. ` +
+        'Nothing is broken; they are left over from earlier pins or overrides (sizes: --prune-signer-runtimes --dry-run).',
       repair: `Run: ${RERUN} --prune-signer-runtimes (add --dry-run to list only).`,
     })
   }

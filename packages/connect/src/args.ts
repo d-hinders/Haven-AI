@@ -152,6 +152,24 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     options.replaceExistingWiring = true
   }
 
+  // #3123 review: these guards sit ABOVE the --rekey early return so the
+  // flags are refused, never silently discarded, on every path (#1681 f2).
+  if (destroyKeyMaterial && !unwire) {
+    throw new Error('--destroy-key-material only applies to --unwire.')
+  }
+  if (destroyKeyMaterial && unwire) unwire = { ...unwire, destroyKeyMaterial: true }
+  if (dryRun && !pruneSignerRuntimes) {
+    throw new Error('--dry-run only applies to --prune-signer-runtimes.')
+  }
+  if (pruneSignerRuntimes) {
+    if (unwire || tombstoneDir || rekeyPhase || doctor || repair) {
+      throw new Error('--prune-signer-runtimes is its own operation; run it alone.')
+    }
+    if (options.setupToken) {
+      throw new Error('--prune-signer-runtimes takes no --setup token; it reads stored state only.')
+    }
+    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey, unwire, unwireDir, pruneSignerRuntimes: { dryRun } }
+  }
   if (rekey) {
     // Re-key reuses STORED credentials, like --doctor: the whole point is that
     // the agent already exists here, so a setup token is exactly what it does
@@ -185,19 +203,6 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   }
 
   // --reason / --replaced-by ride whichever teardown mode is active.
-  if (destroyKeyMaterial && !unwire) {
-    throw new Error('--destroy-key-material only applies to --unwire.')
-  }
-  if (destroyKeyMaterial && unwire) unwire = { ...unwire, destroyKeyMaterial: true }
-  if (dryRun && !pruneSignerRuntimes) {
-    throw new Error('--dry-run only applies to --prune-signer-runtimes.')
-  }
-  if (pruneSignerRuntimes) {
-    if (unwire || tombstoneDir || rekeyPhase || doctor || repair) {
-      throw new Error('--prune-signer-runtimes is its own operation; run it alone.')
-    }
-    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey, unwire, unwireDir, pruneSignerRuntimes: { dryRun } }
-  }
   if (unwire && (tombstoneReason !== undefined || tombstoneReplacedBy !== undefined)) {
     unwire = {
       ...(tombstoneReason !== undefined ? { reason: tombstoneReason } : {}),

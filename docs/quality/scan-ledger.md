@@ -741,7 +741,8 @@ the argument-spelling convergence (#2366) was declared done.
 - C1 → **#3098** — two money-path perimeters: the CASP guardrails doc's
   `covers:` and the classifier's glob file disagree on five package globs; the
   demo merchant's settlement file is outside every glob (block 6 in scope: 3
-  verb files, 1 outside), and #2969/#2979 shipped without the label.
+  verb files, 1 outside), and #2969/#2979 shipped without the label. Shipped:
+  PR #3115.
 - C2 → **#3099** — block-1 survivor: the demo merchant's settled-cache cleanup
   clause deletes green (33/33); *not load-bearing at the tested condition*.
 - D2 → **#3100** — discovery `resource_url` vs the suggested tool's `url`

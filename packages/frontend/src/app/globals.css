@@ -138,6 +138,26 @@
   /* Hero surface wash — replaces the inline lavender gradient on DashboardHero. */
   --v2-surface-hero: linear-gradient(90deg, #F7F5FF 0%, #F3F0FF 55%, #F8F6FF 100%);
 
+  /*
+   * Marketing canvas wash (#3139) — the ground HeroBackdrop paints UNDER the
+   * hero ink on the five marketing routes. GROUND-classified like the
+   * --v2-surface-hero above: the ink sits ON it, so it is a gradient and
+   * lives outside the THEME_TOKENS colour table (the parity test does not
+   * see gradient-valued tokens). Light byte-preserves the wash the marketing
+   * surface has always painted; the dark form mirrors the #2929 hero-wash
+   * stops so theme ink keeps its measured contrast. Byte-identical in both
+   * dark blocks.
+   */
+  --v2-marketing-canvas-wash: linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0.96) 72%, #ffffff 100%);
+
+  /*
+   * Marketing dot-grid ink (#3139). The HeroBackdrop dot texture is painted
+   * in the ground's own ink: the page ink at low alpha in light, a light dot
+   * at low alpha in dark. Colour-valued (rgba), so it is registered in
+   * THEME_TOKENS and carried by both dark blocks byte-identically.
+   */
+  --v2-marketing-dot: rgba(26, 31, 54, 0.08);
+
   /* Semantic gradient fills for progress / allowance bars. Replace ad-hoc
      `from-indigo-500 to-violet-500` style classes. */
   --v2-bar-fill-ok: linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%);
@@ -433,6 +453,21 @@
      */
     --v2-surface-hero: linear-gradient(90deg, #1a1f2e 0%, #191d2c 55%, #1b1e2e 100%);
 
+    /*
+     * Marketing canvas wash (#3139) — dark form. See the light :root block for
+     * the classification. Stops mirror the #2929 hero-wash ground so the
+     * marketing ink scale keeps its measured contrast on every stop and mesh
+     * composite (ink ≥ 8.6:1, ink-2 ≥ 5:1). Byte-identical in both dark blocks.
+     */
+    --v2-marketing-canvas-wash: linear-gradient(180deg, rgba(26, 31, 46, 0.88) 0%, rgba(25, 29, 44, 0.96) 72%, #191d2c 100%);
+
+    /*
+     * Marketing dot-grid ink (#3139) — dark form. See the light :root block.
+     * A light dot at low alpha, in the ground's own ink. Byte-identical in
+     * both dark blocks.
+     */
+    --v2-marketing-dot: rgba(212, 220, 236, 0.07);
+
     --v2-table-header-bg: #191d26;
     --v2-table-header-ink: #97a3b6;
     --v2-table-row-border: #2b3140;
@@ -553,6 +588,21 @@
    * both dark blocks.
    */
   --v2-surface-hero: linear-gradient(90deg, #1a1f2e 0%, #191d2c 55%, #1b1e2e 100%);
+
+  /*
+   * Marketing canvas wash (#3139) — dark form. See the light :root block for
+   * the classification. Stops mirror the #2929 hero-wash ground so the
+   * marketing ink scale keeps its measured contrast on every stop and mesh
+   * composite (ink ≥ 8.6:1, ink-2 ≥ 5:1). Byte-identical in both dark blocks.
+   */
+  --v2-marketing-canvas-wash: linear-gradient(180deg, rgba(26, 31, 46, 0.88) 0%, rgba(25, 29, 44, 0.96) 72%, #191d2c 100%);
+
+  /*
+   * Marketing dot-grid ink (#3139) — dark form. See the light :root block.
+   * A light dot at low alpha, in the ground's own ink. Byte-identical in
+   * both dark blocks.
+   */
+  --v2-marketing-dot: rgba(212, 220, 236, 0.07);
 
   --v2-table-header-bg: #191d26;
   --v2-table-header-ink: #97a3b6;

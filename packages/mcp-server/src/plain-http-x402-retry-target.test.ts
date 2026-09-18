@@ -276,6 +276,9 @@ describe('haven_complete_mcp_tool — the post-funding escape is annotated (#309
     expect(result.phase).toBe('funded_but_unsettled')
     expect(result.next_action).toBe('sweep_stranded_funds')
     expect(result.suggested_tool).toBe('haven_get_payment_status')
+    // #3102: the typed step names the sweep the message names (site-level pin).
+    expect(result.next_tool).toBe('mcp__haven__haven_sweep_delegate')
+    expect(result.next_arguments).toEqual({})
   })
 
   it('on erc7710 (no funding leg) reports not_delivered and points back at the quote', async () => {

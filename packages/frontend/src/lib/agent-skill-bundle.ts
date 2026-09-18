@@ -273,8 +273,10 @@ check on in-flight payments. Do not poll in a tight loop.
 ## Failure handling
 
 Haven tool failures are shaped like \`{ success: false, code, message, ... }\`
-or older \`{ error, status, details? }\` responses. Branch on \`code\` when
-present and surface \`message\` or \`error\` verbatim. Common cases:
+or older \`{ error, status, details? }\` responses. A failure carries the same
+\`next_action\` / \`next_tool\` / \`next_arguments\` / \`next_tool_omitted_reason\`
+fields a success does; follow them first, then branch on \`code\` and surface
+\`message\` or \`error\` verbatim. Common cases:
 
 - \`insufficient_funds\`: the Haven wallet doesn't hold enough of that token.
   Suggest the user add funds in the Haven dashboard.

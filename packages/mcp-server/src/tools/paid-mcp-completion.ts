@@ -54,6 +54,7 @@ import {
   HavenApiError,
   HavenClient,
   HavenInsecureRetryTargetError,
+  type NextStep,
   MerchantTimeoutError,
   X402PaymentHeaderValidationError,
   isZeroSettlementTxHash,
@@ -64,7 +65,7 @@ import {
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { HostedToolError, paymentWindowExpiredError, runTool } from './support/errors.js'
-import { buildAgentGuidance, buildPurchaseSummary, type HostedHandoff } from './support/guidance.js'
+import { buildAgentGuidance, buildPurchaseSummary, type HostedHandoff, refusalNextStep } from './support/guidance.js'
 import {
   parseMcpTransport,
   serializeMcpTransport,
@@ -93,6 +94,32 @@ function heldHashHandoff(canReport: boolean, paymentId: string, heldHash: string
   return canReport && heldHash
     ? { nextTool: 'haven_report_settlement_evidence', nextArguments: { payment_id: paymentId, settlement_tx_hash: heldHash } }
     : { nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } }
+}
+
+/**
+ * #3102 review: the eip3009 post-funding rejection reads its action from live
+ * state. The tool must follow that action — a sweep named beside
+ * `retry_original_x402_request` would race a late settlement. Unknown state
+ * (the status read failed) keeps the sweep the message names; a state that
+ * says retry or poll hands the agent the status read; any other live action is
+ * reported with the reason the sweep is not named. (The payment-state mapper
+ * in errors.ts omits the tool for `retry_original_x402_request` because that
+ * refusal already holds the payment header and the retry is the agent's own
+ * HTTP call; here the header was just refused, so the status read is the
+ * step that tells the agent whether a retry is even possible.)
+ */
+function rejectedAfterFundingStep(liveAction: string | undefined, paymentId: string): NextStep {
+  if (liveAction === undefined || liveAction === AgentPaymentNextAction.SweepStrandedFunds) {
+    return refusalNextStep({ nextAction: AgentPaymentNextAction.SweepStrandedFunds, nextTool: 'haven_sweep_delegate', nextArguments: {} })
+  }
+  if (liveAction === AgentPaymentNextAction.RetryOriginalX402Request || liveAction === AgentPaymentNextAction.CheckStatusLater) {
+    return refusalNextStep({ nextAction: liveAction, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } })
+  }
+  return refusalNextStep({
+    nextAction: liveAction as AgentPaymentNextAction,
+    nextTool: null,
+    nextToolOmittedReason: `Haven reports next_action ${liveAction} for this payment; the sweep in the message applies only if the delegate still holds the funds`,
+  })
 }
 
 export async function resolveMerchantCallContext(
@@ -125,7 +152,7 @@ export async function resolveMerchantCallContext(
       paymentId: args.payment_id,
       status: 'invalid_input',
       phase: 'not_started',
-      nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+      nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call the same tool with the explicit context this message names; no tool can be named until you supply it' }),
       rail: 'x402',
     })
   }
@@ -146,7 +173,6 @@ export async function resolveMerchantCallContext(
           paymentId: args.payment_id,
           status: 'expired',
           phase: 'expired',
-          nextAction: AgentPaymentNextAction.PaymentWindowExpired,
           rail: 'x402',
         })
       }
@@ -160,7 +186,7 @@ export async function resolveMerchantCallContext(
           `call context for payment ${args.payment_id} (${err.message}). Re-send merchant_url, ` +
           'tool_name, arguments, and mcp_transport explicitly.',
         statusCode: err.statusCode,
-        nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+        nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call the same tool with the explicit context this message names; no tool can be named until you supply it' }),
         paymentId: args.payment_id,
         rail: 'x402',
       })
@@ -300,7 +326,7 @@ export async function deliverMerchantPayment(
           // #3011 review: nothing was funded on erc7710 — same phase the
           // erc7710 rejection branch uses.
           phase: 'not_delivered',
-          nextAction: AgentPaymentNextAction.CheckStatusLater,
+          nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.CheckStatusLater, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: args.payment_id } }),
           rail: 'erc7710',
           suggestedTool: 'haven_get_payment_status',
         })
@@ -316,7 +342,8 @@ export async function deliverMerchantPayment(
         paymentId: args.payment_id,
         status: 'merchant_unresponsive_after_funding',
         phase: 'funded_but_unsettled',
-        nextAction: AgentPaymentNextAction.SweepStrandedFunds,
+        // #3102: the first concrete step is the status read the message asks for; the sweep follows it.
+        nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.SweepStrandedFunds, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: args.payment_id } }),
         rail: 'x402',
         suggestedTool: 'haven_get_payment_status',
       })
@@ -339,9 +366,17 @@ export async function deliverMerchantPayment(
         statusCode: 400,
         paymentId: args.payment_id,
         phase: options?.noFundingLeg ? 'not_delivered' : 'funded_but_unsettled',
-        nextAction: options?.noFundingLeg
-          ? AgentPaymentNextAction.RetryWithExplicitContext
-          : AgentPaymentNextAction.SweepStrandedFunds,
+        nextStep: options?.noFundingLeg
+          ? refusalNextStep({
+              nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+              nextTool: null,
+              nextToolOmittedReason: 're-quote the merchant at its https URL; nothing moved',
+            })
+          : refusalNextStep({
+              nextAction: AgentPaymentNextAction.SweepStrandedFunds,
+              nextTool: 'haven_sweep_delegate',
+              nextArguments: {},
+            }),
         rail: options?.noFundingLeg ? 'erc7710' : 'x402',
         suggestedTool: options?.noFundingLeg ? 'haven_quote_mcp_tool' : 'haven_get_payment_status',
       })
@@ -399,9 +434,17 @@ export async function deliverMerchantPayment(
         paymentId: args.payment_id,
         status: status?.status ?? 'merchant_rejected_after_funding',
         phase: status?.phase ?? 'not_delivered',
-        nextAction: notReady
-          ? AgentPaymentNextAction.StopAndTellUser
-          : AgentPaymentNextAction.CheckStatusLater,
+        nextStep: notReady
+          ? refusalNextStep({
+              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextTool: null,
+              nextToolOmittedReason: 'the merchant is not ready to settle; tell the user and re-quote later',
+            })
+          : refusalNextStep({
+              nextAction: AgentPaymentNextAction.CheckStatusLater,
+              nextTool: 'haven_get_payment_status',
+              nextArguments: { payment_id: args.payment_id },
+            }),
         ...(notReady ? {} : { suggestedTool: 'haven_get_payment_status' }),
         rail: status?.rail ?? 'erc7710',
         idempotencyKey: status?.idempotencyKey,
@@ -418,7 +461,11 @@ export async function deliverMerchantPayment(
       paymentId: args.payment_id,
       status: status?.status ?? 'merchant_rejected_after_funding',
       phase: status?.phase ?? 'funded_but_unsettled',
-      nextAction: status?.nextAction ?? AgentPaymentNextAction.SweepStrandedFunds,
+      // #3102 review: the action is read from live state, so the tool must
+      // follow it — a sweep named beside `retry_original_x402_request` would
+      // race a late settlement. Sweep only when the state says sweep; any
+      // other state hands the agent the status read the state came from.
+      nextStep: rejectedAfterFundingStep(status?.nextAction, args.payment_id),
       rail: status?.rail ?? 'x402',
       idempotencyKey: status?.idempotencyKey,
       suggestedTool: 'haven_sweep_delegate',
@@ -591,7 +638,7 @@ export async function preflightMcpPaymentHeader(haven: HavenClient, args: Record
       paymentId: args.payment_id,
       status: 'invalid_payment_header',
       phase: 'not_started',
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again; suggested_tool names the tool for after that' }),
       rail: 'x402',
       suggestedTool: 'haven_sign_x402',
     })

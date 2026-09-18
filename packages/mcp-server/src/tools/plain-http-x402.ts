@@ -71,7 +71,7 @@ import {
   readMaxAmountCap,
 } from './support/cap-price.js'
 import { HostedToolError, normalizeError, runTool } from './support/errors.js'
-import { buildAgentGuidance, paymentStatusHandoff, type HostedHandoff } from './support/guidance.js'
+import { buildAgentGuidance, paymentStatusHandoff, type HostedHandoff, refusalNextStep } from './support/guidance.js'
 import { buildX402SigningContext, coerceJsonField } from './support/mcp-context.js'
 import {
   isPendingApproval,
@@ -257,7 +257,7 @@ export function createPlainHttpX402Handlers(
               'returns it as request_url), and treat a merchant whose challenge downgrades the ' +
               'scheme as suspect. Nothing was funded or signed.',
             statusCode: 400,
-            nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+            nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the https URL you quoted as url; nothing was funded or signed' }),
           })
         }
         // #1351: shape-check the cap before the funding intent — this tool has
@@ -306,7 +306,7 @@ export function createPlainHttpX402Handlers(
                 'cap. No funding intent was created and no funds were moved. Re-quote the ' +
                 'merchant with haven_quote_x402.',
               statusCode: 400,
-              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again; suggested_tool names the tool for after that' }),
               suggestedTool: 'haven_quote_x402',
             })
           }
@@ -571,7 +571,7 @@ export function createPlainHttpX402Handlers(
               'check haven_get_payment_status, and if no settlement appears within the payment ' +
               'window, recover the delegate balance with haven_sweep_delegate. Do not pay again.',
             statusCode: 400,
-            nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+            nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the https URL you originally quoted as url; the status and sweep exits are in the message' }),
             paymentId: state.paymentId,
             phase: 'funded_but_unsettled',
             suggestedTool: 'haven_get_payment_status',

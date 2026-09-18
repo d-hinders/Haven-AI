@@ -59,7 +59,7 @@ import {
 } from './support/cap-price.js'
 import { getUsableCatalogMcpEntry } from './support/catalog-entry.js'
 import { HostedToolError, runTool } from './support/errors.js'
-import { buildAgentGuidance, paymentStatusHandoff } from './support/guidance.js'
+import { buildAgentGuidance, paymentStatusHandoff, refusalNextStep } from './support/guidance.js'
 import {
   buildX402SigningContext,
   quoteMcpToolCall,
@@ -699,7 +699,11 @@ export function createCatalogPurchaseHandlers(
                 'There is no approval queue — an over-budget redemption would revert ' +
                 'on-chain. Ask the wallet owner to grant or raise the budget in Haven before retrying.',
               statusCode: 403,
-              nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+              nextStep: refusalNextStep({
+                nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+                nextTool: null,
+                nextToolOmittedReason: 'the account needs funds or a higher allowance first; haven_get_allowances shows the numbers',
+              }),
               suggestedTool: 'haven_get_allowances',
             })
           }

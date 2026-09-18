@@ -12,6 +12,7 @@
  */
 import { AgentPaymentNextAction, HavenApiError, HavenClient, type HavenCatalogEntry } from '@haven_ai/sdk'
 import { HostedToolError } from './errors.js'
+import { refusalNextStep } from './guidance.js'
 
 /**
  * The catalog wrappers must refuse rows that cannot produce a live MCP quote.
@@ -34,7 +35,7 @@ export async function getUsableCatalogMcpEntry(
           'be delisted, or be curated for a different chain than this agent\'s. Call ' +
           'haven_discover_tools to see entries available on this chain.',
         statusCode: 404,
-        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again; suggested_tool names the tool for after that' }),
         suggestedTool: 'haven_discover_tools',
       })
     }
@@ -51,7 +52,7 @@ export async function getUsableCatalogMcpEntry(
           : 'missing the MCP tool metadata (protocol/tool_name) this guided preflight needs. ') +
         'Use haven_pay_mcp_tool directly with an explicit merchant_url and tool_name instead.',
       statusCode: 409,
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again; suggested_tool names the tool for after that' }),
       suggestedTool: 'haven_pay_mcp_tool',
     })
   }

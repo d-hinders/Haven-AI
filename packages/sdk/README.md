@@ -79,6 +79,7 @@ shows up in your Haven dashboard activity feed.
 - The delegate key signs payment payloads locally. Haven's backend never receives it.
 - The agent's on-chain budget delegation enforces the agent budget: budget, recipient and expiry are checked by audited caveat enforcers at redemption, not by an off-chain rules engine.
 - `getAllowances()` / `get_allowances` is the right path for budget, remaining amount, reset period, or "what can I spend?" questions.
+- `checkFunds()` / `haven_check_funds` answers the different question of whether the account actually holds funds behind the budget — as a sufficiency signal (`covered` true/false/null), never as a balance.
 - If an API key is exposed or lost, rotate it from the Haven agent detail page. The new key is shown once and the old key stops working.
 - If a delegate key is exposed or lost, a delegation-rail agent is **re-keyed** rather than replaced — same agent, new signing key, budget remainder carried. See [Replacing an agent's signing key](../../docs/product/agent-key-rotation.md).
 

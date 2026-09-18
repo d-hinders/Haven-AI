@@ -191,6 +191,47 @@ describe('shared Haven tool descriptions', () => {
     expect(desc).not.toContain('safeAddress')
   })
 
+  // ── #3126 — the sufficiency signal, not a balance ────────────────────────
+
+  it('routes funds-held questions to the coverage check and keeps them out of the authority reads', () => {
+    const check = composeDescription(toolDescriptions.checkFunds)
+
+    // The fragment must carry the two-concept distinction in its own prose:
+    // covered/holdings vs permitted/authority.
+    expect(check).toContain('holds')
+    expect(check).toContain('not spend permitted')
+    expect(check).toContain('covered')
+    expect(check.toLowerCase()).toContain('null')
+    expect(check).toContain('unverifiable')
+    expect(check.toLowerCase()).toContain('not a balance read')
+    expect(check.toLowerCase()).toContain('not returned')
+    // The authority figure is named apart from holdings, by name.
+    expect(check).toContain('budgetRemainingAtomic')
+    expect(check).toContain('PERMITTED')
+    // The tool's own name is spelled out for the routing prose below.
+    expect(check).not.toContain('balanceOf')
+  })
+
+  it('describes the sufficiency signal without any authority vocabulary for the holdings answer', () => {
+    const check = composeDescription(toolDescriptions.checkFunds).toLowerCase()
+    // #3126's binding naming constraint: nothing may read like the
+    // authority fields while meaning held. `budgetRemainingAtomic` is the
+    // one permitted figure, and it is explicitly labeled.
+    expect(check).not.toMatch(/\bavailable(?! in the response)/)
+    expect(check).toContain('budget_remaining_atomic is the permitted figure')
+  })
+
+  it('routes balance questions away from the sweep and the send, to the coverage check', () => {
+    const sweepDesc = composeDescription(toolDescriptions.sweep_delegate)
+    expect(sweepDesc).toContain('haven_check_funds')
+
+    const sendDesc = composeDescription(toolDescriptions.send)
+    expect(sendDesc).toContain('haven_check_funds')
+
+    const allowanceDesc = composeDescription(toolDescriptions.getAllowances)
+    expect(allowanceDesc).toContain('haven_check_funds')
+  })
+
   it('describes the sweep destination as the originating account, not a Safe', () => {
     const desc = composeDescription(toolDescriptions.sweep_delegate)
     expect(desc).toContain('originating account')

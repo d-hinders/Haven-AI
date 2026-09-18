@@ -664,6 +664,76 @@ export interface PostPurchaseAllowanceSummary {
 }
 
 /**
+ * #3126 — the answer to "is there money actually HELD behind my budget?",
+ * asked as a sufficiency signal rather than a balance.
+ *
+ * Every other agent-readable figure in this package describes SPEND
+ * AUTHORITY — what the agent is PERMITTED to move this period
+ * ({@link HavenAllowanceSummary}). This shape answers the different question
+ * of whether the account HOLDS funds behind that authority, and deliberately
+ * answers it as `covered: boolean | null`, never as a figure: a constrained
+ * actor has no business reading the treasury total, and the boolean answers
+ * the only decision an agent has (attempt the payment, or tell the user
+ * funds are missing).
+ *
+ * The naming keeps the two concepts apart (the #3126 binding constraint):
+ * `budgetRemainingAtomic` is AUTHORITY — the same value
+ * {@link HavenAllowanceSummary} reports per token as `onchain.remaining` —
+ * while `covered` speaks only of HELD funds. Nothing here is named like the
+ * authority fields (`remaining`, `available`); nothing here returns a
+ * balance.
+ *
+ * `covered: null` means the chain read FAILED — unverifiable, never a
+ * guess. The same honesty rule `x402-funding-leg.ts`'s `delegateCanFund`
+ * established (#1521): treat null as "we do not know", not as "funded" or
+ * as absence; `coverageError` carries why.
+ */
+export interface HavenBalanceCoverage {
+  /**
+   * true: the chain reports the agent's account holds at least
+   * `checkedAmountAtomic` of the token. false: the chain read succeeded and
+   * reports LESS — tell the user funds are missing rather than retrying.
+   * null: the chain read failed — unverifiable, never treated as absence.
+   */
+  covered: boolean | null
+  /** Present only when `covered` is null: why the chain read could not answer. */
+  coverageError?: string
+  chainId: number
+  tokenAddress: string
+  tokenSymbol: string
+  /** The amount the coverage question was asked about, in atomic units. */
+  checkedAmountAtomic: string
+  /**
+   * Context, AUTHORITY not holdings: the agent's remaining spend authority
+   * for the requested token, in atomic units — the same derivation
+   * {@link HavenAllowanceSummary} reports (`onchain.remaining`; the #1090
+   * derivation, the #1145 enforcer read). Zero when no active budget row
+   * names the token. Compare it with `covered`, never instead of it.
+   */
+  budgetRemainingAtomic: string
+  /**
+   * Provenance of `budgetRemainingAtomic` (#1319, same semantics as
+   * {@link HavenAllowance.onchain.remainingIsFromChain}): true when the
+   * budget figure came from a live enforcer read, false when it fell back
+   * to the configured budget. Absent when no budget row existed for the
+   * token (nothing was read).
+   */
+  budgetRemainingIsFromChain?: boolean
+}
+
+/** @internal wire shape of {@link HavenBalanceCoverage}. */
+export interface RawHavenBalanceCoverage {
+  covered: boolean | null
+  coverage_error?: string
+  chain_id: number
+  token_address: string
+  token_symbol: string
+  checked_amount_atomic: string
+  budget_remaining_atomic: string
+  budget_remaining_is_from_chain?: boolean
+}
+
+/**
  * Affirmative spend-readiness for the authenticated agent, derived from the raw
  * agent status plus the remaining spend authority the backend reports per rail
  * (the on-chain AllowanceModule on the legacy rail; the active budget

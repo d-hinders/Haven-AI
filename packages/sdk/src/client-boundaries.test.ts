@@ -32,6 +32,7 @@ const boundary: ClientBoundary = {
     'getAgent',
     'getAgentSummary',
     'getAllowances',
+    'checkFunds',
     'getCatalogEntry',
     'getCatalogSubmissionStatus',
     'getPayment',
@@ -75,6 +76,7 @@ const boundary: ClientBoundary = {
     "async getAgent(): Promise<HavenAgent>",
     "async getAgentSummary(): Promise<HavenAgentSummary>",
     "async getAllowances(): Promise<HavenAllowanceSummary>",
+    "async checkFunds(input: { token: string; amountAtomic: string; }): Promise<HavenBalanceCoverage>",
     "async getCatalogEntry(id: string): Promise<HavenCatalogEntry>",
     "async getCatalogSubmissionStatus(id: string): Promise<{ id: string; status: 'submitted' | 'ownership_verified' | 'verified_payable' | 'failed' | 'delisted'; instructions?: { expires_at: string; well_known: { url: string; content: string; instruction: string; }; dns_txt: { name: string; value: string; instruction: string; }; } | null; }>",
     "async getPayment(paymentId: string): Promise<PaymentResult>",
@@ -555,6 +557,7 @@ describe('HavenClient structural boundary', () => {
       'HavenAgentSummary',
       'HavenAllowance',
       'HavenAllowanceSummary',
+      'HavenBalanceCoverage', // #3126
       'HavenCatalogEntry',
       'HavenCatalogMerchant', // #3078
       'HavenCatalogSubmission',

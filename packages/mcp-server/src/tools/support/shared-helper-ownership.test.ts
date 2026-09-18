@@ -824,7 +824,7 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     }
   })
 
-  it('contributes exactly the ten tools it claims, and only those', async () => {
+  it('contributes exactly the eleven tools it claims, and only those', async () => {
     const { STATE_DIRECT_RECOVERY_TOOLS, createStateDirectRecoveryHandlers } = await import(
       '../state-direct-recovery.js'
     )
@@ -834,6 +834,7 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     expect(contributed).toEqual([...STATE_DIRECT_RECOVERY_TOOLS].sort())
     expect(contributed).toEqual(
       [
+        'haven_check_funds',
         'haven_get_agent',
         'haven_get_allowances',
         'haven_get_payment_status',

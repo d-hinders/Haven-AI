@@ -145,6 +145,13 @@ spending:
   local signer; the signer is verified by calling any signer tool.
 - \`mcp__haven__haven_get_allowances\` — detailed per-token breakdown
   (configured, spent, reset window) when you need more than the summary.
+- \`mcp__haven__haven_check_funds\` — whether the account actually HOLDS at
+  least a given amount of a token. Allowance answers above say what you are
+  permitted to spend; this one says whether the money is really there,
+  answered as \`covered\` true/false/null — never as a balance. On
+  \`covered: false\`, stop and tell the user the account is short; on
+  \`covered: null\` (the chain read failed), treat it as unverifiable rather
+  than as absence.
 
 Budgets reset on a period the user chose. If a payment exceeds the remaining
 budget it is declined before any money moves — tell the user; they can raise

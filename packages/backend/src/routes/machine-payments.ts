@@ -7,6 +7,7 @@ import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   handleGetAllowances,
+  handleBalanceCoverage,
   handleBudgetPrecheck,
   budgetPrecheckBodyError,
   handleReconciliationEvent,
@@ -84,6 +85,29 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     const result = await handleGetAllowances(agent)
     return reply.code(result.statusCode).send(result.body)
   })
+
+  // #3126 — the sufficiency signal, NOT a balance tool. Answers "is this
+  // amount of this token actually HELD on my account?" as covered
+  // true/false/null; the account's balance itself is never returned, and
+  // every figure in the response is named for its concept (budget_* is
+  // authority, covered is holdings). See modules/mpp/balance-coverage.ts for
+  // the argument, and the OpenAPI entry for the agent-facing wording.
+  app.get<{ Querystring: { token?: string; amount_atomic?: string } }>(
+    '/balance-coverage',
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const token = request.query.token
+      const amountAtomic = request.query.amount_atomic
+      if (typeof token !== 'string' || token.length === 0) {
+        return reply.code(400).send({ error: 'token is required (the ERC-20 contract address)' })
+      }
+      if (typeof amountAtomic !== 'string' || amountAtomic.length === 0) {
+        return reply.code(400).send({ error: 'amount_atomic is required (a decimal atomic amount)' })
+      }
+      const result = await handleBalanceCoverage(agent, { token, amountAtomic })
+      return reply.code(result.statusCode).send(result.body)
+    },
+  )
 
   app.get<{ Querystring: { limit?: string } }>('/receipts', async (request, reply) => {
     const agent = request.agent as AgentContext

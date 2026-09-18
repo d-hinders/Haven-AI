@@ -6,11 +6,13 @@ import type {
   HavenAgentReadiness,
   HavenAgentSummary,
   HavenAllowanceSummary,
+  HavenBalanceCoverage,
   HavenPaymentReceipt,
   PaymentStatusResult,
   PostPurchaseAllowanceSummary,
   RawHavenAgent,
   RawHavenAllowanceSummary,
+  RawHavenBalanceCoverage,
   RawHavenPaymentReceiptsResponse,
 } from './types.js'
 import { AgentPaymentWarningCode } from './types.js'
@@ -130,6 +132,36 @@ export class AccountReads {
           remainingIsFromChain: allowance.onchain.remaining_is_from_chain,
         },
       })),
+    }
+  }
+
+  /**
+   * #3126 — the sufficiency signal behind {@link HavenBalanceCoverage}.
+   *
+   * Deliberately NOT a balance read: the endpoint answers whether the
+   * account HOLDS at least the checked amount, as `covered
+   * true/false/null`, and never returns the balance itself. The camelCase
+   * mapping is permissive (raw fields flow through; the server owns the
+   * wire shape, pinned by the backend's `expectMatchesSpec` assertion), so
+   * an older server that has not deployed the endpoint surfaces its 404 as
+   * a thrown error rather than a fabricated answer.
+   */
+  async checkFunds(input: { token: string; amountAtomic: string }): Promise<HavenBalanceCoverage> {
+    const query = `token=${encodeURIComponent(input.token)}&amount_atomic=${encodeURIComponent(input.amountAtomic)}`
+    const raw = await this.transport.get<RawHavenBalanceCoverage>(
+      `/machine-payments/balance-coverage?${query}`,
+    )
+    return {
+      covered: raw.covered,
+      ...(raw.coverage_error !== undefined ? { coverageError: raw.coverage_error } : {}),
+      chainId: raw.chain_id,
+      tokenAddress: raw.token_address,
+      tokenSymbol: raw.token_symbol,
+      checkedAmountAtomic: raw.checked_amount_atomic,
+      budgetRemainingAtomic: raw.budget_remaining_atomic,
+      ...(raw.budget_remaining_is_from_chain !== undefined
+        ? { budgetRemainingIsFromChain: raw.budget_remaining_is_from_chain }
+        : {}),
     }
   }
 

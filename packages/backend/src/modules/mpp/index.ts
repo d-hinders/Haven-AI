@@ -33,6 +33,7 @@
 export { mppDemoRetired } from './challenge.js'
 export { handleSend } from './send.js'
 export { handleGetAllowances } from './allowances.js'
+export { handleBalanceCoverage } from './balance-coverage.js'
 export {
   attachEvidenceHandler,
   listReceipts,

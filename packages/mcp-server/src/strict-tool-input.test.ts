@@ -90,6 +90,13 @@ const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   // #2349 — batch 3, the remainder. Each fixture is the least that gets PAST
   // validation and into the handler; the stubbed Haven answers `{}` to
   // everything, so most fail downstream, which is fine — see the loop.
+  // #3126: the coverage fixture resolves to a registry token (Base Sepolia
+  // USDC) so the handler's human-amount conversion succeeds; the stubbed
+  // coverage read answers `{}`, which the loop tolerates downstream.
+  haven_check_funds: {
+    token: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    max_amount_human: '1',
+  },
   haven_sweep_delegate: {},
   haven_pay: { token: 'USDC', amount: '1', to: '0xabc' },
   haven_quote_mcp_tool: { merchant_url: 'http://merchant.test/mcp', tool_name: 'buy' },
@@ -162,6 +169,9 @@ const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   // by-id read, a list, an offline verification, a filter, and a submission.
   haven_sweep_delegate: 'expected_auth',
   haven_pay: 'idempotencyKey',
+  // #3126: the SDK's camelCase amount spelling — the plausible mis-key on the
+  // new tool, same class as the pay tools' crossover key.
+  haven_check_funds: 'maxAmountHuman',
   haven_quote_mcp_tool: 'max_amount',
   haven_prepare_catalog_purchase: 'arguments',
   haven_quote_catalog_purchase: 'max_amount',
@@ -191,10 +201,9 @@ function stubFetch() {
 }
 
 async function connectedClient() {
-  const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
-  const server = buildHostedMcpServer(haven)
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   const client = new Client({ name: 'strict-input-test', version: '0.0.0' })
+  const server = buildHostedMcpServer(new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' }))
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
   return client
 }
@@ -560,6 +569,7 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
       // as the rest of this list: the loops self-scope, so only a literal
       // assertion goes red when the entry is deleted.
       'haven_complete_mcp_tool',
+      'haven_check_funds',
       'haven_sweep_delegate',
       'haven_pay',
       'haven_quote_mcp_tool',
@@ -575,7 +585,7 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
     ]) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).toContain(tool)
     }
-    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(21)
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(22)
     // And the two deliberate exclusions, as a literal list for the same reason.
     expect(Object.keys(PERMISSIVE_INPUT_TOOLS).sort()).toEqual(
       ['haven_get_agent', 'haven_get_allowances'],

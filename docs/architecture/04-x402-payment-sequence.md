@@ -1709,6 +1709,17 @@ echo the 300 default their child expiry was built with). The v1 payload-only
 shape made every v2 merchant reject with a generic failure — caught by the
 #1064 QA leg's first live run.
 
+**Requirement preservation (#3117).** The SDK keeps valid advertised timeouts
+in the v2 `accepted` entry and applies the authorization cap only when building
+signing requirements. The existing cap plus forward margin is unchanged;
+requirement matching is not a guarantee that a longer merchant timeout can
+pass facilitator verification. Backend ERC-7710 settlement recovers the
+unique stored offer matching the authorized amount, recipient, asset, network,
+timeout and facilitator pins, then echoes its full `extra` metadata. A stored
+challenge without a unique matching offer refuses before the intent becomes
+submitted. Older intents with no stored challenge retain the reconstructed
+legacy echo. No metadata can change the signed child or its spend limits.
+
 **Since #2361 the envelope also echoes the merchant challenge's `resource`
 and `extensions` objects VERBATIM** — on this erc7710 path sourced from the
 #1355 verbatim `machine_metadata.payment_required` at settle (a pre-#1355

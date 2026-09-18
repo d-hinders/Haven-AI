@@ -85,7 +85,7 @@ describe('x402 helpers', () => {
   // #715 (epic #713): the merchant controls maxTimeoutSeconds, and the x402
   // library turns it straight into the EIP-3009 `validBefore`. Without a cap
   // a leaked signed authorization stays spendable for as long as the merchant
-  // asked. Both enforcement points are pinned here.
+  // asked. The signing boundary is pinned independently of the wire echo here.
   describe('authorization-window clamp (#715)', () => {
     function responseWithTimeout(maxTimeoutSeconds: unknown): Response {
       const body = {
@@ -98,9 +98,9 @@ describe('x402 helpers', () => {
       })
     }
 
-    it('clamps an absurd merchant-requested window at parse time', () => {
+    it('preserves a large advertised window at parse time for accepted matching', () => {
       const parsed = parsePaymentRequired(responseWithTimeout(365 * 24 * 3600))
-      expect(parsed.accepts[0].maxTimeoutSeconds).toBe(X402_MAX_AUTHORIZATION_WINDOW_SECONDS)
+      expect(parsed.accepts[0].maxTimeoutSeconds).toBe(365 * 24 * 3600)
     })
 
     it('keeps sane windows untouched and defaults a missing one to 30 s', () => {
@@ -115,7 +115,7 @@ describe('x402 helpers', () => {
       expect(parsePaymentRequired(responseWithTimeout(0)).accepts[0].maxTimeoutSeconds).toBe(1)
     })
 
-    it('clamps again at the pre-sign choke point for unparsed options', () => {
+    it('clamps at the pre-sign choke point for unparsed options', () => {
       const requirements = toStandardPaymentRequirements(paymentRequired, {
         ...accepted,
         maxTimeoutSeconds: 999_999,

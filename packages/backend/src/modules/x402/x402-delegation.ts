@@ -227,6 +227,31 @@ export interface X402AcceptedEcho {
   facilitatorAddresses?: string[]
 }
 
+/** Select by trusted settlement state; merchant metadata cannot change authority. */
+export function selectStoredAccepted(
+  challenge: Record<string, unknown> | null,
+  network: string,
+  trusted: X402AcceptedEcho,
+): Record<string, unknown> | undefined {
+  if (!challenge) return undefined // pre-stored-challenge compatibility
+  const matches = (Array.isArray(challenge.accepts) ? challenge.accepts : []).filter((value: unknown) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const option = value as Record<string, unknown>
+    const extra = option.extra as Record<string, unknown> | undefined
+    const sameAddress = (value: unknown, expected: string) =>
+      typeof value === 'string' && value.toLowerCase() === expected.toLowerCase()
+    const facilitators = extra?.facilitatorAddresses ?? []
+    const pins = trusted.facilitatorAddresses ?? []
+    return option.scheme === 'exact' && option.network === network &&
+      option.amount === trusted.amount && sameAddress(option.payTo, trusted.payTo) &&
+      sameAddress(option.asset, trusted.asset) && option.maxTimeoutSeconds === trusted.maxTimeoutSeconds &&
+      extra?.assetTransferMethod === 'erc7710' && Array.isArray(facilitators) &&
+      facilitators.length === pins.length && facilitators.every((value, i) => sameAddress(value, pins[i]))
+  }) as Record<string, unknown>[]
+  if (matches.length !== 1) throw new Error('Stored challenge does not identify one matching settlement option — re-authorize')
+  return matches[0]
+}
+
 /**
  * The base64 X-PAYMENT header for an exact-scheme erc7710 payment.
  *
@@ -242,6 +267,8 @@ export function encodeXPaymentHeader(
   payload: X402Erc7710Payload,
   accepted: X402AcceptedEcho,
   challengeEcho?: {
+    /** Selected against trusted settlement state, then echoed without reconstruction. */
+    accepted?: Record<string, unknown>
     /** The merchant 402's `resource` object, echoed VERBATIM (#2361). */
     resource?: Record<string, unknown>
     /**
@@ -262,7 +289,7 @@ export function encodeXPaymentHeader(
     ...(resource && typeof resource === 'object' && !Array.isArray(resource)
       ? { resource }
       : {}),
-    accepted: {
+    accepted: challengeEcho?.accepted ?? {
       scheme: 'exact',
       network,
       amount: accepted.amount,

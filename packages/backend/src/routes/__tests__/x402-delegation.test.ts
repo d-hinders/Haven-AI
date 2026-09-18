@@ -1371,7 +1371,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
   // the settle envelope VERBATIM — the live bisection on #2360 proved a
   // strict facilitator rejects the echo-less envelope outright, and the
   // stored copy is the merchant's own bytes rather than a reconstruction.
-  it('settle echoes the stored challenge resource and extensions (#2361)', async () => {
+  it.each([false, true])('settle echoes matching stored requirements or refuses mismatched ones (mismatch=%s)', async mismatch => {
     const childFixture = JSON.parse(JSON.stringify(buildBudgetDelegation({
       agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
       delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
@@ -1397,7 +1397,11 @@ describe('x402 delegation-rail settlement (#830)', () => {
           // The #1355 verbatim blob, as a JSONB-parsed object.
           machine_metadata: {
             network: 'eip155:84532', settlement_scheme: 'erc7710',
-            payment_required: { x402Version: 2, resource, accepts: [], extensions },
+            payment_required: { x402Version: 2, resource, accepts: [{
+              scheme: 'exact', network: 'eip155:84532', amount: mismatch ? '999' : '1000',
+              payTo: MERCHANT, asset: USDC, maxTimeoutSeconds: 300,
+              extra: { assetTransferMethod: 'erc7710', name: 'USD Coin', version: '2', merchant: { tiers: ['a'] } },
+            }], extensions },
           },
         }] })
       }
@@ -1409,6 +1413,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
       headers: { authorization: 'Bearer sk_agent_test' },
       payload: { signature: await signChild(childFixture) },
     })
+    if (mismatch) {
+      expect(res.statusCode).toBe(502)
+      expect(res.json().details).toMatch(/matching settlement option/)
+      expect(mockQuery.mock.calls.some(c => /status = 'submitted'/.test(String(c[0])))).toBe(false)
+      return
+    }
     expect(res.statusCode).toBe(200)
     const decoded = JSON.parse(Buffer.from(res.json().payment_header, 'base64').toString('utf8'))
     expect(Object.keys(decoded).sort()).toEqual(
@@ -1416,6 +1426,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     )
     expect(decoded.resource).toEqual(resource)
     expect(decoded.extensions).toEqual(extensions)
+    expect(decoded.accepted.extra).toEqual({ assetTransferMethod: 'erc7710', name: 'USD Coin', version: '2', merchant: { tiers: ['a'] } })
   })
 
   // The metadata-less (pre-#1355) fallback is pinned by the CHARACTERIZATION
@@ -1429,7 +1440,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     const extensions = { bazaar: { schema: 'v1' } }
     const stringMetadata = JSON.stringify({
       settlement_scheme: 'erc7710',
-      payment_required: { x402Version: 2, resource: { url: 'https://merchant.example/resource' }, accepts: [], extensions },
+      payment_required: { x402Version: 2, resource: { url: 'https://merchant.example/resource' }, accepts: [{ scheme: 'exact', network: 'eip155:84532', amount: '1000', payTo: MERCHANT, asset: USDC, maxTimeoutSeconds: 300, extra: { assetTransferMethod: 'erc7710' } }], extensions },
     })
     mockQuery.mockImplementation((sql: string) => {
       if (/SELECT id, status, execution_rail/.test(String(sql))) {

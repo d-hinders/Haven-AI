@@ -2152,6 +2152,37 @@ to call next in structured fields, and those fields are typed end to end
   removes its Hermes dotenv API-key line, and deletes the target directory's
   local signer, pending re-key, and stored API key.
 
+  > **Re-verified #3123:** the last step now ASKS before it destroys. A
+  > revoked agent's API key + delegate signature are exactly what the
+  > sweep-recovery routes still accept — the only local means of recovering a
+  > stranded delegate balance — so after the wiring is removed `--unwire` runs
+  > the one read it already has (`probeHostedAgentIdentity`, `GET
+  > /machine-payments/agent` with the stored key; no new network call, no
+  > backend change) and refuses to destroy the key material on every answer:
+  > `ok` (still active — revoke on the agent page first), `unauthorized` (a
+  > stranded balance MAY exist and the connector CANNOT check; the backend's
+  > 401 is deliberately ambiguous between revoked / archived / paused / rotated
+  > and the refusal says so), `network_error` / `bad_response` (unknown is not
+  > "safe to delete"). Only a directory with no stored API key + URL proceeds
+  > unprobed, as before. The refusal exits 1 with the wiring gone and the key
+  > left in the 0o600 credential file only — the config and Hermes-env copies
+  > are scrubbed BEFORE the decision (S3), so a refusal never leaves the key in
+  > a world-readable editor file; `--doctor` then reports the directory as
+  > `superseded` until the key is revoked or destroyed, which is the honest
+  > state. `--destroy-key-material` proceeds on every answer and states that
+  > local recovery ends. `--json` carries an additive `teardown: { status:
+  > destroyed | retained | forced, probe, detail, remedy? }`. The `claude-code`
+  > copy of the key (`claude mcp add`, a config the connector does not own)
+  > stays out of `--unwire`'s scope, stated in the README. Companion:
+  > `--prune-signer-runtimes [--dry-run]` reclaims
+  > `~/.haven/signer-runtime/<key>` directories no credential directory's
+  > sidecar names (walking the ROOT, so `override-<hash>` directories from
+  > #2424 are seen), never one any credential directory names nor the current
+  > pin, reporting each entry through #3121's levels (a failed removal is the
+  > only exit 1); `--doctor` surfaces unused directories as the
+  > `signer_runtime_unused` advisory. Nothing else in this document was
+  > re-verified in this pass.
+
   This is local teardown, **not** backend revocation: Connect reports what it
   changed, while the owner revokes the agent on the Haven agent page. Named
   pairs are uniquely addressable. For the shared bare `haven` /

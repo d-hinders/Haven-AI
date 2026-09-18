@@ -409,6 +409,14 @@ contract — the three variables, what each replaces, the sidecar and wrapper
 records — is in the connector's own README:
 [`packages/connect/README.md` § *Installing an unpublished signer / SDK / MCP build*](../../packages/connect/README.md#installing-an-unpublished-signer--sdk--mcp-build-haven_signer_spec-2424).
 
+Every pin and every override key leaves its directory behind when you move
+on; nothing reclaimed them before #3123. `--prune-signer-runtimes --dry-run`
+lists the directories no credential directory's sidecar names (the current pin
+is always kept), and without `--dry-run` removes them; `--doctor` reports them
+as the `signer_runtime_unused` advisory. It never removes a directory any
+credential directory names, so switching channels back and forth costs disk
+only until you prune.
+
 > **Re-verified #2963:** for a *pinned* (non-override) install `--doctor`'s
 > `signer_runtime` check compares intactness against the sidecar and currency
 > against the manifest — a dev-channel snapshot that is intact but behind the

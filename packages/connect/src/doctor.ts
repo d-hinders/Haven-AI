@@ -25,6 +25,7 @@
  * not a licence to destroy key material the owner may still be mid-flow on.
  */
 
+import { pruneSignerRuntimes } from './prune-runtimes.js'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { connectorRerunCommand } from '@haven_ai/sdk'
 import { homedir } from 'node:os'
@@ -1327,6 +1328,28 @@ export async function runDoctor(
 
   const signerProcess = primaryChecksById.get('signer_process')
   if (signerProcess) checks.push(signerProcess)
+
+  // ── Unused signer-runtime directories (#3123) — advisory, only when any ─
+  // A dry-run prune: directories under ~/.haven/signer-runtime that no
+  // credential directory's sidecar names and that are not the current pin.
+  // Reported here so the doctor's own repair advice can be completed without
+  // hand-editing directories; absent when there is nothing to reclaim, so a
+  // single-agent install reads exactly as before.
+  const prune = await pruneSignerRuntimes({ dryRun: true }, { homeDir, credentialsDir: input.credentialsDir })
+  const unused = prune.entries.filter((entry) => entry.action === 'would_remove')
+  if (unused.length > 0) {
+    const bytes = unused.reduce((sum, entry) => sum + entry.bytes, 0)
+    checks.push({
+      id: 'signer_runtime_unused',
+      label: 'Unused signer-runtime directories',
+      level: 'advisory',
+      detail:
+        `${unused.length} signer-runtime director${unused.length === 1 ? 'y' : 'ies'} under ${prune.root} that no credential ` +
+        `directory names (${Math.round(bytes / 1024 / 1024)} MB): ${unused.map((entry) => entry.key).join(', ')}. ` +
+        'Nothing is broken; they are left over from earlier pins or overrides.',
+      repair: `Run: ${RERUN} --prune-signer-runtimes (add --dry-run to list only).`,
+    })
+  }
 
   // ── Restart still required? (informational, never fails the doctor) ───────
   const restart = restartRequiredForRuntime(input2.runtime, deps.env)

@@ -327,3 +327,137 @@ describe('unwireAgent end-to-end (#2169)', () => {
     expect(await readFile(join(homeDir, '.hermes', 'config.yaml'), 'utf8')).toBe(bad)
   })
 })
+
+/**
+ * #3123 — teardown asks before it destroys. `--unwire` used to strip the API
+ * key and delete the signer key unconditionally; a revoked agent's API key +
+ * delegate signature are exactly what the sweep-recovery routes still accept,
+ * so that was the only local means of recovering a stranded balance. Owner
+ * decision (option c): refuse on every probe outcome, an explicit flag
+ * proceeds, no balance read, no new network call beyond the existing probe.
+ */
+describe('teardown refuses before destroying the recovery credential (#3123)', () => {
+  const API_URL = 'https://api.haven.example'
+
+  async function seedProbeableAgent(homeDir: string, apiKey = 'sk_live_agent') {
+    const wrapper = join(homeDir, '.haven', 'agents', 'research', 'bin', 'haven-signer.mjs')
+    const dir = await seedAgent(homeDir, { agentId: 'agent-research', slug: 'research', apiKey, hostedUrl: HOSTED_URL, wrapperPath: wrapper })
+    // The real setup records api_url; the probe needs it. Without it there is nothing to probe with.
+    const identity = JSON.parse(await readFile(join(dir, 'identity.json'), 'utf8')) as Record<string, unknown>
+    await writeFile(join(dir, 'identity.json'), JSON.stringify({ ...identity, api_url: API_URL }))
+    await writeFile(join(dir, 'rekey-pending.json'), JSON.stringify({ version: 1, agent_id: 'agent-research', address: '0x' + 'ee'.repeat(20), private_key: '0x' + '33'.repeat(32), started_at: '2026-09-01T00:00:00.000Z', expires_at: '2026-09-01T01:00:00.000Z' }))
+    const { configPath, envPath } = await seedHermes(homeDir, HOSTED_URL, apiKey, wrapper, RESEARCH)
+    return { dir, wrapper, configPath, envPath }
+  }
+
+  async function keyMaterialPresent(dir: string): Promise<{ signer: boolean; rekey: boolean; apiKey: boolean }> {
+    const has = async (f: string) => readFile(join(dir, f), 'utf8').then(() => true, () => false)
+    const identity = JSON.parse(await readFile(join(dir, 'identity.json'), 'utf8')) as { api_key?: string }
+    return { signer: await has('signer.json'), rekey: await has('rekey-pending.json'), apiKey: typeof identity.api_key === 'string' }
+  }
+
+  for (const status of ['ok', 'unauthorized', 'network_error', 'bad_response'] as const) {
+    it(`probe ${status}: REFUSES — signer key, parked re-key and API key stay; the wiring (config + env) is still removed first (S3)`, async () => {
+      const homeDir = await mkdtemp(join(tmpdir(), `haven-unwire-refuse-${status}-`))
+      const { dir, configPath, envPath } = await seedProbeableAgent(homeDir)
+      const probe = vi.fn(async () => (status === 'ok' ? { status, agentId: 'agent-research', delegateAddress: '0x' + 'cd'.repeat(20) } : { status }))
+
+      const result = await unwireAgent({ directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones'), probeHostedIdentity: probe })
+
+      expect(result.teardown).toMatchObject({ status: 'retained', probe: status })
+      expect(result.teardown.remedy).toBeTruthy()
+      expect(await keyMaterialPresent(dir)).toEqual({ signer: true, rekey: true, apiKey: true })
+      // S3: the world-readable copies were scrubbed BEFORE the decision; the key survives only in the 0o600 file.
+      expect(await readFile(configPath, 'utf8')).not.toContain('haven-research')
+      expect(await readFile(envPath, 'utf8')).not.toContain('sk_live_agent')
+      expect(result.tombstoned).toBe(true)
+      expect(probe).toHaveBeenCalledTimes(1)
+      expect(probe).toHaveBeenCalledWith('sk_live_agent', API_URL, undefined)
+    })
+  }
+
+  it('probe ok: the refusal names the live spend authority and the remedy (revoke on the agent page, or the override)', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-unwire-ok-'))
+    const { dir } = await seedProbeableAgent(homeDir)
+    const result = await unwireAgent({ directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones'), probeHostedIdentity: async () => ({ status: 'ok', agentId: 'agent-research', delegateAddress: '0x' + 'cd'.repeat(20) }) })
+    expect(result.teardown.detail).toMatch(/still ACTIVE/)
+    expect(result.teardown.remedy).toMatch(/Revoke the agent on the Haven agent page/)
+    expect(result.teardown.remedy).toContain('--destroy-key-material')
+  })
+
+  it('probe unauthorized: says what it does NOT know — a stranded balance MAY exist and the connector cannot check — never that the key is worthless', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-unwire-unauth-'))
+    const { dir } = await seedProbeableAgent(homeDir)
+    const result = await unwireAgent({ directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones'), probeHostedIdentity: async () => ({ status: 'unauthorized' }) })
+    const text = `${result.teardown.detail} ${result.teardown.remedy}`
+    expect(text).toMatch(/MAY still exist/)
+    expect(text).toMatch(/CANNOT check/)
+    expect(text).toMatch(/sweep-recovery/)
+    // The backend's 401 is deliberately ambiguous (revoked, archived, paused, unknown key all read the
+    // same); the connector must not claim a revocation, and must name the alternatives.
+    expect(text).not.toMatch(/\b(was|is|has been|got) revoked\b/)
+    expect(text).toMatch(/does not say which/)
+    expect(text).toMatch(/archived/)
+    expect(text).toMatch(/paused/)
+    expect(text).not.toMatch(/worthless/)
+  })
+
+  it('probe network_error: unknown is not "safe to delete" — refused, with retry as the remedy', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-unwire-net-'))
+    const { dir } = await seedProbeableAgent(homeDir)
+    const result = await unwireAgent({ directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones'), probeHostedIdentity: async () => ({ status: 'network_error' }) })
+    expect(result.teardown.detail).toMatch(/Could not verify/)
+    expect(result.teardown.detail).toMatch(/Unknown is not "safe to delete"/)
+    expect(result.teardown.remedy).toMatch(/Retry/)
+  })
+
+  it('--destroy-key-material proceeds on every outcome, destroys all three, and says that local recovery ends', async () => {
+    for (const status of ['ok', 'unauthorized', 'network_error'] as const) {
+      const homeDir = await mkdtemp(join(tmpdir(), `haven-unwire-force-${status}-`))
+      const { dir, configPath, envPath } = await seedProbeableAgent(homeDir)
+      const result = await unwireAgent({
+        directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones'), destroyKeyMaterial: true,
+        probeHostedIdentity: async () => (status === 'ok' ? { status, agentId: 'agent-research', delegateAddress: '0x' + 'cd'.repeat(20) } : { status }),
+      })
+      expect(result.teardown).toMatchObject({ status: 'forced', probe: status })
+      expect(result.teardown.detail).toContain('--destroy-key-material')
+      expect(result.teardown.remedy).toMatch(/Local recovery of a stranded delegate balance ends/)
+      expect(await keyMaterialPresent(dir)).toEqual({ signer: false, rekey: false, apiKey: false })
+      // After a forced teardown no local copy of the key remains anywhere the connector writes (S3).
+      expect(await readFile(configPath, 'utf8')).not.toContain('sk_live_agent')
+      expect(await readFile(envPath, 'utf8')).not.toContain('sk_live_agent')
+      const identity = JSON.parse(await readFile(join(dir, 'identity.json'), 'utf8'))
+      expect(identity.agent_id).toBe('agent-research')
+    }
+  })
+
+  it('no stored API key + URL: nothing the recovery routes would accept, so the teardown proceeds unprobed (the pre-#3123 shape)', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-unwire-unprobed-'))
+    const wrapper = join(homeDir, '.haven', 'agents', 'research', 'bin', 'haven-signer.mjs')
+    const dir = await seedAgent(homeDir, { agentId: 'agent-research', slug: 'research', apiKey: 'sk_x', hostedUrl: HOSTED_URL, wrapperPath: wrapper })
+    const probe = vi.fn()
+    const result = await unwireAgent({ directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones'), probeHostedIdentity: probe })
+    expect(result.teardown).toMatchObject({ status: 'destroyed', probe: 'not_probed' })
+    expect(probe).not.toHaveBeenCalled()
+    expect(await keyMaterialPresent(dir)).toMatchObject({ signer: false, apiKey: false })
+  })
+
+  it('the probe is the ONLY network call on the teardown path: one GET /machine-payments/agent with the stored key, nothing else', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-unwire-onecall-'))
+    const { dir } = await seedProbeableAgent(homeDir)
+    const calls: Array<{ url: string; auth: string | undefined }> = []
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), auth: new Headers(init?.headers).get('authorization') ?? undefined })
+      return new Response(JSON.stringify({ id: 'agent-research', delegate_address: '0x' + 'cd'.repeat(20) }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch
+    const globalFetch = vi.spyOn(globalThis, 'fetch')
+    try {
+      const result = await unwireAgent({ directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones'), fetch: fetchImpl })
+      expect(result.teardown).toMatchObject({ status: 'retained', probe: 'ok' })
+      expect(calls).toEqual([{ url: `${API_URL}/machine-payments/agent`, auth: 'Bearer sk_live_agent' }])
+      expect(globalFetch).not.toHaveBeenCalled()
+    } finally {
+      globalFetch.mockRestore()
+    }
+  })
+})

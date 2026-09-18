@@ -2138,3 +2138,32 @@ describe('doctor verdict levels (#3121)', () => {
     expect(rollUpLevel([{ level: 'advisory' }, { level: 'failed' }, { level: 'ok' }])).toBe('failed')
   })
 })
+
+/**
+ * #3123 — the doctor surfaces signer-runtime directories nothing references
+ * as an ADVISORY (#3121 level), naming the prune command; absent when there
+ * is nothing to reclaim, so a single-agent install reads exactly as before.
+ */
+describe('unused signer-runtime directories (#3123)', () => {
+  it('a directory no credential directory names is an advisory naming --prune-signer-runtimes; the referenced one and the pin are not counted', async () => {
+    const { homeDir } = await healthyHome()
+    const stale = join(homeDir, '.haven', 'signer-runtime', '0.0.0-dev.202607010000.0000000', 'node_modules', '@haven_ai', 'signer', 'dist')
+    await mkdir(stale, { recursive: true })
+    await writeFile(join(stale, 'cli.js'), 'x'.repeat(2048))
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'signer_runtime_unused')
+    expect(check?.level).toBe('advisory')
+    expect(check?.detail).toContain('0.0.0-dev.202607010000.0000000')
+    expect(check?.detail).not.toContain(MCP_RUNTIME_MANIFEST.signerVersion)
+    expect(check?.repair).toContain('--prune-signer-runtimes')
+    expect(report.ok).toBe(true)
+    expect(report.level).toBe('advisory')
+  })
+
+  it('no unused directory → no check at all (the #1589 id list is untouched)', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    expect(report.checks.find((c) => c.id === 'signer_runtime_unused')).toBeUndefined()
+    expect(report.level).toBe('ok')
+  })
+})

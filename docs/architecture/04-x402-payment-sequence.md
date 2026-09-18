@@ -28,6 +28,8 @@ covers:
   - packages/sdk/src/types.ts
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
+  - packages/signer/src/sign-context.ts
+  - packages/signer/src/next-step.ts
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
   - packages/mcp-server/src/tools.test.ts
   - packages/mcp-server/src/tools/state-direct-recovery.test.ts
@@ -861,7 +863,9 @@ stream, so request bodies, tool names, and tool arguments may still need to be
 preserved or reconstructed. SDK and hosted MCP tool completion establish a
 fresh MCP transport session; callers do not need to preserve the old session
 id. Local MCP normalizes most fields to camelCase while retaining
-`resume_state`; backend HTTP responses use snake_case.
+`resume_state` (and, since #3103, dual-emits `nextAction` / `next_action` on
+its failure envelope, the converged spelling being `next_action`); backend
+HTTP responses use snake_case.
 
 **What is live since #2145: the resume CALL, with a reachable trigger.**
 `resumeX402Payment` / `haven_resume_x402_payment` (and `resumeAuthorizedX402`
@@ -1987,8 +1991,11 @@ error instead of quietly routing a payment at the wrong chain's bundler.
 > `HavenSignContextError` gains the optional `next_tool*` fields additively;
 > no signing decision, expected-context version or binding version changes.
 > The local runtime's failure envelope dual-emits `nextAction` and
-> `next_action` (decision 10, one release before the old spelling is dropped)
-> and its one decision site, merchant-not-ready, says why no tool follows.
+> `next_action` (decision 10, one release before the old spelling is dropped;
+> this supersedes the #2983 note's "its failure shape is camelCase") and its
+> two decision sites — the ones the signer's symmetric grep returns
+> (`nextAction: …` or `nextAction = …`): the `MERCHANT_NOT_READY` envelope
+> and the `UNKNOWN_ERROR` fallback — say why no tool follows.
 > Every field the refusals emitted before is byte-identical, pinned by
 > `next-step-characterization.test.ts` in each package (written before the
 > change). The hosted server's suite pins the signer's declared shapes to the

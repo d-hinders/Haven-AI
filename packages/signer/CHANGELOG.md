@@ -8,6 +8,14 @@ alone.
 
 ## Unreleased
 
+- **Refusals carry a typed next step (#3103, epic #3105).** `HavenSignContextError`
+  and every structured signer refusal now also carry the `next_tool` family:
+  a backend refusal of the signing context names the hosted status read
+  (`next_tool_server_role: hosted`, `next_tool_name: haven_get_payment_status`,
+  `next_arguments: { payment_id }`); a transport failure, malformed body,
+  expired window or version skew carries `next_tool_omitted_reason`. Additive;
+  no signing decision, expected-context version or binding version changes.
+
 ## 0.3.0-alpha.0 — 2026-09-17
 
 ### Removed

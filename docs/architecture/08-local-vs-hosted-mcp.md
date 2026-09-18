@@ -452,8 +452,11 @@ since #1984 — are unaffected, hosted and local alike.
 > `HavenSignContextError` gains the optional `next_tool*` fields additively;
 > no signing decision, expected-context version or binding version changes.
 > The local runtime's failure envelope dual-emits `nextAction` and
-> `next_action` (decision 10, one release before the old spelling is dropped)
-> and its one decision site, merchant-not-ready, says why no tool follows.
+> `next_action` (decision 10, one release before the old spelling is dropped;
+> this supersedes the #2983 note's "its failure shape is camelCase") and its
+> two decision sites — the ones the signer's symmetric grep returns
+> (`nextAction: …` or `nextAction = …`): the `MERCHANT_NOT_READY` envelope
+> and the `UNKNOWN_ERROR` fallback — say why no tool follows.
 > Every field the refusals emitted before is byte-identical, pinned by
 > `next-step-characterization.test.ts` in each package (written before the
 > change). The hosted server's suite pins the signer's declared shapes to the

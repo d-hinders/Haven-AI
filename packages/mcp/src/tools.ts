@@ -202,6 +202,11 @@ export interface ToolFailure {
   paymentId?: string
   status?: string
   phase?: string
+  /**
+   * @deprecated since #3103 — read `next_action`. Kept with the same value for
+   * one release (the #2908 pattern) and removed in the release after the one
+   * carrying #3103.
+   */
   nextAction?: string
   /**
    * #3103 (epic #3105, decision 10): the same value as `nextAction`, spelled
@@ -862,6 +867,9 @@ function normalizeError(err: unknown): ToolFailure {
     message: err instanceof Error ? err.message : String(err),
     nextAction: AgentPaymentNextAction.StopAndTellUser,
     next_action: AgentPaymentNextAction.StopAndTellUser,
+    // #3103: the second local decision site — nothing structured can follow an
+    // error this runtime did not recognise.
+    next_tool_omitted_reason: 'an error this runtime does not recognise; tell the user what message says',
   }
 }
 

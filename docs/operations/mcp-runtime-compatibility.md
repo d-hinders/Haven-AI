@@ -27,6 +27,7 @@ covers:
   - packages/sdk/src/types.ts
   - packages/sdk/src/next-step.ts
   - packages/mcp-server/src/server.ts
+  - packages/mcp-server/src/next-step-signer-parity.test.ts
 last-verified: "2026-09-18"
 ---
 
@@ -1834,7 +1835,9 @@ what each server's instructions say and why they differ in length.
   existing local credentials, reinstall or reuse the pinned MCP runtime, and
   fail loudly if the wrapper handshake cannot list the required Haven tools.
 - **Tool naming across runtimes (#1588, corrected by #2550):** guidance
-  responses — and, since #3102, every hosted refusal — carry `next_tool` (Claude-family namespaced,
+  responses — since #3102 every hosted refusal, and since #3103 the edge
+  signer's refusals, which name hosted tools through the role fields for the
+  same reason — carry `next_tool` (Claude-family namespaced,
   `mcp__<server>__<tool>`, kept byte-identical for existing clients), the pair
   `next_tool_server` and `next_tool_name` (the bare tool name), and — since
   #2550 — `next_tool_server_role`, one of `hosted` or `signer`; and — since
@@ -2169,8 +2172,11 @@ what each server's instructions say and why they differ in length.
 > `HavenSignContextError` gains the optional `next_tool*` fields additively;
 > no signing decision, expected-context version or binding version changes.
 > The local runtime's failure envelope dual-emits `nextAction` and
-> `next_action` (decision 10, one release before the old spelling is dropped)
-> and its one decision site, merchant-not-ready, says why no tool follows.
+> `next_action` (decision 10, one release before the old spelling is dropped;
+> this supersedes the #2983 note's "its failure shape is camelCase") and its
+> two decision sites — the ones the signer's symmetric grep returns
+> (`nextAction: …` or `nextAction = …`): the `MERCHANT_NOT_READY` envelope
+> and the `UNKNOWN_ERROR` fallback — say why no tool follows.
 > Every field the refusals emitted before is byte-identical, pinned by
 > `next-step-characterization.test.ts` in each package (written before the
 > change). The hosted server's suite pins the signer's declared shapes to the

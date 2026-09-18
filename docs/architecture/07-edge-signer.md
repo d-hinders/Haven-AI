@@ -31,7 +31,7 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-10"
+last-verified: "2026-09-18"
 ---
 
 # Haven — Edge Signer
@@ -119,7 +119,9 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    / `haven_sign_x402` / `haven_sign_sweep_delegate` return
    `{ success: false, code: 'UNSUPPORTED_EXPECTED_CONTEXT_VERSION' |
    'UNSUPPORTED_SWEEP_BINDING_VERSION', supported_versions, received_version,
-   fallback, next_action: 'stop_and_tell_user' }`. `supported_versions` /
+   fallback, next_action: 'stop_and_tell_user', next_tool_omitted_reason }`
+   (the last field since #3103 — no tool can fix a version skew from inside
+   the call). `supported_versions` /
    `received_version` are DERIVED at the throw site from
    `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS`,
    never a second literal (`assertSupportedBindingVersion` in `core.ts`).

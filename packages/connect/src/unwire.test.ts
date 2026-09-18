@@ -250,7 +250,7 @@ describe('unwireAgent end-to-end (#2169)', () => {
     expect(resultA.tombstoned).toBe(true)
   })
 
-  it('owner unwire: --doctor afterwards reports the directory as retired, not superseded', async () => {
+  it('owner unwire with NO stored api_url (nothing to preserve, #3123 not_probed): --doctor afterwards reports the directory as retired, not superseded', async () => {
     const homeDir = await mkdtemp(join(tmpdir(), 'haven-unwire-retired-'))
     const tombstonesDir = join(homeDir, '.haven', 'tombstones')
     const wrapper = join(homeDir, '.haven', 'agents', 'agent-1', 'bin', 'haven-signer.mjs')

@@ -109,7 +109,7 @@ report stays `version: 1`; `level` is additive.
 | Level | Meaning | Example |
 | --- | --- | --- |
 | `ok` | Nothing to say. | The installed signer matches the connector's pin. |
-| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered). `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
+| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version; `signer_runtime_unused` (#3123): runtime directories nothing references. Also ("intact, but outdated" — both versions named, `--repair` offered). `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
 | `failed` | A real failure with one repair action. Exit 1. | A stale or empty runtime directory; a live key in a directory the runtime's config demonstrably does not use. |
 
 What stays blocking is live spend authority: a directory whose stored key
@@ -253,7 +253,7 @@ unreferenced directories go, no configured agent's wrapper points at a
 removed one. It is its own flag — never part of `--repair`, never
 automatic; `--doctor` reports unused directories as an advisory
 (`signer_runtime_unused`) that names this command. `--json` emits
-`{ pruned: true, dry_run, level, removed, reclaimed_bytes, entries[] }`.
+`{ pruned: true, version: 1, root, dry_run, level, removed, reclaimed_bytes, entries[] }`.
 
 An **unnamed** pair (`haven` / `haven-signer`) is shared by every unnamed agent
 and is only removed when this directory's wrapper is the one the config
@@ -443,9 +443,11 @@ already-configured machine behaves as follows (characterized in
   managed Codex/Hermes equivalents) and re-points them at the new agent's
   credentials; unrelated MCP servers and configuration are preserved. Once
   the runtime install has actually completed, each superseded directory is
-  tombstoned and its local key files removed — the same teardown `--unwire`
-  performs — so `--doctor` reads it as `retired` rather than still
-  spend-capable. If the install ends with an error code the retirement is
+  tombstoned and its local key files removed — the unconditional key-material
+  teardown; `--unwire` itself runs that teardown only when its #3123 probe says
+  there is nothing to preserve, and `--replace` deliberately does not probe
+  (the owner has just chosen to overwrite; see the #3119 follow-up) — so
+  `--doctor` reads it as `retired` rather than still spend-capable. If the install ends with an error code the retirement is
   **skipped**, because the old wiring may still be the only working one; the
   outcome's `superseded_agents_retired_locally` says which happened and
   `retired_agent_ids` names exactly the directories it reached. With

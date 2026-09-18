@@ -18,6 +18,7 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
+  - packages/connect/src/prune-runtimes.ts
   - packages/signer/src/credentials.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts

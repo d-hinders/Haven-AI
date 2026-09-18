@@ -1075,9 +1075,11 @@ is Haven's hosted production backend, so a `haven` command run against another
 deployment without `--api` or `HAVEN_API_URL` reaches production rather than
 failing. That is a property of the CLI's own session, not of anything it hands the
 connector, and nothing in this paragraph changes because of it. And it is not a revoke: `--replace` retires the
-superseded directory **locally** (tombstone, then the `--unwire` key-material
-teardown, only once the runtime install actually completed — a failed install
-skips it and the outcome says so), and the owner still revokes on the Haven
+superseded directory **locally** (tombstone, then the unconditional key-material
+teardown — `--unwire` itself now runs that teardown only when its #3123 probe
+says there is nothing to preserve; `--replace` does not probe — only once the
+runtime install actually completed — a failed install skips it and the outcome
+says so), and the owner still revokes on the Haven
 agent page. The revoke route is owner-authenticated; the connector holds agent
 keys only.
 
@@ -2139,8 +2141,8 @@ to call next in structured fields, and those fields are typed end to end
   read as a success payload. That distinction earns its keep twice: `--doctor`'s
   success output *is* a JSON report (a failure record carries no `checks`), and
   `--unwire` reports `{"unwired": true}` with a **non-zero exit** when some
-  runtime entries were refused, which is a partial result rather than a
-  failure.
+  runtime entries were refused or the key-material teardown was retained
+  (#3123), which is a partial result rather than a failure.
 - **`--unwire [<dir>]` (#2169):** removes one agent's local wiring. Address
   the target by its credential directory, or resolve it with `--name <slug>`
   (or `--credentials-dir`). The positional value is always an existing
@@ -2180,8 +2182,11 @@ to call next in structured fields, and those fields are typed end to end
   > #2424 are seen), never one any credential directory names nor the current
   > pin, reporting each entry through #3121's levels (a failed removal is the
   > only exit 1); `--doctor` surfaces unused directories as the
-  > `signer_runtime_unused` advisory. Nothing else in this document was
-  > re-verified in this pass.
+  > `signer_runtime_unused` advisory. Also re-read in this pass: the
+  > `--replace` paragraph under the wiring-collision section (now states that
+  > `--replace`'s teardown is unconditional and unprobed) and the JSON-envelope
+  > bullet above (a retained teardown is the second non-zero-exit case).
+  > Nothing else in this document was re-verified in this pass.
 
   This is local teardown, **not** backend revocation: Connect reports what it
   changed, while the owner revokes the agent on the Haven agent page. Named

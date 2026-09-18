@@ -428,6 +428,8 @@ describe('haven_pay_mcp_tool', () => {
     expect(payload.status).toBe('funded_but_unsettled')
     expect(payload.phase).toBe('funded_but_unsettled')
     expect(payload.next_action).toBe(AgentPaymentNextAction.SweepStrandedFunds)
+    // #3102: site-level pin of the typed step (the characterization pins fixtures, not sites).
+    expect(payload.next_tool).toBe('mcp__haven__haven_sweep_delegate')
     expect(payload.rail).toBe('x402')
     expect(payload.idempotency_key).toBe('idem-rejected')
     expect(payload.suggested_tool).toBe('haven_sweep_delegate')

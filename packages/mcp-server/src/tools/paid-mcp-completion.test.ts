@@ -274,6 +274,10 @@ describe('haven_settle_mcp_tool', () => {
     // genuinely may hold stranded funds, so the sweep guidance stays.
     expect(payload.suggested_tool).toBe('haven_sweep_delegate')
     expect(payload.message).toMatch(/stranded funds/)
+    // #3102: the refusal names the sweep as its typed next step (site-level pin).
+    expect(payload.next_tool).toBe('mcp__haven__haven_sweep_delegate')
+    expect(payload.next_arguments).toEqual({})
+    expect(payload.next_tool_omitted_reason).toBeUndefined()
   })
 
   /**
@@ -309,6 +313,9 @@ describe('haven_settle_mcp_tool', () => {
     // No stranded-funds claim and no sweep suggestion — nothing moved.
     expect(payload.suggested_tool).toBeUndefined()
     expect(payload.next_action).not.toBe(AgentPaymentNextAction.SweepStrandedFunds)
+    // #3102: no tool follows, and the refusal says so in the structured field.
+    expect(payload.next_tool).toBeUndefined()
+    expect(payload.next_tool_omitted_reason).toMatch(/not ready to settle/)
     expect(payload.message).not.toMatch(/stranded/)
     expect(payload.message).not.toMatch(/sweep_stranded|haven_sweep_delegate/)
     // What IS true: no settlement, budget intact, honest re-quote guidance,
@@ -350,6 +357,9 @@ describe('haven_settle_mcp_tool', () => {
     expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
     expect(payload.next_action).toBe(AgentPaymentNextAction.CheckStatusLater)
     expect(payload.suggested_tool).toBe('haven_get_payment_status')
+    // #3102: the status read is the typed next step, with the id the tool requires.
+    expect(payload.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(payload.next_arguments).toEqual({ payment_id: 'pay_7710_gateway' })
     expect(payload.message).not.toMatch(/stranded|haven_sweep_delegate/)
     expect(payload.message).not.toMatch(/no settlement occurred|nothing moved|budget is intact/i)
     expect(payload.message).toMatch(/has NOT observed a settlement/)

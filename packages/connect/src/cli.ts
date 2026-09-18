@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import type { DoctorLevel, DoctorReport } from './doctor.js'
 import { realpathSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { helpText, parseArgs } from './args.js'
@@ -57,6 +58,17 @@ function failSubcommand(
     )
   }
   return 1
+}
+
+/** #3121: one marker per verdict level — `✓` ok, `!` advisory, `✗` failed. */
+function levelMarker(level: DoctorLevel): string {
+  return level === 'ok' ? '✓' : level === 'advisory' ? '!' : '✗'
+}
+
+/** Advisories across the flat list and every wired agent's checks — the same set the rolled-up level reads. */
+function advisoryCount(report: DoctorReport): number {
+  const wired = report.agents.filter((agent) => agent.classification === 'wired').flatMap((agent) => agent.checks)
+  return [...report.checks, ...wired].filter((check) => check.level === 'advisory').length
 }
 
 export async function runCli(
@@ -285,8 +297,10 @@ export async function runCli(
       if (parsed.json) {
         io.stdout(`${redactSecrets(JSON.stringify(report))}\n`)
       } else {
+        // #3121: three markers for three levels. `!` is an advisory — worth
+        // reading, nothing broken, and it never reaches the exit code.
         for (const check of report.checks) {
-          io.stdout(redactSecrets(`${check.ok ? '✓' : '✗'} ${check.label}: ${check.detail}\n`))
+          io.stdout(redactSecrets(`${levelMarker(check.level)} ${check.label}: ${check.detail}\n`))
           if (check.repair) io.stdout(redactSecrets(`    ↳ repair: ${check.repair}\n`))
         }
         // #1697: the other agents on this machine. The flat list above
@@ -297,9 +311,14 @@ export async function runCli(
           io.stdout('\nOther agents on this machine:\n')
           for (const agent of otherAgents) {
             const name = agent.slug ? `${agent.slug} (${agent.agentId ?? 'unknown'})` : agent.agentId ?? 'unknown'
-            const failed = agent.checks.filter((check) => !check.ok)
+            const failed = agent.checks.filter((check) => check.level === 'failed')
+            const advised = agent.checks.filter((check) => check.level === 'advisory')
             const verdict = agent.classification === 'wired'
-              ? failed.length === 0 ? 'wired, all checks passed' : `wired, ${failed.length} check(s) FAILED`
+              ? failed.length > 0
+                ? `wired, ${failed.length} check(s) FAILED`
+                : advised.length > 0
+                  ? `wired, ${advised.length} advisory finding(s)`
+                  : 'wired, all checks passed'
               // #1915: `parked` is the one classification whose bare name says
               // nothing a reader can act on — it is not a broken agent, it is
               // a directory with no agent in it and a private key still in it.
@@ -308,16 +327,24 @@ export async function runCli(
               : agent.classification === 'parked'
                 ? 'parked re-key only — no identity.json in this directory, but key material is still there'
                 : agent.classification
-            io.stdout(redactSecrets(`  ${failed.length > 0 ? '✗' : '•'} ${name}: ${verdict}\n`))
-            for (const check of failed) {
-              io.stdout(redactSecrets(`      ✗ ${check.label}: ${check.detail}\n`))
+            io.stdout(redactSecrets(`  ${failed.length > 0 ? '✗' : advised.length > 0 ? '!' : '•'} ${name}: ${verdict}\n`))
+            for (const check of [...failed, ...advised]) {
+              io.stdout(redactSecrets(`      ${levelMarker(check.level)} ${check.label}: ${check.detail}\n`))
               if (check.repair) io.stdout(redactSecrets(`        ↳ repair: ${check.repair}\n`))
             }
           }
         }
-        io.stdout(report.ok ? 'All checks passed.\n' : 'One or more checks FAILED — see repairs above.\n')
+        io.stdout(
+          report.level === 'failed'
+            ? 'One or more checks FAILED — see repairs above.\n'
+            : report.level === 'advisory'
+              ? `No failures. ${advisoryCount(report)} advisory finding(s) — see the ! line(s) above.\n`
+              : 'All checks passed.\n',
+        )
       }
-      return report.ok ? 0 : 1
+      // #3121: the exit code counts only real failures. `report.ok` is the
+      // same predicate (`level !== 'failed'`), kept for --json consumers.
+      return report.level === 'failed' ? 1 : 0
     } catch (err) {
       return failSubcommand(io, parsed.json, err, { doctor: 'failed' }, {
         code: 'doctor_failed',

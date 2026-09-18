@@ -358,7 +358,11 @@ throughout.
 
    The doctor reports the installed signer and SDK versions (the snapshot),
    starts the local signer for a real stdio handshake and prints its advertised
-   compat versions. Its hosted MCP row proves endpoint reachability; the
+   compat versions. On the dev channel the pinned build moves often: an install
+   that is intact but behind the connector's current pin is reported as an
+   **advisory** (`!` marker, "intact, but outdated", both versions named) and
+   exits 0 — only a real failure exits 1 (#3121). Run `--doctor --repair` to
+   catch up when you want the newer snapshot. Its hosted MCP row proves endpoint reachability; the
    `identity_match` row is the authenticated stored-credential check. Every
    "re-run `npx @haven_ai/connect@<tag>`" hint the
    snapshot's packages print names **`@dev`**, because the tag is a build-time

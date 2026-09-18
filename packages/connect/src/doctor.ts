@@ -56,19 +56,60 @@ import { serverNamesFor, type ServerNames } from './server-names.js'
 import { CONNECT_OUTCOME_FILENAME, readConnectOutcomeRuntime, REKEY_PENDING_FILENAME, inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
 import { shortAddress } from './redact.js'
 
+/**
+ * #3121: three verdicts, not two. `ok` is "nothing to say"; `advisory` is
+ * "worth telling you, and nothing is broken" — an intact install that is
+ * behind the connector's pin, or a classification the connector cannot make
+ * on this runtime; `failed` is a real failure. Only `failed` reaches the exit
+ * code. Before #3121 an advisory had to be reported as a failure or not at
+ * all, and an install that passed one day failed the next with no action by
+ * anyone, because the pinned dev build had moved overnight.
+ */
+export type DoctorLevel = 'ok' | 'advisory' | 'failed'
+
 export interface DoctorCheck {
   id: string
   label: string
+  /**
+   * Kept for `--json` consumers that branch on it (#1589 shape): `true` for
+   * `ok` AND `advisory`, `false` only for `failed` — so `check.ok`, like
+   * `report.ok`, answers "is anything broken", never "is there nothing to
+   * say". The level is the finer answer. Derived from `level` in one place
+   * (`finalizeCheck`); the two cannot disagree.
+   */
   ok: boolean
+  level: DoctorLevel
   /** Human detail — never secret material. */
   detail: string
-  /** One concrete action, present exactly when the check fails. */
+  /** One concrete action, present when the check is not `ok` (a `failed` check always; an `advisory` when there is one). */
   repair?: string
+}
+
+/** A check as its site states it: the level, never `ok` — `finalizeCheck` derives that. */
+type CheckVerdict = Omit<DoctorCheck, 'ok'>
+
+function finalizeCheck(check: CheckVerdict): DoctorCheck {
+  return { ...check, ok: check.level !== 'failed' }
+}
+
+/** The rolled-up level: `failed` if any check failed, else `advisory` if any advised, else `ok`. */
+export function rollUpLevel(checks: ReadonlyArray<Pick<DoctorCheck, 'level'>>): DoctorLevel {
+  if (checks.some((check) => check.level === 'failed')) return 'failed'
+  if (checks.some((check) => check.level === 'advisory')) return 'advisory'
+  return 'ok'
 }
 
 export interface DoctorReport {
   version: 1
+  /**
+   * `true` exactly when `level !== 'failed'` — the same predicate the exit
+   * code uses, so `--json` consumers that branch on `ok` see exit 0 ⇔ ok.
+   * Before #3121 this meant "every check passed"; an advisory now leaves it
+   * `true`. Additive within `version: 1` (#3121 decisions 3 and 4).
+   */
   ok: boolean
+  /** #3121: the rolled-up verdict over the flat checks and every WIRED agent's checks. */
+  level: DoctorLevel
   runtime: string
   credentialDirectory?: string
   checks: DoctorCheck[]
@@ -424,13 +465,22 @@ function rekeyPendingCheck(
   runtime: string,
   slug: string | undefined,
 ): DoctorCheck {
+  return finalizeCheck(rekeyPendingVerdict(status, hostedDelegateAddress, runtime, slug))
+}
+
+function rekeyPendingVerdict(
+  status: RekeyPendingStatus,
+  hostedDelegateAddress: string | undefined,
+  runtime: string,
+  slug: string | undefined,
+): CheckVerdict {
   const label = 'Pending re-key'
   const nameFlag = slug ? ` --name ${slug}` : ''
   if (status.state === 'unreadable') {
     return {
       id: 'rekey_pending',
       label,
-      ok: false,
+      level: 'failed',
       detail:
         `A re-key was started here but ${status.path} does not parse, so neither the address it ` +
         'generated nor when it started can be read. The file still holds what was a private key.',
@@ -453,7 +503,7 @@ function rekeyPendingCheck(
     return {
       id: 'rekey_pending',
       label,
-      ok: false,
+      level: 'failed',
       detail:
         `A re-key started ${started} has COMPLETED on Haven — the agent's signing address is already ` +
         `${address}, the one this machine generated — but the local half was never finished, so the ` +
@@ -483,7 +533,7 @@ function rekeyPendingCheck(
     return {
       id: 'rekey_pending',
       label,
-      ok: false,
+      level: 'failed',
       detail:
         `A re-key started ${started} EXPIRED ${status.expiresAt ?? ''} without being finished. Its ` +
         `address was ${address}; the private half it generated is still on disk at ${status.path}. ` +
@@ -498,7 +548,7 @@ function rekeyPendingCheck(
   return {
     id: 'rekey_pending',
     label,
-    ok: true,
+    level: 'ok',
     detail:
       `A re-key started ${started} is still open (expires ${status.expiresAt ?? 'unknown'}). Paste this ` +
       `address into "Replace signing key" on the Haven agent page: ${address}. Parked at ${status.path}. ` +
@@ -539,13 +589,13 @@ async function runtimeSpecOverrideCheck(
   if (shell) facts.push(shell)
   if (facts.length === 0) return undefined
   const variables = Object.values(RUNTIME_SPEC_ENV).join(' / ')
-  return {
+  return finalizeCheck({
     id: 'runtime_spec_override',
     label: 'Runtime spec override',
-    ok: false,
+    level: 'failed',
     detail: `runtime spec overridden — not the pinned manifest (${MCP_RUNTIME_MANIFEST.signerPackage}@${MCP_RUNTIME_MANIFEST.signerVersion}, ${MCP_RUNTIME_MANIFEST.sdkPackage}@${MCP_RUNTIME_MANIFEST.sdkVersion}). ${facts.join('. ')}.`,
     repair: `Developer override (#2424). To return to the pinned manifest: unset ${variables}, then run ${RERUN} --doctor --repair --runtime <runtime>. If the override is intentional, this finding is the record of it.`,
-  }
+  })
 }
 
 async function readMcpSidecarOverride(
@@ -597,8 +647,20 @@ async function checksForAgent(
   input: { runtime: string },
   deps: DoctorDeps,
 ): Promise<{ checks: DoctorCheck[]; signerCapabilities?: Record<string, unknown> }> {
+  const verdicts = await verdictsForAgent(entry, input, deps)
+  return {
+    checks: verdicts.checks.map(finalizeCheck),
+    ...(verdicts.signerCapabilities ? { signerCapabilities: verdicts.signerCapabilities } : {}),
+  }
+}
+
+async function verdictsForAgent(
+  entry: { directory: string; identity?: IdentityFile; sidecar: SignerRuntimeSidecar | null },
+  input: { runtime: string },
+  deps: DoctorDeps,
+): Promise<{ checks: CheckVerdict[]; signerCapabilities?: Record<string, unknown> }> {
   const { directory, identity, sidecar } = entry
-  const checks: DoctorCheck[] = []
+  const checks: CheckVerdict[] = []
   let signerCapabilities: Record<string, unknown> | undefined
 
   // ── Credentials ───────────────────────────────────────────────────────────
@@ -613,7 +675,7 @@ async function checksForAgent(
   checks.push({
     id: 'credentials',
     label: 'Agent credentials',
-    ok: credentialsOk,
+    level: credentialsOk ? 'ok' : 'failed',
     detail: credentialsOk
       ? `identity.json and signer.json parse (agent ${identity?.agent_id ?? 'unknown'}; ` +
         `${describeAccountAddressKey(identity, signerFile)})`
@@ -626,7 +688,7 @@ async function checksForAgent(
     checks.push({
       id: 'signer_runtime',
       label: 'Signer runtime (preinstalled wrapper)',
-      ok: false,
+      level: 'failed',
       detail: 'No signer-runtime.json sidecar — the pinned signer runtime was never prepared (or a pre-#1586 npx config).',
       repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)}`,
     })
@@ -642,7 +704,7 @@ async function checksForAgent(
     checks.push({
       id: 'signer_runtime',
       label: 'Signer runtime (preinstalled wrapper)',
-      ok: matches,
+      level: matches ? 'ok' : 'failed',
       detail: matches
         ? `Installed ${sidecar.signer_package}@${sidecar.signer_version} at ${sidecar.runtime_directory} (override install — see runtime_spec_override)`
         : `Override runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
@@ -663,10 +725,14 @@ async function checksForAgent(
     })
     const versionOk = sidecar.signer_version === MCP_RUNTIME_MANIFEST.signerVersion
     const ok = intact && versionOk
+    // #3121: intact but behind the pin is an ADVISORY — nothing is broken,
+    // the CLI serves tools to the very next check — so it no longer fails the
+    // run. The detail still names both versions and the repair still says how
+    // to catch up. Not intact is a real failure, as before.
     checks.push({
       id: 'signer_runtime',
       label: 'Signer runtime (preinstalled wrapper)',
-      ok,
+      level: ok ? 'ok' : intact ? 'advisory' : 'failed',
       detail: ok
         ? `Installed ${sidecar.signer_package}@${sidecar.signer_version} at ${sidecar.runtime_directory}`
         : intact
@@ -694,7 +760,7 @@ async function checksForAgent(
     checks.push({
       id: 'hosted_mcp',
       label: 'Hosted Haven MCP',
-      ok: probe.status === 'ok',
+      level: probe.status === 'ok' ? 'ok' : 'failed',
       detail: probe.status === 'ok'
         ? `MCP tools endpoint is reachable (${hostedUrl}).`
         : `MCP tools endpoint probe failed: ${probe.status} (${hostedUrl}).`,
@@ -708,7 +774,7 @@ async function checksForAgent(
     checks.push({
       id: 'hosted_mcp',
       label: 'Hosted Haven MCP',
-      ok: false,
+      level: 'failed',
       detail: 'No stored API key / hosted MCP URL to probe with.',
       repair: `Re-run the full setup: ${RERUN} --setup <token>.`,
     })
@@ -743,7 +809,7 @@ async function checksForAgent(
       checks.push({
         id: 'identity_match',
         label: 'Hosted identity matches the local signing key',
-        ok: false,
+        level: 'failed',
         detail: probe.status === 'unauthorized'
           ? 'The stored API key was rejected, so the agent it authenticates as cannot be compared with the local signing key.'
           : `Could not read the hosted identity (${probe.status}) — the comparison did not happen, so it cannot be reported as a match.`,
@@ -755,7 +821,7 @@ async function checksForAgent(
       checks.push({
         id: 'identity_match',
         label: 'Hosted identity matches the local signing key',
-        ok: false,
+        level: 'failed',
         detail: 'signer.json holds no delegate_address to compare against the hosted identity.',
         repair: `Re-run the full setup with a fresh token: ${RERUN} --setup <token>.`,
       })
@@ -764,7 +830,7 @@ async function checksForAgent(
       checks.push({
         id: 'identity_match',
         label: 'Hosted identity matches the local signing key',
-        ok: same,
+        level: same ? 'ok' : 'failed',
         detail: same
           ? `The stored API key authenticates as the agent whose signing key is in this directory (${shortAddress(localDelegate)}).`
           : `MISMATCH: the stored API key authenticates as agent ${probe.agentId ?? 'unknown'} with delegate ` +
@@ -793,7 +859,7 @@ async function checksForAgent(
       checks.push({
         id: 'signer_process',
         label: 'Signer stdio handshake',
-        ok: false,
+        level: 'failed',
         detail: 'The local-tools consent is not acknowledged, so the signer refuses to start (by design).',
         repair: `Run: ${RERUN} --ack-local-tools --setup <token>  (or re-run your original connector command with --ack-local-tools).`,
       })
@@ -814,7 +880,7 @@ async function checksForAgent(
       checks.push({
         id: 'signer_process',
         label: 'Signer stdio handshake',
-        ok: probe.status === 'ok',
+        level: probe.status === 'ok' ? 'ok' : 'failed',
         detail: probe.status === 'ok'
           ? `Signer started, listed ${probe.toolNames?.length ?? 0} tools${probe.serverInfo?.version ? ` (v${probe.serverInfo.version})` : ''}.${compatDetail}`
           : `Handshake failed: ${probe.status}.`,
@@ -825,7 +891,7 @@ async function checksForAgent(
     checks.push({
       id: 'signer_process',
       label: 'Signer stdio handshake',
-      ok: false,
+      level: 'failed',
       detail: 'Skipped — no prepared signer runtime to probe.',
       repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)}`,
     })
@@ -839,7 +905,7 @@ export async function runDoctor(
   deps: DoctorDeps = {},
 ): Promise<DoctorReport> {
   const homeDir = deps.homeDir ?? homedir()
-  const checks: DoctorCheck[] = []
+  const checks: CheckVerdict[] = []
   let signerCapabilities: Record<string, unknown> | undefined
 
   const { directory, others, parkedOnly } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
@@ -957,7 +1023,7 @@ export async function runDoctor(
     checks.push({
       id: 'credentials',
       label: 'Agent credentials',
-      ok: false,
+      level: 'failed',
       detail: 'No agent credential directory with an identity.json under ~/.haven/agents.',
       repair: `Run the full setup once: ${RERUN} --setup <token from the Haven dashboard>.`,
     })
@@ -997,7 +1063,7 @@ export async function runDoctor(
     checks.push({
       id: 'runtime_config',
       label: 'Runtime MCP config',
-      ok: false,
+      level: 'failed',
       detail:
         `Runtime is unknown — no runtime flag was given and the connector's record in ` +
         `${primaryDirectory ?? input.credentialsDir ?? '~/.haven/agents'} carries no resolvable ` +
@@ -1013,14 +1079,14 @@ export async function runDoctor(
     checks.push({
       id: 'runtime_config',
       label: 'Runtime MCP config',
-      ok: true,
+      level: 'ok',
       detail: `Runtime '${input2.runtime}' is configured through its own CLI or by hand (${input2.runtime === 'other' ? 'manual runtime' : 'CLI-managed'}) and has no file-based config the connector owns — skipping the file check.`,
     })
   } else if (configText === null) {
     checks.push({
       id: 'runtime_config',
       label: 'Runtime MCP config',
-      ok: false,
+      level: 'failed',
       detail: `No runtime config at ${configPath}.`,
       repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input2.runtime)}`,
     })
@@ -1038,7 +1104,7 @@ export async function runDoctor(
     checks.push({
       id: 'runtime_config',
       label: 'Runtime MCP config',
-      ok,
+      level: ok ? 'ok' : 'failed',
       detail: ok
         ? `Config at ${configPath} references the hosted server and the prepared signer wrapper.`
         : signerViaNpx
@@ -1132,22 +1198,47 @@ export async function runDoctor(
     const supersededLive = live
       .filter((item) => item.entry.classification !== 'wired')
       .map((item) => item.label)
+    // #3121: with no readable config (`configText === null` — every
+    // claude-code run, by design, or a missing file) `agentIsWired` could only
+    // fall back to "the selected directory is wired, the rest are not", so a
+    // second agent the user deliberately wired on this runtime is classified
+    // `superseded` here without evidence. Failing the run on that would tell
+    // the user to revoke an agent they are using; the honest verdict is an
+    // ADVISORY that names the live keys and says why the classification is
+    // unreliable. The CLASSIFICATION itself does not change (decision 5) —
+    // only the severity of the check that reads it. With a readable config
+    // the classification is evidence, and a live unwired key stays a failure
+    // for every non-wired classification.
+    const classificationUnreliable = configText === null
+    const supersededLevel: DoctorLevel =
+      supersededLive.length === 0 ? 'ok' : classificationUnreliable ? 'advisory' : 'failed'
     checks.push({
       id: 'superseded_agents',
       label: 'Superseded agent credentials',
-      ok: supersededLive.length === 0,
+      level: supersededLevel,
       detail:
-        supersededLive.length > 0
+        supersededLevel === 'failed'
           ? `${otherEntries.length} other credential dir(s) found — ${parts.join('; ')}. A host started before ` +
             'your latest setup keeps authenticating (and spending) as the old agent.'
-          : `${otherEntries.length} other credential dir(s) found — ${parts.join('; ')}.`,
-      ...(supersededLive.length > 0
+          : supersededLevel === 'advisory'
+            ? `${otherEntries.length} other credential dir(s) found — ${parts.join('; ')}. Runtime ` +
+              `'${input2.runtime}' has no config file the connector can read, so which of these agents ` +
+              'are wired cannot be verified from this machine: a live key here may be an agent you use ' +
+              'deliberately, or one a host started before your latest setup is still spending as.'
+            : `${otherEntries.length} other credential dir(s) found — ${parts.join('; ')}.`,
+      ...(supersededLevel === 'failed'
         ? {
             repair:
               `Revoke ${supersededLive.join(', ')} on the Haven agent page, then remove the old ` +
               'director(y/ies) under ~/.haven/agents. Connect never revokes or deletes for you.',
           }
-        : {}),
+        : supersededLevel === 'advisory'
+          ? {
+              repair:
+                `Check ${supersededLive.join(', ')} on the Haven agent page: revoke the ones you no longer use, ` +
+                'then remove their director(y/ies) under ~/.haven/agents. Connect never revokes or deletes for you.',
+            }
+          : {}),
     })
   }
 
@@ -1192,7 +1283,7 @@ export async function runDoctor(
     checks.push({
       id: 'rekey_pending_elsewhere',
       label: 'Parked re-keys in other credential directories',
-      ok: abandoned.length === 0,
+      level: abandoned.length === 0 ? 'ok' : 'failed',
       detail:
         abandoned.length > 0
           ? `ABANDONED re-key key material outside the agent this report describes: ${abandoned.map(describe).join(', ')}. ` +
@@ -1217,7 +1308,7 @@ export async function runDoctor(
   checks.push({
     id: 'restart',
     label: 'Runtime restart',
-    ok: true,
+    level: 'ok',
     detail: restart
       ? 'This runtime loads MCP config at startup — restart it after any repair before expecting the tools to appear.'
       : input2.runtime === ''
@@ -1226,17 +1317,22 @@ export async function runDoctor(
   })
 
   // #1697: exit non-zero if ANY wired agent fails ANY check — not just the
-  // one the old heuristic happened to select.
-  const wiredOk = inventory
+  // one the old heuristic happened to select. #3121: "fails" means level
+  // `failed`; a wired agent's advisory rolls up to `advisory`, never to the
+  // exit code.
+  const wiredChecks = inventory
     .filter((entry) => entry.classification === 'wired')
-    .every((entry) => entry.checks.every((check) => check.ok))
+    .flatMap((entry) => entry.checks)
+  const finalChecks = checks.map(finalizeCheck)
+  const level = rollUpLevel([...finalChecks, ...wiredChecks])
 
   return {
     version: 1,
-    ok: checks.every((check) => check.ok) && wiredOk,
+    ok: level !== 'failed',
+    level,
     runtime: input2.runtime,
     credentialDirectory: primaryDirectory,
-    checks,
+    checks: finalChecks,
     agents: inventory,
     ...(signerCapabilities ? { signerCapabilities } : {}),
   }

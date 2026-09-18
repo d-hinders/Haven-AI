@@ -400,9 +400,10 @@ describe('--doctor per-agent output (#1697)', () => {
     const spy = vi.spyOn(doctor, 'runDoctor').mockResolvedValue({
       version: 1,
       ok: false,
+      level: 'failed',
       runtime: 'codex-cli',
       credentialDirectory: '/home/u/.haven/agents/agent-1',
-      checks: [{ id: 'credentials', label: 'Agent credentials', ok: true, detail: 'fine' }],
+      checks: [{ id: 'credentials', label: 'Agent credentials', ok: true, level: 'ok', detail: 'fine' }],
       agents: [
         {
           agentId: 'agent-1', directory: '/home/u/.haven/agents/agent-1',
@@ -413,7 +414,7 @@ describe('--doctor per-agent output (#1697)', () => {
           classification: 'wired' as const,
           checks: [{
             id: 'identity_match', label: 'Hosted identity matches the local signing key',
-            ok: false, detail: 'MISMATCH: quote as one agent and sign as another.',
+            ok: false, level: 'failed', detail: 'MISMATCH: quote as one agent and sign as another.',
             repair: 'Re-run setup for this agent.',
           }],
         },
@@ -684,5 +685,115 @@ describe('--doctor/--repair runtime requirement (#3120 premise note)', () => {
     })
     expect(exitCode).toBe(1)
     expect(stderr.join('')).toContain('--doctor/--repair need --runtime <runtime>')
+  })
+})
+
+/**
+ * #3121 — three verdict levels. The exit code counts only `failed`; an
+ * advisory is printed with its own marker and its own summary line, exits 0,
+ * and rides in `--json` per check and rolled up. These tests pin the EXIT
+ * CODE, not only the strings.
+ */
+describe('--doctor verdict levels (#3121)', () => {
+  function reportWith(level: 'ok' | 'advisory' | 'failed') {
+    const signerRuntime = {
+      id: 'signer_runtime',
+      label: 'Signer runtime (preinstalled wrapper)',
+      ok: level !== 'failed',
+      level,
+      detail:
+        level === 'ok'
+          ? 'Installed @haven_ai/signer@1.2.3 at /rt'
+          : level === 'advisory'
+            ? "Installed version 1.2.2 does not match the connector's pinned 1.2.3 — intact, but outdated."
+            : 'Runtime directory is stale or empty (/rt) — the CLI or package versions are missing.',
+      ...(level === 'ok' ? {} : { repair: 'Run: npx -y @haven_ai/connect --doctor --repair --runtime codex-cli' }),
+    }
+    return {
+      version: 1 as const,
+      ok: level !== 'failed',
+      level,
+      runtime: 'codex-cli',
+      credentialDirectory: '/home/u/.haven/agents/agent-1',
+      checks: [{ id: 'credentials', label: 'Agent credentials', ok: true, level: 'ok' as const, detail: 'fine' }, signerRuntime],
+      agents: [{ agentId: 'agent-1', directory: '/home/u/.haven/agents/agent-1', classification: 'wired' as const, checks: [] }],
+    }
+  }
+
+  async function runWith(level: 'ok' | 'advisory' | 'failed', extra: string[] = []) {
+    const stdout: string[] = []
+    const spy = vi.spyOn(doctorModule, 'runDoctor').mockResolvedValue(reportWith(level))
+    try {
+      const exitCode = await runCli(['--doctor', '--runtime', 'codex-cli', ...extra], {
+        stdout: (m) => stdout.push(m), stderr: () => undefined,
+      })
+      return { exitCode, out: stdout.join('') }
+    } finally {
+      spy.mockRestore()
+    }
+  }
+
+  it('an advisory exits 0, is marked "!" and gets its own summary line — never "FAILED"', async () => {
+    const { exitCode, out } = await runWith('advisory')
+    expect(exitCode).toBe(0)
+    expect(out).toContain('! Signer runtime (preinstalled wrapper): Installed version 1.2.2')
+    expect(out).toContain('↳ repair:')
+    expect(out).toContain('No failures. 1 advisory finding(s)')
+    expect(out).not.toContain('FAILED')
+    expect(out).not.toContain('All checks passed')
+  })
+
+  it('MUTATION PROOF: a failed check still exits 1 with the "✗" marker and the FAILED summary', async () => {
+    const { exitCode, out } = await runWith('failed')
+    expect(exitCode).toBe(1)
+    expect(out).toContain('✗ Signer runtime (preinstalled wrapper): Runtime directory is stale or empty')
+    expect(out).toContain('One or more checks FAILED')
+  })
+
+  it('all ok: exit 0 and the unchanged "All checks passed." line (characterization)', async () => {
+    const { exitCode, out } = await runWith('ok')
+    expect(exitCode).toBe(0)
+    expect(out).toContain('✓ Signer runtime (preinstalled wrapper)')
+    expect(out).toContain('All checks passed.')
+  })
+
+  it('--json carries the level per check and rolled up, and ok tracks the exit code', async () => {
+    const { exitCode, out } = await runWith('advisory', ['--json'])
+    expect(exitCode).toBe(0)
+    const report = JSON.parse(out) as { ok: boolean; level: string; version: number; checks: Array<{ id: string; level: string; ok: boolean }> }
+    expect(report.version).toBe(1)
+    expect(report.level).toBe('advisory')
+    expect(report.ok).toBe(true)
+    expect(report.checks.find((c) => c.id === 'signer_runtime')).toMatchObject({ level: 'advisory', ok: true })
+    expect(report.checks.find((c) => c.id === 'credentials')).toMatchObject({ level: 'ok', ok: true })
+  })
+
+  it('a WIRED agent\'s advisory in agents[] is shown with "!" and does not fail the run', async () => {
+    const stdout: string[] = []
+    const base = reportWith('ok')
+    const spy = vi.spyOn(doctorModule, 'runDoctor').mockResolvedValue({
+      ...base,
+      level: 'advisory',
+      agents: [
+        ...base.agents,
+        {
+          slug: 'ops', agentId: 'agent-ops', directory: '/home/u/.haven/agents/ops', classification: 'wired' as const,
+          checks: [{
+            id: 'signer_runtime', label: 'Signer runtime (preinstalled wrapper)', ok: true, level: 'advisory' as const,
+            detail: "Installed version 1.2.2 does not match the connector's pinned 1.2.3 — intact, but outdated.",
+          }],
+        },
+      ],
+    })
+    try {
+      const exitCode = await runCli(['--doctor', '--runtime', 'codex-cli'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(0)
+      const out = stdout.join('')
+      expect(out).toContain('! ops (agent-ops): wired, 1 advisory finding(s)')
+      expect(out).toContain('      ! Signer runtime (preinstalled wrapper): Installed version 1.2.2')
+      expect(out).toContain('No failures. 1 advisory finding(s)')
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

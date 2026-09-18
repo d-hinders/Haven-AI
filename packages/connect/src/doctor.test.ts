@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { acknowledgeLocalSignerConsent } from './signer-consent.js'
 import { CONNECT_OUTCOME_FILENAME } from './storage.js'
-import { describeAccountAddressKey, runDoctor, runRepair, type DoctorDeps } from './doctor.js'
+import { describeAccountAddressKey, rollUpLevel, runDoctor, runRepair, type DoctorDeps } from './doctor.js'
 
 const API_KEY = 'sk_agent_1234567890abcdef1234567890abcdef'
 const DELEGATE_ADDRESS = '0x' + 'cd'.repeat(20)
@@ -211,7 +211,10 @@ describe('runDoctor (#1589)', () => {
 
     const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
     const check = report.checks.find((c) => c.id === 'signer_runtime')
-    expect(check?.ok).toBe(false)
+    // #3121: intact-but-outdated is an ADVISORY — `ok` stays true (nothing is
+    // broken) and the level says what there is to read.
+    expect(check?.level).toBe('advisory')
+    expect(check?.ok).toBe(true)
     expect(check?.detail).not.toMatch(/stale or empty/i)
     expect(check?.detail).toContain(oldVersion)
     expect(check?.detail).toContain(MCP_RUNTIME_MANIFEST.signerVersion)
@@ -1847,5 +1850,217 @@ describe('runtime resolution in --repair (#3120)', () => {
     const repair = await runRepair({ runtime: 'codex-cli' }, { homeDir, runCommand })
     expect(repair.ok).toBe(true)
     expect(repair.messages.join('\n')).not.toContain('resolved')
+  })
+})
+
+/**
+ * #3121 — three verdict levels. Before this, a check had one verdict and
+ * `report.ok` rolled every `false` into the exit code, so "worth telling you,
+ * and nothing is broken" had to be reported as a failure or not at all. An
+ * install that passed one day failed the next because the pinned dev build
+ * had moved overnight, with no action by anyone.
+ *
+ * The blocking behaviour to preserve is LIVE SPEND AUTHORITY: probe `ok` AND
+ * `classification !== 'wired'` — for every non-wired classification — with
+ * a readable config. The `configText === null` class (every claude-code run)
+ * is the one place the classification is a fallback, not evidence, and it
+ * moves to advisory.
+ */
+describe('doctor verdict levels (#3121)', () => {
+  const OLD_KEY = 'sk_agent_oldsecret'
+
+  async function homeWithOutdatedRuntime() {
+    const { homeDir, dir } = await healthyHome()
+    const oldVersion = '0.0.0-dev.202609040858.f4467bb'
+    const oldRuntimeDirectory = join(homeDir, '.haven', 'signer-runtime', oldVersion)
+    const oldCliPath = join(oldRuntimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist', 'cli.js')
+    await mkdir(join(oldRuntimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist'), { recursive: true })
+    await writeFile(oldCliPath, '// cli (older, intact)')
+    for (const pkg of ['signer', 'sdk']) {
+      const pkgDir = join(oldRuntimeDirectory, 'node_modules', '@haven_ai', pkg)
+      await mkdir(pkgDir, { recursive: true })
+      await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ version: oldVersion }))
+    }
+    const sidecarPath = join(dir, 'signer-runtime.json')
+    const sidecar = JSON.parse(await readFile(sidecarPath, 'utf8')) as Record<string, unknown>
+    await writeFile(sidecarPath, JSON.stringify({
+      ...sidecar, signer_version: oldVersion, sdk_version: oldVersion,
+      runtime_directory: oldRuntimeDirectory, cli_path: oldCliPath,
+    }))
+    expect(oldVersion).not.toBe(MCP_RUNTIME_MANIFEST.signerVersion)
+    return { homeDir, dir, oldVersion }
+  }
+
+  /** A second, live credential directory beside the selected one — the #1688 shape, reusable per runtime. */
+  async function homeWithSecondLiveDirectory() {
+    const { homeDir } = await healthyHome()
+    const oldDir = join(homeDir, '.haven', 'agents', 'agent-old')
+    await mkdir(oldDir, { recursive: true })
+    await writeFile(join(oldDir, 'identity.json'), JSON.stringify({
+      api_key: OLD_KEY, agent_id: 'agent-old', api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+    const selected = join(homeDir, '.haven', 'agents', 'agent-1', 'identity.json')
+    await writeFile(selected, await readFile(selected, 'utf8'))
+    const deps = healthyDeps()
+    deps.probeHostedIdentity.mockImplementation(async (apiKey: string) =>
+      apiKey === OLD_KEY
+        ? { status: 'ok' as const, agentId: 'agent-old', delegateAddress: DELEGATE_ADDRESS }
+        : { status: 'ok' as const, agentId: 'agent-1', delegateAddress: DELEGATE_ADDRESS },
+    )
+    return { homeDir, oldDir, deps }
+  }
+
+  function everyCheck(report: Awaited<ReturnType<typeof runDoctor>>) {
+    return [...report.checks, ...report.agents.flatMap((agent) => agent.checks)]
+  }
+
+  it('intact but behind the pin: ADVISORY, report.ok true, level advisory, both versions named, repair still offered', async () => {
+    const { homeDir, oldVersion } = await homeWithOutdatedRuntime()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'signer_runtime')
+    expect(check?.level).toBe('advisory')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain(oldVersion)
+    expect(check?.detail).toContain(MCP_RUNTIME_MANIFEST.signerVersion)
+    expect(check?.detail).toContain('intact, but outdated')
+    expect(check?.repair).toContain('--repair')
+    // The report as a whole: nothing failed, so the exit-code predicate is green.
+    expect(report.level).toBe('advisory')
+    expect(report.ok).toBe(true)
+  })
+
+  it('MUTATION PROOF: a stale or empty runtime is still a FAILURE — the advisory is for intact installs only', async () => {
+    const { homeDir, runtimeDirectory } = await healthyHome()
+    await rm(runtimeDirectory, { recursive: true, force: true })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'signer_runtime')
+    expect(check?.level).toBe('failed')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toMatch(/stale or empty/i)
+    expect(report.level).toBe('failed')
+    expect(report.ok).toBe(false)
+  })
+
+  describe('a live, genuinely unwired directory stays BLOCKING with a readable config — one test per classification', () => {
+    it('superseded: identity present, no config entry, key authenticates → failed', async () => {
+      const { homeDir, deps } = await homeWithSecondLiveDirectory()
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+      expect(report.agents.find((a) => a.agentId === 'agent-old')?.classification).toBe('superseded')
+      const check = report.checks.find((c) => c.id === 'superseded_agents')
+      expect(check?.level).toBe('failed')
+      expect(check?.detail).toMatch(/SPEND-CAPABLE/)
+      expect(check?.repair).toMatch(/Revoke agent-old/)
+      expect(report.ok).toBe(false)
+    })
+
+    it('retired: tombstoned but the key still authenticates → failed (a tombstone is a marker, not a revocation)', async () => {
+      const { homeDir, oldDir, deps } = await homeWithSecondLiveDirectory()
+      const { writeAgentTombstone } = await import('./tombstone.js')
+      await writeAgentTombstone({ directory: oldDir, agentId: 'agent-old', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+      const entry = report.agents.find((a) => a.agentId === 'agent-old')
+      expect(entry?.classification).not.toBe('wired')
+      const check = report.checks.find((c) => c.id === 'superseded_agents')
+      expect(check?.level).toBe('failed')
+      expect(check?.detail).toContain('tombstoned — key material still present')
+      expect(report.ok).toBe(false)
+    })
+
+    it('orphaned: no api key by construction, so it can never be probed live — reported as unverifiable, never green-washed', async () => {
+      const { homeDir, deps } = await homeWithSecondLiveDirectory()
+      const orphanDir = join(homeDir, '.haven', 'agents', 'orphan')
+      await mkdir(orphanDir, { recursive: true })
+      await writeFile(join(orphanDir, 'identity.json'), JSON.stringify({ agent_id: 'agent-orphan' }))
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+      expect(report.agents.find((a) => a.directory === orphanDir)?.classification).toBe('orphaned')
+      const check = report.checks.find((c) => c.id === 'superseded_agents')
+      expect(check?.detail).toContain('could not verify: orphan (no stored key/API URL to probe)')
+      // The live superseded sibling still fails the check — an orphan beside it changes nothing.
+      expect(check?.level).toBe('failed')
+    })
+
+    it('parked: a re-key-only directory has no identity to probe — reported through rekey_pending_elsewhere, never as live', async () => {
+      const { homeDir, deps } = await homeWithSecondLiveDirectory()
+      const parkedDir = join(homeDir, '.haven', 'agents', 'parked')
+      await mkdir(parkedDir, { recursive: true })
+      await writeFile(join(parkedDir, 'rekey-pending.json'), JSON.stringify({
+        version: 1, agent_id: 'agent-parked', address: '0x' + 'ee'.repeat(20), private_key: '0x' + '33'.repeat(32),
+        started_at: '2026-09-01T00:00:00.000Z', expires_at: '2026-09-01T01:00:00.000Z',
+      }))
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps, now: () => Date.parse('2026-09-18T00:00:00.000Z') })
+      expect(report.agents.find((a) => a.directory === parkedDir)?.classification).toBe('parked')
+      const superseded = report.checks.find((c) => c.id === 'superseded_agents')
+      expect(superseded?.detail).toContain('could not verify: parked')
+      expect(superseded?.level).toBe('failed') // the live sibling
+      const parked = report.checks.find((c) => c.id === 'rekey_pending_elsewhere')
+      expect(parked?.level).toBe('failed') // an EXPIRED parked key is the abandoned case (#1911)
+      expect(report.ok).toBe(false)
+    })
+  })
+
+  it('claude-code (no readable config): a second live directory is an ADVISORY naming why the classification is unreliable — exit-code predicate green', async () => {
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const report = await runDoctor({ runtime: 'claude-code' }, { homeDir, ...deps })
+    // The classification itself is unchanged (decision 5): the fallback still says "superseded".
+    expect(report.agents.find((a) => a.agentId === 'agent-old')?.classification).toBe('superseded')
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.level).toBe('advisory')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain('STILL SPEND-CAPABLE: agent-old')
+    expect(check?.detail).toContain("Runtime 'claude-code' has no config file the connector can read")
+    expect(check?.detail).toContain('cannot be verified from this machine')
+    expect(check?.repair).toMatch(/Check agent-old on the Haven agent page/)
+    expect(report.level).toBe('advisory')
+    expect(report.ok).toBe(true)
+  })
+
+  it('MUTATION PROOF (the twin): the SAME two directories on codex-cli, whose config names only agent-1, stay a failure', async () => {
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.level).toBe('failed')
+    expect(report.ok).toBe(false)
+  })
+
+  it('unknown runtime (#3120): runtime_config stays FAILED — "not checked" is not "nothing is broken"', async () => {
+    // Decided here rather than inherited (#3121, "this slice owns the exit
+    // code"): a check that could not look at a surface it owns is not an
+    // advisory, because an advisory promises the surface was examined. The
+    // #3120 shard's sentence "an unknown runtime can never ride a green exit
+    // code again" therefore still holds.
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'runtime_config')
+    expect(check?.level).toBe('failed')
+    expect(check?.detail).toContain('NOT checked')
+    expect(report.ok).toBe(false)
+  })
+
+  it('every level is reachable — the model cannot collapse back to binary unnoticed', async () => {
+    const healthy = await runDoctor({ runtime: 'codex-cli' }, { homeDir: (await healthyHome()).homeDir, ...healthyDeps() })
+    const outdated = await runDoctor({ runtime: 'codex-cli' }, { homeDir: (await homeWithOutdatedRuntime()).homeDir, ...healthyDeps() })
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const failing = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+    const levels = new Set([healthy, outdated, failing].flatMap((r) => everyCheck(r).map((c) => c.level)))
+    expect([...levels].sort()).toEqual(['advisory', 'failed', 'ok'])
+    expect([healthy.level, outdated.level, failing.level]).toEqual(['ok', 'advisory', 'failed'])
+  })
+
+  it('INVARIANT: ok === (level !== "failed") on every check and on the report, in every state', async () => {
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    for (const report of [
+      await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps }),
+      await runDoctor({ runtime: 'claude-code' }, { homeDir, ...deps }),
+      await runDoctor({ runtime: 'codex-cli' }, { homeDir: (await homeWithOutdatedRuntime()).homeDir, ...healthyDeps() }),
+    ]) {
+      for (const check of everyCheck(report)) expect(check.ok, check.id).toBe(check.level !== 'failed')
+      expect(report.ok).toBe(report.level !== 'failed')
+    }
+  })
+
+  it('rollUpLevel: failed beats advisory beats ok; empty is ok', () => {
+    expect(rollUpLevel([])).toBe('ok')
+    expect(rollUpLevel([{ level: 'ok' }, { level: 'ok' }])).toBe('ok')
+    expect(rollUpLevel([{ level: 'ok' }, { level: 'advisory' }])).toBe('advisory')
+    expect(rollUpLevel([{ level: 'advisory' }, { level: 'failed' }, { level: 'ok' }])).toBe('failed')
   })
 })

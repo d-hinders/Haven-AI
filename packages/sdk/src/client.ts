@@ -40,6 +40,7 @@ import type {
   HavenAgentSummary,
   HavenAgentAllowanceSummary,
   HavenAllowanceSummary,
+  HavenBalanceCoverage,
   PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
   HavenPaymentReceiptsPage,
@@ -644,6 +645,22 @@ export class HavenClient {
    */
   async getAllowances(): Promise<HavenAllowanceSummary> {
     return this.accountReads.getAllowances()
+  }
+
+  /**
+   * #3126 — is the checked amount of the token actually HELD on the
+   * agent's own account?
+   *
+   * This is the companion to {@link getAllowances}, not a variant of it:
+   * allowances answer what the agent is PERMITTED to spend this period;
+   * this answers whether the account HOLDS funds behind that permission,
+   * as a sufficiency signal — `covered: true | false | null` — never as a
+   * balance. `covered: null` means the chain read failed: treat it as
+   * unverifiable, not as absence (`coverageError` says why). The account's
+   * balance itself is deliberately not returned.
+   */
+  async checkFunds(input: { token: string; amountAtomic: string }): Promise<HavenBalanceCoverage> {
+    return this.accountReads.checkFunds(input)
   }
 
   /**

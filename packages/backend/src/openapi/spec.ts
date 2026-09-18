@@ -5711,6 +5711,46 @@ export const openapiSpec = {
         },
       },
     },
+    '/machine-payments/balance-coverage': {
+      get: {
+        tags: ['Machine payments'],
+        operationId: 'getMachinePaymentBalanceCoverage',
+        summary: 'Report whether the account actually holds the amount behind the agent\'s budget (#3126).',
+        description:
+          'Answers the question no spend-authority read answers: is `amount_atomic` of `token` ' +
+          'actually HELD on the authenticated agent\'s own account right now. The response is a ' +
+          'sufficiency signal, never a balance: `covered` is true/false/null and the account\'s ' +
+          'balance itself is deliberately not returned — a constrained agent has no business ' +
+          'reading the treasury total, and the boolean answers the only decision an agent has ' +
+          '(attempt the payment, or tell the user funds are missing). `covered: null` means the ' +
+          'chain read FAILED — treat it as unverifiable, not as absence. Keep the two concepts ' +
+          'apart: `budget_remaining_atomic` is spend AUTHORITY (the same figure ' +
+          'GET /machine-payments/allowances reports as onchain.remaining); `covered` is about ' +
+          'HELD funds. Rail-aware like every read: both retired rails answer 410. Reporting only — ' +
+          'grants no authority, moves nothing; enforcement stays on-chain.',
+        security: [{ AgentApiKey: [] }],
+        responses: {
+          '200': {
+            description: 'The coverage answer for the requested token and amount.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BalanceCoverageResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': agentAuthForbidden,
+          '410': {
+            ...errorResponse,
+            description:
+              'The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule (#2020). ' +
+              'Fail-closed; there is no account this surface can describe.',
+          },
+          '502': errorResponse,
+        },
+      },
+    },
     '/machine-payments/authorize': {
       post: {
         tags: ['Machine payments'],
@@ -8362,6 +8402,53 @@ export const openapiSpec = {
             type: 'boolean',
             description:
               '#1319 provenance, same semantics as the allowances read\'s flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
+          },
+        },
+        additionalProperties: false,
+      },
+      BalanceCoverageResponse: {
+        type: 'object',
+        description:
+          'The #3126 sufficiency answer — whether HELD funds cover the checked amount. Deliberately ' +
+          'NOT a balance: no field carries the account\'s balance, and nothing is named like the ' +
+          'authority figures (remaining/available). `covered` speaks only of holdings; ' +
+          '`budget_remaining_atomic` is the PERMITTED figure the allowances read reports.',
+        required: ['covered', 'chain_id', 'token_address', 'token_symbol', 'checked_amount_atomic', 'budget_remaining_atomic'],
+        properties: {
+          covered: {
+            anyOf: [
+              { type: 'boolean' },
+              { type: 'null' },
+            ],
+            description:
+              'true: the chain says the agent\'s account holds at least checked_amount_atomic of ' +
+              'token. false: the chain read succeeded and reports LESS — tell the user the funds ' +
+              'are missing rather than retrying. null: the chain read FAILED — unverifiable, never ' +
+              'treated as absence; coverage_error carries why.',
+          },
+          coverage_error: {
+            type: 'string',
+            description: 'Present only when covered is null: why the chain read could not answer.',
+          },
+          chain_id: { type: 'integer' },
+          token_address: address,
+          token_symbol: { type: 'string' },
+          checked_amount_atomic: {
+            type: 'string',
+            description: 'The amount the coverage question was asked about, in ATOMIC units.',
+          },
+          budget_remaining_atomic: {
+            type: 'string',
+            description:
+              'Context, AUTHORITY not holdings: the agent\'s remaining spend authority for the ' +
+              'requested token, in ATOMIC units — the same derivation GET /machine-payments/allowances ' +
+              'reports as onchain.remaining (#1090 derivation, #1145 enforcer read). Zero when no ' +
+              'active budget row names the token. Compare it with covered, never instead of it.',
+          },
+          budget_remaining_is_from_chain: {
+            type: 'boolean',
+            description:
+              '#1319 provenance, same semantics as the allowances read\'s flag: true when the budget figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
           },
         },
         additionalProperties: false,

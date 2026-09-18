@@ -57,6 +57,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "GET /health/ops": "routes/health.ts",
   "GET /machine-payments/agent": "routes/machine-payments.ts",
   "GET /machine-payments/allowances": "routes/machine-payments.ts",
+  "GET /machine-payments/balance-coverage": "routes/machine-payments.ts",
   "GET /machine-payments/receipts": "routes/machine-payments.ts",
   "GET /machine-payments/{id}/status": "routes/machine-payments.ts",
   "GET /merchants": "routes/merchants.ts",

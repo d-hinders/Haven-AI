@@ -60,26 +60,6 @@ last-verified: "2026-09-18"
 > one per CI edit, so this section does not accumulate a paragraph every time a
 > step is added.
 >
-> **Recent re-verification (#3125):** the `haven_list_receipts` description
-> prose changed on BOTH runtimes — it is one shared fragment
-> (`packages/sdk/src/tool-descriptions.ts` `listReceipts`), composed verbatim by
-> the local stdio surface and the hosted `contracts.ts` module alike, and the
-> edit adds the payer-provenance boundary: `parties.treasuryAccount` is Haven's
-> authoritative payer record, `protocolReceiptPayload` is the merchant's
-> `PAYMENT-RESPONSE` relayed verbatim, merchant-controlled and unverified — not
-> Haven's record — and its payer may differ from `payerAddress`. No tool added,
-> renamed or re-shaped: arguments, schemas, the strict/permissive split and the
-> registered tool-NAME set are untouched, so the version-skew and consent-hash
-> contracts do not move (descriptions are not a skew axis — #2330 precedent —
-> and `computeConsentHash` hashes identity, tool names and allowances only, not
-> description text, verified at `packages/mcp/src/consent.ts:81-103`; an older
-> runtime simply serves the older guidance text from the `@haven_ai/sdk` it
-> bundles). The fragment was sized to keep the hosted description mean under
-> the #1591 per-tool cap (873.04 ≤ 874 bytes measured at the delivered head),
-> so the new guidance cost old phrasing, not the budget. The SDK type edit is
-> doc-comment-only (`HavenPaymentReceipt.protocolReceiptPayload`), no wire
-> shape change. Nothing else in this document was re-verified in this pass.
->
 > **Recent re-verification (#3128):** `haven_list_receipts` is RE-SHAPED on
 > both runtimes — the one deliberate non-additive change on this surface
 > since #2330. Its schema gains an optional `cursor` (the previous page's
@@ -112,6 +92,40 @@ last-verified: "2026-09-18"
 > not this sentence, is the instrument) — the `getAgent` prose lost
 > phrasing, not guidance. Nothing else in
 > this document was re-verified in this pass.
+>
+> **Recent re-verification (#3126):** the sufficiency read `GET
+> /machine-payments/balance-coverage` (tool `haven_check_funds`) ships in this
+> same change as its backend route, so there is no version window to argue.
+> Round-2 rework relocated the route's two query guards (`token`,
+> `amount_atomic`) verbatim into `modules/mpp/balance-coverage-guards.ts`,
+> exported through the mpp barrel, to hold the #3029 shrink-only ratchet
+> baseline for `routes/machine-payments.ts` (19, unchanged). The wire contract
+> this document describes is untouched: same checks in the same order,
+> byte-identical 400 bodies (pinned by the 62-test real-DB route suite), no
+> tool added or renamed beyond this PR's own `haven_check_funds`, no schema or
+> description change, and the skew-flatness this document asserts holds — the
+> endpoint and the tool that calls it deploy in the same train. Nothing else
+> in this document was re-verified in this pass.
+>
+> **Recent re-verification (#3125):** the `haven_list_receipts` description
+> prose changed on BOTH runtimes — it is one shared fragment
+> (`packages/sdk/src/tool-descriptions.ts` `listReceipts`), composed verbatim by
+> the local stdio surface and the hosted `contracts.ts` module alike, and the
+> edit adds the payer-provenance boundary: `parties.treasuryAccount` is Haven's
+> authoritative payer record, `protocolReceiptPayload` is the merchant's
+> `PAYMENT-RESPONSE` relayed verbatim, merchant-controlled and unverified — not
+> Haven's record — and its payer may differ from `payerAddress`. No tool added,
+> renamed or re-shaped: arguments, schemas, the strict/permissive split and the
+> registered tool-NAME set are untouched, so the version-skew and consent-hash
+> contracts do not move (descriptions are not a skew axis — #2330 precedent —
+> and `computeConsentHash` hashes identity, tool names and allowances only, not
+> description text, verified at `packages/mcp/src/consent.ts:81-103`; an older
+> runtime simply serves the older guidance text from the `@haven_ai/sdk` it
+> bundles). The fragment was sized to keep the hosted description mean under
+> the #1591 per-tool cap (873.04 ≤ 874 bytes measured at the delivered head),
+> so the new guidance cost old phrasing, not the budget. The SDK type edit is
+> doc-comment-only (`HavenPaymentReceipt.protocolReceiptPayload`), no wire
+> shape change. Nothing else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#3054):** the hosted guided prepare's over-budget
 > compare moved server-side. `haven_prepare_catalog_purchase`'s step 6 no

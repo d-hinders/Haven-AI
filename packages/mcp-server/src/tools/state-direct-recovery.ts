@@ -3,9 +3,10 @@
  * surface, carved out of `tools.ts` (which stays the compatibility facade
  * `index.ts`, `server.ts`, tests and embedders import).
  *
- * Ten tools, one owner:
+ * Ten authority reads plus the #3126 sufficiency check — one owner:
  *
  *   state      haven_get_agent, haven_get_allowances,
+ *              haven_check_funds (#3126),
  *              haven_get_payment_status, haven_get_resume_state
  *   direct     haven_send, haven_pay, haven_submit
  *   recovery   haven_sweep_delegate
@@ -32,14 +33,16 @@ import {
   HavenApiError,
   HavenClient,
   HavenPaymentStateError,
+  resolveTokenFromAddress,
   verifyPaymentReceipt,
   type PaymentReceipt,
   type SweepAuthorization,
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
-import { runTool } from './support/errors.js'
-import { buildAgentGuidance } from './support/guidance.js'
+import { runTool, HostedToolError } from './support/errors.js'
+import { buildAgentGuidance, refusalNextStep } from './support/guidance.js'
+import { atomicToDisplay, humanToAtomic, readMaxAmountCap } from './support/cap-price.js'
 import {
   delegationSignFields,
   submitErc7710WithExpiryMapping,
@@ -67,6 +70,7 @@ import { isPendingApproval } from './support/quote-response.js'
 export const STATE_DIRECT_RECOVERY_TOOLS = [
   'haven_get_agent',
   'haven_get_allowances',
+  'haven_check_funds',
   'haven_sweep_delegate',
   'haven_send',
   'haven_pay',
@@ -93,6 +97,106 @@ export function createStateDirectRecoveryHandlers(
     haven_get_agent: async () => runTool(async () => haven.getAgentSummary()),
 
     haven_get_allowances: async () => runTool(async () => haven.getAllowances()),
+
+    // #3126 — the sufficiency check. The hosted handler asks the BACKEND's
+    // rail-aware coverage read (haven.checkFunds → GET
+    // /machine-payments/balance-coverage); it never reads a chain itself —
+    // the hosted server has no RPC configuration and the chain ask lives
+    // behind the agent-authenticated route. The amount arrives in the cap
+    // spelling (#1351) and reuses that contract's validators verbatim; the
+    // token symbol comes from Haven's own registry so the human display
+    // matches the rest of the surface.
+    haven_check_funds: async (input) =>
+      runTool(async () => {
+        const args = parseStrict('haven_check_funds', input)
+        const cap = readMaxAmountCap(args, { required: true })
+        const token = resolveTokenFromAddress(args.token)
+        // Same conversion contract as the pay tools' caps (#1351): a human
+        // amount is interpreted through the decimals of the token the
+        // ADDRESS resolves to, never a guess; an unresolvable token or an
+        // over-precise human amount refuses here, before the coverage read.
+        let maxAmountAtomic: string
+        if (cap.kind === 'none') {
+          // Unreachable while required:true (readMaxAmountCap refuses
+          // both-or-neither before returning 'none'); kept exhaustive so the
+          // type never silently grows a fourth variant.
+          throw new HostedToolError({
+            code: 'INVALID_INPUT',
+            message: 'An amount is required: pass max_amount_human (whole tokens) or max_amount (atomic).',
+            statusCode: 400,
+            nextStep: refusalNextStep({
+              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextTool: null,
+              nextToolOmittedReason: 'the user has to decide before anything is called again',
+            }),
+          })
+        } else if (cap.kind === 'human') {
+          if (!token) {
+            throw new HostedToolError({
+              code: 'MAX_AMOUNT_UNCONVERTIBLE',
+              message:
+                `max_amount_human ("${cap.value}") cannot be applied: Haven does not recognise ` +
+                `token ${args.token}, so the number of atomic units in one token is unknown and ` +
+                'any conversion would be a guess. Nothing was read from any chain. Re-send the ' +
+                'amount as max_amount in atomic units.',
+              statusCode: 400,
+              nextStep: refusalNextStep({
+                nextAction: AgentPaymentNextAction.StopAndTellUser,
+                nextTool: null,
+                nextToolOmittedReason: 'the user has to decide before anything is called again',
+              }),
+            })
+          }
+          const atomic = humanToAtomic(cap.value, token.decimals)
+          if (atomic === null) {
+            throw new HostedToolError({
+              code: 'MAX_AMOUNT_UNCONVERTIBLE',
+              message:
+                `max_amount_human ("${cap.value}") carries more decimal places than ` +
+                `${token.symbol} supports (${token.decimals}). Haven refuses rather than silently ` +
+                'change the amount. Nothing was read from any chain. Round the amount to ' +
+                `${token.decimals} decimal places, or send an exact max_amount in atomic units.`,
+              statusCode: 400,
+              nextStep: refusalNextStep({
+                nextAction: AgentPaymentNextAction.StopAndTellUser,
+                nextTool: null,
+                nextToolOmittedReason: 'the user has to decide before anything is called again',
+              }),
+            })
+          }
+          maxAmountAtomic = atomic.toString()
+        } else {
+          maxAmountAtomic = cap.value
+        }
+        const coverage = await haven.checkFunds({
+          token: args.token,
+          amountAtomic: maxAmountAtomic,
+        })
+        const amountDisplay = token
+          ? cap.kind === 'human'
+            ? cap.value
+            : atomicToDisplay(maxAmountAtomic, token.decimals)
+          : `${maxAmountAtomic} (atomic; unknown decimals)`
+        return {
+          covered: coverage.covered,
+          ...(coverage.coverageError ? { coverage_error: coverage.coverageError } : {}),
+          chain_id: coverage.chainId,
+          token: token?.symbol ?? coverage.tokenSymbol,
+          token_address: coverage.tokenAddress,
+          checked_amount: amountDisplay,
+          checked_amount_atomic: coverage.checkedAmountAtomic,
+          budget_remaining_atomic: coverage.budgetRemainingAtomic,
+          ...(coverage.budgetRemainingIsFromChain !== undefined
+            ? { budget_remaining_is_from_chain: coverage.budgetRemainingIsFromChain }
+            : {}),
+          next_step:
+            coverage.covered === false
+              ? 'The budget is backed by an empty account — stop and tell the user the funds are missing rather than attempting the payment.'
+              : coverage.covered === null
+                ? 'The chain read failed: treat this as unverifiable, not as absence. Retry shortly or proceed knowing the payment may fail on-chain.'
+                : 'The checked amount is held. Spend AUTHORITY is a separate question — budget_remaining_atomic above is the permitted figure; ask haven_get_allowances for the full per-token breakdown.',
+        }
+      }),
 
     haven_sweep_delegate: async (input) =>
       runTool(async () => {

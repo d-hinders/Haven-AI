@@ -34,6 +34,7 @@ import {
 const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_get_agent',
   'haven_get_allowances',
+  'haven_check_funds',
   'haven_send',
   'haven_pay',
   'haven_submit',
@@ -58,10 +59,10 @@ const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
 ]
 
 describe('hosted tool contract surface (#2807 characterization)', () => {
-  it('advertises exactly the 23 hosted tool names, each exactly once', () => {
+  it('advertises exactly the 24 hosted tool names, each exactly once', () => {
     const schemaKeys = Object.keys(toolSchemas)
-    expect(schemaKeys).toHaveLength(23)
-    expect(new Set(schemaKeys).size).toBe(23)
+    expect(schemaKeys).toHaveLength(24)
+    expect(new Set(schemaKeys).size).toBe(24)
     expect([...schemaKeys].sort()).toEqual([...HOSTED_TOOL_NAMES].sort())
   })
 
@@ -189,6 +190,6 @@ describe('hosted tool contract surface (#2807 characterization)', () => {
       expect(toolDescriptions[name as HostedToolName]).toBeTruthy()
       expect(toolInputSchema(name as HostedToolName)).toBeTruthy()
     }
-    expect(advertised.size).toBe(23)
+    expect(advertised.size).toBe(24)
   })
 })

@@ -49,6 +49,7 @@ import { composeDescription, toolDescriptions as sharedDescriptions } from '@hav
 export type HostedToolName =
   | 'haven_get_agent'
   | 'haven_get_allowances'
+  | 'haven_check_funds'
   | 'haven_send'
   | 'haven_pay'
   | 'haven_submit'
@@ -149,6 +150,26 @@ export type DiscoveryEntry = {
 export const toolSchemas = {
   haven_get_agent: {},
   haven_get_allowances: {},
+  // #3126: the amount arrives in the pay tools' cap spelling (#1351) —
+  // max_amount_human in whole tokens ("1" = 1 USDC, preferred) or max_amount
+  // in atomic units — so a figure learned from a quote flows in unchanged.
+  // Exactly one is REQUIRED (readMaxAmountCap refuses both-or-neither): this
+  // tool answers a coverage question about a stated amount, never an
+  // open-ended balance read.
+  haven_check_funds: {
+    token: z.string().min(1),
+    max_amount: z
+      .string()
+      .regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount')
+      .optional(),
+    max_amount_human: z
+      .string()
+      .regex(
+        /^[0-9]+(\.[0-9]+)?$/,
+        'max_amount_human must be a plain decimal amount in whole tokens, e.g. "1" or "0.25"',
+      )
+      .optional(),
+  },
   haven_sweep_delegate: {
     // Phase 2 only: the authorization returned by phase 1 and the signature from
     // the local signer. Omit both to run phase 1 (prepare). Passed through to the
@@ -774,6 +795,15 @@ export const STRICT_INPUT_TOOLS = {
     'name, description, price, tool_name or contact sent here used to be dropped in silence ' +
     '— the directory learns everything else from the live merchant probe and the ownership ' +
     'proof, never from this call.',
+  // #3126: the amount argument arrives in the pay tools' cap spelling, and the
+  // cap convention's both-or-neither refusal (readMaxAmountCap) is the strict
+  // refusal's own refusal — declaring the tool strict makes a decorated call
+  // meet THAT documented error instead of a silent strip. No live caller
+  // predates strictness here: the tool ships new.
+  haven_check_funds:
+    'Exactly one of max_amount_human or max_amount selects the amount the coverage question is ' +
+    'asked about — both or neither is refused before anything is read. An undeclared key ' +
+    'cannot select or filter what the chain is asked, so it is refused rather than dropped.',
 } as const satisfies Partial<Record<HostedToolName, string>>
 
 export type StrictInputToolName = keyof typeof STRICT_INPUT_TOOLS
@@ -1073,6 +1103,19 @@ const SWEEP_DELEGATE_DESCRIPTION = [
   'USDC only — stranded native ETH is not recoverable through this path.',
 ].join(' ')
 
+// #3126 — the hosted sufficiency check, deliberately NOT a balance tool: the
+// constrained actor reads a boolean (covered true/false/null), never the
+// treasury total. Kept lean by hand (not the full composed fragment) because
+// the #1591 mean budget is a per-tool property measured at the cap; the
+// shared fragment's summary leads verbatim so the drift test holds.
+const CHECK_FUNDS_DESCRIPTION = [
+  sharedDescriptions.checkFunds.summary + '.',
+  'Pass the token contract address and exactly ONE amount spelling: max_amount_human (whole tokens, preferred) or max_amount (atomic units).',
+  'Returns covered: true (holds at least the amount), false (a live chain read reports less — stop and tell the user the funds are missing), or null (the read failed — unverifiable, never absence; coverage_error says why).',
+  'The balance itself is deliberately not returned — a sufficiency signal, not a balance read; budget_remaining_atomic is the PERMITTED figure (haven_get_allowances).',
+  'Read-only: grants no authority, moves nothing; both retired rails answer 410.',
+].join(' ')
+
 const DISCOVER_TOOLS_DESCRIPTION = composeDescription({
   ...sharedDescriptions.discoverTools,
   nextActionGuidance:
@@ -1083,6 +1126,7 @@ const DISCOVER_TOOLS_DESCRIPTION = composeDescription({
 export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
+  haven_check_funds: CHECK_FUNDS_DESCRIPTION,
   haven_sweep_delegate: SWEEP_DELEGATE_DESCRIPTION,
   haven_discover_tools: DISCOVER_TOOLS_DESCRIPTION,
   haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),

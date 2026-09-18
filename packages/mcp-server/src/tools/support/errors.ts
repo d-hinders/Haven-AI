@@ -163,6 +163,12 @@ function stateErrorNextStep(nextAction: string, paymentId: string | undefined): 
   if (action === AgentPaymentNextAction.SweepStrandedFunds) {
     return refusalNextStep({ nextAction: action, nextTool: 'haven_sweep_delegate', nextArguments: {} })
   }
+  if (action === AgentPaymentNextAction.CheckStatusLater) {
+    return refusalNextStep({ nextAction: action, nextTool: null, nextToolOmittedReason: 'no payment_id is known for this state, so haven_get_payment_status cannot be named' })
+  }
+  if (action === AgentPaymentNextAction.RetryOriginalX402Request) {
+    return refusalNextStep({ nextAction: action, nextTool: null, nextToolOmittedReason: 'the retry is your own HTTP call with the payment header; haven_resume_x402_payment hands the context back if you lost it' })
+  }
   return refusalNextStep({
     nextAction: action,
     nextTool: null,

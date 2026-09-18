@@ -12,10 +12,11 @@ import { refusalNextStep } from './tools/support/guidance.js'
  * typed builder (commit a5b6aabc) and carried across it: every field pinned
  * there is unchanged, and each site now ALSO carries the typed step — a tool
  * with arguments that tool declares, or `next_tool_omitted_reason`. #3101
- * typed the 17 `buildAgentGuidance` sites; these are the other 27. The
+ * typed the 17 `buildAgentGuidance` sites; these are the other 27 (28
+ * fixtures: the eip3009 rejection has a live-state branch). The
  * census was originally derived from `nextAction:` lines minus the builder's
  * call sites; it now counts `refusalNextStep(` calls: the 27 steps at the 25
- * HostedToolError sites (two branching) plus the 3 branches of the
+ * HostedToolError sites (three branching) plus the 5 branches of the
  * payment-state mapper in errors.ts (`stateErrorNextStep`, decision 9's
  * default table), pinned separately in `next-step-refusal.test.ts`. Each fixture mirrors one
  * site's `HostedToolError` input (code, action, suggested_tool, whether a
@@ -25,9 +26,15 @@ import { refusalNextStep } from './tools/support/guidance.js'
  * the delta per site is listed in the PR body and updated here in the same
  * commit.
  */
-export const REFUSAL_SITE_COUNT = 27
-/** `refusalNextStep(` calls in the hosted source: the 27 site steps + the state mapper's 3 branches. */
-export const REFUSAL_STEP_CALLS = 30
+export const REFUSAL_SITE_COUNT = 28
+/**
+ * `refusalNextStep(` calls in the hosted source: 26 inline site steps + the 3
+ * branches of `rejectedAfterFundingStep` (the eip3009 rejection follows the
+ * action the backend reports) + the 5 branches of the payment-state mapper
+ * `stateErrorNextStep` in errors.ts. Both helpers are pinned by their own
+ * fixtures and handler tests.
+ */
+export const REFUSAL_STEP_CALLS = 34
 
 const A = AgentPaymentNextAction
 const F = AgentPaymentFailureCode
@@ -53,10 +60,11 @@ export const REFUSAL_SITES: Site[] = [
   { site: 'paid-mcp-completion.ts timeout erc7710', base: { code: F.MerchantUnresponsiveAfterFunding, message: 'm', statusCode: 504, paymentId: 'pay_1', status: 'merchant_unresponsive_after_funding', phase: 'not_delivered', rail: 'erc7710', suggestedTool: 'haven_get_payment_status' }, step: { nextAction: A.CheckStatusLater, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: 'pay_1' } }, expect: { next_action: 'check_status_later', suggested_tool: 'haven_get_payment_status', ...STATUS('pay_1') } },
   { site: 'paid-mcp-completion.ts timeout eip3009', base: { code: F.MerchantUnresponsiveAfterFunding, message: 'm', statusCode: 504, paymentId: 'pay_1', status: 'merchant_unresponsive_after_funding', phase: 'funded_but_unsettled', rail: 'x402', suggestedTool: 'haven_get_payment_status' }, step: { nextAction: A.SweepStrandedFunds, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: 'pay_1' } }, expect: { next_action: 'sweep_stranded_funds', suggested_tool: 'haven_get_payment_status', ...STATUS('pay_1') } },
   { site: 'paid-mcp-completion.ts insecure target erc7710', base: { code: 'INSECURE_RETRY_TARGET', message: 'm', statusCode: 400, paymentId: 'pay_1', phase: 'not_delivered', rail: 'erc7710', suggestedTool: 'haven_quote_mcp_tool' }, step: { nextAction: A.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-quote the merchant at its https URL; nothing moved' }, expect: { next_action: 'retry_with_explicit_context', suggested_tool: 'haven_quote_mcp_tool', ...OMIT('re-quote the merchant at its https URL; nothing moved') } },
-  { site: 'paid-mcp-completion.ts insecure target eip3009', base: { code: 'INSECURE_RETRY_TARGET', message: 'm', statusCode: 400, paymentId: 'pay_1', phase: 'funded_but_unsettled', rail: 'x402', suggestedTool: 'haven_get_payment_status' }, step: { nextAction: A.SweepStrandedFunds, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: 'pay_1' } }, expect: { next_action: 'sweep_stranded_funds', suggested_tool: 'haven_get_payment_status', ...STATUS('pay_1') } },
+  { site: 'paid-mcp-completion.ts insecure target eip3009', base: { code: 'INSECURE_RETRY_TARGET', message: 'm', statusCode: 400, paymentId: 'pay_1', phase: 'funded_but_unsettled', rail: 'x402', suggestedTool: 'haven_get_payment_status' }, step: { nextAction: A.SweepStrandedFunds, nextTool: 'haven_sweep_delegate', nextArguments: {} }, expect: { next_action: 'sweep_stranded_funds', suggested_tool: 'haven_get_payment_status', next_tool: 'mcp__haven__haven_sweep_delegate', next_tool_server: 'haven', next_tool_name: 'haven_sweep_delegate', next_tool_server_role: 'hosted', next_arguments: {} } },
   { site: 'paid-mcp-completion.ts rejected after funding: merchant not ready', base: { code: F.MerchantRejectedAfterFunding, message: 'm', statusCode: 503, paymentId: 'pay_1', status: 'merchant_rejected_after_funding', phase: 'not_delivered', rail: 'erc7710', retryWithNewQuote: true }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the merchant is not ready to settle; tell the user and re-quote later' }, expect: { next_action: 'stop_and_tell_user', ...OMIT('the merchant is not ready to settle; tell the user and re-quote later') } },
   { site: 'paid-mcp-completion.ts rejected after funding: erc7710', base: { code: F.MerchantRejectedAfterFunding, message: 'm', statusCode: 402, paymentId: 'pay_1', status: 'merchant_rejected_after_funding', phase: 'not_delivered', suggestedTool: 'haven_get_payment_status', rail: 'erc7710', retryWithNewQuote: true }, step: { nextAction: A.CheckStatusLater, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: 'pay_1' } }, expect: { next_action: 'check_status_later', suggested_tool: 'haven_get_payment_status', ...STATUS('pay_1') } },
   { site: 'paid-mcp-completion.ts rejected after funding: eip3009', base: { code: F.MerchantRejectedAfterFunding, message: 'm', statusCode: 402, paymentId: 'pay_1', status: 'merchant_rejected_after_funding', phase: 'funded_but_unsettled', suggestedTool: 'haven_sweep_delegate' }, step: { nextAction: A.SweepStrandedFunds, nextTool: 'haven_sweep_delegate', nextArguments: {} }, expect: { next_action: 'sweep_stranded_funds', suggested_tool: 'haven_sweep_delegate', next_tool: 'mcp__haven__haven_sweep_delegate', next_tool_server: 'haven', next_tool_name: 'haven_sweep_delegate', next_tool_server_role: 'hosted', next_arguments: {} } },
+  { site: 'paid-mcp-completion.ts rejected after funding: eip3009, live state is not a sweep', base: { code: F.MerchantRejectedAfterFunding, message: 'm', statusCode: 402, paymentId: 'pay_1', status: 'funded_but_unsettled', phase: 'funded_but_unsettled', suggestedTool: 'haven_sweep_delegate' }, step: { nextAction: A.RetryOriginalX402Request, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: 'pay_1' } }, expect: { next_action: 'retry_original_x402_request', suggested_tool: 'haven_sweep_delegate', ...STATUS('pay_1') } },
   { site: 'paid-mcp-completion.ts header preflight', base: { code: 'INVALID_PAYMENT_HEADER', message: 'm', statusCode: 400, paymentId: 'pay_1', status: 'invalid_payment_header', phase: 'not_started', suggestedTool: 'haven_sign_x402' }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_SUG }, expect: { next_action: 'stop_and_tell_user', suggested_tool: 'haven_sign_x402', ...OMIT(STOP_SUG) } },
   { site: 'plain-http-x402.ts pay: insecure target', base: { code: 'INSECURE_RETRY_TARGET', message: 'm', statusCode: 400 }, step: { nextAction: A.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the https URL you quoted as url; nothing was funded or signed' }, expect: { next_action: 'retry_with_explicit_context', ...OMIT('re-call with the https URL you quoted as url; nothing was funded or signed') } },
   { site: 'plain-http-x402.ts pay: erc7710-only merchant on a 3009 account', base: { code: 'ERC7710_ONLY', message: 'm', statusCode: 400, suggestedTool: 'haven_quote_x402' }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_SUG }, expect: { next_action: 'stop_and_tell_user', suggested_tool: 'haven_quote_x402', ...OMIT(STOP_SUG) } },

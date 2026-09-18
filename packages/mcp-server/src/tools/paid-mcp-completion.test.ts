@@ -274,10 +274,12 @@ describe('haven_settle_mcp_tool', () => {
     // genuinely may hold stranded funds, so the sweep guidance stays.
     expect(payload.suggested_tool).toBe('haven_sweep_delegate')
     expect(payload.message).toMatch(/stranded funds/)
-    // #3102: the refusal names the sweep as its typed next step (site-level pin).
-    expect(payload.next_tool).toBe('mcp__haven__haven_sweep_delegate')
-    expect(payload.next_arguments).toEqual({})
-    expect(payload.next_tool_omitted_reason).toBeUndefined()
+    // #3102: the typed step follows the LIVE action. This fixture stubs no
+    // payment state that says sweep, so the refusal reports Haven's action and
+    // says why the sweep the message mentions is not named as the tool
+    // (site-level pin; the sweep-named case is pinned in tools.test.ts).
+    expect(payload.next_tool).toBeUndefined()
+    expect(payload.next_tool_omitted_reason).toMatch(/Haven reports next_action .*; the sweep in the message applies only if/)
   })
 
   /**

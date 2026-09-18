@@ -420,9 +420,9 @@ since #1984 — are unaffected, hosted and local alike.
 > (`refusalNextStep`, the same builder and target map as the success path),
 > so each of the 27 refusal steps (25 sites, two of them branching) now
 > also carries either a tool with arguments that tool declares
-> (`haven_get_payment_status { payment_id }` on the post-funding timeout,
-> insecure-target and rejection branches; `haven_sweep_delegate {}` on the
-> eip3009 rejection) or `next_tool_omitted_reason` (every stop-and-tell-user,
+> (`haven_get_payment_status { payment_id }` on the post-funding timeout and
+> the erc7710 rejection; `haven_sweep_delegate {}` on the eip3009 rejection
+> and the funded insecure-target branch, as their messages say) or `next_tool_omitted_reason` (every stop-and-tell-user,
 > retry-with-explicit-context, fund-account and window-expired refusal). The
 > one other hosted refusal shape, the SDK's `HavenPaymentStateError` passed
 > through `normalizeError`, takes its step from the per-action default table

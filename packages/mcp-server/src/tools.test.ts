@@ -385,6 +385,24 @@ describe('haven_pay_mcp_tool', () => {
     expect(payload.rail).toBe('x402')
   })
 
+  it('haven_complete_mcp_tool follows the LIVE state when it is not a sweep — no sweep beside retry_original_x402_request (#3102 review)', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({ status: 402, ok: false, body: { error: 'payment verification failed' } })
+    vi.spyOn(haven, 'getPaymentStatus').mockResolvedValue({
+      paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'funded_but_unsettled', phase: 'funded_but_unsettled',
+      nextAction: AgentPaymentNextAction.RetryOriginalX402Request, message: 'm', amount: '1.50', token: 'USDC', txHash: null,
+      expiresAt: '2099-01-01T00:00:00.000Z', chainId: 8453, resourceUrl: 'http://merchant.test/mcp', merchantAddress: '0xMerchant', idempotencyKey: 'idem-rejected',
+    } as never)
+    const payload = await createToolHandlers(haven).haven_complete_mcp_tool({
+      payment_id: 'pay_x402', merchant_url: 'http://merchant.test/mcp', tool_name: 'create_text', arguments: {}, payment_header: 'eyJ4IjoxfQ==',
+    })
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.next_action).toBe(AgentPaymentNextAction.RetryOriginalX402Request)
+    expect(payload.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(payload.next_arguments).toEqual({ payment_id: 'pay_x402' })
+  })
+
   it('haven_complete_mcp_tool fails with a typed sweep hint when the merchant rejects after funding', async () => {
     stubFetch({})
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })

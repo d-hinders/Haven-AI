@@ -20,6 +20,7 @@ describe('a payment-state refusal carries a typed step from the default table (#
     const out = normalizeError(state('none'))
     expect(out.next_tool).toBeUndefined()
     expect(out.next_tool_omitted_reason).toMatch(/cannot act on/)
+    expect(normalizeError(state('retry_original_x402_request')).next_tool_omitted_reason).toMatch(/your own HTTP call/)
   })
 })
 

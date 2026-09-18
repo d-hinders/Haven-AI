@@ -11,9 +11,13 @@ import { refusalNextStep } from './tools/support/guidance.js'
  * sites that name a `next_action`, written BEFORE they were moved onto the
  * typed builder (commit a5b6aabc) and carried across it: every field pinned
  * there is unchanged, and each site now ALSO carries the typed step — a tool
- * with arguments that tool declares, or `next_tool_omitted_reason`. #3101 typed the 17 `buildAgentGuidance` sites; these are the
- * other 27 (`nextAction:` lines in the hosted non-test source, minus the
- * builder's — the census below derives the number). Each fixture mirrors one
+ * with arguments that tool declares, or `next_tool_omitted_reason`. #3101
+ * typed the 17 `buildAgentGuidance` sites; these are the other 27. The
+ * census was originally derived from `nextAction:` lines minus the builder's
+ * call sites; it now counts `refusalNextStep(` calls: the 27 steps at the 25
+ * HostedToolError sites (two branching) plus the 3 branches of the
+ * payment-state mapper in errors.ts (`stateErrorNextStep`, decision 9's
+ * default table), pinned separately in `next-step-refusal.test.ts`. Each fixture mirrors one
  * site's `HostedToolError` input (code, action, suggested_tool, whether a
  * payment id is known) and pins what `normalizeError` puts on the wire for
  * it. The structural commit keeps every pinned field byte-identical and ADDS
@@ -22,6 +26,8 @@ import { refusalNextStep } from './tools/support/guidance.js'
  * commit.
  */
 export const REFUSAL_SITE_COUNT = 27
+/** `refusalNextStep(` calls in the hosted source: the 27 site steps + the state mapper's 3 branches. */
+export const REFUSAL_STEP_CALLS = 30
 
 const A = AgentPaymentNextAction
 const F = AgentPaymentFailureCode
@@ -85,10 +91,10 @@ function hostedSource(): string {
 const NEXT_KEYS = ['next_action', 'suggested_tool', 'next_tool', 'next_tool_server', 'next_tool_name', 'next_tool_server_role', 'next_arguments', 'next_tool_omitted_reason'] as const
 
 describe('hosted refusal next-step emissions — characterization (#3102)', () => {
-  it(`census: ${REFUSAL_SITE_COUNT} refusal steps are built in the hosted source (refusalNextStep calls; a bare nextAction on HostedToolError no longer compiles)`, () => {
+  it(`census: ${REFUSAL_STEP_CALLS} refusal steps are built in the hosted source (refusalNextStep calls; a bare nextAction on HostedToolError no longer compiles)`, () => {
     const source = hostedSource()
     const calls = [...source.matchAll(/(?<!function )refusalNextStep\(/g)].length
-    expect(calls).toBe(REFUSAL_SITE_COUNT)
+    expect(calls).toBe(REFUSAL_STEP_CALLS)
     expect(REFUSAL_SITES).toHaveLength(REFUSAL_SITE_COUNT)
   })
 

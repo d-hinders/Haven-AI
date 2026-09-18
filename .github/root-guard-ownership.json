@@ -197,7 +197,7 @@
         "lint:db-mocks",
         "lint:wire-types"
       ],
-      "reason": "The shared ratchet ENGINE, backing EIGHT gates as of #3104 (seven as of #3029, six as of #2747): the backend db-mock, retired-rail-prose and request-schema ratchets, the frontend wire-type ratchet (#1447), the frontend copy lint, packages/frontend/scripts/design-lint, scripts/docs/ui-gate-wording, and the typed next-step ratchet (#3104). An earlier version of this sentence said two, which is what it backed at #1447. Routing it to one job would leave the other surface's gates unguarded, which is the whole reason two jobs are named here."
+      "reason": "The shared ratchet ENGINE, backing NINE gates as of #3131 (eight as of #3104, seven as of #3029, six as of #2747): the backend db-mock, retired-rail-prose and request-schema ratchets, the frontend wire-type ratchet (#1447), the frontend copy lint, packages/frontend/scripts/design-lint, scripts/docs/ui-gate-wording, the typed next-step ratchet (#3104), and the MCP\u2194CLI vocabulary guard (#3131). An earlier version of this sentence said two, which is what it backed at #1447. Routing it to one job would leave the other surface's gates unguarded, which is the whole reason two jobs are named here."
     },
     {
       "path": "scripts/lib/ratchet.test.mjs",

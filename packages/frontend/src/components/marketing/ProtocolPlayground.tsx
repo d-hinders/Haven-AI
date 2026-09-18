@@ -292,9 +292,9 @@ export function ProtocolPlayground({ kind }: { kind: ProtocolKind }) {
           Live trace
         </div>
         {timeline.length === 0 ? (
-          <EmptyState size="inline" title="The trace will populate as the flow plays." className="bg-white" />
+          <EmptyState size="inline" title="The trace will populate as the flow plays." className="bg-bg" />
         ) : (
-          <ol className="divide-y divide-[var(--v2-border)] overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-white">
+          <ol className="divide-y divide-[var(--v2-border)] overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-bg">
             {timeline.map((event) => (
               <li key={`${event.step}-${event.label}`} className="flex items-start gap-4 px-4 py-3">
                 <span className="w-6 pt-0.5 text-[12px] text-[var(--v2-ink-3)] v2-tabular">
@@ -340,9 +340,7 @@ function StageCard({
       className={`rounded-[10px] border p-5 transition-all duration-200 ${
         active
           ? 'border-brand/45 bg-brand-soft/55 shadow-[0_12px_32px_-18px_rgba(79,70,229,0.34)]'
-          : done
-          ? 'border-[var(--v2-border)] bg-white'
-          : 'border-[var(--v2-border)] bg-white'
+          : 'border-[var(--v2-border)] bg-bg'
       } h-full ${className}`}
     >
       <div className="mb-1 text-[11px] uppercase tracking-wider text-[var(--v2-ink-3)]">{kicker}</div>
@@ -362,7 +360,7 @@ function StageCard({
       </div>
       <div className="space-y-2">
         {lines.map((line) => (
-          <div key={line} className="rounded-md bg-white/70 px-3 py-2 text-[12px] text-[var(--v2-ink-2)] ring-1 ring-[var(--v2-border)]">
+          <div key={line} className="rounded-md bg-surface-2/85 px-3 py-2 text-[12px] text-[var(--v2-ink-2)] ring-1 ring-[var(--v2-border)]">
             {line}
           </div>
         ))}
@@ -398,7 +396,7 @@ function AnimatedArrow({
         <svg className={`absolute -right-0.5 -top-[5px] h-3 w-3 ${textColor}`} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={1.5}>
           <path d="M2 6h7M6.5 3.5 9 6 6.5 8.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        <span className={`absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap bg-white px-1 font-mono text-[11px] ${textColor}`}>
+        <span className={`absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap bg-bg px-1 font-mono text-[11px] ${textColor}`}>
           {label}
         </span>
         {active && (
@@ -436,7 +434,7 @@ function DesktopDropConnector({
         <svg className={`absolute -bottom-0.5 -left-[5px] h-3 w-3 ${textColor}`} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={1.5}>
           <path d="M6 2v7M3.5 6.5 6 9l2.5-2.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        <span className={`absolute left-3 top-1/2 -translate-y-1/2 bg-white px-1 font-mono text-[11px] ${textColor}`}>
+        <span className={`absolute left-3 top-1/2 -translate-y-1/2 bg-bg px-1 font-mono text-[11px] ${textColor}`}>
           {label}
         </span>
       </div>

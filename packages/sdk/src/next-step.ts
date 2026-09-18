@@ -91,8 +91,9 @@ export type NextStep = AgentNextStep
 /**
  * Per-`next_action` default tool (decision 9): the tool a site names unless it
  * has a reason to override. Only actions with ONE sensible target are listed;
- * `sign_and_submit_payment` and `retry_original_x402_request` are deliberately
- * absent: the signer tool
+ * `retry_original_x402_request` is absent because its only live emitter names
+ * no tool on purpose (the agent's own HTTP retry); `sign_and_submit_payment`
+ * is absent because the signer tool
  * depends on the settlement scheme (`haven_sign` for erc7710 delegations,
  * `haven_sign_x402` for the EIP-3009 bridge) and a wrong default there would be
  * worse than none.

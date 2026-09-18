@@ -13,7 +13,7 @@ import { buildAgentGuidance, paymentStatusHandoff, type HostedHandoff } from './
  */
 const SUMMARY = { payment_id: 'pay_1', status: 'pending_signature' } as unknown as Parameters<typeof buildAgentGuidance>[0]['summary']
 
-// Positive control: the shapes the 13 sites use compile.
+// Positive control: the shapes the 17 sites use compile.
 const ok1: HostedHandoff = { nextTool: 'haven_sign', nextArguments: { payment_id: 'pay_1' } }
 const ok2: HostedHandoff = { nextTool: 'haven_report_settlement_evidence', nextArguments: { payment_id: 'pay_1', settlement_tx_hash: '0x' + 'ab'.repeat(32) } }
 const ok3: HostedHandoff = { nextTool: 'haven_sweep_delegate', nextArguments: {} }

@@ -324,6 +324,22 @@ describe('runRepair (#1589)', () => {
     expect(config).toContain('bin/haven-mcp')
   })
 
+  it('the same refusal fires under a runtime ALIAS (--runtime codex): the config path is looked up by the normalized id (#3145 review)', async () => {
+    // Before, `runtimeConfigPathFor('codex')` was null, the refusal was
+    // skipped and a repair would have rewritten a local-stdio config.
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(homeDir, '.codex', 'config.toml'), [
+      '[mcp_servers.haven]',
+      `command = "${join(dir, 'bin', 'haven-mcp')}"`,
+    ].join('\n'))
+    const runCommand = vi.fn()
+    const repair = await runRepair({ runtime: 'codex' }, { homeDir, runCommand })
+    expect(repair.ok).toBe(false)
+    expect(repair.messages.join('\n')).toContain('LOCAL-stdio topology')
+    expect(runCommand).not.toHaveBeenCalled()
+    expect(await readFile(join(homeDir, '.codex', 'config.toml'), 'utf8')).toContain('bin/haven-mcp')
+  })
+
   it('refuses without stored credentials — repair never mints identity', async () => {
     const homeDir = await mkdtemp(join(tmpdir(), 'haven-doctor-empty-'))
     const repair = await runRepair({ runtime: 'codex-cli' }, { homeDir })

@@ -124,11 +124,11 @@ export const toolDescriptions = {
   },
   listReceipts: {
     summary:
-      'List recent machine-payment receipts and evidence for bookkeeping.',
+      'List recent machine-payment receipts.',
     selectionGuidance:
-      'Use this for transaction history, receipts, payment evidence, or bookkeeping; use the allowance tool instead for remaining allowance, budget, spend-limit, or what-can-I-spend questions.',
+      'For transaction history or payment evidence; use the allowance tool instead for remaining allowance or what-can-I-spend questions.',
     behavior:
-      'Returns the agent\'s recent machine-payment receipts ordered by recency. Proof header values are not returned.',
+      "parties.treasuryAccount is Haven's authoritative payer. protocolReceiptPayload is the merchant's PAYMENT-RESPONSE, relayed verbatim: merchant-controlled, unverified, not Haven's record; payer may differ from payerAddress. Proof header values are omitted.",
     nextActionGuidance: '',
   },
   verifyReceipt: {

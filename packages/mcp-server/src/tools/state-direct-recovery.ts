@@ -41,7 +41,7 @@ import {
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { runTool, HostedToolError } from './support/errors.js'
-import { buildAgentGuidance } from './support/guidance.js'
+import { buildAgentGuidance, refusalNextStep } from './support/guidance.js'
 import { atomicToDisplay, humanToAtomic, readMaxAmountCap } from './support/cap-price.js'
 import {
   delegationSignFields,
@@ -124,7 +124,11 @@ export function createStateDirectRecoveryHandlers(
             code: 'INVALID_INPUT',
             message: 'An amount is required: pass max_amount_human (whole tokens) or max_amount (atomic).',
             statusCode: 400,
-            nextAction: AgentPaymentNextAction.StopAndTellUser,
+            nextStep: refusalNextStep({
+              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextTool: null,
+              nextToolOmittedReason: 'the user has to decide before anything is called again',
+            }),
           })
         } else if (cap.kind === 'human') {
           if (!token) {
@@ -136,7 +140,11 @@ export function createStateDirectRecoveryHandlers(
                 'any conversion would be a guess. Nothing was read from any chain. Re-send the ' +
                 'amount as max_amount in atomic units.',
               statusCode: 400,
-              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextStep: refusalNextStep({
+                nextAction: AgentPaymentNextAction.StopAndTellUser,
+                nextTool: null,
+                nextToolOmittedReason: 'the user has to decide before anything is called again',
+              }),
             })
           }
           const atomic = humanToAtomic(cap.value, token.decimals)
@@ -149,7 +157,11 @@ export function createStateDirectRecoveryHandlers(
                 'change the amount. Nothing was read from any chain. Round the amount to ' +
                 `${token.decimals} decimal places, or send an exact max_amount in atomic units.`,
               statusCode: 400,
-              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextStep: refusalNextStep({
+                nextAction: AgentPaymentNextAction.StopAndTellUser,
+                nextTool: null,
+                nextToolOmittedReason: 'the user has to decide before anything is called again',
+              }),
             })
           }
           maxAmountAtomic = atomic.toString()

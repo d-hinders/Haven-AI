@@ -10,6 +10,7 @@ import {
   handleBalanceCoverage,
   handleBudgetPrecheck,
   budgetPrecheckBodyError,
+  parseBalanceCoverageQuery,
   handleReconciliationEvent,
   handleSend,
   attachEvidenceHandler,
@@ -96,15 +97,16 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     '/balance-coverage',
     async (request, reply) => {
       const agent = request.agent as AgentContext
-      const token = request.query.token
-      const amountAtomic = request.query.amount_atomic
-      if (typeof token !== 'string' || token.length === 0) {
-        return reply.code(400).send({ error: 'token is required (the ERC-20 contract address)' })
+      // #3126 query guards relocated to the mpp module
+      // (parseBalanceCoverageQuery) so the #3029 request-schemas ratchet
+      // keeps its shrink-only baseline for this file — checks and 400 bodies
+      // unchanged. Parses the raw wire query (amount_atomic) into the
+      // handler's camelCase input.
+      const parsed = parseBalanceCoverageQuery(request.query)
+      if ('error' in parsed) {
+        return reply.code(400).send(parsed)
       }
-      if (typeof amountAtomic !== 'string' || amountAtomic.length === 0) {
-        return reply.code(400).send({ error: 'amount_atomic is required (a decimal atomic amount)' })
-      }
-      const result = await handleBalanceCoverage(agent, { token, amountAtomic })
+      const result = await handleBalanceCoverage(agent, parsed)
       return reply.code(result.statusCode).send(result.body)
     },
   )

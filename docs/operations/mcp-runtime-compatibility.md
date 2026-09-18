@@ -36,6 +36,20 @@ last-verified: "2026-09-18"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Recent re-verification (#3126):** the sufficiency read `GET
+> /machine-payments/balance-coverage` (tool `haven_check_funds`) ships in this
+> same change as its backend route, so there is no version window to argue.
+> Round-2 rework relocated the route's two query guards (`token`,
+> `amount_atomic`) verbatim into `modules/mpp/balance-coverage-guards.ts`,
+> exported through the mpp barrel, to hold the #3029 shrink-only ratchet
+> baseline for `routes/machine-payments.ts` (19, unchanged). The wire contract
+> this document describes is untouched: same checks in the same order,
+> byte-identical 400 bodies (pinned by the 62-test real-DB route suite), no
+> tool added or renamed beyond this PR's own `haven_check_funds`, no schema or
+> description change, and the skew-flatness this document asserts holds — the
+> endpoint and the tool that calls it deploy in the same train. Nothing else
+> in this document was re-verified in this pass.
+>
 > **Recent re-verification (#3054):** the hosted guided prepare's over-budget
 > compare moved server-side. `haven_prepare_catalog_purchase`'s step 6 no
 > longer reads `GET /machine-payments/allowances` and compares locally; it

@@ -54,6 +54,7 @@ export {
 export { prepareSweep, submitSweep } from './sweep.js'
 export { handleBudgetPrecheck } from './budget-precheck.js'
 export { budgetPrecheckBodyError } from './budget-precheck-guards.js'
+export { parseBalanceCoverageQuery } from './balance-coverage-guards.js'
 
 export type {
   MachinePaymentRail,

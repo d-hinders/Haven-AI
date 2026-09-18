@@ -6,6 +6,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/sdk/src/next-step.ts
   - packages/sdk/src/types.ts
+  - scripts/lint-next-steps.mjs
   - packages/connect/src/**
   - packages/signer/src/**
   - packages/sdk/src/client.ts
@@ -437,6 +438,18 @@ since #1984 — are unaffected, hosted and local alike.
 > key, cap, funding, signing or settlement decision changes; the local
 > runtime is untouched (slice #3103). Scope of this note: those fields.
 > Nothing else in this document was re-verified.
+
+> **Re-verification (#3104, cross-surface handoff parity and the ratchet,
+> 2026-09-18):** this diff adds `scripts/lint-next-steps.mjs` (+ test +
+> zero baseline, wired in `ci.yml` and `package.json`), moves the hosted
+> next-step fixtures to `packages/mcp-server/src/test-support/next-step-fixtures.ts`,
+> and extends `packages/mcp-server/src/next-step-signer-parity.test.ts` into
+> the cross-surface walk: every hosted emission fixture is built for real and
+> its arguments parsed with the named tool's strict schema on the surface its
+> role names. No emission, tool name, schema key or decision changes; the epic's
+> contract as it stands after #3100–#3103 is what the walk and the ratchet
+> hold. Scope of this note: the tests and the gate. Nothing else in this
+> document was re-verified.
 
 > **Re-verification (#3103, the signer and the local runtime name a next tool,
 > 2026-09-18):** this diff adds `packages/signer/src/next-step.ts` (the signer's

@@ -413,6 +413,19 @@ jobs:
           npm run lint:request-schemas:test
           npm run check:route-modules
 
+      - name: Typed next-step ratchet (#3104, epic #3105)
+        # Blocking, shrink-only, baseline at zero: every next-step emission in
+        # the hosted server, the signer and the local runtime names its tool
+        # (arguments in that tool's vocabulary) or says why none follows, and
+        # both discovery maps carry suggested_arguments. Also run in the
+        # mcp_server / signer / mcp jobs, since each of those packages is on
+        # the scan list and this job does not fire on their changes.
+        # Self-tested for the same reason as lint:deps above — the self-test
+        # SPAWNS the CLI.
+        run: |
+          npm run lint:next-steps
+          npm run lint:next-steps:test
+
       - name: DB schema smoke (migrations + money-path query PREPARE, #773)
         # Applies every migration to the real Postgres service, then PREPAREs the
         # curated money-path queries so column/type drift fails here instead of
@@ -463,6 +476,13 @@ jobs:
 
       - name: Run MCP unit tests
         run: npm run test -w packages/mcp
+
+      - name: Typed next-step ratchet (#3104, epic #3105)
+        # Same gate as in backend_checks: this package is one of the three the
+        # ratchet scans, so a change here must run it. Self-tested (spawns the CLI).
+        run: |
+          npm run lint:next-steps
+          npm run lint:next-steps:test
 
       - name: Build MCP
         run: npm run build -w packages/mcp
@@ -557,6 +577,13 @@ jobs:
       - name: Run MCP server unit tests
         run: npm run test -w packages/mcp-server
 
+      - name: Typed next-step ratchet (#3104, epic #3105)
+        # Same gate as in backend_checks: this package is one of the three the
+        # ratchet scans, so a change here must run it. Self-tested (spawns the CLI).
+        run: |
+          npm run lint:next-steps
+          npm run lint:next-steps:test
+
       - name: Build MCP server
         run: npm run build -w packages/mcp-server
 
@@ -598,6 +625,13 @@ jobs:
 
       - name: Run signer unit tests
         run: npm run test -w packages/signer
+
+      - name: Typed next-step ratchet (#3104, epic #3105)
+        # Same gate as in backend_checks: this package is one of the three the
+        # ratchet scans, so a change here must run it. Self-tested (spawns the CLI).
+        run: |
+          npm run lint:next-steps
+          npm run lint:next-steps:test
 
       - name: Build signer
         run: npm run build -w packages/signer

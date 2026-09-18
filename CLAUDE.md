@@ -216,6 +216,9 @@ All of these must fail for funds to be at risk.
 - Structured error responses from every API route.
 - A route's request schema comes from the spec through the request-validation
   plugin; `lint:request-schemas` is shrink-only.
+- Every MCP payment-flow response names its next tool with arguments in that
+  tool's vocabulary, or says why none follows (`next_tool_omitted_reason`);
+  `lint:next-steps` is shrink-only at zero (epic #3105).
 - Env config via `.env` files — never commit secrets.
 - Conventional commits; document public endpoints with JSDoc or OpenAPI.
 - Every new doc under `docs/` (and the root gravity files) needs front-matter

@@ -42,6 +42,17 @@ last-verified: "2026-09-18"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Re-verified unchanged (#3131):** this doc is coupled to
+> `.github/workflows/ci.yml`, which #3131 edits — it adds one dependency-free
+> step to the repo-config job, running a new read-only CI guard over two source
+> files this doc does not cover. Nothing in this document moves: no tool is
+> added, renamed or re-shaped, no description text changes, no schema or
+> argument changes, and the runtime-skew and consent-hash contracts are
+> untouched. The guard emits no runtime code. Recorded here rather than
+> silently passed over because the coupling gate cannot tell a CI-wiring edit
+> from a contract edit, and a contract doc cleared without a reader is how
+> #2274 shipped a false sentence past a green tick.
+>
 > **Recent re-verification (#3125):** the `haven_list_receipts` description
 > prose changed on BOTH runtimes — it is one shared fragment
 > (`packages/sdk/src/tool-descriptions.ts` `listReceipts`), composed verbatim by

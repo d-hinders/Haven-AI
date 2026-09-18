@@ -441,7 +441,7 @@ export { newViolations, hasShrunk }
  * The shared engine's violations, sorted for a stable report. The ordering is
  * this gate's own concern -- `lib/ratchet.mjs` deliberately does not sort, and
  * the private copy this replaced did, so keeping it here preserves the output
- * byte-for-byte while the DECISION moves to the one place all seven gates share.
+ * byte-for-byte while the DECISION moves to the one place all nine gates share.
  *
  * The shared engine names the second dimension `key`; this gate calls it a
  * `rule`, and the printing below reads `f.key`.
@@ -477,7 +477,7 @@ async function main() {
   let loaded
   try {
     // The shape check this gate carried in #2747 lived here. It moved into
-    // `loadBaseline` in #2759, where it covers all seven gates and one more case
+    // `loadBaseline` in #2759, where it covers all nine gates and one more case
     // this one never reached: an OBJECT baseline holding a non-numeric COUNT,
     // which `count > allowed` reads as false and so silently allows everything
     // for that key. Proven dead before removing it rather than assumed —

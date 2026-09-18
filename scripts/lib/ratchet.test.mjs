@@ -1,7 +1,7 @@
 // Unit tests for the shared ratcheting engine (#2759).
 //
 // This module had NO test file of its own until now, which is part of why it
-// drifted: seven gates import it, each gate's suite exercises the paths that gate
+// drifted: nine gates import it, each gate's suite exercises the paths that gate
 // happens to take, and nothing tested the engine's own contract. #2728 found a
 // missing `--update` refusal in two of the six; #2747 found a seventh gate that
 // had cloned the engine rather than importing it; #2759 is the defect below.
@@ -58,7 +58,7 @@ test('newViolations: a non-numeric `allowed` compares FALSE, which is why the re
 
 test('assertUsableBaseline: accepts an empty baseline and a well-formed one', () => {
   // The accept path first. A validator that refuses everything satisfies every
-  // refusal test below and breaks all seven gates.
+  // refusal test below and breaks all nine gates.
   assert.deepEqual(assertUsableBaseline({}), {})
   const good = { 'a.md': { r: 0 }, 'b.md': { r: 12 } }
   assert.equal(assertUsableBaseline(good), good)
@@ -153,6 +153,7 @@ test('the importer count in the comments matches the real importer list', () => 
 
   assert.deepEqual(importers, [
     'packages/frontend/scripts/design-lint.mjs',
+    'scripts/ci/vocabulary-divergence.mjs',
     'scripts/db-mock-ratchet.mjs',
     'scripts/docs/ui-gate-wording.mjs',
     'scripts/frontend-copy-lint.mjs',
@@ -162,7 +163,7 @@ test('the importer count in the comments matches the real importer list', () => 
     'scripts/retired-rail-prose-ratchet.mjs',
   ])
   // The count the prose claims, in one place, next to the list that proves it.
-  assert.equal(importers.length, 8, 'the comments say EIGHT gates import this engine')
+  assert.equal(importers.length, 9, 'the comments say NINE gates import this engine')
 })
 
 // ── The two guards #2759's own review found untested ────────────────────────

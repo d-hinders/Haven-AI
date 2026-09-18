@@ -1,0 +1,268 @@
+{
+  "$comment": [
+    "The MCP/SDK receipt surface and the CLI/API transaction surface name the same",
+    "settled payment differently (#3131, epic #3130). This file is the record of",
+    "WHICH concepts diverge and what was decided about each. `vocabulary-divergence.mjs`",
+    "reads it and fails when either surface grows a field with no entry here.",
+    "",
+    "It is a JSON baseline rather than a doc under docs/ because the guard reads it:",
+    "one artefact, machine-checked, so the map cannot drift from what ships. The",
+    "`reason` on every entry is what keeps it readable by a person.",
+    "",
+    "`value` on each side is `recorded` or `defaulted` (#3130 A3). Two entries can",
+    "share a column and still diverge, because one path substitutes a value the",
+    "other passes through -- that is the whole of the proofStatus and settled-at",
+    "defects, and a map keyed on columns alone could not say it.",
+    "",
+    "`disposition` is about the NAMES. Two entries marked `converged` still record a",
+    "referent difference in their reason (`payment id` widens to sweep ids;",
+    "`token address` is normalised on one surface only). That second axis is",
+    "deliberately not counted -- the open number tracks the renames #3134 owes and the value defects #3132 does, not every",
+    "way two fields can disagree -- but a reader must not take `converged` as",
+    "'identical'."
+  ],
+  "surfaces": {
+    "receipt": {
+      "label": "MCP / SDK receipt",
+      "file": "packages/sdk/src/payment-mappers.ts",
+      "symbol": "mapPaymentReceipt",
+      "note": "An SDK PRESENTATION layer, not a wire: the backend receipts wire is snake_case (#3130). A rename here reaches packages/mcp-server via listReceipts."
+    },
+    "transaction": {
+      "label": "CLI / API transaction",
+      "file": "packages/backend/src/openapi/spec.ts",
+      "symbol": "transactionBaseProperties",
+      "note": "The OpenAPI contract, already drift-gated by check:api-types. Read here rather than the generated core/src/api-types.ts so the guard fires where a developer adds the field."
+    }
+  },
+  "concepts": [
+    {
+      "concept": "proof state",
+      "receipt": {
+        "field": "proofStatus",
+        "column": "proof_status",
+        "value": "recorded"
+      },
+      "transaction": {
+        "field": "paymentProofStatus",
+        "column": "proof_status",
+        "value": "defaulted",
+        "by": "modules/transactions/x402.ts:37 `?? 'payment_confirmed'`",
+        "alias": "payment_proof_status",
+        "aliasedBy": "infra/repositories/transaction-history.ts:228,325 `mpe.proof_status AS payment_proof_status`"
+      },
+      "disposition": "blocked-on-fallback",
+      "blockedBy": 3132,
+      "reason": "One column, two values -- and the two names are ALIASES of the same `machine_payment_evidence.proof_status`, not two columns. It arrives through a LEFT JOIN, so with no evidence row the synthesized x402 path reports 'payment_confirmed' for a payment that has no receipt, while enrichment.ts passes the column through unchanged. Converging the NAMES before #3132 fixes the VALUE would hide the defect behind agreement. The substitution is conservative -- it never fabricates a settled state -- which is why this is a reconciliation defect and not a money-safety one."
+    },
+    {
+      "concept": "merchant address",
+      "receipt": {
+        "field": "merchantAddress",
+        "column": "merchant_address",
+        "value": "recorded"
+      },
+      "transaction": {
+        "field": "x402MerchantAddress",
+        "column": "x402_merchant_address",
+        "value": "recorded"
+      },
+      "disposition": "converge-pending",
+      "reason": "Same concept, two names, both recorded. Unaffected by the #3132 fallback work, so #3134 may converge it independently."
+    },
+    {
+      "concept": "resource url",
+      "receipt": {
+        "field": "resourceUrl",
+        "column": "resource_url",
+        "value": "recorded"
+      },
+      "transaction": {
+        "field": "x402ResourceUrl",
+        "column": "x402_resource_url",
+        "value": "recorded"
+      },
+      "disposition": "converge-pending",
+      "reason": "Same concept, two names, both recorded. As above, not gated on #3132."
+    },
+    {
+      "concept": "settled at",
+      "receipt": {
+        "field": "confirmedAt",
+        "column": "confirmed_at",
+        "value": "recorded",
+        "note": "ISO 8601, nullable"
+      },
+      "transaction": {
+        "field": "timestamp",
+        "column": "confirmed_at",
+        "value": "defaulted",
+        "by": "modules/transactions/x402.ts:54 `confirmed_at ?? created_at`",
+        "note": "unix seconds, never null"
+      },
+      "disposition": "blocked-on-fallback",
+      "blockedBy": 3132,
+      "reason": "Unit AND fallback differ. Unlike the proof-state substitution this one FABRICATES a date: a payment that never confirmed reports its creation time as its settlement time, in a field the consumer reads as 'when this settled'. Same silent-substitution defect as proof state, opposite in severity."
+    },
+    {
+      "concept": "transaction hash",
+      "receipt": {
+        "field": "txHash",
+        "column": "tx_hash",
+        "value": "recorded"
+      },
+      "transaction": {
+        "field": "hash",
+        "column": "tx_hash",
+        "value": "recorded"
+      },
+      "disposition": "permanently-divergent",
+      "reason": "DIFFERENT CONCEPTS that hold equal values on x402 rows by copy. Transaction.hash is the hash of ANY row in a wallet's history -- ERC-20 transfer, native transfer, internal call, delegate sweep, inbound deposit -- and only rows attributed to a payment intent carry a payment at all -- the attribution query has no rail filter, so `source` names which protocol it was ('x402', 'mpp_demo', 'mpp_crypto', 'spt') or 'direct' for a plain send. HavenPaymentReceipt.txHash is a payment field whose meaning is scheme-dependent and is already DEPRECATED for that reason (sdk/src/types.ts, #2998), with fundingTxHash/settlementTxHash as its successors. Renaming hash -> txHash would attach payment-settlement semantics to a generic transfer column and re-collapse the distinction #2998 paid to make."
+    },
+    {
+      "concept": "atomic amount",
+      "receipt": {
+        "field": "amountRaw",
+        "column": "amount_raw",
+        "value": "recorded"
+      },
+      "transaction": {
+        "field": "value",
+        "column": "amount_raw",
+        "value": "recorded"
+      },
+      "disposition": "permanently-divergent",
+      "reason": "DIFFERENT CONCEPTS. On non-payment rows `value` is the explorer's on-chain transfer value with `decimals` and `asset` beside it; `amountRaw` exists only on receipts. Equal on x402 rows by copy, different on the rest of the feed."
+    },
+    {
+      "concept": "display amount",
+      "receipt": {
+        "field": "amount",
+        "column": "amount_human",
+        "value": "recorded"
+      },
+      "transaction": {
+        "field": "valueFormatted",
+        "column": "amount_human",
+        "value": "recorded"
+      },
+      "disposition": "permanently-divergent",
+      "reason": "DIFFERENT CONCEPTS, same reasoning as atomic amount: valueFormatted is the formatted on-chain value of any transfer, amount is a payment figure."
+    },
+    {
+      "concept": "payment id",
+      "receipt": {
+        "field": "paymentId",
+        "column": "payment_id",
+        "value": "recorded"
+      },
+      "transaction": {
+        "field": "paymentId",
+        "column": "id",
+        "value": "recorded"
+      },
+      "disposition": "converged",
+      "reason": "One name on both surfaces, but not one referent: the receipt's payment_id is always a payment_intents.id, while the transaction's paymentId widens to a delegate_sweeps.id on activityType:'delegate_sweep' rows (enrichment.ts). Recorded as converged on the NAME; #3134 must not read it as 'same field' without that clause."
+    },
+    {
+      "concept": "token symbol",
+      "receipt": {
+        "field": "tokenSymbol",
+        "column": "token_symbol",
+        "value": "recorded"
+      },
+      "transaction": {
+        "field": "tokenSymbol",
+        "column": "token_symbol",
+        "value": "recorded"
+      },
+      "disposition": "converged",
+      "reason": "Already one name on both surfaces."
+    },
+    {
+      "concept": "token address",
+      "receipt": {
+        "field": "tokenAddress",
+        "column": "token_address",
+        "value": "recorded",
+        "copiedFrom": "payment_intents.token_address, copied onto machine_payment_evidence at settlement (modules/mpp/evidence.ts:321)"
+      },
+      "transaction": {
+        "field": "tokenAddress",
+        "column": "token_address",
+        "value": "recorded"
+      },
+      "disposition": "converged",
+      "reason": "Already one name on both surfaces. NOT both normalised, though: #3129 checksummed the TRANSACTION surface at its row boundary and touched no SDK file; the receipt surface passes the stored value through, checksummed by storage convention only -- the receipt reads machine_payment_evidence.token_address, a copy taken at settlement from payment_intents.token_address, which happens to be stored that way, while to_address and x402_merchant_address are stored lowercase."
+    },
+    {
+      "concept": "payment rail / source",
+      "receipt": {
+        "field": "rail",
+        "column": "rail",
+        "value": "recorded",
+        "derivedFrom": "`payment_rail ?? source` at evidence-write time (modules/mpp/evidence.ts:173), stored on machine_payment_evidence.rail"
+      },
+      "transaction": {
+        "field": "source",
+        "column": "source",
+        "value": "defaulted",
+        "alias": "COALESCE(pi.payment_rail, pi.source, 'direct')",
+        "by": "infra/repositories/transaction-history.ts:225 substitutes 'direct'; modules/transactions/x402.ts:69 hardcodes 'x402' on the synthesized row, a second substitution site on the same field"
+      },
+      "disposition": "blocked-on-fallback",
+      "blockedBy": 3132,
+      "reason": "ONE axis. Both sides resolve the same two columns in the same order -- payment_rail then source -- so the receipt's `rail` is the payment PROTOCOL, exactly what the transaction calls `source`. An earlier draft filed them as permanently single-surface, reasoning that #1705 keeps three axes unmerged; that was wrong, because #1705's third axis is the ACCOUNT's execution_rail, which migration 036 states is a different axis from payment_intents.payment_rail. The asymmetry is one-sided and a later draft got it backwards: only the TRANSACTION side substitutes. It defaults to 'direct' in SQL and hardcodes 'x402' on the synthesized row. The receipt side cannot default, because when the coalesce yields a non-protocol rail recordMachinePaymentEvidenceBase returns not_applicable and no evidence row -- and therefore no receipt -- is written at all. (The `rail ?? 'unknown'` in evidence.ts is the FEE LEDGER's quoteFee call and never reaches a receipt.) #3132 owns the transaction-side substitutions before #3134 can rename anything."
+    }
+  ],
+  "singleSurface": {
+    "$comment": [
+      "Fields that exist on one surface and have no counterpart on the other, each",
+      "with the reason there will never be one. Without this list the guard's first",
+      "run would report 37 unpaired FIELDS (19 + 18, exactly) rather than the real",
+      "divergences, and a guard that cries wolf on its first run teaches people to",
+      "ignore it (#3131)."
+    ],
+    "receipt": {
+      "id": "The evidence row's own identifier. A transaction row is not a database row.",
+      "fundingTxHash": "Successor to the deprecated txHash (#2998), scheme-specific. No transfer-level counterpart.",
+      "settlementTxHash": "Successor to the deprecated txHash (#2998), naming the merchant-side settlement leg specifically. No transfer-level counterpart.",
+      "chainId": "Present on the ENRICHED transaction schema, not on transactionBaseProperties, which is the surface this guard reads.",
+      "payerAddress": "#2960 party identity. The transaction row's `from` is the explorer's counterparty field, which is not the same question.",
+      "parties": "#2960 structured party block. No transaction counterpart.",
+      "settlementAddress": "Where settlement landed, scheme-specific. No transfer-level counterpart.",
+      "challengeId": "x402 protocol state. Never appears on a wallet-history row.",
+      "idempotencyKey": "Request-level key. Never appears on a wallet-history row.",
+      "challengePayload": "x402 protocol state.",
+      "selectedPayment": "x402 protocol state -- which advertised requirement was chosen.",
+      "paymentProofHeaderName": "x402 protocol wiring.",
+      "protocolReceiptHeaderName": "x402 protocol wiring.",
+      "protocolReceiptPayload": "The merchant's own receipt body.",
+      "merchantStatus": "The merchant's HTTP response state, not a chain fact.",
+      "createdAt": "Evidence-row lifecycle. The transaction surface has one time field and #3132 owns its semantics.",
+      "updatedAt": "Evidence-row lifecycle.",
+      "paymentIntentId": "Conditional key, present only when the raw row carries it. Links evidence to intent; no transfer-level counterpart.",
+      "approvalRequestId": "Conditional key. Approval requests were dropped with the table (#2055); the field survives on the raw shape."
+    },
+    "transaction": {
+      "type": "native / erc20 / internal -- a transfer classification. Receipts are always payments.",
+      "from": "Explorer counterparty on explorer-derived rows; the account address on x402-synthesized rows. `payerAddress` is a party-identity field (#2960), not the same question.",
+      "to": "Explorer counterparty on explorer-derived rows. On x402-synthesized rows there is no explorer: it holds x402_merchant_address ?? to_address, the same value the merchant-address concept pairs -- equal by copy, different concept, the framing this map already uses for `hash`.",
+      "asset": "Ticker where known, falling back to the raw contract address on explorer rows; the intent's token_symbol verbatim on synthesized ones. Receipts carry tokenSymbol only.",
+      "decimals": "Transfer formatting input. Receipts carry the formatted amount instead.",
+      "direction": "in / out relative to the wallet. Every receipt is outbound by construction.",
+      "blockNumber": "On-chain block of the transfer, or null (#3129). Receipts record no block.",
+      "isError": "Whether the on-chain transfer reverted. A receipt exists only for a settled payment.",
+      "paymentFlowStatus": "Derived by machinePaymentLifecycle from proof status and reconciliation events. Receipts expose the inputs, not the derivation.",
+      "paymentAttentionReason": "As paymentFlowStatus.",
+      "activityType": "delegate_sweep marker. Sweeps are not payments and have no receipt.",
+      "agentName": "Attribution joined onto the history row. The receipt surface is agent-scoped already, so the agent is the principal rather than a field.",
+      "initiatedBy": "#2097 initiator classification for any history row. Every receipt is agent-initiated by construction.",
+      "settlementScheme": "eip3009 / erc7710 -- WHICH settlement branch moved the money (#1705). The three axes #1705 keeps unmerged are this, `source` (the payment protocol) and the ACCOUNT's `execution_rail` (account architecture) -- not the receipt's `rail`, which is the same axis as `source`.",
+      "amountSek": "Book-time SEK value (#463) for the accounting feed.",
+      "fxRateSek": "The rate amountSek was struck at (#2871).",
+      "fxSource": "Where that rate came from.",
+      "accounting": "Accounting-feed sync state joined by paymentId (#2870)."
+    }
+  }
+}

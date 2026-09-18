@@ -1974,9 +1974,10 @@ to call next in structured fields, and those fields are typed end to end
   > verdict (#3120) stays a failure. A runtime string the connector does
   > not recognise (`--runtime codex-clii`) is a new `runtime_config` failure
   > of its own, naming the allowed values, and demotes nothing; a documented
-  > alias (`--runtime codex`) now resolves to its config file for both the
-  > doctor's check and the repair's local-topology refusal, instead of the
-  > "CLI-managed" skip.
+  > alias (`--runtime codex`) now resolves to its config file for the
+  > doctor's check, the repair's local-topology refusal and the repair's
+  > config write, instead of the "CLI-managed" skip and a repair that
+  > reported success having written nothing.
 
   The hosted MCP `tools/list` check proves only that its endpoint responds; it
   does not authenticate a bearer token. Credential verdicts instead use the

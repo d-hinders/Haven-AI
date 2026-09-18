@@ -14,7 +14,7 @@ import { useDelegateBalance, type DelegateBalance } from '@/hooks/useDelegateBal
 function balance(overrides: Partial<DelegateBalance> = {}): DelegateBalance {
   return {
     delegate_address: '0x2222222222222222222222222222222222222222',
-    safe_address: '0x1111111111111111111111111111111111111111',
+    account_address: '0x1111111111111111111111111111111111111111',
     chain_id: 8453,
     eth: '0',
     eth_atomic: '0',
@@ -54,7 +54,7 @@ describe('useDelegateBalance', () => {
 
   it('does not expose recovery eligibility without a verified destination', async () => {
     mockApiGet.mockResolvedValueOnce(
-      balance({ usdc: '1.00', usdc_atomic: '1000000', safe_address: null }),
+      balance({ usdc: '1.00', usdc_atomic: '1000000', account_address: null }),
     )
     const { result } = renderHook(() => useDelegateBalance('agent-unlinked'))
 

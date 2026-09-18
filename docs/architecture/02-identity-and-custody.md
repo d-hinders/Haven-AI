@@ -4,7 +4,7 @@ status: current
 covers:
   - packages/backend/src/routes/safe-deploy.ts
   - packages/backend/src/routes/passkeys.ts
-  - packages/backend/src/routes/user-safes.ts
+  - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/auth.ts
   - packages/backend/src/routes/payments.ts

@@ -37,9 +37,9 @@ export interface PaymentActivityItem {
   x402_resource_url?: string | null
   x402_merchant_address?: string | null
   chain_id?: number | null
-  safe_id?: string | null
-  safe_address?: string | null
-  safe_name?: string | null
+  account_id?: string | null
+  account_address?: string | null
+  account_name?: string | null
   explorer_url: string | null
   confirmed_at?: string | null
   payment_proof_status?: string | null

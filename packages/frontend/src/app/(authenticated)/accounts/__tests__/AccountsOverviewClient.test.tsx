@@ -3,20 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   mockUseAuth,
-  mockUseUserSafes,
+  mockUseAccounts,
   mockUseAgents,
   mockUsePreferences,
   mockSetActiveSafe,
 } = vi.hoisted(() => ({
   mockUseAuth: vi.fn(),
-  mockUseUserSafes: vi.fn(),
+  mockUseAccounts: vi.fn(),
   mockUseAgents: vi.fn(),
   mockUsePreferences: vi.fn(),
   mockSetActiveSafe: vi.fn(),
 }))
 
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => mockUseAuth() }))
-vi.mock('@/hooks/useAccounts', () => ({ useAccounts: () => mockUseUserSafes() }))
+vi.mock('@/hooks/useAccounts', () => ({ useAccounts: () => mockUseAccounts() }))
 vi.mock('@/hooks/useAgents', () => ({ useAgents: () => mockUseAgents() }))
 vi.mock('@/hooks/usePreferences', () => ({ usePreferences: () => mockUsePreferences() }))
 vi.mock('@/hooks/usePortfolio', () => ({
@@ -41,7 +41,7 @@ import AccountsOverviewClient from '../AccountsOverviewClient'
 function safe(id: string, name: string, chainId: number, isDefault = false) {
   return {
     id,
-    safe_address: `0x${id.padEnd(40, '0')}`,
+    account_address: `0x${id.padEnd(40, '0')}`,
     chain_id: chainId,
     name,
     is_default: isDefault,
@@ -57,7 +57,7 @@ describe('AccountsOverviewClient — active account (#629)', () => {
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
-    mockUseUserSafes.mockReturnValue({
+    mockUseAccounts.mockReturnValue({
       accounts: [BASE, SEPOLIA],
       loading: false,
     })
@@ -120,7 +120,7 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
   })
 
   it('offers no Add-account entry point when accounts exist', () => {
-    mockUseUserSafes.mockReturnValue({
+    mockUseAccounts.mockReturnValue({
       accounts: [BASE, SEPOLIA],
       loading: false,
     })
@@ -137,7 +137,7 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
   })
 
   it('offers no Add-account entry point from the empty state either', () => {
-    mockUseUserSafes.mockReturnValue({ accounts: [], loading: false })
+    mockUseAccounts.mockReturnValue({ accounts: [], loading: false })
 
     render(<AccountsOverviewClient />)
 
@@ -202,7 +202,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
   }
 
   it('offers no set-default control with several accounts, while keeping the default badge', () => {
-    mockUseUserSafes.mockReturnValue({ accounts: [BASE, SEPOLIA], loading: false })
+    mockUseAccounts.mockReturnValue({ accounts: [BASE, SEPOLIA], loading: false })
 
     render(<AccountsOverviewClient />)
 
@@ -228,7 +228,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
 
   it('offers no set-default control for a lone NON-default account either', () => {
     const LONE = safe('lone1', 'Lone account', 8453, false)
-    mockUseUserSafes.mockReturnValue({ accounts: [LONE], loading: false })
+    mockUseAccounts.mockReturnValue({ accounts: [LONE], loading: false })
     /*
       `activeAccount: null` — no account selected yet — and that is load-bearing
       rather than incidental. `haven-reviewer` found this arm's non-vacuity

@@ -81,7 +81,8 @@ describeDb('catalog_submissions lifecycle (#1714)', () => {
       description: 'Summarizes docs',
       entrypoint: 'summarize',
     })
-    expect(moved).toBe(true)
+    // #3078: the mark hands back what the merchant hook needs, or null.
+    expect(moved).toMatchObject({ id, merchant_id: null })
 
     const due = await listVerifiedCatalogSubmissionsDueForRecheck(
       new Date(Date.now() - 86_400_000),
@@ -110,7 +111,7 @@ describeDb('catalog_submissions lifecycle (#1714)', () => {
         description: null,
         entrypoint: 'nope',
       }),
-    ).toBe(false)
+    ).toBeNull()
 
     const { id: re } = await submit('re.example.com', 2)
     await markCatalogSubmissionOwnershipVerified(re)
@@ -126,7 +127,7 @@ describeDb('catalog_submissions lifecycle (#1714)', () => {
         description: 'reverified',
         entrypoint: 'second',
       }),
-    ).toBe(true)
+    ).not.toBeNull()
   })
 
   it('a row degrades to failed at the caller threshold, once, with failed_at set', async () => {

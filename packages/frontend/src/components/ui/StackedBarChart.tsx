@@ -397,12 +397,22 @@ export function StackedBarChart({
   // top, but only where that leaves at least `TIP_MIN_VISIBLE` of the bar
   // in view above it: its bottom `TIP_GAP` above the axis baseline when the
   // bar is tall enough to hold it, else its bottom just above the legend
-  // — over that day's axis label whole (the label it repeats), never half of
-  // it and never over a legend row. A bar too short for either (the
+  // — over the axis labels beneath it (whole, never half of one; the day's
+  // own it repeats) and never over a legend row. A bar too short for either (the
   // callout would swallow its body, the label and the legend to save a
   // sliver — design review) keeps the resting callout and loses its top
-  // instead. The svg scales the viewBox to its CSS box without preserving
-  // the ratio, so a viewBox y maps to CSS by `y / VIEW_H * clientHeight`.
+  // instead. Between the two slots, the one that hides the fewest
+  // NEIGHBOURS' tops wins (#3076): a 62px band above the baseline covers
+  // the top of every bar shorter than ~68px within the callout's span,
+  // leaving a refusal cap floating over a hidden bar, while the same
+  // callout above the legend clears them at the cost of the date labels it
+  // partly repeats. Ties go to the baseline slot. The svg scales the
+  // viewBox to its CSS box without preserving the ratio, so a viewBox y
+  // maps to CSS by `y / VIEW_H * clientHeight` (and x by `VIEW_W`). This
+  // effect reads `tipHalfPct`, which the half-width effect above sets: on
+  // the pass where that value changes this one uses the previous value and
+  // corrects itself on the next — a two-stage fixed point, one way (the
+  // half-width never depends on `tipTop`), converging before paint.
   // Every input is a layout read or a value the render already fixed, so the
   // second pass reads the same number and the setter bails out — the same
   // fixed point as the half-width above.
@@ -428,7 +438,51 @@ export function StackedBarChart({
     const least = Math.max(barTop + TIP_GAP, markTop + TIP_MIN_VISIBLE)
     const aboveBaseline = cssY(baseY) - tip.offsetHeight - TIP_GAP
     const onLegendTop = svg.clientHeight + LEGEND_GAP - TIP_GAP - tip.offsetHeight
-    const top = aboveBaseline >= least ? aboveBaseline : onLegendTop >= least ? onLegendTop : null
+    // The callout's horizontal span, in the wrapper's CSS px (the box its
+    // `left: %` resolves against — the same one the half-width effect
+    // measures): the same centre-and-clamp the `left` style uses, half its
+    // measured width each side. A neighbour whose bar top — or whose
+    // refusal cap — lies inside a slot's box has its top hidden by that
+    // slot (a cap just above the box over a hidden bar top is the floating
+    // cap the review saw).
+    const width = tip.parentElement?.clientWidth ?? 0
+    const cssX = (x: number) => (x / VIEW_W) * width
+    const centre =
+      (Math.min(100 - tipHalfPct, Math.max(tipHalfPct, ((xOf(active as number) + barW / 2) / VIEW_W) * 100)) / 100) *
+      width
+    const spanLeft = centre - tip.offsetWidth / 2
+    const spanRight = centre + tip.offsetWidth / 2
+    const hiddenTops = (slotTop: number): number => {
+      if (width === 0) return 0
+      let n = 0
+      entries.forEach((e, j) => {
+        if (j === active) return
+        const left = cssX(xOf(j))
+        if (left + cssX(barW) <= spanLeft || left >= spanRight) return
+        // A day with nothing spent draws no bar: its "top" is the baseline
+        // and must not score (it only ever falls in the legend slot's box,
+        // which would bias the choice toward the baseline slot — review).
+        // Its cap, if it has one, still counts.
+        const inside = (y: number) => y > slotTop && y < slotTop + tip.offsetHeight
+        const barHidden = e.total > 0 && inside(cssY(yOf(e.total)))
+        const capHidden = e.refusals > 0 && inside(cssY(yOf(e.total) - REFUSAL_MARKER_H - 3))
+        if (barHidden || capHidden) n += 1
+      })
+      return n
+    }
+    const slots = [aboveBaseline, onLegendTop].filter((t) => t >= least)
+    let top: number | null = null
+    if (slots.length > 0) {
+      top = slots[0] as number
+      let best = hiddenTops(top)
+      for (const t of slots.slice(1)) {
+        const n = hiddenTops(t)
+        if (n < best) {
+          best = n
+          top = t
+        }
+      }
+    }
     setTipTop(top === null ? null : Number(top.toFixed(1)))
   })
 
@@ -643,7 +697,7 @@ export function StackedBarChart({
           className={
             narrow
               ? 'mt-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3'
-              : `pointer-events-none absolute w-max max-w-[60%] -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover${tipTop === null ? ' top-3' : ''}`
+              : `pointer-events-none absolute w-max max-w-[min(60%,24rem)] -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover${tipTop === null ? ' top-3' : ''}`
           }
           data-flipped={!narrow && tipTop !== null ? 'true' : undefined}
           // Anchored over the day it describes rather than the plot's
@@ -661,54 +715,95 @@ export function StackedBarChart({
                 }
           }
         >
-          <p className="text-xs font-semibold text-[var(--v2-ink)]">
-            {entry.label}
-            {entry.partial && (
-              <span data-testid="chart-tooltip-partial" className="ml-1.5 font-normal text-[var(--v2-ink-3)]">
-                · partial day
-              </span>
-            )}
-          </p>
-          <ul className="mt-1.5 space-y-1">
-            {entry.segments.map((s) => (
-              <li
-                key={s.seriesId}
-                data-testid="chart-tooltip-row"
-                className="flex items-baseline gap-2 text-xs"
-              >
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
-                  style={{ backgroundColor: seriesColor(s.seriesIndex) }}
-                />
-                <span className="min-w-0 flex-1 truncate text-[var(--v2-ink-2)]">{s.name}</span>
-                <span className="v2-tabular whitespace-nowrap text-[var(--v2-ink)]">
-                  {formatValue(s.amount)}
-                </span>
-                {s.tokens !== undefined && s.tokens.length > 0 && (
-                  <span
-                    data-testid="chart-tooltip-tokens"
-                    className="v2-tabular whitespace-nowrap text-[var(--v2-ink-3)]"
-                  >
-                    {' ('}
-                    {s.tokens.map(([token, amount]) => `${formatValue(amount)} ${token}`).join(' + ')}
-                    {')'}
+          {/* Two lines, not a table (#3067): the day, its refusal count and
+              its total on the first, the agents as swatch·name·amount chips
+              that wrap on the second. The old one-row-per-agent
+              form stood 113–135px tall on a 200px plot, so on every bar of
+              middling height the callout either hid the bar's top or (had
+              it dropped) the whole bar — a ~60px callout fits above or
+              below almost any bar and the drop rule (#3063) has room to
+              work. The values in full are in the data table below. */}
+          {/* The header row wraps: the label's units ("10 Jul", "· partial
+              day", "· 1 payment refused") each hold together and break only
+              between each other — a space between them is the break, the
+              <p> may shrink (min-w-0) — and the total is pushed to the
+              right edge, or onto the next line when the units fill this
+              one; it never leaves the box (design re-check: with no break
+              between nowrap units the row's min-content pushed the total
+              6.7px past the 390 panel's border and split "10 Jul"). */}
+          <div data-testid="chart-tooltip-header" className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+            <p className="min-w-0 text-xs font-semibold text-[var(--v2-ink)]">
+              <span className="whitespace-nowrap">{entry.label}</span>
+              {entry.partial && (
+                <>
+                  {' '}
+                  <span data-testid="chart-tooltip-partial" className="whitespace-nowrap font-normal text-[var(--v2-ink-3)]">
+                    · partial day
                   </span>
-                )}
-              </li>
-            ))}
-          </ul>
-          {entry.refusals > 0 && (
-            <p
-              data-testid="chart-tooltip-refusals"
-              className="mt-1.5 text-xs text-[var(--v2-ink-2)]"
-            >
-              {entry.refusals} payment{entry.refusals === 1 ? '' : 's'} refused
+                </>
+              )}
+              {/* The day's refusal count belongs to the day, so it sits
+                  beside the day — as a trailing chip it read as the last
+                  agent's (design review). */}
+              {entry.refusals > 0 && (
+                <>
+                  {' '}
+                  <span data-testid="chart-tooltip-refusals" className="whitespace-nowrap font-normal text-[var(--v2-ink-2)]">
+                    · {entry.refusals} payment{entry.refusals === 1 ? '' : 's'} refused
+                  </span>
+                </>
+              )}
             </p>
-          )}
-          <p className="mt-1.5 border-t border-[var(--v2-border)] pt-1.5 text-xs font-semibold text-[var(--v2-ink)]">
-            {currency} {formatValue(entry.total)}
-          </p>
+            <p data-testid="chart-tooltip-total" className="v2-tabular ml-auto whitespace-nowrap text-xs font-semibold text-[var(--v2-ink)]">
+              {currency} {formatValue(entry.total)}
+            </p>
+          </div>
+          {/* A chip may not run off the panel: the name truncates, the
+              money figure never does (a 36-char id fallback or a long agent
+              name pushed the amount out of the 390 panel — the
+              whitespace-nowrap trap of #2038, caught in review), and the
+              token breakdown wraps onto the chip's next line rather than
+              stretching the callout to its width bound (a 560px banner
+              over four date labels on the showcase — design review; the
+              bound is 24rem, so chips wrap at a readable width). */}
+          <ul data-testid="chart-tooltip-chips" className="mt-1 flex min-w-0 max-w-full flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
+              {entry.segments.map((s) => (
+                <li
+                  key={s.seriesId}
+                  data-testid="chart-tooltip-row"
+                  className="inline-flex min-w-0 max-w-full flex-wrap items-baseline gap-x-1.5 gap-y-0.5"
+                >
+                  {/* swatch·name·amount never wrap against each other: in a
+                      wrapping chip the name's flex-basis is its full width,
+                      so a long name took a line of its own, orphaned the
+                      swatch and pushed the amount to a third line (design
+                      re-check). Inside this non-wrapping span the name
+                      truncates against the amount; only the token breakdown
+                      folds to the chip's next line. */}
+                  <span data-testid="chart-tooltip-figure" className="inline-flex min-w-0 max-w-full items-baseline gap-1.5">
+                    <span
+                      aria-hidden="true"
+                      className="inline-block h-2 w-2 flex-shrink-0 self-center rounded-full"
+                      style={{ backgroundColor: seriesColor(s.seriesIndex) }}
+                    />
+                    <span data-testid="chart-tooltip-name" className="min-w-0 truncate text-[var(--v2-ink-2)]">{s.name}</span>
+                    <span data-testid="chart-tooltip-amount" className="v2-tabular flex-shrink-0 whitespace-nowrap text-[var(--v2-ink)]">
+                      {formatValue(s.amount)}
+                    </span>
+                  </span>
+                  {s.tokens !== undefined && s.tokens.length > 0 && (
+                    <span
+                      data-testid="chart-tooltip-tokens"
+                      className="v2-tabular min-w-0 text-[var(--v2-ink-3)]"
+                    >
+                      {'('}
+                      {s.tokens.map(([token, amount]) => `${formatValue(amount)} ${token}`).join(' + ')}
+                      {')'}
+                    </span>
+                  )}
+                </li>
+              ))}
+          </ul>
         </div>
       )}
 

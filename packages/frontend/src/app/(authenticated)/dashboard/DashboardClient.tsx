@@ -88,7 +88,7 @@ function buildSpendSummary(agent: DashboardAgentPreview): string {
   const summaries = agent.allowances.slice(0, 2).map((allowance) => {
     const amount = formatAllowanceForToken(
       allowance.allowanceAmount,
-      agent.safeChainId,
+      agent.accountChainId,
       allowance.tokenSymbol,
     )
     return `${amount} ${allowance.tokenSymbol}/${formatResetLabel(allowance.resetPeriodMin)}`
@@ -658,7 +658,7 @@ export default function DashboardClient() {
   // account" is just the first account.
   const delegationSafe = safes[0]
   const recoverySigners = getStoredHybridSigners({
-    accountAddress: delegationSafe?.safe_address as Address | undefined,
+    accountAddress: delegationSafe?.account_address as Address | undefined,
     chainId: delegationSafe?.chain_id,
   })
   // #1205: the server now answers this question — computed by
@@ -829,7 +829,7 @@ export default function DashboardClient() {
 
   const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
   const actionGate = useAccountOperationGate({
-    accountAddress: selectedActionSafe?.safe_address as Address | undefined,
+    accountAddress: selectedActionSafe?.account_address as Address | undefined,
     chainId: selectedActionSafe?.chain_id,
   })
   const requiresOtherDevice = actionGate.kind === 'passkey_on_other_device'
@@ -841,7 +841,7 @@ export default function DashboardClient() {
   const {
     refetch: refetchSelectedBalances,
   } = useBalances(
-    selectedActionSafe?.safe_address ?? null,
+    selectedActionSafe?.account_address ?? null,
     { enabled: sendModalDataEnabled, chainId: selectedActionSafe?.chain_id },
   )
 
@@ -1112,7 +1112,7 @@ export default function DashboardClient() {
       <AddFundsModal
         open={addFundsOpen}
         onClose={() => setAddFundsOpen(false)}
-        accountAddress={selectedActionSafe?.safe_address}
+        accountAddress={selectedActionSafe?.account_address}
         chainId={selectedActionSafe?.chain_id}
         onReceive={() => {
           setHasOpenedReceive(true)

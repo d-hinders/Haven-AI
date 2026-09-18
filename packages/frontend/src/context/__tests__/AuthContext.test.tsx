@@ -42,7 +42,7 @@ const mockUser = {
   name: 'Ada Lovelace',
   email: 'test@example.com',
   wallet_address: null,
-  safe_address: null,
+  account_address: null,
   accounts: [],
 }
 
@@ -154,7 +154,7 @@ describe('AuthContext', () => {
       accounts: [
         {
           id: 'safe-1',
-          safe_address: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
+          account_address: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
           chain_id: 100,
           name: 'Main Safe',
           is_default: true,
@@ -173,7 +173,7 @@ describe('AuthContext', () => {
           credential_id: 'credential-123',
           signer_address: '0x0802E96a6dd7e1DD80620CF5D759d41B714c0ce2',
           chain_id: 100,
-          safe_address: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
+          account_address: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
           created_at: '2026-05-04T00:00:00.000Z',
         },
       ],
@@ -196,7 +196,7 @@ describe('AuthContext', () => {
       accounts: [
         {
           id: 'safe-1',
-          safe_address: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
+          account_address: '0x07058311f995c89F4DbE17Db61fa1A3CDe638975',
           chain_id: 100,
           name: 'Main Safe',
           is_default: true,
@@ -204,7 +204,7 @@ describe('AuthContext', () => {
         },
         {
           id: 'safe-2',
-          safe_address: '0x1111111111111111111111111111111111111111',
+          account_address: '0x1111111111111111111111111111111111111111',
           chain_id: 8453,
           name: 'Base Safe',
           is_default: false,

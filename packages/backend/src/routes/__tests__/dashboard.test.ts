@@ -76,8 +76,8 @@ const AGENT = {
   name: 'Research agent',
   status: 'active',
   account_id: SAFE.id,
-  safe_name: SAFE.name,
-  safe_chain_id: SAFE.chain_id,
+  account_name: SAFE.name,
+  account_chain_id: SAFE.chain_id,
 }
 
 describe('dashboard routes', () => {
@@ -167,13 +167,11 @@ describe('dashboard routes', () => {
     expect(agentQuery).toContain("a.status IN ('active', 'paused')")
   })
 
-  // #2907 (naming P0 finding #2): DashboardAgentPreview and the preview
-  // transaction dual-emit the account_* twins, equal to their safe_*/safeId
-  // originals, ON THE WIRE. Dropping `withDashboardAgentAccountAlias(...)` or
-  // `withTransactionAccountAlias(...)` from this route leaves the mapper's own
-  // unit test green (it never calls the route) — this is the request-level
-  // check that catches it.
-  it('#2907: agents[] and transactions[] dual-emit the account_* twins', async () => {
+  // #2914 (naming epic #2906 phase 5, the contraction): the twin `#2907`
+  // dual-emitted is gone. DashboardAgentPreview and the preview transaction
+  // carry the account_* names ONLY, ON THE WIRE — a request-level check, not
+  // just the mapper's own unit test (the mapper itself is deleted).
+  it('#2914: agents[] and transactions[] carry the account_* names only, not the retired safe*', async () => {
     const tx = {
       hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
       type: 'native',
@@ -203,15 +201,20 @@ describe('dashboard routes', () => {
     const body = response.json()
     expect(body.agents.length).toBeGreaterThan(0)
     for (const agent of body.agents) {
-      expect(agent.accountId).toBe(agent.safeId)
-      expect(agent.accountName).toBe(agent.safeName)
-      expect(agent.accountChainId).toBe(agent.safeChainId)
+      expect(agent.safeId).toBeUndefined()
+      expect(agent.safeName).toBeUndefined()
+      expect(agent.safeChainId).toBeUndefined()
+      expect(agent.accountId).toBeDefined()
+      expect(agent.accountName).toBeDefined()
+      expect(agent.accountChainId).toBeDefined()
     }
     expect(body.transactions.length).toBeGreaterThan(0)
     for (const item of body.transactions) {
-      expect(item.accountId).toBe(item.safeId)
-      expect(item.accountAddress).toBe(item.safeAddress)
-      expect(item.accountName).toBe(item.safeName)
+      expect(item.safeId).toBeUndefined()
+      expect(item.safeAddress).toBeUndefined()
+      expect(item.safeName).toBeUndefined()
+      expect(item.accountId).toBeDefined()
+      expect(item.accountAddress).toBeDefined()
     }
   })
 

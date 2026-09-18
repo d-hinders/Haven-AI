@@ -56,7 +56,7 @@
  * the table — so a reader gets the headline and the figures.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { chartScale, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components/charts/chart-scale'
 
@@ -200,10 +200,20 @@ export function AreaChart({
         setCaret(points.length - 1)
       } else if (event.key === 'Escape') {
         setCaret(null)
+        setPinned(null)
       }
     },
     [points.length],
   )
+
+  // A pin or caret outlives the data it pointed at otherwise: a shorter
+  // range would leave `active` on an index with no point — no callout, and
+  // no hover either, until a tap or Escape. Reset both when the points
+  // change. (The bar chart's note; #3070 ports its treatment whole.)
+  useEffect(() => {
+    setPinned(null)
+    setCaret(null)
+  }, [points.length])
 
   if (!chartable) return null
 
@@ -259,7 +269,20 @@ export function AreaChart({
               data-testid="area-point"
               aria-hidden="true"
               onMouseEnter={() => setHovered(i)}
-              onMouseDown={() => setPinned(i)}
+              // A tap pins the day; a second tap on the pinned day lets
+              // it go (the callout takes no pointer, so nothing else can
+              // — #3070, the #3066 treatment). The release also drops the
+              // hover: a touch tap synthesises mouseenter before mousedown
+              // and never a mouseleave, so without this the panel would
+              // stay up through the second tap.
+              onMouseDown={() => {
+                if (pinned === i) {
+                  setPinned(null)
+                  setHovered(null)
+                } else {
+                  setPinned(i)
+                }
+              }}
             >
               {/* The hit strip is the day's whole slice of the plot, not the
                   dot: a day has to be selectable where the day is drawn. */}
@@ -328,6 +351,13 @@ export function AreaChart({
         </span>
       </div>
 
+      {/* The callout takes no pointer events: it used to pin itself on
+          mouseenter, and since it overlaps the neighbouring points the
+          pointer could not reach a day the previous day's callout lay over
+          (#3070 — a scrub across the /design-system sample skipped Thu 4).
+          Now the pointer falls through to the hit strips beneath; a pin is
+          a tap on the day, released by a second tap or Escape. On a narrow
+          screen the panel is in flow below the plot. */}
       {point !== null && (
         <div
           data-testid="chart-tooltip"
@@ -335,13 +365,8 @@ export function AreaChart({
           className={
             narrow
               ? 'mt-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3'
-              : 'absolute left-1/2 top-3 w-max max-w-full -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover'
+              : 'pointer-events-none absolute left-1/2 top-3 w-max max-w-full -translate-x-1/2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3 shadow-popover'
           }
-          onMouseEnter={() => setPinned(active)}
-          onMouseLeave={() => {
-            setPinned(null)
-            setHovered(null)
-          }}
         >
           <p className="text-xs text-[var(--v2-ink-2)]">{point.label}</p>
           <p className="mt-1 text-sm font-semibold text-[var(--v2-ink)]">

@@ -359,6 +359,97 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
     expect(tip.getAttribute('data-flipped')).toBeNull()
   })
 
+  it('prefers the slot above the legend when the baseline slot would hide a neighbour\'s top (#3076)', () => {
+    layOut()
+    // A 360px callout (the 60% cap of a 600px wrapper) spans 30–70%: at
+    // Wed 10 it reaches over Tue 9 (x 260–376), whose cap top (97.0) lies
+    // inside the baseline slot's box (76.7..166.7) — so that slot would hide
+    // a neighbour's top. Above the legend (116) it hides none: Mon 8's top
+    // (132.7) is outside the span. The legend slot wins.
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    const svg = container.querySelector('svg')!
+    fireEvent.keyDown(svg, { key: 'End' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip.getAttribute('data-flipped')).toBe('true')
+    expect(tip.style.top).toBe('116px')
+    // The narrow 200px callout of the test above does not reach Tue 9, so
+    // the baseline slot keeps winning there (76.7px) — a tie goes to it.
+  })
+
+  it('counts a neighbour\'s BAR top as hidden, not only its cap: a cap floating above the box does not clear the bar under it (#3076)', () => {
+    layOut()
+    // Described: a tall middle bar B. Neighbour A (capless, top 132.7) sits
+    // inside both slots' boxes (baseline 76.7..166.7, legend 116..206).
+    // Neighbour C carries a cap: its bar top (79.9) sits inside the
+    // baseline box but its cap (70.8) floats just above it — the floating
+    // cap over a hidden bar the review saw. A 400px callout spans both.
+    // Counting bar tops, the baseline slot hides A and C, the legend slot
+    // only A: legend wins. Counting caps only, each slot hides one (A) and
+    // the baseline slot keeps the tie.
+    const capless: StackedBarDay[] = [
+      { label: 'A', series: [{ id: 'x', name: 'x', amount: 150, seriesIndex: 0 }] },
+      { label: 'B', series: [{ id: 'x', name: 'x', amount: 450, seriesIndex: 0 }] },
+      { label: 'C', refusals: 1, series: [{ id: 'x', name: 'x', amount: 348, seriesIndex: 0 }] },
+    ]
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={capless} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    fireEvent.keyDown(container.querySelector('svg')!, { key: 'ArrowRight' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip).toHaveTextContent(/^B/)
+    expect(tip.style.top).toBe('116px')
+  })
+
+  it('counts a neighbour\'s CAP as hidden even when its bar top is below the box (#3076 review)', () => {
+    layOut()
+    // A (250, capless): top 106.1 — inside the baseline box (76.7..166.7)
+    // only. C (15 + a refusal): a 4px bar whose top (168.7) is BELOW the
+    // baseline box but whose cap (159.6) is inside it; both inside the
+    // legend box (116..206). Baseline slot hides A + C(cap) = 2, legend
+    // slot hides C = 1 → legend wins. A bar-only rule scores 1 v 1 and
+    // keeps the baseline.
+    const days: StackedBarDay[] = [
+      { label: 'A', series: [{ id: 'x', name: 'x', amount: 250, seriesIndex: 0 }] },
+      { label: 'B', series: [{ id: 'x', name: 'x', amount: 450, seriesIndex: 0 }] },
+      { label: 'C', refusals: 1, series: [{ id: 'x', name: 'x', amount: 15, seriesIndex: 0 }] },
+    ]
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={days} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    fireEvent.keyDown(container.querySelector('svg')!, { key: 'ArrowRight' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip).toHaveTextContent(/^B/)
+    expect(tip.style.top).toBe('116px')
+  })
+
+  it('never scores the "top" of a day that drew no bar (#3076 review)', () => {
+    layOut()
+    // A (250): top 106.1, inside the baseline box only. Z (nothing spent,
+    // nothing refused — an empty day a gap-filled range would emit): no
+    // bar, no cap; its phantom top is the baseline (172.7), inside the
+    // legend box only. Baseline slot hides A = 1, legend slot hides
+    // nothing → legend wins. Scoring the phantom makes it 1 v 1 and keeps
+    // the baseline.
+    const days: StackedBarDay[] = [
+      { label: 'A', series: [{ id: 'x', name: 'x', amount: 250, seriesIndex: 0 }] },
+      { label: 'B', series: [{ id: 'x', name: 'x', amount: 450, seriesIndex: 0 }] },
+      { label: 'Z', series: [] },
+    ]
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
+    const { container, getByTestId } = render(
+      <StackedBarChart days={days} currency="USD" ariaLabel="s" formatValue={fmt} />,
+    )
+    fireEvent.keyDown(container.querySelector('svg')!, { key: 'ArrowRight' })
+    const tip = getByTestId('chart-tooltip')
+    expect(tip).toHaveTextContent(/^B/)
+    expect(tip.style.top).toBe('116px')
+  })
+
   it('counts the refusal cap as part of the bar: a day whose CAP alone would hide flips too', () => {
     layOut()
     // Tue 9's bar top is at 106.1, the 90px callout's resting bottom at
@@ -454,6 +545,92 @@ describe('StackedBarChart — the tooltip, opened two ways', () => {
     )
     expect(screen.getByTestId('chart-tooltip-refusals')).toHaveTextContent('4 payments refused')
     expect(tip).toHaveTextContent(/USD 250\.00/)
+  })
+
+  it('is two lines, not a table: day, refusal count and total on the first, agents as wrapping chips on the second (#3067)', () => {
+    renderChart()
+    fireEvent.keyDown(document.querySelector('svg')!, { key: 'ArrowRight' })
+    const tip = screen.getByTestId('chart-tooltip')
+    // The total shares the first line with the day label.
+    const total = screen.getByTestId('chart-tooltip-total')
+    expect(total).toHaveTextContent('USD 250.00')
+    expect(total.parentElement!.textContent).toMatch(/^Tue 9/)
+    // The day's refusal count belongs to the day: it sits on the first
+    // line beside the label, never as a trailing chip that reads as the
+    // last agent's.
+    const refusals = screen.getByTestId('chart-tooltip-refusals')
+    expect(refusals.parentElement).toBe(total.parentElement!.firstElementChild)
+    // Units are separated by a real space (the only place the line may
+    // break) and each unit holds together; the row wraps and the <p> may
+    // shrink, so the total is never pushed out of the box.
+    expect(refusals.parentElement!.textContent).toBe('Tue 9 · 4 payments refused')
+    expect(refusals.className).toMatch(/whitespace-nowrap/)
+    expect(refusals.parentElement!.className).toMatch(/min-w-0/)
+    const dateUnit = refusals.parentElement!.firstElementChild!
+    expect(dateUnit.textContent).toBe('Tue 9')
+    expect(dateUnit.className).toMatch(/whitespace-nowrap/)
+    const header = screen.getByTestId('chart-tooltip-header')
+    expect(header.className).toMatch(/flex-wrap/)
+    expect(total.className).toMatch(/ml-auto/)
+
+    // One wrapping list of agent chips — no row-per-agent block underneath.
+    const list = screen.getByTestId('chart-tooltip-chips')
+    expect(list.tagName).toBe('UL')
+    expect(list.className).toMatch(/flex-wrap/)
+    expect(list.className).not.toMatch(/flex-col/)
+    expect(Array.from(list.children).map((li) => li.getAttribute('data-testid'))).toEqual([
+      'chart-tooltip-row',
+      'chart-tooltip-row',
+    ])
+    // The chips carry swatch, name and amount — the name stays (the legend
+    // is below the plot, the chip is where the eye is).
+    expect(list.children[0]).toHaveTextContent(/Research agent.*200\.00/)
+    // Nothing of the old block form remains after the list.
+    expect(list.nextElementSibling).toBeNull()
+    // The callout is capped narrower than the plot's 60% so chips wrap at
+    // a readable width instead of stretching into a banner.
+    expect(tip.className).toMatch(/max-w-\[min\(60%,24rem\)\]/)
+  })
+
+  it('separates every header unit with one real space — the only place the line may break (#3067 re-check)', () => {
+    // A day that is both partial and refused carries all three units.
+    const partialRefused: StackedBarDay[] = [
+      ...THREE_DAYS.slice(0, 2),
+      { ...THREE_DAYS[1]!, label: 'Wed 10', partial: true },
+    ]
+    render(<StackedBarChart days={partialRefused} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(document.querySelector('svg')!, { key: 'End' })
+    const label = screen.getByTestId('chart-tooltip-partial').parentElement!
+    expect(label.textContent).toBe('Wed 10 · partial day · 4 payments refused')
+  })
+
+  it('never lets a long name push the money figure out of the panel: the name truncates, the amount does not shrink, the tokens fold (#3067 review)', () => {
+    renderChart()
+    fireEvent.keyDown(document.querySelector('svg')!, { key: 'ArrowRight' })
+    const row = screen.getAllByTestId('chart-tooltip-row')[0]!
+    // jsdom lays nothing out, so the guard is the class contract that a
+    // browser turns into geometry: the chip may shrink (min-w-0), the
+    // name ellipsises inside it, and the figures refuse to shrink or wrap.
+    expect(row.className).toMatch(/min-w-0/)
+    expect(row.className).not.toMatch(/whitespace-nowrap/)
+    // swatch·name·amount live in one non-wrapping span, so the name
+    // truncates against the amount instead of taking a line of its own.
+    const figure = row.querySelector('[data-testid="chart-tooltip-figure"]')!
+    expect(figure.className).toMatch(/inline-flex/)
+    expect(figure.className).toMatch(/min-w-0/)
+    expect(figure.className).not.toMatch(/flex-wrap/)
+    const name = figure.querySelector('[data-testid="chart-tooltip-name"]')!
+    expect(figure.querySelector('[data-testid="chart-tooltip-amount"]')).not.toBeNull()
+    expect(name.className).toMatch(/truncate/)
+    expect(name.className).toMatch(/min-w-0/)
+    const amount = row.querySelector('[data-testid="chart-tooltip-amount"]')!
+    expect(amount.className).toMatch(/whitespace-nowrap/)
+    expect(amount.className).toMatch(/flex-shrink-0/)
+    // The token breakdown wraps onto the chip's next line instead of
+    // widening the callout — the chip itself is a wrapping row.
+    expect(row.className).toMatch(/flex-wrap/)
+    const tokens = row.querySelector('[data-testid="chart-tooltip-tokens"]')!
+    expect(tokens.className).not.toMatch(/whitespace-nowrap/)
   })
 
   it('moves the caret and stops at the ends of the range', () => {

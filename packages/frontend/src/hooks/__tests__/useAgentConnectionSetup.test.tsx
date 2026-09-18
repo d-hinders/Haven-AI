@@ -13,7 +13,7 @@ const {
   SAFE,
   mockUseAuth,
   mockUseSafeDetails,
-  mockUseSafeOperationGate,
+  mockUseAccountOperationGate,
   mockUseAgentConnectionSetupStatus,
   mockUsePublicClient,
   mockUseActiveSigner,
@@ -24,14 +24,14 @@ const {
   SAFE: {
     id: 'safe-1',
     name: 'Operating wallet',
-    safe_address: '0x1111111111111111111111111111111111111111',
+    account_address: '0x1111111111111111111111111111111111111111',
     chain_id: 100,
     is_default: true,
     created_at: '2026-01-01T00:00:00.000Z',
   },
   mockUseAuth: vi.fn(),
   mockUseSafeDetails: vi.fn(),
-  mockUseSafeOperationGate: vi.fn(),
+  mockUseAccountOperationGate: vi.fn(),
   mockUseAgentConnectionSetupStatus: vi.fn(),
   mockUsePublicClient: vi.fn(),
   mockUseActiveSigner: vi.fn(),
@@ -55,7 +55,7 @@ vi.mock('@/hooks/useSafeDetails', () => ({
 }))
 
 vi.mock('@/hooks/useAccountOperationGate', () => ({
-  useAccountOperationGate: (args: unknown) => mockUseSafeOperationGate(args),
+  useAccountOperationGate: (args: unknown) => mockUseAccountOperationGate(args),
 }))
 
 vi.mock('@/hooks/useAgentConnectionSetupStatus', () => ({
@@ -111,14 +111,14 @@ function connectedSetupStatus(overrides: Record<string, unknown> = {}) {
     haven_wallet: {
       id: SAFE.id,
       name: SAFE.name,
-      address: SAFE.safe_address,
+      address: SAFE.account_address,
       chain_id: 100,
       network: 'Gnosis',
     },
     agent_budget: [],
     delegate_address: '0x3333333333333333333333333333333333333333',
     install_status: CONFIGURED_INSTALL,
-    approval: { status: 'pending_approval', safe_tx_hash: null, tx_hash: null },
+    approval: { status: 'pending_approval', account_tx_hash: null, tx_hash: null },
     ...overrides,
   }
 }
@@ -265,7 +265,7 @@ describe('resume from a hand-off link (#2522)', () => {
     vi.clearAllMocks()
     mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] }, activeAccount: SAFE })
     mockUseSafeDetails.mockReturnValue({ details: null, loading: false, error: null })
-    mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
+    mockUseAccountOperationGate.mockReturnValue({ kind: 'ready' })
     mockUsePublicClient.mockReturnValue({})
     mockUseAccount.mockReturnValue({ address: undefined, chain: undefined })
     mockUseActiveSigner.mockReturnValue({ type: 'eoa', address: '0x2222222222222222222222222222222222222222', walletClient: {} })
@@ -284,7 +284,7 @@ describe('resume from a hand-off link (#2522)', () => {
       useAgentConnectionSetup({
         open: true,
         onClose: vi.fn(),
-        accountAddress: SAFE.safe_address,
+        accountAddress: SAFE.account_address,
         accountId: SAFE.id,
         resumeSetupId,
       }),
@@ -356,11 +356,11 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
     vi.clearAllMocks()
     mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] }, activeAccount: SAFE })
     mockUseSafeDetails.mockReturnValue({
-      details: { address: SAFE.safe_address, threshold: 1, owners: ['0x2222222222222222222222222222222222222222'] },
+      details: { address: SAFE.account_address, threshold: 1, owners: ['0x2222222222222222222222222222222222222222'] },
       loading: false,
       error: null,
     })
-    mockUseSafeOperationGate.mockReturnValue({ kind: 'ready' })
+    mockUseAccountOperationGate.mockReturnValue({ kind: 'ready' })
     mockUsePublicClient.mockReturnValue({})
     mockUseAccount.mockReturnValue({ address: undefined, chain: undefined })
     mockUseActiveSigner.mockReturnValue({ type: 'eoa', address: '0x2222222222222222222222222222222222222222', walletClient: {} })
@@ -385,7 +385,7 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
       useAgentConnectionSetup({
         open: true,
         onClose: vi.fn(),
-        accountAddress: SAFE.safe_address,
+        accountAddress: SAFE.account_address,
         accountId: SAFE.id,
       }),
     )
@@ -449,7 +449,7 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
           haven_wallet: {
             id: SAFE.id,
             name: SAFE.name,
-            address: SAFE.safe_address,
+            address: SAFE.account_address,
             chain_id: 100,
             network: 'Gnosis',
           },

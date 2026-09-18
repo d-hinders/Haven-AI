@@ -28,7 +28,7 @@ function installUpToAgentCreate(agentResponse: () => Response) {
     if (path === '/accounts/hybrid') return json({ ok: true }, 201)
     if (path === '/auth/me') {
       return json({
-        safes: [{ id: 'safe-1', safe_address: '0x' + '11'.repeat(20), account_type: 'delegator_hybrid' }],
+        accounts: [{ id: 'safe-1', account_address: '0x' + '11'.repeat(20), account_type: 'delegator_hybrid' }],
       })
     }
     if (path === '/agents') return agentResponse()

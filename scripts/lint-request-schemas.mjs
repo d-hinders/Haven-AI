@@ -90,8 +90,10 @@ export function fastifyPathToOpenApi(prefix, path) {
 export function prefixesFromIndex(indexSource, importName) {
   const prefixes = []
   // `await app.register(agentRoutes, { prefix: '/agents' })` — the repo's
-  // registration shape for every route module. Same import may be registered
-  // twice (userSafesRoutes at /user/safes AND /user/accounts): each counts.
+  // registration shape for every route module. An import registered under two
+  // prefixes counts once per registration — #2907 had one such twin mount
+  // until #2914 retired the old prefix; the mechanism stands, the example is
+  // history.
   const re = /app\.register\(\s*([A-Za-z_$][\w$]*)\s*,\s*\{[^}]*?prefix:\s*'([^']*)'/g
   for (const m of indexSource.matchAll(re)) {
     if (m[1] === importName) prefixes.push(m[2])

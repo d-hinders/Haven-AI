@@ -128,6 +128,11 @@ export default function CatalogSubmitModal({
   onVerifiedPayable?: () => void
 }) {
   const [resourceUrl, setResourceUrl] = useState('')
+  // Optional (#3078): name the NEW merchant these belong to, when the host
+  // has none yet. Ignored server-side when a merchant already owns the host
+  // — the host proves the merchant, not this text.
+  const [merchantName, setMerchantName] = useState('')
+  const [merchantWebsite, setMerchantWebsite] = useState('')
   // Honeypot: visually hidden and expected to stay empty. Whatever it holds,
   // the value is never sent — the backend drops submissions that fill it.
   const [website, setWebsite] = useState('')
@@ -151,6 +156,8 @@ export default function CatalogSubmitModal({
     setSubmitError(null)
     setPollError(false)
     setResourceUrl('')
+    setMerchantName('')
+    setMerchantWebsite('')
     setWebsite('')
   }, [open])
 
@@ -200,7 +207,15 @@ export default function CatalogSubmitModal({
       setSubmitError(null)
       setPhase('submitting')
       try {
-        const accepted = await submitCatalog(resourceUrl)
+        const trimmedMerchantName = merchantName.trim()
+        const trimmedMerchantWebsite = merchantWebsite.trim()
+        const merchant =
+          trimmedMerchantName || trimmedMerchantWebsite
+            ? { name: trimmedMerchantName || undefined, website: trimmedMerchantWebsite || undefined }
+            : undefined
+        const accepted = merchant
+          ? await submitCatalog(resourceUrl, merchant)
+          : await submitCatalog(resourceUrl)
         setToken(accepted.verify_token ?? null)
         setSubmissionId(accepted.id)
         const next = await getSubmissionStatus(accepted.id)
@@ -212,7 +227,7 @@ export default function CatalogSubmitModal({
         setPhase('error')
       }
     },
-    [resourceUrl, applyStatus],
+    [resourceUrl, merchantName, merchantWebsite, applyStatus],
   )
 
   const handleReset = useCallback(() => {
@@ -324,6 +339,43 @@ export default function CatalogSubmitModal({
                 </p>
               )}
             </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="catalog-merchant-name"
+              className="mb-1 block text-xs font-medium text-[var(--v2-ink-3)]"
+            >
+              Merchant name (optional)
+            </label>
+            <Input
+              id="catalog-merchant-name"
+              type="text"
+              value={merchantName}
+              onChange={(e) => setMerchantName(e.target.value)}
+              placeholder="Your company or product name"
+              autoComplete="off"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="catalog-merchant-website"
+              className="mb-1 block text-xs font-medium text-[var(--v2-ink-3)]"
+            >
+              Merchant website (optional)
+            </label>
+            <Input
+              id="catalog-merchant-website"
+              type="url"
+              value={merchantWebsite}
+              onChange={(e) => setMerchantWebsite(e.target.value)}
+              placeholder="https://your-company.example"
+              autoComplete="off"
+            />
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+              Used only if no merchant already owns this endpoint&apos;s domain.
+            </p>
           </div>
 
           {/*

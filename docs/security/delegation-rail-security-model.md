@@ -11,14 +11,15 @@ covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/routes/agents.ts
-  - packages/backend/src/routes/user-safes.ts
+  - packages/backend/src/routes/user-accounts.ts
+  - packages/backend/src/routes/transactions.ts
+  - packages/backend/src/middleware/retired-safe-names.ts
   - packages/backend/src/modules/agents/rekey-*.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
   - packages/backend/src/infra/repositories/smart-accounts.ts
-  - packages/backend/src/routes/user-safes.ts
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/backend/src/rails/hybrid-transfers.ts
   - packages/backend/src/infra/repositories/hybrid-signers.ts
@@ -35,7 +36,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-14"
+last-verified: "2026-09-17"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -302,6 +303,51 @@ chain.
 > old table or columns now name the new ones with the old in parentheses. The
 > wire keys this document quotes (`safe_address`, `safe_id` on responses) are
 > still emitted — the #2907 alias mappers are untouched and fed by local shims.
+>
+> **Superseded by #2914 (2026-09-17), appended rather than rewritten:** that
+> last sentence was true when it was written and is not now. The contraction
+> deleted `openapi/wire-aliases.ts` and the local shims with it, so the
+> responses this document quotes carry `account_address` / `account_id` and
+> nothing else. Read the paragraph above as the record of what #2911 did; read
+> this one for what the wire does today.
+>
+> **Extended by the #2914 follow-up (2026-09-17), same day.** #2914 left three
+> retired RESPONSE names standing: `safes` on `GET /user/accounts`, `safeName`
+> on the `GET /transactions` feed, and `safes` on `GET /transactions/filters`.
+> All three are gone now — the first two were deliberate one-release twins for
+> the published CLI, the third was simply missed and found in review. So "carry
+> `account_address` / `account_id` and nothing else" is true of the ENVELOPE
+> keys too, not just the row fields. Nothing in this document's security
+> argument moves: an envelope key is not an authority boundary, the queries are
+> still `WHERE user_id = $1`, and the retired REQUEST names are still refused
+> with a 400 rather than ignored — which is the part that matters here, since
+> an ignored `safeId` filter would widen a query the ownership scope is
+> supposed to narrow. This document's coverage list gains
+> `routes/transactions.ts` and `middleware/retired-safe-names.ts` in the same
+> change, because those two files are what make the claims above true and
+> neither was declared.
+>
+> **Scope of this re-read** (so the `last-verified` date is not carrying an
+> unstated claim; it is NOT bumped — it already reads 2026-09-17 from an
+> earlier change today): the envelope keys on `GET /user/accounts`,
+> `GET /transactions` and `GET /transactions/filters`; that every query behind
+> them is still scoped to the caller's `user_id`; and that the retired request
+> names are still refused with a 400. Nothing else in this document was
+> re-read. On the scoping: the two list queries bind it as `$1`, while the
+> x402 legs behind `GET /transactions` bind it as `$2` alongside an account-id
+> `ANY(...)` — the same ownership property, written differently. An earlier
+> draft of this note said `WHERE user_id = $1` flatly; review measured it.
+
+> **Re-verified #3093 (frontend hooks: array wire keys default to `[]`):** this
+> diff touched one file in this document's coverage list,
+> `hooks/useDelegationBudget.ts`, by one expression: `setBudgets(res.delegations)`
+> became `setBudgets(res.delegations ?? [])`, so a `GET /agents/{id}/delegations`
+> answer without the key renders an empty budget card instead of sending the
+> route into the ErrorBoundary. Nothing this document describes moves —
+> `pickSigningPath`, the passkey/EOA dispatch, the grant/revoke ceremonies and
+> the signer-set read (`/account-signers`) are untouched; a missing key was
+> never a security state, only a crash. Scope of this note: that one
+> expression. Nothing else in this document was re-verified.
 
 > **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
 > migration):** this diff touched one file in this document's coverage list,
@@ -460,7 +506,7 @@ names the consequence and asks for confirmation, and the API does not refuse
 
 **Read surface (#1079).** The signer set is additionally readable at account
 level via `GET /accounts/hybrid/:address/signers` — owner-scoped (dashboard
-JWT + ownership check on `smart_accounts`, `user_safes` before #2911) and returning **public-key material
+JWT + ownership check on `smart_accounts`) and returning **public-key material
 plus per-credential enrollment time** (`key_id`, P256 x/y, owner address, and
 `created_at` since #1679 — a timestamp the UI uses to label rows
 "Passkey · added {date}"; nothing secret, nothing spend-enabling). It powers
@@ -802,8 +848,7 @@ moment the user has nothing at risk and no context for what a backup protects.
   on the server's classification instead of re-deriving chain semantics
   client-side.
 - **The waiver column survives as history, not as an unblock.**
-  `smart_accounts.single_signer_waiver_at` (migration 046; the table was
-  `user_safes` until #2911) is still written when an
+  `smart_accounts.single_signer_waiver_at` (migration 046) is still written when an
   acknowledgement is sent, and nothing requires it to proceed. It no longer
   silences the recommendation either — it never made an account recoverable; it
   only recorded that someone had been told once, and the risk is ongoing.
@@ -905,6 +950,12 @@ hard backstop.
 > actually reachable through both names, which is the whole point of an
 > additive rename. Proven with a parity test that fails 4 assertions when the
 > twin entries are removed.
+>
+> **Superseded at #2914:** the contraction removed the `/user/safes` pair from
+> `OWNER_CLI_ALLOWED_ROUTES` rather than keeping both, so the allow-list now
+> carries the `/user/accounts` names alone and matches §9 exactly. A reader
+> should not act on the "adding the two twin entries" instruction above — it
+> records what #2907 did, not what the list holds today.
 
 > **Re-verified #2850:** this diff touched two files in this document's
 > covered-paths list — `routes/agent-rekey.ts` and `routes/agents.ts` — each by
@@ -1058,8 +1109,8 @@ the sponsored revocation, the CLI prints the dashboard signing link, and the
 signature happens in the owner's browser, every time. **The human keeps
 every signature**, which is the same boundary §3 draws for the delegation
 itself. Since #2534 it can also read the
-funding instructions for one of the owner's Safes
-(`GET /user/safes/{safeId}/funding`): balances, chain facts and the documented
+funding instructions for one of the owner's accounts
+(`GET /user/accounts/{accountId}/funding`): balances, chain facts and the documented
 minimum-useful amounts a human acts on — the same read-only category as the
 rest of the list, moving no money and touching no delegation state.
 

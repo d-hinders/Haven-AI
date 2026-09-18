@@ -289,38 +289,42 @@ describe('haven_get_agent', () => {
   })
 
   /**
-   * #2908 (naming epic #2906): the hosted outputs carry BOTH names for the
-   * window — the #1598 pattern (`readiness` / `spend_authority_readiness`),
-   * applied to the account address. ONE mapper per shape produces both keys
-   * (`accountAddressTwins` in the SDK's `account-reads.ts`, spread into
-   * `haven_get_agent` and `haven_get_allowances`), and this equality test is
-   * what the mutation "emit only one name" fails. Each row is a different
-   * SERVER shape: old-only (pre-#2907), new-only (post-#2914), both.
+   * #2914 (naming epic #2906, phase 5 — the CONTRACTION): the #2908 window
+   * (hosted outputs carrying both `accountAddress` and a deprecated
+   * `safeAddress` twin) is closed. `haven_get_agent` and `haven_get_allowances`
+   * now emit `accountAddress` ONLY, and a NEW-shape server (`account_address`)
+   * is the only server shape read — an OLD-only server (`safe_address` alone,
+   * pre-#2907) no longer resolves an address at all.
    */
-  describe.each([
-    ['old-only server (safe_address)', { safe_address: '0xAcct' }],
-    ['new-only server (account_address)', { account_address: '0xAcct' }],
-    ['both (the window)', { account_address: '0xAcct', safe_address: '0xAcct' }],
-  ])('dual-name account address — %s (#2908)', (_label, twins) => {
-    it('haven_get_agent: accountAddress === safeAddress', async () => {
-      stubFetch({
-        'GET /machine-payments/agent': { status: 200, body: { ...AGENT_RESPONSE, ...twins } },
-        'GET /machine-payments/allowances': { status: 200, body: { ...AGENT_ALLOWANCES_RESPONSE, ...twins } },
-      })
-      const result = ok<{ accountAddress: string; safeAddress: string }>(await handlers().haven_get_agent({}))
-      expect(result.data.accountAddress).toBe('0xAcct')
-      expect(result.data.safeAddress).toBe('0xAcct')
-      expect(result.data.accountAddress).toBe(result.data.safeAddress)
+  it('haven_get_agent: accountAddress only, no safeAddress key, from a new-shape server', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: { ...AGENT_RESPONSE, account_address: '0xAcct' } },
+      'GET /machine-payments/allowances': { status: 200, body: { ...AGENT_ALLOWANCES_RESPONSE, account_address: '0xAcct' } },
     })
+    const result = ok<{ accountAddress: string }>(await handlers().haven_get_agent({}))
+    expect(result.data.accountAddress).toBe('0xAcct')
+    expect(result.data).not.toHaveProperty('safeAddress')
+  })
 
-    it('haven_get_allowances: accountAddress === safeAddress', async () => {
-      stubFetch({
-        'GET /machine-payments/allowances': { status: 200, body: { ...AGENT_ALLOWANCES_RESPONSE, ...twins } },
-      })
-      const result = ok<{ accountAddress: string; safeAddress: string }>(await handlers().haven_get_allowances({}))
-      expect(result.data.accountAddress).toBe('0xAcct')
-      expect(result.data.safeAddress).toBe('0xAcct')
+  it('haven_get_allowances: accountAddress only, no safeAddress key, from a new-shape server', async () => {
+    stubFetch({
+      'GET /machine-payments/allowances': { status: 200, body: { ...AGENT_ALLOWANCES_RESPONSE, account_address: '0xAcct' } },
     })
+    const result = ok<{ accountAddress: string }>(await handlers().haven_get_allowances({}))
+    expect(result.data.accountAddress).toBe('0xAcct')
+    expect(result.data).not.toHaveProperty('safeAddress')
+  })
+
+  it('haven_get_agent: an OLD-only server (safe_address alone) no longer resolves an account address', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: { ...AGENT_RESPONSE, safe_address: '0xAcct' } },
+      'GET /machine-payments/allowances': {
+        status: 200,
+        body: { ...AGENT_ALLOWANCES_RESPONSE, account_address: undefined, safe_address: '0xAcct' },
+      },
+    })
+    const result = ok<{ accountAddress: string | undefined }>(await handlers().haven_get_agent({}))
+    expect(result.data.accountAddress).toBeUndefined()
   })
 })
 
@@ -513,7 +517,7 @@ describe('haven_get_payment_status: post-purchase allowance summary (#1310)', ()
   function allowancesFixture(remaining: string) {
     return {
       agent_id: 'agt_1',
-      safe_address: '0xSafe',
+      account_address: '0xSafe',
       delegate_address: '0xDelegate',
       chain_id: 8453,
       allowances: [{

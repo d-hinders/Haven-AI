@@ -187,8 +187,10 @@ what a payload means; they re-derive it.
   the one asymmetry in this list: the signer compares the sweep's `to` against
   the account address **only when the local credential records one**
   (`account_address`, or the pre-#2908 `safe_address` / `safeAddress`, which
-  are read permanently; from the environment, `HAVEN_ACCOUNT_ADDRESS`, or the
-  older `HAVEN_WALLET_ADDRESS` / `HAVEN_SAFE_ADDRESS` until #2914). Run with
+  are read permanently; from the environment, `HAVEN_ACCOUNT_ADDRESS` only —
+  `HAVEN_WALLET_ADDRESS` and `HAVEN_SAFE_ADDRESS` were removed by #2914, so a
+  machine still configured through either records no account address and lands
+  in exactly the degraded case this paragraph describes). Run with
   `HAVEN_DELEGATE_KEY` alone — or with a credential
   whose account address is absent — and there is no local value to compare
   against, so the destination is authenticated by Haven's binding signature and

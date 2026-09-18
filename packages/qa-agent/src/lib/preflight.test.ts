@@ -204,14 +204,14 @@ describe('checkDelegateResidual', () => {
 const TREASURY = '0x9a4c2b7e1d0f3a85c6e4b21d9f0ae873c5d1b042'
 
 /** An agent-identity API stub — these tests are about the check, not HavenApi. */
-function agentApi(response: { ok: boolean; status: number; data: { safe_address?: string } }): Pick<HavenApi, 'getAgent'> {
+function agentApi(response: { ok: boolean; status: number; data: { account_address?: string } }): Pick<HavenApi, 'getAgent'> {
   return { getAgent: async () => response }
 }
 
 describe('checkDelegationTreasury', () => {
   it('passes a funded treasury and states headroom in legs', async () => {
     const check = await checkDelegationTreasury(
-      agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+      agentApi({ ok: true, status: 200, data: { account_address: TREASURY } }),
       providerWithUsdc(900_000n), // 0.9 USDC — the provisioning balance
     )
     expect(check.ok).toBe(true)
@@ -223,7 +223,7 @@ describe('checkDelegationTreasury', () => {
 
   it('BLOCKS on the #2074 shape — an empty treasury names itself, its token, and the remedy', async () => {
     const check = await checkDelegationTreasury(
-      agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+      agentApi({ ok: true, status: 200, data: { account_address: TREASURY } }),
       providerWithUsdc(0n),
     )
     expect(check.ok).toBe(false)
@@ -238,12 +238,12 @@ describe('checkDelegationTreasury', () => {
 
   it('blocks just below a full run cost and passes at exactly it', async () => {
     const below = await checkDelegationTreasury(
-      agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+      agentApi({ ok: true, status: 200, data: { account_address: TREASURY } }),
       providerWithUsdc(TREASURY_RUN_COST_ATOMIC - 1n),
     )
     expect(below.ok).toBe(false)
     const at = await checkDelegationTreasury(
-      agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+      agentApi({ ok: true, status: 200, data: { account_address: TREASURY } }),
       providerWithUsdc(TREASURY_RUN_COST_ATOMIC),
     )
     expect(at.ok).toBe(true)
@@ -258,13 +258,13 @@ describe('checkDelegationTreasury', () => {
     expect(check.detail).toMatch(/HTTP 503/)
   })
 
-  it('is UNKNOWN when the identity carries no safe_address', async () => {
+  it('is UNKNOWN when the identity carries no account_address', async () => {
     const check = await checkDelegationTreasury(
       agentApi({ ok: true, status: 200, data: {} }),
       providerWithUsdc(0n),
     )
     expect(check.ok).toBeNull()
-    expect(check.detail).toMatch(/safe_address/)
+    expect(check.detail).toMatch(/account_address/)
   })
 
   it('is UNKNOWN when the API is unreachable — never a thrown error', async () => {
@@ -279,7 +279,7 @@ describe('checkDelegationTreasury', () => {
   it('is UNKNOWN when the RPC balance read fails', async () => {
     const failingProvider = { call: async () => { throw new Error('rpc timeout') } } as unknown as ethers.Provider
     const check = await checkDelegationTreasury(
-      agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+      agentApi({ ok: true, status: 200, data: { account_address: TREASURY } }),
       failingProvider,
     )
     expect(check.ok).toBeNull()
@@ -323,7 +323,7 @@ describe('runPreflight', () => {
       { ...baseCfg, delegationAgentApiKey: 'qa_key' },
       {
         provider: providerWithUsdc(0n),
-        api: agentApi({ ok: true, status: 200, data: { safe_address: TREASURY } }),
+        api: agentApi({ ok: true, status: 200, data: { account_address: TREASURY } }),
       },
     )
     expect(result.checks.filter((c) => c.name.includes('treasury'))).toHaveLength(1)

@@ -74,7 +74,7 @@ describe('LoginPage', () => {
       id: '1',
       email: 'test@example.com',
       wallet_address: null,
-      safe_address: '0xabc',
+      account_address: '0xabc',
     })
 
     render(<LoginPage />)

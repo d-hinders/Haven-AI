@@ -614,7 +614,7 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
       apiKeyPrefix: 'sk_agent_abc',
       apiUrl: 'http://haven.test',
       agentId: 'agt_1',
-      safeAddress: '0xSAFE',
+      accountAddress: '0xSAFE',
       delegateAddress: '0xDELEGATE',
       chainId: 8453,
       // The LOCAL surface's names — `ConsentInput.toolNames` is typed to the

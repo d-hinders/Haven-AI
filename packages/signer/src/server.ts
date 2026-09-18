@@ -20,7 +20,7 @@ import {
 import { loadHavenIdentity } from './sign-context.js'
 
 export const SIGNER_NAME = '@haven_ai/signer'
-export const SIGNER_VERSION = '0.2.1-alpha.0'
+export const SIGNER_VERSION = '0.3.0-alpha.0'
 
 export interface SignerOptions {
   /** Path to a Haven credential JSON file (delegate_key is read from it). */
@@ -128,7 +128,7 @@ export function buildSignerMcpServer(
     audit: {
       auditPath: options.auditPath ?? defaultSigningAuditPath(credentialsPath),
       delegateAddress: signer.delegateAddress,
-      safeAddress: options.credentials?.accountAddress ?? options.credentials?.safeAddress,
+      accountAddress: options.credentials?.accountAddress,
       chainId: options.credentials?.chainId,
     },
     // #1263: the payment_id signing path — the ONLY network call this server
@@ -212,7 +212,7 @@ export async function runSignerConsentGate(
   return ensureSignerConsent(
     {
       delegateAddress: signer.delegateAddress,
-      safeAddress: credentials?.accountAddress ?? credentials?.safeAddress,
+      accountAddress: credentials?.accountAddress,
       agentId: credentials?.agentId,
       chainId: credentials?.chainId,
       network: credentials?.network,

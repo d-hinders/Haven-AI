@@ -461,7 +461,7 @@ export async function findOwnedAccountsWithType(
  * lookup key. LEFT JOIN so a missing Safe row yields null → legacy
  * (fail-closed), never an error. The join goes through `agents.account_id` —
  * the agent's bound Safe row — the same resolution the auth middleware uses.
- * NOTE: `agents` has NO `safe_address` column; an address-based join here
+ * NOTE: `agents` has NO account-address column; an address-based join here
  * 500s on the real schema, which mocked route tests cannot catch — found
  * live on the first DoD run (#745).
  */

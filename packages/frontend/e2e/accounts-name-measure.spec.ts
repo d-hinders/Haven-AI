@@ -138,7 +138,7 @@ const WRAPPING_NAME = 'Operating wallet Europe'
 const SECOND_SAFE = {
   ...testSafe,
   id: 'safe-second',
-  safe_address: '0x4444444444444444444444444444444444444444',
+  account_address: '0x4444444444444444444444444444444444444444',
   name: 'Imported Safe',
   is_default: false,
   created_at: '2026-04-20T10:00:00.000Z',
@@ -340,9 +340,10 @@ async function serveAccounts(page: Page, accounts: unknown[]) {
   await page.route('**/auth/me', async (route) => {
     await route.fulfill({
       status: 200,
-      // Both envelope keys: AuthContext reads `accounts`; `safes` remains the
-      // deprecated twin on the response until #2914 retires it.
-      body: JSON.stringify({ ...testUser, accounts, safes: accounts }),
+      // One envelope key. `safes` was the deprecated twin here until #2914
+      // retired it; sending it now would make this fixture describe a
+      // response the backend cannot produce.
+      body: JSON.stringify({ ...testUser, accounts }),
     })
   })
 }

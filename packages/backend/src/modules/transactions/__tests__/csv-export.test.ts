@@ -34,9 +34,9 @@ function tx(overrides: Partial<EnrichedTransaction> = {}): EnrichedTransaction {
     blockNumber: 45_725_826,
     isError: false,
     chainId: 8453,
-    safeId: 'safe-1',
-    safeAddress: '0xsafe',
-    safeName: 'Main',
+    accountId: 'account-1',
+    accountAddress: '0xsafe',
+    accountName: 'Main',
     ...overrides,
   }
 }
@@ -88,9 +88,7 @@ describe('transactionCsvRow', () => {
       tx_hash: '0xabc',
       payment_id: 'pi-1',
       agent_name: 'Buyer',
-      safe_address: '0xsafe',
       initiator: 'agent',
-      // #2907: dual-emitted, same value as safe_address.
       account_address: '0xsafe',
     })
   })

@@ -103,7 +103,7 @@ function alreadySettledResponse(): Response {
     status: 'confirmed',
     tx_hash: '0xfirstfunding',
     chain_id: 8453,
-    safe_address: safeAddress,
+    account_address: safeAddress,
     payer: safeAddress,
     token: 'USDC',
     amount: '0.001',
@@ -333,7 +333,7 @@ describe('#1521 — replayed settled payment', () => {
         payment_id: 'pay_fresh',
         status: 'pending_signature',
         chain_id: 8453,
-        safe_address: safeAddress,
+        account_address: safeAddress,
         token: 'USDC',
         amount: '0.001',
         to: delegateAddress,
@@ -341,7 +341,7 @@ describe('#1521 — replayed settled payment', () => {
         sign_data: {
           hash: `0x${'11'.repeat(32)}`,
           components: {
-            safe: safeAddress,
+            payer_account: safeAddress,
             token: accepted.asset,
             to: delegateAddress,
             amount: accepted.amount,

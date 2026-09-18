@@ -26,6 +26,7 @@ covers:
   - .github/workflows/ci.yml
   - scripts/generate-api-types.mjs
   - packages/core/src/api-types.ts
+  - packages/frontend/src/lib/api.ts
   - packages/backend/src/routes/dashboard.ts
   - packages/backend/src/routes/balances.ts
   - packages/backend/src/routes/portfolio.ts
@@ -33,7 +34,7 @@ covers:
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-09-11"
+last-verified: "2026-09-17"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -296,6 +297,15 @@ regenerating. Editing the spec now changes the dashboard's compile-time types
 — an inaccurate spec entry fails the frontend typecheck, which is exactly the
 pressure that keeps the contract honest.
 
+That pressure is on **response** types only. Request bodies are posted as
+`unknown` (`packages/frontend/src/lib/api.ts` — `post`, `put` and `patch` all take
+`body?: unknown`),
+so no generated type ever constrains what the dashboard SENDS. #3082 is the
+worked example: `recipient_address` was declared `string` on
+`POST /agents/{id}/delegations/build` while the dashboard sent `null` for an
+open budget, every typecheck stayed green, and the mismatch only surfaced once
+a runtime validator started reading the declaration.
+
 ### What The Response-Shape Assertion Can And Cannot Catch (#1444)
 
 `check:api-types` compares the spec to types generated FROM that spec. Both
@@ -335,7 +345,7 @@ field. Both halves are guarded by tests in `openapi/spec.test.ts`.
 
 **`Transaction` used to be the `$ref` case, and it could not be asserted at all
 (#2885).** `Transaction` (`GET /transactions`, the aggregated feed) was
-`allOf: [{ $ref: TransactionBase }, { chainId, safeId, safeAddress, safeName }]`
+`allOf: [{ $ref: TransactionBase }, { chainId, accountId, accountAddress, accountName }]`
 — composed so the ~25 shared fields were written once (#984). Because the
 `$ref`'d `TransactionBase` was closed, every feed row failed on the four fields
 the sibling declared, so the route carried no `expectMatchesSpec`, and
@@ -445,9 +455,9 @@ The contract exposes three authentication schemes:
 - `DashboardJwt` authenticates the user for account management, setup, and
   dashboard read operations. Since #984 the dashboard read surface is
   documented in the spec itself (tag `Dashboard`: `/dashboard/overview`,
-  `/balances/{safeAddress}`, `/portfolio/{safeAddress}`,
-  `/transactions/filters`, `/transactions/{safeAddress}`,
-  `/safe/{safeAddress}/details`) — it is the source for the frontend's
+  `/balances/{accountAddress}`, `/portfolio/{accountAddress}`,
+  `/transactions/filters`, `/transactions/{accountAddress}`,
+  `/safe/{accountAddress}/details`) — it is the source for the frontend's
   generated response types, so it must describe what the routes actually
   emit, not an idealization (e.g. `from`/`to` can be the empty string;
   `amountSek` is present on enriched rows).

@@ -61,8 +61,8 @@ const AGENT = {
   name: 'Research agent',
   status: 'active',
   account_id: SAFE.id,
-  safe_name: SAFE.name,
-  safe_chain_id: SAFE.chain_id,
+  account_name: SAFE.name,
+  account_chain_id: SAFE.chain_id,
   account_type: null,
 }
 

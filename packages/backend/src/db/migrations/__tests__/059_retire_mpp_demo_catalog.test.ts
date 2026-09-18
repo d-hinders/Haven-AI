@@ -23,10 +23,10 @@ async function seedMppDemoRow(status = 'active'): Promise<string> {
   const result = await db.query<{ id: string }>(
     `INSERT INTO merchant_catalog
        (name, description, category, resource_url, rail, protocol, tool_name,
-        price_display, price_atomic, asset, network, status, verified_at)
+        price_display, price_atomic, asset, network, status, verified_at, merchant_id)
      VALUES
        ('Haven MPP demo resource', 'Haven internal MPP demo endpoint.', 'demo',
-        $1, 'mpp', 'http', NULL, '$0.01 USDC', '10000', 'USDC', 'eip155:8453', $2, now())
+        $1, 'mpp', 'http', NULL, '$0.01 USDC', '10000', 'USDC', 'eip155:8453', $2, now(), (SELECT id FROM merchants WHERE slug = 'test-merchant'))
      RETURNING id`,
     [RESOURCE_URL, status],
   )
@@ -46,6 +46,11 @@ describeDb('migration 059: retire mpp_demo catalog row (#1328)', () => {
 
   beforeEach(async () => {
     await resetDb()
+    // #3078: merchant_catalog.merchant_id is NOT NULL after migration 088; the
+    // rows this file plants belong to one throwaway merchant.
+    await db.query(
+      `INSERT INTO merchants (slug, name) VALUES ('test-merchant', 'Test merchant') ON CONFLICT (slug) DO NOTHING`,
+    )
   })
 
   it('delists the seeded Haven MPP demo resource row', async () => {
@@ -77,11 +82,11 @@ describeDb('migration 059: retire mpp_demo catalog row (#1328)', () => {
     const other = await db.query<{ id: string }>(
       `INSERT INTO merchant_catalog
          (name, description, category, resource_url, rail, protocol, tool_name,
-          price_display, asset, network, status)
+          price_display, asset, network, status, merchant_id)
        VALUES
          ('Soundside — text generation', 'unrelated merchant', 'media',
           'https://mcp.soundside.ai/mcp', 'x402', 'mcp', 'create_text',
-          '$0.01 USDC', 'USDC', 'eip155:8453', 'active')
+          '$0.01 USDC', 'USDC', 'eip155:8453', 'active', (SELECT id FROM merchants WHERE slug = 'test-merchant'))
        RETURNING id`,
     )
 

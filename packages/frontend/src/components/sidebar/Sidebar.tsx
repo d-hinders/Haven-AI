@@ -63,7 +63,7 @@ const icons = {
   transactions: <Icon icon={ArrowLeftRight} className="w-full h-full" />,
   analytics: <Icon icon={ChartColumn} className="w-full h-full" />,
   agents: <Icon icon={Bot} className="w-full h-full" />,
-  catalog: <Icon icon={Store} className="w-full h-full" />,
+  marketplace: <Icon icon={Store} className="w-full h-full" />,
   contacts: <Icon icon={Users} className="w-full h-full" />,
   profile: <Icon icon={CircleUserRound} className="w-full h-full" />,
   settings: <Icon icon={Settings} className="w-full h-full" />,
@@ -83,10 +83,10 @@ const icons = {
  * pages do rather than the accident of when each shipped: Dashboard and
  * Analytics are "how are things" (#3024 wrote them down as an Overview group
  * the moment Analytics shipped, which #2947 did first); Accounts,
- * Transactions and Accounting are "my money and its record"; Agents, Catalog and Contacts are "what I let
+ * Transactions and Accounting are "my money and its record"; Agents, Marketplace and Contacts are "what I let
  * agents do and with whom" — on the delegation rail an agent only ever pays a
- * contact, so Catalog and Contacts are the two answers to "where can the
- * money go". Custody is gone outright (#3024): its two facts, the account's
+ * contact, so Marketplace and Contacts are the two answers to "where can the
+ * money go" (Marketplace renamed from Catalog by #3079). Custody is gone outright (#3024): its two facts, the account's
  * signer set and each agent's delegation terms, already render on
  * `/accounts/:id` and `/agents/:id`.
  */
@@ -97,7 +97,9 @@ export const baseNavItems: NavItem[] = [
   { label: 'Transactions', href: '/transactions', icon: icons.transactions },
   { label: 'Accounting', href: '/accounting', icon: icons.accounting },
   { label: 'Agents', href: '/agents', icon: icons.agents },
-  { label: 'Catalog', href: '/catalog', icon: icons.catalog },
+  // #3079: renamed from Catalog. Same index, same route slot — `/catalog`
+  // permanently redirects to `/marketplace` (next.config.ts `redirects()`).
+  { label: 'Marketplace', href: '/marketplace', icon: icons.marketplace },
   { label: 'Contacts', href: '/contacts', icon: icons.contacts },
 ]
 
@@ -255,7 +257,7 @@ export default function Sidebar() {
       label: t.sidebar.agentsGroup,
       items: [
         baseNavItems[5], // Agents
-        baseNavItems[6], // Catalog
+        baseNavItems[6], // Marketplace
         baseNavItems[7], // Contacts
       ],
     },

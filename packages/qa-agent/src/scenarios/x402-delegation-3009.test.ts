@@ -121,7 +121,7 @@ function balances(before = 1_000_000n, after = 999_000n, residual = 0n, delegate
 beforeEach(() => {
   vi.clearAllMocks()
   mockFetch.mockResolvedValue(okMerchantResponse())
-  mockGetAgent.mockResolvedValue({ ok: true, data: { safe_address: TREASURY } })
+  mockGetAgent.mockResolvedValue({ ok: true, data: { account_address: TREASURY } })
   settled([receipt()])
   balances()
 })

@@ -98,7 +98,7 @@ describe('runSignerConsentGate', () => {
     const signer = createEdgeSigner(TEST_KEY)
     const credentials = {
       delegateKey: TEST_KEY,
-      safeAddress: '0x000000000000000000000000000000000000Cafe',
+      accountAddress: '0x000000000000000000000000000000000000Cafe',
       chainId: 100,
       network: 'Gnosis Chain',
     }
@@ -113,7 +113,7 @@ describe('runSignerConsentGate', () => {
 
     const input: SignerConsentInput = {
       delegateAddress: signer.delegateAddress,
-      safeAddress: credentials.safeAddress,
+      accountAddress: credentials.accountAddress,
       chainId: credentials.chainId,
       network: credentials.network,
       toolNames: ['haven_sign', 'haven_x402_sign_header', 'haven_sign_x402', 'haven_sign_sweep_delegate'],
@@ -212,7 +212,7 @@ describe('haven_sign tool', () => {
       audit: {
         auditPath,
         delegateAddress: signer.delegateAddress,
-        safeAddress: '0x000000000000000000000000000000000000Cafe',
+        accountAddress: '0x000000000000000000000000000000000000Cafe',
         chainId: 8453,
       },
     })
@@ -309,7 +309,7 @@ describe('haven_sign tool', () => {
         audit: {
           auditPath,
           delegateAddress: signer.delegateAddress,
-          safeAddress: '0x000000000000000000000000000000000000Cafe',
+          accountAddress: '0x000000000000000000000000000000000000Cafe',
           chainId: 100,
         },
       })

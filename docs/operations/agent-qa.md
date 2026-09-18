@@ -213,7 +213,7 @@ is checked too, and blocks below one run's cost
 approved — diagnosable only by hand-decoding a failing UserOperation's
 calldata, while preflight printed two ✓ lines for resources that were fine.
 The address is derived at runtime (`GET /machine-payments/agent` →
-`safe_address`, authenticated with `QA_DELEGATION_AGENT_API_KEY`), never
+`account_address`, authenticated with `QA_DELEGATION_AGENT_API_KEY`), never
 restated in config; absent that key the check skips like everything else. The
 floor is derived from every standing-treasury debit: 0.010 USDC for the direct
 settle, seven 0.001-USDC settling merchant legs (including the #2159 resume

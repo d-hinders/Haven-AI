@@ -156,8 +156,8 @@ describe('auth SQL characterization (pre-#1180)', () => {
     })
   })
 
-  describe('the safes payload is user-scoped and ordered', () => {
-    it('login fetches safes for the AUTHENTICATED user id, oldest first', async () => {
+  describe('the accounts payload is user-scoped and ordered', () => {
+    it('login fetches accounts for the AUTHENTICATED user id, oldest first', async () => {
       const hash = await bcrypt.hash('password123', 4)
       mockQuery.mockResolvedValueOnce({
         rows: [{ id: 'u1', name: 'Ada', email: 'ada@example.com', password_hash: hash, currency_preference: 'EUR' }],
@@ -185,7 +185,7 @@ describe('auth SQL characterization (pre-#1180)', () => {
       expect(sqlSent()[1]).toMatch(/ORDER BY (?:us\.)?created_at ASC/)
       // #1205: raw signer-set inputs are consumed by sessionAccountPayload; the
       // payload carries the computed answer instead.
-      expect(res.json().user.safes).toEqual([
+      expect(res.json().user.accounts).toEqual([
         {
           id: 's1',
           chain_id: 8453,

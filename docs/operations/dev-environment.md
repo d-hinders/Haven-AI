@@ -8,6 +8,9 @@ covers:
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
+  - packages/backend/src/config.ts
+  - packages/backend/src/openapi/request-validation.ts
+  - packages/backend/src/index.ts
 last-verified: "2026-09-18"
 ---
 
@@ -238,6 +241,17 @@ Isolation rules that are non-negotiable for a payments product:
   logs a boot warning when its variable is unset, and the harness prints which
   endpoint CLASS it is observing through (never the URL) in its run preamble.
 
+- **Marketplace chains and prospects (#3078, epic #3077)** —
+  `HAVEN_MARKETPLACE_CHAIN_IDS=84532,8453` on dev (owner decision 11: the demo
+  grid shows the real mainnet merchants next to the Ampersend sandbox; a
+  mainnet offer is not payable from a Sepolia agent and its network chip says
+  so) and `8453` on prod (testnets hidden outright). Unset falls back to
+  `HAVEN_DEPLOY_CHAIN_IDS`, both unset lists every chain. The list scopes
+  dashboard and credential-less reads only — an agent's `GET /catalog` sees
+  its own chain regardless. `HAVEN_MARKETPLACE_PROSPECTS=true` (strict
+  boolean) lists the `coming_soon` merchants of #3080 to authenticated
+  dashboard users on dev only; the route refuses to list them when any
+  mainnet chain is listed, so a copied env cannot publish them on prod.
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A
@@ -274,10 +288,24 @@ Isolation rules that are non-negotiable for a payments product:
   that deterministic test so the normal 15-minute merchant-report grace stays
   in force; never set it in production.
 - **Request-validation mode** — `HAVEN_REQUEST_VALIDATION` on the backend is
-  `off` (nothing runs) | `shadow` (default: log and count would-be refusals,
-  change nothing) | `enforce` (refuse off-spec requests with the documented
-  400 envelope). Per the OpenAPI spec, via the request-validation plugin
-  (#3029, epic #3028). Any other value refuses the boot rather than falling
+  `off` (no schema is injected — EXCEPT on an `enforcedPrefixes` module,
+  which stays enforced regardless of the mode) | `shadow` (default: log and
+  count would-be refusals;
+  since #3082 the request BODY is restored after validation so nothing the
+  handler reads changes, and a body that coercion alone made valid is counted
+  as `would_coerce`. Typed querystring/params are still coerced — that is what
+  makes them usable) | `enforce` (off-spec requests get the documented 400
+  envelope). Per the OpenAPI spec, via the request-validation plugin
+  (#3029, epic #3028).
+
+  **`enforce` is not global, despite the name.** A route is enforced only when
+  its prefix is in the plugin's `enforcedPrefixes`, which `index.ts` sets to
+  `['/contacts']` — `mode` gates the `off` early-return and the counters and
+  nothing else. Setting `HAVEN_REQUEST_VALIDATION=enforce` today therefore
+  refuses exactly what `shadow` refuses. Epic #3028 slices 2–4 widen the
+  prefix list; the variable is not the switch that does it.
+
+  Any other value refuses the boot rather than falling
   back — a misspelled `enforce` must not silently mean `shadow`. **A mode
   change is a RESTART**: the injected schemas are fixed at route
   registration, so flipping the variable is a redeploy, not a live switch.

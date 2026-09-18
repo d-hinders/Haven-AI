@@ -467,7 +467,7 @@ test.describe('bottom tab bar (#2731)', () => {
     const more = page.getByRole('button', { name: 'Open sidebar' })
     await more.click()
     await expect(
-      page.getByRole('navigation', { name: 'All sections' }).getByRole('link', { name: 'Catalog' }),
+      page.getByRole('navigation', { name: 'All sections' }).getByRole('link', { name: 'Marketplace' }),
     ).toBeVisible()
     await page.getByRole('button', { name: 'Close sidebar' }).click()
     await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()

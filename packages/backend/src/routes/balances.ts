@@ -41,10 +41,10 @@ export default async function balanceRoutes(
 ): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  app.get<{ Params: { safeAddress: string }; Querystring: { chain_id?: string } }>(
-    '/:safeAddress',
+  app.get<{ Params: { accountAddress: string }; Querystring: { chain_id?: string } }>(
+    '/:accountAddress',
     async (request, reply) => {
-      const { safeAddress: accountAddress } = request.params
+      const { accountAddress } = request.params
       const requestedChainId = parseChainId(request.query.chain_id)
       const { sub } = request.user as { sub: string }
 
@@ -115,10 +115,13 @@ export default async function balanceRoutes(
         return { balances }
       })
 
-      // Emit safe_funded once when the Safe first receives any tokens.
+      // Emit safe_funded once when the account first receives any tokens.
+      // The EVENT NAME is a stored enum value (migration 021) and is out of
+      // scope for #2914, which carries no migration; only its payload key
+      // moves to the account vocabulary.
       // Fire-and-forget; ON CONFLICT DO NOTHING in the insert deduplicates.
       if (result.balances.some((b) => BigInt(b.balance) > 0n)) {
-        emitFunnelEvent(sub, 'safe_funded', { safe_address: accountAddress, chain_id: chainId })
+        emitFunnelEvent(sub, 'safe_funded', { account_address: accountAddress, chain_id: chainId })
       }
 
       return result

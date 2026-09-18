@@ -32,7 +32,8 @@ export function useContacts(): UseContactsReturn {
     setError(null)
     try {
       const res = await api.get<{ contacts: Contact[] }>('/contacts')
-      if (!isCancelled()) setContacts(res.contacts)
+      // `?? []` — an absent key must degrade, not crash the route (#3093).
+      if (!isCancelled()) setContacts(res.contacts ?? [])
     } catch {
       if (!isCancelled()) setError('We could not load your contacts. Try again in a moment.')
     } finally {

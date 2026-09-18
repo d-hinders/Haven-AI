@@ -33,7 +33,7 @@ vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({
     user: {
       accounts: [
-        { id: 'safe-1', safe_address: '0x' + 'aa'.repeat(20), chain_id: 8453, name: 'Main' },
+        { id: 'safe-1', account_address: '0x' + 'aa'.repeat(20), chain_id: 8453, name: 'Main' },
       ],
     },
   }),
@@ -44,7 +44,7 @@ vi.mock('@/hooks/useActiveChain', () => ({
 }))
 vi.mock('@/hooks/useTransactionFilters', () => ({
   useTransactionFilters: () => ({
-    safes: [],
+    accounts: [],
     agents: [],
     tokens: [],
     loading: false,
@@ -68,7 +68,7 @@ const TX = {
   chainId: 8453,
   accountId: 'safe-1',
   accountAddress: '0x' + 'aa'.repeat(20),
-  safeName: 'Main',
+  accountName: 'Main',
 }
 
 const { feedState } = vi.hoisted(() => ({

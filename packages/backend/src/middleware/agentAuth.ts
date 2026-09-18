@@ -93,7 +93,7 @@ function isSweepRecoveryRequest(request: FastifyRequest): boolean {
  *   - X-API-Key: sk_agent_xxx
  *
  * On success, decorates request.agent with the agent context
- * (including the owning user's safe_address via JOIN).
+ * (including the owning user's account_address via JOIN).
  */
 /**
  * Agent-credential refusal bodies (#2530).
@@ -208,7 +208,7 @@ export async function agentAuthMiddleware(
     return reply.code(403).send({ error: 'Agent has no delegate address configured' })
   }
 
-  // `safe_address` intentionally falls back to the user's legacy mirror for
+  // `account_address` intentionally falls back to the user's legacy mirror for
   // older agent endpoints. That fallback is unsafe for recovery after an
   // account unlink: the mirror may now point at a different wallet. Keep the
   // agent authenticated only when its original Safe binding still exists;

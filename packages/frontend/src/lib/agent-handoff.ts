@@ -30,7 +30,7 @@ export interface HandoffInput {
     description?: string
     delegateAddress: string
     accountAddress: string
-    safeName?: string
+    accountName?: string
     chainId: number
   }
   policy: {
@@ -98,12 +98,12 @@ export function buildDotenv(input: HandoffInput): string {
     lines.push(`# HAVEN_DELEGATE_KEY=<private key for ${agent.delegateAddress}>`)
   }
   lines.push(
+    // #2914: the retired `HAVEN_WALLET_ADDRESS` / `HAVEN_SAFE_ADDRESS` handoff
+    // names are gone — `HAVEN_ACCOUNT_ADDRESS` is the only spelling emitted
+    // now. Credential-FILE fallbacks for those names are permanent and live
+    // in packages/signer and packages/mcp; this is the env-snippet hand-off,
+    // not the file.
     `HAVEN_ACCOUNT_ADDRESS=${agent.accountAddress}`,
-    // #2906 window: the old names stay until #2914 removes them. Every
-    // consumed env name must be picked up by the rename census — add it to
-    // scripts/ci/safe-account-rename-census.mjs when introducing one.
-    `HAVEN_WALLET_ADDRESS=${agent.accountAddress}`,
-    `HAVEN_SAFE_ADDRESS=${agent.accountAddress}`,
     `HAVEN_CHAIN_ID=${agent.chainId}`,
   )
   if (apiBaseUrl) lines.push(`HAVEN_API_URL=${apiBaseUrl}`)
@@ -250,7 +250,7 @@ export function buildHandoff(input: HandoffInput): HandoffArtifacts {
     `## Identity`,
     ``,
     `- **Agent ID:** \`${agent.id}\``,
-    `- **Haven wallet:** \`${agent.accountAddress}\`${agent.safeName ? ` (${agent.safeName})` : ''}`,
+    `- **Haven wallet:** \`${agent.accountAddress}\`${agent.accountName ? ` (${agent.accountName})` : ''}`,
     `- **Credential address:** \`${agent.delegateAddress}\``,
     `- **Network:** ${chainName} (chain id \`${agent.chainId}\`)`,
     ``,

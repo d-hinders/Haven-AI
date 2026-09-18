@@ -123,11 +123,11 @@ async function main(): Promise<void> {
     record(1, 'Fresh account', 'PASS', `${account.account_address} (deploys on first payment)`)
   } else if (prov.status === 409) {
     const { id } = (await prov.json()) as { id: string }
-    const list = await fetch(`${api}/user/safes`, { headers: authed() })
-    const { safes } = (await list.json()) as { safes: Array<{ id: string; safe_address: Address }> }
-    const row = safes.find((s) => s.id === id)
-    if (!row) { record(1, 'Fresh account', 'FAIL', `account ${id} not found in /user/safes`); return finish() }
-    account = { id, account_address: row.safe_address }
+    const list = await fetch(`${api}/user/accounts`, { headers: authed() })
+    const { accounts } = (await list.json()) as { accounts: Array<{ id: string; account_address: Address }> }
+    const row = accounts.find((s) => s.id === id)
+    if (!row) { record(1, 'Fresh account', 'FAIL', `account ${id} not found in /user/accounts`); return finish() }
+    account = { id, account_address: row.account_address }
     record(1, 'Fresh account', 'PASS', `${account.account_address} (existing Hybrid, deterministic reuse)`)
   } else {
     record(1, 'Fresh account', 'FAIL', `${prov.status} ${await prov.text()}`); return finish()
@@ -139,7 +139,7 @@ async function main(): Promise<void> {
   const created = await fetch(`${api}/agents`, {
     method: 'POST',
     headers: authed(),
-    body: JSON.stringify({ name: `DoD agent ${Date.now()}`, delegate_address: agentDelegate, safe_id: account.id }),
+    body: JSON.stringify({ name: `DoD agent ${Date.now()}`, delegate_address: agentDelegate, account_id: account.id }),
   })
   if (!created.ok) { record(2, 'One-signature grant', 'FAIL', `agent create ${created.status} ${await created.text()}`); return finish() }
   const agent = (await created.json()) as { id: string; api_key: string }

@@ -43,7 +43,7 @@ describe('useActiveChain', () => {
     expect(inScope(SEPOLIA, 'all')).toBe(true)
   })
 
-  describe('useChainScope follow-active (Catalog/Transactions)', () => {
+  describe('useChainScope follow-active (Transactions; the marketplace lists every chain, #3079)', () => {
     it('defaults to the active chain and re-defaults when it switches', () => {
       setActiveChain(BASE)
       const { result, rerender } = renderHook(() => useChainScope('follow-active'))

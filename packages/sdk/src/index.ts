@@ -48,20 +48,11 @@ export {
   type UnsupportedNodeVersionMessageOptions,
 } from './node-version.js'
 
-// #2908: the account-vocabulary read/emit helpers every package shares.
-export {
-  readAccountAddress,
-  readAccountId,
-  accountAddressTwins,
-  readX402ReceiptPayer,
-} from './account-naming.js'
+export { readX402ReceiptPayer } from './account-naming.js'
 
 export {
   AgentPaymentPhase,
   AgentPaymentNextAction,
-  AgentPaymentNextActionAccountAlias,
-  canonicalAgentPaymentNextAction,
-  isFundAccountOrRaiseAllowance,
   AgentPaymentFailureCode,
   AgentPaymentRail,
   AGENT_PAYMENT_PHASE_VALUES,
@@ -104,7 +95,6 @@ export type {
   X402RequestSnapshot,
   X402Quote,
   AgentNextStep,
-  AgentPaymentNextActionWire,
   AgentPurchaseSummary,
   AgentPaymentSummary,
   AgentPaymentWarning,
@@ -125,6 +115,7 @@ export type {
   SweepEntry,
   SweepConfirmation,
   HavenCatalogEntry,
+  HavenCatalogMerchant,
   HavenCatalogSubmission,
   CatalogSubmissionAccepted,
 } from './types.js'

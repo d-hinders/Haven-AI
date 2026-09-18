@@ -14,7 +14,7 @@ export interface ListPasskeysResponse {
     credential_id: string
     signer_address: string
     chain_id: number
-    safe_address: string | null
+    account_address: string | null
     created_at: string
   }>
 }

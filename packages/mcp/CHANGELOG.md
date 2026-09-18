@@ -8,6 +8,22 @@ alone.
 
 ## Unreleased
 
+## 0.3.0-alpha.0 — 2026-09-17
+
+### Removed
+
+- **BREAKING (#2914, naming epic #2906 phase 5).** `HAVEN_WALLET_ADDRESS` and
+  `HAVEN_SAFE_ADDRESS` are no longer read from the environment;
+  `HAVEN_ACCOUNT_ADDRESS` is the only name. Set it before upgrading.
+- `HavenCredentialFile.safeAddress` is removed from the in-memory shape.
+
+### Unchanged, and deliberately
+
+- The credential-FILE fallback `account_address ?? safe_address ?? safeAddress`
+  is **permanent** — a file on disk never rewrites itself — and stays tested
+  against an old-shape file. The environment is not permanent, and that
+  difference is the whole of this entry.
+
 ## 0.2.1-alpha.0 — 2026-09-16
 
 ### Added

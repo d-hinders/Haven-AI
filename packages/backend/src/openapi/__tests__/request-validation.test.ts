@@ -20,6 +20,7 @@ const mockQuery = vi.fn()
 
 import { installRequestValidation, requestValidationOpsSnapshot, requestSchemaForOperation, prefixIsEnforced } from '../request-validation.js'
 import { openapiSpec } from '../spec.js'
+import { makeSpecAjv, REQUEST_AJV_OPTIONS } from '../ajv.js'
 
 const USER = 'user-1'
 
@@ -54,6 +55,58 @@ describe('requestSchemaForOperation (#3029)', () => {
     expect(params.id).toMatchObject({ format: 'uuid' })
     expect(query.limit).toMatchObject({ type: 'integer', minimum: 1 })
     expect(query.offset).toMatchObject({ type: 'integer', minimum: 0 })
+  })
+})
+
+describe('the OPEN-budget body against the REAL spec and the REAL request ajv (#3082)', () => {
+  // The defect that blocked agent onboarding, pinned at the layer that caused
+  // it. Not a hand-built schema: this reads the shipped operation out of
+  // `openapiSpec` and compiles it with the same ajv options the plugin
+  // installs, so a regression in EITHER the spec declaration or the ajv
+  // options fails here.
+  const BUILD = '/agents/{id}/delegations/build'
+
+  function compileBody() {
+    const operation = (openapiSpec.paths as Record<string, Record<string, unknown>>)[BUILD].post
+    const schema = requestSchemaForOperation(operation as never)
+    expect(schema?.body, `${BUILD} must declare a request body`).toBeTruthy()
+    const ajv = makeSpecAjv(
+      { ...REQUEST_AJV_OPTIONS, closeObjects: false },
+      openapiSpec.components.schemas as never,
+    )
+    return ajv.compile(schema!.body as never)
+  }
+
+  const OPEN_BUDGET = {
+    token_address: '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+    recipient_address: null,
+    budget_atomic: '1000000',
+    period_seconds: 86400,
+  }
+
+  it('an OPEN budget (recipient_address: null) VALIDATES', () => {
+    expect(compileBody()(structuredClone(OPEN_BUDGET))).toBe(true)
+  })
+
+  it('and null is NOT rewritten to "" — the coercion that caused #3082', () => {
+    const body = structuredClone(OPEN_BUDGET)
+    compileBody()(body)
+    // `routes/agent-delegations.ts` guards with `recipient_address != null`.
+    // An `''` here is indistinguishable from a caller pinning a recipient to
+    // the empty string, and it is what produced
+    // `400 recipient_address must be a valid address when set` on every
+    // budget grant.
+    expect(body.recipient_address).toBeNull()
+  })
+
+  it('a PINNED budget still validates, and a malformed pin still does not', () => {
+    // The nullable declaration must not have widened the field into "anything
+    // goes": `pattern` constrains strings and ignores null, so a real address
+    // passes and a short one is still refused.
+    const pinned = { ...structuredClone(OPEN_BUDGET), recipient_address: '0x' + 'ab'.repeat(20) }
+    expect(compileBody()(pinned)).toBe(true)
+    const malformed = { ...structuredClone(OPEN_BUDGET), recipient_address: '0xdead' }
+    expect(compileBody()(malformed)).toBe(false)
   })
 })
 
@@ -138,6 +191,69 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
     const added = Object.keys(after.byRouteField).filter((k) => !(k in before.byRouteField) || after.byRouteField[k] !== before.byRouteField[k])
     expect(added.length).toBe(1)
     expect(added[0]).toMatch(/^POST \/contacts body/)
+  })
+
+  it('#3082: shadow does NOT mutate the request body — null survives ajv coercion', async () => {
+    // This assertion read `address: ''` until #3082 — as a characterization
+    // of the defect, not as an intended contract. The schema is attached in
+    // shadow mode too and REQUEST_AJV_OPTIONS sets `coerceTypes: 'array'`,
+    // so ajv rewrote the body IN PLACE and the handler was handed something
+    // the client never sent.
+    //
+    // That broke shadow's documented promise — "no behaviour change on any
+    // currently-accepted request" — and it is how #3082 blocked agent
+    // onboarding on dev: the dashboard sends `recipient_address: null` for an
+    // OPEN budget, `routes/agent-delegations.ts`'s `!= null` guard saw `''`,
+    // and every budget grant 400'd.
+    const res = await auth('POST', '/contacts', { name: 'Acme', address: null })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ created: { name: 'Acme', address: null } })
+  })
+
+  it('#3082: the instrument still fires — an unmutated body is still COUNTED as a would-refusal', async () => {
+    // The fix restores the body; it must not also silence the measurement
+    // epic #3028 exists to gather. `address: null` is genuinely off-spec
+    // against a `type: 'string'` declaration, so the counter must still move
+    // even though the handler now sees the client's `null`.
+    const before = requestValidationOpsSnapshot().wouldRefuse
+    const res = await auth('POST', '/contacts', { name: 'Acme', address: null })
+    expect(res.json()).toEqual({ created: { name: 'Acme', address: null } })
+    expect(requestValidationOpsSnapshot().wouldRefuse).toBe(before + 1)
+  })
+
+  it('CONTROL (#3082): a conformant body reaches the handler byte-for-byte', async () => {
+    // Proves the instrument can say "unchanged" before its "changed" above is
+    // used as evidence (#2444). Same route, same assertion shape.
+    const address = '0x' + 'ab'.repeat(20)
+    const res = await auth('POST', '/contacts', { name: 'Acme', address })
+    expect(res.json()).toEqual({ created: { name: 'Acme', address } })
+  })
+
+  it('#3082: a COERCIBLE off-spec body is counted as would_coerce — the divergence a refusal never shows', async () => {
+    // Restoring the body is what makes this silent, so the same snapshot
+    // measures it. `name: 42` validates CLEAN after coercion to "42", so it
+    // raises no would-refusal — yet the handler would receive a different
+    // value the moment this route is enforced. Epic #3028 flips money-path
+    // modules on these readings.
+    const before = requestValidationOpsSnapshot()
+    const res = await auth('POST', '/contacts', { name: 42, address: '0x' + 'ab'.repeat(20) })
+    const after = requestValidationOpsSnapshot()
+
+    // The client's value reached the handler untouched...
+    expect(res.json()).toEqual({ created: { name: 42, address: '0x' + 'ab'.repeat(20) } })
+    // ...and the divergence was recorded rather than hidden.
+    expect(after.wouldCoerce).toBe(before.wouldCoerce + 1)
+    expect(Object.keys(after.coerceByRouteField)).toContain('POST /contacts name')
+    // It is NOT a would-refusal: coercion made it valid, which is the whole point.
+    expect(after.wouldRefuse).toBe(before.wouldRefuse)
+  })
+
+  it('#3082: a body needing no coercion moves NEITHER counter', async () => {
+    const before = requestValidationOpsSnapshot()
+    await auth('POST', '/contacts', { name: 'Acme', address: '0x' + 'ab'.repeat(20) })
+    const after = requestValidationOpsSnapshot()
+    expect(after.wouldCoerce).toBe(before.wouldCoerce)
+    expect(after.wouldRefuse).toBe(before.wouldRefuse)
   })
 
   it('a typed query parameter (limit=10, a string on the wire) is ACCEPTED — coercion proven', async () => {
@@ -335,9 +451,11 @@ async function contactProbeRoutes(app: FastifyInstance): Promise<void> {
   })
 
   app.post('/', async (request) => {
-    const body = request.body as { name: string }
+    // Echoes the body the HANDLER received, not the one the client sent —
+    // that difference is the whole subject of the #3082 tests below.
+    const body = request.body as Record<string, unknown>
     await mockQuery('INSERT INTO contacts')
-    return { created: { name: body.name } }
+    return { created: { ...body } }
   })
 
   // A spec'd GET with typed path + query params (uuid + integer limit,

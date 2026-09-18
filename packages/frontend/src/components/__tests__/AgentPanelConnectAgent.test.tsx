@@ -9,7 +9,7 @@ const {
   SAFE: {
     id: 'safe-1',
     name: 'Operating wallet',
-    safe_address: '0x1111111111111111111111111111111111111111',
+    account_address: '0x1111111111111111111111111111111111111111',
     chain_id: 100,
     is_default: true,
     created_at: '2026-01-01T00:00:00.000Z',

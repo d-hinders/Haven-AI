@@ -788,8 +788,16 @@ export function createPaidMcpCompletionHandlers(
           // next_tool: the hash was missing, zero, or already refused, and
           // the sweep is the remaining passive path.
           const heldHash = merchant7710.settlement_tx_hash
+          // #3101 review: the merchant's string must be the SHAPE the report
+          // tool declares (0x + 64 hex), not merely non-zero — otherwise the
+          // typed handoff's strict validator refuses it and the agent is left
+          // with no next_tool after money moved. A malformed hash falls
+          // through to the status poll, which is what the agent can still do.
           const canReport =
-            pending && typeof heldHash === 'string' && !isZeroSettlementTxHash(heldHash)
+            pending &&
+            typeof heldHash === 'string' &&
+            /^0x[0-9a-fA-F]{64}$/.test(heldHash) &&
+            !isZeroSettlementTxHash(heldHash)
           return {
             payment_id: args.payment_id,
             settlement_scheme: 'erc7710',

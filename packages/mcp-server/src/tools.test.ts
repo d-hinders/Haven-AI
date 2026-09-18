@@ -1703,6 +1703,41 @@ describe('hosted erc7710 (#1456)', () => {
       })
     })
 
+    it('a merchant hash that is not a hash keeps the status poll as next_tool — never a silent omission (#3101 review)', async () => {
+      // The merchant controls PAYMENT-RESPONSE.transaction. "0xdeadbeef" is
+      // non-zero, so the pre-#3101 predicate would have named the report tool
+      // with an argument its schema (0x + 64 hex) refuses; the typed builder's
+      // strict validator then fails safe by omitting the tool — after money
+      // moved. The predicate now agrees with the target's schema.
+      stubSettle()
+      const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+      vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+        status: 200,
+        ok: true,
+        body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } },
+        settlementTxHash: '0xdeadbeef',
+        evidenceOutcome: { outcome: 'retryable', statusCode: 503 },
+      })
+      vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+        allowance: null,
+        warnings: [],
+        payment: { status: 'submitted' },
+      } as never)
+      const res = ok(
+        await createToolHandlers(haven).haven_settle_mcp_tool({
+          payment_id: 'pay_7710',
+          signature: SIG7710,
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+        }),
+      ) as { data: Record<string, any> }
+      expect(res.data.code).toBe('SETTLEMENT_PENDING')
+      expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+      expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
+      expect(res.data.next_tool_omitted_reason).toBeUndefined()
+    })
+
     it('a terminal backend refusal (mismatch/reverted) is delivered_unsettled, not settlement_pending', async () => {
       stubSettle()
       const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })

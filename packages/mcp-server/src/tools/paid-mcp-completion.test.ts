@@ -259,6 +259,19 @@ describe('haven_settle_mcp_tool', () => {
       ok: false,
       body: { error: 'payment verification failed' },
     })
+    // #3102 review: the realistic post-funding state for the read AFTER the
+    // rejection — the shared fetch fixture answers the earlier preflight
+    // reads (a PRE-signature status) and would otherwise answer this one too.
+    const realStatus = haven.getPaymentStatus.bind(haven)
+    let statusReads = 0
+    vi.spyOn(haven, 'getPaymentStatus').mockImplementation(async (id) => {
+      statusReads += 1
+      return statusReads >= 2 ? ({
+      paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'funded_but_unsettled', phase: 'funded_but_unsettled',
+      nextAction: AgentPaymentNextAction.SweepStrandedFunds, message: 'm', amount: '1.50', token: 'USDC', txHash: null,
+      expiresAt: '2099-01-01T00:00:00.000Z', chainId: 8453, resourceUrl: 'http://merchant.test/mcp', merchantAddress: '0xMerchant', idempotencyKey: 'idem-rejected',
+    } as never) : realStatus(id)
+    })
 
     const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
       payment_id: 'pay_x402',
@@ -274,12 +287,9 @@ describe('haven_settle_mcp_tool', () => {
     // genuinely may hold stranded funds, so the sweep guidance stays.
     expect(payload.suggested_tool).toBe('haven_sweep_delegate')
     expect(payload.message).toMatch(/stranded funds/)
-    // #3102: the typed step follows the LIVE action. This fixture stubs no
-    // payment state that says sweep, so the refusal reports Haven's action and
-    // says why the sweep the message mentions is not named as the tool
-    // (site-level pin; the sweep-named case is pinned in tools.test.ts).
-    expect(payload.next_tool).toBeUndefined()
-    expect(payload.next_tool_omitted_reason).toMatch(/Haven reports next_action .*; the sweep in the message applies only if/)
+    // #3102: the typed step names the sweep when the live state says sweep (site-level pin).
+    expect(payload.next_tool).toBe('mcp__haven__haven_sweep_delegate')
+    expect(payload.next_arguments).toEqual({})
   })
 
   /**

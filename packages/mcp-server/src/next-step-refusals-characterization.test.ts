@@ -15,10 +15,10 @@ import { refusalNextStep } from './tools/support/guidance.js'
  * typed the 17 `buildAgentGuidance` sites; these are the other 27 (28
  * fixtures: the eip3009 rejection has a live-state branch). The
  * census was originally derived from `nextAction:` lines minus the builder's
- * call sites; it now counts `refusalNextStep(` calls: the 27 steps at the 25
- * HostedToolError sites (three branching) plus the 5 branches of the
+ * call sites; it now counts `refusalNextStep(` calls: 26 inline site steps,
+ * the 3 branches of `rejectedAfterFundingStep` and the 5 branches of the
  * payment-state mapper in errors.ts (`stateErrorNextStep`, decision 9's
- * default table), pinned separately in `next-step-refusal.test.ts`. Each fixture mirrors one
+ * default table) — 34, with the helpers pinned by their own tests. Each fixture mirrors one
  * site's `HostedToolError` input (code, action, suggested_tool, whether a
  * payment id is known) and pins what `normalizeError` puts on the wire for
  * it. The structural commit keeps every pinned field byte-identical and ADDS

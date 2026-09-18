@@ -1953,11 +1953,12 @@ error instead of quietly routing a payment at the wrong chain's bundler.
 > `HostedToolError` no longer takes a bare `nextAction`: a refusal thrown as a
 > `HostedToolError` names an action only through a typed `nextStep`
 > (`refusalNextStep`, the same builder and target map as the success path),
-> so each of the 27 refusal steps (25 sites, two of them branching) now
-> also carries either a tool with arguments that tool declares
-> (`haven_get_payment_status { payment_id }` on the post-funding timeout and
-> the erc7710 rejection; `haven_sweep_delegate {}` on the eip3009 rejection
-> and the funded insecure-target branch, as their messages say) or `next_tool_omitted_reason` (every stop-and-tell-user,
+> so each of the 28 refusal steps (27 sites, one of them following the live
+> payment state) now also carries either a tool with arguments that tool declares
+> (six name a tool: `haven_get_payment_status { payment_id }` on the
+> post-funding timeout, the erc7710 rejection and an eip3009 rejection whose
+> live state says retry or poll; `haven_sweep_delegate {}` on the eip3009
+> rejection and the funded insecure-target branch, as their messages say) or `next_tool_omitted_reason` (every stop-and-tell-user,
 > retry-with-explicit-context, fund-account and window-expired refusal). The
 > one other hosted refusal shape, the SDK's `HavenPaymentStateError` passed
 > through `normalizeError`, takes its step from the per-action default table

@@ -102,7 +102,11 @@ function heldHashHandoff(canReport: boolean, paymentId: string, heldHash: string
  * `retry_original_x402_request` would race a late settlement. Unknown state
  * (the status read failed) keeps the sweep the message names; a state that
  * says retry or poll hands the agent the status read; any other live action is
- * reported with the reason the sweep is not named.
+ * reported with the reason the sweep is not named. (The payment-state mapper
+ * in errors.ts omits the tool for `retry_original_x402_request` because that
+ * refusal already holds the payment header and the retry is the agent's own
+ * HTTP call; here the header was just refused, so the status read is the
+ * step that tells the agent whether a retry is even possible.)
  */
 function rejectedAfterFundingStep(liveAction: string | undefined, paymentId: string): NextStep {
   if (liveAction === undefined || liveAction === AgentPaymentNextAction.SweepStrandedFunds) {

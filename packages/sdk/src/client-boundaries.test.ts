@@ -422,6 +422,7 @@ describe('HavenClient structural boundary', () => {
       // delegate sweep share. Public so a consumer reading `unconfirmed` can
       // see how long the SDK waited before saying so.
       'DEFAULT_CONFIRMATION_TIMEOUT_MS',
+      'DEFAULT_NEXT_TOOL_BY_ACTION', // #3101
       'DISCOVERY_MAX_BYTES',
       'ERC7710_ASSET_TRANSFER_METHOD',
       'HAVEN_AGENT_RUNBOOK_MD',
@@ -441,6 +442,8 @@ describe('HavenClient structural boundary', () => {
       'INSECURE_RETRY_TARGET_CODE', // #3097
       'MERCHANT_DISCOVERY_PATHS',
       'MerchantTimeoutError',
+      'NEXT_TOOL_SERVER_NAMES', // #3101
+      'NEXT_TOOL_SERVER_ROLES', // #3101
       'RECEIPT_VERSION',
       'SIGNER_UPDATE_FALLBACK',
       'SKILL_FOLDER_NAME',
@@ -469,8 +472,10 @@ describe('HavenClient structural boundary', () => {
       'composeDescription',
       'connectorRerunCommand',
       'connectorSpec',
+      'createNextStepBuilder', // #3101
       'decodeBase64Json',
       'decodeBase64Utf8',
+      'defaultNextToolFor', // #3101
       'discoverMerchantMcpUrl',
       'encodeBase64Json',
       'encodeBase64Utf8',
@@ -483,9 +488,11 @@ describe('HavenClient structural boundary', () => {
       'isSweepableChain',
       'isZeroSettlementTxHash', // #2970
       'normalizePaymentRequired',
+      'parseNextTool', // #3101
       'parsePaymentRequired',
       'parsePaymentRequiredResponse',
       'readX402ReceiptPayer',
+      'renderNextTool', // #3101
       'resolveConnectorChannel',
       'resolveTokenFromAddress',
       'resolveX402RetryTarget', // #3097
@@ -554,6 +561,13 @@ describe('HavenClient structural boundary', () => {
       'HavenClientConfig',
       'HavenPaymentReceipt',
       'MachinePaymentRail',
+      'NextStep', // #3101
+      'NextStepArguments', // #3101
+      'NextStepHandoff', // #3101
+      'NextStepInput', // #3101
+      'NextStepTarget', // #3101
+      'NextStepTargets', // #3101
+      'NextToolServerRole', // #3101
       'OpenAITool',
       'PaymentFee',
       'PaymentIntent',

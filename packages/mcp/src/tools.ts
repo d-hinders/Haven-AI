@@ -81,7 +81,7 @@ export type DiscoveryEntry = {
   verified_payable?: boolean
 } & DiscoveryHint
 
-export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
+export const toolSchemas = {
   haven_send: {
     asset: z.enum(['ETH', 'USDC']),
     recipient: z.string().min(1),
@@ -151,7 +151,8 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   haven_verify_receipt: {
     receipt: z.unknown(),
   },
-}
+// #3101: keys survive on the type (see the hosted server's contracts.ts).
+} as const satisfies Record<HavenMcpToolName, z.ZodRawShape>
 
 /**
  * MCP tool descriptions, composed from the shared semantic source in
@@ -202,6 +203,13 @@ export interface ToolFailure {
   status?: string
   phase?: string
   nextAction?: string
+  /** #3101 (epic #3105, decision 7): the typed next-step family, additive; `next_tool` never null. */
+  next_tool?: string
+  next_tool_server?: string
+  next_tool_name?: string
+  next_tool_server_role?: 'hosted' | 'signer'
+  next_arguments?: Record<string, unknown>
+  next_tool_omitted_reason?: string
   resume_state?: unknown
   body?: unknown
   /**

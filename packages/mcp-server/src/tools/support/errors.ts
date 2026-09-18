@@ -23,6 +23,7 @@ import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
   type HavenClient,
+  type NextStep,
 } from '@haven_ai/sdk'
 import type { ToolFailure, ToolPayload } from '../contracts.js'
 
@@ -37,6 +38,8 @@ export class HostedToolError extends Error {
   readonly idempotencyKey?: string | null
   readonly retryWithNewQuote?: boolean
   readonly suggestedTool?: string
+  /** #3101 (decision 7): the typed next step a refusal hands the agent, emitted by `normalizeError`. */
+  readonly nextStep?: NextStep
 
   constructor(input: {
     code: string
@@ -50,6 +53,7 @@ export class HostedToolError extends Error {
     idempotencyKey?: string | null
     retryWithNewQuote?: boolean
     suggestedTool?: string
+    nextStep?: NextStep
   }) {
     super(input.message)
     this.name = 'HostedToolError'
@@ -63,6 +67,7 @@ export class HostedToolError extends Error {
     this.idempotencyKey = input.idempotencyKey
     this.retryWithNewQuote = input.retryWithNewQuote
     this.suggestedTool = input.suggestedTool
+    this.nextStep = input.nextStep
   }
 }
 
@@ -128,6 +133,18 @@ export async function paymentWindowExpiredErrorFor(
   return null
 }
 
+/** The `next_tool` family of a NextStep, for the failure envelope (additive, #3101). */
+function nextStepWireFields(step: NextStep): Pick<ToolFailure, 'next_tool' | 'next_tool_server' | 'next_tool_name' | 'next_tool_server_role' | 'next_arguments' | 'next_tool_omitted_reason'> {
+  return {
+    ...(step.next_tool ? { next_tool: step.next_tool } : {}),
+    ...(step.next_tool_server ? { next_tool_server: step.next_tool_server } : {}),
+    ...(step.next_tool_name ? { next_tool_name: step.next_tool_name } : {}),
+    ...(step.next_tool_server_role ? { next_tool_server_role: step.next_tool_server_role } : {}),
+    ...(step.next_arguments ? { next_arguments: step.next_arguments } : {}),
+    ...(step.next_tool_omitted_reason ? { next_tool_omitted_reason: step.next_tool_omitted_reason } : {}),
+  }
+}
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -139,10 +156,12 @@ export function normalizeError(err: unknown): ToolFailure {
       paymentId: err.paymentId,
       status: err.status,
       phase: err.phase,
-      next_action: err.nextAction,
+      next_action: err.nextStep?.next_action ?? err.nextAction,
       rail: err.rail,
       idempotency_key: err.idempotencyKey,
       retry_with_new_quote: err.retryWithNewQuote,
+      // #3101: the typed next step rides on refusals exactly as on successes.
+      ...(err.nextStep ? nextStepWireFields(err.nextStep) : {}),
     }
   }
   if (err instanceof z.ZodError) {

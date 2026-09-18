@@ -64,7 +64,7 @@ import {
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { HostedToolError, paymentWindowExpiredError, runTool } from './support/errors.js'
-import { buildAgentGuidance, buildPurchaseSummary } from './support/guidance.js'
+import { buildAgentGuidance, buildPurchaseSummary, type HostedHandoff } from './support/guidance.js'
 import {
   parseMcpTransport,
   serializeMcpTransport,
@@ -86,6 +86,13 @@ export interface ResolvedMerchantCallContext {
   toolName: string
   toolArguments: Record<string, unknown>
   mcpTransport: X402McpTransport | undefined
+}
+
+/** #3101: after an erc7710 settle whose merchant reported a hash — report it if the agent can, else poll. */
+function heldHashHandoff(canReport: boolean, paymentId: string, heldHash: string | null | undefined): HostedHandoff {
+  return canReport && heldHash
+    ? { nextTool: 'haven_report_settlement_evidence', nextArguments: { payment_id: paymentId, settlement_tx_hash: heldHash } }
+    : { nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } }
 }
 
 export async function resolveMerchantCallContext(
@@ -510,6 +517,9 @@ export function classifySettlementEvidenceReport(
       settlement_tx_hash: settlementTxHash,
       ...buildAgentGuidance({
         nextAction: AgentPaymentNextAction.None,
+        // #3101 (decision 3): a done state names no tool and says so.
+        nextTool: null,
+        nextToolOmittedReason: 'the purchase is settled; no Haven tool follows',
         safeToContinue: true,
         reason:
           'Haven verified this settlement transaction on-chain against the payment and ' +
@@ -527,7 +537,7 @@ export function classifySettlementEvidenceReport(
     settlement_tx_hash: settlementTxHash,
     ...buildAgentGuidance({
       nextAction: AgentPaymentNextAction.CheckStatusLater,
-      nextTool: 'mcp__haven__haven_get_payment_status',
+      nextTool: 'haven_get_payment_status',
       nextArguments: { payment_id: paymentId },
       safeToContinue: true,
       reason: pending
@@ -734,6 +744,9 @@ export function createPaidMcpCompletionHandlers(
                 // Same terminal value the 3009 success path uses (#1308) — one
                 // vocabulary, not a parallel one per scheme.
                 nextAction: AgentPaymentNextAction.None,
+                // #3101 (decision 3): a done state names no tool and says so.
+                nextTool: null,
+                nextToolOmittedReason: 'the purchase is settled; no Haven tool follows',
                 safeToContinue: true,
                 reason:
                   'Settled directly from the treasury through the budget delegation — no funding ' +
@@ -790,12 +803,7 @@ export function createPaidMcpCompletionHandlers(
             allowance: summary7710.allowance,
             ...buildAgentGuidance({
               nextAction: AgentPaymentNextAction.CheckStatusLater,
-              nextTool: canReport
-                ? 'mcp__haven__haven_report_settlement_evidence'
-                : 'mcp__haven__haven_get_payment_status',
-              nextArguments: canReport
-                ? { payment_id: args.payment_id, settlement_tx_hash: heldHash }
-                : { payment_id: args.payment_id },
+              ...heldHashHandoff(canReport, args.payment_id, heldHash),
               safeToContinue: true,
               reason: pending
                 ? 'The merchant delivered the result and reported a settlement transaction, but ' +
@@ -843,7 +851,7 @@ export function createPaidMcpCompletionHandlers(
               nextAction: fundingPending
                 ? AgentPaymentNextAction.StopAndTellUser
                 : AgentPaymentNextAction.CheckStatusLater,
-              nextTool: 'mcp__haven__haven_get_payment_status',
+              nextTool: 'haven_get_payment_status',
               nextArguments: { payment_id: args.payment_id },
               safeToContinue: !fundingPending,
               reason: fundingPending
@@ -886,6 +894,9 @@ export function createPaidMcpCompletionHandlers(
           // #1308: done — nothing left but reporting.
           ...buildAgentGuidance({
             nextAction: AgentPaymentNextAction.None,
+            // #3101 (decision 3): a done state names no tool and says so.
+            nextTool: null,
+            nextToolOmittedReason: 'the purchase is settled; no Haven tool follows',
             safeToContinue: true,
             reason:
               'Funding and merchant settlement both succeeded. Report the result to the user ' +

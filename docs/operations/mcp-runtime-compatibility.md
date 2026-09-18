@@ -2096,3 +2096,23 @@ what each server's instructions say and why they differ in length.
 > `tool_name`; hosted: degraded) carries `suggested_tool_omitted_reason` on
 > both surfaces instead of a hint. Scope of this note: those fields and that
 > text. Nothing else in this document was re-verified.
+
+> **Re-verification (#3101, the typed next-step builder, 2026-09-18):** this
+> diff touches `packages/mcp-server/src/tools/support/{guidance,errors}.ts`,
+> `packages/mcp-server/src/tools/{contracts,catalog-purchase,plain-http-x402,paid-mcp-completion,state-direct-recovery}.ts`,
+> the SDK's `types.ts` (a new optional `next_tool_omitted_reason` on
+> `AgentNextStep`) and, annotation only, `packages/mcp/src/tools.ts`. The
+> hosted `next_tool` family is now rendered by the SDK's builder from a bare
+> tool name + server role over a target map derived from the hosted and
+> signer `toolSchemas` (which keep their keys via `as const satisfies`); the
+> wire strings are byte-identical, pinned by
+> `next-step-characterization.test.ts`. New on the wire:
+> `next_tool_omitted_reason` wherever no tool is named (the three refusals
+> that used to hand `{ payment_id: null }` to a tool requiring a string, the
+> recovery module's own-HTTP-retry step, the report-accepted step and the
+> three settled done-states), and the same `next_tool` family on refusals
+> whose `HostedToolError` carries a step. No tool name, schema key,
+> strict/permissive split, expected-context version, signer contract, cap,
+> funding, signing or settlement decision changes; the local runtime's
+> `nextAction` emission is untouched (slice #3103). Scope of this note: those
+> fields. Nothing else in this document was re-verified.

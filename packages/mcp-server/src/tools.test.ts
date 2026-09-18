@@ -2082,17 +2082,23 @@ describe('next_tool emission literals (#1588 review)', () => {
     return parts.join('\n')
   }
 
-  it('every nextTool literal in the source parses into the runtime-neutral pair', async () => {
-    // Source-derived like the description scanner: only 4 of the 9 emission
-    // sites are behaviourally pinned, and a mis-spelled literal on an
-    // unpinned site would silently drop the pair (the derivation omits on
-    // parse failure by design). This closes that hole for every literal,
-    // present and future.
+  it('every nextTool literal in the source is a BARE name the hosted target map registers (#3101)', async () => {
+    // Source-derived like the description scanner. Before #3101 this asserted
+    // the namespaced form (`mcp__<server>__<tool>`), because each site carried
+    // the literal the wire sends; since #3101 the SDK builder renders that
+    // string from the bare name + role, and a site names the bare tool — so
+    // the invariant is now: bare, and registered (the compile-time twin makes
+    // an unregistered name a type error; this is the source-level floor).
     const source = await hostedSurfaceSource()
     const literals = [...source.matchAll(/nextTool: '([^']+)'/g)].map((m) => m[1])
     expect(literals.length).toBeGreaterThanOrEqual(9)
-    const unparseable = literals.filter((l) => !/^mcp__([a-z0-9-]+)__([a-z0-9_]+)$/.test(l))
-    expect(unparseable).toEqual([])
+    const prefixed = literals.filter((l) => l.startsWith('mcp__'))
+    expect(prefixed).toEqual([])
+    const { toolSchemas: signerSchemas } = await import('@haven_ai/signer')
+    const { toolSchemas } = await import('./tools/contracts.js')
+    const registered = new Set([...Object.keys(toolSchemas), ...Object.keys(signerSchemas)])
+    const unregistered = literals.filter((l) => !registered.has(l))
+    expect(unregistered).toEqual([])
   })
 
   it('suggested_tool hints use BARE tool names — the sibling convention, never the prefixed form', async () => {

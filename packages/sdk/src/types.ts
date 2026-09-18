@@ -1268,6 +1268,12 @@ export interface AgentNextStep {
   next_tool_server_role?: 'hosted' | 'signer'
   /** Small literal arguments for next_tool. Bulky fields are referenced by reason. */
   next_arguments?: Record<string, unknown>
+  /**
+   * #3101 (epic #3105, decision 3): present exactly when `next_tool` is
+   * absent — why no tool is named (the payment id is unknown, nothing is left
+   * to do, the arguments could not be built). `next_tool` is never null.
+   */
+  next_tool_omitted_reason?: string
   /** False when the agent should stop and involve the user before continuing. */
   safe_to_continue: boolean
   reason: string

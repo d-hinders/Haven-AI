@@ -133,6 +133,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // tools/support/guidance.ts — agent guidance and purchase summaries.
   buildAgentGuidance: { module: 'guidance', slices: ['s2809', 's2810', 's2811', 's2812'] },
   buildPurchaseSummary: { module: 'guidance', slices: ['s2810', 's2812'] },
+  // #3101: the status handoff for a refusal that may not know its payment id —
+  // the three `payment_id: null` sites, in the catalog and plain-HTTP slices.
+  paymentStatusHandoff: { module: 'guidance', slices: ['s2810', 's2811'] },
   // tools/support/cap-price.ts — cap/price selection.
   readMaxAmountCap: { module: 'cap-price', slices: ['s2810', 's2811'] },
   priceSelectedOption: { module: 'cap-price', slices: ['s2810', 's2811'] },
@@ -347,7 +350,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'paymentWindowExpiredErrorFor',
     'normalizeError',
   ],
-  guidance: ['buildAgentGuidance', 'buildPurchaseSummary'],
+  guidance: ['buildAgentGuidance', 'buildPurchaseSummary', 'paymentStatusHandoff'],
   'mcp-context': [
     'delegationSignFields',
     'isMerchantEndpointMiss',

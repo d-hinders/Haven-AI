@@ -283,6 +283,24 @@ delegation-rail account at a merchant advertising
 `extra.assetTransferMethod: "erc7710"` takes the erc7710 shape recorded
 immediately after it instead.
 
+**Where the paid retry goes (#3097).** The merchant's 402 declares
+`resource.url`; Haven records that declaration as the resource's identity (the
+binding message, the intent row and the resume checks all compare against it),
+but the request that carries `PAYMENT-SIGNATURE` goes to the URL the caller
+quoted whenever one exists. The hosted quote returns it as `request_url`, the
+agent passes it back as `url` to `haven_pay_x402_quote` (and to
+`haven_resume_x402_payment`), and both answer with `retry_url` — the one URL
+the agent retries — beside `resource_url` and
+`resource_url_differs_from_request`. A retry target that is not `https` (nor
+loopback / a reserved test host) is refused with `INSECURE_RETRY_TARGET` before
+any intent exists; on the SDK and local paths the same rule sits on the one
+seam every paid retry crosses (`McpMerchantTransport.deliverPayment`; on the
+MCP-merchant family that is after funding, and the hosted completion tool then
+reports `funded_but_unsettled` with sweep guidance). The live
+case: the Ampersend sandbox declares `http://` for a resource it serves over
+https, and its `http://` answers 308 → https — a client that adopted the
+declaration sent the signed header in clear on the first hop.
+
 ```mermaid
 sequenceDiagram
   autonumber
@@ -294,7 +312,7 @@ sequenceDiagram
 
   Agent->>Resource: Request paid resource
   Resource-->>Agent: 402 Payment Required
-  Agent->>MCP: haven_pay_x402_quote { payment_required }
+  Agent->>MCP: haven_pay_x402_quote { payment_required, url }
   MCP->>API: Construct funding intent
   alt signable funding intent
     API-->>MCP: { payment_id, payload_hash, x402.expected }
@@ -1869,3 +1887,18 @@ error instead of quietly routing a payment at the wrong chain's bundler.
   facilitator, acquiring, fiat/card, or merchant-of-record products.
 - Use [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
   before changing x402/MPP flows or merchant-facing demos.
+
+> **Re-verification (#3097, the paid retry's target, 2026-09-18):** this diff
+> touches the hosted plain-HTTP handlers, the hosted tool contracts and the
+> SDK's quote/transport modules in this document's coverage list. What changed:
+> `haven_pay_x402_quote` and `haven_resume_x402_payment` take an optional `url`
+> (the URL the agent quoted), the quote returns `request_url` / `retry_url` /
+> `resource_url_differs_from_request`, pay and resume return `retry_url`, and a
+> public `http://` retry target is refused (`INSECURE_RETRY_TARGET`) before an
+> intent exists on the hosted surface, and on the SDK side at
+> `McpMerchantTransport.deliverPayment` (after funding on the MCP-merchant
+> family, annotated by the hosted completion tool). The
+> flows above are otherwise unchanged: selection, caps, funding, signing and
+> settlement evidence keep their positions; the paragraph "Where the paid retry
+> goes" is the new statement. Scope of this note: that paragraph and the
+> diagram's `url` argument. Nothing else in this document was re-verified.

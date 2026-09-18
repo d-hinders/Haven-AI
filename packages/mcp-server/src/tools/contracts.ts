@@ -291,6 +291,13 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     body: z.string().optional(),
   },
   haven_pay_x402_quote: {
+    // #3097: the URL the agent QUOTED — where the paid retry goes. The
+    // merchant's `payment_required.resource.url` is its declaration about
+    // itself, not the retry target: a challenge may declare `http://` for a
+    // resource served over https (the Ampersend sandbox does), and a public
+    // http:// retry target is refused. haven_quote_x402 returns this as
+    // `request_url`; pass it back verbatim.
+    url: z.string().url().optional(),
     // The parsed HTTP 402 PaymentRequired the agent received from the merchant
     // (or the paymentRequired field from a haven_quote_x402 result).
     // Validated downstream by the SDK; typed as an object (not z.unknown()) so
@@ -319,6 +326,8 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_resume_x402_payment: {
     payment_id: z.string().optional(),
     resume_state: z.record(z.string(), z.unknown()).optional(),
+    // #3097: same as haven_pay_x402_quote — the https URL originally quoted.
+    url: z.string().url().optional(),
   },
   haven_report_x402_outcome: {
     // #2292: the plain-HTTP twin of haven_complete_mcp_tool's bookkeeping —
@@ -656,7 +665,7 @@ export const STRICT_INPUT_TOOLS = {
     'The hosted surface has no body field to route it to; quote a GET resource, or use ' +
     'haven_pay_mcp_tool for a merchant that needs a request payload.',
   haven_pay_x402_quote:
-    'This is the HOSTED surface, which takes payment_required and idempotency_key ' +
+    'This is the HOSTED surface, which takes payment_required, idempotency_key and url ' +
     '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotencyKey. Passing ' +
     'quote already failed loudly here, because payment_required is required — it is ' +
     'idempotencyKey that was dropped in silence, replacing the caller\'s replay scope with ' +
@@ -694,7 +703,8 @@ export const STRICT_INPUT_TOOLS = {
   haven_resume_x402_payment:
     'A resume rebuilds the merchant retry from the STORED payment (by payment_id) or from ' +
     'the resume_state you hand back verbatim — resource, amount, payee and the signed ' +
-    'header are read from there, never from arguments. A payment_header, payment_required ' +
+    'header are read from there, never from arguments; the one argument it does read is ' +
+    'url, the https retry target you quoted. A payment_header, payment_required ' +
     'or merchant_url sent alongside used to be dropped in silence while the retry proceeded ' +
     'against the stored one.',
   haven_get_payment_status:
@@ -900,15 +910,16 @@ const QUOTE_X402_DESCRIPTION = composeDescription({
 const PAY_X402_QUOTE_DESCRIPTION = [
   'Step 1 of a direct x402 purchase (plain HTTP merchant, non-MCP): construct the funding step and',
   'return the unsigned hash for the local signer. Pass the payment_required from haven_quote_x402',
-  'or straight from the merchant 402. Read-only budget questions: haven_get_allowances.',
+  'or straight from the merchant 402, plus url (haven_quote_x402\'s request_url): the paid',
+  'retry goes there, never to the declared resource_url; public http:// is refused.',
+  'Read-only budget questions: haven_get_allowances.',
   'Cap rule here: max_amount_human (preferred) or max_amount, never both; omitting BOTH accepts the',
   'quoted price as-is and the response carries cap_warning.',
   'Returns { payment_id, payload_hash, expires_at, x402, signer_compatibility } — compact by default;',
   'include_signing_payload=true on a same-idempotency_key re-run returns the inline payload for an',
   'older signer. Over-budget is declined at prepare; nothing is ever held for later approval.',
   'The signer tool named in the response guidance (haven_sign_x402) returns payment_header INLINE',
-  'alongside the signature — it is a one-shot that spends its own binding building that',
-  'header, so do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
+  'alongside the signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
   'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
   'setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710.',
   'Haven never talks to this merchant and never holds the key. The header is built before funding',
@@ -951,14 +962,14 @@ const RESUME_X402_DESCRIPTION = [
   'Resume an authorized x402 payment: retrieve the signing context so the signer can rebuild the',
   'merchant payment header and the agent can retry the merchant.',
   'Only call this after haven_get_payment_status reports nextAction=retry_original_x402_request —',
-  'that means Haven funding confirmed but no merchant response was ever recorded, typically because',
-  'the process crashed between funding and the merchant retry. Any other nextAction reports a',
-  'conflict instead of returning context; do not call this speculatively and do not pay again.',
+  'Haven funding confirmed but no merchant response was recorded (a crash between funding and',
+  'the retry). Any other nextAction reports a conflict; never call this speculatively or pay again.',
+  'Optional url: the https URL you quoted, used as x402.retry_url over the merchant\'s declaration.',
   'Returns { payment_id, payment_required, x402 } in the haven_pay_x402_quote shape. Then call',
   'haven_sign_x402 with this payment_id — the funding leg is already spent, so this signs nothing',
   'new on-chain and its signature must not be re-submitted. Take payment_header from ITS result',
-  'and retry the original resource_url with it. Do NOT pass its x402_binding to',
-  'haven_x402_sign_header: that binding is already spent, and the call can only refuse.',
+  'and retry x402.retry_url with it. Do NOT pass its x402_binding to haven_x402_sign_header:',
+  'it can only refuse.',
   // #2292: same obligation as the first-attempt path — a resumed retry Haven did not make is
   // just as unobservable as the original one.
   'Then report the outcome with haven_report_x402_outcome.',

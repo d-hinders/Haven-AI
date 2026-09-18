@@ -1,6 +1,7 @@
 import type { X402McpTransport, X402PaymentRequired } from './types.js'
 import { MerchantTimeoutError } from './types.js'
 import { X402_PAYMENT_HEADER_NAMES, x402PaymentHeaderNamesFor } from './x402.js'
+import { assertSecureX402RetryTarget } from './x402-retry-target.js'
 
 export const DEFAULT_MERCHANT_TIMEOUT = 300_000
 export const MCP_NOTIFICATION_TIMEOUT = 10_000
@@ -216,6 +217,9 @@ export class McpMerchantTransport {
     init: RequestInit | undefined,
     paymentHeader: string,
   ): Promise<Response> {
+    // #3097: the ONE seam every paid retry crosses (plain HTTP, MCP, resume).
+    // A signed header never leaves for a public http:// target.
+    assertSecureX402RetryTarget(url)
     const headers = new Headers(init?.headers)
     const send = x402PaymentHeaderNamesFor(paymentHeader)
     for (const name of X402_PAYMENT_HEADER_NAMES) {

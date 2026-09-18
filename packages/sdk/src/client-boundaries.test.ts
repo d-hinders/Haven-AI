@@ -432,11 +432,13 @@ describe('HavenClient structural boundary', () => {
       'HavenApiError',
       'HavenClient',
       'HavenError',
+      'HavenInsecureRetryTargetError', // #3097
       'HavenPaymentStateError',
       'HavenSigningError',
       'HavenTimeoutError',
       'HavenUnsupportedSignerVersionError',
       'HavenZeroSettlementHashError',
+      'INSECURE_RETRY_TARGET_CODE', // #3097
       'MERCHANT_DISCOVERY_PATHS',
       'MerchantTimeoutError',
       'RECEIPT_VERSION',
@@ -459,6 +461,7 @@ describe('HavenClient structural boundary', () => {
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
       'addressFromKey',
+      'assertSecureX402RetryTarget', // #3097
       'buildSweepAuthorizationMessage',
       'buildSweepTypedData',
       'buildX402ExpectedMessage',
@@ -475,6 +478,7 @@ describe('HavenClient structural boundary', () => {
       'havenTools',
       'isConnectorChannel',
       'isErc7710Option',
+      'isSecureX402RetryTarget', // #3097
       'isSupportedNodeVersion',
       'isSweepableChain',
       'isZeroSettlementTxHash', // #2970
@@ -484,6 +488,7 @@ describe('HavenClient structural boundary', () => {
       'readX402ReceiptPayer',
       'resolveConnectorChannel',
       'resolveTokenFromAddress',
+      'resolveX402RetryTarget', // #3097
       'sameUrl',
       'selectErc7710PaymentOption',
       'selectPaymentOption',
@@ -596,6 +601,7 @@ describe('HavenClient structural boundary', () => {
       'X402Receipt',
       'X402RequestSnapshot',
       'X402ResumeState',
+      'X402RetryTarget', // #3097
       'X402SchemeSelection',
     ])
   })

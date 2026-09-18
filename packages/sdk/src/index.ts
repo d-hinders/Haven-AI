@@ -181,6 +181,14 @@ export type { X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-
 // own marker.
 export type { EvidenceReportOutcome } from './merchant-completion.js'
 export { isZeroSettlementTxHash } from './merchant-completion.js'
+export {
+  resolveX402RetryTarget,
+  isSecureX402RetryTarget,
+  assertSecureX402RetryTarget,
+  HavenInsecureRetryTargetError,
+  INSECURE_RETRY_TARGET_CODE,
+} from './x402-retry-target.js'
+export type { X402RetryTarget } from './x402-retry-target.js'
 
 export {
   SWEEP_BASE_CHAIN_ID,

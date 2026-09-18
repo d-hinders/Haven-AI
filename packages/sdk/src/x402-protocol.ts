@@ -222,6 +222,11 @@ export function buildX402Quote(
     request,
     ...(mcpTransport ? { mcpTransport } : {}),
     resourceUrl: paymentRequired.resource.url,
+    // #3097: the merchant's declaration vs the URL the caller quoted. The
+    // paid retry goes to the caller's URL; a quote that says the two disagree
+    // is how an agent sees a challenge that downgrades the scheme or moves
+    // the host before it pays.
+    resourceUrlDiffersFromRequest: paymentRequired.resource.url !== request.url,
     description: paymentRequired.resource.description ?? option.description ?? null,
     mimeType: paymentRequired.resource.mimeType ?? option.mimeType ?? null,
     amountAtomic: x402AuthorizationAmount(option),

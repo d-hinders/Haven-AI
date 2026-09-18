@@ -346,3 +346,18 @@ since #1984 — are unaffected, hosted and local alike.
 - [Hosted connect flow](06-hosted-mcp-connect-flow.md)
 - [Edge signer](07-edge-signer.md)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)
+
+> **Re-verification (#3097, the paid retry's target, 2026-09-18):** this diff
+> touches `packages/mcp-server/src/tools/{plain-http-x402,contracts,paid-mcp-completion}.ts`,
+> `packages/mcp-server/src/tools/support/mcp-context.ts` and the SDK's
+> `mcp-merchant-transport.ts` (in this document's coverage list; the SDK's
+> `x402-protocol.ts` is covered by `04-x402-payment-sequence.md`). Both surfaces keep their contracts; what is new is an optional `url` on
+> `haven_pay_x402_quote` / `haven_resume_x402_payment` (the URL the agent
+> quoted), `request_url` / `retry_url` / `resource_url_differs_from_request` on
+> the quote, `retry_url` on pay and resume, and the `INSECURE_RETRY_TARGET`
+> refusal of a public `http://` retry target — the same rule on the SDK's
+> `McpMerchantTransport.deliverPayment` seam, which the local runtime crosses. The
+> local/hosted divergence this document describes is unchanged: the local
+> runtime always retried the caller's URL; the hosted surface now carries it.
+> Scope of this note: those fields and that refusal. Nothing else in this
+> document was re-verified.

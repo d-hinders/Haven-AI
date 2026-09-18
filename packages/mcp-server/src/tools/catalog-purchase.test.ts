@@ -74,23 +74,34 @@ describe('haven_discover_tools', () => {
           entries: [
             { ...base, id: 'cat_mcp', name: 'create_text', resource_url: 'https://mcp.merchant.test/mcp', protocol: 'mcp', tool_name: 'create_text', tool_arguments: { prompt: 'hello' } },
             { ...base, id: 'cat_http', name: 'Fact', resource_url: 'https://services.sandbox.ampersend.ai/api/fact', protocol: 'http', tool_name: null, tool_arguments: null },
+            // Round-2 (#3113): the two row shapes haven_quote_catalog_purchase refuses get a reason, not a hint.
+            { ...base, id: 'cat_mcp_nameless', name: 'Unnamed', resource_url: 'https://mcp.merchant.test/mcp', protocol: 'mcp', tool_name: null, tool_arguments: null },
+            { ...base, id: 'cat_mcp_degraded', name: 'Stale', resource_url: 'https://mcp.merchant.test/mcp', protocol: 'mcp', tool_name: 'x', tool_arguments: {}, status: 'degraded' },
           ],
         },
       },
     })
-    const result = ok<Array<{ id: string; resource_url: string; suggested_tool: StrictInputToolName; suggested_arguments: Record<string, unknown> }>>(
+    const result = ok<Array<{ id: string; resource_url: string; suggested_tool?: StrictInputToolName; suggested_arguments?: Record<string, unknown>; suggested_tool_omitted_reason?: string }>>(
       await handlers().haven_discover_tools({}),
     )
     expect(result.data.map((e) => [e.suggested_tool, e.suggested_arguments])).toEqual([
       ['haven_quote_catalog_purchase', { catalog_id: 'cat_mcp' }],
       ['haven_quote_x402', { url: 'https://services.sandbox.ampersend.ai/api/fact' }],
+      [undefined, undefined],
+      [undefined, undefined],
     ])
+    for (const id of ['cat_mcp_nameless', 'cat_mcp_degraded']) {
+      const row = result.data.find((e) => e.id === id)!
+      expect(row).not.toHaveProperty('suggested_tool')
+      expect(row.suggested_tool_omitted_reason).toContain('haven_quote_catalog_purchase refuses it')
+    }
     // The property, not the literals: every hint parses under the strict
     // schema of the tool it names. (The live bug: discovery said
     // `resource_url`, the tool took `url`.)
     for (const entry of result.data) {
-      expect(() => parseStrict(entry.suggested_tool, entry.suggested_arguments), entry.suggested_tool).not.toThrow()
-      expect(() => parseStrict(entry.suggested_tool, { resource_url: entry.resource_url })).toThrow(/send "resource_url" as|does not accept/)
+      if (!entry.suggested_tool) continue
+      expect(() => parseStrict(entry.suggested_tool!, entry.suggested_arguments), entry.suggested_tool).not.toThrow()
+      expect(() => parseStrict(entry.suggested_tool!, { resource_url: entry.resource_url })).toThrow(/Send "resource_url" as|does not accept/)
     }
   })
 

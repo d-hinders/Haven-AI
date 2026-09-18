@@ -108,6 +108,44 @@ const mcpTransportArg = z
   })
   .strict(MCP_TRANSPORT_CASE_HINT)
 
+/**
+ * #3100 (epic #3105, decision 4): the structured hint on a discovery entry.
+ * Either a tool the entry can be handed to with arguments that tool accepts
+ * VERBATIM — the argument shapes are the declared input of the named tool,
+ * and the discovery parity test parses each under that tool's strict schema —
+ * or, when no verbatim hint exists for the row, the REASON (decision 3's
+ * omitted-plus-reason shape; never a null hint). Slice #3101 turns the
+ * argument shapes into derived types once `toolSchemas` keeps its keys.
+ */
+export type DiscoveryHint =
+  | { suggested_tool: 'haven_quote_catalog_purchase'; suggested_arguments: { catalog_id: string } }
+  | { suggested_tool: 'haven_quote_x402'; suggested_arguments: { url: string } }
+  | { suggested_tool_omitted_reason: string }
+
+/** One `haven_discover_tools` entry on the hosted surface (wire-shaped). */
+export type DiscoveryEntry = {
+  id: string
+  name: string
+  description: string | null
+  category: string | null
+  resource_url: string
+  rail: string
+  protocol: string
+  tool_name: string | null
+  tool_arguments: Record<string, unknown> | null
+  price_display: string | null
+  price_atomic: string | null
+  price_is_indicative: true
+  asset: string | null
+  network: string | null
+  status: string
+  verified_at: string | null
+  source?: string
+  domain_verified?: boolean
+  verified_payable?: boolean
+  merchant?: { id: string; slug: string; name: string; listing_status: string; is_test_merchant: boolean }
+} & DiscoveryHint
+
 export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_get_agent: {},
   haven_get_allowances: {},

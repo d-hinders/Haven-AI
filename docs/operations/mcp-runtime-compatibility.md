@@ -2092,5 +2092,7 @@ what each server's instructions say and why they differ in length.
 > divergence this document records is unchanged (the two surfaces suggest
 > different tools by design — same property, not the same values). The
 > `haven_quote_x402` reason no longer claims the hosted surface has no body
-> field (it has had one since #2366). Scope of this note: those fields and that
+> field (it has had one since #2366). A row no verbatim hint exists for (no
+> `tool_name`; hosted: degraded) carries `suggested_tool_omitted_reason` on
+> both surfaces instead of a hint. Scope of this note: those fields and that
 > text. Nothing else in this document was re-verified.

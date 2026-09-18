@@ -35,7 +35,7 @@ describe('strictRefusalMessage', () => {
   it('names the rejected key, its alias and the declared keys', () => {
     const text = strictRefusalMessage('haven_quote_x402', ['resource_url'])
     expect(text).toContain('does not accept "resource_url"')
-    expect(text).toContain('send "resource_url" as "url"')
+    expect(text).toContain('Send "resource_url" as "url"')
     expect(text).toContain('It declares: url, method, headers, body')
     expect(text.toLowerCase()).not.toContain('no body field')
   })
@@ -55,7 +55,7 @@ describe('both parse paths carry the hint', () => {
     } catch (err) {
       message = (err as { message: string }).message
     }
-    expect(message).toContain('send "resource_url" as "url"')
+    expect(message).toContain('Send "resource_url" as "url"')
   })
 
   it('toolInputSchema (the transport path, before the handler runs)', () => {
@@ -63,7 +63,7 @@ describe('both parse paths carry the hint', () => {
     const result = schema.safeParse({ resource_url: 'https://merchant.test/paid' })
     expect(result.success).toBe(false)
     const issue = result.success ? undefined : result.error.issues.find((i) => i.code === 'unrecognized_keys')
-    expect(issue?.message).toContain('send "resource_url" as "url"')
+    expect(issue?.message).toContain('Send "resource_url" as "url"')
     expect(schema.safeParse({ url: 'https://merchant.test/paid' }).success).toBe(true)
   })
 })
@@ -72,6 +72,13 @@ describe('the false sentence is gone and the table is honest', () => {
   it('STRICT_INPUT_TOOLS.haven_quote_x402 no longer says the hosted surface has no body field', () => {
     expect(STRICT_INPUT_TOOLS.haven_quote_x402).not.toContain('no body field')
     expect(STRICT_INPUT_TOOLS.haven_quote_x402).toContain('body')
+  })
+
+  it('echoes at most five rejected keys and counts the rest (#3113 round 2)', () => {
+    const junk = Array.from({ length: 8 }, (_, i) => `junk_${i}`)
+    const text = strictRefusalMessage('haven_quote_x402', junk)
+    expect(text).toContain('"junk_4" and 3 more.')
+    expect(text).not.toContain('junk_5')
   })
 
   it('never resolves a prototype-chain name as an alias (#3113 review)', () => {

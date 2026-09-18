@@ -376,5 +376,9 @@ since #1984 — are unaffected, hosted and local alike.
 > divergence this document records is unchanged (the two surfaces suggest
 > different tools by design — same property, not the same values). The
 > `haven_quote_x402` reason no longer claims the hosted surface has no body
-> field (it has had one since #2366). Scope of this note: those fields and that
-> text. Nothing else in this document was re-verified.
+> field (it has had one since #2366). A row no verbatim hint exists for — an MCP
+> row without `tool_name` on either surface, a degraded MCP row on the hosted
+> one — carries `suggested_tool_omitted_reason` instead of a hint, on BOTH
+> surfaces (review rounds 1–2), so that field is not a divergence. Scope of
+> this note: those fields and that text. Nothing else in this document was
+> re-verified.

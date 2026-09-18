@@ -582,8 +582,9 @@ hosted surface an MCP entry points at the cap-free `haven_quote_catalog_purchase
 `{ catalog_id }` (prepare requires a cap the server must never invent) and an
 HTTP entry at `haven_quote_x402 { url }`; the local runtime points at its pay
 tools with `{ merchant_url, tool_name, arguments }` (`arguments` only when the
-row carries them; a row with no `tool_name` gets `suggested_tool_omitted_reason`
-instead of a hint its tool would refuse) / `{ url }`. A hosted strict refusal
+row carries them) / `{ url }`. A row the suggested tool would refuse — no
+`tool_name` on either surface, degraded on the hosted one — gets
+`suggested_tool_omitted_reason` instead of a hint. A hosted strict refusal
 names the declared keys and the declared alias of a rejected key
 (`resource_url` → `url`, `id` → `catalog_id`; epic #3105, decision 5). The
 quote tool the hosted hint names carries no structured next step of its own

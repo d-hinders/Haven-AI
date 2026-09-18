@@ -99,17 +99,23 @@ export function declaredAliasFor(name: HostedToolName, rejected: string): string
   return declared.find((k) => k !== rejected && foldKey(k) === folded)
 }
 
+const ECHOED_KEYS = 5
+
 export function strictRefusalMessage(name: StrictInputToolName, keys?: readonly string[]): string {
-  const subject = keys && keys.length > 0
-    ? `${name} does not accept ${keys.map((k) => `"${k}"`).join(', ')}.`
+  // Bounded echo: the caller's own keys reflected back, at most ECHOED_KEYS of
+  // them — a refusal that repeats every junk key is context burn, not help.
+  const named = (keys ?? []).slice(0, ECHOED_KEYS)
+  const more = (keys?.length ?? 0) - named.length
+  const subject = named.length > 0
+    ? `${name} does not accept ${named.map((k) => `"${k}"`).join(', ')}${more > 0 ? ` and ${more} more` : ''}.`
     : `${name} refuses an argument it does not declare.`
   // #3100: name the declared keys, and the alias of every rejected key that
   // has one — the hint an agent copying a field from another response needs.
   const declared = Object.keys(toolSchemas[name])
-  const aliases = (keys ?? [])
+  const aliases = named
     .map((k) => ({ rejected: k, alias: declaredAliasFor(name, k) }))
     .filter((a): a is { rejected: string; alias: string } => a.alias !== undefined)
-    .map((a) => `send "${a.rejected}" as "${a.alias}"`)
+    .map((a) => `Send "${a.rejected}" as "${a.alias}"`)
   const hint = aliases.length > 0 ? ` ${aliases.join('; ')}.` : ''
   return (
     `${subject}${hint} It declares: ${declared.join(', ')}. ` +

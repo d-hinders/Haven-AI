@@ -159,21 +159,21 @@ export const toolDescriptions = {
   },
   discoverTools: {
     summary:
-      'Step 1 of a purchase: discover payable services from Haven\'s curated merchant catalog — names, prices, and the exact next call for each.',
+      'Step 1 of a purchase: discover payable services from Haven\'s curated merchant catalog — names, prices, the next call.',
     selectionGuidance:
       'Use this when the user asks what the agent can buy, pay for, or which paid services exist — or when you need a resource URL for a service the user described. ' +
       'Use verified=verified for entries Haven watched pass a live quote probe (operator-curated or self-submitted) — domain_verified is the only ownership claim; never treat these badges as proof of merchant honesty, quality, or reliability. ' +
       'Do NOT use for balance, budget, or spend-limit questions — use haven_get_allowances. ' +
       'Do NOT use to pay — each returned entry names the next tool to call.',
     behavior:
-      'Use each entry\'s suggested_tool field first — it names the exact next call. ' +
+      'Use each entry\'s suggested_tool + suggested_arguments first; an entry without them says why. ' +
       'Read-only lookup against Haven\'s curated catalog; entries are periodically re-verified against the live merchant and degraded entries are flagged. ' +
       'Use category for a case-insensitive category filter (for example, VPN or vpn), or search for a product name, category, or description term. ' +
-      'Returns name, description, price, rail, resource URL, tool_name, tool_arguments, suggested_tool, and the provenance badges source/domain_verified/verified_payable. ' +
+      'Returns name, description, price, rail, resource URL, tool_name, tool_arguments, the hint, and the provenance badges source/domain_verified/verified_payable. ' +
       'The catalog price (price_display/price_atomic, marked price_is_indicative) is a last-verified hint, NOT authoritative — the real price comes from the merchant\'s live 402 at pay time. ' +
       'Never creates a payment, signature, or approval.',
     nextActionGuidance:
-      'Pick an entry and call the tool named in suggested_tool with suggested_arguments VERBATIM; an entry without suggested_tool says why in suggested_tool_omitted_reason. Confirm the price from the live quote or pay result (not the catalog), and if the next tool takes a cap, pass the user\'s cap as max_amount_human in whole tokens ("no more than 1 USDC" → max_amount_human: "1") — never convert it to atomic units by hand.',
+      'Call suggested_tool with suggested_arguments VERBATIM (no hint: read suggested_tool_omitted_reason). Confirm the price from the live quote or pay result, not the catalog; if the next tool takes a cap, pass the user\'s cap as max_amount_human in whole tokens ("no more than 1 USDC" → max_amount_human: "1"), never atomic units by hand.',
   },
   submitCatalogEntry: {
     summary:

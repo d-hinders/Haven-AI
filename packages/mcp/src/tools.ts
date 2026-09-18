@@ -46,6 +46,41 @@ export type HavenMcpToolName =
   | 'haven_discover_tools'
   | 'haven_submit_catalog_entry'
 
+/**
+ * #3100 (epic #3105, decision 4): the structured hint on a local discovery
+ * entry — a pay tool with arguments it accepts VERBATIM, or the reason no
+ * verbatim hint exists for the row (decision 3's omitted-plus-reason shape).
+ */
+export type DiscoveryHint =
+  | {
+      suggested_tool: 'haven_pay_mcp_tool'
+      suggested_arguments: { merchant_url: string; tool_name: string; arguments?: Record<string, unknown> }
+    }
+  | { suggested_tool: 'haven_pay_x402'; suggested_arguments: { url: string } }
+  | { suggested_tool_omitted_reason: string }
+
+/** One `haven_discover_tools` entry on the local surface (wire-shaped). */
+export type DiscoveryEntry = {
+  id: string
+  name: string
+  description: string | null
+  category: string | null
+  resource_url: string
+  rail: string
+  protocol: string
+  tool_name: string | null
+  tool_arguments: Record<string, unknown> | null
+  price_display: string | null
+  price_atomic: string | null
+  asset: string | null
+  network: string | null
+  status: string
+  verified_at: string | null
+  source?: string
+  domain_verified?: boolean
+  verified_payable?: boolean
+} & DiscoveryHint
+
 export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   haven_send: {
     asset: z.enum(['ETH', 'USDC']),
@@ -394,7 +429,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           rail: args.rail === 'x402' || args.rail === 'mpp' ? args.rail : undefined,
           verified: args.verified === 'verified' || args.verified === 'operator' ? args.verified : undefined,
         })
-        return entries.map((entry) => ({
+        return entries.map((entry): DiscoveryEntry => ({
           id: entry.id,
           name: entry.name,
           description: entry.description,

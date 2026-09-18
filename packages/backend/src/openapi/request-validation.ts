@@ -431,9 +431,25 @@ export function requestSchemaForOperation(
  * The route FILE that declares `(method, openApiPath)`, or `undefined` for an
  * operation the generated table does not know — a route added without
  * regenerating it, which `check:route-modules` and the generated table's own
- * test both redden on. `undefined` is the SAFE direction: an unattributed
- * route cannot be enforced, so a stale table under-enforces (a route keeps
- * shadow-logging) rather than refusing traffic nobody flipped.
+ * test both redden on.
+ *
+ * For an ADDED route `undefined` is the safe direction: an unattributed route
+ * cannot be enforced, so it keeps shadow-logging rather than refusing traffic
+ * nobody flipped. It is NOT one-directional for a MOVED one — move an
+ * operation into a new file without regenerating and the stale table still
+ * answers the OLD file, so a route in a file nobody listed stays enforced
+ * until the table is regenerated. What bounds that is the staleness itself
+ * being gated: `check:route-modules` and the drift test both redden on it.
+ *
+ * One blind spot the table and the ratchet share, because both read the same
+ * source: a route registered with a NON-LITERAL path (`app.post(BULK_PATH, …)`)
+ * is invisible to `extractRoutes`, so it gets no table entry and can never be
+ * enforced even when its file IS listed — while `lint:request-schemas`
+ * short-circuits per FILE and would report that file enforced. None exists
+ * today (measured across every `routes/*.ts` and `index.ts`). Flipping a
+ * module in epic #3028 slices 3–4 should therefore assert the refusal per
+ * ROUTE, the way `routes/__tests__/contacts.test.ts` and
+ * `routes/__tests__/merchants.test.ts` do, and not per file.
  */
 export function routeModuleFor(method: string, openApiPath: string): string | undefined {
   return ROUTE_MODULE_BY_OPERATION[operationKey(method, openApiPath)]

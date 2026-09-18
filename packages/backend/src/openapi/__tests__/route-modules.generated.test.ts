@@ -5,9 +5,12 @@
  * The request-validation plugin resolves `enforcedModules` through that table,
  * and it is GENERATED rather than derived at boot because the derivation reads
  * TypeScript source while the deployed image ships only `dist/*.js`. A stale
- * table therefore fails in the quiet direction: a route it does not know is
- * never enforced, so a module somebody flipped keeps shadow-logging while the
- * gate reports it enforced. `npm run check:route-modules` says the same thing
+ * table therefore fails quietly in both directions: a route it does not know
+ * is never enforced, so a module somebody flipped keeps shadow-logging while
+ * the gate reports it enforced; and a route that MOVED keeps its old
+ * attribution, so a route in a file nobody listed stays enforced. Neither is
+ * visible at runtime, which is why the staleness itself is what gets gated.
+ * `npm run check:route-modules` says the same thing
  * from the CLI; this is the copy that runs inside the backend suite, so a PR
  * that simply never ran the script cannot reach `dev` green.
  */

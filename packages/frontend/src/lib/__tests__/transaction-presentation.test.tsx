@@ -113,3 +113,55 @@ describe('transaction presentation', () => {
     expect(settlementSchemeLabel(undefined)).toBeNull()
   })
 })
+
+/**
+ * #3129 made the backend emit EIP-55 checksummed addresses on transaction
+ * rows where Etherscan previously gave lowercase. That is the GNOSIS leg:
+ * `chains.ts` puts Gnosis (100) on `etherscan-v2` and Base (8453, the default
+ * chain) on `blockscout-v2`, which already checksummed — the opposite of what
+ * the provider names suggest, and pinned by a test in
+ * `packages/backend/src/modules/transactions/__tests__/normalize.test.ts`.
+ * Every rendered counterparty label resolves through `transactionTitle`, and
+ * both lookups inside it lowercase before matching — so the change is inert.
+ *
+ * These pin that. The failure mode if the lowercasing is ever dropped is
+ * severe and silent: a payment row's counterparty stops reading "Acme Ltd"
+ * and starts reading `0xA873…DD35`, with nothing red anywhere.
+ */
+describe('counterparty name resolution is case-insensitive (#3129)', () => {
+  const CHECKSUMMED = '0xA87300000000000000000000000000000000DD35'
+  const LOWER = CHECKSUMMED.toLowerCase()
+
+  it('resolves a contact stored lowercase from a checksummed row address', () => {
+    const resolveAddress = (address: string) =>
+      address.toLowerCase() === LOWER ? 'Acme Ltd' : null
+
+    render(transactionMovement(tx({ direction: 'in', from: CHECKSUMMED }), resolveAddress))
+
+    expect(screen.getByText('Acme Ltd')).toBeInTheDocument()
+  })
+
+  it('resolves an own-account name stored lowercase from a checksummed row address', () => {
+    const accountNames = new Map([[`${LOWER}:8453`, 'Savings']])
+
+    render(
+      transactionMovement(
+        tx({ direction: 'out', to: CHECKSUMMED, chainId: 8453 }),
+        undefined,
+        accountNames,
+      ),
+    )
+
+    expect(screen.getByText('Savings')).toBeInTheDocument()
+  })
+
+  it('CONTROL: an unresolved checksummed address falls back to the truncated form', () => {
+    // So the two assertions above are not passing on a coincidence — and so
+    // the fixture's two forms really do differ.
+    expect(CHECKSUMMED).not.toBe(LOWER)
+
+    render(transactionMovement(tx({ direction: 'in', from: CHECKSUMMED })))
+
+    expect(screen.queryByText('Acme Ltd')).not.toBeInTheDocument()
+  })
+})

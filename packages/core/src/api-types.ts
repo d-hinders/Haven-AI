@@ -3948,8 +3948,8 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
-            /** @description 0 for x402-synthesized rows with no on-chain receipt yet. */
-            blockNumber: number;
+            /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
+            blockNumber: number | null;
             isError: boolean;
             /** @example 0x1111111111111111111111111111111111111111 */
             tokenAddress?: string;
@@ -4013,8 +4013,8 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
-            /** @description 0 for x402-synthesized rows with no on-chain receipt yet. */
-            blockNumber: number;
+            /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
+            blockNumber: number | null;
             isError: boolean;
             /** @example 0x1111111111111111111111111111111111111111 */
             tokenAddress?: string;

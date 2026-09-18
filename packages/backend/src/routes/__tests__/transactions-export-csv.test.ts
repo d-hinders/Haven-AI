@@ -13,14 +13,21 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { ethers } from 'ethers'
 import transactionRoutes from '../transactions.js'
 import pool from '../../db.js'
 import { TRANSACTION_CSV_COLUMNS } from '../../modules/transactions/index.js'
 
 const BASE_SAFE = '0x135a9215604711AC70d970e12Caa812c53537EF4'
 const GNOSIS_SAFE = '0x55C9d84427756D6f82480427Bb778F6dc0cC755E'
-const SENDER = '0xAAAA0000000000000000000000000000000000A1'
-const RECIPIENT = '0xBBBB0000000000000000000000000000000000B2'
+// #3129: declared in EIP-55 checksummed form, because that is now what the
+// export emits — every address on a transaction row goes through
+// `toCanonicalAddress` at the row boundary. Written through `getAddress`
+// rather than hand-cased so the constant cannot drift from the real answer.
+// (An all-caps address carries no checksum, so these previously round-tripped
+// unchanged; the export now settles them like any other.)
+const SENDER = ethers.getAddress('0xAAAA0000000000000000000000000000000000A1')
+const RECIPIENT = ethers.getAddress('0xBBBB0000000000000000000000000000000000B2')
 const IN_HASH = '0x1111111111111111111111111111111111111111111111111111111111111111'
 const OUT_HASH = '0x2222222222222222222222222222222222222222222222222222222222222222'
 
@@ -139,7 +146,7 @@ function stubManyBaseTransactions(count: number) {
  * so a cross-chain pair resolves to nothing on the dashboard too and would
  * not exercise this. The first account pays the second.
  */
-const SECOND_BASE_SAFE = '0xCCCC0000000000000000000000000000000000C3'
+const SECOND_BASE_SAFE = ethers.getAddress('0xCCCC0000000000000000000000000000000000C3') // #3129, as above
 const SECOND_BASE_SAFE_ID = '33333333-3333-4333-8333-333333333333'
 
 const TWO_BASE_SAFES = [

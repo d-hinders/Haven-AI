@@ -8,6 +8,7 @@ import {
   findDelegateSweepAgentMatches,
   findPaymentIntentAgentMatches,
 } from '../../infra/repositories/transaction-history.js'
+import { toCanonicalAddress } from './normalize.js'
 import { paymentAgentIdentityKey } from './ordering.js'
 import type { EnrichedTransaction } from './types.js'
 
@@ -58,7 +59,12 @@ export async function enrichTransactionsWithAgents(
           name: row.agent_name,
           source: row.source,
           resourceUrl: row.payment_resource_url,
-          merchantAddress: row.merchant_address,
+          // #3129: normalised HERE, where the DB row enters, for the same
+          // reason `aggregate.ts` and `x402.ts` normalise at their
+          // boundaries — this value OVERWRITES the row's already-canonical
+          // `x402MerchantAddress` below, so leaving it raw would put the
+          // mixed casing back after the boundary had settled it.
+          merchantAddress: toCanonicalAddress(row.merchant_address),
           paymentId: row.id,
           paymentProofStatus: row.payment_proof_status,
           paymentFlowStatus: lifecycle.paymentFlowStatus,

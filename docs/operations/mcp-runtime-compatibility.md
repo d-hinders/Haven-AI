@@ -1959,6 +1959,26 @@ to call next in structured fields, and those fields are typed end to end
   > the same either way (`--doctor --repair`). Nothing else in this section
   > re-read.
 
+  > **Re-verified #3121:** three verdict levels. Every check and the report
+  > carry `level: ok | advisory | failed`; only `failed` reaches the exit
+  > code, so "exiting non-zero" above now means "on a failed check". The
+  > intact-but-outdated `signer_runtime` state from #2963 is an `advisory`
+  > (`!` marker, exit 0, both versions still named, `--repair` still
+  > offered), as is `superseded_agents` on a RECOGNISED runtime that owns no
+  > config file (Claude Code, `other`): the live keys are still named, and
+  > the check says why "wired" cannot be verified from this machine. `ok` on a check and on the report is derived (`true` unless
+  > `failed`) so `report.ok` stays the exit code's predicate for `--json`
+  > consumers; the report stays `version: 1`. A live key in a directory the
+  > readable config demonstrably does not use stays a failure, for every
+  > non-wired classification, and the unknown-runtime `runtime_config`
+  > verdict (#3120) stays a failure. A runtime string the connector does
+  > not recognise (`--runtime codex-clii`) is a new `runtime_config` failure
+  > of its own, naming the allowed values, and demotes nothing; a documented
+  > alias (`--runtime codex`) now resolves to its config file for the
+  > doctor's check, the repair's local-topology refusal and the repair's
+  > config write, instead of the "CLI-managed" skip and a repair that
+  > reported success having written nothing.
+
   The hosted MCP `tools/list` check proves only that its endpoint responds; it
   does not authenticate a bearer token. Credential verdicts instead use the
   authenticated, read-only agent-identity endpoint: an accepted identity read

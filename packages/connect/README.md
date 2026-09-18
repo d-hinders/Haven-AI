@@ -87,12 +87,38 @@ every credential directory on the machine and classifies each one:
 | `retired` | Tombstoned (see below); key material removed. |
 | `orphaned` | No usable identity and no tombstone. |
 
-The exit code is non-zero if **any** wired agent fails **any** check — not
+The exit code is non-zero if **any** wired agent fails **any** check
+(`level: failed` — see the next section; an advisory does not count) — not
 only the one the report's main section describes. In `--json`, the same
 information is on `agents[]`, each entry carrying `slug`, `agentId`,
 `directory`, `classification` and its own `checks[]`; the flat `checks` array
 is retained and still describes one agent, so a single-agent install reads as
 it always did.
+
+### Three verdicts, not two (#3121)
+
+Every check carries a `level` — `ok`, `advisory` or `failed` — and the report
+carries the rolled-up `level` over the flat checks and every wired agent's
+checks. Only `failed` reaches the exit code; an advisory is printed with a `!`
+marker, gets its own summary line ("No failures. N advisory finding(s)") and
+exits 0. `ok` on a check and on the report is kept for `--json` consumers and
+means "nothing is broken": it is `true` for `ok` and `advisory`, `false` only
+for `failed`, so `report.ok` is always the exit code's predicate. The doctor
+report stays `version: 1`; `level` is additive.
+
+| Level | Meaning | Example |
+| --- | --- | --- |
+| `ok` | Nothing to say. | The installed signer matches the connector's pin. |
+| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered). `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
+| `failed` | A real failure with one repair action. Exit 1. | A stale or empty runtime directory; a live key in a directory the runtime's config demonstrably does not use. |
+
+What stays blocking is live spend authority: a directory whose stored key
+still authenticates and whose classification is not `wired` fails the run, for
+every non-wired classification, whenever the runtime config could be read. The
+classification itself does not change on Claude Code — only the severity of
+the check that reads it — so `agents[]` reads as before. A runtime string the
+connector does not recognise (`--runtime codex-clii`) is not "no config": it
+fails `runtime_config` naming the allowed values, and demotes nothing.
 
 One check is worth calling out: **`identity_match`** compares the agent the
 stored API key actually authenticates as against the `delegate_address` in
@@ -496,9 +522,9 @@ the agent credential files, the pinned signer runtime install (and, since
 see the last section of this file), the hosted MCP
 (authorized `tools/list`), and starts the local signer for a real stdio
 handshake — reporting its advertised compat versions. Every failing check
-prints one concrete repair action; the exit code is non-zero on any failure.
-Add `--json` for a machine-readable report. No secret material is ever
-printed.
+prints one concrete repair action; the exit code is non-zero on any failure
+and zero on an advisory (see "Three verdicts, not two" above). Add `--json`
+for a machine-readable report. No secret material is ever printed.
 
 `--doctor` also probes every OTHER agent credential directory it did not
 select (#1688). A re-run of setup mints a NEW agent and, unless it ran with

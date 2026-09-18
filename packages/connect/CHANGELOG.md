@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+- `--doctor` verdicts have three levels (#3121): every check and the report carry `level: ok | advisory | failed`; only `failed` reaches the exit code (advisories print `!` and exit 0); `ok` is now `level !== 'failed'` (was "every check passed"). Intact-but-outdated `signer_runtime` and `superseded_agents` on a runtime with no connector-owned config (claude-code, other) are advisories. Report stays `version: 1`; `level` is additive.
+
 ## 0.3.0-alpha.0 — 2026-09-17
 
 ### Fixed

@@ -718,9 +718,10 @@ you need the reasoning. Never edit one without the other — CI will not let you
 - `packages/demo-merchant-mcp/src/**` (the demo merchant's settlement surface —
   #3098. `x402.ts` verifies the buyer's authorization and submits it on-chain,
   and the prod instance runs on Base mainnet; the CASP guardrails doc had
-  covered the package since #1736 while the classifier never had, and two
-  settlement-semantics changes (#2969/#2977, #2979/#2980) shipped unlabelled
-  through that gap. Runtime `globs`, not control: it deploys from `dev` on
+  covered the package since #650 while the classifier never had, and two
+  settlement-semantics changes shipped through that gap — #2969/PR #2977
+  unlabelled, #2979/PR #2982 labelled only because it also touched
+  `mcp-server/src/**`. Runtime `globs`, not control: it deploys from `dev` on
   Railway and the money-flow harness pays it through `QA_DEMO_MERCHANT_URL`.
   Scoped to `src/**` like the hosted MCP entry);
 - `db/migrations/`;
@@ -783,7 +784,9 @@ if it is genuinely still coming, `PRE_EMPTIVE_GLOBS` in the drift test is where
 to say so. And `docs/regulatory/casp-risk-guardrails.md`'s `covers:` front matter
 — a fourth copy of this perimeter, which declares itself maintained against this
 list — is now pinned to it too, with its two remaining gaps exempted explicitly
-rather than silently.
+rather than silently; and since #3098 in the other direction as well: a
+package-wide `covers:` entry there must be on this list or named `DOC_ONLY` in
+the test with its reason (four are: `sdk`, `cli`, `connect`, `mcp`).
 
 A comment-only diff in a listed file may be treated as non-money-path when the
 review confirms zero behavioral change — say so explicitly in the PR.

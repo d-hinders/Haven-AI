@@ -6,7 +6,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .github/CODEOWNERS
-last-verified: "2026-09-15"
+last-verified: "2026-09-18"
 ---
 
 # Backlogs moved to GitHub Issues
@@ -50,7 +50,8 @@ old YAML `scope:` field demanded. The **🔁 Loop task** issue template
   loads the right playbook (see `docs/contributing/ship-playbooks/README.md`).
 - **Money-path?** — whether it touches x402, machine-payments, payment-coverage,
   allowances, the **delegation rail** or rail seam, the SDK signer, the hosted
-  MCP tool surface (`packages/mcp-server/src/**`, #2300), or migrations. Don't
+  MCP tool surface (`packages/mcp-server/src/**`, #2300), the demo merchant's
+  settlement surface (`packages/demo-merchant-mcp/src/**`, #3098), or migrations. Don't
   work from this summary: the authoritative list is
   [`.github/money-path-globs.json`](../../.github/money-path-globs.json), which
   `labeler.yml` applies automatically and a test keeps in sync

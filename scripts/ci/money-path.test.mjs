@@ -392,11 +392,13 @@ describe('money-path list stays in one piece', () => {
   test('the demo merchant\'s settlement file is RUNTIME money-path — a change to it gates promotion (#3098)', () => {
     // The #2300 shape, one package over. packages/demo-merchant-mcp/src/x402.ts
     // verifies the buyer's authorization and SUBMITS it on-chain (settleOnce),
-    // and the prod instance runs on Base mainnet (#1458). #2969/#2977 (the
-    // zero-hash settlement sentinel) and #2979/#2980 (settlement readiness)
-    // changed its settlement semantics with no money-path label, no CASP shard
-    // and no qa-freshness count — the file was outside every glob while the
-    // CASP guardrails doc's `covers:` had listed it since #1736. Runtime, not
+    // and the prod instance runs on Base mainnet (#1458). Two settlement-
+    // semantics changes shipped through the gap: #2969 (PR #2977, the zero-hash
+    // sentinel) with no money-path label, so no shard was required and
+    // qa-freshness did not count it; #2979 (PR #2982, settlement readiness)
+    // labelled only because it also touched mcp-server/src/**. The file was
+    // outside every glob while the CASP guardrails doc's `covers:` had listed
+    // it since #650. Runtime, not
     // control: the demo merchant deploys from `dev` on Railway and the
     // money-flow harness pays it through QA_DEMO_MERCHANT_URL, so a green run
     // really does cover it. Mutation: remove packages/demo-merchant-mcp/src/**
@@ -429,21 +431,26 @@ describe('money-path list stays in one piece', () => {
     // does not is the #1030 shape with the copies swapped.
     //
     // Scoped to package-wide globs (`packages/<pkg>/**`, `packages/<pkg>/src/**`)
-    // because those are the entries that claim a perimeter; the doc's named
-    // backend files are individually argued in its prose and are not the
-    // classifier's business. A doc-only package is ALLOWED — the doc reasons
+    // ONLY — those are the entries that claim a whole package as perimeter.
+    // Sub-package wildcards (`packages/backend/src/modules/accounting/**`,
+    // `rails/**`, the frontend accounting/reporting routes) and named files are
+    // knowingly outside this check: the doc argues them individually, and
+    // narrowing the check is safe. A doc-only package is ALLOWED — the doc reasons
     // about client packages the deployed harness never runs — but it is named
     // here with its reason, never silent.
     const DOC_ONLY = new Map([
-      // Client-side packages: run inside the agent's own process, not deployed
-      // by Haven, so the money-flow harness's "did the green run cover this?"
-      // has no answer for them. The doc covers them because the CASP perimeter
-      // question (does Haven hold or move funds?) still applies to what they
-      // ship; the machinery lists only packages/sdk/src/signer.ts of the SDK
-      // because that file is spend authority (the signing schemes), the rest
-      // is transport. Widening any of these to `globs` is an owner decision:
-      // every SDK/connector/CLI/local-runtime PR would then owe a covering QA
-      // run the harness cannot give it.
+      // cli / connect / mcp: client-side packages that run inside the agent's
+      // or the user's own process, not deployed by Haven, so the money-flow
+      // harness's "did the green run cover this?" has no answer for them.
+      // sdk: the harness DOES build and drive it (qa-agent depends on it), but
+      // only packages/sdk/src/signer.ts is spend authority (the signing
+      // schemes) and that file IS on the runtime list; the rest is transport.
+      // The doc covers all four because the CASP perimeter question (does
+      // Haven hold or move funds?) still applies to what they ship. Widening
+      // any of these to `globs` is an owner decision: every SDK/connector/CLI/
+      // local-runtime PR would then owe a covering QA run.
+      // A DOC_ONLY entry whose files are ALL on the list is stale and fails
+      // below — an exclusion must exclude something.
       ['packages/sdk/src/**', 'client library; only signer.ts is on the runtime list — see #3098'],
       ['packages/cli/src/**', 'client CLI; not deployed by Haven — see #3098'],
       ['packages/connect/src/**', 'the dashboard\'s connector, runs on the user\'s machine — see #3098'],
@@ -460,10 +467,13 @@ describe('money-path list stays in one piece', () => {
     const files = trackedFiles()
     const offList = []
     for (const glob of packageWide) {
-      if (DOC_ONLY.has(glob)) continue
       const matched = files.filter((f) => matchesGlob(f, glob))
       assert.ok(matched.length > 0, `${doc}: ${glob} matches no tracked file`)
       const unlisted = matched.filter((f) => moneyPathFiles([f], all).length === 0)
+      if (DOC_ONLY.has(glob)) {
+        assert.ok(unlisted.length > 0, `DOC_ONLY names ${glob}, but every file it matches is on the money-path list — the exclusion is stale, drop it`)
+        continue
+      }
       if (unlisted.length) offList.push(`${glob} (e.g. ${unlisted[0]})`)
     }
     assert.deepEqual(

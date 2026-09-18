@@ -7,6 +7,7 @@ import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   handleGetAllowances,
+  handleBudgetPrecheck,
   handleReconciliationEvent,
   handleSend,
   attachEvidenceHandler,
@@ -18,6 +19,7 @@ import {
   RECONCILIATION_EVENT_TYPES,
   SUPPORTED_ASSETS,
   type AuthorizeBody,
+  type BudgetPrecheckBody,
   type EvidenceBody,
   type ReconciliationEventBody,
   type SendAsset,
@@ -273,6 +275,43 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     )
     return reply.code(result.statusCode).send(result.body)
   })
+
+  // ── POST /budget-precheck — server-side budget gate for the hosted prepare ─
+  // #3054: the guided purchase's over-budget refusal is DECIDED here so it
+  // reaches the payment_refusals ledger (source hosted_prepare). Same
+  // posture as every writer: the row is recorded through refuse() only —
+  // never agent-asserted — and a fire-and-forget write can never change the
+  // decided response.
+  app.post<{ Body: BudgetPrecheckBody }>(
+    '/budget-precheck',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const body = request.body ?? {}
+      if (!body.token || typeof body.token !== 'string' || !isValidAddress(body.token)) {
+        return reply.code(400).send({ error: 'token must be a valid contract address' })
+      }
+      if (
+        !body.amountAtomic ||
+        typeof body.amountAtomic !== 'string' ||
+        !/^[0-9]+$/.test(body.amountAtomic)
+      ) {
+        return reply.code(400).send({ error: 'amountAtomic must be a non-negative integer string' })
+      }
+      if (body.resourceUrl !== undefined && typeof body.resourceUrl !== 'string') {
+        return reply.code(400).send({ error: 'resourceUrl must be a string' })
+      }
+      if (body.merchantTo !== undefined && typeof body.merchantTo !== 'string') {
+        return reply.code(400).send({ error: 'merchantTo must be a string' })
+      }
+      if (body.chainId !== undefined && typeof body.chainId !== 'number') {
+        return reply.code(400).send({ error: 'chainId must be a number' })
+      }
+
+      const result = await handleBudgetPrecheck(agent, body)
+      return reply.code(result.statusCode).send(result.body)
+    },
+  )
 
   // ── POST /sweep/prepare — build a gasless USDC sweep authorization ──────────
   app.post('/sweep/prepare', { config: moneyPathRateLimit }, async (request, reply) => {

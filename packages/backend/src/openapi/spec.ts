@@ -5643,6 +5643,65 @@ export const openapiSpec = {
         },
       },
     },
+    '/machine-payments/budget-precheck': {
+      post: {
+        tags: ['Machine payments'],
+        operationId: 'precheckMachinePaymentBudget',
+        summary: 'Decide server-side whether a quote amount fits the agent’s remaining budget.',
+        description:
+          '#3054: the guided prepare\'s budget compare moved server-side so an over-budget refusal ' +
+          'is DECIDED by Haven — and reaches the payment_refusals ledger with source ' +
+          '"hosted_prepare" through the refuse() choke point — instead of being computed in the ' +
+          'agent\'s runtime where the ledger never saw it. The body carries the merchant quote ' +
+          'facts (chainId/token/amountAtomic plus advisory merchantTo and the bought resourceUrl — ' +
+          'the refusal dedupe window\'s discriminating column, never this endpoint\'s own URL); ' +
+          'nothing about the caller\'s claim is trusted beyond which quote it asks about. ' +
+          'Sufficiency answers { sufficient: true, remaining_atomic }. Insufficiency refuses 403 ' +
+          'delegation_budget_exceeded with the same taxonomy body the x402 legs refuse with (phase, ' +
+          'next_action, remaining/shortfall atomic+human). BOTH retired rails answer 410 like ' +
+          'every rail-aware surface. Reporting-and-refusal only — enforcement stays on-chain: the ' +
+          'budget delegation\'s ERC20PeriodTransferEnforcer still refuses an over-budget redemption.',
+        security: [{ AgentApiKey: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/BudgetPrecheckRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The amount fits the remaining budget.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BudgetPrecheckResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': {
+            ...errorResponse,
+            description:
+              'The amount exceeds the agent\'s remaining delegation budget — decided here and ' +
+              'recorded in the payment_refusals ledger (source "hosted_prepare"). Carries ' +
+              'error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action ' +
+              '"fund_account_or_raise_allowance", plus remaining/remaining_atomic, ' +
+              'amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / ' +
+              'merchant_address when the request carried them.',
+          },
+          '410': {
+            ...errorResponse,
+            description:
+              'The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule (#2020). ' +
+              'Fail-closed; there is no budget concept left to pre-check.',
+          },
+          '429': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
     '/machine-payments/authorize': {
       post: {
         tags: ['Machine payments'],
@@ -8234,6 +8293,53 @@ export const openapiSpec = {
               },
               additionalProperties: false,
             },
+          },
+        },
+        additionalProperties: false,
+      },
+      BudgetPrecheckRequest: {
+        type: 'object',
+        description:
+          'The merchant quote facts the guided prepare asks Haven to pre-check (#3054). camelCase ' +
+          'like the route family. `resourceUrl` is the merchant resource being bought — the ' +
+          'refusal dedupe window\'s discriminating column — never this endpoint\'s own URL.',
+        required: ['token', 'amountAtomic'],
+        properties: {
+          chainId: { type: 'integer', description: 'Advisory: the compare is scoped to the authenticated agent\'s own chain.' },
+          token: { ...address, description: 'The quote\'s asset contract address — the SELECTED settlement option\'s asset.' },
+          amountAtomic: {
+            type: 'string',
+            pattern: '^[0-9]+$',
+            description: 'The amount that would be authorized, in ATOMIC units, as a non-negative integer string.',
+          },
+          merchantTo: {
+            type: 'string',
+            description: 'Advisory: the merchant payTo address from the selected option. Carried onto the refusal row; it does not scope the compare — the budget is per-token and the enforcer is the gate on recipients.',
+          },
+          resourceUrl: {
+            type: 'string',
+            description: 'The merchant resource being bought. Lands on the refusal row\'s dedupe key when the pre-check refuses.',
+          },
+        },
+        additionalProperties: false,
+      },
+      BudgetPrecheckResponse: {
+        type: 'object',
+        description:
+          'The sufficient branch of the server-side budget pre-check (#3054). The insufficient ' +
+          'answer is not this schema — it is the 403 delegation_budget_exceeded refusal, which ' +
+          'also lands a payment_refusals row with source "hosted_prepare".',
+        required: ['sufficient', 'remaining_atomic'],
+        properties: {
+          sufficient: { type: 'boolean', description: 'Always true on this schema — insufficiency refuses 403 instead.' },
+          remaining_atomic: {
+            type: 'string',
+            description: 'The remaining period budget for the requested token, in ATOMIC units, after deciding this quote fits.',
+          },
+          remaining_is_from_chain: {
+            type: 'boolean',
+            description:
+              '#1319 provenance, same semantics as the allowances read\'s flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
           },
         },
         additionalProperties: false,

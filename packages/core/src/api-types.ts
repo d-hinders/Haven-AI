@@ -2194,6 +2194,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/machine-payments/budget-precheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide server-side whether a quote amount fits the agent’s remaining budget.
+         * @description #3054: the guided prepare's budget compare moved server-side so an over-budget refusal is DECIDED by Haven — and reaches the payment_refusals ledger with source "hosted_prepare" through the refuse() choke point — instead of being computed in the agent's runtime where the ledger never saw it. The body carries the merchant quote facts (chainId/token/amountAtomic plus advisory merchantTo and the bought resourceUrl — the refusal dedupe window's discriminating column, never this endpoint's own URL); nothing about the caller's claim is trusted beyond which quote it asks about. Sufficiency answers { sufficient: true, remaining_atomic }. Insufficiency refuses 403 delegation_budget_exceeded with the same taxonomy body the x402 legs refuse with (phase, next_action, remaining/shortfall atomic+human). BOTH retired rails answer 410 like every rail-aware surface. Reporting-and-refusal only — enforcement stays on-chain: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption.
+         */
+        post: operations["precheckMachinePaymentBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/machine-payments/authorize": {
         parameters: {
             query?: never;
@@ -3731,6 +3751,31 @@ export type components = {
                     remaining_is_from_chain?: boolean;
                 };
             }[];
+        };
+        /** @description The merchant quote facts the guided prepare asks Haven to pre-check (#3054). camelCase like the route family. `resourceUrl` is the merchant resource being bought — the refusal dedupe window's discriminating column — never this endpoint's own URL. */
+        BudgetPrecheckRequest: {
+            /** @description Advisory: the compare is scoped to the authenticated agent's own chain. */
+            chainId?: number;
+            /**
+             * @description The quote's asset contract address — the SELECTED settlement option's asset.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            token: string;
+            /** @description The amount that would be authorized, in ATOMIC units, as a non-negative integer string. */
+            amountAtomic: string;
+            /** @description Advisory: the merchant payTo address from the selected option. Carried onto the refusal row; it does not scope the compare — the budget is per-token and the enforcer is the gate on recipients. */
+            merchantTo?: string;
+            /** @description The merchant resource being bought. Lands on the refusal row's dedupe key when the pre-check refuses. */
+            resourceUrl?: string;
+        };
+        /** @description The sufficient branch of the server-side budget pre-check (#3054). The insufficient answer is not this schema — it is the 403 delegation_budget_exceeded refusal, which also lands a payment_refusals row with source "hosted_prepare". */
+        BudgetPrecheckResponse: {
+            /** @description Always true on this schema — insufficiency refuses 403 instead. */
+            sufficient: boolean;
+            /** @description The remaining period budget for the requested token, in ATOMIC units, after deciding this quote fits. */
+            remaining_atomic: string;
+            /** @description #1319 provenance, same semantics as the allowances read's flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read). */
+            remaining_is_from_chain?: boolean;
         };
         MachinePaymentReceipt: {
             /** Format: uuid */
@@ -14045,6 +14090,120 @@ export interface operations {
             };
             /** @description The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule (#2020, reversing #1986’s left-readable decision on the recorded owner call: the accounts are emptied and unsupported, so no state is read). Fail-closed; nothing is read or written. */
             410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    precheckMachinePaymentBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BudgetPrecheckRequest"];
+            };
+        };
+        responses: {
+            /** @description The amount fits the remaining budget. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetPrecheckResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The amount exceeds the agent's remaining delegation budget — decided here and recorded in the payment_refusals ledger (source "hosted_prepare"). Carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / merchant_address when the request carried them. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule (#2020). Fail-closed; there is no budget concept left to pre-check. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -51,6 +51,7 @@ export {
   RECONCILIATION_EVENT_TYPES,
 } from './reconciliation.js'
 export { prepareSweep, submitSweep } from './sweep.js'
+export { handleBudgetPrecheck } from './budget-precheck.js'
 
 export type {
   MachinePaymentRail,
@@ -58,6 +59,7 @@ export type {
   AuthorizeBody,
   ReconciliationEventBody,
   EvidenceBody,
+  BudgetPrecheckBody,
   SendAsset,
   SendBody,
   SweepSubmitBody,

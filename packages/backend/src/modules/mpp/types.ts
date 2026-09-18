@@ -80,6 +80,20 @@ export interface SweepSubmitBody {
   signature?: string
 }
 
+/**
+ * `POST /machine-payments/budget-precheck` (#3054): the quote facts the
+ * hosted MCP's guided prepare asks Haven to pre-check. camelCase like the
+ * route family; `resourceUrl` is the merchant resource being bought — the
+ * dedupe window's discriminating column — never the allowances read's URL.
+ */
+export interface BudgetPrecheckBody {
+  chainId?: number
+  token?: string
+  amountAtomic?: string
+  merchantTo?: string
+  resourceUrl?: string
+}
+
 /** A generic handler result shape, mirroring `X402HandlerResult`. */
 export interface MppHandlerResult {
   statusCode: number

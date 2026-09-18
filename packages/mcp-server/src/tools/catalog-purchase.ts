@@ -41,6 +41,7 @@
 import {
   AgentPaymentNextAction,
   AgentPaymentWarningCode,
+  HavenApiError,
   HavenClient,
   HavenPaymentStateError,
   selectStandardPaymentOption,
@@ -473,23 +474,18 @@ export function createCatalogPurchaseHandlers(
 
           // 2. Run the LIVE quote against the catalog entry's own merchant —
           // the SAME probe haven_pay_mcp_tool uses, shared rather than
-          // duplicated (#1306 review requirement). #1348: the two Haven reads
-          // steps 4-5 need (agent, allowances) are independent of the merchant
-          // probe, so they START here and overlap its latency — the slowest
-          // leg of this preflight. Failure semantics are unchanged by design:
-          // the quote is AWAITED first, so its error still wins when several
-          // legs fail; the agent read stays a hard pre-intent refusal (#1319);
-          // the allowance read is settled to a result object the moment it
-          // starts (never an unhandled rejection) and is consumed by the same
-          // degrade-to-warning logic as before.
+          // duplicated (#1306 review requirement). #1348: the Haven reads this
+          // preflight needs START here and overlap the probe's latency — the
+          // slowest leg of this preflight. Failure semantics are unchanged by
+          // design: the quote is AWAITED first, so its error still wins when
+          // several legs fail; the agent read stays a hard pre-intent refusal
+          // (#1319). #3054: the budget pre-check is NO LONGER overlapped
+          // here — it is a single POST the tool can only issue once the
+          // selected option's asset/amount are known (#2051), so it runs at
+          // step 5b; the round-trip COUNT is unchanged (it replaced the
+          // allowances GET), only its position moved after the quote.
           const agentPromise = haven.getAgent()
           agentPromise.catch(() => {}) // awaited at step 5; guard the gap
-          const allowancesPromise = haven
-            .getAllowances()
-            .then(
-              (value) => ({ ok: true as const, value }),
-              (error) => ({ ok: false as const, error }),
-            )
           const { quote, merchantUrl } = await quoteMcpToolCall(haven, {
             merchantUrl: entry.resourceUrl,
             toolName: entry.toolName,
@@ -545,9 +541,23 @@ export function createCatalogPurchaseHandlers(
           const priced = priceSelectedOption(cap, catalogSelection.option)
           const authorizedAsset = catalogSelection.option.asset
 
-          // 5b. Rail-aware allowance/budget report. A failed read NEVER fails
-          // this preflight — sufficient degrades to null with a warning, and
-          // the on-chain policy remains the actual gate either way.
+          // 5b. Rail-aware allowance/budget pre-check (#3054: the DECISION is
+          // server-side now). One Haven round trip — POST
+          // /machine-payments/budget-precheck — replaces the GET
+          // /machine-payments/allowances read this block used to make, so
+          // the preflight's Haven traffic is unchanged on every path (#1348
+          // budget). The backend runs the SAME derived-budget compare this
+          // tool used to run locally (#1090 derived budgets + the #1145
+          // enforcer read, never agent_allowances), and an over-budget quote
+          // is refused THERE — through refuse(), source 'hosted_prepare' —
+          // so the payment_refusals ledger records what Haven's guardrail
+          // decided. The refusal comes back as a decided 403 and step 6
+          // relays it byte-identically. A failed pre-check NEVER fails the
+          // preflight: any other outcome (transport error, a 410 from a
+          // retired rail, a legacy-rail account, an older backend without
+          // the route) degrades to sufficient: null with a warning, exactly
+          // as the failed allowances read did — the on-chain policy remains
+          // the actual gate either way.
           const warnings: AgentPaymentWarning[] = []
           let allowanceBlock: {
             rail: 'legacy' | 'delegation'
@@ -556,66 +566,95 @@ export function createCatalogPurchaseHandlers(
             source: 'allowance_module' | 'active_delegations'
           }
           try {
-            // #1090 machinery, reused via the SAME derivation the /agents/:id
-            // allowances view and GET /machine-payments/allowances use — this
-            // NEVER reads agent_allowances on the delegation rail, which is a
-            // frozen onboarding mirror there (mutation-tested). #1348: the
-            // read itself started back at step 2 (overlapping the merchant
-            // probe); a rejection was captured there and is re-thrown here so
-            // this catch block degrades it exactly as before.
-            const allowancesResult = await allowancesPromise
-            if (!allowancesResult.ok) throw allowancesResult.error
-            const allowances = allowancesResult.value
-            // #2051: match and compare against the SELECTED option's asset
-            // and amount. This pre-check is the other client-side guard on
-            // this path, and it was steerable the same way the cap was — a
-            // cheap standard entry sailed past a small remaining budget while
-            // an expensive erc7710 entry was what got authorized.
-            const match = allowances.allowances.find(
-              (a) => a.tokenAddress.toLowerCase() === authorizedAsset.toLowerCase(),
-            )
-            const remainingAtomic = match ? match.onchain.remaining : '0'
+            // #2051: asked about the SELECTED option's asset and amount —
+            // the option that will actually be authorized, not a cheap
+            // standard entry sailing past a small budget while an expensive
+            // erc7710 entry is what gets authorized. The compare runs
+            // server-side now; this shape only carries the quote facts.
+            // #1319: `remaining_is_from_chain` rides back on sufficiency,
+            // and an OPTIMISTIC remaining still reports a real
+            // sufficient: true — only the warning below distinguishes it.
+            const precheck = await haven.precheckBudget({
+              chainId: agent.chainId,
+              token: authorizedAsset,
+              amountAtomic: priced.amountAtomic,
+              merchantTo: catalogSelection.option.payTo,
+              // The merchant resource being bought — the ledger dedupe
+              // window's discriminating column — never this request's URL.
+              resourceUrl: merchantUrl,
+            })
             allowanceBlock = {
               rail,
-              sufficient: BigInt(remainingAtomic) >= BigInt(priced.amountAtomic),
-              remaining_atomic: remainingAtomic,
+              sufficient: precheck.sufficient,
+              remaining_atomic: precheck.remaining_atomic,
               source,
             }
-            // #1319: the read above SUCCEEDED — this is distinct from the
-            // catch block below, which fires when it fails outright. On the
-            // delegation rail, `remaining` can still be an OPTIMISTIC number:
+            // #1319: the pre-check above SUCCEEDED — distinct from the catch
+            // below, which fires when it fails outright. On the delegation
+            // rail, `remaining_atomic` can still be an OPTIMISTIC number:
             // #1145's on-chain enforcer read falls back to the full
             // configured budget (never throws) when the RPC read itself
-            // times out, so `sufficient` here can be computed from a figure
-            // that was never actually confirmed live. `remainingIsFromChain`
-            // is only ever set on the delegation rail (#1319 wire field) —
-            // `undefined` is not "optimistic", it is "not applicable", so
-            // this only warns when the flag is explicitly false.
-            if (rail === 'delegation' && match?.onchain.remainingIsFromChain === false) {
+            // times out, and the wire carries that provenance
+            // (`remaining_is_from_chain`) exactly as the allowances read
+            // does. `undefined` is not "optimistic", it is "not applicable"
+            // (no budget row for the token), so this only warns when the
+            // flag is explicitly false.
+            if (
+              rail === 'delegation' &&
+              precheck.remaining_is_from_chain === false
+            ) {
               warnings.push({
                 code: AgentPaymentWarningCode.AllowanceReadOptimistic,
                 message:
                   'The reported remaining delegation budget could not be read live from chain, so ' +
-                  `${remainingAtomic} ${priced.token} atomic is the configured full budget, not a confirmed ` +
+                  `${precheck.remaining_atomic} ${priced.token} atomic is the configured full budget, not a confirmed ` +
                   'live figure. The on-chain policy (the budget caveat enforcer) remains the actual ' +
                   'spend gate at redemption regardless of this report.',
               })
             }
           } catch (err) {
-            allowanceBlock = { rail, sufficient: null, source }
-            warnings.push({
-              code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
-              message:
-                'Could not read the active delegation budget ' +
-                `for this agent (${err instanceof Error ? err.message : String(err)}). Proceeding without a pre-check — ` +
-                'the on-chain policy remains the actual spend gate; this only affects the guidance shown here.',
-            })
+            // The decided over-budget refusal is the ONE failure that is not
+            // a degrade: Haven decided the purchase does not fit the budget
+            // and has already recorded it (refuse(), source
+            // 'hosted_prepare'). It lands here as sufficient: false and step
+            // 6 below throws the byte-identical DELEGATION_BUDGET_EXCEEDED
+            // refusal the local compare used to produce. Every other failure
+            // — transport down, a retired rail's 410, an older backend
+            // without the route — degrades exactly as the failed allowances
+            // read did: sufficient: null, a warning, never a refusal.
+            const decided =
+              err instanceof HavenApiError &&
+              err.statusCode === 403 &&
+              (err.body as { error_code?: string } | undefined)?.error_code ===
+                'delegation_budget_exceeded'
+            if (decided) {
+              allowanceBlock = {
+                rail,
+                sufficient: false,
+                remaining_atomic:
+                  (err.body as { remaining_atomic?: string } | undefined)?.remaining_atomic ?? '0',
+                source,
+              }
+            } else {
+              allowanceBlock = { rail, sufficient: null, source }
+              warnings.push({
+                code: AgentPaymentWarningCode.AllowanceCheckUnavailable,
+                message:
+                  'Could not read the active delegation budget ' +
+                  `for this agent (${err instanceof Error ? err.message : String(err)}). Proceeding without a pre-check — ` +
+                  'the on-chain policy remains the actual spend gate; this only affects the guidance shown here.',
+              })
+            }
           }
 
           // 6. Over-budget REVERTS at prepare and no approval queue exists
           // anywhere (#1090; the last one died with #2055) — refuse BEFORE any
           // funding intent (mutation-tested: reading agent_allowances here
           // instead of the derived budgets must fail a test).
+          // #3054: the DECISION is Haven's now (the pre-check refused
+          // server-side and the ledger row is already recorded); this shape
+          // is the RELAY of that decision — byte-identical to the refusal
+          // the local compare used to throw, characterized below.
           if (rail === 'delegation' && allowanceBlock.sufficient === false) {
             throw new HostedToolError({
               code: 'DELEGATION_BUDGET_EXCEEDED',

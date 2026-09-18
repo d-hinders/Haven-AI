@@ -114,7 +114,7 @@ function enclosingLiteral(source, at) {
   return ''
 }
 
-/** Comments never name a tool: `/* nextStep: … */` or a `// nextTool:` line must not read as NAMED. */
+/** Comments never name a tool: a block-commented `nextStep:` or a line-commented `nextTool:` must not read as NAMED. */
 export function stripComments(source) {
   // A single pass that knows where string literals are, so a `/*` or `//`
   // inside one ('Accept: */*', 'https://…') neither opens nor closes a

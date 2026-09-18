@@ -188,7 +188,7 @@ export function runGate(name, main) {
       // of exactly ONE of the eight gates. The other seven walk the tree
       // themselves (`readdir`/`statSync`), and a self-referential symlink gives
       // `ELOOP` from both `statSync` and `readFileSync`; measured. A stated
-      // reason that holds for one sixth of the callers is worse than no reason,
+      // reason that holds for one eighth of the callers is worse than no reason,
       // because the next reader takes it as settled.
       const OPERATOR_ERRNO = new Set([
         'EACCES',
@@ -330,7 +330,7 @@ export function loadBaseline(path) {
  * Validated like `loadBaseline`, because leaving one unvalidated read path
  * exported reopens #2759 for whichever gate reaches for it next — and none of
  * that gate's mutations would redden, since the hole would be in a function no
- * current caller uses. No gate uses this today (all six call `loadBaseline`);
+ * current caller uses. No gate uses this today (all eight call `loadBaseline`);
  * it stays for callers that need the object without the `firstRun` flag.
  */
 export function readBaseline(path) {

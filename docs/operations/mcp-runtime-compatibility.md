@@ -11,6 +11,10 @@ covers:
   - .github/workflows/publish.yml
   - packages/cli/src/connect-runner.ts
   - packages/backend/src/routes/machine-payments.ts
+  - packages/sdk/src/tool-descriptions.ts
+  - packages/sdk/src/account-reads.ts
+  - packages/sdk/src/types.ts
+  - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
   - packages/cli/src/commands.ts

@@ -630,7 +630,7 @@ async function readBackInvoice(
       // not an error — this is exactly what verification exists to surface.
       return {
         registered: false, missing: 'deleted', booked: null, cancelled: null,
-        invoice_number: givenNumber, voucher: null, invoice_date: null,
+        invoice_number: givenNumber, document_ref: null, voucher: null, invoice_date: null,
         total: null, checked_at: checkedAt,
       }
     }
@@ -643,7 +643,7 @@ async function readBackInvoice(
   if (invoice.ExternalInvoiceNumber !== externalInvoiceNumber(paymentId)) {
     return {
       registered: false, missing: 'foreign_invoice', booked: null, cancelled: null,
-      invoice_number: givenNumber, voucher: null, invoice_date: null,
+      invoice_number: givenNumber, document_ref: null, voucher: null, invoice_date: null,
       total: null, checked_at: checkedAt,
     }
   }
@@ -658,6 +658,7 @@ async function readBackInvoice(
     booked: Boolean(invoice.Booked),
     cancelled: Boolean(invoice.Cancelled),
     invoice_number: givenNumber,
+    document_ref: null,
     voucher,
     invoice_date: invoice.InvoiceDate ?? null,
     total: invoice.Total ?? null,

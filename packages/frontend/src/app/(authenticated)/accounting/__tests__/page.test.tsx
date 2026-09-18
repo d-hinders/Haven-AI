@@ -6,7 +6,7 @@
  * `reason=unsupported_currency`, which Settings turns into a sentence naming
  * the supported ledger currencies (#2877).
  */
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
 
@@ -275,5 +275,59 @@ describe('/accounting with the feed on (#2869)', () => {
     })
     renderPage()
     expect(screen.getByTestId('feed-counts')).toBeInTheDocument()
+  })
+})
+
+/**
+ * The Accounted row on the feed page (#3018): the record-only connector's
+ * row carries a document ref (no invoice number), its identity line names
+ * the document, the check button says "Check in Accounted", and a verify
+ * answer reads from Haven's own record — "Evidence archived …", never a
+ * Fortnox-shaped sentence about an invoice.
+ */
+describe('/accounting: an Accounted row (#3018)', () => {
+  beforeEach(() => {
+    mockReplace.mockReset()
+    searchParamsRef.current = new URLSearchParams()
+  })
+
+  const accountedRow = {
+    id: 's2', user_id: 'u1', provider: 'accounted', payment_id: 'pay_2',
+    external_ref: 'accounted:document:3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10',
+    status: 'pushed' as const, error: null, attempts: 1,
+    created_at: '2026-09-12T09:00:00.000Z', updated_at: '2026-09-12T09:00:00.000Z',
+  }
+
+  function withAccountedRow(overrides: Partial<AccountingFeedStatus> = {}) {
+    withStatus({ syncs: [accountedRow], ...overrides })
+  }
+
+  it('the identity line names the document and the check button says Check in Accounted', () => {
+    withAccountedRow()
+    renderPage()
+    expect(screen.getByText('Accounted document 3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check in Accounted' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Check in Fortnox' })).toBeNull()
+  })
+
+  it('the verify verdict reads from the record, not a provider read-back (#3018 sentence)', async () => {
+    withAccountedRow()
+    mockFeed.mockReturnValue(feed({
+      status: feedStatus({ syncs: [accountedRow] }),
+      // The hook returns the route's 200 body — the BARE verification.
+      verify: vi.fn().mockResolvedValue({
+        registered: true, missing: null, booked: null, cancelled: null,
+        document_ref: '3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10', invoice_number: null,
+        voucher: null, invoice_date: null, total: 10.42,
+        checked_at: '2026-09-12T09:05:00.000Z',
+      }),
+    }))
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Check in Accounted' }))
+    expect(await screen.findByText(/Evidence archived in Accounted — document 3f1c7a52/)).toBeInTheDocument()
+    // The sentence never reads as a provider read-back: no "registered in",
+    // no invoice wording.
+    expect(screen.queryByText(/Registered in/)).toBeNull()
+    expect(screen.queryByText(/invoice/i)).toBeNull()
   })
 })

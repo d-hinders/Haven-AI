@@ -81,8 +81,12 @@ function toIso(value: string | null): string | null {
  * The arithmetic is float, and deliberately kept to the same precision the SEK
  * path has always used: the amount is a source-document figure an accountant
  * confirms, not a posted balance.
+ *
+ * Exported (#3018): the Accounted connector's `verify` answers `total` from
+ * the same figure the feed pushes — one computation, one home, no drift
+ * between what was delivered and what verify reports.
  */
-function ledgerAmount(entry: AccountingEntry, currency: LedgerCurrency): { amount: string | null; rate: string | null } {
+export function ledgerAmount(entry: AccountingEntry, currency: LedgerCurrency): { amount: string | null; rate: string | null } {
   if (currency === DEFAULT_LEDGER_CURRENCY) return { amount: entry.amountSek, rate: entry.fxRate }
   const rate = entry.fxRates?.[currency]
   if (rate == null) return { amount: null, rate: null }

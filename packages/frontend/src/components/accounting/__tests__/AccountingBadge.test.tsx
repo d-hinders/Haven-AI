@@ -87,6 +87,16 @@ describe('AccountingBadge', () => {
     expect(providerDisplayName('bokio')).toBe('Bokio')
   })
 
+  it('a pushed ACCOUNTED row reads "Evidence archived", not "In Accounted" (#3018)', () => {
+    // The document is evidence Haven archived, not a booking the provider
+    // made — the record-only connector's pushed label says what happened.
+    renderWithLocale(<AccountingBadge accounting={accounting({ provider: 'accounted' })} />)
+    const link = screen.getByRole('link', { name: 'Evidence archived. Open accounting.' })
+    expect(link).toHaveAttribute('href', '/accounting')
+    expect(link).toHaveTextContent('Evidence archived')
+    expect(link).toHaveAttribute('data-status', 'pushed')
+  })
+
   it('pending → "Feeding…"', () => {
     renderWithLocale(<AccountingBadge accounting={accounting({ status: 'pending', externalRef: null })} />)
     expect(screen.getByRole('link')).toHaveTextContent('Feeding…')

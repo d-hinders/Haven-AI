@@ -1,0 +1,1 @@
+{"error":{"code":"DOC_UPLOAD_TOO_LARGE","message":"Dokumentet överskrider den högsta tillåtna storleken.","message_en":"The document exceeds the maximum allowed size.","recovery_hint":"Upload a document of 10 MB or less.","docs_url":"https://app.accounted.se/docs/api/errors/DOC_UPLOAD_TOO_LARGE","request_id":"req_2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e"}}

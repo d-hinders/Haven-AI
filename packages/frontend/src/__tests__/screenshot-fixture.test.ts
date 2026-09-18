@@ -886,7 +886,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       const statusOf = () =>
         feed.api('/accounting/feed/status', 'GET') as { hosted: boolean; enabled: boolean; available: boolean }
 
-      it('serves the three flag states plus the attention state, one per stage', () => {
+      it('serves the flag states plus the #3018 Accounted stage, one per stage', () => {
         const seen: Record<string, unknown> = {}
         for (const stage of Object.keys(feed.stages)) {
           feed.stage(stage)
@@ -896,11 +896,38 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(seen).toEqual({
           on: { hosted: true, enabled: true, available: true },
           attention: { hosted: true, enabled: true, available: true },
+          // #3018: the Accounted destination is a READY-shaped answer — the
+          // api_key connection is live and the feed delivers documents.
+          accounted: { hosted: true, enabled: true, available: true },
           // The distinction the owner decision turns on: BOTH are off, and
           // `hosted` is the only field that tells them apart.
           'coming-soon': { hosted: true, enabled: false, available: false },
           'self-hosted': { hosted: false, enabled: false, available: false },
         })
+      })
+
+      it('the #3018 Accounted stage serves the document destination and the record-only verify verdict', () => {
+        feed.stage('accounted')
+        const status = feed.api('/accounting/feed/status', 'GET') as {
+          connected: boolean
+          destination: { provider: string; status: string }
+          syncs: { provider: string; external_ref: string; status: string }[]
+        }
+        expect(status.destination).toMatchObject({ provider: 'accounted', status: 'connected' })
+        expect(status.syncs).toHaveLength(1)
+        expect(status.syncs[0]).toMatchObject({
+          provider: 'accounted',
+          external_ref: 'accounted:document:3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10',
+          status: 'pushed',
+        })
+        // The stage answers the row's verify route with the record-only
+        // verdict: no provider number, the document ref instead.
+        const verdict = feed.api('/accounting/feed/verify/pay_01HZX8N4T8W0X2Y4A6C8E0G4K', 'GET') as {
+          registered: boolean
+          invoice_number: number | null
+          document_ref: string | null
+        }
+        expect(verdict).toMatchObject({ registered: true, invoice_number: null, document_ref: '3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10' })
       })
 
       it('the attention stage is what raises the summary, the inline explanation and the sidebar dot (#2869 review)', () => {

@@ -45,7 +45,7 @@
  * document-only connector cannot claim a booking it never read, and a
  * currency-null company read cannot drive the connect-time currency rule. A
  * full-suite connector (Fortnox, in-memory) runs every case unchanged; the
- * skip decisions are pinned by `connector-conformance-skips.test.ts`.
+ * executed skip decisions are pinned by `connector-conformance-skips.test.ts`.
  */
 import { randomBytes } from 'node:crypto'
 import { afterEach, beforeAll, beforeEach, expect, it } from 'vitest'
@@ -100,7 +100,7 @@ export interface ConformanceHarness {
     /**
      * false = the connector's company read exposes NO base currency
      * (Accounted answers null — the 2026-05-12 spec has no currency field),
-     * so the connect-time currency rule (cases 7/7c/7d) has nothing to
+     * so the connect-time currency rule (cases 7/7b/7c/7d) has nothing to
      * refuse and nothing positive to store.
      */
     baseCurrency?: boolean
@@ -136,7 +136,7 @@ export interface ConformanceHarness {
  *    claims a human booking at the provider. A `capabilities.verify: false`
  *    connector answers from Haven's own record and cannot report booking;
  *    its `foreign_invoice` and `no_invoice_ref` halves still run.
- *  - `baseCurrencyCases` — cases 7/7c/7d ARE the connect-time currency rule;
+ *  - `baseCurrencyCases` — cases 7/7b/7c/7d ARE the connect-time currency rule;
  *    a connector whose company read reports `baseCurrency: null` (declared)
  *    cannot drive them.
  */
@@ -165,10 +165,41 @@ export function conformanceSkipsFor(harness: ConformanceHarness): ConformanceSki
   const baseCurrencyCases = harness.declares?.baseCurrency === false
   if (baseCurrencyCases) {
     reasons.push(
-      `cases 7, 7c, 7d skipped: ${harness.provider.id}'s company read reports baseCurrency null (no currency on the provider's spec) — the connect-time currency rule has nothing to refuse and no currency to store`,
+      `cases 7, 7b, 7c, 7d skipped: ${harness.provider.id}'s company read reports baseCurrency null (no currency on the provider's spec) — the connect-time currency rule has nothing to refuse and no currency to store`,
     )
   }
   return { attachmentCases, bookingHalves, baseCurrencyCases, reasons }
+}
+
+/**
+ * The skip predicate of every parameterised case that CAN skip, keyed by the
+ * case's leading number. The runner's `skip()` calls go through these SAME
+ * predicates (`caseSkipped`), and `connector-conformance-skips.test.ts`
+ * evaluates them against each shape's vector — so the "runs every case
+ * unchanged" claim measures the decisions the runner actually executes, not
+ * a parallel model of them. A case that must never skip (1, 2, 4b, 5, 6b, 8)
+ * has no entry here.
+ */
+const CASE_SKIP_PREDICATES: Readonly<Record<string, (skips: ConformanceSkips) => boolean>> = {
+  '3': ({ attachmentCases }) => attachmentCases,
+  '4': ({ bookingHalves }) => bookingHalves,
+  '6': ({ attachmentCases }) => attachmentCases,
+  '7': ({ baseCurrencyCases }) => baseCurrencyCases,
+  '7b': ({ baseCurrencyCases }) => baseCurrencyCases,
+  '7c': ({ baseCurrencyCases }) => baseCurrencyCases,
+  '7d': ({ baseCurrencyCases }) => baseCurrencyCases,
+}
+
+/** The runner's ACTUAL skip decision for one case — the predicate the skip-proving test evaluates. */
+export function caseSkipped(caseNo: string, skips: ConformanceSkips): boolean {
+  const predicate = CASE_SKIP_PREDICATES[caseNo]
+  if (!predicate) throw new Error(`conformance case ${caseNo} has no skip predicate — register it in CASE_SKIP_PREDICATES`)
+  return predicate(skips)
+}
+
+/** Every case number with a registered skip predicate, sorted — the skip-proving test pins this set. */
+export function skippableCases(): string[] {
+  return Object.keys(CASE_SKIP_PREDICATES).sort()
 }
 
 /** The payload keys the contract bans — the accountant codes, Haven never asserts. */
@@ -306,7 +337,7 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
     })
 
     it('3. attachment failure degrades to a note on a PUSHED row, never a failed push', async ({ skip }) => {
-      skip(skips.attachmentCases)
+      skip(caseSkipped('3', skips))
       const c = await connectedCase({ attachment: 'fail' })
       const pid = paymentId()
       await feedSettledPayment(c.userId, pid)
@@ -319,7 +350,7 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
     })
 
     it('4. verify reports registered → booked → missing (deleted), and a foreign record as not ours', async ({ skip }) => {
-      skip(skips.bookingHalves)
+      skip(caseSkipped('4', skips))
       const c = await connectedCase()
       const pid = paymentId()
       await feedSettledPayment(c.userId, pid)
@@ -339,11 +370,13 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
       expect(await c.connector.verify(c.userId, 'not-a-ref', pid)).toEqual({ ok: false, error_code: 'no_invoice_ref' })
     })
 
-    it('4b. verify refuses a FOREIGN record as not ours — the half a record-only connector can still meet', async ({ skip }) => {
-      skip(!skips.bookingHalves)
+    it('4b. verify refuses a FOREIGN record as not ours — the identity halves every connector must meet', async () => {
       // #3018: with `capabilities.verify: false` the connector cannot report
       // booking, but the foreign_invoice and no_invoice_ref halves are about
-      // OUR OWN record's identity — they run everywhere.
+      // OUR OWN record's identity — they run everywhere, for every shape.
+      // UNCONDITIONAL: a skip here is what silently dropped the
+      // foreign_invoice assertion from the verify-capable suites (round-1
+      // review of #3018).
       const c = await connectedCase()
       const pid = paymentId()
       await feedSettledPayment(c.userId, pid)
@@ -366,7 +399,7 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
     })
 
     it('6. a post-push insufficient-scope error leaves the row pushed with its note, flips ONLY the connection, and is never re-pushable', async ({ skip }) => {
-      skip(skips.attachmentCases)
+      skip(caseSkipped('6', skips))
       const c = await connectedCase({ attachment: 'scope_missing' })
       const pid = paymentId()
       await feedSettledPayment(c.userId, pid)
@@ -429,7 +462,7 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
     })
 
     it('7. a provider reporting an UNSUPPORTED base currency is refused at connect by the generic flow, and nothing is stored', async ({ skip }) => {
-      skip(skips.baseCurrencyCases)
+      skip(caseSkipped('7', skips))
       const userId = await seedUser()
       // JPY: not a ledger currency Haven feeds (#2877 widened the rule from
       // SEK-only to the six in `domain/ledger-currency.ts`; an unsupported
@@ -451,7 +484,7 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
     })
 
     it('7c. … and a RECONNECT that reports an unsupported ledger leaves the existing row exactly as it was', async ({ skip }) => {
-      skip(skips.baseCurrencyCases)
+      skip(caseSkipped('7c', skips))
       const userId = await seedUser()
       const sek = await harness.setup({ userId, company: { baseCurrency: 'SEK' } })
       registerConnector(sek.connector)
@@ -467,7 +500,7 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
     })
 
     it('7d. a SUPPORTED non-SEK ledger connects and is stored with its own currency (#2877)', async ({ skip }) => {
-      skip(skips.baseCurrencyCases)
+      skip(caseSkipped('7d', skips))
       const userId = await seedUser()
       // MUTATION TARGET: narrow `isSupportedLedgerCurrency` back to SEK and
       // this connect is refused — the widening is what this case measures,
@@ -482,7 +515,7 @@ export function runConnectorConformance(name: string, harness: ConformanceHarnes
     })
 
     it('7b. positive control: the same flow with a SEK ledger stores the connection with id, name and currency', async ({ skip }) => {
-      skip(skips.baseCurrencyCases)
+      skip(caseSkipped('7b', skips))
       const userId = await seedUser()
       const c = await harness.setup({ userId, company: { externalCompanyId: 'co-7b', name: 'Sju B AB', baseCurrency: 'SEK' } })
       registerConnector(c.connector)

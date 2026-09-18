@@ -49,7 +49,7 @@ import {
   type AgentPaymentWarning,
   type X402PaymentRequired,
 } from '@haven_ai/sdk'
-import type { HostedToolHandlers, HostedToolName } from './contracts.js'
+import type { DiscoveryEntry, DiscoveryHint, HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import {
   priceSelectedOption,
@@ -90,6 +90,33 @@ export const CATALOG_PURCHASE_TOOLS = [
 
 export type CatalogPurchaseToolName = (typeof CATALOG_PURCHASE_TOOLS)[number]
 
+/** #3100: the structured hint for one catalog row, or the reason it has none. */
+function discoveryHintFor(entry: {
+  id: string
+  protocol: string
+  status: string
+  toolName: string | null
+  resourceUrl: string
+}): DiscoveryHint {
+  if (entry.protocol !== 'mcp') return { suggested_tool: 'haven_quote_x402', suggested_arguments: { url: entry.resourceUrl } }
+  if (entry.status === 'degraded') {
+    return {
+      suggested_tool_omitted_reason:
+        'this catalog row is degraded (its live price could not be re-verified), so ' +
+        'haven_quote_catalog_purchase refuses it; quote the merchant yourself with ' +
+        'haven_quote_mcp_tool { merchant_url, tool_name, arguments }',
+    }
+  }
+  if (!entry.toolName) {
+    return {
+      suggested_tool_omitted_reason:
+        'this catalog row carries no tool_name, so haven_quote_catalog_purchase refuses it; ' +
+        'read the merchant\'s tool list yourself, then haven_quote_mcp_tool { merchant_url, tool_name, arguments }',
+    }
+  }
+  return { suggested_tool: 'haven_quote_catalog_purchase', suggested_arguments: { catalog_id: entry.id } }
+}
+
 /**
  * This capability's handler contribution to `createToolHandlers`.
  *
@@ -110,7 +137,7 @@ export function createCatalogPurchaseHandlers(
           rail: args.rail,
           verified: args.verified,
         })
-        return entries.map((entry) => ({
+        return entries.map((entry): DiscoveryEntry => ({
           id: entry.id,
           name: entry.name,
           description: entry.description,
@@ -150,20 +177,27 @@ export function createCatalogPurchaseHandlers(
               }
             : {}),
           // Hosted surface is keyless: x402 entries start with the quote half
-          // of the split flow; MCP entries take the GUIDED preflight —
-          // haven_prepare_catalog_purchase runs the live quote, cap, and
-          // rail-aware allowance check from just the catalog_id (#1306), and
-          // the description prose already said to prefer it. #1547: this
-          // structured field said haven_pay_mcp_tool while the prose said
-          // prepare — and structured fields win over prose by this server's
-          // own instructions, so the field steered agents off the guided path.
+          // of the split flow; MCP entries start with the read-only catalog
+          // quote, which leads into the GUIDED preflight
+          // (haven_prepare_catalog_purchase — live quote, cap, rail-aware
+          // allowance check from the catalog_id, #1306). #1547: this field
+          // once said haven_pay_mcp_tool while the prose said prepare, and
+          // structured fields win over prose by this server's own
+          // instructions. #3100 (epic #3105, decision 4): the hint now carries
+          // `suggested_arguments` the suggested tool accepts VERBATIM — which
+          // is why it points at the cap-free quote rather than prepare:
+          // prepare REQUIRES a spending cap the server must never invent, so
+          // a verbatim hint for it cannot exist; the quote's own guidance
+          // takes the agent to prepare with the user's cap.
           // #1328: the 'mpp' rail's only-ever catalog row (the Haven MPP demo
           // resource) is delisted with the mpp_demo retirement, so this
           // fallback is unreachable today; it stays x402 rather than naming a
           // deleted tool in case a future non-demo 'mpp' rail entry appears.
-          suggested_tool:
-            entry.protocol === 'mcp' ? 'haven_prepare_catalog_purchase'
-            : 'haven_quote_x402',
+          // A degraded row, or one without tool_name, is refused by the quote
+          // tool itself (getUsableCatalogMcpEntry → CATALOG_ENTRY_UNUSABLE), so
+          // it gets the REASON instead of a hint that 409s on the first hop
+          // (haven-reviewer round 2 on #3113; same rule as the local runtime).
+          ...discoveryHintFor(entry),
         }))
       }),
 

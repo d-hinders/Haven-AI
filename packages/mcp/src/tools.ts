@@ -46,6 +46,41 @@ export type HavenMcpToolName =
   | 'haven_discover_tools'
   | 'haven_submit_catalog_entry'
 
+/**
+ * #3100 (epic #3105, decision 4): the structured hint on a local discovery
+ * entry — a pay tool with arguments it accepts VERBATIM, or the reason no
+ * verbatim hint exists for the row (decision 3's omitted-plus-reason shape).
+ */
+export type DiscoveryHint =
+  | {
+      suggested_tool: 'haven_pay_mcp_tool'
+      suggested_arguments: { merchant_url: string; tool_name: string; arguments?: Record<string, unknown> }
+    }
+  | { suggested_tool: 'haven_pay_x402'; suggested_arguments: { url: string } }
+  | { suggested_tool_omitted_reason: string }
+
+/** One `haven_discover_tools` entry on the local surface (wire-shaped). */
+export type DiscoveryEntry = {
+  id: string
+  name: string
+  description: string | null
+  category: string | null
+  resource_url: string
+  rail: string
+  protocol: string
+  tool_name: string | null
+  tool_arguments: Record<string, unknown> | null
+  price_display: string | null
+  price_atomic: string | null
+  asset: string | null
+  network: string | null
+  status: string
+  verified_at: string | null
+  source?: string
+  domain_verified?: boolean
+  verified_payable?: boolean
+} & DiscoveryHint
+
 export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   haven_send: {
     asset: z.enum(['ETH', 'USDC']),
@@ -394,7 +429,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           rail: args.rail === 'x402' || args.rail === 'mpp' ? args.rail : undefined,
           verified: args.verified === 'verified' || args.verified === 'operator' ? args.verified : undefined,
         })
-        return entries.map((entry) => ({
+        return entries.map((entry): DiscoveryEntry => ({
           id: entry.id,
           name: entry.name,
           description: entry.description,
@@ -413,14 +448,39 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           source: entry.source,
           domain_verified: entry.domainVerified,
           verified_payable: entry.verifiedPayable,
-          // Which Haven pay tool reaches this entry from the local MCP surface.
+          // Which Haven pay tool reaches this entry from the local MCP surface,
+          // and — #3100 (epic #3105, decision 4) — the arguments that tool
+          // accepts VERBATIM, spelled in ITS vocabulary (`merchant_url`, not
+          // the entry's `resource_url`). The local surface keeps pointing at
+          // its pay tools: they need no cap, so a verbatim hint exists.
           // #1328: the 'mpp' rail's only-ever catalog row (the Haven MPP demo
           // resource) is delisted with the mpp_demo retirement, so this
           // fallback is unreachable today; it stays x402 rather than naming a
           // deleted tool in case a future non-demo 'mpp' rail entry appears.
-          suggested_tool:
-            entry.protocol === 'mcp' ? 'haven_pay_mcp_tool'
-            : 'haven_pay_x402',
+          // A row without a tool_name cannot get a verbatim hint —
+          // haven_pay_mcp_tool requires tool_name — so it gets the REASON
+          // instead of a hint its own tool refuses (haven-reviewer on #3113;
+          // the epic's "omitted + reason, never null" shape, decision 3).
+          ...(entry.protocol === 'mcp'
+            ? entry.toolName
+              ? {
+                  suggested_tool: 'haven_pay_mcp_tool',
+                  suggested_arguments: {
+                    merchant_url: entry.resourceUrl,
+                    tool_name: entry.toolName,
+                    ...(entry.toolArguments ? { arguments: entry.toolArguments } : {}),
+                  },
+                }
+              : {
+                  suggested_tool_omitted_reason:
+                    'this catalog row carries no tool_name, which haven_pay_mcp_tool requires; ' +
+                    'read the merchant\'s tool list yourself, then call haven_pay_mcp_tool with ' +
+                    'merchant_url, tool_name and arguments',
+                }
+            : {
+                suggested_tool: 'haven_pay_x402',
+                suggested_arguments: { url: entry.resourceUrl },
+              }),
         }))
       })
     },

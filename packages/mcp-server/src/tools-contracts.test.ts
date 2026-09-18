@@ -169,8 +169,10 @@ describe('hosted tool contract surface (#2807 characterization)', () => {
     expect(strict.success).toBe(false)
     if (!strict.success) {
       expect(strict.message).toContain('haven_list_receipts does not accept "cursor"')
+      // #3100: the refusal also names the declared keys (and a rejected key's
+      // declared alias when one exists — `cursor` has none).
       expect(strict.message).toBe(
-        'haven_list_receipts does not accept "cursor". That is deliberate rather than an ' +
+        'haven_list_receipts does not accept "cursor". It declares: limit. That is deliberate rather than an ' +
           'omission: ' +
           STRICT_INPUT_TOOLS.haven_list_receipts +
           ' Send only the fields this tool declares.',

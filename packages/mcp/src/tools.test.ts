@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient, toolDescriptions as sharedDescriptions } from '@haven_ai/sdk'
-import { createToolHandlers, toolDescriptions } from './tools.js'
+import { z } from 'zod'
+import { createToolHandlers, toolDescriptions, toolSchemas } from './tools.js'
 import { readFileSync } from 'node:fs'
 
 const delegateKey = '0x59c6995e998f97a5a0044966f09453843a4bba3e18a70e0614612ece7c1e4568'
@@ -1732,6 +1733,14 @@ describe('haven_discover_tools (#349)', () => {
       asset: 'USDC', network: 'eip155:8453', status: 'active', verified_at: null,
     },
     {
+      // #3113 review: an MCP row without tool_name — haven_pay_mcp_tool
+      // requires tool_name, so no verbatim hint exists for it.
+      id: 'cat-mcp-degraded', name: 'Unnamed MCP tool', description: 'd', category: 'media',
+      resource_url: 'https://mcp.merchant.example/mcp', rail: 'x402', protocol: 'mcp',
+      tool_name: null, price_display: '$0.01 USDC', price_atomic: '10000',
+      asset: 'USDC', network: 'eip155:8453', status: 'degraded', verified_at: null,
+    },
+    {
       id: 'cat-mpp', name: 'MPP resource', description: 'd', category: 'demo',
       resource_url: 'https://api.merchant.example/mpp', rail: 'mpp', protocol: 'http',
       tool_name: null, price_display: '$0.01 USDC', price_atomic: '10000',
@@ -1753,17 +1762,37 @@ describe('haven_discover_tools (#349)', () => {
     expect(result.success).toBe(true)
     const data = (result as { data: Array<Record<string, unknown>> }).data
 
-    expect(data).toHaveLength(3)
+    expect(data).toHaveLength(4)
     expect(data[0]).toMatchObject({
       id: 'cat-mcp',
       suggested_tool: 'haven_pay_mcp_tool',
       tool_arguments: { prompt: 'hello' },
     })
     expect(data[1]).toMatchObject({ id: 'cat-http', suggested_tool: 'haven_pay_x402' })
+    // #3100 (epic #3105, decision 4): the hint carries arguments the suggested
+    // tool accepts VERBATIM, spelled in that tool's vocabulary — and the
+    // parity check below is the property, not the two literals.
+    expect(data[0].suggested_arguments).toEqual({
+      merchant_url: 'https://mcp.merchant.example/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'hello' },
+    })
+    expect(data[1].suggested_arguments).toEqual({ url: 'https://api.merchant.example/paid' })
+    for (const entry of data as Array<{ suggested_tool?: keyof typeof toolSchemas; suggested_arguments?: unknown }>) {
+      if (!entry.suggested_tool) continue
+      const parsed = z.object(toolSchemas[entry.suggested_tool]).strict().safeParse(entry.suggested_arguments)
+      expect(parsed.success, `${entry.suggested_tool} refuses its own discovery hint`).toBe(true)
+    }
+    // #3113 review: a row without tool_name gets no hint (its tool would refuse
+    // one) and says why — never a hint that fails on the first hop.
+    expect(data[2]).toMatchObject({ id: 'cat-mcp-degraded', status: 'degraded' })
+    expect(data[2]).not.toHaveProperty('suggested_tool')
+    expect(data[2]).not.toHaveProperty('suggested_arguments')
+    expect(String(data[2].suggested_tool_omitted_reason)).toContain('tool_name')
     // #1328: the 'mpp' rail's suggested_tool fallback no longer names a
     // deleted tool — it now matches the plain-HTTP x402 case (unreachable in
     // practice today; the only-ever 'mpp' catalog row is delisted).
-    expect(data[2]).toMatchObject({ id: 'cat-mpp', suggested_tool: 'haven_pay_x402', status: 'degraded' })
+    expect(data[3]).toMatchObject({ id: 'cat-mpp', suggested_tool: 'haven_pay_x402', status: 'degraded' })
 
     // read-only: exactly one request, a GET to /catalog, nothing else
     expect(fetchMock).toHaveBeenCalledTimes(1)

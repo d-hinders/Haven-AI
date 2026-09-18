@@ -49,11 +49,11 @@ import {
   RuntimeSpecOverrideError,
 } from './runtime-spec-override.js'
 import { runtimeConfigPathFor, writeRuntimeConfig } from './config-writers.js'
-import { restartRequiredForRuntime, type RuntimeId } from './runtime-registry.js'
+import { normalizeRuntimeName, restartRequiredForRuntime, RUNTIME_FLAG_VALUE_LIST, type RuntimeId } from './runtime-registry.js'
 import { getLocalSignerConsentStatus } from './signer-consent.js'
 import { TOMBSTONE_FILENAME, readAgentTombstone, readTombstoneRecords } from './tombstone.js'
 import { serverNamesFor, type ServerNames } from './server-names.js'
-import { REKEY_PENDING_FILENAME, inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
+import { CONNECT_OUTCOME_FILENAME, readConnectOutcomeRuntime, REKEY_PENDING_FILENAME, inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
 import { shortAddress } from './redact.js'
 
 export interface DoctorCheck {
@@ -105,6 +105,57 @@ interface IdentityFile {
 // so a `@dev` snapshot tells its tester to re-run `@dev` instead of quietly
 // pointing them back at the production connector.
 const RERUN = connectorRerunCommand()
+
+/**
+ * #3120: the `--runtime <id>` fragment for a repair/rerun string, or '' when
+ * the runtime is unknown. Repair strings interpolate this directly, so the
+ * empty case renders as plain `--doctor --repair` (a rerun that will resolve
+ * the runtime again) instead of a truncated `--runtime ` that breaks when
+ * pasted. Never put a human-readable placeholder in a command line.
+ */
+function runtimeFlagFor(runtime: string): string {
+  return normalizeRuntimeName(runtime) ? ` --runtime ${runtime}` : ''
+}
+
+/**
+ * #3120: which runtime the doctor is actually looking at.
+ *
+ * `cli.ts` passes `parsed.options.runtime ?? ''` — an absent flag is the empty
+ * string, which is "nobody said", not a runtime. `runtimeConfigPathFor('')`
+ * falls through to null and the pre-#3120 doctor reported that as a green
+ * "CLI-managed" check no runtime could distinguish from Claude Code's real
+ * one. Resolution order:
+ *
+ * 1. An explicit, non-empty `--runtime` wins VERBATIM. The doctor reports what
+ *    was asked for, not a re-spelled alias: `--runtime Cowork` stays
+ *    `Cowork` in the report and in `--json`, while `runtimeConfigPathFor` and
+ *    the registry normalize it internally as they always have.
+ * 2. Otherwise the connector's own record: the `ConnectOutcome` each setup
+ *    (success or failure) parks in the agent credential directory's
+ *    `last-connect-outcome.json`. The PRIMARY directory's record answers for
+ *    the run — per-directory resolution feeds `agentIsWired`, which is #3121's
+ *    consequence to own, not this one's.
+ * 3. Otherwise unknown (''). Every consumer treats unknown as its honest
+ *    degraded verdict; nothing falls back to env detection, which would guess
+ *    from the doctor's own shell rather than the runtime the agent uses.
+ *
+ * `origin` says where a non-flag value came from, so `--doctor --repair` can
+ * state which runtime it resolved and from where before it rewrites a config.
+ */
+async function resolveDoctorRuntime(
+  input: { runtime: string; credentialsDir?: string },
+  directory: string | undefined,
+): Promise<{ runtime: string; origin: 'flag' | 'record' | 'unknown' }> {
+  const explicit = input.runtime.trim()
+  if (explicit) return { runtime: explicit, origin: 'flag' }
+  if (directory) {
+    const recorded = await readConnectOutcomeRuntime(directory)
+    if (recorded !== null && normalizeRuntimeName(recorded)) {
+      return { runtime: recorded, origin: 'record' }
+    }
+  }
+  return { runtime: '', origin: 'unknown' }
+}
 
 /**
  * Newest agent directory that holds an identity.json, plus every OTHER such
@@ -415,7 +466,7 @@ function rekeyPendingCheck(
         status.state === 'expired'
           ? `The parked key expired. Start again — ${RERUN} --rekey${nameFlag} — and re-run "Replace ` +
             'signing key" on the Haven agent page with the new address it prints.'
-          : `Run: ${RERUN} --rekey-finish${nameFlag} --api-key <the key the agent page showed you> --runtime ${runtime}`,
+          : `Run: ${RERUN} --rekey-finish${nameFlag} --api-key <the key the agent page showed you>${runtimeFlagFor(runtime)}`,
     }
   }
 
@@ -577,7 +628,7 @@ async function checksForAgent(
       label: 'Signer runtime (preinstalled wrapper)',
       ok: false,
       detail: 'No signer-runtime.json sidecar — the pinned signer runtime was never prepared (or a pre-#1586 npx config).',
-      repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}`,
+      repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)}`,
     })
   } else if (sidecar.runtime_spec_override) {
     // #2424: an override install is compared against what the run that wrote
@@ -595,7 +646,7 @@ async function checksForAgent(
       detail: matches
         ? `Installed ${sidecar.signer_package}@${sidecar.signer_version} at ${sidecar.runtime_directory} (override install — see runtime_spec_override)`
         : `Override runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
-      ...(matches ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime} with the same HAVEN_*_SPEC variables set.` }),
+      ...(matches ? {} : { repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)} with the same HAVEN_*_SPEC variables set.` }),
     })
   } else {
     // #2963: two questions, two references. "Is the directory intact?" is
@@ -621,7 +672,7 @@ async function checksForAgent(
         : intact
           ? `Installed version ${sidecar.signer_version} does not match the connector's pinned ${MCP_RUNTIME_MANIFEST.signerVersion} — intact, but outdated.`
           : `Runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
-      ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}` }),
+      ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)}` }),
     })
   }
 
@@ -698,7 +749,7 @@ async function checksForAgent(
           : `Could not read the hosted identity (${probe.status}) — the comparison did not happen, so it cannot be reported as a match.`,
         repair: probe.status === 'unauthorized'
           ? `Re-run the full setup with a fresh token: ${RERUN} --setup <token>.`
-          : `Restore network access to the Haven API, then re-run: ${RERUN} --doctor --runtime ${input.runtime}`,
+          : `Restore network access to the Haven API, then re-run: ${RERUN} --doctor${runtimeFlagFor(input.runtime)}`,
       })
     } else if (!localDelegate) {
       checks.push({
@@ -767,7 +818,7 @@ async function checksForAgent(
         detail: probe.status === 'ok'
           ? `Signer started, listed ${probe.toolNames?.length ?? 0} tools${probe.serverInfo?.version ? ` (v${probe.serverInfo.version})` : ''}.${compatDetail}`
           : `Handshake failed: ${probe.status}.`,
-        ...(probe.status === 'ok' ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}` }),
+        ...(probe.status === 'ok' ? {} : { repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)}` }),
       })
     }
   } else {
@@ -776,7 +827,7 @@ async function checksForAgent(
       label: 'Signer stdio handshake',
       ok: false,
       detail: 'Skipped — no prepared signer runtime to probe.',
-      repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}`,
+      repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)}`,
     })
   }
 
@@ -793,8 +844,17 @@ export async function runDoctor(
 
   const { directory, others, parkedOnly } = await discoverCredentialDirectory(homeDir, input.credentialsDir)
 
+  // ── #3120: resolve the runtime BEFORE anything judges it ──────────────────
+  // An absent flag used to flow through as '' and earn a fabricated green
+  // "CLI-managed" verdict. Resolve the recorded runtime from the primary
+  // directory's own outcome record instead, and let every check below see the
+  // same resolved value.
+  const resolution = await resolveDoctorRuntime(input, directory)
+  const runtime = resolution.runtime
+  const input2 = { ...input, runtime }
+
   // ── Runtime config (read once; every agent's wiring is judged against it) ─
-  const configPath = runtimeConfigPathFor(input.runtime, homeDir)
+  const configPath = runtimeConfigPathFor(input2.runtime, homeDir)
   let configText: string | null = null
   if (configPath !== null) {
     try {
@@ -845,7 +905,7 @@ export async function runDoctor(
         // A tombstone is a deliberate record and outranks the discovery tell:
         // a retired directory that also holds a parked key stays `retired`.
         classification: tombstone ? 'retired' : parkedOnly.has(dir) ? 'parked' : 'orphaned',
-        checks: rekeyPending ? [rekeyPendingCheck(rekeyPending, undefined, input.runtime, slug)] : [],
+        checks: rekeyPending ? [rekeyPendingCheck(rekeyPending, undefined, input2.runtime, slug)] : [],
         ...(rekeyPending ? { rekeyPending } : {}),
       })
       continue
@@ -860,14 +920,14 @@ export async function runDoctor(
       ...(rekeyPending ? { rekeyPending } : {}),
     }
     if (wired) {
-      const result = await checksForAgent({ directory: dir, identity, sidecar }, input, deps)
+      const result = await checksForAgent({ directory: dir, identity, sidecar }, input2, deps)
       entry.checks = result.checks
       capabilitiesByDirectory.set(dir, result.signerCapabilities)
     } else if (rekeyPending) {
       // A superseded directory runs no probes (that is the point — it is not
       // the agent in use), so the backend-completed refinement is unavailable
       // here and the check reports the file facts alone.
-      entry.checks = [rekeyPendingCheck(rekeyPending, undefined, input.runtime, slug)]
+      entry.checks = [rekeyPendingCheck(rekeyPending, undefined, input2.runtime, slug)]
     }
     inventory.push(entry)
   }
@@ -914,7 +974,7 @@ export async function runDoctor(
       // anyway — the user pointed the doctor at this machine, and silence
       // about the selected directory would be the old heuristic's failure.
       const result = await checksForAgent(
-        { directory: primaryDirectory, identity: primaryIdentity, sidecar: primarySidecar }, input, deps,
+        { directory: primaryDirectory, identity: primaryIdentity, sidecar: primarySidecar }, input2, deps,
       )
       signerCapabilities = result.signerCapabilities
       for (const check of result.checks) primaryChecksById.set(check.id, check)
@@ -927,12 +987,34 @@ export async function runDoctor(
     }
   }
 
-  if (configPath === null) {
+  if (configPath === null && input2.runtime === '') {
+    // #3120: the fabricated pass lived here. configPath is null for TWO
+    // indistinguishable reasons — a CLI-managed runtime that really has no
+    // file-based config (claude-code, other), and an UNKNOWN runtime ("nobody
+    // said"). Only the first justifies a green skip; the second must say it
+    // could not look. ok:false (not a new advisory level — #3121 owns that)
+    // so an unknown runtime can never ride a green exit code again.
+    checks.push({
+      id: 'runtime_config',
+      label: 'Runtime MCP config',
+      ok: false,
+      detail:
+        `Runtime is unknown — no runtime flag was given and the connector's record in ` +
+        `${primaryDirectory ?? input.credentialsDir ?? '~/.haven/agents'} carries no resolvable ` +
+        `${CONNECT_OUTCOME_FILENAME} runtime. The runtime config was NOT checked. Re-run the doctor ` +
+        `naming the runtime — one of: ${RUNTIME_FLAG_VALUE_LIST.join(', ')}.`,
+      repair: `Re-run the doctor naming the runtime — one of: ${RUNTIME_FLAG_VALUE_LIST.join(', ')}.`,
+    })
+  } else if (configPath === null) {
+    // claude-code / other: genuinely CLI-managed or manual — the honest skip
+    // the scope boundary preserves. The detail names the RESOLVED runtime
+    // (#3120), so "CLI-managed" is only ever claimed about a runtime that
+    // earned it.
     checks.push({
       id: 'runtime_config',
       label: 'Runtime MCP config',
       ok: true,
-      detail: `Runtime '${input.runtime}' has no file-based config the connector owns (CLI-managed) — skipping the file check.`,
+      detail: `Runtime '${input2.runtime}' is configured through its own CLI or by hand (${input2.runtime === 'other' ? 'manual runtime' : 'CLI-managed'}) and has no file-based config the connector owns — skipping the file check.`,
     })
   } else if (configText === null) {
     checks.push({
@@ -940,7 +1022,7 @@ export async function runDoctor(
       label: 'Runtime MCP config',
       ok: false,
       detail: `No runtime config at ${configPath}.`,
-      repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}`,
+      repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input2.runtime)}`,
     })
   } else {
     const primaryIdentity = await readIdentity(primaryDirectory ?? '')
@@ -962,7 +1044,7 @@ export async function runDoctor(
         : signerViaNpx
           ? `Config at ${configPath} still launches the signer via npx — the pre-#1586 shape that cannot start under a 120s startup timeout.`
           : `Config at ${configPath} is missing the Haven entries${primarySidecar && !wrapperReferenced ? ' (or references a different signer wrapper)' : ''}.`,
-      ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair --runtime ${input.runtime}` }),
+      ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input2.runtime)}` }),
     })
   }
 
@@ -1131,14 +1213,16 @@ export async function runDoctor(
   if (signerProcess) checks.push(signerProcess)
 
   // ── Restart still required? (informational, never fails the doctor) ───────
-  const restart = restartRequiredForRuntime(input.runtime, deps.env)
+  const restart = restartRequiredForRuntime(input2.runtime, deps.env)
   checks.push({
     id: 'restart',
     label: 'Runtime restart',
     ok: true,
     detail: restart
       ? 'This runtime loads MCP config at startup — restart it after any repair before expecting the tools to appear.'
-      : 'No restart requirement known for this runtime.',
+      : input2.runtime === ''
+        ? 'Runtime is unknown — whether a restart is needed cannot be determined. Re-run the doctor naming the runtime for a definitive answer.'
+        : 'No restart requirement known for this runtime.',
   })
 
   // #1697: exit non-zero if ANY wired agent fails ANY check — not just the
@@ -1150,7 +1234,7 @@ export async function runDoctor(
   return {
     version: 1,
     ok: checks.every((check) => check.ok) && wiredOk,
-    runtime: input.runtime,
+    runtime: input2.runtime,
     credentialDirectory: primaryDirectory,
     checks,
     agents: inventory,
@@ -1182,6 +1266,28 @@ export async function runRepair(
       messages: [`No agent credentials found to repair — run the full setup: ${RERUN} --setup <token>.`],
     }
   }
+
+  // #3120: repair REWRITES the runtime config, so an inherited runtime is
+  // worse here than in a read-only check. Resolve exactly like the doctor
+  // does — explicit flag verbatim, else the record the setup parked in this
+  // directory — and refuse to touch any config while the runtime is unknown.
+  const resolution = await resolveDoctorRuntime(input, directory)
+  if (resolution.origin === 'record') {
+    messages.push(`Runtime not given — resolved '${resolution.runtime}' from ${join(directory, CONNECT_OUTCOME_FILENAME)}.`)
+  }
+  const runtime = resolution.runtime
+  const input2 = { ...input, runtime }
+  if (runtime === '') {
+    return {
+      ok: false,
+      messages: [
+        'Runtime is unknown — no runtime flag was given and the connector record carries no resolvable runtime.',
+        'Repair rewrites the runtime config, so it will not guess. Re-run repair naming the runtime — ' +
+          `one of: ${RUNTIME_FLAG_VALUE_LIST.join(', ')}.`,
+      ],
+    }
+  }
+
   let identity: IdentityFile
   try {
     identity = JSON.parse(await readFile(join(directory, 'identity.json'), 'utf8')) as IdentityFile
@@ -1199,7 +1305,7 @@ export async function runRepair(
   // the exact class of harm a repair tool must never cause. Detect and
   // refuse: the local wrapper (bin/haven-mcp) and its mcp-runtime sidecar
   // are the tell.
-  const configPath = runtimeConfigPathFor(input.runtime, homeDir)
+  const configPath = runtimeConfigPathFor(input2.runtime, homeDir)
   if (configPath) {
     try {
       const existing = await readFile(configPath, 'utf8')
@@ -1245,7 +1351,7 @@ export async function runRepair(
   messages.push(`Rewriting MCP entries ${names.hosted} / ${names.signer}${serverName ? ` (agent "${serverName}")` : ' (unnamed pair)'} — no other pair is touched.`)
 
   const configResult = await writeRuntimeConfig({
-    runtime: input.runtime as RuntimeId,
+    runtime: input2.runtime as RuntimeId,
     hostedMcpUrl: identity.hosted_mcp_url ?? `${identity.api_url}/mcp`,
     apiKey: identity.api_key,
     identityPath: join(directory, 'identity.json'),

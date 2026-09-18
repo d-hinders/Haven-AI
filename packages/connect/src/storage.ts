@@ -649,3 +649,26 @@ export async function writeConnectOutcomeRecord(
   await restrictPermissions(path, 0o600, warn)
   return path
 }
+
+/**
+ * #3120: the doctor's read side of the same record.
+ *
+ * Returns the verbatim `runtime` string a completed or failed setup parked in
+ * this directory's `last-connect-outcome.json` — or null when there is no
+ * record, it is unreadable, it does not parse, or it carries no string
+ * `runtime` field. Best-effort mirrors the write: `recordConnectOutcome`
+ * swallows every write failure, so a missing record is a real path, not a
+ * defensive one. Never throws; every degradation is silent because the CALLER
+ * owns the user-visible "runtime unknown" verdict (and names the directory it
+ * inspected).
+ */
+export async function readConnectOutcomeRuntime(directory: string): Promise<string | null> {
+  try {
+    const parsed = JSON.parse(await readFile(join(directory, CONNECT_OUTCOME_FILENAME), 'utf8')) as unknown
+    if (typeof parsed !== 'object' || parsed === null) return null
+    const runtime = (parsed as { runtime?: unknown }).runtime
+    return typeof runtime === 'string' && runtime.length > 0 ? runtime : null
+  } catch {
+    return null
+  }
+}

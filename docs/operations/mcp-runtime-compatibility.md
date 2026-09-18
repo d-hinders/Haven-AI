@@ -896,6 +896,17 @@ nothing — because the detected client is the right write either way, and
 refusing there would turn every rollout window in which the dashboard learns a
 picker id before the published connector does into a hard failure.
 
+> **Recent re-verification (#3120):** the precedence ladder above is unchanged —
+> `--doctor`/`--repair` now resolve a runtime the same way when the `--runtime`
+> flag is ABSENT (explicit flag verbatim → the runtime recorded in the agent
+> directory's `last-connect-outcome.json` → unknown, never env-detection), but
+> with a flag present nothing moved: detection still beats a contradicting
+> hint, an explicit runtime still applies as given, `runtime_undetermined` /
+> `runtime_unrecognized` / `runtime_force_unrecognized` keep their codes and
+> allowed-value lists. The doctor's new unknown-runtime verdict reuses
+> `RUNTIME_FLAG_VALUE_LIST` for its prose, so the values it names cannot drift
+> from this ladder's vocabulary.
+
 ### Failure vocabulary for runtime selection (#1719)
 
 Each of these is a stable `code` with a next action, raised as a `ConnectError`

@@ -324,6 +324,21 @@ describe('runRepair (#1589)', () => {
     expect(config).toContain('bin/haven-mcp')
   })
 
+  it('a runtime ALIAS repairs the same config codex-cli does (--runtime codex writes ~/.codex/config.toml) (#3145 review)', async () => {
+    // Before: `writeRuntimeConfig` fell to its "manual runtime" arm for the
+    // raw alias and the repair reported success having written nothing.
+    const { homeDir, dir } = await healthyHome()
+    await rm(join(homeDir, '.codex', 'config.toml'))
+    const runCommand = vi.fn()
+    const repair = await runRepair({ runtime: 'codex' }, { homeDir, runCommand })
+    expect(repair.ok).toBe(true)
+    expect(repair.messages.join('\n')).not.toContain('manually')
+    const config = await readFile(join(homeDir, '.codex', 'config.toml'), 'utf8')
+    expect(config).toContain(join(dir, 'bin', 'haven-signer.mjs'))
+    const report = await runDoctor({ runtime: 'codex' }, { homeDir, ...healthyDeps() })
+    expect(report.checks.find((c) => c.id === 'runtime_config')?.level).toBe('ok')
+  })
+
   it('the same refusal fires under a runtime ALIAS (--runtime codex): the config path is looked up by the normalized id (#3145 review)', async () => {
     // Before, `runtimeConfigPathFor('codex')` was null, the refusal was
     // skipped and a repair would have rewritten a local-stdio config.

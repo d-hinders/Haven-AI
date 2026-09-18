@@ -1474,7 +1474,10 @@ export async function runRepair(
   messages.push(`Rewriting MCP entries ${names.hosted} / ${names.signer}${serverName ? ` (agent "${serverName}")` : ' (unnamed pair)'} — no other pair is touched.`)
 
   const configResult = await writeRuntimeConfig({
-    runtime: input2.runtime as RuntimeId,
+    // Normalized for the WRITE too (#3145 review round 3): `writeRuntimeConfig`
+    // switches on the id, and the raw alias fell to its "manual runtime" arm
+    // — a repair that reported success while writing nothing.
+    runtime: (normalizeRuntimeName(input2.runtime) ?? input2.runtime) as RuntimeId,
     hostedMcpUrl: identity.hosted_mcp_url ?? `${identity.api_url}/mcp`,
     apiKey: identity.api_key,
     identityPath: join(directory, 'identity.json'),

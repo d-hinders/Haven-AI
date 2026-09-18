@@ -245,6 +245,34 @@ describe('x402 payment verification and settlement', () => {
     expect(submit).toHaveBeenCalledTimes(1)
   })
 
+  it('a generic submit failure clears the in-flight record, so a different product on the same authorization is not refused as "already settling" (#3099 review)', async () => {
+    // The surviving half of the cleanup: `if (!nextAttempt.txHash) attempts.delete(paymentKey)`.
+    // Pinned by mutation: making that delete never fire leaves the failed
+    // attempt in `attempts`, and the next call for another product is refused
+    // by the in-flight check instead of settling.
+    const submit = vi
+      .fn<SettlementClient['submit']>()
+      .mockRejectedValueOnce(new Error('rpc down'))
+      .mockResolvedValueOnce('0xsettled')
+    const { processor } = makeProcessor({ submit })
+    const pr = paymentRequired()
+    const header = await signedHeader(pr)
+    const input = {
+      productId: 'vpn_basic' as const,
+      paymentHeader: header,
+      merchantAddress: MERCHANT,
+      expectedAmount: 1_000n,
+      paymentRequired: pr,
+    }
+
+    await expect(processor.verifyAndSettle(input)).rejects.toThrow('rpc down')
+    expect(submit).toHaveBeenCalledTimes(1)
+
+    const settled = await processor.verifyAndSettle({ ...input, productId: 'vpn_pro' as const })
+    expect(settled.settlement).toBe('settled_onchain')
+    expect(submit).toHaveBeenCalledTimes(2)
+  })
+
   it('retries receipt confirmation without resubmitting after a submitted tx times out', async () => {
     const waitForReceipt = vi
       .fn<SettlementClient['waitForReceipt']>()

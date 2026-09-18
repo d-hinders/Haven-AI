@@ -23,7 +23,7 @@
 // The `wrongTool()` failure hints carry the caller's own arguments and are
 // outside the numerator by decision 7. Positive control: run it with
 // `--root=<a tree at the epic's base 4ed69592>` — both counters are non-zero
-// there (quoted in PR #3104's body); at the epic's head both are 0 and the
+// there (44 + 2 across 10 files, quoted in PR #3142's body); at the epic's head both are 0 and the
 // committed baseline is all zeros, so any regrowth is a new violation.
 //
 // Baseline shape: `{ "<file>": { unnamed: n, discovery_without_arguments: n } }`

@@ -96,7 +96,8 @@ encodes have to be applied by hand; that is what the rest of this section is for
 
   **Every box must be able to reach a ticked state truthfully (#2906).** A box
   records a **disposition** — *done*, or *waived / no longer applicable* with the
-  reason and a link — not only a success. Two ways to write one that cannot:
+  reason and a link — not only a success. Two ways to write a box whose tick
+  means nothing:
 
   - **A box that can never be true.** Epic #2906 was unclosable for five days
     because a waived operator step stayed phrased as "O3 dual-read proof recorded
@@ -105,13 +106,23 @@ encodes have to be applied by hand; that is what the rest of this section is for
     up in comments the checker does not read. When a step is waived or stops
     applying, **rewrite the box to state that and tick it** — the tick records
     that the question was answered, not that the work happened.
+
+    **A session RECORDS a waiver; it never MAKES one.** The rewritten box names
+    who waived the step and links the comment where they did — in #2906 that was
+    the owner, on 2026-09-14. A session may not both decide and record a waiver
+    in one act, and "no longer applicable" is the term a motivated session would
+    reach for, because an epic's scope can always be narrated so a step stopped
+    applying. Without a named waiver-holder this rule is a tick-by-declaration
+    route to closing any inconvenient epic, which is worse than the problem it
+    fixes. The surrounding rule already says the epic stays open until a **human**
+    ticks the last box; this does not weaken it.
   - **A box that is already true.** A box asking that a command "runs without a
     flag" when it already does is ticked on unchanged code and measures nothing.
     Write each box so it is **false today and true only when the work is done**.
 
   Where a slice may legitimately ship nothing — a decision-first slice whose
   honest outcome is "documented, no code" — write the box so that outcome is
-  tickable, or the epic hangs on a release that will never be cut.
+  tickable; otherwise the epic hangs on a release that will never be cut.
 - **Do not put `code-quality` on the slices** — the epic's open sub-issues already
   are the queue for `epic=#<n>`, and that label is for the standalone queue
   (`loop-epic.md` states this; it is the one rule most easily lost when filing

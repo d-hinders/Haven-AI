@@ -58,13 +58,20 @@ the last box.
 
 EVERY BOX MUST BE ABLE TO REACH A TICKED STATE TRUTHFULLY (#2906). A box records
 a DISPOSITION — done, or waived / no longer applicable with the reason and a
-link — not only a success. Epic #2906 was unclosable for five days because a
+link — not only a success. Epic #2906 reported not-ready for five days because a
 waived step stayed phrased as "proof recorded on this issue": the owner had
 waived it, so no work could make that sentence true and the checker reported
-not-ready forever. When a step is waived or stops applying, REWRITE THE BOX to
-say so and tick it. Equally, do not write a box that is already true before the
-work — it is ticked on unchanged code and measures nothing. Each box should be
-false today and true only when the step is done. -->
+not-ready on every run while the evidence sat in comments it does not read. When
+a step is waived or stops applying, REWRITE THE BOX to say so and tick it — and
+name WHO waived it, with a link to where they did. A session RECORDS a waiver, it
+never MAKES one; without a named waiver-holder this is a tick-by-declaration
+route to closing any inconvenient epic. Equally, do not write a box that is
+already true before the work — it is ticked on unchanged code and measures
+nothing. Each box should be false today and true only when the step is done.
+
+Where a slice may legitimately ship nothing — a decision-first slice whose honest
+outcome is "documented, no code" — write the box so that outcome is tickable;
+otherwise the epic hangs on a release that will never be cut. -->
 
 - [ ] Operator step: <what> — done in <where>
 - [ ] Product verification on `dev`: <runbook or QA scenario> — run by <whom>

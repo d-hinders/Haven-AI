@@ -8,7 +8,7 @@ covers:
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
-last-verified: "2026-09-15"
+last-verified: "2026-09-18"
 ---
 
 # Dev environment
@@ -288,6 +288,23 @@ vars (client id/secret + redirect to the dev backend's
 #2862; the Fortnox app's registered redirect URI must match it) are set on the
 dev Railway backend, using a **separate dev Fortnox app** — never the prod
 credentials. The feed was live-proven against dev on 2026-07-16.
+
+  > **Re-verified #3018 (2026-09-18):** the only `index.ts` change in PR
+  > #3110 is the comment block above `registerConnector(new AccountedConnector())`
+  > — it now describes the #3018 WORM document delivery (the receipt underlag
+  > uploaded as one WORM document, delivery proven by sha256 echo) where it
+  > previously said the connector's push half was still pending and skipped.
+  > Comment-only: no registration, wiring or boot-order change. The doc's
+  > other `index.ts` claims — boolean boot flags through `parseBooleanFlag`
+  > and the request-validation `off`/`shadow`/`enforce` modes — were re-read
+  > against the merged tree and hold; the doc makes no claim about
+  > accounting-connector registration itself. Found stale here but
+  > PRE-EXISTING and out of scope for #3018 (dev's own #3084 changed the code
+  > without touching this doc): the `enforcedPrefixes` sentence in the
+  > request-validation bullet above still names `['/contacts']` while
+  > `index.ts` now sets `['/contacts', '/merchants']` — flagged, not edited.
+  > Nothing in this file was edited except this note and the
+  > `last-verified` date.
 
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 

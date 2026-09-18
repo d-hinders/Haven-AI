@@ -267,14 +267,17 @@ const DS_BALANCE_SUMMARY = `Balance over 7 days: ends at ${dsMoney(DS_BALANCE_EN
 function Section({
   title,
   description,
+  testId,
   children,
 }: {
   title: string
   description: string
+  /** Optional stable hook for the visual-regression spec to clip the section (#3064). */
+  testId?: string
   children: ReactNode
 }) {
   return (
-    <section className="space-y-4">
+    <section data-testid={testId} className="space-y-4">
       <div>
         <h2 className="text-lg font-semibold tracking-tight text-[var(--v2-ink)]">{title}</h2>
         <p className="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">{description}</p>
@@ -2458,6 +2461,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="StackedBarChart"
+        testId="ds-stacked-bar-chart"
         description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the swatch beside its spend figure in the agents table (SeriesSwatch, exported from this file — the table reads the same index the chart paints with; never beside a name, where a dot reads as a status light). A partial day — the window's cut first or last day — is striped with the series token at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar or its cap would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top and its refusal cap stay visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
       >
         <Card hover={false} className="p-5">
@@ -2482,7 +2486,10 @@ export default function DesignSystemPage() {
           </div>
           {/* The swatch a table row carries to key itself to the chart above —
               the same `seriesColor(index)` the segments and the legend read. */}
-          <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]">
+          <ul
+            data-testid="ds-stacked-bar-swatch-list"
+            className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]"
+          >
             {DS_CHART_DAYS[0]?.series.map((s) => (
               <li key={s.id} className="inline-flex items-center gap-1.5">
                 <SeriesSwatch seriesIndex={s.seriesIndex} />

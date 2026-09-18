@@ -27,16 +27,18 @@
  * the right one: no timeout closes a render that differs by a quarter of the
  * image. The cause of the non-determinism — most likely below-the-fold content
  * settling — is NOT established here, and is left named rather than guessed. It bought little
- * beyond what the scoped clips already cover: #1820 measured the whole-page
+ * it bought little beyond what the scoped clips already cover: #1820 measured the whole-page
  * budget PASSING a sidebar-confined regression the scoped sidebar capture
  * failed at 3.66x its own budget, because one number cannot be both loose
  * enough for page-wide churn and tight enough for a shell-sized change. Losing
- * it does cost real coverage — no baseline anywhere now diffs primitives
- * BELOW the shell on `/design-system` itself — and that gap is not closed
- * here; `product-routes.visual.spec.ts`'s whole-page `/dashboard` and
- * `/transactions` baselines remain the only whole-page pixel coverage in the
- * suite. The scoped top-bar and sidebar clips below are what is left of this
- * spec, and they are unaffected by the removal — they were never the flaky
+ * it did cost real coverage — no baseline diffed primitives BELOW the shell on
+ * `/design-system` until #3064 scoped one clip to the StackedBarChart showcase
+ * section (the section test below, whose assertions name tick voice, partial
+ * day and swatch order); everything else below the shell on that page is still
+ * compared against nothing. `product-routes.visual.spec.ts`'s whole-page
+ * `/dashboard` and `/transactions` baselines remain the only whole-page pixel
+ * coverage in the suite. The scoped top-bar and sidebar clips below are what is left
+ * of this spec, and they are unaffected by the removal — they were never the flaky
  * half.
  *
  * BASELINES ARE LINUX-RENDERED (committed under e2e/__screenshots__/<spec>/,
@@ -49,6 +51,7 @@
  * ("Updating visual baselines") for the CI-artifact flow.
  */
 import { expect, test } from '@playwright/test'
+import type { Locator } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -423,5 +426,181 @@ test.describe('design-system visual regression', () => {
         })
       }
     })
+  }
+
+  /**
+   * ── The StackedBarChart showcase clips, the first below-shell baselines (#3064) ──
+   *
+   * The header above records what #2635 left uncovered: no baseline diffed any
+   * primitive BELOW the shell on `/design-system`, so the StackedBarChart
+   * section's rendering could drift from the primitive it documents and only a
+   * reviewer's hand-rendered probe would notice — exactly how #3057's three
+   * showcase changes (the striped partial day, the narrow sample's
+   * `PAD_NARROW` gutter, the `formatTick` voice) were verified. The coupling
+   * gate proves the primitive APPEARS on the page; these clips are the part
+   * that can see whether the appearance is right.
+   *
+   * ── Why ONE CLIP PER SHOWCASE SAMPLE, not one section clip ──────────────────
+   *
+   * The issue preferred a single section-scoped clip and sanctioned one clip
+   * per sample only "if the section is tall". Measured (first cut of this very
+   * spec, structure mode, before the split): the section is 839.5px tall at
+   * the 800px desktop viewport and 946.25px at the 844px mobile one — taller
+   * than BOTH viewports, because the page scrolls inside the shell's inner
+   * scroll root and the section never fits the fold anywhere this spec
+   * renders. `toHaveScreenshot` on an element past the fold captures nothing
+   * where the page has no painted pixels, so a one-clip cut would have been
+   * unverifiable until a CI dispatch said so. The split is therefore not a
+   * convenience: it is the issue's sanctioned alternative, taken on a measured
+   * height, and each clip below still asserts its own box fits the viewport so
+   * a future showcase edit that pushes a sample past the fold fails HERE,
+   * naming the sample, instead of as an unexplained red in CI.
+   *
+   * The three clips, and the drift each is sized to catch:
+   *   - the WIDE sample   → `design-system-stacked-bar-chart-<vp>[-dark].png`
+   *     (the issue's canonical name), plus its tick voice and partial day;
+   *   - the NARROW sample → `...-stacked-bar-chart-narrow-<vp>[-dark].png`,
+   *     the `PAD_NARROW` gutter treatment whose tick voice #3057 changed;
+   *   - the SWATCH LIST   → `...-stacked-bar-swatch-list-<vp>[-dark].png`,
+   *     one `series-swatch` per series in order.
+   *
+   * ── The assertions are the named causes for any pixel diff ──────────────────
+   *
+   * The things the #3057 reviewers measured BY HAND, now written where the
+   * comparison runs: the y-ticks read `$200` / `$400` (no cents,
+   * thousands-grouped — the showcase's data max is 405, `chartScale` snaps the
+   * step to 200, and `formatAnalyticsTick` renders integers); exactly one day
+   * carries `data-partial`, it is the LAST day, and the chart defines a hatch
+   * pattern per series for it; the swatch list holds one `series-swatch` per
+   * series, IN ORDER (`data-series-index` 0 then 1, the same indexes the bars
+   * paint with). A diff with none of these having moved is a paint/token
+   * drift; a diff WITH one of them moved names its own cause.
+   *
+   * The budget is the same 100-px absolute slack the shell clips carry
+   * (TOP_BAR_MAX_DIFF_PIXELS / SIDEBAR_MAX_DIFF_PIXELS): the measured jitter
+   * floor is the same zero (includeAA off, threshold 0.02), so the budget is
+   * sized to catch one hatched bar recoloured (~300 px here) and to ignore a
+   * runner-image nudge. Threshold rides the shared PIXEL_THRESHOLD — at the
+   * Playwright default 0.2 a token swap inside this palette counts ZERO
+   * differing pixels (#1805's finding, true here too).
+   */
+  const SECTION_TEST_ID = 'ds-stacked-bar-chart'
+  const STACKED_BAR_MAX_DIFF_PIXELS = 100
+
+  for (const vp of VIEWPORTS) {
+    test(`/design-system StackedBarChart wide sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const section = page.getByTestId(SECTION_TEST_ID)
+      await expect(section).toHaveCount(1)
+      // The showcase mounts exactly two charts — wide first, narrow second.
+      // Scoped to the section, not the page: AreaChart uses the same chart
+      // testids further down, and a page-scoped locator would be ambiguous.
+      const charts = section.getByTestId('stacked-bar-chart')
+      await expect(charts).toHaveCount(2)
+      const wide = charts.nth(0)
+
+      // Named cause 1 — the tick voice: `$200` / `$400`, no cents.
+      await expect(wide.getByTestId('chart-tick-label')).toHaveText(['$200', '$400'])
+
+      // Named cause 2 — the partial day: the last day, striped via the
+      // hatch patterns the chart defines for it.
+      const partialDay = wide.locator('[data-testid="chart-day"][data-partial="true"]')
+      await expect(partialDay).toHaveCount(1)
+      await expect(partialDay).toHaveAttribute('data-day-index', '6')
+      await expect(wide.getByTestId('chart-hatch-pattern')).toHaveCount(2)
+
+      await assertFitsViewport(wide, vp.height, 'the wide sample')
+
+      await expect(wide).toHaveScreenshot(`design-system-stacked-bar-chart-${vp.name}${schemeSuffix}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: STACKED_BAR_MAX_DIFF_PIXELS,
+        threshold: PIXEL_THRESHOLD,
+      })
+    })
+
+    test(`/design-system StackedBarChart narrow sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const section = page.getByTestId(SECTION_TEST_ID)
+      await expect(section).toHaveCount(1)
+      const charts = section.getByTestId('stacked-bar-chart')
+      await expect(charts).toHaveCount(2)
+      const narrow = charts.nth(1)
+
+      // The narrow sample is its own render of the same contract — the
+      // `PAD_NARROW` gutter and dot legend #3057 tuned — so its tick voice
+      // and partial day are asserted on IT, not inherited from the wide one.
+      await expect(narrow.getByTestId('chart-tick-label')).toHaveText(['$200', '$400'])
+      const partialDay = narrow.locator('[data-testid="chart-day"][data-partial="true"]')
+      await expect(partialDay).toHaveCount(1)
+      await expect(partialDay).toHaveAttribute('data-day-index', '6')
+      await expect(narrow.getByTestId('chart-hatch-pattern')).toHaveCount(2)
+
+      await assertFitsViewport(narrow, vp.height, 'the narrow sample')
+
+      await expect(narrow).toHaveScreenshot(`design-system-stacked-bar-chart-narrow-${vp.name}${schemeSuffix}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: STACKED_BAR_MAX_DIFF_PIXELS,
+        threshold: PIXEL_THRESHOLD,
+      })
+    })
+
+    test(`/design-system StackedBarChart swatch list renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      // Named cause 3 — the swatches: one per series, in order, the same
+      // `seriesColor(index)` the bars paint with.
+      const swatchList = page.getByTestId('ds-stacked-bar-swatch-list')
+      await expect(swatchList).toHaveCount(1)
+      const swatches = swatchList.getByTestId('series-swatch')
+      await expect(swatches).toHaveCount(2)
+      await expect(swatches.nth(0)).toHaveAttribute('data-series-index', '0')
+      await expect(swatches.nth(1)).toHaveAttribute('data-series-index', '1')
+
+      await assertFitsViewport(swatchList, vp.height, 'the swatch list')
+
+      await expect(swatchList).toHaveScreenshot(`design-system-stacked-bar-swatch-list-${vp.name}${schemeSuffix}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: STACKED_BAR_MAX_DIFF_PIXELS,
+        threshold: PIXEL_THRESHOLD,
+      })
+    })
+  }
+
+  /**
+   * The fold guarantee for the clips above: the element being captured must
+   * fit the viewport, because the page scrolls INSIDE the shell and pixels
+   * past the fold are never painted — a clip that outgrows the viewport would
+   * screenshot unpainted blankness, and only a CI dispatch would say so.
+   * Assert the measured box here, where the failure names the sample.
+   */
+  async function assertFitsViewport(locator: Locator, viewportHeight: number, what: string) {
+    const box = await locator.boundingBox()
+    if (!box) {
+      throw new Error(`${what} rendered no box — it never finished laying out`)
+    }
+    expect(
+      box.height,
+      `${what} grew past the ${viewportHeight}px viewport (${box.height}px) — the showcase no longer fits the fold; shrink the sample or split this clip`,
+    ).toBeLessThanOrEqual(viewportHeight)
   }
 })

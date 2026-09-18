@@ -1796,7 +1796,10 @@ to call next in structured fields, and those fields are typed end to end
   loosely; the `wrongTool()` failure hints (the caller's own arguments) are
   outside it by decision 7. Recorded run at the epic's head (#3104): **0 / 0**.
   Positive control at the epic's base `4ed69592` (`--root=<tree>`): **44
-  unnamed + 2 discovery entries across 10 files**. The gate runs in CI in the
+  unnamed + 2 discovery entries across 10 files** (43 under the pre-review
+  balanced-block rule; NAMED is tested over the emission's own top-level
+  keys, which finds one more `plain-http-x402.ts` block that a nested
+  literal had been naming). The gate runs in CI in the
   hosted-server, signer and local-runtime jobs (each fires on its own
   package's changes) and in `backend_checks` beside the request-schema
   ratchet, and is self-tested (`lint:next-steps:test`). It is a step inside

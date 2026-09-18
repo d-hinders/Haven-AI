@@ -92,7 +92,7 @@ export function writeBaseline(path, counts) {
  * This lives here rather than in one gate because `--update` is the command a
  * gate's own failure message sends you to, so a gate that omits the check
  * turns its remedy into a laundering step. Of the five gates on this module at
- * the time (seven today), three had a line-for-line copy of this decision and
+ * the time (eight today), three had a line-for-line copy of this decision and
  * TWO had none at all
  * (`frontend-copy-lint`, the subject of #2728, and `design-lint`, which review
  * found by reading the importer list rather than the issue) -- exactly the
@@ -112,7 +112,7 @@ export function updateRefusals(
  * Run a gate's `main` as the CLI, and present a failure the way a gate should.
  *
  * Four of the six gates on this module called `main()` bare at the time
- * (#2761 — seven gates today), so an
+ * (#2761 — eight gates today), so an
  * operator-facing condition — a malformed baseline, an unreadable file, a
  * permissions error — arrived as Node's uncaught-exception banner:
  *
@@ -185,7 +185,7 @@ export function runGate(name, main) {
       //
       // `ELOOP` is here because a first version of this comment excluded it as
       // "not reachable from a `git ls-files` scan set" — a reason that is true
-      // of exactly ONE of the seven gates. The other six walk the tree
+      // of exactly ONE of the eight gates. The other seven walk the tree
       // themselves (`readdir`/`statSync`), and a self-referential symlink gives
       // `ELOOP` from both `statSync` and `readFileSync`; measured. A stated
       // reason that holds for one sixth of the callers is worse than no reason,
@@ -215,8 +215,9 @@ export function runGate(name, main) {
 /**
  * A refusal, not a crash — so it is presented as one.
  *
- * All seven gates now run their `main` through `runGate` (#2761; the seventh,
- * request-schemas, came with #3029 already using it), which prints a
+ * All eight gates now run their `main` through `runGate` (#2761; the seventh,
+ * request-schemas, came with #3029 already using it, as did the eighth,
+ * lint-next-steps, with #3104), which prints a
  * frameless error as one line. Without the replacement below the frames WOULD
  * run `assertUsableBaseline` -> `loadBaseline` -> the gate's `main`, which for
  * a malformed baseline is noise around the one line the operator needs -- and
@@ -258,13 +259,13 @@ function refusal(message) {
  * occurrence(s) remain", violation live.
  *
  * Validating here rather than inside `newViolations` is deliberate: it is one
- * place for all seven gates, it keeps the comparison a pure numeric predicate,
+ * place for all eight gates, it keeps the comparison a pure numeric predicate,
  * and it puts the error where the file is named — a comparison that throws can
  * only say WHICH key, not which file it came from.
  *
  * This does not reach `scripts/docs/covers-gaps.mjs`, whose baseline stores gap
  * FILE ARRAYS by design and which does not import this module (#2679). Audited
- * before shipping: the entries across the seven gates on this engine, all
+ * before shipping: the entries across the eight gates on this engine, all
  * numeric, so this is a pure tightening rather than a build someone else has to
  * fix. The 40 array-valued entries in the repo all live in covers-gaps'.
  */

@@ -48,6 +48,12 @@ describe('scanSource — the numerator, defined', () => {
     assert.equal(scanSource("buildAgentGuidance({ nextAction: A.X, debug: { previous: { nextTool: 'old' } }, reason: 'r' })").unnamed, 1)
   })
 
+  test('a comment opener or line comment inside a string literal is not a comment (#3142 review, round 2)', () => {
+    assert.equal(scanSource("const a = 'contains /* here'\nthrow new HostedToolError({ code: 'X', message: 'm', nextAction: AgentPaymentNextAction.StopAndTellUser })\nconst b = 'and */ there'").unnamed, 1)
+    assert.equal(scanSource("buildAgentGuidance({ nextAction: A.X, note: 'see // docs', nextTool: 'haven_sign', nextArguments: {}, reason: 'r' })").unnamed, 0)
+    assert.equal(scanSource("const h = { accept: '*/*' }\nbuildAgentGuidance({ nextAction: A.X, reason: 'r' })").unnamed, 1)
+  })
+
   test('a discovery hint built in a spread branch is still counted (#3142 review)', () => {
     assert.equal(scanSource("entries.map((e) => ({ resource_url: e.url, ...(e.paid ? { suggested_tool: 'haven_pay_x402' } : {}) }))").discovery_without_arguments, 1)
     assert.equal(scanSource("entries.map((e) => ({ resource_url: e.url, ...(e.paid ? { suggested_tool: 'haven_pay_x402', suggested_arguments: { url: e.url } } : {}) }))").discovery_without_arguments, 0)

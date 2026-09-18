@@ -13,9 +13,12 @@
 //     `new HostedToolError({` whose literal carries `nextAction:`, a signer
 //     `next_action: AgentPaymentNextAction.…` object literal, or a local
 //     `nextAction: AgentPaymentNextAction.…` object literal. It is NAMED when
-//     the balanced block contains `nextTool:`, `nextStep:`,
+//     the block's OWN top-level keys (comments stripped, nested literals
+//     blanked — `topLevelText`) contain `nextTool:`, `nextStep:`,
 //     `nextToolOmittedReason:`, `next_tool_omitted_reason:`, a `…Handoff(` /
-//     `…Step(` spread, or `nextStepWireFields(`.
+//     `…Step(` spread, or `nextStepWireFields(`. A handoff must therefore be
+//     named at the emission's top level: one placed inside a spread branch or
+//     a nested literal reads as unnamed (a false red, never a false green).
 //   discovery_without_arguments — a `suggested_tool:` inside a discovery
 //     entry literal (one carrying `resource_url:`) with no
 //     `suggested_arguments:` (the two discovery maps, decision 4).
@@ -23,7 +26,9 @@
 // The `wrongTool()` failure hints carry the caller's own arguments and are
 // outside the numerator by decision 7. Positive control: run it with
 // `--root=<a tree at the epic's base 4ed69592>` — both counters are non-zero
-// there (44 + 2 across 10 files, quoted in PR #3142's body); at the epic's head both are 0 and the
+// there (44 + 2 across 10 files, quoted in PR #3142's body; 43 under the
+// pre-review balanced-block rule — the own-keys rule finds one more in
+// plain-http-x402.ts); at the epic's head both are 0 and the
 // committed baseline is all zeros, so any regrowth is a new violation.
 //
 // Baseline shape: `{ "<file>": { unnamed: n, discovery_without_arguments: n } }`
@@ -111,7 +116,41 @@ function enclosingLiteral(source, at) {
 
 /** Comments never name a tool: `/* nextStep: … */` or a `// nextTool:` line must not read as NAMED. */
 export function stripComments(source) {
-  return source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:'"])\/\/[^\n]*/g, (m, lead) => lead + ' '.repeat(m.length - lead.length))
+  // A single pass that knows where string literals are, so a `/*` or `//`
+  // inside one ('Accept: */*', 'https://…') neither opens nor closes a
+  // comment (#3142 review, round 2: the regex version read a `/*` in a string
+  // as a comment opener and blanked the emission after it — fail-open).
+  let out = ''
+  let i = 0
+  const n = source.length
+  while (i < n) {
+    const c = source[i]
+    const next = source[i + 1]
+    if (c === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2)
+      const stop = end === -1 ? n : end + 2
+      out += source.slice(i, stop).replace(/[^\n]/g, ' ')
+      i = stop
+    } else if (c === '/' && next === '/') {
+      let stop = source.indexOf('\n', i)
+      if (stop === -1) stop = n
+      out += ' '.repeat(stop - i)
+      i = stop
+    } else if (c === "'" || c === '"' || c === '`') {
+      let j = i + 1
+      while (j < n && source[j] !== c) {
+        if (source[j] === '\\') j += 1
+        if (c !== '`' && source[j] === '\n') break
+        j += 1
+      }
+      out += source.slice(i, j + 1)
+      i = j + 1
+    } else {
+      out += c
+      i += 1
+    }
+  }
+  return out
 }
 
 export function scanSource(rawSource) {

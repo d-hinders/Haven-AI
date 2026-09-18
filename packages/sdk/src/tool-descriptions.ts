@@ -159,12 +159,12 @@ export const toolDescriptions = {
   },
   discoverTools: {
     summary:
-      'Step 1 of a purchase: discover payable services from Haven\'s curated merchant catalog — names, prices, and which pay tool to use next.',
+      'Step 1 of a purchase: discover payable services from Haven\'s curated merchant catalog — names, prices, and the exact next call for each.',
     selectionGuidance:
       'Use this when the user asks what the agent can buy, pay for, or which paid services exist — or when you need a resource URL for a service the user described. ' +
       'Use verified=verified for entries Haven watched pass a live quote probe (operator-curated or self-submitted) — domain_verified is the only ownership claim; never treat these badges as proof of merchant honesty, quality, or reliability. ' +
       'Do NOT use for balance, budget, or spend-limit questions — use haven_get_allowances. ' +
-      'Do NOT use to pay — each returned entry names the pay tool to use next.',
+      'Do NOT use to pay — each returned entry names the next tool to call.',
     behavior:
       'Use each entry\'s suggested_tool field first — it names the exact next call. ' +
       'Read-only lookup against Haven\'s curated catalog; entries are periodically re-verified against the live merchant and degraded entries are flagged. ' +
@@ -173,7 +173,7 @@ export const toolDescriptions = {
       'The catalog price (price_display/price_atomic, marked price_is_indicative) is a last-verified hint, NOT authoritative — the real price comes from the merchant\'s live 402 at pay time. ' +
       'Never creates a payment, signature, or approval.',
     nextActionGuidance:
-      'Pick an entry and pay it with the tool named in suggested_tool, passing the entry\'s resource_url, tool_name, and tool_arguments for MCP merchants. Confirm the price from the live pay-tool result (not the catalog), and pass the user\'s cap as max_amount_human in whole tokens ("no more than 1 USDC" → max_amount_human: "1") — never convert it to atomic units by hand.',
+      'Pick an entry and call the tool named in suggested_tool with suggested_arguments VERBATIM; an entry without suggested_tool says why in suggested_tool_omitted_reason. Confirm the price from the live quote or pay result (not the catalog), and if the next tool takes a cap, pass the user\'s cap as max_amount_human in whole tokens ("no more than 1 USDC" → max_amount_human: "1") — never convert it to atomic units by hand.',
   },
   submitCatalogEntry: {
     summary:

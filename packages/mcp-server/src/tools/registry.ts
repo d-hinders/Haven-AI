@@ -91,7 +91,10 @@ function foldKey(key: string): string {
 export function declaredAliasFor(name: HostedToolName, rejected: string): string | undefined {
   const declared = Object.keys(toolSchemas[name])
   const table = TOOL_ARGUMENT_ALIASES[name]
-  if (table && rejected in table) return table[rejected]
+  // Own properties only: `in` walks Object.prototype, and a caller-controlled
+  // key such as "toString" would put native-code text into the refusal
+  // (haven-reviewer on #3113).
+  if (table && Object.hasOwn(table, rejected)) return table[rejected]
   const folded = foldKey(rejected)
   return declared.find((k) => k !== rejected && foldKey(k) === folded)
 }

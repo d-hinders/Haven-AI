@@ -74,6 +74,21 @@ describe('the false sentence is gone and the table is honest', () => {
     expect(STRICT_INPUT_TOOLS.haven_quote_x402).toContain('body')
   })
 
+  it('never resolves a prototype-chain name as an alias (#3113 review)', () => {
+    for (const key of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) {
+      expect(declaredAliasFor('haven_quote_x402', key), key).toBeUndefined()
+    }
+    expect(strictRefusalMessage('haven_quote_x402', ['toString'])).not.toContain('native code')
+  })
+
+  it('no two declared keys of one tool fold to the same spelling, so the alias is never order-dependent', () => {
+    for (const tool of Object.keys(STRICT_INPUT_TOOLS)) {
+      const shape = (toolInputSchema(tool as never) as z.ZodObject<z.ZodRawShape>).shape
+      const folded = Object.keys(shape).map((k) => k.toLowerCase().replace(/[_-]/g, ''))
+      expect(new Set(folded).size, tool).toBe(folded.length)
+    }
+  })
+
   it('every table alias points at a key the tool actually declares', () => {
     for (const [tool, table] of Object.entries(TOOL_ARGUMENT_ALIASES)) {
       const declared = Object.keys((toolInputSchema(tool as never) as z.ZodObject<z.ZodRawShape>).shape ?? toolInputSchema(tool as never))

@@ -581,9 +581,13 @@ spelled in that tool's own vocabulary and accepted by it verbatim — on the
 hosted surface an MCP entry points at the cap-free `haven_quote_catalog_purchase`
 `{ catalog_id }` (prepare requires a cap the server must never invent) and an
 HTTP entry at `haven_quote_x402 { url }`; the local runtime points at its pay
-tools with `{ merchant_url, tool_name, arguments }` / `{ url }`. A strict
-refusal names the declared keys and the declared alias of a rejected key
-(`resource_url` → `url`, `id` → `catalog_id`; epic #3105, decision 5).
+tools with `{ merchant_url, tool_name, arguments }` (`arguments` only when the
+row carries them; a row with no `tool_name` gets `suggested_tool_omitted_reason`
+instead of a hint its tool would refuse) / `{ url }`. A hosted strict refusal
+names the declared keys and the declared alias of a rejected key
+(`resource_url` → `url`, `id` → `catalog_id`; epic #3105, decision 5). The
+quote tool the hosted hint names carries no structured next step of its own
+yet — its description leads to prepare; slice #3102 closes that hop.
 
 Since [#2530](https://github.com/d-hinders/Haven-AI/issues/2530) `GET /catalog`
 also answers WITHOUT a credential, in a reduced public shape: name,

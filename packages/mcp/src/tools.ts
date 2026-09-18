@@ -422,15 +422,26 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           // resource) is delisted with the mpp_demo retirement, so this
           // fallback is unreachable today; it stays x402 rather than naming a
           // deleted tool in case a future non-demo 'mpp' rail entry appears.
+          // A row without a tool_name cannot get a verbatim hint —
+          // haven_pay_mcp_tool requires tool_name — so it gets the REASON
+          // instead of a hint its own tool refuses (haven-reviewer on #3113;
+          // the epic's "omitted + reason, never null" shape, decision 3).
           ...(entry.protocol === 'mcp'
-            ? {
-                suggested_tool: 'haven_pay_mcp_tool',
-                suggested_arguments: {
-                  merchant_url: entry.resourceUrl,
-                  ...(entry.toolName ? { tool_name: entry.toolName } : {}),
-                  ...(entry.toolArguments ? { arguments: entry.toolArguments } : {}),
-                },
-              }
+            ? entry.toolName
+              ? {
+                  suggested_tool: 'haven_pay_mcp_tool',
+                  suggested_arguments: {
+                    merchant_url: entry.resourceUrl,
+                    tool_name: entry.toolName,
+                    ...(entry.toolArguments ? { arguments: entry.toolArguments } : {}),
+                  },
+                }
+              : {
+                  suggested_tool_omitted_reason:
+                    'this catalog row carries no tool_name, which haven_pay_mcp_tool requires; ' +
+                    'read the merchant\'s tool list yourself, then call haven_pay_mcp_tool with ' +
+                    'merchant_url, tool_name and arguments',
+                }
             : {
                 suggested_tool: 'haven_pay_x402',
                 suggested_arguments: { url: entry.resourceUrl },

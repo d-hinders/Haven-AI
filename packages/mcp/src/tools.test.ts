@@ -2113,3 +2113,40 @@ describe('#2145: the local MCP tool descriptions and README present the resume t
     expect(readme.toLowerCase()).not.toContain('nothing emits')
   })
 })
+
+describe('haven_list_receipts (#3128) — the local runtime returns the page, not a bare array', () => {
+  it('returns { receipts, total, hasMore, nextCursor } and forwards limit + cursor to the endpoint', async () => {
+    const urls: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      urls.push(String(url))
+      return jsonResponse({
+        receipts: [{ id: 'rcpt_1', payment_id: 'pay_1', rail: 'x402', amount_human: '1.00' }],
+        total: 7,
+        has_more: true,
+        next_cursor: 'rcpt_1',
+      })
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl, x402Wallet: safeAddress })
+    const handlers = createToolHandlers(haven)
+    const result = await handlers.haven_list_receipts({ limit: 5, cursor: 'rcpt_0' })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('list failed')
+    const page = result.data as { receipts: Array<{ paymentId: string }>; total: number | null; hasMore: boolean | null; nextCursor: string | null }
+    expect(Array.isArray(page.receipts)).toBe(true)
+    expect(page.receipts[0].paymentId).toBe('pay_1')
+    expect(page).toMatchObject({ total: 7, hasMore: true, nextCursor: 'rcpt_1' })
+    const u = urls.find((x) => x.includes('/machine-payments/receipts'))!
+    expect(u).toContain('limit=5')
+    expect(u).toContain('cursor=rcpt_0')
+  })
+
+  it('against a backend without the page fields the three are null, never a fabricated 0 / false', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ receipts: [] }))
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl, x402Wallet: safeAddress })
+    const handlers = createToolHandlers(haven)
+    const result = await handlers.haven_list_receipts({})
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('list failed')
+    expect(result.data).toEqual({ receipts: [], total: null, hasMore: null, nextCursor: null })
+  })
+})

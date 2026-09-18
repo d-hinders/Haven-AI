@@ -379,9 +379,10 @@ export async function attachEvidenceProof<R extends QueryRow>(
 // the delegate that PAID this intent and its erc7710 delegate account,
 // captured at authorize time — NOT `agents.delegate_address`, which rotates
 // on rekey and would silently repaint a historical receipt's payer.
-// #3128: keyset paging on (created_at, id) — the pair the agent index
-// already orders by — with the cursor being the LAST receipt id the caller
-// saw. A cursor that names another agent's receipt (or no receipt) resolves
+// #3128: keyset paging on (created_at, id) — the agent index
+// (`idx_machine_payment_evidence_agent_created`) orders by (agent_id,
+// created_at DESC); `id` is the tiebreak the planner adds by incremental
+// sort — with the cursor being the LAST receipt id the caller saw. A cursor that names another agent's receipt (or no receipt) resolves
 // to NULL in the subquery, and `(row) < NULL` is never true: the page is
 // empty rather than another agent's history. `$3::uuid IS NULL` is the
 // first page.
@@ -399,6 +400,17 @@ export const LIST_EVIDENCE_RECEIPTS_SQL = `SELECT e.*, pi.machine_metadata->>'se
        LIMIT $2`
 
 export const COUNT_EVIDENCE_RECEIPTS_SQL = `SELECT COUNT(*)::text AS total FROM machine_payment_evidence WHERE agent_id = $1`
+
+// #3128 review: a well-formed cursor that names no receipt OF THIS AGENT
+// must be refused, not answered with an empty page beside a non-zero total
+// — the ambiguity the page exists to remove. Resolved under the agent id, so
+// another agent's receipt id is "unresolved", never a probe result.
+export const RESOLVE_RECEIPT_CURSOR_SQL = `SELECT 1 AS found FROM machine_payment_evidence WHERE id = $2 AND agent_id = $1`
+
+export async function receiptCursorResolvesForAgent(agentId: string, cursor: string, db: Executor = pool): Promise<boolean> {
+  const result = await db.query<{ found: number }>(RESOLVE_RECEIPT_CURSOR_SQL, [agentId, cursor])
+  return result.rows.length > 0
+}
 
 export async function listEvidenceReceiptsForAgent<R extends QueryRow>(
   agentId: string,

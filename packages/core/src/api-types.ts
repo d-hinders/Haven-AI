@@ -14494,7 +14494,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description The `next_cursor` of the previous page (a receipt id). Omit for the first page. */
+                /** @description The `next_cursor` of the previous page (a receipt id). Omit for the first page. A value that is not a uuid, or that names no receipt of this agent, is refused with 400. */
                 cursor?: string;
             };
             header?: never;

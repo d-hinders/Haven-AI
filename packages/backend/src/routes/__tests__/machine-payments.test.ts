@@ -157,6 +157,9 @@ const allowanceConfigured = (configured: boolean): DbRoute => [
 /** deriveDelegationBudgets / listDelegationJsonByIds (GET /allowances, delegation rail). */
 const delegationRows = (rows: unknown[]): DbRoute => [/FROM agent_delegations/, () => ({ rows })]
 
+/** #3128: receiptCursorResolvesForAgent — does the cursor name one of this agent's receipts? */
+const cursorResolves = (found: boolean): DbRoute => [/SELECT 1 AS found FROM machine_payment_evidence/, () => ({ rows: found ? [{ found: 1 }] : [] })]
+
 /** #3128: countEvidenceReceiptsForAgent (GET /receipts `total`). */
 const receiptsTotal = (total: number): DbRoute => [/COUNT\(\*\)::text AS total FROM machine_payment_evidence/, () => ({ rows: [{ total: String(total) }] })]
 
@@ -671,7 +674,7 @@ describe('machine payment routes', () => {
   })
 
   it('#3128: cursor reaches the keyset predicate as $3, scoped to the calling agent', async () => {
-    primeDb(AUTH, receiptsTotal(9), [/FROM machine_payment_evidence e/, () => ({ rows: [receiptRow('aaaaaaaa-0000-4000-8000-000000000003')] })])
+    primeDb(AUTH, cursorResolves(true), receiptsTotal(9), [/FROM machine_payment_evidence e/, () => ({ rows: [receiptRow('aaaaaaaa-0000-4000-8000-000000000003')] })])
     const response = await app.inject({
       method: 'GET',
       url: '/machine-payments/receipts?limit=2&cursor=aaaaaaaa-0000-4000-8000-000000000002',
@@ -687,6 +690,21 @@ describe('machine payment routes', () => {
     expect(call.sql).toContain('ORDER BY e.created_at DESC, e.id DESC')
   })
 
+  it('#3128 review: a well-formed cursor that names no receipt of this agent is refused with 400 — never an empty page beside a non-zero total', async () => {
+    primeDb(AUTH, cursorResolves(false), receiptsTotal(7))
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?cursor=aaaaaaaa-0000-4000-8000-00000000dead',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toMatch(/does not name a receipt of this agent/)
+    // The resolver ran under this agent's id; the page and count did not run.
+    const resolve = findCall(/SELECT 1 AS found FROM machine_payment_evidence/)!
+    expect(resolve.params).toEqual([AGENT.id, 'aaaaaaaa-0000-4000-8000-00000000dead'])
+    expect(findCall(/FROM machine_payment_evidence e/)).toBeUndefined()
+  })
+
   it('#3128: a cursor that is not a receipt id is refused with 400 before any query', async () => {
     primeDb(AUTH)
     const response = await app.inject({
@@ -697,6 +715,7 @@ describe('machine payment routes', () => {
     expect(response.statusCode).toBe(400)
     expect(response.json().error).toMatch(/next_cursor/)
     expect(findCall(/FROM machine_payment_evidence e/)).toBeUndefined()
+    expect(findCall(/SELECT 1 AS found FROM machine_payment_evidence/)).toBeUndefined()
   })
 
   it('receipts join the intent so settlement_scheme is agent-visible (#1063 finding)', async () => {

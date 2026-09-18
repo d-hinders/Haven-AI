@@ -102,6 +102,9 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     }
 
     const page = await listReceipts(agent.id, limit, cursor)
+    if (page === null) {
+      return reply.code(400).send({ error: 'cursor does not name a receipt of this agent — pass the next_cursor of a previous page.' })
+    }
     return reply.send(page)
   })
 

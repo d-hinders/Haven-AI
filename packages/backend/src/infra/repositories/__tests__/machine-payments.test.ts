@@ -19,6 +19,7 @@ import {
   insertMerchantReceiptOnce,
   listEvidenceReceiptsForAgent,
   countEvidenceReceiptsForAgent,
+  receiptCursorResolvesForAgent,
   markSweepSubmitted,
   releaseSweepClaim,
   resolveReconciliationForPayment,
@@ -514,5 +515,13 @@ describeDb('machine-payments repository (#1224)', () => {
     // The count is the agent's alone.
     expect(await countEvidenceReceiptsForAgent(agent.agentId)).toBe(4)
     expect(await countEvidenceReceiptsForAgent(other.agentId)).toBe(1)
+
+    // The resolver (review finding 2): own receipt → true; another agent's
+    // receipt and an unknown id → false, so the route refuses instead of
+    // answering an empty page beside `total: 4`.
+    expect(await receiptCursorResolvesForAgent(agent.agentId, ids[0])).toBe(true)
+    expect(await receiptCursorResolvesForAgent(agent.agentId, foreignId)).toBe(false)
+    expect(await receiptCursorResolvesForAgent(other.agentId, foreignId)).toBe(true)
+    expect(await receiptCursorResolvesForAgent(agent.agentId, '00000000-0000-4000-8000-000000000000')).toBe(false)
   })
 })

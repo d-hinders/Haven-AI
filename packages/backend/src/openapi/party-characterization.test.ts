@@ -118,9 +118,9 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
     const liveBody = await listReceipts('agent-1', 25)
 
     // #3128: `listReceipts` returns a page; this fixture recorded the receipts ARRAY.
-    expect(stripParties(liveBody.receipts)).toEqual(stripParties(fixture.body))
+    expect(stripParties(liveBody!.receipts)).toEqual(stripParties(fixture.body))
 
-    const live = liveBody.receipts[0] as {
+    const live = liveBody!.receipts[0] as {
       parties: { treasury_account: string; delegate: string; delegate_account: string | null; merchant: string }
       funding_tx_hash: string | null
       settlement_tx_hash: string | null
@@ -193,7 +193,7 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
     // #3128: the page's COUNT(*) is the second query; the list rows were queued first.
     mockQuery.mockResolvedValueOnce({ rows: [{ total: '1' }] })
     const receiptsBody = await listReceipts('agent-1', 25)
-    const receipt = receiptsBody.receipts[0] as { parties: { delegate: string } }
+    const receipt = receiptsBody!.receipts[0] as { parties: { delegate: string } }
     expect(receipt.parties.delegate).toBe(paidWithDelegate)
     expect(receipt.parties.delegate).not.toBe(rotatedDelegate)
 
@@ -298,9 +298,9 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
     const liveBody = await listReceipts('agent-2', 25)
 
     // #3128: `listReceipts` returns a page; this fixture recorded the receipts ARRAY.
-    expect(stripParties(liveBody.receipts)).toEqual(stripParties(fixture.body))
+    expect(stripParties(liveBody!.receipts)).toEqual(stripParties(fixture.body))
 
-    const live = liveBody.receipts[0] as { parties: { treasury_account: string; delegate: string } }
+    const live = liveBody!.receipts[0] as { parties: { treasury_account: string; delegate: string } }
     expect(live.parties.treasury_account).toBe('0x5555555555555555555555555555555555555555')
     expect(live.parties.delegate).toBe(intentDelegateAddress)
   })
@@ -483,7 +483,7 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
     // #3128: the page's COUNT(*) is the second query; the list rows were queued first.
     mockQuery.mockResolvedValueOnce({ rows: [{ total: '1' }] })
     const liveBody = await listReceipts('agent-1', 25)
-    const live = liveBody.receipts[0] as { parties: { delegate_account: string | null } }
+    const live = liveBody!.receipts[0] as { parties: { delegate_account: string | null } }
     expect(live.parties.delegate_account).toBe(authorizeTimeDelegator)
   })
 

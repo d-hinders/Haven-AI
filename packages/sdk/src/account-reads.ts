@@ -53,14 +53,6 @@ function deriveReadiness(
 }
 
 /**
- * Internal read-only account boundary for HavenClient.
- *
- * It owns authenticated account/allowance/receipt reads and intentionally has
- * no signer, merchant delivery, or payment-state mutation capability. Exported
- * from this module for direct tests and composition only; it is not exported by
- * the SDK entrypoint.
- */
-/**
  * #3128: the ONE function behind every `remainingDisplay` the SDK emits —
  * `HavenAllowance.remainingDisplay` and the bootstrap summary's field are the
  * same call on the same inputs.
@@ -72,6 +64,14 @@ export function formatRemainingDisplay(tokenAddress: string, tokenSymbol: string
     : `${remainingAtomic} ${tokenSymbol} (atomic; unknown decimals)`
 }
 
+/**
+ * Internal read-only account boundary for HavenClient.
+ *
+ * It owns authenticated account/allowance/receipt reads and intentionally has
+ * no signer, merchant delivery, or payment-state mutation capability. Exported
+ * from this module for direct tests and composition only; it is not exported by
+ * the SDK entrypoint.
+ */
 export class AccountReads {
   private readonly transport: HavenApiTransport
   private readonly getPaymentStatus: PaymentStatusReader

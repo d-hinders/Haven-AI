@@ -22,6 +22,7 @@ import {
   insertResidueEvent,
   listEvidenceReceiptsForAgent,
   countEvidenceReceiptsForAgent,
+  receiptCursorResolvesForAgent,
   resolveReconciliationForPayment,
   upsertEvidenceBase,
   type IntentSettlementFields,
@@ -691,9 +692,12 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
  * attaches, synchronously with the settlement report), so a settled payment
  * without a receipt is a payment-status question, not a retry-later one.
  * `has_more` comes from fetching one row past the limit; `next_cursor` is
- * the last returned receipt's id, fed back as `cursor`.
+ * the last returned receipt's id, fed back as `cursor`. A cursor that names
+ * no receipt of this agent returns `null` (the route answers 400) rather
+ * than an empty page beside a non-zero total.
  */
 export async function listReceipts(agentId: string, limit: number, cursor: string | null = null) {
+  if (cursor !== null && !(await receiptCursorResolvesForAgent(agentId, cursor))) return null
   const [rows, total] = await Promise.all([
     listEvidenceReceiptsForAgent<MachinePaymentEvidenceRow>(agentId, limit + 1, cursor),
     countEvidenceReceiptsForAgent(agentId),

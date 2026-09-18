@@ -136,7 +136,7 @@ const spec = openapiSpec as unknown as {
  * `merchants.ts`) uses a `$ref`'d parameter, so no route that refuses today
  * changes its answer — pinned by `resolves $ref'd parameters` below.
  */
-function resolveParameter(parameter: Json): Json | undefined {
+export function resolveParameter(parameter: Json): Json | undefined {
   const ref = parameter.$ref
   if (typeof ref !== 'string') return parameter
   const name = ref.replace('#/components/parameters/', '')

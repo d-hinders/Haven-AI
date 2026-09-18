@@ -72,14 +72,16 @@ and the `release` skill.
 > mount prefix. The accepted values, the default, the restart semantics and the
 > variable's irrelevance to package selection are all untouched, so **nothing in
 > this document was made false or stale by that edit** — step 5's claim was
-> re-read against the merged tree and holds.
+> re-read against the merged tree and holds. `last-verified` is deliberately
+> NOT bumped: the re-read confirmed the existing claims rather than adding or
+> changing one, and a date moved for that is a rubber stamp the staleness audit
+> would then rank on.
 
 > **Re-verification (#3082, request-validation body restore, 2026-09-17):** this
 > doc is coupled because `packages/backend/src/config.ts` is in its `covers:` and
 > that file was edited. Only a JSDoc block and the boot-refusal error string
 > changed, both describing `HAVEN_REQUEST_VALIDATION`: `off` does not disable an
-> `enforcedPrefixes` module (re-keyed to `enforcedModules` by #3135), and
-> shadow's "changes nothing" was true of the
+> `enforcedPrefixes` module, and shadow's "changes nothing" was true of the
 > handler's view only after #3082 restored the request body. No parse shape, no
 > default, no accepted value and no restart semantics moved.
 > **Nothing in this document was made false or stale by that edit.** Its own

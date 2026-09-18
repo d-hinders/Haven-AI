@@ -402,12 +402,13 @@ jobs:
         # SHADOWED by the request-validation plugin and how many hand-rolled
         # `typeof` request guards remain. Slices 2-4 enforce modules and delete
         # ladders, so the baseline only ever shrinks; removing the proof
-        # module's enforcedPrefixes wiring re-enters it in shadow and reddens
+        # module's enforcedModules wiring re-enters it in shadow and reddens
         # this gate. Self-tested for the same reason as lint:deps above — the
         # self-test SPAWNS the CLI (#2720's rule).
         run: |
           npm run lint:request-schemas
           npm run lint:request-schemas:test
+          npm run check:route-modules
 
       - name: DB schema smoke (migrations + money-path query PREPARE, #773)
         # Applies every migration to the real Postgres service, then PREPAREs the

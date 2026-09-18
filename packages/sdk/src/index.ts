@@ -127,6 +127,7 @@ export type {
   HavenAllowanceSummary,
   PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
+  HavenPaymentReceiptsPage,
   SweepResult,
   SweepEntry,
   SweepConfirmation,

@@ -106,11 +106,11 @@ export const toolDescriptions = {
   },
   getAgent: {
     summary:
-      'Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, spend_authority_readiness, and per-token remaining allowance (atomic + human-readable). The recommended first call in a new session to confirm who you are and whether Haven will let you spend right now.',
+      'Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, spend_authority_readiness, per-token remaining allowance (atomic + human-readable). The recommended first call in a new session.',
     selectionGuidance:
-      'Use this as the one-shot orientation/bootstrap at the start of a session, or whenever you need to confirm identity together with whether the agent can spend right now. For a detailed per-token breakdown (configured vs spent vs reset window) use haven_get_allowances.',
+      'Use this as the session bootstrap, or to confirm identity together with whether the agent can spend right now. For per-token detail (configured vs spent vs reset window) use haven_get_allowances.',
     behavior:
-      'Reads identity plus the live spend-authority snapshot in one shot — the agent\'s active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves: there is no approval queue, so ask the owner to grant or raise the budget in Haven rather than waiting for an approval. allowances[] carries remainingAtomic and remainingDisplay per token. Identity fields: id, name, status, accountAddress, delegateAddress, chainId.',
+      'Reads identity plus the live spend-authority snapshot — the active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves; there is no approval queue — ask the owner to grant or raise the budget in Haven. allowances[] carries id, tokenAddress, remainingAtomic, remainingDisplay per token. Identity fields: id, name, status, accountAddress, delegateAddress, chainId.',
     nextActionGuidance: '',
   },
   getAllowances: {
@@ -119,16 +119,16 @@ export const toolDescriptions = {
     selectionGuidance:
       'Use this when the user asks about allowance, budget, spend limit, remaining amount, remaining allowance, remaining budget, daily limit, reset period, what can I spend, or what the agent can still spend.',
     behavior:
-      'Returns the per-token spend authority for the account: the active budget delegation (remaining = the period budget, which re-arms natively at the period boundary). An over-budget payment is declined before any money moves; nothing queues. Configured amounts from Haven are returned alongside.',
+      'Returns the per-token spend authority for the account: the active budget delegation (remaining = the period budget, which re-arms natively at the period boundary), each with id, onchain.remaining, remainingDisplay. An over-budget payment is declined before any money moves; nothing queues. Configured amounts from Haven are returned alongside.',
     nextActionGuidance: '',
   },
   listReceipts: {
     summary:
-      'List recent machine-payment receipts.',
+      'List machine-payment receipts, newest first, by page.',
     selectionGuidance:
       'For transaction history or payment evidence; use the allowance tool instead for remaining allowance or what-can-I-spend questions.',
     behavior:
-      "parties.treasuryAccount is Haven's authoritative payer. protocolReceiptPayload is the merchant's PAYMENT-RESPONSE, relayed verbatim: merchant-controlled, unverified, not Haven's record; payer may differ from payerAddress. Proof header values are omitted.",
+      "Page: { receipts, total, hasMore, nextCursor }; total 0 = none exist (no indexing delay); hasMore = cut at limit, send nextCursor as cursor. parties.treasuryAccount is Haven's authoritative payer. protocolReceiptPayload is the merchant's PAYMENT-RESPONSE, relayed verbatim: merchant-controlled, unverified, not Haven's record; payer may differ from payerAddress. Proof header values are omitted.",
     nextActionGuidance: '',
   },
   verifyReceipt: {

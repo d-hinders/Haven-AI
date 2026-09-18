@@ -12,6 +12,7 @@ import type {
   RawHavenAgent,
   RawHavenAllowanceSummary,
   RawHavenPaymentReceiptsResponse,
+  HavenPaymentReceiptsPage,
 } from './types.js'
 import { AgentPaymentWarningCode } from './types.js'
 import { HavenApiTransport } from './haven-api-transport.js'
@@ -52,6 +53,18 @@ function deriveReadiness(
 }
 
 /**
+ * #3128: the ONE function behind every `remainingDisplay` the SDK emits —
+ * `HavenAllowance.remainingDisplay` and the bootstrap summary's field are the
+ * same call on the same inputs.
+ */
+export function formatRemainingDisplay(tokenAddress: string, tokenSymbol: string, remainingAtomic: string): string {
+  const token = resolveTokenFromAddress(tokenAddress)
+  return token
+    ? `${formatAtomicAmount(safeBigInt(remainingAtomic), token.decimals)} ${tokenSymbol}`
+    : `${remainingAtomic} ${tokenSymbol} (atomic; unknown decimals)`
+}
+
+/**
  * Internal read-only account boundary for HavenClient.
  *
  * It owns authenticated account/allowance/receipt reads and intentionally has
@@ -81,15 +94,16 @@ export class AccountReads {
 
   async getAgentSummary(): Promise<HavenAgentSummary> {
     const [agent, allowanceSummary] = await Promise.all([this.getAgent(), this.getAllowances()])
+    // #3128: every field here is the HavenAllowance's own (or, for the display
+    // string, derived by the same function `getAllowances` used), so the two
+    // reads cannot disagree for the same fixture.
     const allowances: HavenAgentAllowanceSummary[] = allowanceSummary.allowances.map((allowance) => {
-      const token = resolveTokenFromAddress(allowance.tokenAddress)
-      const remainingDisplay = token
-        ? `${formatAtomicAmount(safeBigInt(allowance.onchain.remaining), token.decimals)} ${allowance.tokenSymbol}`
-        : `${allowance.onchain.remaining} ${allowance.tokenSymbol} (atomic; unknown decimals)`
       return {
+        id: allowance.id,
         tokenSymbol: allowance.tokenSymbol,
+        tokenAddress: allowance.tokenAddress,
         remainingAtomic: allowance.onchain.remaining,
-        remainingDisplay,
+        remainingDisplay: allowance.remainingDisplay,
         configuredAmount: allowance.configuredAmount,
         resetPeriodMin: allowance.resetPeriodMin,
         isResetPending: allowance.onchain.isResetPending,
@@ -118,6 +132,7 @@ export class AccountReads {
         tokenSymbol: allowance.token_symbol,
         configuredAmount: allowance.configured_amount,
         resetPeriodMin: allowance.reset_period_min,
+        remainingDisplay: formatRemainingDisplay(allowance.token_address, allowance.token_symbol, allowance.onchain.remaining),
         onchain: {
           amount: allowance.onchain.amount,
           spent: allowance.onchain.spent,
@@ -191,10 +206,24 @@ export class AccountReads {
     }
   }
 
+  /** The first page's receipts as a bare array — the pre-#3128 shape, kept for callers that never page. */
   async listReceipts(options: { limit?: number } = {}): Promise<HavenPaymentReceipt[]> {
-    const query = options.limit ? `?limit=${encodeURIComponent(String(options.limit))}` : ''
+    return (await this.listReceiptsPage(options)).receipts
+  }
+
+  /** #3128: one page with `total`, `hasMore` and `nextCursor` — see {@link HavenPaymentReceiptsPage}. */
+  async listReceiptsPage(options: { limit?: number; cursor?: string } = {}): Promise<HavenPaymentReceiptsPage> {
+    const params = new URLSearchParams()
+    if (options.limit) params.set('limit', String(options.limit))
+    if (options.cursor) params.set('cursor', options.cursor)
+    const query = params.size > 0 ? `?${params.toString()}` : ''
     const raw = await this.transport.get<RawHavenPaymentReceiptsResponse>(`/machine-payments/receipts${query}`)
-    return raw.receipts.map(mapPaymentReceipt)
+    return {
+      receipts: raw.receipts.map(mapPaymentReceipt),
+      total: typeof raw.total === 'number' ? raw.total : null,
+      hasMore: typeof raw.has_more === 'boolean' ? raw.has_more : null,
+      nextCursor: typeof raw.next_cursor === 'string' ? raw.next_cursor : null,
+    }
   }
 
   async getReceipt(paymentId: string): Promise<{ receipt: PaymentReceipt; verification: ReceiptVerification }> {

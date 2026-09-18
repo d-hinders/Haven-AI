@@ -42,6 +42,7 @@ const boundary: ClientBoundary = {
     'getResumeState',
     'getX402MerchantCallContext',
     'listReceipts',
+    'listReceiptsPage', // #3128
     'pay',
     'payX402Quote',
     'prepareSweep',
@@ -85,6 +86,7 @@ const boundary: ClientBoundary = {
     "async getResumeState(paymentId: string): Promise<PaymentResumeState>",
     "async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext>",
     "async listReceipts(options: { limit?: number; } = {}): Promise<HavenPaymentReceipt[]>",
+    "async listReceiptsPage(options: { limit?: number; cursor?: string; } = {}): Promise<HavenPaymentReceiptsPage>",
     "async pay(request: PaymentRequest): Promise<PaymentResult>",
     "async payX402Quote(quote: X402Quote, options: X402AuthorizationOptions = {}): Promise<Response>",
     "async precheckBudget(input: { chainId?: number; token: string; amountAtomic: string; merchantTo?: string; resourceUrl?: string; }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean; }>",
@@ -560,6 +562,7 @@ describe('HavenClient structural boundary', () => {
       'HavenCatalogSubmission',
       'HavenClientConfig',
       'HavenPaymentReceipt',
+      'HavenPaymentReceiptsPage', // #3128
       'MachinePaymentRail',
       'NextStep', // #3101
       'NextStepArguments', // #3101

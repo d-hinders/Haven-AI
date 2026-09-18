@@ -2281,7 +2281,10 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** List stored machine-payment receipts for the authenticated agent. */
+        /**
+         * List stored machine-payment receipts for the authenticated agent.
+         * @description #3128: a page, newest first. `total` is how many receipts Haven holds for the agent, so an empty `receipts` with `total: 0` means none exist — there is no indexing delay behind this list. `has_more` says the page was cut at `limit`; pass `next_cursor` back as `cursor` for the next page.
+         */
         get: operations["listMachinePaymentReceipts"];
         put?: never;
         post?: never;
@@ -14491,6 +14494,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                /** @description The `next_cursor` of the previous page (a receipt id). Omit for the first page. A value that is not a uuid, or that names no receipt of this agent, is refused with 400. */
+                cursor?: string;
             };
             header?: never;
             path?: never;
@@ -14498,7 +14503,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Machine-payment receipts. */
+            /** @description One page of machine-payment receipts. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14506,6 +14511,27 @@ export interface operations {
                 content: {
                     "application/json": {
                         receipts: components["schemas"]["MachinePaymentReceipt"][];
+                        /** @description Receipts Haven holds for this agent, across all pages. */
+                        total: number;
+                        /** @description True when receipts beyond this page exist. */
+                        has_more: boolean;
+                        /** @description Pass as `cursor` for the next page; null on the last page. */
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };

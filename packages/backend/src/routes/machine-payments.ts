@@ -39,6 +39,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
+/** #3128: a receipts cursor is a receipt id (uuid). */
+const RECEIPT_CURSOR_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export default async function machinePaymentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', agentAuthMiddleware)
 
@@ -85,15 +88,24 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     return reply.code(result.statusCode).send(result.body)
   })
 
-  app.get<{ Querystring: { limit?: string } }>('/receipts', async (request, reply) => {
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>('/receipts', async (request, reply) => {
     const agent = request.agent as AgentContext
     const parsedLimit = request.query.limit ? Number(request.query.limit) : 25
     const limit = Number.isInteger(parsedLimit)
       ? Math.min(Math.max(parsedLimit, 1), 100)
       : 25
+    // #3128: the cursor is a receipt id from a previous page. Anything else
+    // is refused up front rather than reaching the uuid cast in the query.
+    const cursor = request.query.cursor ?? null
+    if (cursor !== null && !RECEIPT_CURSOR_PATTERN.test(cursor)) {
+      return reply.code(400).send({ error: 'cursor must be the id of a receipt returned by a previous page (next_cursor).' })
+    }
 
-    const receipts = await listReceipts(agent.id, limit)
-    return reply.send({ receipts })
+    const page = await listReceipts(agent.id, limit, cursor)
+    if (page === null) {
+      return reply.code(400).send({ error: 'cursor does not name a receipt of this agent — pass the next_cursor of a previous page.' })
+    }
+    return reply.send(page)
   })
 
   app.get<{ Params: { id: string } }>('/:id/status', async (request, reply) => {

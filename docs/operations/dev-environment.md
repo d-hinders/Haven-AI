@@ -349,8 +349,8 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > the plugin's `onRoute` wiring in
   > `packages/backend/src/openapi/request-validation.ts` (enforcement is
   > prefix-determined and mode-independent), the `/merchants` path items in
-  > `packages/backend/src/openapi/spec.ts`, and the read-only GET
-  > registrations in `packages/backend/src/routes/merchants.ts`.
+  > the OpenAPI spec, and the read-only GET registrations in the
+  > `/merchants` route module.
 
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 

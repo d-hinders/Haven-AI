@@ -13,7 +13,8 @@
  *    `smart_accounts(id)` — the post-084 account vocabulary;
  *  - the `reason` CHECK is the closed FIVE-value set with
  *    `recipient_not_allowed` ABSENT (no writer emits it);
- *  - the `source` CHECK is the closed three-value set;
+ *  - the `source` CHECK is the closed set, widened with `'hosted_prepare'`
+ *    by migration 087 (#3054);
  *  - `detail` is a JSONB ALLOWLIST: every allowed key survives, ANY extra
  *    key is a constraint violation (23514) at write time;
  *  - `down()` reverses exactly and `up()` round-trips to the head shape.
@@ -248,8 +249,12 @@ describeDb('migration 086: payment_refusals ledger (#2945)', () => {
     await expect(insertRefusal({ reason: 'insufficient_funds' })).rejects.toMatchObject({ code: '23514' })
   })
 
-  it('the source CHECK accepts exactly the three writers and rejects the rest', async () => {
-    for (const source of ['x402_authorize', 'payment', 'redeem']) {
+  // Widened by migration 087 (#3054): 'hosted_prepare' — the hosted
+  // prepare budget refusal, decided server-side by the budget-precheck
+  // route. The 087 file owns the widening's own proof; this pin stays the
+  // 086-side census of the writers.
+  it('the source CHECK accepts exactly the four writers and rejects the rest', async () => {
+    for (const source of ['x402_authorize', 'payment', 'redeem', 'hosted_prepare']) {
       await expect(insertRefusal({ source })).resolves.toBeUndefined()
     }
     await expect(insertRefusal({ source: 'settle' })).rejects.toMatchObject({ code: '23514' })

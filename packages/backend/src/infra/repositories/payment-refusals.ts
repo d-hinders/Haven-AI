@@ -33,8 +33,8 @@ export type PaymentRefusalReason =
   | 'relayer_budget'
   | 'onchain_revert'
 
-/** The closed `source` set — mirrors migration 086's CHECK exactly. */
-export type PaymentRefusalSource = 'x402_authorize' | 'payment' | 'redeem'
+/** The closed `source` set — mirrors migration 087's CHECK exactly. */
+export type PaymentRefusalSource = 'x402_authorize' | 'payment' | 'redeem' | 'hosted_prepare'
 
 /** The `detail` allowlist — mirrors migration 086's CHECK exactly. */
 export const REFUSAL_DETAIL_KEYS = [

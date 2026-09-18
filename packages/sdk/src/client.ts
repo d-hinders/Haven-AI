@@ -646,6 +646,45 @@ export class HavenClient {
   }
 
   /**
+   * `POST /machine-payments/budget-precheck` (#3054): ask Haven to decide —
+   * server-side — whether `amountAtomic` of `token` fits the agent's
+   * remaining delegation budget, the same compare the guided prepare used to
+   * run locally over its allowances read.
+   *
+   * On insufficiency Haven refuses (403, `delegation_budget_exceeded`) and
+   * the refusal reaches the `payment_refusals` ledger with
+   * `source: 'hosted_prepare'` — the point of the endpoint. This method
+   * surfaces that decision as a thrown {@link HavenApiError}; it does NOT
+   * swallow it, because swallowing would turn a decided refusal into the
+   * degrade-to-warning path and the ledger row would still land while the
+   * purchase proceeded.
+   *
+   * camelCase body like the route family; the response mirrors the wire
+   * (`sufficient`, `remaining_atomic`). `resourceUrl` is the merchant
+   * resource being bought — the ledger dedupe window's discriminating
+   * column — never this request's own URL.
+   */
+  async precheckBudget(input: {
+    chainId?: number
+    token: string
+    amountAtomic: string
+    merchantTo?: string
+    resourceUrl?: string
+  }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean }> {
+    return this.post<{
+      sufficient: boolean
+      remaining_atomic: string
+      remaining_is_from_chain?: boolean
+    }>('/machine-payments/budget-precheck', {
+      chainId: input.chainId,
+      token: input.token,
+      amountAtomic: input.amountAtomic,
+      ...(input.merchantTo !== undefined ? { merchantTo: input.merchantTo } : {}),
+      ...(input.resourceUrl !== undefined ? { resourceUrl: input.resourceUrl } : {}),
+    })
+  }
+
+  /**
    * Post-purchase allowance/budget summary for a settled payment (#1310).
    *
    * Reuses the EXACT rail-aware read path {@link getAllowances} / #1306's

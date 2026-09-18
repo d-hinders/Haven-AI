@@ -85,6 +85,7 @@ import * as dropDeadSafeRailTables from './083_drop_dead_safe_rail_tables.js'
 import * as renameUserSafesToSmartAccounts from './084_rename_user_safes_to_smart_accounts.js'
 import * as accountTypeLegacySafe from './085_account_type_legacy_safe.js'
 import * as paymentRefusals from './086_payment_refusals.js'
+import * as paymentRefusalsSourceHosted from './087_payment_refusals_source_hosted.js'
 import * as merchants from './088_merchants.js'
 import * as marketplaceProspects from './089_marketplace_prospects.js'
 
@@ -231,6 +232,7 @@ export const migrations: Migration[] = [
   renameUserSafesToSmartAccounts,
   accountTypeLegacySafe,
   paymentRefusals,
+  paymentRefusalsSourceHosted,
   merchants,
   marketplaceProspects,
 ]

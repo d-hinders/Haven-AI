@@ -7,6 +7,8 @@ import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   handleGetAllowances,
+  handleBudgetPrecheck,
+  budgetPrecheckBodyError,
   handleReconciliationEvent,
   handleSend,
   attachEvidenceHandler,
@@ -18,6 +20,7 @@ import {
   RECONCILIATION_EVENT_TYPES,
   SUPPORTED_ASSETS,
   type AuthorizeBody,
+  type BudgetPrecheckBody,
   type EvidenceBody,
   type ReconciliationEventBody,
   type SendAsset,
@@ -273,6 +276,32 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     )
     return reply.code(result.statusCode).send(result.body)
   })
+
+  // ── POST /budget-precheck — server-side budget gate for the hosted prepare ─
+  // #3054: the guided purchase's over-budget refusal is DECIDED here so it
+  // reaches the payment_refusals ledger (source hosted_prepare). Same
+  // posture as every writer: the row is recorded through refuse() only —
+  // never agent-asserted — and a fire-and-forget write can never change the
+  // decided response.
+  app.post<{ Body: BudgetPrecheckBody }>(
+    '/budget-precheck',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      // #3054 body guards relocated verbatim to the mpp module
+      // (budgetPrecheckBodyError) so the #3029 request-schemas ratchet keeps
+      // its shrink-only baseline for this file — checks and 400 bodies
+      // unchanged.
+      const body = (request.body ?? {}) as BudgetPrecheckBody
+      const bodyError = budgetPrecheckBodyError(body)
+      if (bodyError) {
+        return reply.code(400).send(bodyError)
+      }
+
+      const result = await handleBudgetPrecheck(agent, body)
+      return reply.code(result.statusCode).send(result.body)
+    },
+  )
 
   // ── POST /sweep/prepare — build a gasless USDC sweep authorization ──────────
   app.post('/sweep/prepare', { config: moneyPathRateLimit }, async (request, reply) => {

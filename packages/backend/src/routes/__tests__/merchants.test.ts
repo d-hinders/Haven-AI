@@ -125,7 +125,7 @@ describeDb('merchants routes (#3078)', () => {
     // `/merchants` is born ENFORCED in `src/index.ts` (#3028 rollout): the
     // suite runs every case under enforcement so a spec/route mismatch on a
     // legitimate request would fail here, not on dev.
-    installRequestValidation(app, { mode: 'off', enforcedPrefixes: ['/merchants'] })
+    installRequestValidation(app, { mode: 'off', enforcedModules: ['routes/merchants.ts'] })
     await app.register(merchantRoutes, { prefix: '/merchants' })
     await app.register(catalogRoutes, { prefix: '/catalog' })
   })

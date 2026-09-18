@@ -12,7 +12,7 @@
  * BEHIND A MODE, shadow-first (owner decision #2, epic #3028):
  *
  *   off     — no schema is injected and no route is observed, EXCEPT a
- *             module in `enforcedPrefixes`, which stays enforced whatever
+ *             module in `enforcedModules`, which stays enforced whatever
  *             the mode is
  *   shadow  — every route's request is compiled against the spec; a refusal is
  *             logged once (`request_validation.would_refuse`) and counted, and
@@ -28,9 +28,29 @@
  *             `request_validation.would_coerce` rather than passing unseen.
  *   enforce — a refused request gets the 400 envelope instead of the route
  *
- * Per-module `enforcedPrefixes` flips a module regardless of the mode (the
+ * Per-module `enforcedModules` flips a module regardless of the mode (the
  * proof module rides this in slice 1); slices 2–4 flip the rest after their
  * shadow counters have been read on dev.
+ *
+ * ## Why the flip is keyed on the route FILE (#3135, epic #3028 decision 7)
+ *
+ * Slice 1 keyed it on the mount PREFIX, and a prefix cannot express the epic's
+ * slice partition. `/agents` is shared by `agents.ts`, `agent-delegations.ts`
+ * (slice 3), `agent-rekey.ts` and `agent-passports.ts` (slice 4), so flipping
+ * one of them flipped all four; and the root prefix `''` matched every module
+ * under the old `startsWith` test, so listing it would have enforced the whole
+ * server. The key is now `'routes/<file>.ts'` (and the bare `'index.ts'` for
+ * the two routes declared on the app itself), resolved per operation through
+ * `route-modules.generated.ts` — the table `route-inventory.ts` derives from
+ * the same `index.ts` registration table the server itself reads, and the same
+ * string `scripts/lint-request-schemas-baseline.json` keys its entries with,
+ * so the two instruments cannot drift into keying the rollout two ways.
+ *
+ * The table is GENERATED and committed rather than derived at boot because the
+ * derivation reads TypeScript source and the deployed image ships only
+ * `dist/*.js`: deriving at runtime would resolve nothing in production and
+ * silently un-enforce every flipped module. `npm run check:route-modules` and
+ * `__tests__/route-modules.generated.test.ts` both fail on a stale table.
  *
  * This is a VALIDATOR, nothing more (CASP, docs/regulatory/casp-risk-guardrails.md):
  * it reads shape, refuses or logs, and never authorizes or constructs spend
@@ -83,7 +103,8 @@
 import { isDeepStrictEqual } from 'node:util'
 import type { FastifyError, FastifyInstance, FastifyRequest, RouteOptions } from 'fastify'
 import { makeSpecAjv, REQUEST_AJV_OPTIONS, type ErrorObject } from './ajv.js'
-import { fastifyPathToOpenApi } from './route-inventory.js'
+import { fastifyPathToOpenApi, operationKey } from './route-inventory.js'
+import { ROUTE_MODULE_BY_OPERATION } from './route-modules.generated.js'
 import { openapiSpec } from './spec.js'
 import type { RequestValidationMode } from '../config.js'
 
@@ -92,22 +113,52 @@ type Json = Record<string, unknown>
 /** The spec object, typed loosely — it is a literal, not a generated model. */
 const spec = openapiSpec as unknown as {
   paths: Record<string, Record<string, Json>>
-  components: { schemas: Record<string, Json> }
+  components: { schemas: Record<string, Json>; parameters?: Record<string, Json> }
+}
+
+/**
+ * Resolve a `$ref` into `#/components/parameters`, or hand back a parameter
+ * that is already inline.
+ *
+ * Without this the resolver dropped every `$ref`'d parameter on the floor —
+ * `parameter.in` is `undefined` on a `$ref` node, so the `path`/`query` filter
+ * skipped it. That was **40 of the spec's 134 request parameters** at
+ * `b16be14`, and not a random 40: every `AgentId`, `PaymentId` and `SetupId`
+ * path parameter, i.e. the uuid path params on the agent, payment and setup
+ * routes — the exact #1464 malformed-uuid class epic #3028 cites as
+ * demonstrated cost, and the modules slices 3 and 4 flip.
+ *
+ * Found while re-keying the flip (#3135). It is fixed HERE rather than filed
+ * because slice #3030's whole deliverable is a shadow READING, and a reading
+ * taken through an instrument that silently skips 30% of the request
+ * parameters would record "no refusals" for routes it never checked. Blast
+ * radius is shadow-only: neither enforced module (`contacts.ts`,
+ * `merchants.ts`) uses a `$ref`'d parameter, so no route that refuses today
+ * changes its answer — pinned by `resolves $ref'd parameters` below.
+ */
+export function resolveParameter(parameter: Json): Json | undefined {
+  const ref = parameter.$ref
+  if (typeof ref !== 'string') return parameter
+  const name = ref.replace('#/components/parameters/', '')
+  return spec.components.parameters?.[name]
 }
 
 export interface RequestValidationOptions {
   /**
-   * Boot-read mode. `off` observes nothing OUTSIDE `enforcedPrefixes`, which
+   * Boot-read mode. `off` observes nothing OUTSIDE `enforcedModules`, which
    * stays enforced whatever the mode is; `shadow` logs and continues;
    * `enforce` refuses.
    */
   mode: RequestValidationMode
   /**
-   * Module mount prefixes flipped to enforce REGARDLESS of the mode (and
-   * regardless of `off`): the schema is injected and a refusal is the 400
-   * envelope. Slice 1 pins exactly one: the contacts proof module.
+   * Route FILES flipped to enforce REGARDLESS of the mode (and regardless of
+   * `off`): the schema is injected and a refusal is the 400 envelope. Keys are
+   * `'routes/<file>.ts'`, or the bare `'index.ts'` for the routes declared on
+   * the app itself — the same keys the ratchet baseline uses. Two modules
+   * sharing a mount prefix flip independently (header § *Why the flip is keyed
+   * on the route FILE*).
    */
-  enforcedPrefixes?: string[]
+  enforcedModules?: string[]
 }
 
 /** One would-be refusal, as the structured log line carries it. */
@@ -269,7 +320,7 @@ export function requestSchemaErrorFormatter(
  * The mode this route was registered under, read off the `config` the
  * `onRoute` hook set at registration. `undefined` for a route the plugin
  * never touched (schema-less, or mode `off` with no matching
- * `enforcedPrefixes` — an enforced prefix reports `'enforced'` even under
+ * `enforcedModules` — an enforced module reports `'enforced'` even under
  * `off`).
  */
 function routeMode(request: FastifyRequest): 'enforced' | 'shadow' | undefined {
@@ -313,8 +364,17 @@ interface RequestSchema {
  * an operation-level parameter of the same `name`+`in` overrides it, which is
  * OpenAPI's rule. `null` when the spec describes no request constraints for
  * the operation — the route stays untouched and the ratchet counts the file.
+ *
+ * `pathItemParameters` is an ARGUMENT, not a field written onto `operation`
+ * (#3135). Slice 1 handed them over by setting `operation.__pathItemParameters`
+ * and deleting it a line later — a write to the shared, served spec object,
+ * which `response-shape.ts:120` forbids for exactly the reason that a
+ * concurrent read of `/openapi.json` could observe the scratch field.
  */
-export function requestSchemaForOperation(operation: Json): RequestSchema | null {
+export function requestSchemaForOperation(
+  operation: Json,
+  pathItemParameters?: unknown,
+): RequestSchema | null {
   const schema: RequestSchema = {}
 
   const requestBody = operation.requestBody as Json | undefined
@@ -328,14 +388,16 @@ export function requestSchemaForOperation(operation: Json): RequestSchema | null
   const byLocation = new Map<string, Json>()
   const collect = (list: unknown) => {
     if (!Array.isArray(list)) return
-    for (const parameter of list as Json[]) {
-      if (!parameter || typeof parameter !== 'object') continue
+    for (const entry of list as Json[]) {
+      if (!entry || typeof entry !== 'object') continue
+      const parameter = resolveParameter(entry)
+      if (!parameter) continue // a $ref the spec does not define — nothing to compile
       const location = parameter.in
       if (location !== 'path' && location !== 'query') continue // headers out of scope
       byLocation.set(`${location} ${String(parameter.name)}`, parameter)
     }
   }
-  collect(operation.__pathItemParameters)
+  collect(pathItemParameters)
   collect(operation.parameters)
 
   const pathProperties: Record<string, Json> = {}
@@ -366,13 +428,44 @@ export function requestSchemaForOperation(operation: Json): RequestSchema | null
 }
 
 /**
- * True when the module mounted at `prefix` is flipped by `enforcedPrefixes`.
- * A listed prefix matches its own mount exactly (the module registration is
- * the unit — `catalogRoutes` and `catalogSubmissionRoutes` share `/catalog`
- * and flip together) and, defensively, anything mounted beneath it.
+ * The route FILE that declares `(method, openApiPath)`, or `undefined` for an
+ * operation the generated table does not know — a route added without
+ * regenerating it, which `check:route-modules` and the generated table's own
+ * test both redden on.
+ *
+ * For an ADDED route `undefined` is the safe direction: an unattributed route
+ * cannot be enforced, so it keeps shadow-logging rather than refusing traffic
+ * nobody flipped. It is NOT one-directional for a MOVED one — move an
+ * operation into a new file without regenerating and the stale table still
+ * answers the OLD file, so a route in a file nobody listed stays enforced
+ * until the table is regenerated. What bounds that is the staleness itself
+ * being gated: `check:route-modules` and the drift test both redden on it.
+ *
+ * One blind spot the table and the ratchet share, because both read the same
+ * source: a route registered with a NON-LITERAL path (`app.post(BULK_PATH, …)`)
+ * is invisible to `extractRoutes`, so it gets no table entry and can never be
+ * enforced even when its file IS listed — while `lint:request-schemas`
+ * short-circuits per FILE and would report that file enforced. None exists
+ * today (measured across every `routes/*.ts` and `index.ts`). Flipping a
+ * module in epic #3028 slices 3–4 should therefore assert the refusal per
+ * ROUTE, the way `routes/__tests__/contacts.test.ts` and
+ * `routes/__tests__/merchants.test.ts` do, and not per file.
  */
-export function prefixIsEnforced(prefix: string, enforcedPrefixes: readonly string[]): boolean {
-  return enforcedPrefixes.some((p) => prefix === p || prefix.startsWith(`${p}/`))
+export function routeModuleFor(method: string, openApiPath: string): string | undefined {
+  return ROUTE_MODULE_BY_OPERATION[operationKey(method, openApiPath)]
+}
+
+/**
+ * True when the file declaring this operation is flipped by `enforcedModules`.
+ * Exact match on the file key — no prefix or `startsWith` semantics, which is
+ * the whole point of the re-key (#3135): `'routes/agents.ts'` must not drag
+ * `agent-rekey.ts` along with it just because both mount at `/agents`.
+ */
+export function moduleIsEnforced(
+  module: string | undefined,
+  enforcedModules: readonly string[],
+): boolean {
+  return module !== undefined && enforcedModules.includes(module)
 }
 
 /**
@@ -385,7 +478,7 @@ export function prefixIsEnforced(prefix: string, enforcedPrefixes: readonly stri
  * production wiring.
  */
 export function installRequestValidation(app: FastifyInstance, options: RequestValidationOptions): void {
-  const { mode, enforcedPrefixes = [] } = options
+  const { mode, enforcedModules = [] } = options
   resetCounters(mode)
 
   // The request-side ajv — Fastify's request defaults, NO closeObjects (the
@@ -430,22 +523,31 @@ export function installRequestValidation(app: FastifyInstance, options: RequestV
 
     // `prefix` and `routePath` are set by fastify's own route() before onRoute
     // runs (lib/route.js) but are missing from its RouteOptions type.
+    //
+    // `routePath`, never `path`: fastify sets `path = prefix + path` BEFORE the
+    // onRoute hooks run (lib/route.js addNewRoute), so `path` would double the
+    // prefix, resolve zero operations and read a false zero. Measured again on
+    // fastify 5.8.5 for #3135: a route declared at `'/'` under a prefix arrives
+    // with `routePath === ''` (not `'/'`), which `fastifyPathToOpenApi` maps to
+    // the bare prefix — the spec key.
     const ro = routeOptions as RouteOptions & { prefix?: string; routePath?: string }
     const prefix = ro.prefix ?? ''
-    const enforced = prefixIsEnforced(prefix, enforcedPrefixes)
-    if (mode === 'off' && !enforced) return
-
     const openApiPath = fastifyPathToOpenApi(prefix, ro.routePath ?? routeOptions.url)
     const method = String(routeOptions.method).toLowerCase()
+
+    // The enforcement decision is keyed on the route FILE, so it has to be
+    // resolved BEFORE the `off` early-return — an enforced module stays
+    // enforced whatever the mode is.
+    const enforced = moduleIsEnforced(routeModuleFor(method, openApiPath), enforcedModules)
+    if (mode === 'off' && !enforced) return
+
     const pathItem = spec.paths[openApiPath]
     const operation = pathItem?.[method] as Json | undefined
-    if (!operation) return // no spec operation — no schema; the ratchet counts the file (#1443 covers spec-presence)
+    if (!operation) return // no spec operation — no schema; the ratchet counts the file under `unspecced` (#1443 covers spec-presence)
 
-    // Expose path-item parameters to the resolver (they live on the pathItem,
-    // one level above the operation).
-    operation.__pathItemParameters = pathItem.parameters
-    const requestSchema = requestSchemaForOperation(operation)
-    delete operation.__pathItemParameters
+    // Path-item parameters live one level above the operation and are passed
+    // as an ARGUMENT — nothing here writes to the served spec object (#3135).
+    const requestSchema = requestSchemaForOperation(operation, pathItem.parameters)
     if (!requestSchema) return
 
     routeOptions.schema = requestSchema as RouteOptions['schema']

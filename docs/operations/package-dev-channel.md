@@ -64,6 +64,19 @@ and the `release` skill.
 > note: `CONNECTOR_VERSION` and the channel constant's unchanged value — nothing
 > else in this document was re-verified.
 
+> **Re-verification (#3135, request-validation flip re-key, 2026-09-18):** this
+> doc is coupled again through the same `covers:` entry on
+> `packages/backend/src/config.ts`, and again only a JSDoc block and the
+> boot-refusal error string changed: the per-module override is now keyed on
+> the route FILE (`enforcedModules: ['routes/contacts.ts', …]`) rather than the
+> mount prefix. The accepted values, the default, the restart semantics and the
+> variable's irrelevance to package selection are all untouched, so **nothing in
+> this document was made false or stale by that edit** — step 5's claim was
+> re-read against the merged tree and holds. `last-verified` is deliberately
+> NOT bumped: the re-read confirmed the existing claims rather than adding or
+> changing one, and a date moved for that is a rubber stamp the staleness audit
+> would then rank on.
+
 > **Re-verification (#3082, request-validation body restore, 2026-09-17):** this
 > doc is coupled because `packages/backend/src/config.ts` is in its `covers:` and
 > that file was edited. Only a JSDoc block and the boot-refusal error string

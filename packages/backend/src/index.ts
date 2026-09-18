@@ -103,16 +103,21 @@ app.setErrorHandler(httpErrorHandler)
 // EVERY route's request is compiled against the OpenAPI spec from here down —
 // shadow mode logs would-be refusals and counts them (`request_validation` on
 // GET /health/ops) without changing any answer; the contacts proof module is
-// enforced via enforcedPrefixes, and so is /merchants (#3078): a module born
+// enforced via enforcedModules, and so is merchants.ts (#3078): a module born
 // after the rollout began is born enforced — read-only, one path parameter
-// with a slug pattern — rather than adding to the shadow residue. MUST sit after setErrorHandler (the enforced
+// with a slug pattern — rather than adding to the shadow residue.
+//
+// The list is keyed on the route FILE, not the mount prefix (#3135, epic #3028
+// decision 7): `/agents` is shared by four route files that epic #3028 splits
+// across slices 3 and 4, so a prefix key could not flip them independently.
+// MUST sit after setErrorHandler (the enforced
 // route handler delegates non-validation errors to it) and before the first
 // app.register — it is a root-scope install, not an encapsulated plugin, so
 // its onRoute/compiler/formatter are the ones every child module inherits
 // (spiked: an encapsulated plugin's onRoute sees no later routes).
 installRequestValidation(app, {
   mode: config.requestValidationMode,
-  enforcedPrefixes: ['/contacts', '/merchants'],
+  enforcedModules: ['routes/contacts.ts', 'routes/merchants.ts'],
 })
 
 // --- Process-level error handlers ---

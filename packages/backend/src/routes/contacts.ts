@@ -20,8 +20,8 @@ interface UpdateContactBody {
  * The request-validation PROOF MODULE (#3029, epic #3028 slice 1): the first
  * module enforced against the spec. Its request schemas — name `minLength: 1`,
  * the `address` pattern, the `id` uuid — arrive through the plugin registered
- * by the tests (`installRequestValidation(app, { mode, enforcedPrefixes:
- * ['/contacts'] })`), the same wiring `index.ts` uses; the shape refusals are
+ * by the tests (`installRequestValidation(app, { mode, enforcedModules:
+ * ['routes/contacts.ts'] })`), the same wiring `index.ts` uses; the shape refusals are
  * asserted per handler with `expectRejectsOffSpec`. The `typeof` ladders are
  * gone as of this slice; what remains is the semantic guard the spec does not
  * express in schema.

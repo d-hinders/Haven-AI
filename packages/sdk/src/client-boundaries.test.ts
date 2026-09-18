@@ -374,20 +374,6 @@ function validateBoundary(shape: ClientShape, contract: ClientBoundary): void {
 describe('HavenClient structural boundary', () => {
   it('pins the package runtime export surface', () => {
     expect(Object.keys(sdk).sort()).toEqual([
-      // #2523: the agent-onboarding guidance. These eight sentences (#2528
-      // added the wiring-collision relay) are the
-      // rules the backend's setup prompt states to an agent AND the ones the
-      // `/for-agents.md` runbook repeats; exported so both read one string
-      // rather than two copies that can disagree in front of an agent.
-      // #2533 adds a ninth member of the same family for a different audience:
-      // AGENT_README_SECTION_MD is not a rule stated TO a connected agent but
-      // the entry that redirects one which has no account yet, carried
-      // verbatim by all five published READMEs and the repo README.
-      // #2535 adds AGENT_ONBOARDING_PROMPT: not a sentence but a whole prompt,
-      // and a THIRD audience again — the signed-in user's agent, before any
-      // setup exists. It reuses two of the sentences above verbatim rather than
-      // restating them, which is why it belongs in this family and not beside
-      // the runbook: same rules, different reader, one source.
       'AGENT_APPROVAL_RELAY_JSON_SENTENCE',
       'AGENT_APPROVAL_RELAY_PROSE_SENTENCE',
       'AGENT_COMMAND_MODIFICATION_SENTENCE',
@@ -416,9 +402,6 @@ describe('HavenClient structural boundary', () => {
       'AgentPaymentRailSchema',
       'AgentPaymentWarningCode',
       'CONNECTOR_PACKAGE_NAME',
-      // #1756: the ONE confirmation deadline the payment poller and the
-      // delegate sweep share. Public so a consumer reading `unconfirmed` can
-      // see how long the SDK waited before saying so.
       'DEFAULT_CONFIRMATION_TIMEOUT_MS',
       'DISCOVERY_MAX_BYTES',
       'ERC7710_ASSET_TRANSFER_METHOD',
@@ -430,11 +413,13 @@ describe('HavenClient structural boundary', () => {
       'HavenApiError',
       'HavenClient',
       'HavenError',
+      'HavenInsecureRetryTargetError', // #3097
       'HavenPaymentStateError',
       'HavenSigningError',
       'HavenTimeoutError',
       'HavenUnsupportedSignerVersionError',
       'HavenZeroSettlementHashError',
+      'INSECURE_RETRY_TARGET_CODE', // #3097
       'MERCHANT_DISCOVERY_PATHS',
       'MerchantTimeoutError',
       'RECEIPT_VERSION',
@@ -457,6 +442,7 @@ describe('HavenClient structural boundary', () => {
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
       'addressFromKey',
+      'assertSecureX402RetryTarget', // #3097
       'buildSweepAuthorizationMessage',
       'buildSweepTypedData',
       'buildX402ExpectedMessage',
@@ -473,6 +459,7 @@ describe('HavenClient structural boundary', () => {
       'havenTools',
       'isConnectorChannel',
       'isErc7710Option',
+      'isSecureX402RetryTarget', // #3097
       'isSupportedNodeVersion',
       'isSweepableChain',
       'isZeroSettlementTxHash', // #2970
@@ -482,6 +469,7 @@ describe('HavenClient structural boundary', () => {
       'readX402ReceiptPayer',
       'resolveConnectorChannel',
       'resolveTokenFromAddress',
+      'resolveX402RetryTarget', // #3097
       'sameUrl',
       'selectErc7710PaymentOption',
       'selectPaymentOption',
@@ -501,9 +489,6 @@ describe('HavenClient structural boundary', () => {
       'x402AssetTransferMethod',
       'x402AuthorizationAmount',
       'x402FacilitatorAddresses',
-      // #2361: the shared v2 payment envelope (resource/extensions echoes) —
-      // exported so the edge signer builds the same envelope as the SDK's
-      // own funding leg instead of a drifting copy.
       'x402V2PaymentEnvelope',
     ])
   })
@@ -594,6 +579,7 @@ describe('HavenClient structural boundary', () => {
       'X402Receipt',
       'X402RequestSnapshot',
       'X402ResumeState',
+      'X402RetryTarget', // #3097
       'X402SchemeSelection',
     ])
   })

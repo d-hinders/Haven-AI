@@ -486,6 +486,8 @@ export interface X402Quote {
   request: X402RequestSnapshot
   mcpTransport?: X402McpTransport
   resourceUrl: string
+  /** #3097: `resourceUrl` (the merchant's declaration) is not `request.url` (what was quoted). */
+  resourceUrlDiffersFromRequest: boolean
   description: string | null
   mimeType: string | null
   amountAtomic: string

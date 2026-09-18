@@ -2036,3 +2036,16 @@ what each server's instructions say and why they differ in length.
   informational, and nothing is deleted for you. Do not paste
   signer files, pending-rekey files, wrapper sidecars, or command output into
   public issues without redacting secrets.
+
+> **Re-verification (#3097, the paid retry's target, 2026-09-18):** this diff
+> touches `packages/mcp-server/src/tools/{plain-http-x402,contracts}.ts` and `packages/sdk/src/{types,x402-protocol,mcp-merchant-transport,index}.ts`, in this document's coverage
+> list. Both surfaces keep their contracts; what is new is an optional `url` on
+> `haven_pay_x402_quote` / `haven_resume_x402_payment` (the URL the agent
+> quoted), `request_url` / `retry_url` / `resource_url_differs_from_request` on
+> the quote, `retry_url` on pay and resume, and the `INSECURE_RETRY_TARGET`
+> refusal of a public `http://` retry target — the same rule on the SDK's
+> `MerchantTransport.deliverPayment` seam, which the local runtime crosses. The
+> local/hosted divergence this document describes is unchanged: the local
+> runtime always retried the caller's URL; the hosted surface now carries it.
+> Scope of this note: those fields and that refusal. Nothing else in this
+> document was re-verified.

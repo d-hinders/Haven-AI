@@ -291,6 +291,13 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     body: z.string().optional(),
   },
   haven_pay_x402_quote: {
+    // #3097: the URL the agent QUOTED — where the paid retry goes. The
+    // merchant's `payment_required.resource.url` is its declaration about
+    // itself, not the retry target: a challenge may declare `http://` for a
+    // resource served over https (the Ampersend sandbox does), and a public
+    // http:// retry target is refused. haven_quote_x402 returns this as
+    // `request_url`; pass it back verbatim.
+    url: z.string().url().optional(),
     // The parsed HTTP 402 PaymentRequired the agent received from the merchant
     // (or the paymentRequired field from a haven_quote_x402 result).
     // Validated downstream by the SDK; typed as an object (not z.unknown()) so
@@ -319,6 +326,8 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_resume_x402_payment: {
     payment_id: z.string().optional(),
     resume_state: z.record(z.string(), z.unknown()).optional(),
+    // #3097: same as haven_pay_x402_quote — the https URL originally quoted.
+    url: z.string().url().optional(),
   },
   haven_report_x402_outcome: {
     // #2292: the plain-HTTP twin of haven_complete_mcp_tool's bookkeeping —
@@ -957,7 +966,7 @@ const RESUME_X402_DESCRIPTION = [
   'Returns { payment_id, payment_required, x402 } in the haven_pay_x402_quote shape. Then call',
   'haven_sign_x402 with this payment_id — the funding leg is already spent, so this signs nothing',
   'new on-chain and its signature must not be re-submitted. Take payment_header from ITS result',
-  'and retry the original resource_url with it. Do NOT pass its x402_binding to',
+  'and retry x402.retry_url with it. Do NOT pass its x402_binding to',
   'haven_x402_sign_header: that binding is already spent, and the call can only refuse.',
   // #2292: same obligation as the first-attempt path — a resumed retry Haven did not make is
   // just as unobservable as the original one.

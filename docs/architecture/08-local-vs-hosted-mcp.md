@@ -437,3 +437,28 @@ since #1984 — are unaffected, hosted and local alike.
 > key, cap, funding, signing or settlement decision changes; the local
 > runtime is untouched (slice #3103). Scope of this note: those fields.
 > Nothing else in this document was re-verified.
+
+> **Re-verification (#3103, the signer and the local runtime name a next tool,
+> 2026-09-18):** this diff adds `packages/signer/src/next-step.ts` (the signer's
+> declared hosted handoff shapes — `haven_get_payment_status { payment_id }` —
+> and its refusal-side builder over the SDK's) and touches
+> `packages/signer/src/{sign-context,tools,index}.ts` and `packages/mcp/src/tools.ts`.
+> The signer's five decision sites now carry a typed step beside `next_action`:
+> a backend refusal of the signing context (not expired) names the hosted
+> status read with the payment id through the role fields
+> (`next_tool_server_role: hosted`, `next_tool_name`), so a `--name <slug>`
+> install resolves it; a transport failure, a malformed body, an expired window
+> and a version skew name no tool and say why (`next_tool_omitted_reason`).
+> `HavenSignContextError` gains the optional `next_tool*` fields additively;
+> no signing decision, expected-context version or binding version changes.
+> The local runtime's failure envelope dual-emits `nextAction` and
+> `next_action` (decision 10, one release before the old spelling is dropped;
+> this supersedes the #2983 note's "its failure shape is camelCase") and its
+> two decision sites — the ones the signer's symmetric grep returns
+> (`nextAction: …` or `nextAction = …`): the `MERCHANT_NOT_READY` envelope
+> and the `UNKNOWN_ERROR` fallback — say why no tool follows.
+> Every field the refusals emitted before is byte-identical, pinned by
+> `next-step-characterization.test.ts` in each package (written before the
+> change). The hosted server's suite pins the signer's declared shapes to the
+> hosted schemas. Scope of this note: those fields. Nothing else in this
+> document was re-verified.

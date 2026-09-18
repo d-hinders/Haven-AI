@@ -103,6 +103,9 @@ export function signerInstructions(): string {
     '',
     'A version-mismatch refusal from haven_sign / haven_sign_x402 / haven_sign_sweep_delegate is',
     'machine-readable, not just prose: it carries code, supported_versions, received_version, and',
-    'fallback fields alongside the message, so you can branch on it directly.',
+    'fallback fields alongside the message, so you can branch on it directly. Every signer',
+    'refusal also carries the next-step family: next_tool_name + next_tool_server_role when a',
+    'hosted tool follows (resolve the role against your own server names), else',
+    'next_tool_omitted_reason saying why not.',
   ].join('\n')
 }

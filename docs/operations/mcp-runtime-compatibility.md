@@ -62,6 +62,34 @@ last-verified: "2026-09-18"
 > doc-comment-only (`HavenPaymentReceipt.protocolReceiptPayload`), no wire
 > shape change. Nothing else in this document was re-verified in this pass.
 >
+> **Recent re-verification (#3128):** `haven_list_receipts` is RE-SHAPED on
+> both runtimes — the one deliberate non-additive change on this surface
+> since #2330. Its schema gains an optional `cursor` (the previous page's
+> `next_cursor`, a receipt id) beside `limit`, and its result is the page
+> object `{ receipts, total, hasMore, nextCursor }` instead of the bare
+> receipts array: `total` is how many receipts Haven holds for the agent
+> (`0` = none exist; there is no indexing delay behind this list), `hasMore`
+> says the page was cut at `limit`, and `nextCursor` is fed back as `cursor`.
+> Both runtimes call the SDK's new `listReceiptsPage()`; the SDK's
+> `listReceipts()` keeps returning the array, and the HTTP envelope
+> (`GET /machine-payments/receipts`) is additive (`total`, `has_more`,
+> `next_cursor` beside the unchanged `receipts`), so the qa-agent's and any
+> SDK caller's reads are untouched. Skew: an older `@haven_ai/mcp` bundles an
+> older `@haven_ai/sdk` and keeps serving the array with `limit` only; the
+> hosted server serves the page from its deploy onward; against a backend
+> older than #3128 the SDK maps the three page fields to `null` ("unknown"),
+> never a fabricated `0` / `false`. The strict/permissive split, the tool-NAME
+> set and the consent hash do not move (the hash covers identity, tool names
+> and allowances, not schemas — `packages/mcp/src/consent.ts:81-103`). The
+> two allowance reads are reconciled additively: `HavenAllowance` gains
+> `remainingDisplay` (derived client-side by the same function the bootstrap
+> summary uses) and `HavenAgentAllowanceSummary` gains `id` and
+> `tokenAddress`, pinned field for field on one fixture. The shared
+> description fragments (`listReceipts`, `getAgent`, `getAllowances`) were
+> re-cut under the #1591 mean cap (873.52 ≤ 874 bytes at the delivered
+> head) — the `getAgent` prose lost phrasing, not guidance. Nothing else in
+> this document was re-verified in this pass.
+>
 > **Recent re-verification (#3054):** the hosted guided prepare's over-budget
 > compare moved server-side. `haven_prepare_catalog_purchase`'s step 6 no
 > longer reads `GET /machine-payments/allowances` and compares locally; it

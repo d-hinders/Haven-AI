@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+- #3128: `listReceiptsPage({ limit, cursor })` returns `{ receipts, total, hasMore, nextCursor }` (the three page fields are `null` against a backend older than #3128); `listReceipts()` keeps returning the first page's array. `HavenAllowance.remainingDisplay` (derived client-side) and `HavenAgentAllowanceSummary.id` / `.tokenAddress` added, so the compact and detailed allowance reads agree field for field. `haven_list_receipts` on both MCP runtimes accepts `cursor` and returns the page object instead of a bare array.
+
 ## 0.3.0-alpha.0 — 2026-09-17
 
 ### Removed

@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+- #3128: `haven_list_receipts` accepts `cursor` and returns `{ receipts, total, hasMore, nextCursor }` instead of a bare array (via the SDK's `listReceiptsPage`).
+
 - **Failure envelope: `next_action` added, `nextAction` deprecated (#3103,
   epic #3105 decision 10).** Every `{ success: false }` result now carries
   `next_action` with the same value as `nextAction`; `nextAction` is kept for

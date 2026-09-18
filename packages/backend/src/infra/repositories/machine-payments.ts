@@ -379,6 +379,12 @@ export async function attachEvidenceProof<R extends QueryRow>(
 // the delegate that PAID this intent and its erc7710 delegate account,
 // captured at authorize time — NOT `agents.delegate_address`, which rotates
 // on rekey and would silently repaint a historical receipt's payer.
+// #3128: keyset paging on (created_at, id) — the pair the agent index
+// already orders by — with the cursor being the LAST receipt id the caller
+// saw. A cursor that names another agent's receipt (or no receipt) resolves
+// to NULL in the subquery, and `(row) < NULL` is never true: the page is
+// empty rather than another agent's history. `$3::uuid IS NULL` is the
+// first page.
 export const LIST_EVIDENCE_RECEIPTS_SQL = `SELECT e.*, pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
               pi.machine_metadata->>'delegate_account_address' AS intent_delegate_account_address,
               pi.budget_delegation_hash,
@@ -386,16 +392,28 @@ export const LIST_EVIDENCE_RECEIPTS_SQL = `SELECT e.*, pi.machine_metadata->>'se
        FROM machine_payment_evidence e
        LEFT JOIN payment_intents pi ON pi.id = e.payment_intent_id
        WHERE e.agent_id = $1
-       ORDER BY e.created_at DESC
+         AND ($3::uuid IS NULL OR (e.created_at, e.id) < (
+           SELECT c.created_at, c.id FROM machine_payment_evidence c WHERE c.id = $3::uuid AND c.agent_id = $1
+         ))
+       ORDER BY e.created_at DESC, e.id DESC
        LIMIT $2`
+
+export const COUNT_EVIDENCE_RECEIPTS_SQL = `SELECT COUNT(*)::text AS total FROM machine_payment_evidence WHERE agent_id = $1`
 
 export async function listEvidenceReceiptsForAgent<R extends QueryRow>(
   agentId: string,
   limit: number,
+  cursor: string | null = null,
   db: Executor = pool,
 ): Promise<R[]> {
-  const result = await db.query<R>(LIST_EVIDENCE_RECEIPTS_SQL, [agentId, limit])
+  const result = await db.query<R>(LIST_EVIDENCE_RECEIPTS_SQL, [agentId, limit, cursor])
   return result.rows
+}
+
+/** #3128: how many receipts Haven holds for the agent — the figure that makes an empty page mean "none", not "not yet". */
+export async function countEvidenceReceiptsForAgent(agentId: string, db: Executor = pool): Promise<number> {
+  const result = await db.query<{ total: string }>(COUNT_EVIDENCE_RECEIPTS_SQL, [agentId])
+  return Number(result.rows[0]?.total ?? 0)
 }
 
 // #2960: same intent-captured delegate/delegate-account columns as

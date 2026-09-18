@@ -157,6 +157,46 @@ const allowanceConfigured = (configured: boolean): DbRoute => [
 /** deriveDelegationBudgets / listDelegationJsonByIds (GET /allowances, delegation rail). */
 const delegationRows = (rows: unknown[]): DbRoute => [/FROM agent_delegations/, () => ({ rows })]
 
+/** #3128: countEvidenceReceiptsForAgent (GET /receipts `total`). */
+const receiptsTotal = (total: number): DbRoute => [/COUNT\(\*\)::text AS total FROM machine_payment_evidence/, () => ({ rows: [{ total: String(total) }] })]
+
+/** #3128: a minimal evidence row the receipts mapper accepts. */
+const receiptRow = (id: string) => ({
+  id,
+  payment_intent_id: PAYMENT_ID,
+  approval_request_id: null,
+  agent_id: AGENT.id,
+  user_id: AGENT.user_id,
+  rail: 'x402',
+  proof_status: 'payment_confirmed',
+  tx_hash: TX_HASH,
+  chain_id: 8453,
+  resource_url: 'https://paid.example/data',
+  merchant_address: RECIPIENT.toLowerCase(),
+  payer_address: AGENT.account_address.toLowerCase(),
+  settlement_address: RECIPIENT.toLowerCase(),
+  token_symbol: 'USDC',
+  token_address: USDC,
+  amount_raw: '10000',
+  amount_human: '0.01',
+  challenge_id: null,
+  idempotency_key: `x402:${id}`,
+  challenge_payload: { x402Version: 2 },
+  selected_payment: null,
+  payment_proof_header_name: 'PAYMENT-SIGNATURE',
+  payment_proof_header: 'secret-proof-header',
+  protocol_receipt_header_name: 'PAYMENT-RESPONSE',
+  protocol_receipt_payload: { ok: true },
+  merchant_status: 200,
+  confirmed_at: '2026-05-15T12:00:00.000Z',
+  created_at: '2026-05-15T12:00:01.000Z',
+  updated_at: '2026-05-15T12:00:01.000Z',
+  settlement_scheme: 'eip3009',
+  budget_delegation_hash: null,
+  intent_delegate_address: AGENT.delegate_address,
+  intent_delegate_account_address: null,
+})
+
 /** INSERT INTO payment_intents (send's plain insert, or authorize's ON CONFLICT machine insert). */
 const insertIntent = (row: Record<string, unknown> | null): DbRoute => [
   /INSERT INTO payment_intents/,
@@ -584,6 +624,81 @@ describe('machine payment routes', () => {
     })
   })
 
+  it('#3128: an empty receipts page carries total 0 — "none exist", never "not yet"', async () => {
+    primeDb(AUTH, receiptsTotal(0))
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ receipts: [], total: 0, has_more: false, next_cursor: null })
+    expectMatchesSpec('GET', '/machine-payments/receipts', response.json())
+    // First page: the cursor parameter is null, and the query asks for limit + 1.
+    const call = findCall(/FROM machine_payment_evidence e/)
+    expect(call!.params).toEqual([AGENT.id, 26, null])
+  })
+
+  it('#3128: a page cut at limit says so — has_more true, next_cursor = the last returned id, limit+1 fetched, one row dropped', async () => {
+    const rows = ['aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000002', 'aaaaaaaa-0000-4000-8000-000000000003']
+      .map((id) => receiptRow(id))
+    primeDb(AUTH, receiptsTotal(9), [/FROM machine_payment_evidence e/, () => ({ rows })])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?limit=2',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    const body = response.json() as { receipts: Array<{ id: string }>; total: number; has_more: boolean; next_cursor: string | null }
+    expect(body.receipts.map((r) => r.id)).toEqual(['aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000002'])
+    expect(body).toMatchObject({ total: 9, has_more: true, next_cursor: 'aaaaaaaa-0000-4000-8000-000000000002' })
+    expectMatchesSpec('GET', '/machine-payments/receipts', body)
+    expect(findCall(/FROM machine_payment_evidence e/)!.params).toEqual([AGENT.id, 3, null])
+  })
+
+  it('#3128: a page that ends exactly at limit is the last page — has_more false, next_cursor null (no off-by-one)', async () => {
+    const rows = ['aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000002'].map((id) => receiptRow(id))
+    primeDb(AUTH, receiptsTotal(2), [/FROM machine_payment_evidence e/, () => ({ rows })])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?limit=2',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    const body = response.json() as { receipts: unknown[]; total: number; has_more: boolean; next_cursor: string | null }
+    expect(body.receipts).toHaveLength(2)
+    expect(body).toMatchObject({ total: 2, has_more: false, next_cursor: null })
+  })
+
+  it('#3128: cursor reaches the keyset predicate as $3, scoped to the calling agent', async () => {
+    primeDb(AUTH, receiptsTotal(9), [/FROM machine_payment_evidence e/, () => ({ rows: [receiptRow('aaaaaaaa-0000-4000-8000-000000000003')] })])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?limit=2&cursor=aaaaaaaa-0000-4000-8000-000000000002',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ has_more: false, next_cursor: null, total: 9 })
+    const call = findCall(/FROM machine_payment_evidence e/)!
+    expect(call.params).toEqual([AGENT.id, 3, 'aaaaaaaa-0000-4000-8000-000000000002'])
+    // The cursor row is resolved under the SAME agent id — another agent's
+    // receipt id cannot open a window into this agent's history.
+    expect(call.sql).toContain('WHERE c.id = $3::uuid AND c.agent_id = $1')
+    expect(call.sql).toContain('ORDER BY e.created_at DESC, e.id DESC')
+  })
+
+  it('#3128: a cursor that is not a receipt id is refused with 400 before any query', async () => {
+    primeDb(AUTH)
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?cursor=page-2',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toMatch(/next_cursor/)
+    expect(findCall(/FROM machine_payment_evidence e/)).toBeUndefined()
+  })
+
   it('receipts join the intent so settlement_scheme is agent-visible (#1063 finding)', async () => {
     primeDb(AUTH)
     const response = await app.inject({
@@ -603,6 +718,7 @@ describe('machine payment routes', () => {
   it('lists recent receipts without returning payment proof headers', async () => {
     primeDb(
       AUTH,
+      receiptsTotal(1),
       [/FROM machine_payment_evidence e/, () => ({
         rows: [{
           id: '44444444-4444-4444-4444-444444444444',
@@ -654,6 +770,10 @@ describe('machine payment routes', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({
+      // #3128: the page envelope — one receipt, none beyond it.
+      total: 1,
+      has_more: false,
+      next_cursor: null,
       receipts: [{
         id: '44444444-4444-4444-4444-444444444444',
         settlement_scheme: 'eip3009',

@@ -147,6 +147,8 @@ export const toolSchemas = {
   },
   haven_list_receipts: {
     limit: z.number().int().min(1).max(100).optional(),
+    /** #3128: the previous page's next_cursor (a receipt id). */
+    cursor: z.string().min(1).optional(),
   },
   haven_verify_receipt: {
     receipt: z.unknown(),
@@ -519,7 +521,8 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
     },
     haven_list_receipts: async (input) => {
       const args = objectInput('haven_list_receipts', input)
-      return runTool(async () => haven.listReceipts({ limit: args.limit }))
+      // #3128: same page shape as the hosted runtime.
+      return runTool(async () => haven.listReceiptsPage({ limit: args.limit, cursor: args.cursor }))
     },
     haven_verify_receipt: async (input) => {
       const args = objectInput('haven_verify_receipt', input)

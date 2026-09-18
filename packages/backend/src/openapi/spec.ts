@@ -5866,6 +5866,8 @@ export const openapiSpec = {
         tags: ['Machine payments'],
         operationId: 'listMachinePaymentReceipts',
         summary: 'List stored machine-payment receipts for the authenticated agent.',
+        description:
+          '#3128: a page, newest first. `total` is how many receipts Haven holds for the agent, so an empty `receipts` with `total: 0` means none exist — there is no indexing delay behind this list. `has_more` says the page was cut at `limit`; pass `next_cursor` back as `cursor` for the next page.',
         security: [{ AgentApiKey: [] }],
         parameters: [
           {
@@ -5874,26 +5876,37 @@ export const openapiSpec = {
             required: false,
             schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 },
           },
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            description: 'The `next_cursor` of the previous page (a receipt id). Omit for the first page.',
+            schema: { type: 'string', format: 'uuid' },
+          },
         ],
         responses: {
           '200': {
-            description: 'Machine-payment receipts.',
+            description: 'One page of machine-payment receipts.',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['receipts'],
+                  required: ['receipts', 'total', 'has_more', 'next_cursor'],
                   properties: {
                     receipts: {
                       type: 'array',
                       items: { $ref: '#/components/schemas/MachinePaymentReceipt' },
                     },
+                    total: { type: 'integer', minimum: 0, description: 'Receipts Haven holds for this agent, across all pages.' },
+                    has_more: { type: 'boolean', description: 'True when receipts beyond this page exist.' },
+                    next_cursor: { type: ['string', 'null'], description: 'Pass as `cursor` for the next page; null on the last page.' },
                   },
                   additionalProperties: false,
                 },
               },
             },
           },
+          '400': errorResponse,
           '401': errorResponse,
           '403': agentAuthForbidden,
         },

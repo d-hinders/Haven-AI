@@ -41,7 +41,9 @@ function loadFixture(slug: string): { _base: string; body: unknown } {
  *   - `funding_tx_hash` / `settlement_tx_hash` — #2998, the two hashes
  *     named beside the unlabeled `tx_hash`; asserted separately below.
  */
-const ADDITIVE_SINCE_BASE = new Set(['parties', 'funding_tx_hash', 'settlement_tx_hash'])
+const ADDITIVE_SINCE_BASE = new Set([
+  // #3128: the receipts envelope gained page fields; the receipts themselves are unchanged.
+  'total', 'has_more', 'next_cursor','parties', 'funding_tx_hash', 'settlement_tx_hash'])
 
 function stripParties(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripParties)
@@ -111,11 +113,14 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
     // The delegate that PAID this intent — joined from `payment_intents.delegate_address`,
     // never the calling agent's current delegate (see the rekey test below).
     const intentDelegateAddress = '0x9999999999999999999999999999999999999999'
+    // #3128: the page's COUNT(*) is the second query; the list rows were queued first.
+    mockQuery.mockResolvedValueOnce({ rows: [{ total: '1' }] })
     const liveBody = await listReceipts('agent-1', 25)
 
-    expect(stripParties(liveBody)).toEqual(stripParties(fixture.body))
+    // #3128: `listReceipts` returns a page; this fixture recorded the receipts ARRAY.
+    expect(stripParties(liveBody.receipts)).toEqual(stripParties(fixture.body))
 
-    const live = liveBody[0] as {
+    const live = liveBody.receipts[0] as {
       parties: { treasury_account: string; delegate: string; delegate_account: string | null; merchant: string }
       funding_tx_hash: string | null
       settlement_tx_hash: string | null
@@ -185,8 +190,10 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
     // `listReceipts` no longer accepts an agent-delegate argument at all —
     // there is nothing here to rotate into it. `rotatedDelegate` exists only
     // to document what the OLD (wrong) behaviour would have shown.
+    // #3128: the page's COUNT(*) is the second query; the list rows were queued first.
+    mockQuery.mockResolvedValueOnce({ rows: [{ total: '1' }] })
     const receiptsBody = await listReceipts('agent-1', 25)
-    const receipt = receiptsBody[0] as { parties: { delegate: string } }
+    const receipt = receiptsBody.receipts[0] as { parties: { delegate: string } }
     expect(receipt.parties.delegate).toBe(paidWithDelegate)
     expect(receipt.parties.delegate).not.toBe(rotatedDelegate)
 
@@ -286,11 +293,14 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
       ],
     })
     const intentDelegateAddress = '0x8888888888888888888888888888888888888888'
+    // #3128: the page's COUNT(*) is the second query; the list rows were queued first.
+    mockQuery.mockResolvedValueOnce({ rows: [{ total: '1' }] })
     const liveBody = await listReceipts('agent-2', 25)
 
-    expect(stripParties(liveBody)).toEqual(stripParties(fixture.body))
+    // #3128: `listReceipts` returns a page; this fixture recorded the receipts ARRAY.
+    expect(stripParties(liveBody.receipts)).toEqual(stripParties(fixture.body))
 
-    const live = liveBody[0] as { parties: { treasury_account: string; delegate: string } }
+    const live = liveBody.receipts[0] as { parties: { treasury_account: string; delegate: string } }
     expect(live.parties.treasury_account).toBe('0x5555555555555555555555555555555555555555')
     expect(live.parties.delegate).toBe(intentDelegateAddress)
   })
@@ -470,8 +480,10 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
         },
       ],
     })
+    // #3128: the page's COUNT(*) is the second query; the list rows were queued first.
+    mockQuery.mockResolvedValueOnce({ rows: [{ total: '1' }] })
     const liveBody = await listReceipts('agent-1', 25)
-    const live = liveBody[0] as { parties: { delegate_account: string | null } }
+    const live = liveBody.receipts[0] as { parties: { delegate_account: string | null } }
     expect(live.parties.delegate_account).toBe(authorizeTimeDelegator)
   })
 

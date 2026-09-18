@@ -146,7 +146,7 @@ export type DiscoveryEntry = {
   merchant?: { id: string; slug: string; name: string; listing_status: string; is_test_merchant: boolean }
 } & DiscoveryHint
 
-export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
+export const toolSchemas = {
   haven_get_agent: {},
   haven_get_allowances: {},
   haven_sweep_delegate: {
@@ -418,7 +418,10 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_verify_receipt: {
     receipt: z.unknown(),
   },
-}
+// #3101: `as const satisfies` keeps every key on the type — under a plain
+// `Record<HostedToolName, z.ZodRawShape>` annotation a probe assigning
+// `{ totally_not_a_key: 1 }` to a tool's inferred argument type compiled clean.
+} as const satisfies Record<HostedToolName, z.ZodRawShape>
 
 // ── Strict input (#2312) ─────────────────────────────────────────────────────
 
@@ -1127,6 +1130,18 @@ export interface ToolFailure {
    * cap refusal.
    */
   retry_with_new_quote?: boolean
+  /**
+   * #3101 (epic #3105, decision 7): a refusal that carries a next step emits
+   * the same `next_tool` family a success does, built by the SDK's typed
+   * builder. Additive; `next_tool` is never null — an absent tool says why in
+   * `next_tool_omitted_reason`.
+   */
+  next_tool?: string
+  next_tool_server?: string
+  next_tool_name?: string
+  next_tool_server_role?: 'hosted' | 'signer'
+  next_arguments?: Record<string, unknown>
+  next_tool_omitted_reason?: string
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure

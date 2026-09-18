@@ -284,6 +284,10 @@ export function createStateDirectRecoveryHandlers(
               // no funding leg — and nextTool is deliberately omitted because
               // the next step is the agent's own HTTP retry, not a Haven tool.
               nextAction: AgentPaymentNextAction.RetryOriginalX402Request,
+              // #3101 (decision 3): the omission is stated, never silent.
+              nextTool: null,
+              nextToolOmittedReason:
+                'the next step is your own HTTP retry of the merchant with the payment_header above, not a Haven tool',
               safeToContinue: true,
               reason:
                 'Retry the ORIGINAL merchant request yourself, setting PAYMENT-SIGNATURE ' +

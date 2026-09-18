@@ -118,7 +118,7 @@ const x402ExpectedShape = {
 
 const x402ExpectedSchema = z.object(x402ExpectedShape)
 
-export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
+export const toolSchemas = {
   haven_sign_sweep_delegate: {
     // The authorization fields prepared by Haven's POST /sweep/prepare. Passed
     // through verbatim from the hosted haven_sweep_delegate tool — the signer
@@ -186,7 +186,8 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     // #1255: see haven_sign.typed_data_b64 — the copy-through-safe form.
     typed_data_b64: z.string().min(1).max(262144).optional(),
   },
-}
+// #3101: keys survive on the type (see the hosted server's contracts.ts).
+} as const satisfies Record<SignerToolName, z.ZodRawShape>
 
 const SIGN_DESCRIPTION = [
   'Sign an unsigned Haven payment hash with the local delegate key. The delegate key never leaves',
@@ -359,6 +360,13 @@ export interface ToolFailure {
   next_action?: string
   retry_with_new_quote?: boolean
   suggested_tool?: string
+  /** #3101 (epic #3105, decision 7): the typed next-step family, additive; `next_tool` never null. */
+  next_tool?: string
+  next_tool_server?: string
+  next_tool_name?: string
+  next_tool_server_role?: 'hosted' | 'signer'
+  next_arguments?: Record<string, unknown>
+  next_tool_omitted_reason?: string
   /**
    * #1309: present on `UNSUPPORTED_EXPECTED_CONTEXT_VERSION` /
    * `UNSUPPORTED_SWEEP_BINDING_VERSION` refusals — the exact version set this

@@ -1703,6 +1703,41 @@ describe('hosted erc7710 (#1456)', () => {
       })
     })
 
+    it('a merchant hash that is not a hash keeps the status poll as next_tool — never a silent omission (#3101 review)', async () => {
+      // The merchant controls PAYMENT-RESPONSE.transaction. "0xdeadbeef" is
+      // non-zero, so the pre-#3101 predicate would have named the report tool
+      // with an argument its schema (0x + 64 hex) refuses; the typed builder's
+      // strict validator then fails safe by omitting the tool — after money
+      // moved. The predicate now agrees with the target's schema.
+      stubSettle()
+      const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+      vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+        status: 200,
+        ok: true,
+        body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } },
+        settlementTxHash: '0xdeadbeef',
+        evidenceOutcome: { outcome: 'retryable', statusCode: 503 },
+      })
+      vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+        allowance: null,
+        warnings: [],
+        payment: { status: 'submitted' },
+      } as never)
+      const res = ok(
+        await createToolHandlers(haven).haven_settle_mcp_tool({
+          payment_id: 'pay_7710',
+          signature: SIG7710,
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+        }),
+      ) as { data: Record<string, any> }
+      expect(res.data.code).toBe('SETTLEMENT_PENDING')
+      expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+      expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710' })
+      expect(res.data.next_tool_omitted_reason).toBeUndefined()
+    })
+
     it('a terminal backend refusal (mismatch/reverted) is delivered_unsettled, not settlement_pending', async () => {
       stubSettle()
       const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
@@ -2082,17 +2117,23 @@ describe('next_tool emission literals (#1588 review)', () => {
     return parts.join('\n')
   }
 
-  it('every nextTool literal in the source parses into the runtime-neutral pair', async () => {
-    // Source-derived like the description scanner: only 4 of the 9 emission
-    // sites are behaviourally pinned, and a mis-spelled literal on an
-    // unpinned site would silently drop the pair (the derivation omits on
-    // parse failure by design). This closes that hole for every literal,
-    // present and future.
+  it('every nextTool literal in the source is a BARE name the hosted target map registers (#3101)', async () => {
+    // Source-derived like the description scanner. Before #3101 this asserted
+    // the namespaced form (`mcp__<server>__<tool>`), because each site carried
+    // the literal the wire sends; since #3101 the SDK builder renders that
+    // string from the bare name + role, and a site names the bare tool — so
+    // the invariant is now: bare, and registered (the compile-time twin makes
+    // an unregistered name a type error; this is the source-level floor).
     const source = await hostedSurfaceSource()
     const literals = [...source.matchAll(/nextTool: '([^']+)'/g)].map((m) => m[1])
     expect(literals.length).toBeGreaterThanOrEqual(9)
-    const unparseable = literals.filter((l) => !/^mcp__([a-z0-9-]+)__([a-z0-9_]+)$/.test(l))
-    expect(unparseable).toEqual([])
+    const prefixed = literals.filter((l) => l.startsWith('mcp__'))
+    expect(prefixed).toEqual([])
+    const { toolSchemas: signerSchemas } = await import('@haven_ai/signer')
+    const { toolSchemas } = await import('./tools/contracts.js')
+    const registered = new Set([...Object.keys(toolSchemas), ...Object.keys(signerSchemas)])
+    const unregistered = literals.filter((l) => !registered.has(l))
+    expect(unregistered).toEqual([])
   })
 
   it('suggested_tool hints use BARE tool names — the sibling convention, never the prefixed form', async () => {

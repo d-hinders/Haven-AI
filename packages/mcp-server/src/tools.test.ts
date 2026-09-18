@@ -1259,25 +1259,13 @@ describe('human-unit spending caps (#1351)', () => {
       'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
       'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': {
+      // #3054: the guided prepare's budget compare is server-side now — the
+      // tool POSTs /machine-payments/budget-precheck instead of reading
+      // GET /machine-payments/allowances. Sufficient here (5 USDC remaining);
+      // the over-budget refusal is pinned in its own test below.
+      'POST /machine-payments/budget-precheck': {
         status: 200,
-        body: {
-          agent_id: 'agt_1',
-          account_address: '0xSafe',
-          delegate_address: '0xDelegate',
-          chain_id: 8453,
-          allowances: [{
-            id: 'allowance-1',
-            token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-            token_symbol: 'USDC',
-            configured_amount: '5000000',
-            reset_period_min: 60,
-            onchain: {
-              amount: '5000000', spent: '0', remaining: '5000000', effective_spent: '0',
-              reset_time_min: 60, last_reset_min: 100, nonce: 7, is_reset_pending: false,
-            },
-          }],
-        },
+        body: { sufficient: true, remaining_atomic: '5000000' },
       },
     }
 
@@ -1344,31 +1332,29 @@ describe('human-unit spending caps (#1351)', () => {
     it('a generous human cap does NOT widen the on-chain budget: the delegation rail still refuses over-budget', async () => {
       // The cap only ever narrows. An agent cannot buy authority by writing a
       // big number here — the delegation budget remains the hard gate, and
-      // this refusal fires with the cap satisfied.
+      // this refusal fires with the cap satisfied. #3054: the gate is the
+      // SERVER's compare now — the stubbed POST /machine-payments/
+      // budget-precheck refuses with the taxonomy body, and the tool relays
+      // it as the same DELEGATION_BUDGET_EXCEEDED refusal this test has
+      // always pinned.
       stubFetch({
         ...catalogRoutes,
         'GET /machine-payments/agent': {
           status: 200,
           body: { ...AGENT_RESPONSE, execution_rail: 'delegation' },
         },
-        'GET /machine-payments/allowances': {
-          status: 200,
+        'POST /machine-payments/budget-precheck': {
+          status: 403,
           body: {
-            agent_id: 'agt_1',
-            account_address: '0xSafe',
-            delegate_address: '0xDelegate',
-            chain_id: 8453,
-            allowances: [{
-              id: 'delegation-1',
-              token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-              token_symbol: 'USDC',
-              configured_amount: '0.10',
-              reset_period_min: 1440,
-              onchain: {
-                amount: '100000', spent: '0', remaining: '100000', effective_spent: '0',
-                reset_time_min: 1440, last_reset_min: 0, nonce: 0, is_reset_pending: false,
-              },
-            }],
+            error:
+              "This payment of 1.5 USDC exceeds the agent's remaining budget for this period (0.1 USDC, short by 1.4 USDC). " +
+              'There is no approval queue on the delegation rail — an over-budget redemption reverts ' +
+              'on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
+            error_code: 'delegation_budget_exceeded',
+            phase: 'insufficient_funds',
+            next_action: 'fund_account_or_raise_allowance',
+            remaining_atomic: '100000',
+            amount_atomic: '1500000',
           },
         },
       })

@@ -1944,3 +1944,22 @@ error instead of quietly routing a payment at the wrong chain's bundler.
 > funding, signing or settlement decision changes; the local runtime's
 > `nextAction` emission is untouched (slice #3103). Scope of this note: those
 > fields. Nothing else in this document was re-verified.
+
+> **Re-verification (#3102, every hosted refusal names its next step, 2026-09-18):**
+> this diff touches `packages/mcp-server/src/tools/support/{errors,guidance,cap-price,catalog-entry,mcp-context}.ts`
+> and `packages/mcp-server/src/tools/{catalog-purchase,plain-http-x402,paid-mcp-completion}.ts`.
+> `HostedToolError` no longer takes a bare `nextAction`: a refusal names an
+> action only through a typed `nextStep` (`refusalNextStep`, the same builder
+> and target map as the success path), so each of the 27 refusal sites now
+> also carries either a tool with arguments that tool declares
+> (`haven_get_payment_status { payment_id }` on the post-funding timeout,
+> insecure-target and rejection branches; `haven_sweep_delegate {}` on the
+> eip3009 rejection) or `next_tool_omitted_reason` (every stop-and-tell-user,
+> retry-with-explicit-context, fund-account and window-expired refusal). Every
+> previously emitted field — `next_action`, `suggested_tool`, `status`,
+> `phase`, `rail`, `retry_with_new_quote` — is byte-identical, pinned by
+> `next-step-refusals-characterization.test.ts` (written before the change; a
+> census of `refusalNextStep` calls enforces the 27). No tool name, schema
+> key, cap, funding, signing or settlement decision changes; the local
+> runtime is untouched (slice #3103). Scope of this note: those fields.
+> Nothing else in this document was re-verified.

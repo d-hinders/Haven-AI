@@ -25,6 +25,7 @@ import {
   type HavenClient,
   type NextStep,
 } from '@haven_ai/sdk'
+import { refusalNextStep } from './guidance.js'
 import type { ToolFailure, ToolPayload } from '../contracts.js'
 
 export class HostedToolError extends Error {
@@ -33,6 +34,7 @@ export class HostedToolError extends Error {
   readonly paymentId?: string
   readonly status?: string
   readonly phase?: string
+  /** Derived from `nextStep` (#3102): a refusal names an action only through its typed step. */
   readonly nextAction?: string
   readonly rail?: string
   readonly idempotencyKey?: string | null
@@ -48,11 +50,11 @@ export class HostedToolError extends Error {
     paymentId?: string
     status?: string
     phase?: string
-    nextAction?: string
     rail?: string
     idempotencyKey?: string | null
     retryWithNewQuote?: boolean
     suggestedTool?: string
+    /** #3102: the typed next step; the only way a refusal names a `next_action`. */
     nextStep?: NextStep
   }) {
     super(input.message)
@@ -62,7 +64,7 @@ export class HostedToolError extends Error {
     this.paymentId = input.paymentId
     this.status = input.status
     this.phase = input.phase
-    this.nextAction = input.nextAction
+    this.nextAction = input.nextStep?.next_action
     this.rail = input.rail
     this.idempotencyKey = input.idempotencyKey
     this.retryWithNewQuote = input.retryWithNewQuote
@@ -92,7 +94,6 @@ export function paymentWindowExpiredError(state: {
   paymentId: string
   status: string
   phase: string
-  nextAction: string
   rail: string
   idempotencyKey?: string | null
 }): HostedToolError {
@@ -106,7 +107,15 @@ export function paymentWindowExpiredError(state: {
     paymentId: state.paymentId,
     status: state.status,
     phase: state.phase,
-    nextAction: AgentPaymentNextAction.PaymentWindowExpired,
+    // #3102: which tool to re-run depends on the flow this helper serves
+    // (paid-MCP, catalog, plain HTTP), so the step names none; the
+    // idempotency key in the message is the argument that matters.
+    nextStep: refusalNextStep({
+      nextAction: AgentPaymentNextAction.PaymentWindowExpired,
+      nextTool: null,
+      nextToolOmittedReason:
+        're-run the tool you called with the same idempotency_key; which tool depends on the flow (suggested_tool names the MCP one)',
+    }),
     rail: state.rail,
     idempotencyKey: state.idempotencyKey,
     retryWithNewQuote: true,
@@ -156,7 +165,7 @@ export function normalizeError(err: unknown): ToolFailure {
       paymentId: err.paymentId,
       status: err.status,
       phase: err.phase,
-      next_action: err.nextStep?.next_action ?? err.nextAction,
+      next_action: err.nextAction,
       rail: err.rail,
       idempotency_key: err.idempotencyKey,
       retry_with_new_quote: err.retryWithNewQuote,

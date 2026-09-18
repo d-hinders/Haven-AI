@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AgentPaymentNextAction } from '@haven_ai/sdk'
 import { HostedToolError, normalizeError } from './tools/support/errors.js'
-import { buildAgentGuidance } from './tools/support/guidance.js'
+import { buildAgentGuidance, refusalNextStep } from './tools/support/guidance.js'
 
 /** #3101 (decision 7): a refusal carries the same typed next step a success does. */
 describe('HostedToolError carries a NextStep (#3101)', () => {
@@ -36,8 +36,8 @@ describe('HostedToolError carries a NextStep (#3101)', () => {
     expect(failure.next_tool).toBeUndefined()
     expect(failure.next_tool_omitted_reason).toBe('why')
     expect(failure.next_action).toBe('stop_and_tell_user')
-    const plain = normalizeError(new HostedToolError({ code: 'X', message: 'm', nextAction: 'check_status_later' }))
+    const plain = normalizeError(new HostedToolError({ code: 'X', message: 'm', nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.CheckStatusLater, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: 'p' } }) }))
     expect(plain.next_action).toBe('check_status_later')
-    expect('next_tool' in plain).toBe(false)
+    expect(plain.next_tool).toBe('mcp__haven__haven_get_payment_status')
   })
 })

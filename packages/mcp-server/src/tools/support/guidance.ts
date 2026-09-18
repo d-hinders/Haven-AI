@@ -18,6 +18,7 @@ import {
   type AgentPaymentSummary,
   type AgentPaymentWarning,
   type AgentPurchaseSummary,
+  type NextStep,
   type NextStepHandoff,
   type NextStepInput,
   type NextStepTarget,
@@ -82,6 +83,18 @@ export type HostedNextStepTargets = typeof HOSTED_NEXT_STEP_TARGETS
 
 /** The handoff half of a hosted next step: a bare tool name + its declared arguments, or `null` + the reason. */
 export type HostedHandoff = NextStepHandoff<HostedNextStepTargets>
+
+/**
+ * #3102 (epic #3105, decision 7): the next step a REFUSAL hands the agent.
+ * Same builder, same target map, same compile-time twins as the success path;
+ * `safe_to_continue` is false by definition and the refusal's own `message`
+ * is its reason, so neither is taken here. `HostedToolError` takes this
+ * instead of a bare `nextAction`, so a refusal that names an action must
+ * name a tool with arguments that tool declares, or say why none follows.
+ */
+export function refusalNextStep(input: { nextAction: AgentNextStep['next_action'] } & HostedHandoff): NextStep {
+  return nextStep({ ...input, safeToContinue: false, reason: '' } as NextStepInput<HostedNextStepTargets>)
+}
 
 const nextStep = createNextStepBuilder(HOSTED_NEXT_STEP_TARGETS)
 

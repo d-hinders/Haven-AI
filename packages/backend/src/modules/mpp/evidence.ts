@@ -21,6 +21,8 @@ import {
   getIntentSettlementFields,
   insertResidueEvent,
   listEvidenceReceiptsForAgent,
+  countEvidenceReceiptsForAgent,
+  receiptCursorResolvesForAgent,
   resolveReconciliationForPayment,
   upsertEvidenceBase,
   type IntentSettlementFields,
@@ -683,9 +685,32 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
 }
 
 /** `GET /receipts` orchestration: recent evidence rows, agent-scoped. */
-export async function listReceipts(agentId: string, limit: number) {
-  const receipts = await listEvidenceReceiptsForAgent<MachinePaymentEvidenceRow>(agentId, limit)
-  return receipts.map((row) => mapEvidence(row))
+/**
+ * #3128: a page, not a bare array. `total` is the count Haven holds for the
+ * agent, so `receipts: []` with `total: 0` is "no receipt exists" — there is
+ * no indexing delay behind this list (a receipt row is written when evidence
+ * attaches, synchronously with the settlement report), so a settled payment
+ * without a receipt is a payment-status question, not a retry-later one.
+ * `has_more` comes from fetching one row past the limit; `next_cursor` is
+ * the last returned receipt's id, fed back as `cursor`. A cursor that names
+ * no receipt of this agent returns `null` (the route answers 400) rather
+ * than an empty page beside a non-zero total.
+ */
+export async function listReceipts(agentId: string, limit: number, cursor: string | null = null) {
+  if (cursor !== null && !(await receiptCursorResolvesForAgent(agentId, cursor))) return null
+  const [rows, total] = await Promise.all([
+    listEvidenceReceiptsForAgent<MachinePaymentEvidenceRow>(agentId, limit + 1, cursor),
+    countEvidenceReceiptsForAgent(agentId),
+  ])
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  const receipts = page.map((row) => mapEvidence(row))
+  return {
+    receipts,
+    total,
+    has_more: hasMore,
+    next_cursor: hasMore ? page[page.length - 1]!.id : null,
+  }
 }
 
 /**

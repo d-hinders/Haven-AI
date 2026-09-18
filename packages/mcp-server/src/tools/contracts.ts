@@ -435,6 +435,8 @@ export const toolSchemas = {
   },
   haven_list_receipts: {
     limit: z.number().int().min(1).max(100).optional(),
+    /** #3128: the previous page's next_cursor (a receipt id). */
+    cursor: z.string().min(1).optional(),
   },
   haven_verify_receipt: {
     receipt: z.unknown(),
@@ -776,8 +778,9 @@ export const STRICT_INPUT_TOOLS = {
     'The resume state is rehydrated by payment_id alone; nothing else selects it. Any other ' +
     'key used to be dropped in silence.',
   haven_list_receipts:
-    'This list takes limit only. An offset, cursor, page, status or token filter sent here ' +
-    'used to be dropped in silence and the first page came back looking filtered.',
+    'This list takes limit and cursor (the previous page\'s next_cursor) only. An offset, page, ' +
+    'status or token filter sent here used to be dropped in silence and the first page came ' +
+    'back looking filtered.',
   haven_verify_receipt:
     'Verification is offline and reads only the receipt object itself: the signer is ' +
     'recovered from receipt.authorization and compared with the delegate the receipt names. ' +

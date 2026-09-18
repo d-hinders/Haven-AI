@@ -215,7 +215,10 @@ describe('agent info helpers', () => {
       // deprecated alias and stays byte-identical.
       spend_authority_readiness: 'ready',
       allowances: [{
+        // #3128: the HavenAllowance's own id and token address ride along.
+        id: 'allowance-1',
         tokenSymbol: 'USDC',
+        tokenAddress: USDC_BASE,
         remainingAtomic: '7500',
         remainingDisplay: '0.0075 USDC',
         configuredAmount: '10000',
@@ -223,6 +226,73 @@ describe('agent info helpers', () => {
         isResetPending: false,
       }],
     })
+  })
+
+  it('#3128: the two allowance reads agree field for field — id, token, atomic and display', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+      // A DISTINCT id and token so a hardcoded projection would be caught.
+      if (u.endsWith('/machine-payments/allowances')) {
+        const raw = JSON.parse(await allowancesResponse().text()) as { allowances: Array<Record<string, unknown>> }
+        raw.allowances[0].id = 'allowance-42'
+        return new Response(JSON.stringify(raw), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const [summary, detailed] = await Promise.all([haven.getAgentSummary(), haven.getAllowances()])
+    expect(detailed.allowances[0].id).toBe('allowance-42')
+    expect(summary.allowances).toHaveLength(1)
+    expect(detailed.allowances).toHaveLength(1)
+    const compact = summary.allowances[0]
+    const full = detailed.allowances[0]
+    // The compact view is a projection of the detailed one, never a second source.
+    expect(compact.id).toBe(full.id)
+    expect(compact.tokenAddress).toBe(full.tokenAddress)
+    expect(compact.tokenSymbol).toBe(full.tokenSymbol)
+    expect(compact.remainingAtomic).toBe(full.onchain.remaining)
+    expect(compact.remainingDisplay).toBe(full.remainingDisplay)
+    expect(full.remainingDisplay).toBe('0.0075 USDC')
+    expect(compact.configuredAmount).toBe(full.configuredAmount)
+    expect(compact.resetPeriodMin).toBe(full.resetPeriodMin)
+    expect(compact.isResetPending).toBe(full.onchain.isResetPending)
+    // A client that wants the id AND a display amount can use either read alone.
+    expect(Object.keys(compact).sort()).toEqual(['configuredAmount', 'id', 'isResetPending', 'remainingAtomic', 'remainingDisplay', 'resetPeriodMin', 'tokenAddress', 'tokenSymbol'])
+  })
+
+  it('#3128: listReceiptsPage maps total / has_more / next_cursor, and listReceipts stays the bare first-page array', async () => {
+    const receipt = {
+      id: 'receipt-1', payment_id: 'payment-1', rail: 'x402', proof_status: 'payment_confirmed', tx_hash: `0x${'ab'.repeat(32)}`,
+      chain_id: 8453, resource_url: 'https://paid.example/data', merchant_address: '0xMerchant', payer_address: '0xSafe',
+      settlement_address: '0xMerchant', token_symbol: 'USDC', token_address: '0xToken', amount_raw: '20000', amount_human: '0.02',
+      challenge_id: null, idempotency_key: 'x402:test', challenge_payload: {}, selected_payment: null,
+      payment_proof_header_name: null, protocol_receipt_header_name: null, protocol_receipt_payload: null, merchant_status: 200,
+      confirmed_at: '2026-05-15T12:00:00.000Z', created_at: '2026-05-15T12:00:01.000Z', updated_at: '2026-05-15T12:00:01.000Z',
+    }
+    const seen: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      seen.push(String(url))
+      return new Response(JSON.stringify({ receipts: [receipt], total: 5, has_more: true, next_cursor: 'receipt-1' }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      })
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const page = await haven.listReceiptsPage({ limit: 1, cursor: 'receipt-0' })
+    expect(page).toMatchObject({ total: 5, hasMore: true, nextCursor: 'receipt-1' })
+    expect(page.receipts.map((r) => r.paymentId)).toEqual(['payment-1'])
+    expect(seen[0]).toContain('/machine-payments/receipts?limit=1&cursor=receipt-0')
+    await expect(haven.listReceipts({ limit: 1 })).resolves.toMatchObject([{ paymentId: 'payment-1' }])
+    expect(seen[1]).toContain('/machine-payments/receipts?limit=1')
+    expect(seen[1]).not.toContain('cursor')
+  })
+
+  it('#3128: against a backend without the page fields, total / hasMore / nextCursor are null (unknown), never 0 / false', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ receipts: [] }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    )
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    await expect(haven.listReceiptsPage()).resolves.toEqual({ receipts: [], total: null, hasMore: null, nextCursor: null })
   })
 
   it('getAgentSummary reports needs_approval when active with no remaining allowance', async () => {
@@ -533,6 +603,7 @@ const mappedAllowances = {
     tokenSymbol: 'USDC',
     configuredAmount: '10000',
     resetPeriodMin: 60,
+    remainingDisplay: '0.0075 USDC', // #3128 — derived by the same function as the bootstrap summary
     onchain: {
       amount: '10000',
       spent: '2500',

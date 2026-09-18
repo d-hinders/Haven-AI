@@ -43,6 +43,7 @@ import type {
   HavenBalanceCoverage,
   PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
+  HavenPaymentReceiptsPage,
   CatalogSubmissionAccepted,
   HavenCatalogEntry,
   HavenCatalogSubmission,
@@ -868,6 +869,11 @@ export class HavenClient {
    */
   async listReceipts(options: { limit?: number } = {}): Promise<HavenPaymentReceipt[]> {
     return this.accountReads.listReceipts(options)
+  }
+
+  /** #3128: one page of receipts with `total`, `hasMore` and `nextCursor`. */
+  async listReceiptsPage(options: { limit?: number; cursor?: string } = {}): Promise<HavenPaymentReceiptsPage> {
+    return this.accountReads.listReceiptsPage(options)
   }
 
   /**

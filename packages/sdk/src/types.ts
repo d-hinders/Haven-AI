@@ -605,6 +605,14 @@ export interface HavenAllowance {
   tokenSymbol: string
   configuredAmount: string
   resetPeriodMin: number
+  /**
+   * #3128: human-readable `onchain.remaining`, e.g. "4.96 USDC" — the SAME
+   * string {@link HavenAgentAllowanceSummary.remainingDisplay} carries for
+   * this allowance, computed by one function from `onchain.remaining` and
+   * the token's decimals, so the two reads cannot disagree. Additive; the
+   * wire carries no display form (it is derived client-side).
+   */
+  remainingDisplay: string
   onchain: {
     amount: string
     spent: string
@@ -758,9 +766,24 @@ export interface RawHavenBalanceCoverage {
  */
 export type HavenAgentReadiness = 'ready' | 'needs_approval' | 'revoked'
 
-/** Compact, agent-facing per-token spend authority for the bootstrap summary. */
+/**
+ * Compact, agent-facing per-token spend authority for the bootstrap summary.
+ *
+ * #3128: a deliberately DIFFERENT view of the same allowance as
+ * {@link HavenAllowance} — flat, no `onchain` block, no spent/nonce/reset-time
+ * detail — but never a disjoint one: every field here is present on or
+ * derived from the {@link HavenAllowance} with the same `id`, and
+ * `remainingAtomic` / `remainingDisplay` equal that allowance's
+ * `onchain.remaining` / `remainingDisplay` byte for byte (pinned by test). A
+ * client that wants the id AND a display amount can therefore use either
+ * read alone.
+ */
 export interface HavenAgentAllowanceSummary {
+  /** #3128: the {@link HavenAllowance.id} this row summarises. */
+  id: string
   tokenSymbol: string
+  /** #3128: the {@link HavenAllowance.tokenAddress}. */
+  tokenAddress: string
   /** Live on-chain remaining allowance in atomic units. */
   remainingAtomic: string
   /** Human-readable remaining, e.g. "4.96 USDC". */
@@ -1889,6 +1912,25 @@ export interface RawCatalogEntry {
 
 export interface RawHavenPaymentReceiptsResponse {
   receipts: RawHavenPaymentReceipt[]
+  /** #3128 — optional on the wire so an older backend still maps. */
+  total?: number
+  has_more?: boolean
+  next_cursor?: string | null
+}
+
+/**
+ * #3128: one page of receipts. `total` is the count Haven holds for the
+ * agent (an empty page with `total: 0` means no receipt exists — there is no
+ * indexing delay behind this list); `hasMore` says the page was cut at the
+ * limit; `nextCursor` is fed back as `cursor` for the next page. Against a
+ * backend older than #3128 the three are `null` — "unknown", never a
+ * fabricated 0 / false.
+ */
+export interface HavenPaymentReceiptsPage {
+  receipts: HavenPaymentReceipt[]
+  total: number | null
+  hasMore: boolean | null
+  nextCursor: string | null
 }
 
 /** @internal */

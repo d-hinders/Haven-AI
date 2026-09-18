@@ -11,6 +11,9 @@ covers:
   - .github/workflows/publish.yml
   - packages/cli/src/connect-runner.ts
   - packages/backend/src/routes/machine-payments.ts
+  - packages/sdk/src/account-reads.ts
+  - packages/sdk/src/client.ts
+  - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
   - packages/cli/src/commands.ts
@@ -42,6 +45,38 @@ last-verified: "2026-09-18"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Recent re-verification (#3128):** `haven_list_receipts` is RE-SHAPED on
+> both runtimes — the one deliberate non-additive change on this surface
+> since #2330. Its schema gains an optional `cursor` (the previous page's
+> `next_cursor`, a receipt id) beside `limit`, and its result is the page
+> object `{ receipts, total, hasMore, nextCursor }` instead of the bare
+> receipts array: `total` is how many receipts Haven holds for the agent
+> (`0` = none exist; there is no indexing delay behind this list), `hasMore`
+> says the page was cut at `limit`, and `nextCursor` is fed back as `cursor` —
+> which the backend refuses with 400 if it is not a uuid or names no receipt
+> of this agent, so a stale cursor is an error rather than a silently empty
+> page (an older hosted deploy answered it with an empty page).
+> Both runtimes call the SDK's new `listReceiptsPage()`; the SDK's
+> `listReceipts()` keeps returning the array, and the HTTP envelope
+> (`GET /machine-payments/receipts`) is additive (`total`, `has_more`,
+> `next_cursor` beside the unchanged `receipts`), so the qa-agent's and any
+> SDK caller's reads are untouched. Skew: an older `@haven_ai/mcp` bundles an
+> older `@haven_ai/sdk` and keeps serving the array with `limit` only; the
+> hosted server serves the page from its deploy onward; against a backend
+> older than #3128 the SDK maps the three page fields to `null` ("unknown"),
+> never a fabricated `0` / `false`. The strict/permissive split, the tool-NAME
+> set and the consent hash do not move (the hash covers identity, tool names
+> and allowances, not schemas — `packages/mcp/src/consent.ts:81-103`). The
+> two allowance reads are reconciled additively: `HavenAllowance` gains
+> `remainingDisplay` (derived client-side by the same function the bootstrap
+> summary uses) and `HavenAgentAllowanceSummary` gains `id` and
+> `tokenAddress`, pinned field for field on one fixture. The shared
+> description fragments (`listReceipts`, `getAgent`, `getAllowances`) were
+> re-cut under the #1591 mean cap — `packages/mcp-server/src/description-size.test.ts`
+> carries the measured mean (873.91 ≤ 874 at the delivered head; the test,
+> not this sentence, is the instrument) — the `getAgent` prose lost
+> phrasing, not guidance. Nothing else in
+> this document was re-verified in this pass.
 >
 > **Re-verified unchanged (#3131):** this doc is coupled to
 > `.github/workflows/ci.yml`, which #3131 edits — it adds one dependency-free

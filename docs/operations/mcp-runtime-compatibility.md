@@ -25,7 +25,7 @@ covers:
   - packages/backend/src/domain/agent-payment-taxonomy.ts
   - packages/backend/src/modules/transactions/csv-export.ts
   - packages/sdk/src/types.ts
-last-verified: "2026-09-17"
+last-verified: "2026-09-18"
 ---
 
 # MCP Runtime Compatibility
@@ -33,6 +33,32 @@ last-verified: "2026-09-17"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Recent re-verification (#3054):** the hosted guided prepare's over-budget
+> compare moved server-side. `haven_prepare_catalog_purchase`'s step 6 no
+> longer reads `GET /machine-payments/allowances` and compares locally; it
+> calls the new additive SDK method `client.precheckBudget(...)`
+> (`POST /machine-payments/budget-precheck` — agent-key auth, money-path rate
+> limit, orchestration in `modules/mpp/budget-precheck.ts`), one Haven round
+> trip replacing the allowances GET so the preflight's round-trip count is
+> unchanged (#1348 budget). The server decides with the SAME derived-budget
+> read the allowances endpoint uses (#1090 + the #1145 enforcer read, never
+> `agent_allowances`) and refuses through the #3053 choke point, so the
+> `payment_refusals` ledger records the refusal with `source =
+> 'hosted_prepare'` (migration 087 widens the CHECK; the dedupe fold key is
+> unchanged). The tool relays the decided 403 byte-identically —
+> `DELEGATION_BUDGET_EXCEEDED` shape characterization-pinned (95/95 in
+> `catalog-purchase.test.ts`) — and ANY other precheck outcome (transport
+> failure, a retired rail's 410, an older backend without the route)
+> degrades to the existing `sufficient: null` warning, never a refusal. No
+> tool added, renamed or re-shaped: arguments, schemas, descriptions and the
+> strict/permissive split are untouched, the local stdio runtime is not on
+> this path (`haven_pay_mcp_tool` has no pre-check today and needs none), and
+> the skew-flatness this document asserts holds — deploy order is backend →
+> hosted MCP, and an older MCP against the new backend merely degrades to the
+> warning path. The new route answers 410 on both retired rails like every
+> rail-aware surface. Nothing else in this document was re-verified in this
+> pass.
 >
 > **Recent re-verification (#3000):** the hosted server's
 > `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` refusal (the merchant-timeout branch of

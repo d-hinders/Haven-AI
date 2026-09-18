@@ -239,7 +239,7 @@
     "the zero-hash settlement sentinel) carried area:docs only -- no label, so no",
     "shard was REQUIRED (one was written voluntarily) and qa-freshness did not",
     "count it; #2979 (PR #2982, settlement readiness) carried money-path only",
-    "because it also touched packages/mcp-server/src/** and the SDK -- the",
+    "because it also touched packages/mcp-server/src/** -- the",
     "demo-merchant file contributed nothing to that label, and qa-freshness",
     "counted the mcp-server files, not this one. Runtime globs, not control, on",
     "the file's own test: the demo merchant deploys from dev on Railway",

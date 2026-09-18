@@ -401,7 +401,8 @@ describe('money-path list stays in one piece', () => {
     // it since #650. Runtime, not
     // control: the demo merchant deploys from `dev` on Railway and the
     // money-flow harness pays it through QA_DEMO_MERCHANT_URL, so a green run
-    // really does cover it. Mutation: remove packages/demo-merchant-mcp/src/**
+    // really does cover it — with the redeploy-race caveat recorded in the JSON
+    // note. Mutation: remove packages/demo-merchant-mcp/src/**
     // from the JSON and this fails by name.
     const runtime = loadMoneyPathGlobs()
     for (const f of ['packages/demo-merchant-mcp/src/x402.ts', 'packages/demo-merchant-mcp/src/server.ts']) {

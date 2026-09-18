@@ -701,7 +701,15 @@ export function createX402PaymentProcessor(
       return (await promise).payment
     } finally {
       nextAttempt.promise = undefined
-      if (!nextAttempt.txHash && !settled.has(productKey)) {
+      // #3099: an attempt with no tx hash is over — either `submit` threw (retry
+      // must resubmit) or the chain said the authorization was already used
+      // (the `settled` cache now answers every later call for this key before
+      // `attempts` is consulted, and a different product is refused by the
+      // `settled` prefix scan above). The clause `&& !settled.has(productKey)`
+      // that used to guard this delete was unreachable in any observable way —
+      // the 2026-09-17 scan deleted it and the suite stayed green — so it is
+      // gone rather than left as a guard nothing can test.
+      if (!nextAttempt.txHash) {
         attempts.delete(paymentKey)
       }
     }

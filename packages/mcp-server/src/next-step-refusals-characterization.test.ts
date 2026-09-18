@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { AgentPaymentFailureCode, AgentPaymentNextAction } from '@haven_ai/sdk'
+import { AgentPaymentNextAction } from '@haven_ai/sdk'
 import { z } from 'zod'
 import { HostedToolError, normalizeError, paymentWindowExpiredError } from './tools/support/errors.js'
 import { refusalNextStep } from './tools/support/guidance.js'
-import { REFUSAL_SITES } from './test-support/next-step-fixtures.js'
+import { REFUSAL_SITES, REFUSAL_SITE_COUNT, REFUSAL_STEP_CALLS } from './test-support/next-step-fixtures.js'
 
 /**
  * #3102 (epic #3105, slice 3/5) — CHARACTERIZATION of the hosted REFUSAL
@@ -27,15 +27,7 @@ import { REFUSAL_SITES } from './test-support/next-step-fixtures.js'
  * the delta per site is listed in the PR body and updated here in the same
  * commit.
  */
-export const REFUSAL_SITE_COUNT = 28
-/**
- * `refusalNextStep(` calls in the hosted source: 26 inline site steps + the 3
- * branches of `rejectedAfterFundingStep` (the eip3009 rejection follows the
- * action the backend reports) + the 5 branches of the payment-state mapper
- * `stateErrorNextStep` in errors.ts. Both helpers are pinned by their own
- * fixtures and handler tests.
- */
-export const REFUSAL_STEP_CALLS = 34
+// The census constants live with the fixtures (`test-support/next-step-fixtures.ts`).
 
 function hostedSource(): string {
   const parts = [readFileSync(fileURLToPath(new URL('./tools.ts', import.meta.url)), 'utf8')]

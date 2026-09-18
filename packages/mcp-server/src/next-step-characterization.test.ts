@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AgentPaymentNextAction } from '@haven_ai/sdk'
 import { buildAgentGuidance } from './tools/support/guidance.js'
-import { EMISSION_SITES } from './test-support/next-step-fixtures.js'
+import { EMISSION_SITES, EMISSION_SITE_COUNT } from './test-support/next-step-fixtures.js'
 
 /**
  * #3101 (epic #3105, slice 2/5) — CHARACTERIZATION of the 17 hosted
@@ -28,15 +28,7 @@ const SUMMARY = {
 } as unknown as Parameters<typeof buildAgentGuidance>[0]['summary']
 
 
-/**
- * The census the figure "17 emission sites" comes from: every
- * `buildAgentGuidance(` call in the hosted non-test source. A new site fails
- * this count (haven-reviewer round 2 on #3124 planted an 18th and the suite
- * stayed green), and must then be characterized above. Distinct from the
- * fixture count (19: the held-hash site has two branches, the three null-id
- * sites share one helper) — the number the docs quote is THIS one.
- */
-export const EMISSION_SITE_COUNT = 17
+// The census constant lives with the fixtures (`test-support/next-step-fixtures.ts`).
 
 function hostedSource(): string {
   const parts = [readFileSync(fileURLToPath(new URL('./tools.ts', import.meta.url)), 'utf8')]

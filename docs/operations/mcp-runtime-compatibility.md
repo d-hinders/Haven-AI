@@ -28,6 +28,10 @@ covers:
   - packages/sdk/src/next-step.ts
   - packages/mcp-server/src/server.ts
   - packages/mcp-server/src/next-step-signer-parity.test.ts
+  - packages/mcp-server/src/test-support/next-step-fixtures.ts
+  - scripts/lint-next-steps.mjs
+  - scripts/lint-next-steps-baseline.json
+  - .github/workflows/ci.yml
 last-verified: "2026-09-18"
 ---
 
@@ -1755,11 +1759,13 @@ what each server's instructions say and why they differ in length.
 
 ## Typed next steps — the agent contract and its ratchet (epic #3105)
 
-Every response a Haven MCP surface returns tells the agent what to call next
-in structured fields, and those fields are typed end to end (#3100–#3104):
+Every response on a payment flow — success or refusal — tells the agent what
+to call next in structured fields, and those fields are typed end to end
+(#3100–#3104). Informational reads (`haven_get_agent`, `haven_get_allowances`,
+`haven_discover_tools` apart from its per-entry hints) carry none.
 
-- **The contract.** `next_action` (from `AgentPaymentNextAction`) is always
-  present. When a tool follows, `next_tool` (`mcp__<server>__<tool>`, the
+- **The contract.** On a payment-flow response `next_action` (from
+  `AgentPaymentNextAction`) is present. When a tool follows, `next_tool` (`mcp__<server>__<tool>`, the
   default server names), `next_tool_server`, `next_tool_name`,
   `next_tool_server_role` (`hosted` | `signer` — the field to resolve against
   your own server names) and `next_arguments` (spelled in the named tool's own
@@ -1774,12 +1780,12 @@ in structured fields, and those fields are typed end to end (#3100–#3104):
   wrong key, a missing required key, an unregistered tool or an omitted
   `nextTool` is a compile error at the site. Cross-surface handoffs are pinned
   both ways in `packages/mcp-server/src/next-step-signer-parity.test.ts`:
-  every hosted emission fixture (17 success sites, 28 refusal steps) is built
-  for real and its `next_arguments` parsed with the named tool's strict schema
+  every hosted emission fixture (19 fixtures for the 17 success sites, 28 for
+  the refusal steps) is built for real and its `next_arguments` parsed with the named tool's strict schema
   on the surface its role names (hosted → hosted, hosted → signer from the
   signer's built package); the signer's declared hosted shapes parse under the
   hosted schemas; the local runtime's discovery hints parse under its own
-  tools. Decision 9 rides along: an action with a default-table mapping names
+  tools in `packages/mcp/src/tools.test.ts`. Decision 9 rides along: an action with a default-table mapping names
   its tool.
 - **The ratchet.** `npm run lint:next-steps` (`scripts/lint-next-steps.mjs`,
   shrink-only, baseline `scripts/lint-next-steps-baseline.json` committed at
@@ -1790,8 +1796,11 @@ in structured fields, and those fields are typed end to end (#3100–#3104):
   loosely; the `wrongTool()` failure hints (the caller's own arguments) are
   outside it by decision 7. Recorded run at the epic's head (#3104): **0 / 0**.
   Positive control at the epic's base `4ed69592` (`--root=<tree>`): **43
-  unnamed + 2 discovery entries across 10 files**. The gate runs in CI beside
-  the request-schema ratchet and is self-tested (`lint:next-steps:test`).
+  unnamed + 2 discovery entries across 10 files**. The gate runs in CI in the
+  hosted-server, signer and local-runtime jobs (each fires on its own
+  package's changes) and in `backend_checks` beside the request-schema
+  ratchet, and is self-tested (`lint:next-steps:test`). It is a step inside
+  those required contexts, not a new required context.
 
 ## Troubleshooting
 

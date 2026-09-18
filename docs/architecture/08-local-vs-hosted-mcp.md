@@ -6,6 +6,7 @@ covers:
   - packages/mcp-server/src/**
   - packages/sdk/src/next-step.ts
   - packages/sdk/src/types.ts
+  - scripts/lint-next-steps.mjs
   - packages/connect/src/**
   - packages/signer/src/**
   - packages/sdk/src/client.ts

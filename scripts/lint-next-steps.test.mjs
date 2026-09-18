@@ -42,6 +42,17 @@ describe('scanSource — the numerator, defined', () => {
     assert.equal(scanSource("return { success: false, code: err.code, suggested_tool: err.suggestedTool }").discovery_without_arguments, 0)
   })
 
+  test('a commented-out step or a nested unrelated nextTool does not read as NAMED (#3142 review)', () => {
+    assert.equal(scanSource("new HostedToolError({ code: 'X', message: 'm', /* nextStep: refusalNextStep({ nextTool: null, nextToolOmittedReason: 'x' }) */ nextAction: AgentPaymentNextAction.StopAndTellUser })").unnamed, 1)
+    assert.equal(scanSource("buildAgentGuidance({ nextAction: A.X, // nextTool: 'old'\n  reason: 'r' })").unnamed, 1)
+    assert.equal(scanSource("buildAgentGuidance({ nextAction: A.X, debug: { previous: { nextTool: 'old' } }, reason: 'r' })").unnamed, 1)
+  })
+
+  test('a discovery hint built in a spread branch is still counted (#3142 review)', () => {
+    assert.equal(scanSource("entries.map((e) => ({ resource_url: e.url, ...(e.paid ? { suggested_tool: 'haven_pay_x402' } : {}) }))").discovery_without_arguments, 1)
+    assert.equal(scanSource("entries.map((e) => ({ resource_url: e.url, ...(e.paid ? { suggested_tool: 'haven_pay_x402', suggested_arguments: { url: e.url } } : {}) }))").discovery_without_arguments, 0)
+  })
+
   test('balancedBlock stops at the matching brace', () => {
     assert.equal(balancedBlock('x({ a: { b: 1 }, c: 2 }) y', 2), '{ a: { b: 1 }, c: 2 }')
   })

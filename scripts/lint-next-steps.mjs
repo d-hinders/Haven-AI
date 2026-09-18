@@ -22,7 +22,7 @@
 //
 // The `wrongTool()` failure hints carry the caller's own arguments and are
 // outside the numerator by decision 7. Positive control: run it with
-// `--root <a tree at the epic's base 4ed69592>` — both counters are non-zero
+// `--root=<a tree at the epic's base 4ed69592>` — both counters are non-zero
 // there (quoted in PR #3104's body); at the epic's head both are 0 and the
 // committed baseline is all zeros, so any regrowth is a new violation.
 //
@@ -63,6 +63,22 @@ const BLOCK_OPENERS = [
   /new HostedToolError\(\s*\{/g,
 ]
 const NAMED = /nextTool:|nextStep:|nextToolOmittedReason:|next_tool_omitted_reason:|\.\.\.[A-Za-z]+(Handoff|Step)\(|nextStepWireFields\(/
+
+/** The block with every nested `{…}` blanked, so only the emission's OWN keys are read (a nested `{ nextTool }` elsewhere does not name it). */
+export function topLevelText(block) {
+  let depth = 0
+  let out = ''
+  for (const c of block) {
+    if (c === '{') {
+      depth += 1
+      out += depth === 1 ? c : ' '
+    } else if (c === '}') {
+      out += depth === 1 ? c : ' '
+      depth -= 1
+    } else out += depth <= 1 ? c : ' '
+  }
+  return out
+}
 const DECISION_IN_LITERAL = /(nextAction|next_action):\s*AgentPaymentNextAction\./g
 
 /** Returns the source slice of the balanced `{…}` starting at `open` (index of `{`). */
@@ -93,13 +109,19 @@ function enclosingLiteral(source, at) {
   return ''
 }
 
-export function scanSource(source) {
+/** Comments never name a tool: `/* nextStep: … */` or a `// nextTool:` line must not read as NAMED. */
+export function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:'"])\/\/[^\n]*/g, (m, lead) => lead + ' '.repeat(m.length - lead.length))
+}
+
+export function scanSource(rawSource) {
+  const source = stripComments(rawSource)
   const counts = { unnamed: 0, discovery_without_arguments: 0 }
   const seen = new Set()
   const consider = (block, key) => {
     if (seen.has(key)) return
     seen.add(key)
-    if (!NAMED.test(block)) counts.unnamed += 1
+    if (!NAMED.test(topLevelText(block))) counts.unnamed += 1
   }
   for (const re of BLOCK_OPENERS) {
     for (const m of source.matchAll(re)) {
@@ -122,7 +144,13 @@ export function scanSource(source) {
   // `suggested_tool` hints (errors.ts, the signer) are not discovery and are
   // outside this counter.
   for (const m of source.matchAll(/suggested_tool:/g)) {
-    const block = enclosingLiteral(source, m.index)
+    // The entry literal, or — for a hint built in a spread branch — the parent
+    // literal the branch is spread into (the one carrying `resource_url:`).
+    let block = enclosingLiteral(source, m.index)
+    if (!/resource_url:/.test(block)) {
+      const open = source.lastIndexOf('{', m.index)
+      block = open > 0 ? enclosingLiteral(source, open - 1) : ''
+    }
     if (!/resource_url:/.test(block)) continue
     if (!/suggested_arguments:/.test(block)) counts.discovery_without_arguments += 1
   }

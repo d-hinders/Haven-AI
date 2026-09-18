@@ -5,7 +5,7 @@ import { SIGNER_HOSTED_HANDOFF_SHAPES, toolSchemas as signerToolSchemas } from '
 import { DEFAULT_NEXT_TOOL_BY_ACTION } from '@haven_ai/sdk'
 import { buildAgentGuidance, refusalNextStep } from './tools/support/guidance.js'
 import { HostedToolError, normalizeError, paymentWindowExpiredError } from './tools/support/errors.js'
-import { EMISSION_SITES, REFUSAL_SITES } from './test-support/next-step-fixtures.js'
+import { EMISSION_FIXTURE_COUNT, EMISSION_SITES, REFUSAL_SITES, REFUSAL_SITE_COUNT } from './test-support/next-step-fixtures.js'
 
 /**
  * #3101 — the hosted server declares the signer handoff shapes itself (it
@@ -95,8 +95,10 @@ describe('every hosted emission parses under the named tool\'s schema on the sur
     emitted.push({ site: `refusal: ${f.site}`, out: normalizeError(err) as unknown as Record<string, unknown> })
   }
 
-  it('walks 45 emissions', () => {
-    expect(emitted).toHaveLength(EMISSION_SITES.length + REFUSAL_SITES.length)
+  it(`walks every fixture: ${EMISSION_FIXTURE_COUNT} success + ${REFUSAL_SITE_COUNT} refusal (the census constants, not the arrays' own lengths)`, () => {
+    expect(EMISSION_SITES).toHaveLength(EMISSION_FIXTURE_COUNT)
+    expect(REFUSAL_SITES).toHaveLength(REFUSAL_SITE_COUNT)
+    expect(emitted).toHaveLength(EMISSION_FIXTURE_COUNT + REFUSAL_SITE_COUNT)
   })
 
   for (const { site, out } of emitted) {

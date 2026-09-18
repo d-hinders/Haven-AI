@@ -22,6 +22,11 @@ const HOSTED = (name: string) => ({
   next_tool_server_role: 'hosted',
 })
 
+/** `buildAgentGuidance(` call sites in the hosted non-test source — the census `next-step-characterization.test.ts` enforces. */
+export const EMISSION_SITE_COUNT = 17
+/** Fixtures for those sites: the held-hash site has two branches, the three null-id sites share one helper. */
+export const EMISSION_FIXTURE_COUNT = 19
+
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'catalog-purchase.ts prepare 3009', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign_x402', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign_x402'), next_arguments: { payment_id: 'pay_1' } } },
@@ -61,6 +66,11 @@ type Site = {
   step: Parameters<typeof refusalNextStep>[0] | 'window-expired-helper'
   expect: { next_action: string; suggested_tool?: string } & Record<string, unknown>
 }
+
+/** Refusal fixtures: 27 HostedToolError sites, the eip3009 rejection carrying a live-state branch. */
+export const REFUSAL_SITE_COUNT = 28
+/** `refusalNextStep(` calls in the hosted source: 26 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5. */
+export const REFUSAL_STEP_CALLS = 34
 
 export const REFUSAL_SITES: Site[] = [
   { site: 'catalog-purchase.ts prepare: allowance short', base: { code: 'INSUFFICIENT_ALLOWANCE', message: 'm', statusCode: 402, suggestedTool: 'haven_get_allowances' }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: 'the account needs funds or a higher allowance first; haven_get_allowances shows the numbers' }, expect: { next_action: 'fund_account_or_raise_allowance', suggested_tool: 'haven_get_allowances', ...OMIT('the account needs funds or a higher allowance first; haven_get_allowances shows the numbers') } },

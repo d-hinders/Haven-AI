@@ -869,7 +869,7 @@ function normalizeError(err: unknown): ToolFailure {
     next_action: AgentPaymentNextAction.StopAndTellUser,
     // #3103: the second local decision site — nothing structured can follow an
     // error this runtime did not recognise.
-    next_tool_omitted_reason: 'an error this runtime does not recognise; tell the user what message says',
+    next_tool_omitted_reason: 'an error this runtime does not recognise; tell the user what the message says',
   }
 }
 

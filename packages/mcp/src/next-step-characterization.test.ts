@@ -14,6 +14,20 @@ import { createToolHandlers } from './tools.js'
 describe('local runtime refusal wire — characterization (#3103)', () => {
   afterEach(() => vi.restoreAllMocks())
 
+  it('unknown error: the second local decision site says why no tool follows (RE-DECIDED: additive)', async () => {
+    // A non-Haven throw inside the handler reaches normalizeError's final
+    // fallback — the site the symmetric grep returns beside merchant-not-ready.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => { throw new TypeError('socket hang up') })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test', delegateKey: '0x' + 'd'.repeat(64) })
+    const result = await createToolHandlers(haven).haven_pay_mcp_tool({ merchant_url: 'http://merchant.test/mcp', tool_name: 'buy_vpn' })
+    if (result.success) throw new Error('expected failure')
+    const out = result as unknown as Record<string, unknown>
+    expect(out.nextAction).toBe('stop_and_tell_user')
+    expect(out.next_action).toBe('stop_and_tell_user')
+    expect(out.next_tool).toBeUndefined()
+    expect(out.next_tool_omitted_reason).toMatch(/does not recognise; tell the user what the message says/)
+  })
+
   it('merchant_not_ready: nextAction unchanged, next_action twin added, the omission stated (RE-DECIDED: additive)', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: unknown, init: RequestInit = {}) => {
       const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined

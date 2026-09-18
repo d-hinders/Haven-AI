@@ -86,8 +86,10 @@ export class HavenSignContextError extends HavenSigningError {
    * malformed body names no tool — the remedy is re-running the SAME quote
    * tool with `include_signing_payload: true` — and an expired window names
    * none either (which quote tool depends on the flow). Never null: a step
-   * with no tool carries `next_tool_omitted_reason`. Additive on a published
-   * error shape.
+   * with no tool carries `next_tool_omitted_reason`. Additive: the class is
+   * not exported from the package index — the published surface is the
+   * `ToolFailure` envelope `tools.ts` builds from these fields — and every
+   * constructor call site is in this file.
    */
   readonly next_tool?: string
   readonly next_tool_server?: string
@@ -104,9 +106,9 @@ export class HavenSignContextError extends HavenSigningError {
   constructor(
     message: string,
     code: SignContextErrorCode,
-    refusal?: { httpStatus: number; errorCode?: string },
+    refusal: { httpStatus: number; errorCode?: string } | undefined,
     /** #3103: the payment the context was fetched for, so a refusal can name the status read. */
-    paymentId?: string,
+    paymentId: string,
   ) {
     super(message)
     ;(this as { code: string }).code = code
@@ -126,17 +128,11 @@ export class HavenSignContextError extends HavenSigningError {
         })
       } else {
         this.next_action = AgentPaymentNextAction.StopAndTellUser
-        step = paymentId
-          ? signerRefusalStep({
-              nextAction: AgentPaymentNextAction.StopAndTellUser,
-              nextTool: 'haven_get_payment_status',
-              nextArguments: { payment_id: paymentId },
-            })
-          : signerRefusalStep({
-              nextAction: AgentPaymentNextAction.StopAndTellUser,
-              nextTool: null,
-              nextToolOmittedReason: 'Haven refused the signing context and no payment_id is known here; tell the user what it said',
-            })
+        step = signerRefusalStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: 'haven_get_payment_status',
+          nextArguments: { payment_id: paymentId },
+        })
       }
     } else {
       this.fallback = 'typed_data_b64'

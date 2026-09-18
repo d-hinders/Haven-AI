@@ -71,7 +71,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-13"
+last-verified: "2026-09-18"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -974,6 +974,28 @@ in-flight window — from the money-path list itself until #1892's review. One
 omission in two lists, found twice, because a rule stated in prose is a rule
 nobody re-checks.
 
+**And it is checked in the other direction (#3098).** #1899 asks whether every
+money-path glob is covered here; nothing asked whether every package this list
+spans is on the money-path list. `packages/demo-merchant-mcp/src/**` was — it
+had been in `covers:` since #650 (2026-06-28) while the classifier, the labeler
+and `qa-freshness` had never heard of it, and the file that submits the buyer's
+authorization on-chain shipped two settlement-semantics changes through that
+gap: #2969 (PR #2977) with no `money-path` label, so no shard was required of
+it (one was written voluntarily) and `qa-freshness` did not count it; #2979
+(PR #2982) labelled only because it also touched `packages/mcp-server/src/**`
+— the demo-merchant file contributed nothing to that label. The glob is on the
+runtime list now, and `money-path.test.mjs` fails when a package-wide entry
+here is on neither list unless it is named **doc-only with its reason**:
+`packages/cli/src/**`, `packages/connect/src/**` and `packages/mcp/src/**` are
+client packages the deployed harness never runs, and `packages/sdk/src/**` is
+doc-only apart from `packages/sdk/src/signer.ts`, which is on the runtime list
+because it is spend authority (the harness does build and drive the SDK; the
+rest of it is transport). They stay on this perimeter — the CASP question
+still applies to what they ship — without a QA-freshness obligation. Widening
+one of them is an owner decision, not a drift fix. The check is scoped to
+package-wide entries; sub-package wildcards such as
+`packages/backend/src/modules/accounting/**` are knowingly outside it.
+
 `scripts/ci/money-path.test.mjs` now asserts this front matter spans every
 runtime glob in [`.github/money-path-globs.json`](../../.github/money-path-globs.json).
 The two remaining gaps are **exempted explicitly, not silently**: widening a
@@ -996,9 +1018,11 @@ not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
 
-**The floor is measured, and the number moves (#2300).** As of #2300 the pin
-asserts **31 of the 47 globs**: the 33 runtime `globs` minus the two `EXEMPT`
-entries above, and none of the 14 `controlGlobs`. The addition that moved it
+**The floor is measured, and the number moves (#2300, #3098).** As of #3098
+the pin asserts **32 of the 49 globs**: the 34 runtime `globs` minus the two
+`EXEMPT` entries above, and none of the 15 `controlGlobs` (#3098 added
+`packages/demo-merchant-mcp/src/**`, already covered here, so the pin was
+satisfied on arrival). The addition #2300 made
 was `packages/mcp-server/src/**` — the hosted MCP tool surface, whose
 capability modules decide whether a funding userop is relayed and in what
 order (the completion capability, `src/tools/paid-mcp-completion.ts`, carries

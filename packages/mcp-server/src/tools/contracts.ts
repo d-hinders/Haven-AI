@@ -658,12 +658,11 @@ export const STRICT_INPUT_TOOLS = {
     "merchant quote inside a 5-minute bucket, so the caller's own replay scope was " +
     'silently replaced by a different one rather than merely lost.',
   haven_quote_x402:
-    'This is the HOSTED surface. It takes url, method, headers and body. The local MCP ' +
-    '(@haven_ai/mcp) additionally takes idempotencyKey — carrying it here used ' +
-    'to be dropped in silence, and a body-bearing POST was then probed with an EMPTY body, ' +
-    'so the quote described a different request than the one the caller meant to pay for. ' +
-    'The hosted surface has no body field to route it to; quote a GET resource, or use ' +
-    'haven_pay_mcp_tool for a merchant that needs a request payload.',
+    'This is the HOSTED surface. It takes url, method, headers and body (#2366 added body, so ' +
+    'a body-bearing POST paywall is quoted with the body the caller means to pay for). The ' +
+    'local MCP (@haven_ai/mcp) additionally takes idempotency_key, which the hosted quote ' +
+    'has no use for — carrying it here used to be dropped in silence. haven_discover_tools ' +
+    'hands you resource_url; this tool spells that argument url (#3100).',
   haven_pay_x402_quote:
     'This is the HOSTED surface, which takes payment_required, idempotency_key and url ' +
     '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotencyKey. Passing ' +
@@ -769,6 +768,26 @@ export const PERMISSIVE_INPUT_TOOLS = {
 } as const satisfies Partial<Record<HostedToolName, string>>
 
 export type PermissiveInputToolName = keyof typeof PERMISSIVE_INPUT_TOOLS
+
+/**
+ * #3100 (epic #3105, decision 5): the DECLARED aliases a strict refusal names.
+ *
+ * A rejected key matches a declared key when, after case-folding and
+ * stripping `_` / `-`, the two are equal (`merchantUrl` → `merchant_url`) —
+ * that half is computed, not listed. This table carries the pairs no
+ * normalisation can see: the field another Haven response hands the agent
+ * under one name and this tool declares under another. `haven_discover_tools`
+ * returns `resource_url` and `id`; the tools it points at take `url` and
+ * `catalog_id`. No containment, no similarity — an entry here is the
+ * mutation target of the test that pins the hint.
+ */
+export const TOOL_ARGUMENT_ALIASES: Partial<Record<HostedToolName, Readonly<Record<string, string>>>> = {
+  haven_quote_x402: { resource_url: 'url' },
+  haven_quote_catalog_purchase: { id: 'catalog_id' },
+  haven_prepare_catalog_purchase: { id: 'catalog_id' },
+  haven_quote_mcp_tool: { resource_url: 'merchant_url' },
+  haven_pay_mcp_tool: { resource_url: 'merchant_url' },
+}
 
 /**
  * #2349: every hosted tool carries an input decision, enforced at compile time.

@@ -45,6 +45,7 @@ import {
   toolSchemas,
   STRICT_INPUT_TOOLS,
   PERMISSIVE_INPUT_TOOLS,
+  TOOL_ARGUMENT_ALIASES,
   type HostedToolName,
   type StrictInputToolName,
 } from './contracts.js'
@@ -65,15 +66,51 @@ function isStrictInputTool(name: HostedToolName): name is StrictInputToolName {
  */
 export function toolInputSchema(name: HostedToolName): z.ZodRawShape | z.ZodTypeAny {
   if (!isStrictInputTool(name)) return toolSchemas[name]
-  return z.object(toolSchemas[name]).strict(strictRefusalMessage(name))
+  // #3100: the refusal is built PER ISSUE so the SDK-level path (the MCP
+  // transport validating before the handler runs) names the rejected keys and
+  // their declared aliases too, not only `parseStrict`'s path.
+  const errorMap: z.ZodErrorMap = (issue, ctx) =>
+    issue.code === 'unrecognized_keys'
+      ? { message: strictRefusalMessage(name, issue.keys) }
+      : { message: ctx.defaultError }
+  // `.strict(message)` takes a STATIC string; the per-issue map goes on the
+  // object schema itself, where zod consults it for the keys it refuses.
+  return z.object(toolSchemas[name], { errorMap }).strict()
+}
+
+/** Case-fold and strip `_` / `-`: `merchantUrl`, `merchant-url` and `merchant_url` are one key. */
+function foldKey(key: string): string {
+  return key.toLowerCase().replace(/[_-]/g, '')
+}
+
+/**
+ * #3100: the declared key a rejected key stands for, or undefined. Two rules,
+ * both exact: the folded spellings are equal, or the pair is in
+ * `TOOL_ARGUMENT_ALIASES`. Never containment or similarity.
+ */
+export function declaredAliasFor(name: HostedToolName, rejected: string): string | undefined {
+  const declared = Object.keys(toolSchemas[name])
+  const table = TOOL_ARGUMENT_ALIASES[name]
+  if (table && rejected in table) return table[rejected]
+  const folded = foldKey(rejected)
+  return declared.find((k) => k !== rejected && foldKey(k) === folded)
 }
 
 export function strictRefusalMessage(name: StrictInputToolName, keys?: readonly string[]): string {
   const subject = keys && keys.length > 0
     ? `${name} does not accept ${keys.map((k) => `"${k}"`).join(', ')}.`
     : `${name} refuses an argument it does not declare.`
+  // #3100: name the declared keys, and the alias of every rejected key that
+  // has one — the hint an agent copying a field from another response needs.
+  const declared = Object.keys(toolSchemas[name])
+  const aliases = (keys ?? [])
+    .map((k) => ({ rejected: k, alias: declaredAliasFor(name, k) }))
+    .filter((a): a is { rejected: string; alias: string } => a.alias !== undefined)
+    .map((a) => `send "${a.rejected}" as "${a.alias}"`)
+  const hint = aliases.length > 0 ? ` ${aliases.join('; ')}.` : ''
   return (
-    `${subject} That is deliberate rather than an omission: ${STRICT_INPUT_TOOLS[name]} ` +
+    `${subject}${hint} It declares: ${declared.join(', ')}. ` +
+    `That is deliberate rather than an omission: ${STRICT_INPUT_TOOLS[name]} ` +
     'Send only the fields this tool declares.'
   )
 }

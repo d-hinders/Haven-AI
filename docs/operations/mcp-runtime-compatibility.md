@@ -2077,3 +2077,20 @@ what each server's instructions say and why they differ in length.
 > runtime always retried the caller's URL; the hosted surface now carries it.
 > Scope of this note: those fields and that refusal. Nothing else in this
 > document was re-verified.
+
+> **Re-verification (#3100, discovery hands out arguments its suggested tool
+> accepts, 2026-09-18):** this diff touches the hosted `haven_discover_tools` map (`src/tools/catalog-purchase.ts`), the strict-refusal builder (`src/tools/registry.ts`) and the `STRICT_INPUT_TOOLS` reason for `haven_quote_x402` (`src/tools/contracts.ts`), plus the local runtime's discovery map (`packages/mcp/src/tools.ts`). Additive on the read side:
+> every discovery entry gains `suggested_arguments` in the suggested tool's
+> vocabulary (hosted MCP entries now suggest the cap-free
+> `haven_quote_catalog_purchase { catalog_id }` instead of prepare; HTTP entries
+> `haven_quote_x402 { url }`; the local runtime keeps its pay tools with
+> `{ merchant_url, tool_name, arguments }` / `{ url }`), and a hosted strict
+> refusal now names the declared keys and a rejected key's declared alias
+> (`TOOL_ARGUMENT_ALIASES` + folded-spelling equality) on both the handler and
+> the transport parse paths. No tool name, schema key, strict/permissive split,
+> expected-context version or signer contract changes; the local/hosted
+> divergence this document records is unchanged (the two surfaces suggest
+> different tools by design — same property, not the same values). The
+> `haven_quote_x402` reason no longer claims the hosted surface has no body
+> field (it has had one since #2366). Scope of this note: those fields and that
+> text. Nothing else in this document was re-verified.

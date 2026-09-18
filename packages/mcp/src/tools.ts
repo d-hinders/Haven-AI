@@ -413,14 +413,28 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           source: entry.source,
           domain_verified: entry.domainVerified,
           verified_payable: entry.verifiedPayable,
-          // Which Haven pay tool reaches this entry from the local MCP surface.
+          // Which Haven pay tool reaches this entry from the local MCP surface,
+          // and — #3100 (epic #3105, decision 4) — the arguments that tool
+          // accepts VERBATIM, spelled in ITS vocabulary (`merchant_url`, not
+          // the entry's `resource_url`). The local surface keeps pointing at
+          // its pay tools: they need no cap, so a verbatim hint exists.
           // #1328: the 'mpp' rail's only-ever catalog row (the Haven MPP demo
           // resource) is delisted with the mpp_demo retirement, so this
           // fallback is unreachable today; it stays x402 rather than naming a
           // deleted tool in case a future non-demo 'mpp' rail entry appears.
-          suggested_tool:
-            entry.protocol === 'mcp' ? 'haven_pay_mcp_tool'
-            : 'haven_pay_x402',
+          ...(entry.protocol === 'mcp'
+            ? {
+                suggested_tool: 'haven_pay_mcp_tool',
+                suggested_arguments: {
+                  merchant_url: entry.resourceUrl,
+                  ...(entry.toolName ? { tool_name: entry.toolName } : {}),
+                  ...(entry.toolArguments ? { arguments: entry.toolArguments } : {}),
+                },
+              }
+            : {
+                suggested_tool: 'haven_pay_x402',
+                suggested_arguments: { url: entry.resourceUrl },
+              }),
         }))
       })
     },

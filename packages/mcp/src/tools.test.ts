@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient, toolDescriptions as sharedDescriptions } from '@haven_ai/sdk'
-import { createToolHandlers, toolDescriptions } from './tools.js'
+import { z } from 'zod'
+import { createToolHandlers, toolDescriptions, toolSchemas } from './tools.js'
 import { readFileSync } from 'node:fs'
 
 const delegateKey = '0x59c6995e998f97a5a0044966f09453843a4bba3e18a70e0614612ece7c1e4568'
@@ -1760,6 +1761,19 @@ describe('haven_discover_tools (#349)', () => {
       tool_arguments: { prompt: 'hello' },
     })
     expect(data[1]).toMatchObject({ id: 'cat-http', suggested_tool: 'haven_pay_x402' })
+    // #3100 (epic #3105, decision 4): the hint carries arguments the suggested
+    // tool accepts VERBATIM, spelled in that tool's vocabulary — and the
+    // parity check below is the property, not the two literals.
+    expect(data[0].suggested_arguments).toEqual({
+      merchant_url: 'https://mcp.merchant.example/mcp',
+      tool_name: 'create_text',
+      arguments: { prompt: 'hello' },
+    })
+    expect(data[1].suggested_arguments).toEqual({ url: 'https://api.merchant.example/paid' })
+    for (const entry of data as Array<{ suggested_tool: keyof typeof toolSchemas; suggested_arguments: unknown }>) {
+      const parsed = z.object(toolSchemas[entry.suggested_tool]).strict().safeParse(entry.suggested_arguments)
+      expect(parsed.success, `${entry.suggested_tool} refuses its own discovery hint`).toBe(true)
+    }
     // #1328: the 'mpp' rail's suggested_tool fallback no longer names a
     // deleted tool — it now matches the plain-HTTP x402 case (unreachable in
     // practice today; the only-ever 'mpp' catalog row is delisted).

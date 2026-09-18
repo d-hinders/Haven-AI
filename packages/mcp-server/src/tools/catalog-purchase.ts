@@ -150,20 +150,31 @@ export function createCatalogPurchaseHandlers(
               }
             : {}),
           // Hosted surface is keyless: x402 entries start with the quote half
-          // of the split flow; MCP entries take the GUIDED preflight —
-          // haven_prepare_catalog_purchase runs the live quote, cap, and
-          // rail-aware allowance check from just the catalog_id (#1306), and
-          // the description prose already said to prefer it. #1547: this
-          // structured field said haven_pay_mcp_tool while the prose said
-          // prepare — and structured fields win over prose by this server's
-          // own instructions, so the field steered agents off the guided path.
+          // of the split flow; MCP entries start with the read-only catalog
+          // quote, which leads into the GUIDED preflight
+          // (haven_prepare_catalog_purchase — live quote, cap, rail-aware
+          // allowance check from the catalog_id, #1306). #1547: this field
+          // once said haven_pay_mcp_tool while the prose said prepare, and
+          // structured fields win over prose by this server's own
+          // instructions. #3100 (epic #3105, decision 4): the hint now carries
+          // `suggested_arguments` the suggested tool accepts VERBATIM — which
+          // is why it points at the cap-free quote rather than prepare:
+          // prepare REQUIRES a spending cap the server must never invent, so
+          // a verbatim hint for it cannot exist; the quote's own guidance
+          // takes the agent to prepare with the user's cap.
           // #1328: the 'mpp' rail's only-ever catalog row (the Haven MPP demo
           // resource) is delisted with the mpp_demo retirement, so this
           // fallback is unreachable today; it stays x402 rather than naming a
           // deleted tool in case a future non-demo 'mpp' rail entry appears.
-          suggested_tool:
-            entry.protocol === 'mcp' ? 'haven_prepare_catalog_purchase'
-            : 'haven_quote_x402',
+          ...(entry.protocol === 'mcp'
+            ? {
+                suggested_tool: 'haven_quote_catalog_purchase',
+                suggested_arguments: { catalog_id: entry.id },
+              }
+            : {
+                suggested_tool: 'haven_quote_x402',
+                suggested_arguments: { url: entry.resourceUrl },
+              }),
         }))
       }),
 

@@ -576,6 +576,14 @@ optional `search` term matches `name`, `description`, or `category`, and the
 existing `rail` plus agent-chain scoping still apply. Results stay
 deterministically ordered and may be empty or multi-row; they never authorize
 payment, and any catalog price remains indicative until the live quote below.
+Since #3100 each entry carries `suggested_tool` **and** `suggested_arguments`,
+spelled in that tool's own vocabulary and accepted by it verbatim — on the
+hosted surface an MCP entry points at the cap-free `haven_quote_catalog_purchase`
+`{ catalog_id }` (prepare requires a cap the server must never invent) and an
+HTTP entry at `haven_quote_x402 { url }`; the local runtime points at its pay
+tools with `{ merchant_url, tool_name, arguments }` / `{ url }`. A strict
+refusal names the declared keys and the declared alias of a rejected key
+(`resource_url` → `url`, `id` → `catalog_id`; epic #3105, decision 5).
 
 Since [#2530](https://github.com/d-hinders/Haven-AI/issues/2530) `GET /catalog`
 also answers WITHOUT a credential, in a reduced public shape: name,

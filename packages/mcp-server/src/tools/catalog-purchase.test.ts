@@ -22,6 +22,8 @@
  * Fixtures come from the #2808 shared module, never re-declared here.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
+import { parseStrict } from './parsing.js'
+import type { StrictInputToolName } from './contracts.js'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
@@ -59,6 +61,39 @@ beforeAll(async () => {
 })
 
 describe('haven_discover_tools', () => {
+  it('hands out suggested_arguments each suggested tool accepts VERBATIM — the discovery hop parity (#3100)', async () => {
+    const base = {
+      description: 'd', category: 'api', rail: 'x402', price_display: '$0.01 USDC', price_atomic: '10000',
+      asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', network: 'base', status: 'active',
+      verified_at: '2026-06-16T08:50:39.772Z',
+    }
+    stubFetch({
+      'GET /catalog': {
+        status: 200,
+        body: {
+          entries: [
+            { ...base, id: 'cat_mcp', name: 'create_text', resource_url: 'https://mcp.merchant.test/mcp', protocol: 'mcp', tool_name: 'create_text', tool_arguments: { prompt: 'hello' } },
+            { ...base, id: 'cat_http', name: 'Fact', resource_url: 'https://services.sandbox.ampersend.ai/api/fact', protocol: 'http', tool_name: null, tool_arguments: null },
+          ],
+        },
+      },
+    })
+    const result = ok<Array<{ id: string; resource_url: string; suggested_tool: StrictInputToolName; suggested_arguments: Record<string, unknown> }>>(
+      await handlers().haven_discover_tools({}),
+    )
+    expect(result.data.map((e) => [e.suggested_tool, e.suggested_arguments])).toEqual([
+      ['haven_quote_catalog_purchase', { catalog_id: 'cat_mcp' }],
+      ['haven_quote_x402', { url: 'https://services.sandbox.ampersend.ai/api/fact' }],
+    ])
+    // The property, not the literals: every hint parses under the strict
+    // schema of the tool it names. (The live bug: discovery said
+    // `resource_url`, the tool took `url`.)
+    for (const entry of result.data) {
+      expect(() => parseStrict(entry.suggested_tool, entry.suggested_arguments), entry.suggested_tool).not.toThrow()
+      expect(() => parseStrict(entry.suggested_tool, { resource_url: entry.resource_url })).toThrow(/send "resource_url" as|does not accept/)
+    }
+  })
+
   it('marks catalog prices as indicative (not authoritative)', async () => {
     stubFetch({
       'GET /catalog': {
@@ -91,6 +126,7 @@ describe('haven_discover_tools', () => {
       price_is_indicative: boolean
       price_atomic: string
       suggested_tool: string
+      suggested_arguments: Record<string, unknown>
       tool_arguments: Record<string, unknown>
     }>>(
       await handlers().haven_discover_tools({}),
@@ -98,9 +134,12 @@ describe('haven_discover_tools', () => {
 
     expect(result.data[0].price_is_indicative).toBe(true)
     expect(result.data[0].price_atomic).toBe('10000')
-    // #1547: the structured field agrees with the description prose — MCP
-    // entries point at the GUIDED preflight, not the manual tool.
-    expect(result.data[0].suggested_tool).toBe('haven_prepare_catalog_purchase')
+    // #1547 pointed MCP entries at the GUIDED preflight rather than the manual
+    // tool; #3100 points them one step earlier, at the cap-free catalog quote
+    // (prepare REQUIRES a cap the server must never invent, so a verbatim
+    // hint for it cannot exist) — still the guided path, never the manual tool.
+    expect(result.data[0].suggested_tool).toBe('haven_quote_catalog_purchase')
+    expect(result.data[0].suggested_arguments).toEqual({ catalog_id: 'cat_1' })
     expect(result.data[0].tool_arguments).toEqual({ prompt: 'hello' })
   })
 

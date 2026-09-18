@@ -2103,8 +2103,10 @@ what each server's instructions say and why they differ in length.
 > the SDK's `types.ts` (a new optional `next_tool_omitted_reason` on
 > `AgentNextStep`) and, annotation only, `packages/mcp/src/tools.ts`. The
 > hosted `next_tool` family is now rendered by the SDK's builder from a bare
-> tool name + server role over a target map derived from the hosted and
-> signer `toolSchemas` (which keep their keys via `as const satisfies`); the
+> tool name + server role over a target map derived from the hosted
+> `toolSchemas` (which keeps its keys via `as const satisfies`) plus the two
+> signer handoff shapes the hosted server declares itself — it never imports
+> the edge signer at runtime; a test pins them to the signer's schemas; the
 > wire strings are byte-identical, pinned by
 > `next-step-characterization.test.ts`. New on the wire:
 > `next_tool_omitted_reason` wherever no tool is named (the three refusals

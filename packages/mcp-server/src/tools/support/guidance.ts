@@ -22,16 +22,32 @@ import {
   type NextStepInput,
   type NextStepTarget,
 } from '@haven_ai/sdk'
-import { toolSchemas as signerToolSchemas } from '@haven_ai/signer'
 import { z } from 'zod'
 import { toolSchemas } from '../contracts.js'
+
+/**
+ * The argument shapes the hosted server hands to the SIGNER's tools. Declared
+ * here rather than imported from `@haven_ai/signer`: the hosted server is
+ * keyless by design and its deploy image carries only `sdk` + `mcp-server`
+ * (Dockerfile), so a runtime import of the edge signer both breaks the build
+ * and pulls key-handling code into the hosted bundle. The hosted server only
+ * ever hands the signer a `payment_id` (the signer fetches the signing
+ * context itself, #1263), so the shape is exactly that — a subset of the
+ * signer's own schema, pinned to it by `next-step-signer-parity.test.ts`
+ * (test-time import, which the workspace has).
+ */
+const SIGNER_HANDOFF_SHAPES = {
+  haven_sign: { payment_id: z.string().min(1) },
+  haven_sign_x402: { payment_id: z.string().min(1) },
+} as const satisfies Record<string, z.ZodRawShape>
 
 /**
  * #3101 (epic #3105, slice 2/5): the hosted next-step TARGET MAP — every tool a
  * hosted response may hand the agent to, keyed on its BARE name with the
  * server role that reaches it (decision 1). The argument type of each target
- * is derived from the tool's own zod shape (the three `toolSchemas` maps keep
- * their keys since this slice), and the validate closure is the runtime twin
+ * is derived from the tool's own zod shape (the hosted `toolSchemas` keeps its
+ * keys since this slice; the signer handoffs are the declared subset above),
+ * and the validate closure is the runtime twin
  * of that type. The SDK's builder renders `mcp__<server>__<tool>` and the
  * runtime-neutral server/name/role fields from this map in one place; the
  * 13 emission sites name a bare tool and arguments that tool declares, and a
@@ -59,7 +75,7 @@ function hostedTargets<M extends Record<string, z.ZodRawShape>>(role: 'hosted' |
 
 const HOSTED_NEXT_STEP_TARGETS = {
   ...hostedTargets('hosted', toolSchemas),
-  ...hostedTargets('signer', signerToolSchemas),
+  ...hostedTargets('signer', SIGNER_HANDOFF_SHAPES),
 }
 export type HostedNextStepTargets = typeof HOSTED_NEXT_STEP_TARGETS
 

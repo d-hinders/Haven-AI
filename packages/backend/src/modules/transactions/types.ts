@@ -17,7 +17,17 @@ export interface Transaction {
   decimals: number
   direction: 'in' | 'out'
   timestamp: number
-  blockNumber: number
+  /**
+   * On-chain block, or `null` when this row has none recorded (#3129).
+   *
+   * Explorer-derived rows always carry a real block. `null` is the
+   * x402-synthesized row, built from a payment intent: no block number is
+   * stored anywhere (no migration defines a `block_number` column), so the
+   * field is genuinely unknown. It was `0` until #3129, which reads as a real
+   * block — a zero that means "missing" is worse than an absent value,
+   * especially beside a `hash` that IS a real settlement transaction.
+   */
+  blockNumber: number | null
   isError: boolean
   tokenAddress?: string
   tokenSymbol?: string

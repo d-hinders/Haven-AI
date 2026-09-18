@@ -452,6 +452,18 @@ export const ROUTING_MATRIX = [
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
   },
   {
+    files: ['scripts/lint-next-steps.mjs'],
+    expect: ['code', 'backend', 'mcp_server', 'signer', 'mcp', 'connect', 'qa_agent'],
+    kind: CONTRACT,
+    why: 'The shrink-only typed next-step ratchet (#3104, epic #3105) polices packages/mcp-server, packages/signer and packages/mcp, so it runs in each of their jobs and in backend_checks beside the request-schema ratchet; connect and qa_agent follow from the package dependency table.',
+  },
+  {
+    files: ['scripts/lint-next-steps.test.mjs'],
+    expect: ['code', 'backend', 'mcp_server', 'signer', 'mcp', 'connect', 'qa_agent'],
+    kind: CONTRACT,
+    why: 'The ratchet’s self-test, same reason as dep-lint’s.',
+  },
+  {
     files: ['scripts/generate-api-types.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,

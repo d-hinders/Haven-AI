@@ -10,6 +10,8 @@ covers:
   - packages/frontend/src/lib/env.ts
   - packages/backend/src/config.ts
   - packages/backend/src/openapi/request-validation.ts
+  - packages/backend/src/openapi/route-modules.generated.ts
+  - packages/backend/scripts/generate-route-modules.ts
   - packages/backend/src/index.ts
 last-verified: "2026-09-18"
 ---
@@ -288,7 +290,7 @@ Isolation rules that are non-negotiable for a payments product:
   that deterministic test so the normal 15-minute merchant-report grace stays
   in force; never set it in production.
 - **Request-validation mode** — `HAVEN_REQUEST_VALIDATION` on the backend is
-  `off` (no schema is injected — EXCEPT on an `enforcedPrefixes` module,
+  `off` (no schema is injected — EXCEPT on an `enforcedModules` module,
   which stays enforced regardless of the mode) | `shadow` (default: log and
   count would-be refusals;
   since #3082 the request BODY is restored after validation so nothing the
@@ -299,14 +301,27 @@ Isolation rules that are non-negotiable for a payments product:
   (#3029, epic #3028).
 
   **`enforce` is not global, despite the name.** A route is enforced only when
-  its prefix is in the plugin's `enforcedPrefixes`, which `index.ts` sets to
-  `['/contacts', '/merchants']` since #3084 (before that, `['/contacts']`) —
+  the route FILE that declares it is in the plugin's `enforcedModules`, which
+  `index.ts` sets to `['routes/contacts.ts', 'routes/merchants.ts']` —
   `mode` gates the `off` early-return and the counters and nothing else.
   Setting `HAVEN_REQUEST_VALIDATION=enforce` today therefore refuses exactly
   what `shadow` refuses, and since #3084 that includes off-spec
   `/merchants/{slug}` requests (the required `slug` must match its pattern).
-  Epic #3028 slices 2–4 widen the prefix list; the variable is not the switch
+  Epic #3028 slices 2–4 widen the list; the variable is not the switch
   that does it.
+
+  **Keyed on the FILE, not the mount prefix, since #3135** (epic #3028
+  decision 7). A prefix could not express the epic's slice partition:
+  `/agents` is shared by `agents.ts`, `agent-delegations.ts`, `agent-rekey.ts`
+  and `agent-passports.ts`, which the epic splits across slices 3 and 4, and
+  the root prefix `''` matched every module beneath it. The key is resolved
+  per operation through the generated
+  `packages/backend/src/openapi/route-modules.generated.ts`; regenerate it with
+  `npm run generate:route-modules` after adding, moving or renaming a route
+  (`npm run check:route-modules` and the backend suite both fail on a stale
+  table). The `lint:request-schemas` gate keys its baseline entries with the
+  same string, so the gate and the runtime cannot disagree about which modules
+  are still shadowed.
 
   Any other value refuses the boot rather than falling
   back — a misspelled `enforce` must not silently mean `shadow`. **A mode
@@ -331,11 +346,14 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > against the merged tree and hold; the doc makes no claim about
   > accounting-connector registration itself. Found stale here but
   > PRE-EXISTING and out of scope for #3018 (dev's own #3084 changed the code
-  > without touching this doc): the `enforcedPrefixes` sentence in the
-  > request-validation bullet above still names `['/contacts']` while
-  > `index.ts` now sets `['/contacts', '/merchants']` — flagged, not edited.
-  > Nothing in this file was edited except this note and the
-  > `last-verified` date.
+  > without touching this doc): the enforced-module sentence in the
+  > request-validation bullet above still named `['/contacts']` while
+  > `index.ts` had moved on — flagged, not edited. Nothing in this file was
+  > edited except this note and the `last-verified` date.
+  >
+  > **Resolved since:** #3111 corrected that sentence, and #3135 re-keyed the
+  > option itself from `enforcedPrefixes` to the file-keyed `enforcedModules`.
+  > The bullet above is current as of #3135.
 
   > **Re-verified #3018 (2026-09-18, round-3 follow-up):** the staleness
   > flagged in the blockquote above is fixed in this edit. The sentence now

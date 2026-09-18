@@ -33,7 +33,7 @@ covers:
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/ConnectionSettings.tsx
   - packages/frontend/src/components/accounting/BackfillDialog.tsx
-last-verified: "2026-09-12"
+last-verified: "2026-09-18"
 ---
 
 # Accounting feed — operations runbook
@@ -435,6 +435,22 @@ the entry is built; the sweep's JOIN excludes the connection) and leaves the
 two manual ones (Sync now, backfill). A "nothing syncs" report where
 `settings ->> 'auto_feed' = 'false'` is the answer, not a fault. Supplier
 strategy is fixed at one supplier per merchant (owner decision).
+
+**A merchant with no name is booked under a name derived from its address, and
+that derivation is deliberately case-insensitive (#3129).** `supplierNameFor`
+lowercases before building `Merchant <first6>-<last4>`, because
+`findOrCreateSupplier` resolves the name through a **remote**
+`GET /suppliers?name=` filter whose case sensitivity is Fortnox's and cannot be
+pinned from this repository — the local exact-match after it *is*
+case-insensitive, so the remote filter is the whole exposure. If the derived
+name could move with the address form, a casing change anywhere upstream would
+stop matching merchants already booked and create a second supplier for each,
+breaking the one-supplier-per-merchant rule above in a way that only shows up
+in the customer's ledger. #3129 made `counterparty.address` EIP-55 checksummed
+on the entry and this is what keeps that invisible here. **Debugging a
+duplicate supplier: the derived name is not where to look** — it is pinned by
+`fortnox-connector.test.ts` and is byte-identical to every name written since
+the feed went live.
 
 ## Background retry sweep
 

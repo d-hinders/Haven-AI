@@ -655,6 +655,15 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       selected_payment: row.selected_payment,
       payment_proof_header_name: row.payment_proof_header_name,
       protocol_receipt_header_name: row.protocol_receipt_header_name,
+      // #3125: relayed VERBATIM — the merchant's PAYMENT-RESPONSE object,
+      // opaque and merchant-controlled. Nothing inside it (including `payer`)
+      // is Haven's record: Haven's own payer is `payer_address` above, and the
+      // authoritative party set is the `withParties` payload below. Wire
+      // namespacing/key-prefix was decided AGAINST (#3125): the relay must
+      // stay the merchant's object verbatim (settlement-hash derivation above
+      // reads payload.transaction), and prefixing the envelope could not
+      // prefix the merchant-controlled keys inside it — provenance is stated
+      // at the read surfaces instead (SDK type doc, tool description).
       protocol_receipt_payload: row.protocol_receipt_payload,
       merchant_status: row.merchant_status,
       confirmed_at: row.confirmed_at,

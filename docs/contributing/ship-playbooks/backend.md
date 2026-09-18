@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/openapi/**
-last-verified: "2026-09-15"
+last-verified: "2026-09-18"
 ---
 
 # Backend / API playbook
@@ -13,6 +13,19 @@ Loaded by `ship-next` for `area:backend` issues.
 - **OpenAPI drift.** Keep `packages/backend/src/openapi/spec.test.ts` green — a route on the agent-payment surface must be documented in `openapi/spec.ts` or carry a `because:` entry in the allowlist (now `KNOWN_UNDOCUMENTED_ROUTES` in `openapi/route-coverage.ts`). Adding a route means updating the spec.
 - **Route coverage, wider than the above (#1443).** `openapi/route-coverage.test.ts` gates **every route module the server registers**, not just the seven agent-payment files — it derives its scope from `index.ts`'s registration table, so a brand-new route file is covered from its first commit. A new route is accounted for by documenting it, by a per-route `KNOWN_UNDOCUMENTED_ROUTES` entry, or — for a module whose whole surface is deferred to the #1446 backfill — by `UNDOCUMENTED_MODULES`. Both lists sit under **shrink-only ceilings**: raising one is the failure the gate exists to catch, so document the route instead. Keeping `spec.test.ts` green is no longer sufficient on its own.
 - **Response shape vs. the spec (#1444).** `check:api-types` proves the spec agrees with types generated from the spec — never that a route returns what the spec promises. When you add or change a documented route's response, assert it: `expectMatchesSpec('GET', '/agents/{id}', response.json())` from `openapi/response-shape.js`, after `app.inject`. It catches a missing required field, a wrong type, a bad enum value and a malformed uuid/timestamp; it does **not** catch an extra undeclared field on a schema that sets `additionalProperties: true`. Fixtures on asserted paths must look like real rows — a fixture id of `'agent-1'` fails the uuid format, correctly. Scope and mutation proofs: `docs/architecture/05-agent-api-openapi.md`.
+- **Adding a route also regenerates the route-module table (#3135).** The
+  request-validation plugin resolves its per-module enforcement list
+  (`enforcedModules`, keyed on the route FILE) through the generated
+  `openapi/route-modules.generated.ts`, because deriving it at boot would read
+  TypeScript source the deployed image does not ship. Run
+  `npm run generate:route-modules` and commit the result whenever you add,
+  move, rename or delete a route; `npm run check:route-modules` and
+  `openapi/__tests__/route-modules.generated.test.ts` both fail on a stale
+  table. A *missing* entry fails quietly in the safe direction — the route is
+  never enforced. A *moved* one does not: the stale table keeps the old
+  attribution, so the route stays enforced under a file nobody listed. Both are
+  invisible at runtime, which is why the staleness itself is what gets gated
+  rather than the lookup.
 - **Generated wire types (#984).** Any edit to `openapi/spec.ts` must regenerate the shared wire types: run `npm run generate:api-types` and commit the resulting `packages/core/src/api-types.ts`. CI's **blocking** `npm run check:api-types` drift gate fails the PR if the spec and the generated types disagree. Never hand-edit `api-types.ts`.
 - **Package gate.** `npm run typecheck -w packages/backend` and `npm run test -w packages/backend` must pass. **Run `typecheck` as the LAST step, after every test file is written or edited** — `vitest`/`tsx` strip types and do NOT type-check, so a green test run says nothing about type errors in the test itself. `tsc` is the only thing that checks `*.test.ts`; a type error there (a wrong config field, a stale mock shape) fails CI's typecheck but never the test run (#781, the #776 miss).
 - **SQL schema drift.** When the diff adds or changes a money-path query, add it to the curated list in `packages/backend/scripts/db-schema-smoke.ts` — CI applies the migrations and `PREPARE`s each query against a real Postgres, so a column/type mismatch fails in CI instead of dev (mocked route tests never validate SQL against the schema — how `agents.safe_address` reached dev, #757). Run locally against a throwaway DB with `DATABASE_URL=… npm run db:schema-smoke -w packages/backend`. Since epic #1219 the smoke is no longer the only real-database check: repository *behaviour* (idempotency, locking, transactions) is proven on the real-DB harness — see [`testing-strategy.md`](../testing-strategy.md) for which check owns what.

@@ -29,6 +29,56 @@ describe('shared Haven tool descriptions', () => {
     expect(desc).toContain('what-can-i-spend')
   })
 
+  it("#3125: receipts distinguish Haven's payer from the merchant's claim", () => {
+    // payerAddress is Haven's own record (row.payer_address, written from the
+    // intent's treasury account). protocolReceiptPayload.payer is the
+    // merchant's PAYMENT-RESPONSE relayed verbatim — merchant-controlled,
+    // unverified, and in the 2026-09-18 field run a DIFFERENT address on
+    // every row. This description is agent-read behaviour specification: an
+    // agent that reads "payer" unqualified will attribute the payment to
+    // whichever value it reaches first, and the nested one sits inside the
+    // object named "receipt payload". The hosted surface composes this same
+    // fragment under the #1591 per-tool byte budget, so the guidance is
+    // deliberately compact — the full party vocabulary (delegate,
+    // delegateAccount, merchant) lives in the HavenPaymentReceipt type doc.
+    // If you lengthen the fragment, the hosted description-size mean gate
+    // (mcp-server description-size.test.ts, ≤874 bytes/tool) is the bound
+    // that will fail — trim elsewhere first and re-verify there.
+    const desc = composeDescription(toolDescriptions.listReceipts)
+
+    expect(desc).toContain('parties.treasuryAccount')
+    expect(desc).toContain('authoritative')
+    expect(desc).toContain('PAYMENT-RESPONSE')
+    expect(desc).toContain('relayed verbatim')
+    expect(desc).toContain('unverified')
+    expect(desc).toContain('merchant-controlled')
+    expect(desc).toContain("not Haven's record")
+    expect(desc).toContain('payerAddress')
+  })
+
+  it('#3125: the SDK type doc comment marks protocolReceiptPayload merchant-supplied and unverified', () => {
+    // The type is the other place a consumer reads the field (IDE hover on
+    // HavenPaymentReceipt). Pin the provenance prose in the doc comment
+    // directly above the field declaration so it cannot be dropped silently,
+    // same spirit as the README guards at the bottom of this file.
+    const types = readFileSync(new URL('./types.ts', import.meta.url), 'utf8')
+    const at = types.indexOf('protocolReceiptPayload?: Record<string, unknown> | null')
+    expect(at, 'protocolReceiptPayload field not found in types.ts').toBeGreaterThan(0)
+    const before = types.slice(0, at)
+    const docStart = before.lastIndexOf('/**')
+    expect(docStart, 'expected a doc comment directly above protocolReceiptPayload').toBeGreaterThan(0)
+    const doc = before.slice(docStart)
+
+    expect(doc).toContain('PAYMENT-RESPONSE')
+    expect(doc.toLowerCase()).toContain('unverified')
+    expect(doc).toContain('merchant')
+    expect(doc).toContain('payerAddress')
+    expect(doc).toContain('PaymentParties')
+    // The issue's decide-and-state item: the no-namespacing choice must be
+    // recorded in the doc itself, not just the PR.
+    expect(doc).toContain('NOT namespaced')
+  })
+
   it('routes read-only budget questions away from payment tools', () => {
     for (const key of ['payX402'] as const) {
       const desc = composeDescription(toolDescriptions[key]).toLowerCase()

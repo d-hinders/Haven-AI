@@ -24,7 +24,7 @@
     "typeof": 8
   },
   "routes/agent-passports.ts": {
-    "shadow": 0,
+    "shadow": 1,
     "typeof": 1
   },
   "routes/agent-rekey.ts": {
@@ -86,6 +86,11 @@
   "routes/portfolio.ts": {
     "shadow": 1,
     "typeof": 0
+  },
+  "routes/safe-deploy.ts": {
+    "shadow": 0,
+    "typeof": 0,
+    "unspecced": 1
   },
   "routes/transactions.ts": {
     "shadow": 1,

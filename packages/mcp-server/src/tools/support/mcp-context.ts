@@ -29,6 +29,7 @@ import {
 import { MCP_TRANSPORT_CASE_HINT } from '../contracts.js'
 import { signerCompatibilityNotice } from './signer-compat.js'
 import { HostedToolError, paymentWindowExpiredErrorFor } from './errors.js'
+import { refusalNextStep } from './guidance.js'
 
 /**
  * #1254: the delegation-rail signing fields, forwarded VERBATIM whenever the
@@ -116,7 +117,7 @@ export function merchantNotReadyErrorFor(err: unknown): HostedToolError | null {
         ? ` Retry after approximately ${retry_after_s}s.`
         : ' This is often transient; retry later.'),
     statusCode: 503,
-    nextAction: AgentPaymentNextAction.StopAndTellUser,
+    nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the merchant needs to recover first; re-quote after retry_after_s' }),
     // Genuinely retryable — unlike a rejection, nothing about THIS call was
     // wrong; the merchant's own wallet needs to recover first.
     retryWithNewQuote: true,
@@ -236,7 +237,7 @@ function assertSecureMerchantUrl(merchantUrl: string): void {
       'payment header to a public http:// endpoint. Use the merchant\'s https URL (or a loopback / ' +
       'reserved test host). Nothing was funded or signed.',
     statusCode: 400,
-    nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+    nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the merchant\'s https URL as merchant_url; nothing was funded or signed' }),
   })
 }
 
@@ -303,7 +304,7 @@ function mcpTransportShapeError(input: unknown): HostedToolError {
     statusCode: 400,
     status: 'invalid_input',
     phase: 'not_started',
-    nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+    nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call the same tool with the explicit context this message names; no tool can be named until you supply it' }),
     rail: 'x402',
   })
 }

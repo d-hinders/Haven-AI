@@ -136,6 +136,8 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // #3101: the status handoff for a refusal that may not know its payment id —
   // the three `payment_id: null` sites, in the catalog and plain-HTTP slices.
   paymentStatusHandoff: { module: 'guidance', slices: ['s2810', 's2811'] },
+  // #3102: the refusal-side builder — every HostedToolError that names an action.
+  refusalNextStep: { module: 'guidance', slices: ['s2810', 's2811', 's2812'] },
   // tools/support/cap-price.ts — cap/price selection.
   readMaxAmountCap: { module: 'cap-price', slices: ['s2810', 's2811'] },
   priceSelectedOption: { module: 'cap-price', slices: ['s2810', 's2811'] },
@@ -350,7 +352,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'paymentWindowExpiredErrorFor',
     'normalizeError',
   ],
-  guidance: ['buildAgentGuidance', 'buildPurchaseSummary', 'paymentStatusHandoff'],
+  guidance: ['buildAgentGuidance', 'buildPurchaseSummary', 'paymentStatusHandoff', 'refusalNextStep'],
   'mcp-context': [
     'delegationSignFields',
     'isMerchantEndpointMiss',

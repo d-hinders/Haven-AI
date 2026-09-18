@@ -396,18 +396,35 @@ jobs:
           npm run lint:migration-constraint-scope
           npm run lint:migration-constraint-scope:test
 
-      - name: Request-schema ratchet (#3029)
+      - name: Request-schema ratchet + route-module table (#3029, #3135)
         # Blocking, shrink-only baseline over the request-validation rollout
         # (epic #3028): per route file, whether any registered route is still
         # SHADOWED by the request-validation plugin and how many hand-rolled
         # `typeof` request guards remain. Slices 2-4 enforce modules and delete
         # ladders, so the baseline only ever shrinks; removing the proof
-        # module's enforcedPrefixes wiring re-enters it in shadow and reddens
+        # module's enforcedModules wiring re-enters it in shadow and reddens
         # this gate. Self-tested for the same reason as lint:deps above — the
-        # self-test SPAWNS the CLI (#2720's rule).
+        # self-test SPAWNS the CLI (#2720's rule). It also runs
+        # check:route-modules (#3135), so a route added, moved or renamed
+        # without regenerating openapi/route-modules.generated.ts reddens here
+        # — the plugin resolves enforcedModules through that table.
         run: |
           npm run lint:request-schemas
           npm run lint:request-schemas:test
+          npm run check:route-modules
+
+      - name: Typed next-step ratchet (#3104, epic #3105)
+        # Blocking, shrink-only, baseline at zero: every next-step emission in
+        # the hosted server, the signer and the local runtime names its tool
+        # (arguments in that tool's vocabulary) or says why none follows, and
+        # both discovery maps carry suggested_arguments. Also run in the
+        # mcp_server / signer / mcp jobs, since each of those packages is on
+        # the scan list and this job does not fire on their changes.
+        # Self-tested for the same reason as lint:deps above — the self-test
+        # SPAWNS the CLI.
+        run: |
+          npm run lint:next-steps
+          npm run lint:next-steps:test
 
       - name: DB schema smoke (migrations + money-path query PREPARE, #773)
         # Applies every migration to the real Postgres service, then PREPAREs the
@@ -459,6 +476,13 @@ jobs:
 
       - name: Run MCP unit tests
         run: npm run test -w packages/mcp
+
+      - name: Typed next-step ratchet (#3104, epic #3105)
+        # Same gate as in backend_checks: this package is one of the three the
+        # ratchet scans, so a change here must run it. Self-tested (spawns the CLI).
+        run: |
+          npm run lint:next-steps
+          npm run lint:next-steps:test
 
       - name: Build MCP
         run: npm run build -w packages/mcp
@@ -553,6 +577,13 @@ jobs:
       - name: Run MCP server unit tests
         run: npm run test -w packages/mcp-server
 
+      - name: Typed next-step ratchet (#3104, epic #3105)
+        # Same gate as in backend_checks: this package is one of the three the
+        # ratchet scans, so a change here must run it. Self-tested (spawns the CLI).
+        run: |
+          npm run lint:next-steps
+          npm run lint:next-steps:test
+
       - name: Build MCP server
         run: npm run build -w packages/mcp-server
 
@@ -594,6 +625,13 @@ jobs:
 
       - name: Run signer unit tests
         run: npm run test -w packages/signer
+
+      - name: Typed next-step ratchet (#3104, epic #3105)
+        # Same gate as in backend_checks: this package is one of the three the
+        # ratchet scans, so a change here must run it. Self-tested (spawns the CLI).
+        run: |
+          npm run lint:next-steps
+          npm run lint:next-steps:test
 
       - name: Build signer
         run: npm run build -w packages/signer

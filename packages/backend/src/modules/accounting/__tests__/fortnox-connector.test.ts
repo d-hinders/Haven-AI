@@ -4,6 +4,7 @@
  * (see the #494 open questions — outcomes recorded on the issue).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ethers } from 'ethers'
 
 const { mockGetToken, mockGetConn, mockConfigured, mockLoadUnderlag, mockGetSyncState, mockMarkPushed } = vi.hoisted(() => ({
   mockGetToken: vi.fn(),
@@ -388,6 +389,32 @@ describe('helpers', () => {
     // Fortnox-safe: no Unicode ellipsis in the Name field (live gotcha 2000359).
     expect(fallback).not.toMatch(/…/)
     expect(supplierNameFor({ ...TX, counterparty: { name: null, address: null } })).toBe('Unknown merchant')
+  })
+
+  /**
+   * #3129 made `counterparty.address` EIP-55 checksummed on the accounting
+   * entry. This name is resolved by a REMOTE `GET /suppliers?name=<name>`
+   * filter whose case sensitivity is Fortnox's and cannot be pinned here, so
+   * if the derived name moved with the address form, the first push after
+   * that change could fail to match a merchant already booked and create a
+   * DUPLICATE supplier in a customer's live accounting system.
+   */
+  it('derives the same supplier name whatever form the address arrives in (#3129)', () => {
+    const lower = '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
+    const checksummed = ethers.getAddress(lower)
+    // CONTROL: the two forms really differ, so this assertion can fail.
+    expect(checksummed).not.toBe(lower)
+
+    const fromLower = supplierNameFor({ ...TX, counterparty: { name: null, address: lower } })
+    const fromChecksummed = supplierNameFor({
+      ...TX,
+      counterparty: { name: null, address: checksummed },
+    })
+
+    expect(fromChecksummed).toBe(fromLower)
+    // And it is the LOWERCASE form — byte-identical to every name already
+    // written to a customer's Fortnox before #3129.
+    expect(fromLower).toBe('Merchant 0xdead-beef')
   })
 })
 

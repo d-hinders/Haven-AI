@@ -91,3 +91,19 @@ describe('paymentAgentIdentityKey', () => {
     )
   })
 })
+
+describe('transactionDedupKey hash casing (#3129)', () => {
+  it('collapses two rows that differ only in hash casing', () => {
+    const lower = tx({ hash: '0x' + 'ab'.repeat(32) })
+    const upper = tx({ hash: '0x' + 'AB'.repeat(32) })
+    expect(transactionDedupKey(upper)).toBe(transactionDedupKey(lower))
+  })
+
+  it('agrees with paymentAgentIdentityKey, which already lowercased', () => {
+    // The two identity keys used to disagree about whether hash casing
+    // matters. Same input, same answer, is the invariant.
+    const hash = '0x' + 'AB'.repeat(32)
+    expect(transactionDedupKey(tx({ hash })).startsWith(hash.toLowerCase())).toBe(true)
+    expect(paymentAgentIdentityKey(hash, 'acct', 8453).startsWith(hash.toLowerCase())).toBe(true)
+  })
+})

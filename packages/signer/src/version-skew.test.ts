@@ -339,6 +339,9 @@ describe('tool boundary surfaces the skew instead of a Zod string (#1143)', () =
     // an unknown version is now a machine-readable Haven diagnosis with its
     // own stable code (#1309).
     expect(result.code).toBe('UNSUPPORTED_EXPECTED_CONTEXT_VERSION')
+    // #3103: the refusal names no tool and says why (update the signer).
+    expect(result.next_tool).toBeUndefined()
+    expect(result.next_tool_omitted_reason).toMatch(/re-running the connector/)
     expect(result.code).not.toBe('INVALID_INPUT')
     expect(result.code).not.toBe('SIGNING_ERROR')
     expect(result.message).toMatch(/out of date/)

@@ -25,6 +25,7 @@ import {
   type HavenClient,
   type NextStep,
 } from '@haven_ai/sdk'
+import { refusalNextStep } from './guidance.js'
 import type { ToolFailure, ToolPayload } from '../contracts.js'
 
 export class HostedToolError extends Error {
@@ -33,6 +34,7 @@ export class HostedToolError extends Error {
   readonly paymentId?: string
   readonly status?: string
   readonly phase?: string
+  /** Derived from `nextStep` (#3102): a refusal names an action only through its typed step. */
   readonly nextAction?: string
   readonly rail?: string
   readonly idempotencyKey?: string | null
@@ -48,11 +50,11 @@ export class HostedToolError extends Error {
     paymentId?: string
     status?: string
     phase?: string
-    nextAction?: string
     rail?: string
     idempotencyKey?: string | null
     retryWithNewQuote?: boolean
     suggestedTool?: string
+    /** #3102: the typed next step; the only way a refusal names a `next_action`. */
     nextStep?: NextStep
   }) {
     super(input.message)
@@ -62,7 +64,7 @@ export class HostedToolError extends Error {
     this.paymentId = input.paymentId
     this.status = input.status
     this.phase = input.phase
-    this.nextAction = input.nextAction
+    this.nextAction = input.nextStep?.next_action
     this.rail = input.rail
     this.idempotencyKey = input.idempotencyKey
     this.retryWithNewQuote = input.retryWithNewQuote
@@ -92,7 +94,6 @@ export function paymentWindowExpiredError(state: {
   paymentId: string
   status: string
   phase: string
-  nextAction: string
   rail: string
   idempotencyKey?: string | null
 }): HostedToolError {
@@ -106,7 +107,15 @@ export function paymentWindowExpiredError(state: {
     paymentId: state.paymentId,
     status: state.status,
     phase: state.phase,
-    nextAction: AgentPaymentNextAction.PaymentWindowExpired,
+    // #3102: which tool to re-run depends on the flow this helper serves
+    // (paid-MCP, catalog, plain HTTP), so the step names none; the
+    // idempotency key in the message is the argument that matters.
+    nextStep: refusalNextStep({
+      nextAction: AgentPaymentNextAction.PaymentWindowExpired,
+      nextTool: null,
+      nextToolOmittedReason:
+        're-run the tool you called with the same idempotency_key; which tool depends on the flow (suggested_tool names the MCP one)',
+    }),
     rail: state.rail,
     idempotencyKey: state.idempotencyKey,
     retryWithNewQuote: true,
@@ -145,6 +154,28 @@ function nextStepWireFields(step: NextStep): Pick<ToolFailure, 'next_tool' | 'ne
   }
 }
 
+/** #3102: the typed step for a payment-state refusal, from the per-action default table. */
+function stateErrorNextStep(nextAction: string, paymentId: string | undefined): NextStep {
+  const action = nextAction as AgentPaymentNextAction
+  if (action === AgentPaymentNextAction.CheckStatusLater && paymentId) {
+    return refusalNextStep({ nextAction: action, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } })
+  }
+  if (action === AgentPaymentNextAction.SweepStrandedFunds) {
+    return refusalNextStep({ nextAction: action, nextTool: 'haven_sweep_delegate', nextArguments: {} })
+  }
+  if (action === AgentPaymentNextAction.CheckStatusLater) {
+    return refusalNextStep({ nextAction: action, nextTool: null, nextToolOmittedReason: 'no payment_id is known for this state, so haven_get_payment_status cannot be named' })
+  }
+  if (action === AgentPaymentNextAction.RetryOriginalX402Request) {
+    return refusalNextStep({ nextAction: action, nextTool: null, nextToolOmittedReason: 'the retry is your own HTTP call with the payment header; haven_resume_x402_payment hands the context back if you lost it' })
+  }
+  return refusalNextStep({
+    nextAction: action,
+    nextTool: null,
+    nextToolOmittedReason: 'the payment is in a state this tool cannot act on; next_action and message say what can',
+  })
+}
+
 export function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HostedToolError) {
     return {
@@ -156,7 +187,7 @@ export function normalizeError(err: unknown): ToolFailure {
       paymentId: err.paymentId,
       status: err.status,
       phase: err.phase,
-      next_action: err.nextStep?.next_action ?? err.nextAction,
+      next_action: err.nextAction,
       rail: err.rail,
       idempotency_key: err.idempotencyKey,
       retry_with_new_quote: err.retryWithNewQuote,
@@ -187,6 +218,11 @@ export function normalizeError(err: unknown): ToolFailure {
       next_action: err.nextAction,
       rail: err.state.rail,
       idempotency_key: err.state.idempotencyKey,
+      // #3102: the SDK's state error names an action the backend chose; the
+      // step follows decision 9's default table (check_status_later → the
+      // status read, sweep_stranded_funds → the sweep) and says why none
+      // follows otherwise — so no hosted refusal carries a bare next_action.
+      ...nextStepWireFields(stateErrorNextStep(err.nextAction, err.paymentId)),
     }
   }
   if (err instanceof HavenApiError) {

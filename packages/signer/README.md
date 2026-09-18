@@ -180,8 +180,8 @@ what a payload means; they re-derive it.
   allowed — top-level caveats are AND-ed during redemption, so an unrecognised
   one can only add a constraint.
 - **A binding version it does not understand.** The refusal is machine-readable
-  — `code`, `supported_versions`, `received_version`, `fallback` — and names
-  updating the signer as the fix.
+  — `code`, `supported_versions`, `received_version`, `fallback`, and (#3103)
+  `next_tool_omitted_reason` — and names updating the signer as the fix.
 - **A sweep that does not move funds out of this delegate's own key** — the
   `from` check is unconditional. The **destination** check is not, and this is
   the one asymmetry in this list: the signer compares the sweep's `to` against
@@ -206,7 +206,12 @@ signing payload from Haven (`GET /x402/:id/sign-context`, see
 still holds everywhere it did before, but structured like the version-mismatch
 refusal below rather than prose alone: `code`, `next_action`, and — per
 refusal class — `fallback`, `retry_with_new_quote`, `http_status`,
-`backend_error_code`. `message` is unchanged.
+`backend_error_code`. Since #3103 each also carries a typed next step: the
+`SIGN_CONTEXT_REFUSED` (other) row names the hosted status read
+(`next_tool_server_role: hosted`, `next_tool_name: haven_get_payment_status`,
+`next_arguments: { payment_id }` — resolve the role against your own server
+names); every other row carries `next_tool_omitted_reason` with the exact
+remedy. `message` is unchanged.
 
 | `code` | When | `next_action` | `fallback` | extra |
 |---|---|---|---|---|

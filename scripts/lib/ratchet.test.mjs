@@ -156,12 +156,13 @@ test('the importer count in the comments matches the real importer list', () => 
     'scripts/db-mock-ratchet.mjs',
     'scripts/docs/ui-gate-wording.mjs',
     'scripts/frontend-copy-lint.mjs',
+    'scripts/lint-next-steps.mjs',
     'scripts/lint-request-schemas.mjs',
     'scripts/lint-wire-types.mjs',
     'scripts/retired-rail-prose-ratchet.mjs',
   ])
   // The count the prose claims, in one place, next to the list that proves it.
-  assert.equal(importers.length, 7, 'the comments say SEVEN gates import this engine')
+  assert.equal(importers.length, 8, 'the comments say EIGHT gates import this engine')
 })
 
 // ── The two guards #2759's own review found untested ────────────────────────

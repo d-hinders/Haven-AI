@@ -30,8 +30,13 @@ export interface X402RetryTarget {
   url: string
   /** Which input produced it. */
   source: 'request' | 'resource'
-  /** True when the merchant's declared `resource.url` is not the caller's URL. */
-  resourceUrlDiffersFromRequest: boolean
+  /**
+   * True when the merchant's declared `resource.url` is not the caller's URL.
+   * Absent (undefined) when nothing was compared — the caller named no URL
+   * and the declaration was adopted as-is — so a consumer never reads
+   * "false" as "the merchant agrees with what you quoted".
+   */
+  resourceUrlDiffersFromRequest?: boolean
 }
 
 export function resolveX402RetryTarget(input: {
@@ -46,11 +51,18 @@ export function resolveX402RetryTarget(input: {
       resourceUrlDiffersFromRequest: requestUrl !== input.resourceUrl,
     }
   }
-  return { url: input.resourceUrl, source: 'resource', resourceUrlDiffersFromRequest: false }
+  return { url: input.resourceUrl, source: 'resource' }
 }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+const LOOPBACK_HOSTS = new Set(['localhost', '::1', '[::1]'])
 const RESERVED_SUFFIXES = ['.test', '.localhost', '.invalid', '.example']
+// The whole 127/8 block, matched octet by octet. A string-prefix test on the
+// hostname (`startsWith('127.')`) is NOT this: `127.attacker.io` is an ordinary
+// registrable public name whose first label happens to be digits, and it would
+// have passed (haven-reviewer finding on #3112). `URL` already normalises the
+// exotic spellings (`0x7f.0.0.1`, `2130706433`) to dotted decimal before this
+// runs, so dotted decimal is the only form that reaches it.
+const IPV4_LOOPBACK = /^127(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
 
 /** True when a retry carrying a payment header may be sent to `url`. */
 export function isSecureX402RetryTarget(url: string): boolean {
@@ -63,7 +75,7 @@ export function isSecureX402RetryTarget(url: string): boolean {
   if (parsed.protocol === 'https:') return true
   if (parsed.protocol !== 'http:') return false
   const host = parsed.hostname.toLowerCase()
-  if (LOOPBACK_HOSTS.has(host) || host.startsWith('127.')) return true
+  if (LOOPBACK_HOSTS.has(host) || IPV4_LOOPBACK.test(host)) return true
   return RESERVED_SUFFIXES.some((suffix) => host.endsWith(suffix))
 }
 

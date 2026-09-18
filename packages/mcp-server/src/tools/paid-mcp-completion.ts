@@ -53,6 +53,7 @@ import {
   AgentPaymentWarningCode,
   HavenApiError,
   HavenClient,
+  HavenInsecureRetryTargetError,
   MerchantTimeoutError,
   X402PaymentHeaderValidationError,
   isZeroSettlementTxHash,
@@ -311,6 +312,31 @@ export async function deliverMerchantPayment(
         nextAction: AgentPaymentNextAction.SweepStrandedFunds,
         rail: 'x402',
         suggestedTool: 'haven_get_payment_status',
+      })
+    }
+    // #3097: the SDK refuses to hand a payment header to a public http://
+    // merchant at the deliverPayment seam. quoteMcpToolCall refuses the same
+    // URL before any intent, so this fires only for a merchant_url that
+    // reached this tool without a quote (the explicit four-argument fallback)
+    // — and by now funding is CONFIRMED, so it must not escape as a bare 400
+    // with no payment_id and no sweep guidance (haven-reviewer on #3112).
+    if (err instanceof HavenInsecureRetryTargetError) {
+      throw new HostedToolError({
+        code: err.code,
+        message: options?.noFundingLeg
+          ? `${err.message} No merchant call was made and erc7710 has no funding leg, so nothing ` +
+            `moved; re-quote the merchant at its https URL.`
+          : `${err.message} The funding leg is already confirmed on-chain and the merchant was NOT ` +
+            `called: retry haven_complete_mcp_tool with the merchant's https URL as merchant_url, ` +
+            `or recover the delegate balance with haven_sweep_delegate.`,
+        statusCode: 400,
+        paymentId: args.payment_id,
+        phase: options?.noFundingLeg ? 'not_delivered' : 'funded_but_unsettled',
+        nextAction: options?.noFundingLeg
+          ? AgentPaymentNextAction.RetryWithExplicitContext
+          : AgentPaymentNextAction.SweepStrandedFunds,
+        rail: options?.noFundingLeg ? 'erc7710' : 'x402',
+        suggestedTool: options?.noFundingLeg ? 'haven_quote_mcp_tool' : 'haven_get_payment_status',
       })
     }
     throw err

@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { HavenClient, HavenInsecureRetryTargetError } from '@haven_ai/sdk'
+import { createToolHandlers } from './tools.js'
 import {
   AGENT_RESPONSE,
   PAYMENT_REQUIRED,
@@ -96,7 +98,23 @@ describe('haven_pay_x402_quote — the retry target is decided before any intent
       await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED, max_amount: '1500000' }),
     )
     expect(result.data.retry_url).toBe('https://merchant.test/paid')
-    expect(result.data.resource_url_differs_from_request).toBe(false)
+    // Nothing was compared, so the flag is absent rather than a false "false".
+    expect('resource_url_differs_from_request' in result.data).toBe(false)
+  })
+
+  it('refuses a public DNS name whose first label is 127 (the prefix-test bypass)', async () => {
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+    const result = fail(
+      await handlers().haven_pay_x402_quote({
+        payment_required: { ...PAYMENT_REQUIRED, resource: { url: 'http://127.attacker.io/paid', description: 'paid data' } },
+        max_amount: '1500000',
+      }),
+    )
+    expect(result.code).toBe('INSECURE_RETRY_TARGET')
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 
   it('refuses a public http url even when the caller asks for it explicitly', async () => {
@@ -164,11 +182,82 @@ describe('haven_resume_x402_payment — the same rule on the resume path', () =>
     expect(result.data.x402.resource_url).toBe('http://merchant.com/paid')
   })
 
+  it('reads the https url the SDK builder stored in state.url when no request was captured', async () => {
+    stubFetch(funded('pay_http'))
+    const result = ok<{ x402: Record<string, unknown> }>(
+      await handlers().haven_resume_x402_payment({
+        resume_state: state('pay_http', 'http://merchant.com/paid', 'https://merchant.test/paid'),
+      }),
+    )
+    expect(result.data.x402.retry_url).toBe('https://merchant.test/paid')
+  })
+
+  it('names the funded-but-unsettled exits when the only retry target is http', async () => {
+    stubFetch(funded('pay_http'))
+    const result = fail(
+      await handlers().haven_resume_x402_payment({ resume_state: state('pay_http', 'http://merchant.com/paid') }),
+    )
+    expect(result.code).toBe('INSECURE_RETRY_TARGET')
+    expect(result.paymentId).toBe('pay_http')
+    expect(result.suggested_tool).toBe('haven_get_payment_status')
+    expect(result.message).toContain('haven_sweep_delegate')
+  })
+
   it('keeps an https resume byte-compatible apart from the added retry_url', async () => {
     stubFetch(funded('pay_ok'))
     const result = ok<{ x402: Record<string, unknown> }>(
       await handlers().haven_resume_x402_payment({ resume_state: state('pay_ok', 'https://merchant.test/paid') }),
     )
     expect(result.data.x402.retry_url).toBe('https://merchant.test/paid')
+  })
+})
+
+describe('the MCP-merchant family — refused before the unpaid probe (#3097 review)', () => {
+  it('haven_quote_mcp_tool refuses a public http merchant_url and never probes it', async () => {
+    stubFetch({})
+    const result = fail(
+      await handlers().haven_quote_mcp_tool({ merchant_url: 'http://127.attacker.io/mcp', tool_name: 'facts', arguments: {} }),
+    )
+    expect(result.code).toBe('INSECURE_RETRY_TARGET')
+    expect(recordedCalls().find((c) => c.url.includes('127.attacker.io'))).toBeUndefined()
+  })
+
+  it('haven_pay_mcp_tool refuses the same URL before any intent', async () => {
+    stubFetch({ 'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE } })
+    const result = fail(
+      await handlers().haven_pay_mcp_tool({
+        merchant_url: 'http://merchant.com/mcp',
+        tool_name: 'facts',
+        arguments: {},
+        max_amount: '1500000',
+      }),
+    )
+    expect(result.code).toBe('INSECURE_RETRY_TARGET')
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+  })
+})
+
+describe('haven_complete_mcp_tool — the post-funding escape is annotated (#3097 review)', () => {
+  it('turns the SDK refusal into a funded_but_unsettled failure with payment_id and sweep guidance', async () => {
+    stubFetch({})
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined as never)
+    vi.spyOn(haven, 'completeX402MerchantCall').mockRejectedValue(
+      new HavenInsecureRetryTargetError('http://merchant.com/mcp'),
+    )
+    const result = fail(
+      await createToolHandlers(haven).haven_complete_mcp_tool({
+        payment_id: 'pay_x402',
+        merchant_url: 'http://merchant.com/mcp',
+        tool_name: 'facts',
+        arguments: {},
+        payment_header: 'eyJwYXltZW50IjoiaGVhZGVyIn0=',
+      }),
+    )
+    expect(result.code).toBe('INSECURE_RETRY_TARGET')
+    expect(result.paymentId).toBe('pay_x402')
+    expect(result.phase).toBe('funded_but_unsettled')
+    expect(result.next_action).toBe('sweep_stranded_funds')
+    expect(result.suggested_tool).toBe('haven_get_payment_status')
   })
 })

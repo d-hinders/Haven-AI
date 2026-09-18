@@ -21,6 +21,7 @@ import {
   X402UnexpectedStatusError,
   HavenClient,
   discoverMerchantMcpUrl,
+  isSecureX402RetryTarget,
   sameUrl,
   type X402McpTransport,
   type X402Quote,
@@ -166,6 +167,13 @@ export async function quoteMcpToolCall(
     body: JSON.stringify(envelope),
   }
   let merchantUrl = input.merchantUrl
+  // #3097: the merchant URL IS the paid retry target on this family — the
+  // signed header is POSTed back to it by haven_complete_mcp_tool. Refuse a
+  // public http:// merchant here, before the unpaid probe and long before any
+  // intent, rather than at the SDK's deliverPayment seam where the funding leg
+  // has already confirmed (haven-reviewer on #3112). Re-checked on the
+  // discovered endpoint below, which may differ in scheme from the input.
+  assertSecureMerchantUrl(merchantUrl)
   // This is an MCP-tool purchase, so always negotiate the Streamable-HTTP
   // lifecycle before its unpaid tools/call — exact MCP endpoints can use any
   // same-origin path, not only `/mcp`. A base URL that cannot establish a
@@ -190,6 +198,7 @@ export async function quoteMcpToolCall(
     }
     const inputUrl = merchantUrl
     merchantUrl = discovered
+    assertSecureMerchantUrl(merchantUrl)
     try {
       const quote = await probe()
       return { quote, merchantUrl }
@@ -208,6 +217,25 @@ export async function quoteMcpToolCall(
       throw retryErr
     }
   }
+}
+
+/**
+ * #3097: the pre-intent form of the SDK's `assertSecureX402RetryTarget`, as a
+ * hosted refusal. Module-private on purpose: it has exactly one caller
+ * (quoteMcpToolCall, twice), so it is not a shared helper for the #2808
+ * ownership map — the rule itself is the SDK's, tested there.
+ */
+function assertSecureMerchantUrl(merchantUrl: string): void {
+  if (isSecureX402RetryTarget(merchantUrl)) return
+  throw new HostedToolError({
+    code: 'INSECURE_RETRY_TARGET',
+    message:
+      `Refusing to quote or pay an MCP merchant at ${merchantUrl}: the paid call would carry a ` +
+      'payment header to a public http:// endpoint. Use the merchant\'s https URL (or a loopback / ' +
+      'reserved test host). Nothing was funded or signed.',
+    statusCode: 400,
+    nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+  })
 }
 
 export function serializeMcpTransport(input: X402McpTransport | undefined):

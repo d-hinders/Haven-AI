@@ -2038,8 +2038,10 @@ what each server's instructions say and why they differ in length.
   public issues without redacting secrets.
 
 > **Re-verification (#3097, the paid retry's target, 2026-09-18):** this diff
-> touches `packages/mcp-server/src/tools/{plain-http-x402,contracts}.ts` and `packages/sdk/src/{types,x402-protocol,mcp-merchant-transport,index}.ts`, in this document's coverage
-> list. Both surfaces keep their contracts; what is new is an optional `url` on
+> touches `packages/mcp-server/src/tools/{plain-http-x402,contracts,paid-mcp-completion}.ts`,
+> `packages/mcp-server/src/tools/support/mcp-context.ts` and `packages/sdk/src/types.ts`
+> (the one SDK file in this document's coverage list; the SDK's x402 modules are
+> covered by `04-x402-payment-sequence.md`). Both surfaces keep their contracts; what is new is an optional `url` on
 > `haven_pay_x402_quote` / `haven_resume_x402_payment` (the URL the agent
 > quoted), `request_url` / `retry_url` / `resource_url_differs_from_request` on
 > the quote, `retry_url` on pay and resume, and the `INSECURE_RETRY_TARGET`

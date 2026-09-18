@@ -348,8 +348,10 @@ since #1984 — are unaffected, hosted and local alike.
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)
 
 > **Re-verification (#3097, the paid retry's target, 2026-09-18):** this diff
-> touches `packages/mcp-server/src/tools/{plain-http-x402,contracts}.ts` and the SDK's x402 quote/transport modules, in this document's coverage
-> list. Both surfaces keep their contracts; what is new is an optional `url` on
+> touches `packages/mcp-server/src/tools/{plain-http-x402,contracts,paid-mcp-completion}.ts`,
+> `packages/mcp-server/src/tools/support/mcp-context.ts` and the SDK's
+> `mcp-merchant-transport.ts` (in this document's coverage list; the SDK's
+> `x402-protocol.ts` is covered by `04-x402-payment-sequence.md`). Both surfaces keep their contracts; what is new is an optional `url` on
 > `haven_pay_x402_quote` / `haven_resume_x402_payment` (the URL the agent
 > quoted), `request_url` / `retry_url` / `resource_url_differs_from_request` on
 > the quote, `retry_url` on pay and resume, and the `INSECURE_RETRY_TARGET`

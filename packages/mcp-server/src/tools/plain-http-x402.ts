@@ -58,9 +58,20 @@ import {
   normalizePaymentRequired,
   resolveX402RetryTarget,
   isSecureX402RetryTarget,
+  type X402RetryTarget,
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
+
+// #3097: `resource_url_differs_from_request` is emitted only when a request
+// URL existed to compare against. On the pay-from-declaration path nothing was
+// compared, and a literal `false` there read as "the merchant agrees with what
+// you quoted" (haven-reviewer on #3112).
+function differsFromRequest(target: X402RetryTarget): { resource_url_differs_from_request?: boolean } {
+  return target.resourceUrlDiffersFromRequest === undefined
+    ? {}
+    : { resource_url_differs_from_request: target.resourceUrlDiffersFromRequest }
+}
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import {
@@ -366,7 +377,7 @@ export function createPlainHttpX402Handlers(
               // #3097: the URL to send the paid retry to — the caller's, not the
               // merchant's declaration.
               retry_url: retryTarget.url,
-              resource_url_differs_from_request: retryTarget.resourceUrlDiffersFromRequest,
+              ...differsFromRequest(retryTarget),
               // #1275/#1351: the optional-cap nudge applies on both schemes.
               ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
               ...buildAgentGuidance({
@@ -410,7 +421,7 @@ export function createPlainHttpX402Handlers(
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
             // #3097: see the erc7710 branch — the retry goes to the caller's URL.
             retry_url: retryTarget.url,
-            resource_url_differs_from_request: retryTarget.resourceUrlDiffersFromRequest,
+            ...differsFromRequest(retryTarget),
             // #1275: optional-cap soft nudge for this generic x402 flow.
             // #1351: either spelling of the cap clears it.
             ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
@@ -516,24 +527,6 @@ export function createPlainHttpX402Handlers(
         // escaped `createToolHandlers` as a raw throw instead of a ToolFailure.
         const args = parseStrict('haven_resume_x402_payment', input)
         const state = await resolveResumeState(haven, args, 'x402') as X402ResumeState
-        // #3097: same rule as haven_pay_x402_quote — the caller's `url` (or the
-        // captured request) wins; a public http:// fallback is refused before
-        // the signing context is handed out.
-        const retryTarget = resolveX402RetryTarget({
-          requestUrl: args.url ?? state.request?.url,
-          resourceUrl: state.resourceUrl,
-        })
-        if (!isSecureX402RetryTarget(retryTarget.url)) {
-          throw new HostedToolError({
-            code: 'INSECURE_RETRY_TARGET',
-            message:
-              `Refusing to hand out a signing context whose paid retry would go to ${retryTarget.url}: ` +
-              'the retry must target an https URL. Re-call with the https URL you originally quoted as `url`.',
-            statusCode: 400,
-            nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
-            paymentId: state.paymentId,
-          })
-        }
 
         // Verify the payment is ready to retry before returning signing context.
         const status = await haven.getPaymentStatus(state.paymentId)
@@ -544,6 +537,38 @@ export function createPlainHttpX402Handlers(
             409,
             status,
           )
+        }
+
+        // #3097: same rule as haven_pay_x402_quote — the caller's `url`, else
+        // the captured request, else `state.url` (the SDK builder's "original
+        // paid URL", which survives when `request` was never captured); the
+        // merchant's `resourceUrl` is the last fallback. A public http:// target
+        // is refused before the signing context is handed out — AFTER the
+        // readiness gate above, so a payment that needs no retry is never
+        // refused for a retry it will not make (haven-reviewer on #3112).
+        // A resume from a bare payment_id reads the backend's resume_state,
+        // whose `url` IS the merchant declaration; for an http-declaring
+        // merchant that resume is refused every time unless the agent
+        // supplies `url`, which is why the message names the exits.
+        const retryTarget = resolveX402RetryTarget({
+          requestUrl: args.url ?? state.request?.url ?? state.url,
+          resourceUrl: state.resourceUrl,
+        })
+        if (!isSecureX402RetryTarget(retryTarget.url)) {
+          throw new HostedToolError({
+            code: 'INSECURE_RETRY_TARGET',
+            message:
+              `Refusing to hand out a signing context whose paid retry would go to ${retryTarget.url}: ` +
+              'the retry must target an https URL. Re-call with the https URL you originally quoted ' +
+              'as `url`. If that URL is gone, the funding leg is already confirmed for this payment: ' +
+              'check haven_get_payment_status, and if no settlement appears within the payment ' +
+              'window, recover the delegate balance with haven_sweep_delegate. Do not pay again.',
+            statusCode: 400,
+            nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+            paymentId: state.paymentId,
+            phase: 'funded_but_unsettled',
+            suggestedTool: 'haven_get_payment_status',
+          })
         }
 
         // Return the same signing context shape as haven_pay_x402_quote so the

@@ -665,7 +665,7 @@ export const STRICT_INPUT_TOOLS = {
     'The hosted surface has no body field to route it to; quote a GET resource, or use ' +
     'haven_pay_mcp_tool for a merchant that needs a request payload.',
   haven_pay_x402_quote:
-    'This is the HOSTED surface, which takes payment_required and idempotency_key ' +
+    'This is the HOSTED surface, which takes payment_required, idempotency_key and url ' +
     '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotencyKey. Passing ' +
     'quote already failed loudly here, because payment_required is required — it is ' +
     'idempotencyKey that was dropped in silence, replacing the caller\'s replay scope with ' +
@@ -909,15 +909,16 @@ const QUOTE_X402_DESCRIPTION = composeDescription({
 const PAY_X402_QUOTE_DESCRIPTION = [
   'Step 1 of a direct x402 purchase (plain HTTP merchant, non-MCP): construct the funding step and',
   'return the unsigned hash for the local signer. Pass the payment_required from haven_quote_x402',
-  'or straight from the merchant 402. Read-only budget questions: haven_get_allowances.',
+  'or straight from the merchant 402, plus url (haven_quote_x402\'s request_url): the paid',
+  'retry goes there, never to the declared resource_url; public http:// is refused.',
+  'Read-only budget questions: haven_get_allowances.',
   'Cap rule here: max_amount_human (preferred) or max_amount, never both; omitting BOTH accepts the',
   'quoted price as-is and the response carries cap_warning.',
   'Returns { payment_id, payload_hash, expires_at, x402, signer_compatibility } — compact by default;',
   'include_signing_payload=true on a same-idempotency_key re-run returns the inline payload for an',
   'older signer. Over-budget is declined at prepare; nothing is ever held for later approval.',
   'The signer tool named in the response guidance (haven_sign_x402) returns payment_header INLINE',
-  'alongside the signature — it is a one-shot that spends its own binding building that',
-  'header, so do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
+  'alongside the signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
   'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
   'setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710.',
   'Haven never talks to this merchant and never holds the key. The header is built before funding',

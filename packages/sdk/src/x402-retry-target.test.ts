@@ -32,7 +32,7 @@ describe('resolveX402RetryTarget', () => {
     expect(resolveX402RetryTarget({ requestUrl: undefined, resourceUrl: 'https://m.example.com/x' })).toEqual({
       url: 'https://m.example.com/x',
       source: 'resource',
-      resourceUrlDiffersFromRequest: false,
+      // No flag at all: nothing was compared, so "false" would be a lie.
     })
     expect(resolveX402RetryTarget({ requestUrl: '  ', resourceUrl: 'https://m.example.com/x' }).source).toBe('resource')
   })
@@ -55,6 +55,15 @@ describe('isSecureX402RetryTarget', () => {
     expect(isSecureX402RetryTarget('http://services.sandbox.ampersend.ai/api/fact')).toBe(false)
     expect(isSecureX402RetryTarget('http://merchant.com/paid')).toBe(false)
     expect(isSecureX402RetryTarget('http://10.0.0.5/paid')).toBe(false)
+  })
+
+  it('refuses a public DNS name whose first label is 127 — a prefix test is not a loopback test', () => {
+    // haven-reviewer on #3112: `host.startsWith('127.')` let these through.
+    expect(isSecureX402RetryTarget('http://127.attacker.io/paid')).toBe(false)
+    expect(isSecureX402RetryTarget('http://127.0.0.1.evil.com/paid')).toBe(false)
+    expect(isSecureX402RetryTarget('http://127.1/paid')).toBe(true) // URL normalises to 127.0.0.1
+    expect(isSecureX402RetryTarget('http://127.255.255.254/paid')).toBe(true)
+    expect(isSecureX402RetryTarget('http://127.256.0.1/paid')).toBe(false) // not an address
   })
 
   it('allows http only where it cannot leave the machine or the test bench', () => {

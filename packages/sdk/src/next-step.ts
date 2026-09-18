@@ -91,7 +91,8 @@ export type NextStep = AgentNextStep
 /**
  * Per-`next_action` default tool (decision 9): the tool a site names unless it
  * has a reason to override. Only actions with ONE sensible target are listed;
- * `sign_and_submit_payment` is deliberately absent because the signer tool
+ * `sign_and_submit_payment` and `retry_original_x402_request` are deliberately
+ * absent: the signer tool
  * depends on the settlement scheme (`haven_sign` for erc7710 delegations,
  * `haven_sign_x402` for the EIP-3009 bridge) and a wrong default there would be
  * worse than none.
@@ -99,7 +100,9 @@ export type NextStep = AgentNextStep
 export const DEFAULT_NEXT_TOOL_BY_ACTION = {
   check_status_later: 'haven_get_payment_status',
   sweep_stranded_funds: 'haven_sweep_delegate',
-  retry_original_x402_request: 'haven_resume_x402_payment',
+  // `retry_original_x402_request` is NOT here: its only live emitter
+  // (state-direct-recovery.ts, erc7710) names no tool on purpose — the retry
+  // is the agent's own HTTP call — so a default would contradict the site.
 } as const satisfies Partial<Record<AgentPaymentNextAction, string>>
 
 export function defaultNextToolFor(action: AgentPaymentNextAction): string | undefined {

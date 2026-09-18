@@ -4,6 +4,8 @@ status: current
 covers:
   - packages/mcp/**
   - packages/mcp-server/src/**
+  - packages/sdk/src/next-step.ts
+  - packages/sdk/src/types.ts
   - packages/connect/src/**
   - packages/signer/src/**
   - packages/sdk/src/client.ts
@@ -16,7 +18,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/middleware/agentToolAudit.ts
   - packages/backend/src/modules/agents/agent-connection-setup.ts
-last-verified: "2026-09-10"
+last-verified: "2026-09-18"
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -384,16 +386,19 @@ since #1984 — are unaffected, hosted and local alike.
 > re-verified.
 
 > **Re-verification (#3101, the typed next-step builder, 2026-09-18):** this
-> diff touches `packages/mcp-server/src/tools/support/{guidance,errors}.ts`,
+> diff adds `packages/sdk/src/next-step.ts` (the builder, exported from the
+> SDK's `index.ts`) and touches `packages/mcp-server/src/tools/support/{guidance,errors}.ts`,
 > `packages/mcp-server/src/tools/{contracts,catalog-purchase,plain-http-x402,paid-mcp-completion,state-direct-recovery}.ts`,
-> the SDK's `types.ts` (a new optional `next_tool_omitted_reason` on
-> `AgentNextStep`) and, annotation only, `packages/mcp/src/tools.ts`. The
+> `packages/mcp-server/src/server.ts` (instructions name the omitted-reason
+> field), the SDK's `types.ts` (a new optional `next_tool_omitted_reason` on
+> `AgentNextStep`) and `skill-content.ts`, and, annotation only,
+> `packages/signer/src/tools.ts` and `packages/mcp/src/tools.ts`. The
 > hosted `next_tool` family is now rendered by the SDK's builder from a bare
 > tool name + server role over a target map derived from the hosted
 > `toolSchemas` (which keeps its keys via `as const satisfies`) plus the two
 > signer handoff shapes the hosted server declares itself — it never imports
 > the edge signer at runtime; a test pins them to the signer's schemas; the
-> wire strings are byte-identical, pinned by
+> wire strings are byte-identical on all 17 emission sites, pinned by
 > `next-step-characterization.test.ts`. New on the wire:
 > `next_tool_omitted_reason` wherever no tool is named (the three refusals
 > that used to hand `{ payment_id: null }` to a tool requiring a string, the

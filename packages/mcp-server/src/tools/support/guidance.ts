@@ -50,7 +50,8 @@ const SIGNER_HANDOFF_SHAPES = {
  * and the validate closure is the runtime twin
  * of that type. The SDK's builder renders `mcp__<server>__<tool>` and the
  * runtime-neutral server/name/role fields from this map in one place; the
- * 13 emission sites name a bare tool and arguments that tool declares, and a
+ * 17 emission sites name a bare tool and arguments that tool declares (or say
+ * why none follows), and a
  * wrong key, a missing required key, an unregistered tool name or an omitted
  * `nextTool` is a compile error at the site (`next-step-types.test.ts`).
  */

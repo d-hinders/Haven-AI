@@ -3,8 +3,8 @@ import { AgentPaymentNextAction } from '@haven_ai/sdk'
 import { buildAgentGuidance, paymentStatusHandoff } from './tools/support/guidance.js'
 
 /**
- * #3101 (epic #3105, slice 2/5) — CHARACTERIZATION of the 13 hosted
- * next-step emissions, written BEFORE the typed builder landed (commit
+ * #3101 (epic #3105, slice 2/5) — CHARACTERIZATION of the 17 hosted
+ * next-step emissions (13 tool-naming sites plus the four no-tool sites), written BEFORE the typed builder landed (commit
  * 74cd61da) and carried across it: the inputs are now in the builder's
  * vocabulary (bare tool names, `nextTool: null` + reason where no tool is
  * named) and every expectation is byte-identical to the pre-#3101 wire
@@ -53,6 +53,11 @@ export const EMISSION_SITES = [
   { site: 'paid-mcp-completion.ts settle held-hash, can report', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: '0x' + 'ab'.repeat(32) }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: '0x' + 'ab'.repeat(32) } } },
   { site: 'paid-mcp-completion.ts settle held-hash, cannot report', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
   { site: 'paid-mcp-completion.ts settle funding pending', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
+  // The four no-tool sites (no `nextTool:` line before #3101; the required input surfaced them).
+  { site: 'paid-mcp-completion.ts complete settled', action: AgentPaymentNextAction.None, tool: null, reason: 'the purchase is settled; no Haven tool follows', expect: { next_tool_omitted_reason: 'the purchase is settled; no Haven tool follows' } } /* RE-DECIDED: additive reason */,
+  { site: 'paid-mcp-completion.ts settle erc7710 settled', action: AgentPaymentNextAction.None, tool: null, reason: 'the purchase is settled; no Haven tool follows', expect: { next_tool_omitted_reason: 'the purchase is settled; no Haven tool follows' } } /* RE-DECIDED: additive reason */,
+  { site: 'paid-mcp-completion.ts settle 3009 settled', action: AgentPaymentNextAction.None, tool: null, reason: 'the purchase is settled; no Haven tool follows', expect: { next_tool_omitted_reason: 'the purchase is settled; no Haven tool follows' } } /* RE-DECIDED: additive reason */,
+  { site: 'state-direct-recovery.ts own HTTP retry', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: null, reason: 'the next step is your own HTTP retry of the merchant with the payment_header above, not a Haven tool', expect: { next_tool_omitted_reason: 'the next step is your own HTTP retry of the merchant with the payment_header above, not a Haven tool' } } /* RE-DECIDED: additive reason */,
 ] as const
 
 const NEXT_KEYS = ['next_tool', 'next_tool_server', 'next_tool_name', 'next_tool_server_role', 'next_arguments', 'next_tool_omitted_reason'] as const

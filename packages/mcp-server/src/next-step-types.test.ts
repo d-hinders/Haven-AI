@@ -3,7 +3,7 @@ import { AgentPaymentNextAction } from '@haven_ai/sdk'
 import { buildAgentGuidance, paymentStatusHandoff, type HostedHandoff } from './tools/support/guidance.js'
 
 /**
- * #3101 — the COMPILE-TIME twins. `npm run typecheck -w packages/mcp-server`
+ * #3101 — the COMPILE-TIME twins (seven: six per-handoff, one on the full input). `npm run typecheck -w packages/mcp-server`
  * covers test files, so each `@ts-expect-error` below is an assertion that the
  * line does NOT compile: delete one and typecheck fails with "Unused
  * '@ts-expect-error' directive" — that is the mutation, and the diagnostics

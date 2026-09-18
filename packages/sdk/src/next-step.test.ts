@@ -65,8 +65,8 @@ describe('next-step builder (#3101)', () => {
     expect(DEFAULT_NEXT_TOOL_BY_ACTION).toEqual({
       check_status_later: 'haven_get_payment_status',
       sweep_stranded_funds: 'haven_sweep_delegate',
-      retry_original_x402_request: 'haven_resume_x402_payment',
     })
+    expect(defaultNextToolFor(AgentPaymentNextAction.RetryOriginalX402Request)).toBeUndefined()
     expect(defaultNextToolFor(AgentPaymentNextAction.SignAndSubmitPayment)).toBeUndefined()
   })
 })

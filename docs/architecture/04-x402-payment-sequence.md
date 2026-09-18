@@ -24,6 +24,8 @@ covers:
   - packages/mcp/src/tools.ts
   - packages/mcp-server/src/tools.ts
   - packages/mcp-server/src/tools/**
+  - packages/sdk/src/next-step.ts
+  - packages/sdk/src/types.ts
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts
@@ -44,7 +46,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-17"
+last-verified: "2026-09-18"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -1917,16 +1919,19 @@ error instead of quietly routing a payment at the wrong chain's bundler.
 > diagram's `url` argument. Nothing else in this document was re-verified.
 
 > **Re-verification (#3101, the typed next-step builder, 2026-09-18):** this
-> diff touches `packages/mcp-server/src/tools/support/{guidance,errors}.ts`,
+> diff adds `packages/sdk/src/next-step.ts` (the builder, exported from the
+> SDK's `index.ts`) and touches `packages/mcp-server/src/tools/support/{guidance,errors}.ts`,
 > `packages/mcp-server/src/tools/{contracts,catalog-purchase,plain-http-x402,paid-mcp-completion,state-direct-recovery}.ts`,
-> the SDK's `types.ts` (a new optional `next_tool_omitted_reason` on
-> `AgentNextStep`) and, annotation only, `packages/mcp/src/tools.ts`. The
+> the hosted server's instructions (they name the omitted-reason field; that
+> file is on `mcp-runtime-compatibility.md`'s list), the SDK's `types.ts` (a new optional `next_tool_omitted_reason` on
+> `AgentNextStep`) and `skill-content.ts`, and, annotation only,
+> `packages/signer/src/tools.ts` and `packages/mcp/src/tools.ts`. The
 > hosted `next_tool` family is now rendered by the SDK's builder from a bare
 > tool name + server role over a target map derived from the hosted
 > `toolSchemas` (which keeps its keys via `as const satisfies`) plus the two
 > signer handoff shapes the hosted server declares itself — it never imports
 > the edge signer at runtime; a test pins them to the signer's schemas; the
-> wire strings are byte-identical, pinned by
+> wire strings are byte-identical on all 17 emission sites, pinned by
 > `next-step-characterization.test.ts`. New on the wire:
 > `next_tool_omitted_reason` wherever no tool is named (the three refusals
 > that used to hand `{ payment_id: null }` to a tool requiring a string, the

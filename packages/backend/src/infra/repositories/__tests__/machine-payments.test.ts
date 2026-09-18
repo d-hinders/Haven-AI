@@ -494,7 +494,7 @@ describeDb('machine-payments repository (#1224)', () => {
     const seen: string[] = []
     let cursor: string | null = null
     for (let hop = 0; hop < 6; hop += 1) {
-      const rows = await listEvidenceReceiptsForAgent<{ id: string }>(agent.agentId, 1, cursor)
+      const rows: Array<{ id: string }> = await listEvidenceReceiptsForAgent<{ id: string }>(agent.agentId, 1, cursor)
       if (rows.length === 0) break
       seen.push(rows[0].id)
       cursor = rows[0].id

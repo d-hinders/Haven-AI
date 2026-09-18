@@ -1354,6 +1354,77 @@ export const FIXTURE_ACCOUNTING_FEED_ATTENTION = {
   counts: { pending: 0, failed: 1, exhausted: 3 },
 }
 
+/**
+ * The Accounted destination + its pushed document row, for the #3018 stage —
+ * a spread off the shared READY answer, so a renamed key cannot leave it
+ * behind. The destination is the api_key connection (no OAuth grant to
+ * expire), and the pushed row carries the namespaced document ref the page
+ * extracts. Deliberately NOT folded into `FIXTURE_ACCOUNTING_FEED_STATUS`:
+ * that fixture and the e2e twin are held to a two-row pin
+ * (`fixture-shape-parity`) and the visual baselines photograph them — adding
+ * a third row there would red the e2e visual gate and the parity pin at once,
+ * while this stage exists precisely so the #3018 surfaces get evidence
+ * WITHOUT moving either.
+ */
+export const FIXTURE_ACCOUNTING_FEED_ACCOUNTED = {
+  ...FIXTURE_ACCOUNTING_FEED_STATUS,
+  companyName: 'KOMMANDITBOLAGET TESTAREN 3',
+  destination: {
+    provider: 'accounted',
+    displayName: 'Accounted',
+    status: 'connected',
+    companyName: 'KOMMANDITBOLAGET TESTAREN 3',
+    // Absolute — the badge/summary must not age between captures (#2869).
+    lastPushAt: '2026-09-15T09:31:12.000Z',
+  },
+  syncs: [
+    {
+      ...FIXTURE_ACCOUNTING_FEED_SYNC,
+      id: '7c5e9a3d-1b4f-4e2c-8d6a-9f0b2c4e6a8d',
+      provider: 'accounted',
+      payment_id: 'pay_01HZX8N4T8W0X2Y4A6C8E0G4K',
+      external_ref: 'accounted:document:3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10',
+      status: 'pushed',
+      error: null,
+      attempts: 1,
+      created_at: '2026-09-15T09:31:12.000Z',
+      updated_at: '2026-09-15T09:31:12.000Z',
+    },
+  ],
+  counts: { pending: 0, failed: 0, exhausted: 0 },
+}
+
+/** The verify verdict the #3018 stage serves for the Accounted document row. */
+export const FIXTURE_ACCOUNTING_VERIFY_ACCOUNTED = {
+  registered: true,
+  missing: null,
+  booked: null,
+  cancelled: null,
+  invoice_number: null,
+  document_ref: '3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10',
+  voucher: null,
+  invoice_date: null,
+  total: 10.42,
+  checked_at: '2026-09-17T12:00:00.000Z',
+}
+
+/**
+ * The `/transactions` list for the #3018 badge capture: the first row's
+ * accounting re-pointed at the Accounted document (the badge reads
+ * `Evidence archived`), every other row unchanged. Served by the
+ * `accounting-feed` scenario ONLY while its `accounted` stage is on — the
+ * committed `/transactions` baselines photograph the shared `FIXTURE_TXS`,
+ * and this stage must not move them.
+ */
+export const FIXTURE_TXS_ACCOUNTED_BADGE = FIXTURE_TXS.map((t, i) =>
+  i === 0
+    ? {
+        ...t,
+        accounting: { provider: 'accounted', status: 'pushed', externalRef: 'accounted:document:3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10', error: null },
+      }
+    : t,
+)
+
 // ── Analytics overview (#2949, epic #2944 slice E) ───────────────────────────
 // `GET /analytics/overview` is analytics slice B (#2946, PR #2957 — review at
 // the time of writing). The fixture pins the response shape THAT PR specifies:
@@ -2870,6 +2941,10 @@ function setSettingsAccountingStage(next) {
 const ACCOUNTING_FEED_STAGES = {
   on: FIXTURE_ACCOUNTING_FEED_STATUS,
   attention: FIXTURE_ACCOUNTING_FEED_ATTENTION,
+  // #3018: the Accounted destination — one pushed document row (the
+  // `Evidence archived` badge, the document identity line) and a served
+  // record-only verify verdict (the page renders the Accounted sentence).
+  accounted: FIXTURE_ACCOUNTING_FEED_ACCOUNTED,
   'coming-soon': FIXTURE_ACCOUNTING_FEED_COMING_SOON,
   'self-hosted': FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
 }
@@ -3076,7 +3151,19 @@ export const SCENARIOS = {
     /** Exposed so the fixture-contract test can pin each flag state. */
     stage: setAccountingFeedStage,
     api(apiPath) {
-      if (apiPath !== '/accounting/feed/status') return undefined
+      // The #3018 badge stage ALSO serves `/transactions` with the first row's
+      // accounting re-pointed at the Accounted document — the badge
+      // (`Evidence archived`) renders on transaction rows, and the committed
+      // baselines photograph the shared list. Scoped to the stage: every
+      // other stage falls through to the default fixtures.
+      if (apiPath === '/transactions' && accountingFeedStage === 'accounted') {
+        return { transactions: FIXTURE_TXS_ACCOUNTED_BADGE, total: FIXTURE_TXS_ACCOUNTED_BADGE.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedSafeIds: [], truncated: false }
+      }
+      if (apiPath !== '/accounting/feed/status' && !(apiPath === '/accounting/feed/verify/pay_01HZX8N4T8W0X2Y4A6C8E0G4K' && accountingFeedStage === 'accounted'))
+        return undefined
+      if (apiPath === '/accounting/feed/verify/pay_01HZX8N4T8W0X2Y4A6C8E0G4K') {
+        return FIXTURE_ACCOUNTING_VERIFY_ACCOUNTED
+      }
       const status = ACCOUNTING_FEED_STAGES[accountingFeedStage]
       // The summary line renders `lastPushAt` as a RELATIVE time ("2 minutes
       // ago"), so a fixed ISO date would age the capture every month. Served
@@ -3128,6 +3215,34 @@ export const SCENARIOS = {
       // The feed that is on carries the product subtitle; the off states do not.
       await main.getByText(/your accountant codes and confirms them/).waitFor({ timeout: 15_000 })
       await shoot(main, 'feed')
+
+      // ── accounted (#3018): the document-only destination ──────────────────
+      // The api_key destination's summary, the pushed document row with its
+      // `Evidence archived` badge and `Accounted document <id>` identity line,
+      // and the record-only verify verdict (the stage serves the verdict, the
+      // page renders the Accounted sentence from Haven's own record).
+      await openStage('accounted')
+      await main.getByTestId('feed-summary').waitFor({ timeout: 15_000 })
+      await main.getByText('Feeding Accounted · KOMMANDITBOLAGET TESTAREN 3', { exact: false }).waitFor({ timeout: 15_000 })
+      await main.getByText('Accounted document 3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10', { exact: true }).waitFor({ timeout: 15_000 })
+      await main.getByRole('button', { name: 'Check in Accounted', exact: true }).waitFor({ timeout: 15_000 })
+      // The verify verdict, rendered from Haven's own record — click it so the
+      // sentence is IN the capture, then prove it says what the record knows.
+      await main.getByRole('button', { name: 'Check in Accounted', exact: true }).click()
+      await main.getByText(/Evidence archived in Accounted — document 3f1c7a52/).waitFor({ timeout: 15_000 })
+      await refuseIfPresent(main.getByText('In Fortnox', { exact: true }), 'accounting-feed · accounted · In Fortnox badge')
+      await shoot(main, 'accounted')
+
+      // The BADGE on a transaction row (`Evidence archived`, #3018): while the
+      // stage is on, the scenario serves `/transactions` with the first row's
+      // accounting re-pointed at the Accounted document — the committed
+      // `/transactions` baselines photograph the shared list, so the badge
+      // capture must not move them.
+      await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await page.evaluate(() => document.fonts.ready)
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('Evidence archived', { exact: true }).first().waitFor({ timeout: 15_000 })
+      await shoot(page.locator('main').first(), 'accounted-badge')
 
       // ── attention: sign-in expired + exhausted rows ───────────────────────
       // The summary flips to the attention state with its PRIMARY "Fix in

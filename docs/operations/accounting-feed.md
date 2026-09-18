@@ -734,6 +734,48 @@ no-ops until slice 2 (#3018 adds the document push; verify stays answered from
 Haven's own record per the epic Notes; Accounted keys are revoked in their
 dashboard, so `revoke` clears local secrets only).
 
+**The document push (#3018, slice 2).** `pushTransaction` renders the verifiable
+receipt underlag (`receipt-underlag.ts`, deterministic bytes; the merchant
+receipt and the suggested-account hint are excluded by owner decision — the
+upload takes exactly `file` + `upload_source=api`, and the sync row holds one
+ref) and uploads it with `POST /api/v1/companies/{companyId}/documents`,
+`Idempotency-Key = uuid5(paymentId)`. Delivery proof: a **2xx** (the spec
+declares `200`, not `201`) whose `data.sha256_hash` equals the local SHA-256
+of the sent bytes — anything else is `skipped` and no ref is stored. Error
+map: 403 `INSUFFICIENT_SCOPE` → `skipped` + `scope_missing` with
+`missingScopes` from the envelope `details` when present; plain `FORBIDDEN`
+→ thrown (retryable, NOT a scope verdict); 409 `IDEMPOTENCY_KEY_REUSE` →
+terminal `skipped` (same key, different bytes — never retried); 400
+`DOC_UPLOAD_TOO_LARGE` / `DOC_UPLOAD_UNSUPPORTED_TYPE` → permanent
+`skipped`; 500 `DOC_UPLOAD_STORAGE_FAILED` → thrown for the sweep; 429 →
+`ProviderError` with `retryAfterMs` from `Retry-After` (seconds → ms; the
+sweep reads the field, `retry-sweep.ts`). Oversize underlag (> 10 MB) is
+gated locally BEFORE any request.
+
+**Verify from Haven's own record.** `capabilities.verify: false`: there is no
+`GET /documents/{id}` on the 2026-05-12 spec and `/download` writes a
+`document.accessed` audit event per call, so `verify` never calls out. The
+pushed sync row with this ref → `registered: true`, `document_ref` = the
+document id, `total` from the same `ledgerAmount` the feed pushed;
+well-formed ref the row does not carry → `missing: 'foreign_invoice'`;
+foreign ref shape → `ok: false, error_code: 'no_invoice_ref'`. The contract
+change is scoped here: `AccountingVerification.invoice_number` is
+`number | null` and `document_ref: string | null` joined (`connector.ts`,
+`openapi/spec.ts`, regenerated `api-types.ts`); Fortnox keeps emitting the
+number with `document_ref: null`.
+
+**Conformance.** `accounted-connector.conformance.test.ts` runs the shared
+runner over recorded fixtures; the runner is capability-aware (#3018): the
+harness's `capabilities` (attachments/verify false) and
+`declares.baseCurrency: false` skip — by name, with printed reasons — cases
+3/6, case 4's booking halves, and cases 7/7c/7d. Case 4b (foreign /
+no_invoice_ref) and 6b (pre-push scope refusal) still run. The skip
+decisions are pinned by `connector-conformance-skips.test.ts`, and
+`accounted-outbound-allowlist.test.ts` pins the outbound surface to exactly
+`GET /api/v1/companies` + `POST .../documents` over the recorded request
+log (`/download`, `journal-entries`, `supplier-invoices`, `link` never
+appear).
+
 **Live hosts.** `https://app.accounted.se` (the OpenAPI `servers` entry);
 `app.gnubok.se` serves the same deployment as an alternative host, not a
 redirect target. Keys are created AND revoked at `/settings/api`; the sandbox

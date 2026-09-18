@@ -11,7 +11,10 @@
  * or this payment was never fed" (the absence is the contract, not a null).
  *
  * Three states, one label each:
- *   pushed          → "In <Provider>"  (success)
+ *   pushed          → "In <Provider>", or "Evidence archived" for a
+ *                     record-only connector (#3018: Accounted archives the
+ *                     document Haven pushed — "In …" would read as a booking
+ *                     the provider made)
  *   pending         → "Feeding…"       (neutral — in flight)
  *   failed/skipped  → "Not fed"        (warning), the reason on hover/focus
  *
@@ -45,6 +48,15 @@ export function providerDisplayName(provider: string): string {
   if (known) return known
   return provider.length === 0 ? provider : provider[0].toUpperCase() + provider.slice(1)
 }
+
+/**
+ * Providers whose descriptor declares `capabilities.verify: false` (#3018):
+ * their pushed record is a document Haven archived, verify answers from
+ * Haven's own record, and user-facing copy must not read as a provider
+ * read-back. The badge's pushed label and the feed page's verify sentences
+ * both branch on this — one decision, one home.
+ */
+export const RECORD_ONLY_PROVIDERS = new Set(['accounted'])
 
 const TONE: Record<TransactionAccounting['status'], StatusTone> = {
   pushed: 'success',
@@ -90,7 +102,9 @@ function PresentAccountingBadge({
 
   const label =
     accounting.status === 'pushed'
-      ? t.accountingBadge.inProvider(providerDisplayName(accounting.provider))
+      ? RECORD_ONLY_PROVIDERS.has(accounting.provider.toLowerCase())
+        ? t.accountingBadge.evidenceArchived
+        : t.accountingBadge.inProvider(providerDisplayName(accounting.provider))
       : accounting.status === 'pending'
         ? t.accountingBadge.feeding
         : t.accountingBadge.notFed

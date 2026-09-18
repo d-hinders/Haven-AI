@@ -319,7 +319,7 @@ describe('reporting routes', () => {
         ok: true,
         verification: {
           registered: true, missing: null, booked: false, cancelled: false,
-          invoice_number: 11, voucher: null, invoice_date: '2026-08-12',
+          invoice_number: 11, document_ref: null, voucher: null, invoice_date: '2026-08-12',
           total: 10.42, checked_at: '2026-08-12T14:00:00.000Z',
         },
       })
@@ -347,7 +347,7 @@ describe('reporting routes', () => {
       provider: 'fortnox',
       verification: {
         registered: false, missing: 'deleted' as const, booked: null, cancelled: null,
-        invoice_number: 11, voucher: null, invoice_date: null,
+        invoice_number: 11, document_ref: null as string | null, voucher: null, invoice_date: null,
         total: null, checked_at: '2026-08-13T08:00:00.000Z',
       },
     }

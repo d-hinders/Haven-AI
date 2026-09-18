@@ -690,7 +690,7 @@ const providerRefusal = {
  */
 const invoiceVerification = {
   type: 'object',
-  required: ['registered', 'missing', 'booked', 'cancelled', 'invoice_number', 'voucher', 'invoice_date', 'total', 'checked_at'],
+  required: ['registered', 'missing', 'booked', 'cancelled', 'invoice_number', 'document_ref', 'voucher', 'invoice_date', 'total', 'checked_at'],
   properties: {
     registered: { type: 'boolean', description: 'The invoice exists in Fortnox under our external_ref.' },
     missing: {
@@ -699,9 +699,18 @@ const invoiceVerification = {
       description:
         "Why registered is false. 'deleted' = the number 404s; 'foreign_invoice' = an invoice exists at that number but carries someone else's ExternalInvoiceNumber (a company-switch collision). Null when registered. Both mean OUR record was never delivered under our ref — but an audit trail must not say \'no longer exists\' about an invoice that does.",
     },
-    booked: { type: ['boolean', 'null'], description: 'A human has booked it. Null when not registered.' },
+    booked: { type: ['boolean', 'null'], description: 'A human has booked it. Null when not registered (or not knowable).' },
     cancelled: { type: ['boolean', 'null'], description: 'Registered but struck. Null when not registered.' },
-    invoice_number: { type: 'integer' },
+    invoice_number: {
+      type: ['integer', 'null'],
+      description:
+        "The provider's own number for the record (what its UI shows). Null when the delivered object carries no number (#3018: an Accounted document) — document_ref names it instead.",
+    },
+    document_ref: {
+      type: ['string', 'null'],
+      description:
+        "The provider's id for the delivered document, when the record IS a document (Accounted: accounted:document:<id>). Null for invoice-shaped records (Fortnox).",
+    },
     voucher: { type: ['string', 'null'], description: '`<series><number> <year>` once booked, e.g. "A123 2026". Null until then.' },
     invoice_date: { type: ['string', 'null'] },
     total: { type: ['number', 'null'] },

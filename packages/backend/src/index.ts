@@ -327,8 +327,8 @@ if (fortnoxConfigured()) {
 // has no deployment credentials to configure — a key is per USER (pasted at
 // connect, stored encrypted), so there is nothing an operator opts into here;
 // `availability: 'live'` plus the per-account accounting feature gate is the
-// whole exposure decision. The connector's push half is #3018; until then it
-// skips, so a registered instance delivers nothing.
+// whole exposure decision. #3018 is the push half: the receipt underlag is
+// uploaded as one WORM document, delivery proven by sha256 echo.
 registerConnector(new AccountedConnector())
 // #1328: the legacy /demo/mpp/* MPP demo route is retired (see
 // modules/mpp/challenge.ts's mppDemoRetired() for the authorize-side refusal).

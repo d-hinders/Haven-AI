@@ -148,7 +148,12 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      (honoured as a courtesy). Do not retry inside `pushTransaction`.
 4. **Register the instance** at boot in `src/index.ts`, gated on the
    provider's credentials being configured (the Fortnox pattern), so a
-   deployment without them lists the provider as `configured: false`.
+   deployment without them lists the provider as `configured: false`. That
+   gate is OAuth2-specific: an `api_key` provider has no deployment
+   credential to configure — its keys are per USER (pasted at connect,
+   stored encrypted), so the instance registers UNCONDITIONALLY and the
+   per-account accounting feature gate is the whole exposure decision
+   (Accounted is the precedent, #3017).
 5. **Conformance.** Add `__tests__/<provider>-connector.conformance.test.ts`:
    a `ConformanceHarness` for your connector, then
    `runConnectorConformance(name, harness)`. The suite

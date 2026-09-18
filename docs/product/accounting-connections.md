@@ -152,6 +152,29 @@ Two Accounted specifics worth knowing:
   deletes the stored key and stops the feed. The key itself keeps working
   until you revoke it under `app.accounted.se/settings/api`.
 
+### What delivery means for Accounted (#3018)
+
+A settled payment is delivered as **one document**: Haven renders the verifiable
+receipt underlag (payment id, settled time, book value, merchant, resource,
+chain, transaction hash) and uploads it to your Accounted company. The upload
+is append-only — Accounted stores a document once and it cannot be edited
+afterwards — so a retry of the same payment never creates a second document.
+Haven only marks the payment delivered when Accounted confirms it stored
+exactly the bytes Haven sent.
+
+- **The row reads *Evidence archived*.** Not "in Accounted" as a booking: the
+  document is evidence your accountant books from, not a ledger entry Haven
+  made. Pressing **Check in Accounted** answers from Haven's own delivery
+  record — no call to Accounted, and nothing in their audit trail either.
+- **Delivery can be refused.** A key missing the write scope (*Needs more
+  access*), a document over Accounted's 10 MB limit, or a payment whose
+  evidence changed after the document was already stored are shown as not
+  fed, with the reason on the row. Each is final until the underlying cause
+  changes; none is retried behind your back.
+- **Your accountant books from the document.** Haven does not create journal
+  entries or supplier invoices in Accounted — the document is the record, and
+  the booking stays with your accountant.
+
 ## What to include: the backfill choice
 
 Right after a connection that has not fed anything yet, Haven asks:

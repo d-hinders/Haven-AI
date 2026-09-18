@@ -9085,11 +9085,14 @@ export interface operations {
                          * @enum {string|null}
                          */
                         missing: "deleted" | "foreign_invoice" | null;
-                        /** @description A human has booked it. Null when not registered. */
+                        /** @description A human has booked it. Null when not registered (or not knowable). */
                         booked: boolean | null;
                         /** @description Registered but struck. Null when not registered. */
                         cancelled: boolean | null;
-                        invoice_number: number;
+                        /** @description The provider's own number for the record (what its UI shows). Null when the delivered object carries no number (#3018: an Accounted document) — document_ref names it instead. */
+                        invoice_number: number | null;
+                        /** @description The provider's id for the delivered document, when the record IS a document (Accounted: accounted:document:<id>). Null for invoice-shaped records (Fortnox). */
+                        document_ref: string | null;
                         /** @description `<series><number> <year>` once booked, e.g. "A123 2026". Null until then. */
                         voucher: string | null;
                         invoice_date: string | null;

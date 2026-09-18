@@ -17,6 +17,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { CONNECT_OUTCOME_PARAMS, readConnectOutcome } from '@/components/accounting/ConnectionsCard'
 import { ComingSoon, SelfHostedUnavailable } from '@/components/accounting/ComingSoon'
 import { ACCOUNTING_SETTINGS_HREF, FeedSummary } from '@/components/accounting/FeedSummary'
+import { providerDisplayName, RECORD_ONLY_PROVIDERS } from '@/components/accounting/AccountingBadge'
 import { truncate } from '@/lib/format'
 
 /**
@@ -117,31 +118,62 @@ function hasFeedActivity(status: Pick<AccountingFeedStatus, 'counts' | 'syncs'>)
   return status.syncs.length > 0 || Object.values(status.counts).some((n) => n > 0)
 }
 
-/** "fortnox:supplierinvoice:123" → 123 (the number shown in Fortnox's UI). */
-function fortnoxInvoiceNumber(externalRef: string | null): string | null {
-  const match = externalRef?.match(/^fortnox:supplierinvoice:(\d+)$/)
-  return match ? match[1] : null
+/**
+ * The external_ref → the row's identity line + the key its verdict is bound
+ * to (#1364), per provider (#3018). Fortnox carries an invoice number in its
+ * ref; Accounted carries the document id. Null for any other namespace.
+ */
+function externalRecord(
+  externalRef: string | null,
+): { kind: 'invoice' | 'document'; id: string } | null {
+  const invoice = externalRef?.match(/^fortnox:supplierinvoice:(\d+)$/)
+  if (invoice) return { kind: 'invoice', id: invoice[1] }
+  const document = externalRef?.match(/^accounted:document:([0-9a-fA-F-]{8,64})$/)
+  if (document) return { kind: 'document', id: document[1] }
+  return null
 }
 
-/** Plain-language verdict from a read-back verification (#1362). */
-function verificationSummary(v: AccountingVerification): { text: string; tone: 'success' | 'warning' | 'danger' } {
+/**
+ * Plain-language verdict from a verification (#1362), provider-conditional
+ * since #3018. A provider that reads back (Fortnox) gets sentences naming
+ * it and its invoice; a record-only provider (#3018, Accounted) answers
+ * from Haven's own record, so its sentence says what Haven KNOWS — the
+ * archived evidence and who books from it — and never reads as the
+ * provider having answered. `registered: false` on a record-only row
+ * (`foreign_invoice`) and `no_invoice_ref` keep the generic sentences:
+ * they are about our own record's identity, not a provider verdict.
+ */
+function verificationSummary(
+  v: AccountingVerification,
+  provider: string,
+  t: ReturnType<typeof useT>,
+): { text: string; tone: 'success' | 'warning' | 'danger' } {
+  if (RECORD_ONLY_PROVIDERS.has(provider)) {
+    if (!v.registered) return { text: t.accountingPage.verify.foreign, tone: 'warning' }
+    const document = v.document_ref ? v.document_ref.slice(0, 8) : null
+    if (document) return { text: t.accountingPage.verify.accounted.registered(document), tone: 'success' }
+    return { text: t.accountingPage.verify.missing, tone: 'warning' }
+  }
   if (!v.registered) {
     return {
-      text: `Not found in Fortnox — invoice ${v.invoice_number} no longer exists there.`,
+      text: t.accountingPage.verify.fortnox.deleted(String(v.invoice_number)),
       tone: 'danger',
     }
   }
   if (v.cancelled) {
-    return { text: `Registered in Fortnox as invoice ${v.invoice_number}, but cancelled there.`, tone: 'warning' }
+    return { text: t.accountingPage.verify.fortnox.cancelled(String(v.invoice_number)), tone: 'warning' }
   }
   if (v.booked) {
     return {
-      text: `Booked in Fortnox — invoice ${v.invoice_number}${v.voucher ? `, voucher ${v.voucher}` : ''}. Your accountant has accounted for it.`,
+      text: t.accountingPage.verify.fortnox.booked(
+        String(v.invoice_number),
+        v.voucher ?? '',
+      ),
       tone: 'success',
     }
   }
   return {
-    text: `Registered in Fortnox as invoice ${v.invoice_number} — awaiting booking by your accountant.`,
+    text: t.accountingPage.verify.fortnox.registered(String(v.invoice_number)),
     tone: 'success',
   }
 }
@@ -164,7 +196,7 @@ export default function AccountingPage() {
       const message =
         err instanceof Error && err.message
           ? err.message
-          : 'Could not check Fortnox right now. Try again in a moment.'
+          : t.accountingPage.verify.checkFailed
       setVerifications((prev) => ({ ...prev, [paymentId]: { error: message } }))
     } finally {
       setVerifying(null)
@@ -281,11 +313,9 @@ export default function AccountingPage() {
               role="status"
               className="rounded-[12px] border border-warning/20 bg-[var(--v2-warning-soft)] px-4 py-3"
             >
-              <p className="text-sm font-medium text-[var(--v2-warning)]">Preview — not yet delivering to Fortnox</p>
+              <p className="text-sm font-medium text-[var(--v2-warning)]">{t.accountingPage.previewBanner.title}</p>
               <p className="mt-1 text-sm text-[var(--v2-ink-2)]">
-                The accounting feed is built and your settled payments are tracked here, but the live Fortnox
-                connection isn&apos;t wired up yet — transactions are not being sent to your accounting tool. We&apos;ll
-                enable delivery in a follow-up; nothing you do here posts to Fortnox in the meantime.
+                {t.accountingPage.previewBanner.body}
               </p>
             </div>
           )}
@@ -334,14 +364,22 @@ export default function AccountingPage() {
             ) : (
               <Card.Section divided>
                 {status.syncs.map((s) => {
-                  const invoiceNo = s.status === 'pushed' ? fortnoxInvoiceNumber(s.external_ref) : null
+                  const record = s.status === 'pushed' ? externalRecord(s.external_ref) : null
                   // Self-invalidating (#1364 review): a stored verification is
                   // only rendered while the row still points at the SAME
-                  // invoice — a re-sync that changes the row's shape drops the
+                  // record — a re-sync that changes the row's shape drops the
                   // stale verdict instead of showing it under a changed row.
+                  // #3018: the identity differs per provider — Fortnox binds
+                  // the verdict to the invoice number; Accounted's verdict
+                  // carries no number, so it binds to the document id (a
+                  // document_ref on the verdict is always this row's own —
+                  // the connector refuses a ref it cannot vouch for).
                   const stored = verifications[s.payment_id]
                   const v =
-                    stored && ('error' in stored || String(stored.invoice_number) === invoiceNo)
+                    stored &&
+                    ('error' in stored ||
+                      (record?.kind === 'document' && stored.document_ref !== null) ||
+                      (record?.kind === 'invoice' && String(stored.invoice_number) === record.id))
                       ? stored
                       : undefined
                   return (
@@ -359,21 +397,23 @@ export default function AccountingPage() {
                           <p className="text-sm font-medium text-[var(--v2-ink)]">{truncate(s.payment_id)}</p>
                           <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
                             {s.error ??
-                              (invoiceNo
-                                ? `Fortnox invoice ${invoiceNo}`
-                                : s.attempts > 1
-                                  ? `${s.attempts} attempts`
-                                  : s.provider)}
+                              (record?.kind === 'invoice'
+                                ? t.accountingPage.rowIdentity.invoice(record.id)
+                                : record?.kind === 'document'
+                                  ? t.accountingPage.rowIdentity.document(record.id)
+                                  : s.attempts > 1
+                                    ? `${s.attempts} attempts`
+                                    : providerDisplayName(s.provider))}
                           </p>
                         </div>
                         <span className="flex shrink-0 items-center gap-2">
-                          {invoiceNo && (
+                          {record && (
                             <Button
                               variant="ghost"
                               onClick={() => void runVerify(s.payment_id)}
                               disabled={verifying !== null}
                             >
-                              {verifying === s.payment_id ? 'Checking…' : 'Check in Fortnox'}
+                              {verifying === s.payment_id ? 'Checking…' : t.accountingPage.verify.checkIn(providerDisplayName(s.provider))}
                             </Button>
                           )}
                           <StatusChip status={s.status} />
@@ -384,12 +424,12 @@ export default function AccountingPage() {
                           <div className="flex items-center justify-between gap-3 px-5 pb-3">
                             <p
                               className={`text-xs ${
-                                'error' in v ? TONE_TEXT.danger : TONE_TEXT[verificationSummary(v).tone]
+                                'error' in v ? TONE_TEXT.danger : TONE_TEXT[verificationSummary(v, s.provider, t).tone]
                               }`}
                             >
                               {'error' in v
                                 ? v.error
-                                : `${verificationSummary(v).text} Checked ${new Date(v.checked_at).toLocaleTimeString()}.`}
+                                : `${verificationSummary(v, s.provider, t).text} Checked ${new Date(v.checked_at).toLocaleTimeString()}.`}
                             </p>
                             {!('error' in v) && !v.registered && (
                               <Button

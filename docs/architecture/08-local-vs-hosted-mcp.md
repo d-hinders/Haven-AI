@@ -399,8 +399,9 @@ since #1984 — are unaffected, hosted and local alike.
 > signer handoff shapes the hosted server declares itself — it never imports
 > the edge signer at runtime; a test pins them to the signer's schemas; the
 > wire strings are byte-identical on the 9 sites the epic did not re-decide,
-> and all 17 are pinned by `next-step-characterization.test.ts` (the 8
-> re-decided ones marked `RE-DECIDED`). New on the wire:
+> and all 17 `buildAgentGuidance` call sites (a census the characterization
+> test enforces — an 18th site fails it) are pinned by
+> `next-step-characterization.test.ts`, the 8 re-decided ones marked. New on the wire:
 > `next_tool_omitted_reason` wherever no tool is named (the three refusals
 > that used to hand `{ payment_id: null }` to a tool requiring a string, the
 > recovery module's own-HTTP-retry step, the report-accepted step and the

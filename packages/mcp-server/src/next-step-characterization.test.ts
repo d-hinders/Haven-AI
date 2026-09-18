@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync, readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { AgentPaymentNextAction } from '@haven_ai/sdk'
 import { buildAgentGuidance, paymentStatusHandoff } from './tools/support/guidance.js'
 
@@ -60,9 +62,38 @@ export const EMISSION_SITES = [
   { site: 'state-direct-recovery.ts own HTTP retry', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: null, reason: 'the next step is your own HTTP retry of the merchant with the payment_header above, not a Haven tool', expect: { next_tool_omitted_reason: 'the next step is your own HTTP retry of the merchant with the payment_header above, not a Haven tool' } } /* RE-DECIDED: additive reason */,
 ] as const
 
+/**
+ * The census the figure "17 emission sites" comes from: every
+ * `buildAgentGuidance(` call in the hosted non-test source. A new site fails
+ * this count (haven-reviewer round 2 on #3124 planted an 18th and the suite
+ * stayed green), and must then be characterized above. Distinct from the
+ * fixture count (19: the held-hash site has two branches, the three null-id
+ * sites share one helper) — the number the docs quote is THIS one.
+ */
+export const EMISSION_SITE_COUNT = 17
+
+function hostedSource(): string {
+  const parts = [readFileSync(fileURLToPath(new URL('./tools.ts', import.meta.url)), 'utf8')]
+  const walk = (dir: URL) => {
+    for (const entry of readdirSync(fileURLToPath(dir), { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(new URL(`${entry.name}/`, dir))
+      else if (entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts'))
+        parts.push(readFileSync(fileURLToPath(new URL(entry.name, dir)), 'utf8'))
+    }
+  }
+  walk(new URL('./tools/', import.meta.url))
+  return parts.join('\n')
+}
+
 const NEXT_KEYS = ['next_tool', 'next_tool_server', 'next_tool_name', 'next_tool_server_role', 'next_arguments', 'next_tool_omitted_reason'] as const
 
 describe('hosted next-step emissions — characterization (#3101)', () => {
+  it(`the hosted source has exactly ${EMISSION_SITE_COUNT} buildAgentGuidance call sites (census)`, () => {
+    // Excludes the definition in guidance.ts (`export function buildAgentGuidance(`).
+    const calls = [...hostedSource().matchAll(/(?<!function )buildAgentGuidance\(/g)].length
+    expect(calls).toBe(EMISSION_SITE_COUNT)
+  })
+
   for (const fixture of EMISSION_SITES) {
     it(fixture.site, () => {
       const f = fixture as { tool?: string | null; reason?: string; args?: unknown; handoff?: unknown }

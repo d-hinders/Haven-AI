@@ -171,6 +171,23 @@ last-verified: "2026-09-19"
 > `typed_data`). Nothing
 > else in this document was re-verified in this pass.
 >
+> **Recent re-verification (#3171):** the SDK's paid retry — `MerchantCompletion.retryRequest`
+> (behind `fetch()`, `payX402Quote()`, `resumeX402Payment()`) and
+> `HavenClient.completeX402MerchantCall()` (the hosted leg) — now re-initializes
+> once and resends the SAME payment header when the merchant answers HTTP 404 +
+> JSON-RPC `-32001` carrying `error.data = { settled: false, next_action:
+> 'reinitialize_then_retry_same_payment_header' }`. No tool added, renamed or
+> re-shaped on either runtime: arguments, schemas, descriptions and the
+> registered tool-name set are untouched, so the version-skew and consent-hash
+> contracts do not move. Skew: an OLDER SDK (pre-#3171) against the NEW demo
+> merchant still surfaces that 404 as `MERCHANT_REJECTED_AFTER_FUNDING` — the
+> pre-#3171 behaviour, nothing worse, and the merchant's message now tells the
+> agent the remedy in words; a NEW SDK against an OLDER merchant sees a bare
+> `-32001` without `error.data` and does not resend — the conservative
+> direction. Neither skew moves money differently. `last-verified` is not
+> re-stamped: it already reads 2026-09-19. Nothing else in this document was
+> re-verified in this pass.
+>
 > **Recent re-verification (#3172):** the edge signer's audit sidecar is now
 > created owner-only, tightened in place when found permissive, and rotated at
 > 8 MiB; and `payload_hash` / `typed_data_hash` are bounded on the tool

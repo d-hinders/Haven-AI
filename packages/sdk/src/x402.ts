@@ -503,6 +503,40 @@ export function selectPaymentOption(
 export const ERC7710_ASSET_TRANSFER_METHOD = 'erc7710'
 
 /**
+ * True when the entry is EIP-3009-`authorization`-shaped: what this SDK can
+ * construct with `exact.evm.createPaymentHeader` (#3116).
+ *
+ * The [exact EVM specification](https://github.com/x402-foundation/x402/blob/main/specs/schemes/exact/scheme_exact_evm.md)
+ * distinguishes three payloads by `extra.assetTransferMethod`: EIP-3009 signs
+ * `signature`/`authorization`, Permit2 signs `signature`/`permit2Authorization`,
+ * and erc7710 carries a delegation chain. Haven constructs exactly one of
+ * those payloads — the EIP-3009 `authorization` one — so an entry counts as
+ * EIP-3009-compatible ONLY when its advertised method and flow agree with
+ * that payload, by name: an omitted key means the mechanism default
+ * (`eip3009` / `authorization`), and any value that is present but not
+ * exactly the supported string — including a non-string, malformed value —
+ * makes the entry unsupported.
+ *
+ * `extra.assetTransferMethod` / `extra.paymentFlow` are protocol-reserved
+ * keys ([v2 specification §6.1](https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md),
+ * which also requires clients to refuse a `paymentFlow` they do not
+ * recognize), so their values are READ as claims, never ignored. Merchant
+ * shape is untrusted, same defensive posture as `x402AssetTransferMethod` —
+ * but here a malformed value reads as UNSUPPORTED rather than as the
+ * default, because the cost of guessing the default wrong is a signature
+ * the merchant's verifier refuses after the funding leg has already moved
+ * funds. 'erc7710' fails this test like any other non-3009 method and is
+ * selected by `selectErc7710PaymentOption` instead.
+ */
+function isEip3009ConstructibleOption(option: X402PaymentOption): boolean {
+  const rawMethod = option.extra?.assetTransferMethod
+  if (rawMethod !== undefined && rawMethod !== 'eip3009') return false
+  const rawFlow = option.extra?.paymentFlow
+  if (rawFlow !== undefined && rawFlow !== 'authorization') return false
+  return true
+}
+
+/**
  * Read `extra.assetTransferMethod` defensively. `extra` is the merchant's own
  * object, so it is untrusted shape: anything that is not the exact string is
  * treated as "not erc7710" rather than coerced.
@@ -580,7 +614,12 @@ export function selectStandardPaymentOption(
     // here unsanitized — and a throw there became a 500 where every other
     // caller gets the clean no-compatible-option refusal.
     if (opt === null || typeof opt !== 'object') continue
-    if (!isErc7710Option(opt) && isPayableStandardOption(opt)) return opt
+    // #3116: non-erc7710 is no longer assumed EIP-3009-compatible. A permit2
+    // entry, or one advertising a paymentFlow this SDK does not recognize,
+    // must be skipped here rather than signed into an EIP-3009 payload the
+    // exact-EVM specification does not define for it.
+    if (!isEip3009ConstructibleOption(opt)) continue
+    if (isPayableStandardOption(opt)) return opt
   }
 
   return null
@@ -602,6 +641,11 @@ export function selectErc7710PaymentOption(
     // caller gets the clean no-compatible-option refusal.
     if (opt === null || typeof opt !== 'object') continue
     if (isErc7710Option(opt) && isPayableStandardOption(opt)) return opt
+    // #3116: an erc7710 selector must not fall through to an entry whose
+    // method/flow is neither erc7710 nor constructible EIP-3009 — an
+    // unsupported entry stays unsupported on BOTH selectors, so a challenge
+    // that offers only incompatible shapes is refused, never guessed at.
+    if (!isEip3009ConstructibleOption(opt)) continue
   }
 
   return null
@@ -725,6 +769,22 @@ export function toStandardPaymentRequirements(
 
   if (option.scheme !== 'exact') {
     throw new Error(`Unsupported x402 scheme: ${option.scheme}`)
+  }
+
+  // #3116, last stop before `exact.evm.createPaymentHeader`: the requirements
+  // produced here can ONLY become an EIP-3009 `authorization` payload, so an
+  // entry advertising any other transfer method or an unrecognized payment
+  // flow must refuse here even if a future caller bypasses the selectors.
+  // Permit2 signs `signature`/`permit2Authorization` — a payload this SDK
+  // does not construct (implementing Permit2 is out of scope by design) —
+  // and §6.1 forbids constructing a payment for a paymentFlow the client
+  // does not recognize. Both refuse BEFORE any funding or signing.
+  if (!isEip3009ConstructibleOption(option)) {
+    throw new Error(
+      'Unsupported x402 payment requirements: this SDK constructs EIP-3009 ' +
+        'authorization payments only. The merchant advertised a different ' +
+        'extra.assetTransferMethod or an unrecognized extra.paymentFlow.',
+    )
   }
 
   return {

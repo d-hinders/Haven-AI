@@ -952,7 +952,7 @@ describe('x402 helpers', () => {
       }))
 
     const haven = new HavenClient({
-      apiKey: 'sk_agent_test',
+      apiKey: '«reda...…»',
       delegateKey: `0x${'01'.repeat(32)}`,
       baseUrl: 'https://haven.example',
     })
@@ -966,6 +966,154 @@ describe('x402 helpers', () => {
     expect(err.message).toContain('settlement scheme')
     // Refused before any funding call: the merchant 402 was the only fetch.
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('#3116: an UNSUPPORTED-ONLY challenge (permit2) is refused before intent creation or funding', async () => {
+    // `haven.fetch` → `authorizeX402` re-selects before anything else: the
+    // refusal must be the capability one, name the real reason, and happen
+    // with NO call to the Haven backend — no intent, no funding, no signing.
+    const permit2OnlyPaymentRequired: X402PaymentRequired = {
+      ...paymentRequired,
+      accepts: [{
+        ...accepted,
+        extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'permit2' },
+      }],
+    }
+
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(permit2OnlyPaymentRequired), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const haven = new HavenClient({
+      apiKey: '«reda...…»',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const err = await haven.fetch(paymentRequired.resource.url).then(
+      () => { throw new Error('expected the permit2-only merchant to be refused before funding') },
+      (e: unknown) => e as Error,
+    )
+    expect(err.message).toContain('No compatible payment option found')
+    expect(err.message).toContain('transfer method or payment')
+    expect(err.message).toContain("extra.assetTransferMethod: 'permit2'")
+    expect(err.message).toContain('No payment intent was created and no funds moved')
+    // The merchant 402 was the only fetch — nothing reached the backend.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('#3116: an unrecognized paymentFlow on the only entry is refused before intent creation or funding', async () => {
+    const futureFlowPaymentRequired: X402PaymentRequired = {
+      ...paymentRequired,
+      accepts: [{
+        ...accepted,
+        extra: { name: 'USD Coin', version: '2', paymentFlow: 'unrecognized-future-flow' },
+      }],
+    }
+
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify(futureFlowPaymentRequired), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const haven = new HavenClient({
+      apiKey: '«reda...…»',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    await expect(haven.fetch(paymentRequired.resource.url)).rejects.toThrow(
+      'No compatible payment option found',
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('#3116: an unsupported entry is SKIPPED for a supported alternative and the supported one is paid', async () => {
+    // Unsupported-first/supported-second: selection must not let the first
+    // positional entry shadow the payable one behind it. Driven through the
+    // same #946 funding-leg shape the delegation-rail test above uses.
+    const mixedPaymentRequired: X402PaymentRequired = {
+      ...paymentRequired,
+      accepts: [
+        { ...accepted, extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'permit2' } },
+        accepted,
+      ],
+    }
+
+    const txHash = `0x${'ab'.repeat(32)}`
+    const typedData = {
+      domain: {
+        chainId: 8453,
+        name: 'HybridDeleGator',
+        version: '1',
+        verifyingContract: '0x' + 'dd'.repeat(20),
+      },
+      types: {
+        PackedUserOperation: [
+          { name: 'sender', type: 'address' },
+          { name: 'nonce', type: 'uint256' },
+          { name: 'entryPoint', type: 'address' },
+        ],
+      },
+      primaryType: 'PackedUserOperation',
+      message: {
+        sender: '0x' + 'dd'.repeat(20),
+        nonce: '1',
+        entryPoint: '0x' + 'ee'.repeat(20),
+      },
+    }
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_3116',
+      status: 'pending_signature',
+      expires_at: 'later',
+      chain_id: 8453,
+      account_address: safeAddress,
+      payer: safeAddress,
+      token: 'USDC',
+      amount: '0.02',
+      to: delegateAddress,
+      merchant_to: accepted.payTo,
+      resource_url: paymentRequired.resource.url,
+      sign_data: {
+        hash: `0x${'56'.repeat(32)}`,
+        signature_scheme: 'eip712_userop',
+        typed_data: typedData,
+      },
+    }), { status: 201 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_3116',
+      status: 'confirmed',
+      tx_hash: txHash,
+      chain_id: 8453,
+      token: 'USDC',
+      amount: '0.02',
+      to: delegateAddress,
+    }), { status: 200 }))
+
+    const haven = new HavenClient({
+      apiKey: '«reda...…»',
+      delegateKey: `0x${'01'.repeat(32)}`,
+      baseUrl: 'https://haven.example',
+    })
+
+    const receipt = await haven.authorizeX402(mixedPaymentRequired)
+    expect(receipt.success).toBe(true)
+    expect(receipt.paymentId).toBe('pay_3116')
+    expect(receipt.txHash).toBe(txHash)
+    // The authorize carried the SUPPORTED entry's shape — the plain one.
+    // Call 0 is the POST /x402 intent (authorizeX402 takes the challenge
+    // directly; there is no merchant 402 fetch on this path).
+    const authorizeBody = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+    expect(authorizeBody.settlementScheme).toBe('eip3009')
+    expect(authorizeBody.merchantPayTo).toBe(accepted.payTo)
+    expect(authorizeBody.amount).toBe(accepted.amount)
   })
 
   it('#2054: buildX402Quote describes an erc7710-only merchant instead of refusing it', async () => {
@@ -1965,6 +2113,159 @@ describe('selectStandardPaymentOption — characterization before #1453', () => 
   it('returns null for an empty list and when nothing matches', () => {
     expect(selectStandardPaymentOption([])).toBeNull()
     expect(selectStandardPaymentOption([opt({ scheme: 'upto' })])).toBeNull()
+  })
+
+  /**
+   * #3116 — unsupported transfer methods and payment flows are refused.
+   *
+   * The characterization block that preceded the fix pinned the defect
+   * itself: both cases below used to SELECT, and the issue's offline probe
+   * then signed them into an EIP-3009 payload (`signature`/`authorization`,
+   * no `permit2Authorization`), which the exact-EVM specification does not
+   * define for a permit2 entry and which §6.1 forbids for an unrecognized
+   * paymentFlow. These are the inverted, post-fix assertions.
+   */
+  describe('#3116 — unsupported transfer methods and payment flows are refused', () => {
+    it('skips a permit2-tagged entry listed first and selects the plain one', () => {
+      const permit2 = opt({
+        payTo: '0x1111111111111111111111111111111111111111',
+        extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'permit2' },
+      })
+      const plain = opt({ payTo: '0x2222222222222222222222222222222222222222' })
+      expect(selectStandardPaymentOption([permit2, plain])).toBe(plain)
+    })
+
+    it('skips an entry advertising an unrecognized paymentFlow and selects the plain one', () => {
+      const future = opt({
+        payTo: '0x1111111111111111111111111111111111111111',
+        extra: { name: 'USD Coin', version: '2', paymentFlow: 'unrecognized-future-flow' },
+      })
+      const plain = opt({ payTo: '0x2222222222222222222222222222222222222222' })
+      expect(selectStandardPaymentOption([future, plain])).toBe(plain)
+    })
+
+    it('refuses an UNSUPPORTED-ONLY challenge with null — before any intent, funding or signing', () => {
+      // Unsupported-only is the case where skipping has no alternative to
+      // fall back to: the caller must see null (→ the no-compatible-option
+      // refusal) rather than an option it cannot truthfully pay.
+      expect(
+        selectStandardPaymentOption([
+          opt({ extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'permit2' } }),
+        ]),
+      ).toBeNull()
+      expect(
+        selectStandardPaymentOption([
+          opt({ extra: { name: 'USD Coin', version: '2', paymentFlow: 'unrecognized-future-flow' } }),
+        ]),
+      ).toBeNull()
+      expect(
+        selectStandardPaymentOption([
+          opt({ extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'some-future-method' } }),
+        ]),
+      ).toBeNull()
+    })
+
+    it('treats an explicit supported pair exactly like omission', () => {
+      const explicit = opt({
+        payTo: '0x1111111111111111111111111111111111111111',
+        extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'eip3009', paymentFlow: 'authorization' },
+      })
+      expect(selectStandardPaymentOption([explicit])).toBe(explicit)
+    })
+
+    it('treats a NON-STRING method or flow as unsupported, not as the default', () => {
+      // Merchant shape is untrusted: the value is a claim, and a non-string
+      // claim is not evidence of the default.
+      expect(
+        selectStandardPaymentOption([opt({ extra: { assetTransferMethod: 3009 } })]),
+      ).toBeNull()
+      expect(
+        selectStandardPaymentOption([opt({ extra: { paymentFlow: { model: 'upfront' } } })]),
+      ).toBeNull()
+    })
+
+    it('selects an untagged option BESIDE unsupported entries — supported behavior unchanged', () => {
+      const plain = opt({ payTo: '0x2222222222222222222222222222222222222222' })
+      expect(
+        selectStandardPaymentOption([
+          opt({ extra: { assetTransferMethod: 'permit2' } }),
+          plain,
+          opt({ extra: { paymentFlow: 'escrow' } }),
+        ]),
+      ).toBe(plain)
+    })
+
+    it('erc7710 selection is unchanged and never returns an unsupported entry', () => {
+      const tagged = opt({
+        payTo: '0x1111111111111111111111111111111111111111',
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: ['0x' + '44'.repeat(20)] },
+      })
+      expect(selectErc7710PaymentOption([opt(), tagged])).toBe(tagged)
+      // A permit2 entry is not erc7710 either — both selectors refuse it.
+      expect(
+        selectErc7710PaymentOption([opt({ extra: { assetTransferMethod: 'permit2' } })]),
+      ).toBeNull()
+      expect(
+        selectErc7710PaymentOption([opt({ extra: { paymentFlow: 'unrecognized-future-flow' } })]),
+      ).toBeNull()
+    })
+
+    it('selectX402SettlementScheme refuses an unsupported-only challenge on each rail', () => {
+      const permit2Only = [opt({ extra: { assetTransferMethod: 'permit2' } })]
+      const flowOnly = [opt({ extra: { paymentFlow: 'unrecognized-future-flow' } })]
+      for (const accepts of [permit2Only, flowOnly]) {
+        expect(selectX402SettlementScheme(accepts, { delegationRail: true })).toBeNull()
+        expect(selectX402SettlementScheme(accepts, { delegationRail: false })).toBeNull()
+      }
+    })
+
+    it('selectX402SettlementScheme skips the unsupported entry and falls back cleanly', () => {
+      const plain = opt({ payTo: '0x2222222222222222222222222222222222222222' })
+      const sel = selectX402SettlementScheme(
+        [opt({ extra: { assetTransferMethod: 'permit2' } }), plain],
+        { delegationRail: false },
+      )
+      expect(sel?.scheme).toBe('eip3009')
+      expect(sel?.option).toBe(plain)
+    })
+
+    it('toStandardPaymentRequirements refuses a permit2 entry — never encoded as EIP-3009', () => {
+      // The last-stop guard: even a caller that bypasses the selectors cannot
+      // turn these requirements into an EIP-3009 payload. Implementing Permit2
+      // is explicitly out of scope (#3116).
+      const permit2 = opt({ extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'permit2' } })
+      const pr: X402PaymentRequired = {
+        x402Version: 2,
+        resource: { url: 'https://merchant.test/paid' },
+        accepts: [permit2],
+      }
+      expect(() => toStandardPaymentRequirements(pr, permit2)).toThrow(
+        'Unsupported x402 payment requirements',
+      )
+      const future = opt({ extra: { name: 'USD Coin', version: '2', paymentFlow: 'unrecognized-future-flow' } })
+      expect(() =>
+        toStandardPaymentRequirements(
+          { x402Version: 2, resource: { url: 'https://merchant.test/paid' }, accepts: [future] },
+          future,
+        ),
+      ).toThrow('Unsupported x402 payment requirements')
+    })
+
+    it('toStandardPaymentRequirements still accepts the supported shapes', () => {
+      const plain = opt()
+      const pr: X402PaymentRequired = {
+        x402Version: 2,
+        resource: { url: 'https://merchant.test/paid' },
+        accepts: [plain],
+      }
+      for (const option of [
+        plain,
+        opt({ extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'eip3009' } }),
+        opt({ extra: { name: 'USD Coin', version: '2', paymentFlow: 'authorization' } }),
+      ]) {
+        expect(() => toStandardPaymentRequirements(pr, option)).not.toThrow()
+      }
+    })
   })
 })
 

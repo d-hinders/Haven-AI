@@ -10,6 +10,8 @@ alone.
 
 - `HavenPaymentReceipt.scope` (#3132): each receipt row states its list scope as two values, `{ source: 'agent', filter: null }` — this agent's evidence rows, no query-time narrowing — so a receipt read is never mistaken for the wallet's transaction history (`GET /transactions`, `{ source: 'wallet', filter }`). Present when the backend states it; absent on an older backend, never invented. `haven_list_receipts`'s selection guidance says the same in words. New type export `HavenListScope`.
 
+## 0.4.0-alpha.0 — 2026-09-19
+
 - #3128: `listReceiptsPage({ limit, cursor })` returns `{ receipts, total, hasMore, nextCursor }` (the three page fields are `null` against a backend older than #3128); `listReceipts()` keeps returning the first page's array. `HavenAllowance.remainingDisplay` (derived client-side) and `HavenAgentAllowanceSummary.id` / `.tokenAddress` added, so the compact and detailed allowance reads agree field for field. `haven_list_receipts` on both MCP runtimes accepts `cursor` and returns the page object instead of a bare array.
 
 ## 0.3.0-alpha.0 — 2026-09-17

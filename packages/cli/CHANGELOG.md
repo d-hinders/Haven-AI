@@ -10,6 +10,8 @@ alone.
 
 - `activity list` rows carry `scope` (`{ source: 'wallet', filter }` — `--agent` / `--safe` narrow the wallet feed, they do not make it the receipts view), `timestampSource` (which column produced `timestamp`) and, on x402-synthesized rows, the recorded nullable `confirmedAt`; a confirmed payment with no evidence row reports `paymentProofStatus: null` instead of a placeholder (#3132). The usage line says the feed is wallet-scoped.
 
+## 0.4.0-alpha.0 — 2026-09-19
+
 ## 0.3.0-alpha.0 — 2026-09-17
 
 ### Fixed

@@ -274,7 +274,9 @@ export async function runCli(
         if (report.entries.length === 0) io.stdout('  (none)\n')
         for (const e of report.entries) {
           const mark = e.level === 'failed' ? '✗' : e.level === 'advisory' ? '!' : e.action === 'removed' ? '✓' : '•'
-          io.stdout(redactSecrets(`  ${mark} ${e.key} (${e.kind}, ${Math.round(e.bytes / 1024 / 1024)} MB): ${e.detail}\n`))
+          // A kept directory is never sized (#3151 review): say so instead of printing a false 0 MB.
+          const size = e.bytes > 0 ? `${Math.round(e.bytes / 1024 / 1024)} MB` : e.action === 'kept' ? 'not sized' : '0 MB'
+          io.stdout(redactSecrets(`  ${mark} ${e.key} (${e.kind}, ${size}): ${e.detail}\n`))
         }
         io.stdout(
           report.dryRun

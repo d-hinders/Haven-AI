@@ -1331,13 +1331,14 @@ export async function runDoctor(
 
   // ── Unused signer-runtime directories (#3123) — advisory, only when any ─
   // A dry-run prune: directories under ~/.haven/signer-runtime that no
-  // credential directory's sidecar names and that are not the current pin.
+  // credential directory's sidecar or wrapper names and that are not the current pin.
   // Reported here so the doctor's own repair advice can be completed without
   // hand-editing directories; absent when there is nothing to reclaim, so a
   // single-agent install reads exactly as before.
-  // `measure: false`: names only. Sizing walks every file under the root
-  // (~30 s on a 2 GB developer root, measured in the #3151 review) and the
-  // doctor is the command a user runs when something is already broken.
+  // `measure: false`: names only. Sizing walks every file under the root —
+  // 287k files / 1.2 GB on one developer machine, tens of seconds warm and
+  // ~18 minutes cold in the #3151 review's sandbox — and the doctor is the
+  // command a user runs when something is already broken.
   const prune = await pruneSignerRuntimes({ dryRun: true, measure: false }, { homeDir, credentialsDir: input.credentialsDir })
   const unused = prune.entries.filter((entry) => entry.action === 'would_remove')
   if (unused.length > 0) {

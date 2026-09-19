@@ -33,8 +33,9 @@
  * the entry is reported `failed` and the exit code says so; nothing else is
  * affected.
  *
- * Sizes: `directoryBytes` walks every file (hundreds of thousands on a
- * developer machine — ~30 s measured on a 2 GB root, #3151 review), so it
+ * Sizes: `directoryBytes` walks every file (287k files / 1.2 GB on one
+ * developer machine — tens of seconds warm, ~18 minutes cold in the #3151
+ * review's sandbox; the number is the reviewer's, not a contract), so it
  * runs only for the directories the run would remove, and only when the
  * caller asks (`measure: true`, the CLI). The doctor's dry run passes
  * `measure: false` and reports names only.
@@ -53,8 +54,9 @@ export interface PruneEntry {
   directory: string
   key: string
   kind: 'version' | 'override' | 'unknown'
+  /** Size in bytes — `0` for every kept entry and for any `measure: false` run: sizing runs only for directories the run would remove. */
   bytes: number
-  /** The credential directories whose sidecar names this runtime (empty when unreferenced). */
+  /** The credential directories whose sidecar or wrapper names this runtime (empty when unreferenced). */
   referencedBy: string[]
   action: 'kept' | 'removed' | 'would_remove' | 'failed'
   level: DoctorLevel

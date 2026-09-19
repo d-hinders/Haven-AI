@@ -109,7 +109,7 @@ report stays `version: 1`; `level` is additive.
 | Level | Meaning | Example |
 | --- | --- | --- |
 | `ok` | Nothing to say. | The installed signer matches the connector's pin. |
-| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version; `signer_runtime_unused` (#3123): runtime directories nothing references. Also ("intact, but outdated" — both versions named, `--repair` offered). `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
+| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered); `signer_runtime_unused` (#3123): runtime directories nothing references. `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
 | `failed` | A real failure with one repair action. Exit 1. | A stale or empty runtime directory; a live key in a directory the runtime's config demonstrably does not use. |
 
 What stays blocking is live spend authority: a directory whose stored key
@@ -211,7 +211,7 @@ backend change) and **refuses to destroy the key material on every answer**:
 | Probe | What it means | What `--unwire` does |
 | --- | --- | --- |
 | `ok` | The agent is still active: its key still spends. | Refuses; tells you to revoke on the Haven agent page (connect never revokes), then re-run. |
-| `unauthorized` | The key no longer authenticates on normal routes (revoked, archived, paused or rotated — the backend does not say which). | Refuses; says plainly that a stranded balance **may** exist and the connector **cannot check**; recover first (`haven_sweep_delegate`, or the agent page). |
+| `unauthorized` | The key no longer authenticates on normal routes (revoked, archived, paused, pending approval, rotated, or not a key the backend knows — it does not say which). | Refuses; says plainly that a stranded balance **may** exist and the connector **cannot check**; recover first (`haven_sweep_delegate`, or the agent page). |
 | `network_error` / `bad_response` | Could not verify. | Refuses: unknown is not "safe to delete". Retry. |
 | *(no stored API key + URL)* | Nothing the recovery routes would accept. | Proceeds, unprobed — the pre-#3123 shape. |
 
@@ -243,21 +243,24 @@ npx @haven_ai/connect@<channel> --prune-signer-runtimes
 
 It walks the root (so override-keyed `override-<hash>` directories are seen,
 not only manifest versions), **keeps** every directory any credential
-directory's `signer-runtime.json` names — wired, superseded or retired; the
-prune never decides who is live — and the connector's current pin (what
+directory names — through its `signer-runtime.json` or through the path its
+wrapper launches — wired, superseded or retired; the prune never decides who
+is live — and the connector's current pin (what
 `--repair` installs), and removes the rest, reporting each with a #3121
 level: kept/removed are `ok`, a dry-run candidate is an `advisory`, a removal
 that failed (a signer process still holding the directory open on a platform
 that refuses the unlink) is `failed` and the only thing that exits 1. On
-POSIX a running signer keeps its open files until it restarts, and since only
+POSIX a running signer keeps its open files until it restarts, and since
 only directories no sidecar and no wrapper names go, a configured agent is
 not started against a removed one. The prune trusts those two reference
 sources (the sidecar's `runtime_directory` and the path the wrapper
 launches — so a directory whose sidecar is missing or corrupt but whose
 wrapper is intact keeps its runtime); it reads the default agents root AND
-the parent of an explicit `--credentials-dir`, a union, never either/or. It is its own flag — never part of `--repair`, never
-automatic; `--doctor` reports unused directories as an advisory
-(`signer_runtime_unused`) that names this command. `--json` emits
+the parent of an explicit `--credentials-dir`, a union, never either/or. It
+is its own flag — never part of `--repair`, never automatic; `--doctor`
+reports unused directories as an advisory (`signer_runtime_unused`) that
+names this command — names only; sizes come from `--dry-run`, and a kept
+directory is never sized (its row says "not sized"). `--json` emits
 `{ pruned: true, version: 1, root, dry_run, level, removed, reclaimed_bytes, entries[] }`.
 
 An **unnamed** pair (`haven` / `haven-signer`) is shared by every unnamed agent

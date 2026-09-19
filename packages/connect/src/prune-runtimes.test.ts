@@ -1,7 +1,7 @@
 /**
  * #3123 — the signer-runtime prune. Enumerates the ROOT (so override-keyed
  * directories are seen, S4), keeps anything a credential directory's sidecar
- * names or the current pin, removes the rest, reports through #3121's levels.
+ * or wrapper names or the current pin, removes the rest, reports through #3121's levels.
  */
 import { mkdir, mkdtemp, readFile, realpath, writeFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

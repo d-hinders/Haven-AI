@@ -192,6 +192,10 @@ function headersOf(call: unknown[]): Headers {
   return new Headers((call[1] as RequestInit).headers)
 }
 
+function isInitializeCall(call: unknown[]): boolean {
+  return methodOf(call) === 'initialize'
+}
+
 function methodOf(call: unknown[]): string | undefined {
   try {
     return bodyOf(call).method as string | undefined
@@ -538,6 +542,135 @@ describe('#3118 native MCP profile — completeX402MerchantCall', () => {
     const evidence = backendCalls(fetchMock, '/machine-payments/evidence')
     expect(evidence).toHaveLength(1)
     expect(bodyOf(evidence[0]).protocolReceiptHeaderName).toBeUndefined()
+  })
+})
+
+// ── #3155 review round 1: framing, parity and reporting ──────────
+
+describe('#3155 review — completion without a session still reads SSE-framed in-band signals (B1)', () => {
+  const plainUrl = 'https://api.merchant.example/paid-tool'
+  const merchantInit: RequestInit = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: toolCall('haven-mcp-2') }
+  function plainRoutes(paidResult: () => Response): Route {
+    return (url, _init, method) => {
+      if (url === `${backendUrl}/machine-payments/pay_123/status`) return paymentStatusReady(plainUrl)
+      if (url !== plainUrl) return undefined
+      if (method === 'tools/call') return paidResult()
+      return undefined
+    }
+  }
+
+  it('an SSE-framed isError challenge on a plain URL (no handshake) is a rejection, exactly like the JSON control', async () => {
+    for (const [framing, expectOk] of [['sse', false], ['json', false]] as const) {
+      const fetchMock = mockFetch(plainRoutes(() => {
+        const result = rpcResult(2, nativeChallenge(plainUrl))
+        return framing === 'sse' ? sseResponse(sse(result)) : json(result)
+      }))
+      const result = await newClient().completeX402MerchantCall({ url: plainUrl, init: merchantInit, paymentId: 'pay_123', paymentHeader })
+      expect(fetchMock.mock.calls.some(isInitializeCall)).toBe(false)
+      expect(result.ok, framing).toBe(expectOk)
+      expect(backendCalls(fetchMock, '/machine-payments/evidence'), framing).toHaveLength(0)
+      expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events'), framing).toHaveLength(1)
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('an SSE-framed success:false settlement on a plain URL is a rejection, and its transaction is NOT reported as settled (S3)', async () => {
+    const fetchMock = mockFetch(plainRoutes(() =>
+      sseResponse(sse(rpcResult(2, { content: [{ type: 'text', text: 'partial' }], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: { success: false, transaction: '0xpartial', errorReason: 'insufficient_funds' } } }))),
+    ))
+    const result = await newClient().completeX402MerchantCall({ url: plainUrl, init: merchantInit, paymentId: 'pay_123', paymentHeader })
+    expect(result.ok).toBe(false)
+    expect(result.settlementTxHash).toBeUndefined()
+    expect(backendCalls(fetchMock, '/machine-payments/evidence')).toHaveLength(0)
+  })
+
+  it('an SSE-framed SUCCESS on a plain URL is surfaced (collapsed to the result) and its _meta settlement read', async () => {
+    const fetchMock = mockFetch(plainRoutes(() =>
+      sseResponse(sse(rpcResult(2, { content: [{ type: 'text', text: 'ok' }], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: { success: true, transaction: '0xplain' } } }))),
+    ))
+    const result = await newClient().completeX402MerchantCall({ url: plainUrl, init: merchantInit, paymentId: 'pay_123', paymentHeader })
+    expect(result.ok).toBe(true)
+    expect(result.body).toMatchObject({ content: [{ type: 'text', text: 'ok' }] })
+    expect(result.settlementTxHash).toBe('0xplain')
+    expect(backendCalls(fetchMock, '/machine-payments/evidence')).toHaveLength(1)
+  })
+})
+
+describe('#3155 review — fetch() parity with the hosted completion (B2, S1) and non-JSON bodies (S2)', () => {
+  function paidRoutes(paidResult: () => Response): Route {
+    return (url, init, method) => {
+      if (url === `${backendUrl}/x402`) return fundingPendingSignature(mcpUrl)
+      if (url === `${backendUrl}/payments/pay_123/sign`) return fundingConfirmed()
+      if (url !== mcpUrl) return undefined
+      if (method === 'initialize') return initializeOk('sess-p')
+      if (method === 'notifications/initialized') return notificationAccepted()
+      if (method === 'tools/call') {
+        const body = JSON.parse(init?.body as string) as { params: { _meta?: Record<string, unknown> } }
+        if (body.params._meta?.[MCP_X402_PAYMENT_META_KEY]) return paidResult()
+        return json(rpcResult(2, nativeChallenge(mcpUrl)))
+      }
+      return undefined
+    }
+  }
+
+  it('B2: a paid retry answered success:false is the post-funding rejection — reconciliation event, no evidence, thrown as 402', async () => {
+    const fetchMock = mockFetch(paidRoutes(() =>
+      json(rpcResult(2, { content: [{ type: 'text', text: 'not delivered' }], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: { success: false, errorReason: 'settlement failed' } } })),
+    ))
+    const attempt = newClient().fetch(mcpUrl, { method: 'POST', body: toolCall(2) })
+    await expect(attempt).rejects.toMatchObject({ statusCode: 402, body: expect.objectContaining({ marker: 'x402_retry_rejected_after_funding', merchant_status: 200 }) })
+    expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events')).toHaveLength(1)
+    expect(backendCalls(fetchMock, '/machine-payments/evidence')).toHaveLength(0)
+  })
+
+  it('S1: a paid retry with a _meta settlement and no header reports the re-encoded receipt under its _meta name', async () => {
+    const settlement = { success: true, transaction: '0xlocal', network: 'eip155:8453', payer: delegateAddress }
+    const fetchMock = mockFetch(paidRoutes(() =>
+      json(rpcResult(2, { content: [{ type: 'text', text: 'paid' }], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: settlement } })),
+    ))
+    const response = await newClient().fetch(mcpUrl, { method: 'POST', body: toolCall(2) })
+    expect(response.status).toBe(200)
+    const evidence = backendCalls(fetchMock, '/machine-payments/evidence')
+    expect(evidence).toHaveLength(1)
+    const reported = bodyOf(evidence[0])
+    expect(reported.protocolReceiptHeaderName).toBe(`_meta.${MCP_X402_PAYMENT_RESPONSE_META_KEY}`)
+    expect(JSON.parse(atob(reported.protocolReceiptHeader as string))).toEqual(settlement)
+  })
+
+  it('S1 control: a PAYMENT-RESPONSE header still wins over _meta on the local retry', async () => {
+    const fetchMock = mockFetch(paidRoutes(() =>
+      json(rpcResult(2, { content: [], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: { success: true, transaction: '0xmeta' } } }), { headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({ transaction: '0xheader' })) } }),
+    ))
+    await newClient().fetch(mcpUrl, { method: 'POST', body: toolCall(2) })
+    const reported = bodyOf(backendCalls(fetchMock, '/machine-payments/evidence')[0])
+    expect(reported.protocolReceiptHeaderName).toBe('PAYMENT-RESPONSE')
+    expect(JSON.parse(atob(reported.protocolReceiptHeader as string))).toEqual({ transaction: '0xheader' })
+  })
+
+  it('S2: a non-JSON, non-SSE 200 is returned at once with its body untouched — a never-ending stream is not buffered', async () => {
+    let pulled = 0
+    const stream = new ReadableStream<Uint8Array>({
+      pull() {
+        pulled += 1
+        return new Promise(() => undefined) // never closes
+      },
+    })
+    mockFetch((url) => (url === 'https://api.merchant.example/stream' ? new Response(stream, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } }) : undefined))
+    const started = Date.now()
+    const response = await Promise.race([
+      newClient().fetch('https://api.merchant.example/stream'),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('fetch() did not resolve — the body was buffered')), 1000)),
+    ])
+    expect(Date.now() - started).toBeLessThan(1000)
+    expect(response.status).toBe(200)
+    expect(response.bodyUsed).toBe(false)
+    expect(pulled).toBeLessThanOrEqual(1)
+    await response.body?.cancel()
+  })
+
+  it('S2: the same guard on quoteX402 — a text/plain 200 is the typed unexpected-status error without reading the body', async () => {
+    mockFetch((url) => (url === 'https://api.merchant.example/plain' ? new Response('hello', { status: 200, headers: { 'Content-Type': 'text/plain' } }) : undefined))
+    await expect(newClient().quoteX402('https://api.merchant.example/plain')).rejects.toBeInstanceOf(X402UnexpectedStatusError)
   })
 })
 

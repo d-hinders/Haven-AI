@@ -15,7 +15,13 @@ import {
   McpMerchantTransport,
 } from './mcp-merchant-transport.js'
 import type { CapturedMerchantResponse } from './mcp-merchant-transport.js'
-import { X402_RETRY_REJECTED_STATUS } from './mcp-merchant-transport.js'
+import {
+  MCP_X402_PAYMENT_RESPONSE_META_KEY,
+  X402_RETRY_REJECTED_STATUS,
+  encodeMcpSettlementReceipt,
+  extractMcpPaymentRequired,
+  mcpSettlementFromToolResult,
+} from './mcp-merchant-transport.js'
 import { x402PaymentHeaderNamesSent } from './x402.js'
 import { buildExplorerUrl, x402PayerAddress } from './x402-protocol.js'
 import { paymentStateStatusCode } from './payment-state.js'
@@ -140,12 +146,15 @@ export class MerchantCompletion {
     )
 
     // #3118: a profile merchant refuses under HTTP 200 with an `isError: true`
-    // payment-required tool result. That is a rejection after funding exactly
-    // like a non-2xx answer; the thrown status is 402 (what the merchant
-    // said in-band) while the captured `merchant_status` keeps the real 200.
-    const inBandRejection = retryResponse.ok
-      ? await this.merchantTransport.extractToolResultChallenge(retryResponse)
-      : undefined
+    // payment-required tool result or a `_meta["x402/payment-response"]` of
+    // `success: false` (#3155 review B2 — the same two signals the hosted
+    // completion reads). Either is a rejection after funding exactly like a
+    // non-2xx answer; the thrown status is 402 (what the merchant said
+    // in-band) while the captured `merchant_status` keeps the real 200.
+    const toolResult = retryResponse.ok ? await this.merchantTransport.readToolResult(retryResponse) : undefined
+    const inBandChallenge = toolResult ? extractMcpPaymentRequired(toolResult) : undefined
+    const metaSettlement = toolResult ? mcpSettlementFromToolResult(toolResult) : undefined
+    const inBandRejection = inBandChallenge !== undefined || metaSettlement?.success === false
     if (!retryResponse.ok || inBandRejection) {
       const merchant = await captureMerchantResponse(retryResponse)
       await this.recordRetryRejected({
@@ -175,7 +184,16 @@ export class MerchantCompletion {
       )
     }
 
-    const merchantSettlement = parseMerchantSettlement(retryResponse.headers.get('PAYMENT-RESPONSE'))
+    // #3155 review S1: the `_meta` settlement is the receipt when there is no
+    // header, re-encoded so the one existing decoder reads both forms.
+    const headerReceipt = retryResponse.headers.get('PAYMENT-RESPONSE')
+    const protocolReceiptHeader = headerReceipt ?? (metaSettlement ? encodeMcpSettlementReceipt(metaSettlement) : undefined)
+    const protocolReceiptHeaderName = headerReceipt
+      ? 'PAYMENT-RESPONSE'
+      : metaSettlement
+        ? `_meta.${MCP_X402_PAYMENT_RESPONSE_META_KEY}`
+        : undefined
+    const merchantSettlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
     if (receipt.merchant && merchantSettlement.settlementTxHash) {
       receipt.merchant.settlementTxHash = merchantSettlement.settlementTxHash
       receipt.merchant.settlementExplorerUrl = buildExplorerUrl(
@@ -194,8 +212,8 @@ export class MerchantCompletion {
       selectedPayment: receipt.accepted as unknown as Record<string, unknown>,
       paymentProofHeaderName: x402PaymentHeaderNamesSent(receipt.paymentHeader),
       paymentProofHeader: receipt.paymentHeader,
-      protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
-      protocolReceiptHeader: retryResponse.headers.get('PAYMENT-RESPONSE') ?? undefined,
+      protocolReceiptHeaderName,
+      protocolReceiptHeader,
     })
 
     await this.reportMerchantReceipt(receipt.paymentId, retryResponse)

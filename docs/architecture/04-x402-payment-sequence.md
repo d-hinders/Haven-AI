@@ -178,7 +178,11 @@ request, the `_meta` object — unrelated `_meta` keys, arguments and the id are
 preserved, and any other body is sent byte-for-byte; `PAYMENT-RESPONSE` is
 read first, and when absent the `_meta` settlement is re-encoded as base64 JSON
 so the evidence report's receipt payload goes through the one existing
-decoder. Two in-band outcomes are REJECTIONS, never successes, whatever the
+decoder — on the hosted completion and on the local `fetch()` retry alike,
+and an SSE-framed answer is collapsed to its result whether or not a session
+was established (a profile merchant on a plain URL answers without one). Only
+a JSON or SSE body is read when a non-402 answer is probed for a challenge;
+any other body is returned untouched, never buffered. Two in-band outcomes are REJECTIONS, never successes, whatever the
 status code: an `isError: true` payment-required result on the paid retry
 (the tool's content was withheld), and a `_meta` settlement with
 `success: false`. A settlement object without a boolean `success` is not a
@@ -199,8 +203,9 @@ resume retries) is bounded since #1300: `config.merchantTimeout` (default
 **300 s**, calibrated to the protocol contract — the merchant's own
 `maxTimeoutSeconds: 300` and viem's 180 s settlement wait; a test pins the
 default at or above it), caller signals combined, timeout surfaced as the
-typed `MerchantTimeoutError` (504, names the URL). A non-402 quote answer is
-the typed `X402UnexpectedStatusError`. A timeout AFTER confirmed funding is
+typed `MerchantTimeoutError` (504, names the URL). A non-402 quote answer
+carrying no native-profile tool-result challenge (#3118) is the typed
+`X402UnexpectedStatusError`. A timeout AFTER confirmed funding is
 routed to `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` with verify-then-sweep
 guidance — an unanswered retry is not proof of rejection, and the merchant
 may still settle late against its valid EIP-3009 authorization.
@@ -234,7 +239,8 @@ product, amount, amount_atomic, asset, network, merchant, invoice_id,
 funding_tx_hash, settlement_tx_hash, allowance }`. Haven payment state supplies
 settlement status, money, merchant identity, and funding fields. `product` and
 `invoice_id` are narrow merchant display metadata; `settlement_tx_hash` is an
-optional merchant `PAYMENT-RESPONSE` receipt reference, not Haven settlement
+optional merchant `PAYMENT-RESPONSE` (or, since #3118,
+`_meta["x402/payment-response"]`) receipt reference, not Haven settlement
 proof. Missing values are explicit `null`. The top-level raw `result` remains
 advanced merchant evidence and never decides whether Haven reports settlement.
 

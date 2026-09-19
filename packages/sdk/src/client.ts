@@ -1246,10 +1246,11 @@ export class HavenClient {
   }
 
   /**
-   * Fetch wrapper that automatically handles HTTP 402 responses.
+   * Fetch wrapper that automatically handles HTTP 402 responses — and, since
+   * #3118, a native-MCP payment-required tool result answered under HTTP 200.
    *
-   * Works like the standard `fetch()` but intercepts 402 responses,
-   * pays via x402 through Haven, and retries the request.
+   * Works like the standard `fetch()` but intercepts 402 responses (or that
+   * tool-result challenge), pays via x402 through Haven, and retries the request.
    *
    * ```ts
    * const response = await haven.fetch('https://paid-api.com/data')
@@ -1257,8 +1258,9 @@ export class HavenClient {
    * ```
    *
    * **MCP-over-x402 auto-handshake (issue #315):** when the endpoint is
-   * MCP-shaped — the URL path ends in `/mcp`, or the 402 body carries a
-   * Coinbase Bazaar `extensions.bazaar` block — the SDK runs the MCP
+   * MCP-shaped — the URL path ends in `/mcp`, or the 402 body (or, since
+   * #3118, the tool-result challenge) carries a Coinbase Bazaar
+   * `extensions.bazaar` block — the SDK runs the MCP
    * `initialize` handshake, threads the resulting `mcp-session-id`,
    * `Accept: application/json, text/event-stream`, and `x402-wallet` headers
    * through every request, and collapses SSE responses to the JSON-RPC
@@ -1441,7 +1443,11 @@ export class HavenClient {
     if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
 
     const response = await this.merchantTransport.deliverPayment(input.url, requestInit, input.paymentHeader)
-    const surfaced = mcpSessionId ? await this.merchantTransport.surfaceResult(response) : response
+    // #3155 review B1: collapse SSE whether or not a session was established —
+    // an event-stream answer is MCP framing regardless, and a profile merchant
+    // on a plain URL (no session) would otherwise hide its in-band refusal in
+    // a raw SSE string. `surfaceResult` passes every non-SSE response through.
+    const surfaced = await this.merchantTransport.surfaceResult(response)
 
     const text = await surfaced.text()
     let body: unknown
@@ -1557,7 +1563,8 @@ export class HavenClient {
       status: surfaced.status,
       ok: merchantAccepted,
       body,
-      settlementTxHash: settlement.settlementTxHash ?? undefined,
+      // #3155 review S3: a transaction beside a rejection is not a settlement.
+      settlementTxHash: merchantAccepted ? (settlement.settlementTxHash ?? undefined) : undefined,
       evidenceOutcome,
     }
   }

@@ -275,9 +275,23 @@ export class McpMerchantTransport {
    * unparseable body is never mistaken for a payment demand.
    */
   async extractToolResultChallenge(response: Response): Promise<X402PaymentRequired | undefined> {
-    const message = await this.readMessage(response)
-    const toolResult = mcpToolResultOf(message)
+    const toolResult = await this.readToolResult(response)
     return toolResult ? extractMcpPaymentRequired(toolResult) : undefined
+  }
+
+  /**
+   * #3118: the tool RESULT a response carries, read WITHOUT consuming it, or
+   * `undefined`. Only a JSON or SSE body is read at all (#3155 review S2):
+   * a non-402 answer used to be returned untouched, and buffering an
+   * arbitrary body — a streaming or binary paid resource — to look for a
+   * challenge would block the caller until the stream ended or the merchant
+   * timeout fired. A merchant that speaks JSON-RPC declares one of those two
+   * content types.
+   */
+  async readToolResult(response: Response): Promise<Record<string, unknown> | undefined> {
+    const contentType = (response.headers.get('content-type') ?? '').toLowerCase()
+    if (!contentType.includes('application/json') && !contentType.includes('text/event-stream')) return undefined
+    return mcpToolResultOf(await this.readMessage(response))
   }
 
   private async notifyInitialized(
@@ -378,6 +392,14 @@ export function mcpSettlementFromToolResult(toolResult: Record<string, unknown>)
  * method are preserved. Any body that is not a string-encoded JSON-RPC
  * `tools/call` request — form data, a stream, another method, no body — is
  * returned untouched, as is one whose header does not decode.
+ *
+ * The `tools/call` body IS re-serialised (`JSON.parse` → `JSON.stringify`),
+ * so it is semantically, not byte-, identical: an integer above 2^53 in the
+ * id or arguments is rounded by JavaScript's number type, and a caller-set
+ * `Content-Length` header would go stale (the runtime recomputes it for a
+ * string body). Neither half of the dual delivery is size-bounded here; on
+ * erc7710 the decoded envelope is smaller than its base64 header, and only
+ * the header half counts against the 16 KB header ceiling (#2341).
  */
 export function withMcpPaymentMeta(init: RequestInit, paymentHeader: string): RequestInit {
   if (typeof init.body !== 'string') return init

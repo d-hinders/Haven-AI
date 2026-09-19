@@ -266,7 +266,7 @@ describe('McpMerchantTransport', () => {
       expect(response.status).toBe(404)
       expect(fetch).toHaveBeenCalledTimes(2)
       expect(reinitialize).toHaveBeenCalledTimes(1)
-      // The body is still readable by the caller (captureMerchantResponse needs it).
+      // The caller can still read the body (captureMerchantResponse needs it).
       await expect(response.json()).resolves.toMatchObject({ error: { code: -32001 } })
     })
 

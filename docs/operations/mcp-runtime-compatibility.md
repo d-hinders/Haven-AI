@@ -13,6 +13,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/account-reads.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/mcp-merchant-transport.ts
   - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
@@ -1837,6 +1838,27 @@ sets status and payment fields, while product/invoice metadata comes from the
 merchant and `settlement_tx_hash` is only an optional merchant PAYMENT-RESPONSE
 receipt reference. Missing values are explicit; it changes neither signing nor
 runtime compatibility.
+
+> **Re-verified #3118:** the SDK under both runtimes now also speaks the
+> official x402 MCP transport profile — a payment-required TOOL RESULT
+> (`isError: true`, `PaymentRequired` as `structuredContent`, JSON text
+> fallback) under HTTP 200 is quoted like a 402 by `quoteX402` /
+> `quoteMcpX402` / `fetch()`; the paid retry adds the decoded envelope as
+> `params._meta["x402/payment"]` beside the unchanged headers whenever the
+> body is a `tools/call` request; `settlement_tx_hash` may now come from
+> `result._meta["x402/payment-response"]` when there is no `PAYMENT-RESPONSE`
+> header, and it stays a merchant CLAIM relayed verbatim (re-encoded as base64
+> JSON so `protocolReceiptPayload` decodes through the one existing path). An
+> in-band refusal (an `isError` challenge on the paid retry, or
+> `success: false`) is `ok: false` — the hosted refusal is thrown as 402 (no
+> failure object rides an HTTP-200 status) and its message names
+> `HTTP 200, refused in-band`, the status the merchant really returned. No
+> tool added, renamed or re-shaped; no argument, schema, strict/permissive
+> split, tool-NAME set, version-skew or consent-hash contract moves; the
+> hosted server changes in exactly one place, that status mapping in
+> `paid-mcp-completion.ts`, and inherits everything else from
+> `@haven_ai/sdk`. Nothing else in this document was re-verified in this
+> pass.
 
 `haven_prepare_catalog_purchase` (#1306) — the guided catalog-id preflight —
 persists the SAME `mcpCallContext` at quote time (it composes the identical

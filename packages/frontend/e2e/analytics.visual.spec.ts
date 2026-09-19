@@ -199,15 +199,14 @@ const COPY = {
    */
   refusalsRecordedFrom: 'Refusals are recorded from 28 May',
   /**
-   * The #3055 limit-of-visibility clause in the same footnote: the two
-   * refusal classes the ledger never sees, named by who raises them. The
-   * wording is deliberate on both halves — the price cap lives in the
-   * agent's own runtime, and the budget refusal the hosted tools raise is a
-   * PREPARE-time one, never a quote-time one (the quote tools quote and
-   * refuse nothing). The negative pin below holds that second half.
+   * The #3055 limit-of-visibility clause in the same footnote: the ONE
+   * refusal class the ledger never sees, named by who raises it — the price
+   * cap lives in the agent's own runtime. The hosted prepare-time budget
+   * refusal it once also named is recorded since #3109 (`source:
+   * 'hosted_prepare'`) and counted by the tile, so naming it as unrecorded
+   * would contradict the count; the negative pin below holds that.
    */
-  refusedUnrecorded:
-    "Price-cap refusals in your agent's runtime are not recorded, and neither are budget refusals raised when Haven's hosted tools prepare a purchase.",
+  refusedUnrecorded: "Price-cap refusals in your agent's runtime are not recorded.",
   budgetBands: '1 of 2 agents above 75% of their period budget',
   feesOff: 'Haven is not charging fees.',
   gasSponsored: 'Haven sponsored 7 operations',
@@ -324,19 +323,19 @@ const SCENARIOS: Scenario[] = [
         section(page, 'stat-tile-refused').getByText(COPY.refusalsRecordedFrom),
         'the ledger floor the response reports must be named on the face of the tile',
       ).toHaveCount(1)
-      // The #3055 limit-of-visibility clause rides the same footnote: the two
-      // classes the ledger never sees are named rather than silently absent
-      // from the count. The second half is the one this slice adds.
+      // The #3055 limit-of-visibility clause rides the same footnote: the one
+      // class the ledger never sees is named rather than silently absent from
+      // the count.
       await expect(
         section(page, 'stat-tile-refused').getByText(COPY.refusedUnrecorded),
-        'the footnote must name BOTH unrecorded classes: the price cap the ' +
-          "agent's own runtime applies, and the budget refusal the hosted tools " +
-          'raise at prepare',
+        "the footnote must name the price cap the agent's own runtime applies, and nothing the ledger records",
       ).toHaveCount(1)
-      // The phrasing the issue retires, held as a negative: the quote tools
-      // quote and refuse nothing, so naming a quote here would describe a
-      // refusal no code path raises.
+      // Held as negatives: the quote tools quote and refuse nothing, so naming
+      // a quote would describe a refusal no code path raises; and the hosted
+      // prepare-time budget refusal IS recorded since #3109, so a footnote
+      // calling it unrecorded would contradict the count above it (#3055).
       await expect(section(page, 'stat-tile-refused').getByText(/quote/i)).toHaveCount(0)
+      await expect(section(page, 'stat-tile-refused').getByText(/hosted tools/i)).toHaveCount(0)
       await expect(section(page, 'stat-tile-budget-used').getByText(COPY.budgetBands)).toHaveCount(1)
       await expect(section(page, 'stat-tile-fees-paid-to-haven').getByText(COPY.feesOff)).toHaveCount(1)
       await expect(

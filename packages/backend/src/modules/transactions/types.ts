@@ -18,6 +18,23 @@ export interface Transaction {
   direction: 'in' | 'out'
   timestamp: number
   /**
+   * #3132: where `timestamp` came from — never a silent substitution. `block`
+   * on explorer-derived rows (the block's timestamp); on an x402-synthesized
+   * row `confirmed_at` when the intent carries one, else `created_at` (the
+   * intent's creation time, NOT a settlement time). A consumer that needs
+   * "when this settled" reads `confirmedAt` and treats `created_at` here as
+   * "not confirmed at a known time".
+   */
+  timestampSource?: 'block' | 'confirmed_at' | 'created_at'
+  /**
+   * #3132: the recorded confirmation time (ISO 8601) of an x402-synthesized
+   * row, `null` when the intent has none — the same nullable value the
+   * receipts view reports as `confirmed_at`, so the two views can no longer
+   * disagree on whether a payment has a confirmation time. Absent on
+   * explorer-derived rows.
+   */
+  confirmedAt?: string | null
+  /**
    * On-chain block, or `null` when this row has none recorded (#3129).
    *
    * Explorer-derived rows always carry a real block. `null` is the
@@ -89,7 +106,24 @@ export interface TransactionAccounting {
   error: string | null
 }
 
+/**
+ * #3132 (owner decision 3 on #3130): what population a list row came from and
+ * what narrowed it, as two separate values — one value cannot say both.
+ * `source: 'wallet'` (the aggregated feed: every account's explorer window
+ * plus synthesized confirmed intents; sweeps and funding legs included) or
+ * `'agent'` (the receipts view: this agent's evidence rows only). `filter`
+ * names the query-time narrowing applied on top, or `null`. `agentId` on the
+ * wallet feed NARROWS a wallet-scoped query; it does not make it the
+ * receipts view — the populations and row classes still differ.
+ */
+export interface ListScope {
+  source: 'wallet' | 'agent'
+  filter: 'agent' | 'account' | 'account+agent' | null
+}
+
 export interface EnrichedTransaction extends Transaction {
+  /** #3132: present on every `GET /transactions` row. */
+  scope?: ListScope
   chainId: number
   accountId: string
   accountAddress: string

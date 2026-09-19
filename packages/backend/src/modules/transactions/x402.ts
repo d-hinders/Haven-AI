@@ -34,7 +34,15 @@ export async function fetchConfirmedX402Transactions(
       chain.tokenByAddress[tokenAddress] ??
       Object.values(chain.tokens).find((token) => token.symbol === row.token_symbol)
     const merchantAddress = row.x402_merchant_address ?? row.to_address
-    const proofStatus = row.payment_proof_status ?? 'payment_confirmed'
+    // #3132: recorded or null, never a placeholder. `payment_proof_status`
+    // arrives through a LEFT JOIN on machine_payment_evidence, so a confirmed
+    // payment with no evidence row has NO proof status — reporting
+    // 'payment_confirmed' here presented a value that was never read as a
+    // recorded one, and disagreed with enrichment.ts, which passes the same
+    // column through unchanged. The lifecycle below lands on the same
+    // `confirming_merchant` for null as it did for the placeholder, so no
+    // flow status moves; only the fabricated field does.
+    const proofStatus = row.payment_proof_status ?? null
     const lifecycle = machinePaymentLifecycle({
       rail: 'x402',
       paymentProofStatus: proofStatus,
@@ -51,7 +59,14 @@ export async function fetchConfirmedX402Transactions(
       asset: row.token_symbol,
       decimals: tokenConfig?.decimals ?? 18,
       direction: 'out',
+      // #3132: the fallback to `created_at` stays (the field is a non-null
+      // unix-seconds sort key every consumer reads) but it is MARKED, not
+      // hidden: `timestampSource` says which column produced it, and
+      // `confirmedAt` carries the recorded confirmation time or null — the
+      // same nullable value the receipts view reports.
       timestamp: parseIsoTimestamp(row.confirmed_at ?? row.created_at),
+      timestampSource: row.confirmed_at ? 'confirmed_at' : 'created_at',
+      confirmedAt: row.confirmed_at ?? null,
       // #3129: `null`, not `0`. This row is SYNTHESIZED from a payment intent
       // and no block number is stored anywhere — there is no `block_number`
       // column in any migration — so `0` was a placeholder meaning "unknown"

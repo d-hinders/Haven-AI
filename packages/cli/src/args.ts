@@ -199,6 +199,7 @@ export function helpText(): string {
     '  budget show <agentId> --hashes   Its delegation hashes — the second',
     '                          argument `budget revoke` takes, printed nowhere else',
     '  activity list [--safe <id|address>] [--agent <id>] [--direction in|out] [--limit <n>] [--offset <n>]',
+    '                          Wallet-scoped history; --agent narrows it (rows carry scope, timestampSource)',
     '  activity export [filters]   Emit CSV to stdout (--format csv, default)',
     '  activity export --format sie [--from <ISO>] [--to <ISO>] [--company <name>]',
     '                          Bookkeeping-ready SIE 4I (Fortnox/Visma/Bokio)',

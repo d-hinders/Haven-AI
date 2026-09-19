@@ -19,7 +19,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/middleware/agentToolAudit.ts
   - packages/backend/src/modules/agents/agent-connection-setup.ts
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -92,6 +92,28 @@ semantics match. They are not byte-for-byte identical:
   edge signer can authorize without sharing the key.
 - Hosted MCP provides gasless sweep orchestration; the signer supplies
   `haven_sign_sweep_delegate`.
+
+**A receipt read is not a transaction-history read, and since #3132 every row
+says which it is.** `haven_list_receipts` (both runtimes, via the SDK's
+`listReceiptsPage`) returns this agent's evidence rows only — agent-scoped by
+the authenticated principal, no query-time narrowing — so each row carries
+`scope: { source: 'agent', filter: null }`. The wallet feed (`GET
+/transactions`, the CLI's `activity list`) is a different population: every
+account's explorer window plus synthesized confirmed intents, sweeps and
+funding legs included, with `agentId` / `accountId` applied as narrowing
+filters — its rows carry `scope: { source: 'wallet', filter: 'agent' |
+'account' | 'account+agent' | null }`. The two values are separate because one
+value cannot say both without lying about one of them (owner decision 3 on
+#3130): `agentId` narrows a wallet-scoped query, it does not turn it into the
+receipts view. The declaration is per row because the SDK's
+`mapPaymentReceipt` discards the envelope, and it reaches an agent only once
+the SDK that maps it (`HavenPaymentReceipt.scope`) is published. The same
+slice stopped the feed's x402 rows from substituting values silently: a
+confirmed payment with no evidence row reports `paymentProofStatus: null`
+(not `'payment_confirmed'`), and `timestamp`'s `confirmed_at ?? created_at`
+fallback is named by `timestampSource` with the recorded, nullable
+`confirmedAt` beside it — the value the receipts view reports as
+`confirmed_at`.
 
 **Same-named tools do not always spell their arguments the same way, and until
 #2312 the difference was invisible.** The local MCP takes `idempotencyKey`

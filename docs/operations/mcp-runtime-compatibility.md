@@ -108,6 +108,23 @@ last-verified: "2026-09-19"
 > endpoint and the tool that calls it deploy in the same train. Nothing else
 > in this document was re-verified in this pass.
 >
+> **Recent re-verification (#3132):** `haven_list_receipts`'s `selectionGuidance`
+> prose changed on BOTH runtimes (one shared fragment,
+> `packages/sdk/src/tool-descriptions.ts` `listReceipts`): it now says "This
+> agent's payment evidence, not the wallet's transaction history (sweeps,
+> funding legs, other agents)" instead of inviting a transaction-history read,
+> and its `behavior` no longer restates the paging and proof-header facts the
+> row shape carries; the hosted description mean was re-measured under the
+> #1591 budget by `description-size.test.ts`. Each receipt row now carries
+> `scope: { source: 'agent', filter: null }` — additive on the wire
+> (`MachinePaymentReceipt.scope`, optional) and on the SDK type
+> (`HavenPaymentReceipt.scope`, absent on an older backend, never invented), so
+> an older SDK against a newer backend drops the key in `mapPaymentReceipt` and
+> a newer SDK against an older backend sees none; no tool added, renamed or
+> re-shaped, no argument or schema change, and the version-skew and
+> consent-hash contracts do not move (descriptions are not a skew axis — #2330
+> precedent). Nothing else in this document was re-verified in this pass.
+>
 > **Recent re-verification (#3125):** the `haven_list_receipts` description
 > prose changed on BOTH runtimes — it is one shared fragment
 > (`packages/sdk/src/tool-descriptions.ts` `listReceipts`), composed verbatim by

@@ -138,9 +138,9 @@ export const toolDescriptions = {
     summary:
       'List machine-payment receipts, newest first, by page.',
     selectionGuidance:
-      'For transaction history or payment evidence; use the allowance tool instead for remaining allowance or what-can-I-spend questions.',
+      "This agent's payment evidence, not the wallet's transaction history (sweeps, funding legs, other agents); use the allowance tool instead for remaining allowance or what-can-I-spend questions.",
     behavior:
-      "Page: { receipts, total, hasMore, nextCursor }; total 0 = none exist (no indexing delay); hasMore = cut at limit, send nextCursor as cursor. parties.treasuryAccount is Haven's authoritative payer. protocolReceiptPayload is the merchant's PAYMENT-RESPONSE, relayed verbatim: merchant-controlled, unverified, not Haven's record; payer may differ from payerAddress. Proof header values are omitted.",
+      "Page: { receipts, total, hasMore, nextCursor }; total 0 = none; hasMore: pass nextCursor as cursor. parties.treasuryAccount is Haven's authoritative payer. protocolReceiptPayload is the merchant's PAYMENT-RESPONSE relayed verbatim: merchant-controlled, unverified, not Haven's record; payer may differ from payerAddress.",
     nextActionGuidance: '',
   },
   verifyReceipt: {

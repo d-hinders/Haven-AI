@@ -51,14 +51,13 @@
       "transaction": {
         "field": "paymentProofStatus",
         "column": "proof_status",
-        "value": "defaulted",
-        "by": "modules/transactions/x402.ts:37 `?? 'payment_confirmed'`",
+        "value": "recorded",
+        "by": "modules/transactions/x402.ts `row.payment_proof_status ?? null` (#3132) — the same pass-through enrichment.ts always had",
         "alias": "payment_proof_status",
         "aliasedBy": "infra/repositories/transaction-history.ts:228,325 `mpe.proof_status AS payment_proof_status`"
       },
-      "disposition": "blocked-on-fallback",
-      "blockedBy": 3132,
-      "reason": "One column, two values -- and the two names are ALIASES of the same `machine_payment_evidence.proof_status`, not two columns. It arrives through a LEFT JOIN, so with no evidence row the synthesized x402 path reports 'payment_confirmed' for a payment that has no receipt, while enrichment.ts passes the column through unchanged. Converging the NAMES before #3132 fixes the VALUE would hide the defect behind agreement. The substitution is conservative -- it never fabricates a settled state -- which is why this is a reconciliation defect and not a money-safety one."
+      "disposition": "converge-pending",
+      "reason": "One column, two names -- ALIASES of `machine_payment_evidence.proof_status`, arriving through a LEFT JOIN. Until #3132 the synthesized x402 path substituted 'payment_confirmed' when no evidence row existed, so a payment with no receipt reported a proof status it never read while enrichment.ts passed the column through unchanged; both paths now emit the recorded value or null (the lifecycle lands on the same `confirming_merchant` either way, so no flow status moved). The value defect is fixed; the RENAME is #3134's."
     },
     {
       "concept": "merchant address",
@@ -99,15 +98,13 @@
         "note": "ISO 8601, nullable"
       },
       "transaction": {
-        "field": "timestamp",
+        "field": "confirmedAt",
         "column": "confirmed_at",
-        "value": "defaulted",
-        "by": "modules/transactions/x402.ts:54 `confirmed_at ?? created_at`",
-        "note": "unix seconds, never null"
+        "value": "recorded",
+        "note": "ISO 8601, nullable — added by #3132 on x402-synthesized rows, absent on explorer rows"
       },
-      "disposition": "blocked-on-fallback",
-      "blockedBy": 3132,
-      "reason": "Unit AND fallback differ. Unlike the proof-state substitution this one FABRICATES a date: a payment that never confirmed reports its creation time as its settlement time, in a field the consumer reads as 'when this settled'. Same silent-substitution defect as proof state, opposite in severity."
+      "disposition": "converged",
+      "reason": "Both views now report the RECORDED confirmation time under one name, nullable on both, so they can no longer disagree on whether a payment has one. The transaction row's `timestamp` keeps its `confirmed_at ?? created_at` fallback as a non-null sort key, but the substitution is MARKED by `timestampSource` (`singleSurface.transaction`) rather than hidden -- #3132's pattern for every silent fallback."
     },
     {
       "concept": "transaction hash",
@@ -213,11 +210,10 @@
         "column": "source",
         "value": "defaulted",
         "alias": "COALESCE(pi.payment_rail, pi.source, 'direct')",
-        "by": "infra/repositories/transaction-history.ts:225 substitutes 'direct'; modules/transactions/x402.ts:69 hardcodes 'x402' on the synthesized row, a second substitution site on the same field"
+        "by": "infra/repositories/transaction-history.ts FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL `COALESCE(pi.payment_rail, pi.source, 'direct')` -- the one substitution site. The `source: 'x402'` on the synthesized row (modules/transactions/x402.ts) is NOT a substitution: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL selects `pi.source = 'x402'`, so the literal restates the query's own predicate (#3132)."
       },
-      "disposition": "blocked-on-fallback",
-      "blockedBy": 3132,
-      "reason": "ONE axis. Both sides resolve the same two columns in the same order -- payment_rail then source -- so the receipt's `rail` is the payment PROTOCOL, exactly what the transaction calls `source`. An earlier draft filed them as permanently single-surface, reasoning that #1705 keeps three axes unmerged; that was wrong, because #1705's third axis is the ACCOUNT's execution_rail, which migration 036 states is a different axis from payment_intents.payment_rail. The asymmetry is one-sided and a later draft got it backwards: only the TRANSACTION side substitutes. It defaults to 'direct' in SQL and hardcodes 'x402' on the synthesized row. The receipt side cannot default, because when the coalesce yields a non-protocol rail recordMachinePaymentEvidenceBase returns not_applicable and no evidence row -- and therefore no receipt -- is written at all. (The `rail ?? 'unknown'` in evidence.ts is the FEE LEDGER's quoteFee call and never reaches a receipt.) #3132 owns the transaction-side substitutions before #3134 can rename anything."
+      "disposition": "converge-pending",
+      "reason": "ONE axis. Both sides resolve the same two columns in the same order -- payment_rail then source -- so the receipt's `rail` is the payment PROTOCOL, exactly what the transaction calls `source`. #3132 re-measured the transaction side: the synthesized row's 'x402' is recorded by the query's own predicate, and the only substitution left is the SQL's 'direct' for an intent that names no protocol at all -- a classification of 'not a payment', not a fabricated protocol, and not a value #3132 changes (a `null` there would erase the row's category on every consumer that switches on it). The receipt side cannot default, because a non-protocol rail yields no evidence row and therefore no receipt. Nothing blocks the rename any more; the rename is #3134's."
     }
   ],
   "singleSurface": {
@@ -247,7 +243,8 @@
       "createdAt": "Evidence-row lifecycle. The transaction surface has one time field and #3132 owns its semantics.",
       "updatedAt": "Evidence-row lifecycle.",
       "paymentIntentId": "Conditional key, present only when the raw row carries it. Links evidence to intent; no transfer-level counterpart.",
-      "approvalRequestId": "Conditional key. Approval requests were dropped with the table (#2055); the field survives on the raw shape."
+      "approvalRequestId": "Conditional key. Approval requests were dropped with the table (#2055); the field survives on the raw shape.",
+      "scope": "#3132 per-row list scope `{ source, filter }`. Its counterpart is `scope` on the enriched Transaction schema, not on transactionBaseProperties (the surface this guard reads) -- same key, same ListScope shape, so the pair is converged by construction; recorded here for the same reason `chainId` is."
     },
     "transaction": {
       "type": "native / erc20 / internal -- a transfer classification. Receipts are always payments.",
@@ -267,19 +264,21 @@
       "amountSek": "Book-time SEK value (#463) for the accounting feed.",
       "fxRateSek": "The rate amountSek was struck at (#2871).",
       "fxSource": "Where that rate came from.",
-      "accounting": "Accounting-feed sync state joined by paymentId (#2870)."
+      "accounting": "Accounting-feed sync state joined by paymentId (#2870).",
+      "timestamp": "The row's non-null unix-seconds SORT KEY: the block timestamp on explorer rows, `confirmed_at ?? created_at` on x402-synthesized rows. Its counterpart for 'when did this settle' is `confirmedAt` (paired above, #3132); the fallback is marked by `timestampSource`, never silent.",
+      "timestampSource": "#3132: which column produced `timestamp` ('block' | 'confirmed_at' | 'created_at') -- the mark that turns the sort key's fallback from a silent substitution into a stated one. A receipt has no sort-key fallback to mark."
     }
   },
   "cliConventions": {
     "$comment": [
       "The CLI's `--json` casing split, declared rather than left as an accident",
-      "(#3133, owner decision 2026-09-18: KEEP the split \u2014 no rename, no dual-emit,",
+      "(#3133, owner decision 2026-09-18: KEEP the split — no rename, no dual-emit,",
       "no breaking change). `/user/accounts` already took one breaking rename this",
       "quarter (#2914/#3091), costing a dual-emit, a release boundary and a",
       "dist-tags verification; a second to the same surface inside two epics is not",
       "worth the tidiness. Normalising would also make the CLI stop being a",
       "pass-through and start owning a presentation contract that diverges from the",
-      "OpenAPI response schema \u2014 which is what `interface Txn` already does badly.",
+      "OpenAPI response schema — which is what `interface Txn` already does badly.",
       "",
       "ANCHORED ON FUNCTION NAMES, NOT LINE NUMBERS. #3133's own line anchors were",
       "wrong three times across two correction passes; a guard keyed on them would",
@@ -289,7 +288,7 @@
       "",
       "PASS-THROUGH vs SELF-CONSTRUCTED. `emit()` forwards straight to the output",
       "layer with no re-mapping, so a list command's casing IS the backend's and is",
-      "not the CLI's to choose. The `{ ok: true, \u2026 }` envelopes are the CLI's own",
+      "not the CLI's to choose. The `{ ok: true, … }` envelopes are the CLI's own",
       "construction, and those are what this section ratchets."
     ],
     "decided": "2026-09-18",
@@ -307,8 +306,8 @@
         "commands.ts. It was declared here from the start with nothing comparing it to",
         "the code, so the page could promise enforcement over a list free to drift.",
         "`interface Safe` / `interface Txn` in commands.ts are a NON-EXHAUSTIVE subset",
-        "the CLI happens to read \u2014 the emitted JSON carries every key the backend",
-        "sends \u2014 so they are not the authoritative shape and must not be read as it."
+        "the CLI happens to read — the emitted JSON carries every key the backend",
+        "sends — so they are not the authoritative shape and must not be read as it."
       ],
       "wallets list": {
         "convention": "snake",
@@ -318,7 +317,7 @@
       "activity list": {
         "convention": "camel",
         "keys": "accountAddress, chainId, tokenSymbol",
-        "reason": "Forwarded from GET /transactions unchanged (cmdActivityList). Same mechanism as wallets list, opposite convention, because the two backend surfaces differ \u2014 which is the divergence #3130 exists to record."
+        "reason": "Forwarded from GET /transactions unchanged (cmdActivityList). Same mechanism as wallets list, opposite convention, because the two backend surfaces differ — which is the divergence #3130 exists to record."
       },
       "activity export --format csv": {
         "convention": "snake-csv",
@@ -386,7 +385,7 @@
       "cmdLogout": {
         "convention": "snake",
         "keys": "ok, signed_out",
-        "reason": "Pure snake. #3133 listed this among the auth envelopes that mix; it does not \u2014 it carries no camel key. Recorded because the correction matters: the intra-object mixing is THREE sites, not four."
+        "reason": "Pure snake. #3133 listed this among the auth envelopes that mix; it does not — it carries no camel key. Recorded because the correction matters: the intra-object mixing is THREE sites, not four."
       },
       "cmdAgentLifecycle": {
         "convention": "snake",
@@ -406,7 +405,7 @@
       "cmdWalletRename": {
         "convention": "snake",
         "keys": "ok, account_id, name",
-        "reason": "Hybrid envelope on the wallet noun \u2014 `account_id`, the post-#2914 spelling, beside a bare `ok`."
+        "reason": "Hybrid envelope on the wallet noun — `account_id`, the post-#2914 spelling, beside a bare `ok`."
       },
       "cmdContactsRemove": {
         "convention": "snake",
@@ -456,7 +455,7 @@
       },
       "export wrapper": {
         "convention": "snake",
-        "keys": "ok, format, content \u2014 plus rows on the CSV branch only",
+        "keys": "ok, format, content — plus rows on the CSV branch only",
         "reason": "Built in packages/cli/src/output.ts, not commands.ts, so it is outside the census by construction -- the scanner reads one file. It wraps BOTH the CSV and the SIE export -- and the SIE branch passes no `rows`, so the key set differs by format -- and a reader who only saw the header list would parse the wrong thing: the body is inside `content`."
       },
       "failure envelope": {

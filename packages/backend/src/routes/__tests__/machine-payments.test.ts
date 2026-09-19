@@ -659,6 +659,23 @@ describe('machine payment routes', () => {
     expect(findCall(/FROM machine_payment_evidence e/)!.params).toEqual([AGENT.id, 3, null])
   })
 
+  it('#3132: every receipt row states its scope — { source: agent, filter: null } — and the pre-#3132 row still validates', async () => {
+    const rows = ['aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000002'].map((id) => receiptRow(id))
+    primeDb(AUTH, receiptsTotal(2), [/FROM machine_payment_evidence e/, () => ({ rows })])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?limit=5',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    const body = response.json() as { receipts: Array<Record<string, unknown>> }
+    expect(body.receipts).toHaveLength(2)
+    for (const receipt of body.receipts) expect(receipt.scope).toEqual({ source: 'agent', filter: null })
+    expectMatchesSpec('GET', '/machine-payments/receipts', body)
+    // Additive: a row without `scope` (an older backend's shape) still matches the contract.
+    expectMatchesSpec('GET', '/machine-payments/receipts', { ...body, receipts: body.receipts.map(({ scope: _s, ...rest }) => rest) })
+  })
+
   it('#3128: a page that ends exactly at limit is the last page — has_more false, next_cursor null (no off-by-one)', async () => {
     const rows = ['aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000002'].map((id) => receiptRow(id))
     primeDb(AUTH, receiptsTotal(2), [/FROM machine_payment_evidence e/, () => ({ rows })])
@@ -795,6 +812,8 @@ describe('machine payment routes', () => {
       next_cursor: null,
       receipts: [{
         id: '44444444-4444-4444-4444-444444444444',
+        // #3132: per-row list scope — agent-scoped by the principal, unfiltered.
+        scope: { source: 'agent', filter: null },
         settlement_scheme: 'eip3009',
         budget_delegation_hash: null,
         payment_id: PAYMENT_ID,

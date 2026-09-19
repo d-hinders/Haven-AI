@@ -16,6 +16,7 @@ import {
   attachEvidenceHandler,
   handleMerchantReceiptCapture,
   listReceipts,
+  RECEIPT_LIST_SCOPE,
   mppDemoRetired,
   prepareSweep,
   submitSweep,
@@ -131,7 +132,9 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     if (page === null) {
       return reply.code(400).send({ error: 'cursor does not name a receipt of this agent — pass the next_cursor of a previous page.' })
     }
-    return reply.send(page)
+    // #3132: per-row scope (the SDK discards the envelope, so the row is the
+    // only place a declaration reaches an MCP caller).
+    return reply.send({ ...page, receipts: page.receipts.map((receipt) => ({ ...receipt, scope: RECEIPT_LIST_SCOPE })) })
   })
 
   app.get<{ Params: { id: string } }>('/:id/status', async (request, reply) => {

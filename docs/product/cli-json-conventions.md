@@ -8,7 +8,7 @@ covers:
   - packages/backend/src/openapi/spec.ts
   - scripts/ci/vocabulary-map.json
   - scripts/ci/vocabulary-divergence.mjs
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # CLI `--json` conventions
@@ -69,6 +69,16 @@ every key the backend sends, including several that appear in no interface —
 So: to know what `activity list --json` can contain, read the `Transaction`
 schema, not `interface Txn`. Scripting against the interface will miss fields
 that are already being emitted.
+
+Since #3132 every `activity list` row also carries `scope: { source: 'wallet',
+filter }` — the feed is wallet-scoped, and `--agent` / `--safe` NARROW it
+(`filter: 'agent' | 'account' | 'account+agent' | null`) rather than turning it
+into the agent-scoped receipts view the MCP's `haven_list_receipts` returns
+(`{ source: 'agent', filter: null }`). Rows also carry `timestampSource`
+(`'block'` | `'confirmed_at'` | `'created_at'`), naming the column behind
+`timestamp`, and x402-synthesized rows carry the recorded, nullable
+`confirmedAt`; their `paymentProofStatus` is `null` when no evidence row
+exists, never a placeholder.
 
 ## Per command
 

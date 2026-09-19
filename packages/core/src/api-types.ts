@@ -3863,6 +3863,7 @@ export type components = {
             /** Format: date-time */
             updated_at: string;
             parties?: components["schemas"]["Parties"];
+            scope?: components["schemas"]["ListScope"];
         } & {
             [key: string]: unknown;
         };
@@ -3988,6 +3989,16 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
+            /**
+             * @description #3132: which column produced `timestamp` — never a silent substitution. 'block' on explorer-derived rows; on an x402-synthesized row 'confirmed_at' when the intent carries one, else 'created_at' (the intent's creation time, NOT a settlement time). Read `confirmedAt` for the recorded confirmation time.
+             * @enum {string}
+             */
+            timestampSource?: "block" | "confirmed_at" | "created_at";
+            /**
+             * Format: date-time
+             * @description #3132: the recorded confirmation time of an x402-synthesized row, null when the intent has none — the same nullable value `GET /receipts` reports as `confirmed_at`. Absent on explorer-derived rows.
+             */
+            confirmedAt?: string | null;
             /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
             blockNumber: number | null;
             isError: boolean;
@@ -4053,6 +4064,16 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
+            /**
+             * @description #3132: which column produced `timestamp` — never a silent substitution. 'block' on explorer-derived rows; on an x402-synthesized row 'confirmed_at' when the intent carries one, else 'created_at' (the intent's creation time, NOT a settlement time). Read `confirmedAt` for the recorded confirmation time.
+             * @enum {string}
+             */
+            timestampSource?: "block" | "confirmed_at" | "created_at";
+            /**
+             * Format: date-time
+             * @description #3132: the recorded confirmation time of an x402-synthesized row, null when the intent has none — the same nullable value `GET /receipts` reports as `confirmed_at`. Absent on explorer-derived rows.
+             */
+            confirmedAt?: string | null;
             /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
             blockNumber: number | null;
             isError: boolean;
@@ -4094,6 +4115,14 @@ export type components = {
             accountName: string;
             /** Format: uuid */
             agentId?: string;
+            scope?: components["schemas"]["ListScope"];
+        };
+        /** @description #3132 (owner decision 3 on #3130): what population a list row came from and what narrowed it, as two values — one value cannot say both. `source: 'wallet'` is the aggregated feed (every account's explorer window plus synthesized confirmed intents; sweeps and funding legs included); `'agent'` is the receipts view (this agent's evidence rows only). `filter` names the query-time narrowing applied on top, or null. `agentId` on the wallet feed NARROWS a wallet-scoped query; it does not make it the receipts view. */
+        ListScope: {
+            /** @enum {string} */
+            source: "wallet" | "agent";
+            /** @enum {string|null} */
+            filter: "agent" | "account" | "account+agent" | null;
         };
         /** @description Per-account paginated transaction list (`GET /transactions/{accountAddress}`). Items carry no account scope — the account is the path parameter. */
         TransactionsPageResponse: {

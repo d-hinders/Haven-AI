@@ -23,6 +23,7 @@ import {
   transactionsToCsv,
   type ParsedTokenFilter,
 } from '../modules/transactions/index.js'
+import type { ListScope } from '../modules/transactions/index.js'
 import { CSV_BOM } from '../domain/csv.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
@@ -187,11 +188,23 @@ export default async function transactionRoutes(
     // #2870: the accounting badge rides the PAGE, not the whole feed — one
     // ledger query per response, and none for an unentitled account.
     const enrichedPage = await enrichTransactionsWithAccounting(sub, paginated, request.log)
+    // #3132 (owner decision 3): every row states its population and its
+    // narrowing as two values. The feed is WALLET-scoped by construction —
+    // `agentId` / `accountId` narrow it, they do not turn it into the
+    // agent-scoped receipts view (different populations, different row
+    // classes), and the two-value shape says so without prose.
+    // `agentId=user` narrows too (rows with no agent attribution) — any agent
+    // axis value is a query-time narrowing of the wallet feed.
+    const agentNarrowed = Boolean(request.query.agentId)
+    const scope: ListScope = {
+      source: 'wallet',
+      filter: agentNarrowed && accountFilterId ? 'account+agent' : agentNarrowed ? 'agent' : accountFilterId ? 'account' : null,
+    }
     return {
       // One account name. The `safeName` twin outlived #2914 by exactly one
       // release so `@haven_ai/cli` on `latest` would not print every ACCOUNT
       // cell blank; `latest` is 0.3.0-alpha.0 now and reads `accountName`.
-      transactions: enrichedPage,
+      transactions: enrichedPage.map((tx) => ({ ...tx, scope })),
       total: filtered.length,
       offset,
       limit,

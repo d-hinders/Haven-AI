@@ -5,7 +5,29 @@ import {
   MCP_ACCEPT,
   MCP_PROTOCOL_VERSION,
   McpMerchantTransport,
+  SESSION_NOT_FOUND_NEXT_ACTION,
+  sessionNotFoundRecovery,
 } from './mcp-merchant-transport.js'
+
+// #3171: the literal the demo merchant attaches to its unknown-session 404.
+const SESSION_NOT_FOUND_404 = () =>
+  new Response(
+    JSON.stringify({
+      jsonrpc: '2.0',
+      error: {
+        code: -32001,
+        message: 'Session not found. Nothing was settled here — re-initialize, then retry the SAME payment header once.',
+        data: { reason: 'session_expired', settled: false, next_action: SESSION_NOT_FOUND_NEXT_ACTION },
+      },
+      id: null,
+    }),
+    { status: 404, headers: { 'content-type': 'application/json' } },
+  )
+const BARE_SESSION_NOT_FOUND_404 = () =>
+  new Response(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'Session not found' }, id: null }), {
+    status: 404,
+    headers: { 'content-type': 'application/json' },
+  })
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -202,6 +224,93 @@ describe('McpMerchantTransport', () => {
       merchant_body: 'declined verbatim',
     })
     expect(failed.bodyUsed).toBe(true)
+  })
+
+  describe('#3171: an unknown-session 404 that says nothing was settled is recovered once', () => {
+    it('re-initializes and resends the SAME header on the new session — exactly one recovery', async () => {
+      const deliveries: Array<Headers> = []
+      let served = 0
+      const fetch = vi.fn(async (_input: string | URL | Request, init: RequestInit = {}) => {
+        const headers = new Headers(init.headers)
+        deliveries.push(headers)
+        served += 1
+        if (served === 1) return SESSION_NOT_FOUND_404()
+        return new Response('goods', { status: 200, headers: { 'PAYMENT-RESPONSE': 'receipt' } })
+      })
+      const transport = new McpMerchantTransport({ fetch })
+      const reinitialize = vi.fn(async () => 'session-new')
+
+      // A decodable header, so the MCP profile's `_meta` carrier is applied too.
+      const signedHeader = btoa(JSON.stringify({ x402Version: 1, scheme: 'exact', network: 'eip155:8453', payload: { signature: '0xsig' } }))
+      const response = await transport.deliverPaymentRecoveringSession(
+        'https://merchant.test/mcp',
+        { method: 'POST', body: '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"buy"}}', headers: { 'mcp-session-id': 'session-stale' } },
+        signedHeader,
+        reinitialize,
+      )
+
+      expect(response.status).toBe(200)
+      await expect(response.text()).resolves.toBe('goods')
+      expect(reinitialize).toHaveBeenCalledTimes(1)
+      expect(deliveries).toHaveLength(2)
+      // The resent BODY carries the same tools/call and the profile's _meta payment (N4).
+      const secondBody = JSON.parse(String(fetch.mock.calls[1][1]?.body)) as { params: { name: string; _meta?: Record<string, unknown> } }
+      expect(secondBody.params.name).toBe('buy')
+      expect(secondBody.params._meta?.['x402/payment']).toBeDefined()
+      expect(deliveries[0].get('mcp-session-id')).toBe('session-stale')
+      expect(deliveries[1].get('mcp-session-id')).toBe('session-new')
+      // The SAME header both times — never a fresh authorization.
+      expect(deliveries[0].get('payment-signature')).toBe(signedHeader)
+      expect(deliveries[1].get('payment-signature')).toBe(signedHeader)
+    })
+
+    it('a second 404 is the answer — no third delivery', async () => {
+      let served = 0
+      const fetch = vi.fn(async () => {
+        served += 1
+        // A bounded assertion: a recursive recovery against an always-404
+        // merchant would otherwise starve the event loop and HANG the suite
+        // rather than fail it (#3171 review S2).
+        if (served > 2) throw new Error('recovery must not recurse — a third delivery was attempted')
+        return SESSION_NOT_FOUND_404()
+      })
+      const transport = new McpMerchantTransport({ fetch })
+      const reinitialize = vi.fn(async () => 'session-new')
+      const response = await transport.deliverPaymentRecoveringSession('https://merchant.test/mcp', { method: 'POST' }, 'h', reinitialize)
+      expect(response.status).toBe(404)
+      expect(fetch).toHaveBeenCalledTimes(2)
+      expect(reinitialize).toHaveBeenCalledTimes(1)
+      // The caller can still read the body (captureMerchantResponse needs it).
+      await expect(response.json()).resolves.toMatchObject({ error: { code: -32001 } })
+    })
+
+    it('a BARE -32001 (no settled-nothing guarantee), any other 404, or a failed re-initialize is returned untouched', async () => {
+      for (const answer of [BARE_SESSION_NOT_FOUND_404, () => new Response('not here', { status: 404 })]) {
+        const fetch = vi.fn(async () => answer())
+        const transport = new McpMerchantTransport({ fetch })
+        const reinitialize = vi.fn(async () => 'session-new')
+        const response = await transport.deliverPaymentRecoveringSession('https://merchant.test/mcp', { method: 'POST' }, 'h', reinitialize)
+        expect(response.status).toBe(404)
+        expect(fetch).toHaveBeenCalledTimes(1)
+        expect(reinitialize).not.toHaveBeenCalled()
+        expect((await response.text()).length).toBeGreaterThan(0)
+      }
+      const fetch = vi.fn(async () => SESSION_NOT_FOUND_404())
+      const transport = new McpMerchantTransport({ fetch })
+      const response = await transport.deliverPaymentRecoveringSession('https://merchant.test/mcp', { method: 'POST' }, 'h', async () => undefined)
+      expect(response.status).toBe(404)
+      expect(fetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('sessionNotFoundRecovery: only the exact merchant guarantee parses', () => {
+      const good = { jsonrpc: '2.0', error: { code: -32001, message: 'x', data: { reason: 'session_expired', settled: false, next_action: SESSION_NOT_FOUND_NEXT_ACTION } }, id: null }
+      expect(sessionNotFoundRecovery(JSON.stringify(good))).toEqual({ reason: 'session_expired', settled: false, next_action: SESSION_NOT_FOUND_NEXT_ACTION })
+      expect(sessionNotFoundRecovery(JSON.stringify({ ...good, error: { ...good.error, code: -32000 } }))).toBeUndefined()
+      expect(sessionNotFoundRecovery(JSON.stringify({ ...good, error: { ...good.error, data: { ...good.error.data, settled: true } } }))).toBeUndefined()
+      expect(sessionNotFoundRecovery(JSON.stringify({ ...good, error: { ...good.error, data: { ...good.error.data, next_action: 'retry' } } }))).toBeUndefined()
+      expect(sessionNotFoundRecovery(JSON.stringify({ ...good, error: { code: -32001, message: 'Session not found' } }))).toBeUndefined()
+      expect(sessionNotFoundRecovery('not json')).toBeUndefined()
+    })
   })
 
   it('bounds merchant calls but preserves caller cancellation as a non-timeout error', async () => {

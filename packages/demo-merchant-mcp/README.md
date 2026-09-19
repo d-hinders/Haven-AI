@@ -220,6 +220,35 @@ Endpoints:
   boolean (`ok` is true unless `status` is `fail`). A read failure reports
   `ok: null` + `error` instead of taking health down.
 
+### Sessions: unknown-session 404, idle TTL, and what a redeploy does (#1578, #3171)
+
+`POST /mcp` with an `mcp-session-id` this process does not hold answers HTTP
+404 with JSON-RPC `-32001` BEFORE the payment gate (#1578), so a one-use
+payment authorization is never consumed for a session-less response. Since
+#3171 that 404 tells the buyer what it could not otherwise know: the message
+begins `Session not found. Nothing was settled here` and `error.data` is
+`{ reason: 'session_expired', settled: false, next_action:
+'reinitialize_then_retry_same_payment_header' }`. That is the merchant's own
+guarantee, and the Haven SDK acts on exactly that shape: it re-initializes once
+and resends the SAME payment header on the new session, which then settles
+exactly once (`src/http-session-restart.test.ts`). `initialize` is exempt from
+the guard even with a stale id attached, so the recovery door is always open.
+
+The session store is memory-only (`Map` in `http.ts`) — deliberately, this is
+a demo merchant with no shared state. Two consequences, both written here
+because they are observable: **a redeploy forgets every session at once**, so
+every in-flight buyer gets the 404 above on its next call and recovers through
+it; and since #3171 a session idle longer than `sessionIdleTtlMs` (default
+30 minutes, `DEFAULT_SESSION_IDLE_TTL_MS`; `0` disables) is closed and
+forgotten by a lazy sweep on the next request, answering the same 404 — before
+that, every `initialize` from anyone on the internet stayed resident until the
+client happened to close it. Keep the TTL longer than the slowest settlement:
+the idle clock is stamped when a request starts, and closing a session cuts
+its open response streams. The sweep is linear in resident sessions and there
+is still no cap on how many an unauthenticated `initialize` burst can mint
+inside one TTL window; a demo merchant accepts that. One refusal shape, one
+remedy, for both causes.
+
 ### `/mcp` settlement-readiness gate (#2979)
 
 `/healthz` reporting the `fail` band was not enough on its own: before #2979,

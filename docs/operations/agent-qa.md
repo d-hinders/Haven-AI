@@ -23,6 +23,7 @@ covers:
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
+  - packages/demo-merchant-mcp/src/http.ts
 last-verified: "2026-09-19"
 ---
 
@@ -1418,12 +1419,23 @@ distinguishes have opposite causes:
 
   The unknown-session half was closed by #1578: a paid retry carrying a
   pre-restart session id now gets **HTTP 404 with JSON-RPC error `-32001`
-  ("Session not found")** — BEFORE the payment gate, so no authorization is
+  (message beginning "Session not found")** — BEFORE the payment gate, so no authorization is
   consumed. That response is a session problem, never a payment refusal:
   payment refusals are 402s carrying a reason. The client remedy is to
   re-initialize and retry with the SAME payment header, which then settles
-  exactly once. A bare re-challenge from a lost session should no longer
-  occur; if one appears, it is a regression, not a known mode.
+  exactly once. Since #3171 the 404 says so itself: its message begins
+  "Session not found. Nothing was settled here" and `error.data` carries
+  `{ reason: 'session_expired', settled: false, next_action:
+  'reinitialize_then_retry_same_payment_header' }`; the SDK's paid retry
+  (local `fetch()`/`payX402Quote()`/`resumeX402Payment()` and the hosted
+  `completeX402MerchantCall()` alike) reads that data, re-initializes and
+  resends the same header once. Once dev's demo merchant AND the hosted MCP
+  are both running the #3171 build, a run should no longer surface this 404 as
+  `merchant_status=404` after funding; until both are deployed, a bare
+  `-32001` 404 on dev is still the #2769 mode, not a regression. The merchant
+  also sweeps sessions idle longer than 30 minutes (`sessionIdleTtlMs`), which
+  answer the same 404. A bare re-challenge from a lost session should no
+  longer occur; if one appears, it is a regression, not a known mode.
 
   Note this is detected by the challenge's `error` reading the x402 default
   `"Payment required"`, **not** by the key being absent: the `PaymentRequired`

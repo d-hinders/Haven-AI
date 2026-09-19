@@ -1452,7 +1452,14 @@ export class HavenClient {
     let requestInit: RequestInit = withX402Wallet(input.init, x402Wallet) ?? {}
     if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
 
-    const response = await this.merchantTransport.deliverPayment(input.url, requestInit, input.paymentHeader)
+    // #3171: same session recovery as `retryRequest` — the hosted twin of the
+    // local paid retry must not report a settled-nothing 404 as a rejection.
+    const response = await this.merchantTransport.deliverPaymentRecoveringSession(
+      input.url,
+      requestInit,
+      input.paymentHeader,
+      () => this.merchantTransport.initialize(input.url, input.init, x402Wallet),
+    )
     // #3155 review B1: collapse SSE whether or not a session was established —
     // an event-stream answer is MCP framing regardless, and a profile merchant
     // on a plain URL (no session) would otherwise hide its in-band refusal in

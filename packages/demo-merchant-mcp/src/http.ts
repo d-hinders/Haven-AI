@@ -53,12 +53,45 @@ export interface DemoMerchantServerOptions {
    * tests that need a deterministic read without a fake clock.
    */
   readinessCacheMs?: number
+  /**
+   * #3171: how long an MCP session may sit idle before it is closed and its
+   * id forgotten. The store is memory-only (a redeploy forgets every session
+   * at once — see the README), so without a bound every `initialize` from
+   * anyone on the internet stayed resident until the client happened to close
+   * it. Swept lazily on each request. `0` disables the sweep (tests).
+   */
+  sessionIdleTtlMs?: number
+  /** Clock for the idle sweep; injectable for tests. */
+  now?: () => number
 }
 
 interface MerchantSession {
   server: ReturnType<typeof buildMerchantMcpServer>
   transport: StreamableHTTPServerTransport
+  /** #3171: last request that named this session, for the idle sweep. */
+  lastSeenAt: number
 }
+
+export const DEFAULT_SESSION_IDLE_TTL_MS = 30 * 60_000
+
+/**
+ * #3171: the machine-readable half of the unknown-session refusal. The MCP
+ * contract is 404 + -32001; what the buyer could not tell from that alone is
+ * whether it was charged. `settled: false` and the next action are the
+ * merchant's own guarantee (#1578: the guard runs BEFORE the payment gate), so
+ * the buyer side may act on them without a status read. Exported so the SDK
+ * test and this server agree on the literal.
+ */
+export const SESSION_NOT_FOUND_RECOVERY = {
+  reason: 'session_expired',
+  settled: false,
+  next_action: 'reinitialize_then_retry_same_payment_header',
+} as const
+
+export const SESSION_NOT_FOUND_MESSAGE =
+  'Session not found. Nothing was settled here — the session id is unknown to this merchant ' +
+  '(expired, or the merchant restarted). Re-initialize, then retry the SAME payment header once; ' +
+  'the retry settles exactly once.'
 
 interface PaymentToolInfo {
   productId: ProductId
@@ -107,9 +140,11 @@ function createReadinessReader(
   }
 }
 
-interface ResolvedServerOptions extends Omit<DemoMerchantServerOptions, 'path'> {
+interface ResolvedServerOptions extends Omit<DemoMerchantServerOptions, 'path' | 'sessionIdleTtlMs' | 'now'> {
   path: string
   getReadiness: ReadinessReader
+  sessionIdleTtlMs: number
+  now: () => number
 }
 
 export function createDemoMerchantServer(options: DemoMerchantServerOptions): Server {
@@ -119,9 +154,16 @@ export function createDemoMerchantServer(options: DemoMerchantServerOptions): Se
     options.settlementClient,
     options.readinessCacheMs ?? DEFAULT_READINESS_CACHE_MS,
   )
+  const resolved: ResolvedServerOptions = {
+    ...options,
+    path,
+    getReadiness,
+    sessionIdleTtlMs: options.sessionIdleTtlMs ?? DEFAULT_SESSION_IDLE_TTL_MS,
+    now: options.now ?? Date.now,
+  }
 
   return createServer((req, res) => {
-    handle(req, res, { ...options, path, getReadiness }, sessions).catch((err) => {
+    handle(req, res, resolved, sessions).catch((err) => {
       writeJson(res, 500, {
         jsonrpc: '2.0',
         error: { code: -32603, message: err instanceof Error ? err.message : String(err) },
@@ -219,11 +261,20 @@ async function handle(
   // protocol-invalid, and one client quirk away from charged-with-no-goods.
   // The client's remedy is cheap and standard: re-initialize, then retry the
   // SAME payment header — nothing was settled here, so the retry settles
-  // exactly once (and the #1519/#1551 chain-truth safeguards still cover a
+  // exactly once (and the #1519/#1515 chain-truth safeguards still cover a
   // replay of an already-settled header).
+  // #3171: the idle sweep runs before the lookup, so an expired session
+  // answers the same 404 a restart does — one refusal shape, one remedy.
+  await sweepIdleSessions(sessions, options)
   const requestedSessionId = firstHeader(req.headers['mcp-session-id'])
   if (requestedSessionId && !sessions.has(requestedSessionId) && !isInitializeRequest(body)) {
-    writeJson(res, 404, { jsonrpc: '2.0' as const, error: { code: -32001, message: 'Session not found' }, id: null })
+    // #3171: the buyer holding a one-use header on a short window could not
+    // tell from a bare -32001 whether it was charged. Say so, machine-readably.
+    writeJson(res, 404, {
+      jsonrpc: '2.0' as const,
+      error: { code: -32001, message: SESSION_NOT_FOUND_MESSAGE, data: SESSION_NOT_FOUND_RECOVERY },
+      id: null,
+    })
     return
   }
 
@@ -418,7 +469,10 @@ async function getSession(
   const requestedSessionId = firstHeader(req.headers['mcp-session-id'])
   if (requestedSessionId) {
     const existing = sessions.get(requestedSessionId)
-    if (existing) return existing
+    if (existing) {
+      existing.lastSeenAt = options.now()
+      return existing
+    }
   }
 
   const stateful = isInitializeRequest(body)
@@ -431,7 +485,7 @@ async function getSession(
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,
   })
-  const session: MerchantSession = { server, transport }
+  const session: MerchantSession = { server, transport, lastSeenAt: options.now() }
 
   transport.onclose = () => {
     transport.onclose = undefined
@@ -441,6 +495,24 @@ async function getSession(
   await server.connect(transport)
 
   return session
+}
+
+/** #3171: close and forget every session idle longer than the TTL. */
+async function sweepIdleSessions(
+  sessions: Map<string, MerchantSession>,
+  options: Pick<ResolvedServerOptions, 'sessionIdleTtlMs' | 'now'>,
+): Promise<void> {
+  if (options.sessionIdleTtlMs <= 0) return
+  const cutoff = options.now() - options.sessionIdleTtlMs
+  for (const [id, session] of sessions) {
+    if (session.lastSeenAt < cutoff) {
+      sessions.delete(id)
+      // Housekeeping on SOMEONE ELSE's expired session must never fail the
+      // request that happened to trigger it — on the paid retry that would
+      // be a rejection after funding caused by a third party (#3171 review).
+      await closeSession(session, sessions).catch(() => {})
+    }
+  }
 }
 
 async function closeSession(session: MerchantSession, sessions: Map<string, MerchantSession>): Promise<void> {

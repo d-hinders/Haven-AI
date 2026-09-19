@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { x402ResourceServer } from '@x402/core/server'
 import type { PaymentRequirements } from '@x402/core/types'
-import { encodeXPaymentHeader, selectStoredAccepted } from '../x402-delegation.js'
+import { encodeXPaymentHeader, selectStoredAccepted, StoredAcceptedMismatchError } from '../x402-delegation.js'
 const trusted = {
   amount: '1000', payTo: `0x${'cc'.repeat(20)}` as `0x${string}`,
   asset: `0x${'aa'.repeat(20)}` as `0x${string}`, maxTimeoutSeconds: 300,
@@ -35,17 +35,67 @@ describe('stored erc7710 accepted requirements', () => {
   })
   it.each([
     { amount: '999' }, { payTo: `0x${'bb'.repeat(20)}` }, { asset: `0x${'bb'.repeat(20)}` },
-    { network: 'eip155:8453' }, { scheme: 'other' }, { maxTimeoutSeconds: 301 },
-    { extra: { ...option.extra, assetTransferMethod: 'eip3009' } },
+    { maxTimeoutSeconds: 301 },
     { extra: { ...option.extra, facilitatorAddresses: [`0x${'ee'.repeat(20)}`] } },
-  ])('refuses mismatched selected requirements %j', patch => {
-    expect(() => selectStoredAccepted({ accepts: [{ ...option, ...patch }] }, 'eip155:84532', trusted)).toThrow()
+  ])('refuses an erc7710 candidate that does not match the authorization %j', patch => {
+    expect(() => selectStoredAccepted({ accepts: [{ ...option, ...patch }] }, 'eip155:84532', trusted))
+      .toThrow(StoredAcceptedMismatchError)
   })
   it('refuses ambiguous options rather than guessing merchant metadata', () => {
-    expect(() => selectStoredAccepted({ accepts: [option, { ...option, extra: { ...option.extra, name: 'Other' } }] }, 'eip155:84532', trusted)).toThrow()
+    expect(() => selectStoredAccepted({ accepts: [option, { ...option, extra: { ...option.extra, name: 'Other' } }] }, 'eip155:84532', trusted))
+      .toThrow(StoredAcceptedMismatchError)
   })
-  it('refuses present empty challenges but preserves the challenge-absent legacy fallback', () => {
-    expect(() => selectStoredAccepted({ accepts: [] }, 'eip155:84532', trusted)).toThrow()
+
+  // #3117 review: each of these shapes SETTLED before the echo guard existed.
+  // Refusing them would dead-end an intent the agent has already signed, so
+  // each one must still produce a settlement rather than a throw.
+  it('matches an offer spelled with maxAmountRequired, the field the SDK authorizes against', () => {
+    const advertised = { ...option, amount: '1', maxAmountRequired: '1000' }
+    const selected = selectStoredAccepted({ accepts: [advertised] }, option.network, trusted)
+    expect(selected).toEqual(advertised)
+  })
+  it('refuses a maxAmountRequired that disagrees with the authorized amount', () => {
+    expect(() => selectStoredAccepted({ accepts: [{ ...option, maxAmountRequired: '999999' }] }, option.network, trusted))
+      .toThrow(StoredAcceptedMismatchError)
+  })
+  it('matches when the SDK filtered or re-ordered the advertised facilitator list', () => {
+    const extraPin = `0x${'ee'.repeat(20)}`
+    const advertised = {
+      ...option,
+      extra: { ...option.extra, facilitatorAddresses: ['not-an-address', extraPin, ...trusted.facilitatorAddresses] },
+    }
+    expect(selectStoredAccepted({ accepts: [advertised] }, option.network, trusted)).toEqual(advertised)
+  })
+  it('matches when the authorize body pinned no facilitator at all', () => {
+    expect(selectStoredAccepted({ accepts: [option] }, option.network, { ...trusted, facilitatorAddresses: undefined }))
+      .toEqual(option)
+  })
+  it('matches checksum-cased addresses in the stored offer', () => {
+    const advertised = {
+      ...option,
+      payTo: trusted.payTo.toUpperCase().replace('0X', '0x'),
+      asset: trusted.asset.toUpperCase().replace('0X', '0x'),
+      extra: { ...option.extra, facilitatorAddresses: [trusted.facilitatorAddresses[0].toUpperCase().replace('0X', '0x')] },
+    }
+    expect(selectStoredAccepted({ accepts: [advertised] }, option.network, trusted)).toEqual(advertised)
+  })
+  it('refuses a maxTimeoutSeconds quoted as a string rather than coercing it', () => {
+    expect(() => selectStoredAccepted({ accepts: [{ ...option, maxTimeoutSeconds: '300' }] }, option.network, trusted))
+      .toThrow(StoredAcceptedMismatchError)
+  })
+  it('treats byte-identical duplicate offers as one unambiguous offer', () => {
+    expect(selectStoredAccepted({ accepts: [option, { ...option }] }, option.network, trusted)).toEqual(option)
+  })
+  it.each([
+    { label: 'no accepts entries', accepts: [] },
+    { label: 'no accepts key at all', accepts: undefined },
+    { label: 'another network', accepts: [{ ...option, network: 'eip155:8453' }] },
+    { label: 'another scheme', accepts: [{ ...option, scheme: 'other' }] },
+    { label: 'only an eip3009 option', accepts: [{ ...option, extra: { ...option.extra, assetTransferMethod: 'eip3009' } }] },
+  ])('keeps the legacy reconstruction when the challenge carries $label', ({ accepts }) => {
+    expect(selectStoredAccepted({ ...(accepts ? { accepts } : {}) }, 'eip155:84532', trusted)).toBeUndefined()
+  })
+  it('preserves the challenge-absent legacy fallback', () => {
     expect(selectStoredAccepted(null, 'eip155:84532', trusted)).toBeUndefined()
     const decoded = JSON.parse(Buffer.from(encodeXPaymentHeader('eip155:84532', payload, trusted), 'base64').toString())
     expect(decoded.accepted.extra).toEqual({ assetTransferMethod: 'erc7710', facilitatorAddresses: trusted.facilitatorAddresses })

@@ -15,6 +15,7 @@ import {
   assembleSettlementPayload,
   encodeXPaymentHeader,
   selectStoredAccepted,
+  StoredAcceptedMismatchError,
 } from './x402-delegation.js'
 import { storedPaymentRequiredFromMetadata } from './sign-context.js'
 import { passportReferenceFor } from '../passport/index.js'
@@ -153,6 +154,12 @@ export async function settleX402(
       },
     }
   } catch (err) {
+    // Deterministic refusal, not a transport loss: the same stored challenge
+    // refuses forever, so a 502 would send clients into a retry loop that can
+    // never converge. 409 matches the other pre-submission refusals above.
+    if (err instanceof StoredAcceptedMismatchError) {
+      return { code: 409, body: { error: err.message } }
+    }
     return {
       code: 502,
       body: {

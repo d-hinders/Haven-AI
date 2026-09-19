@@ -227,6 +227,25 @@ export interface X402AcceptedEcho {
   facilitatorAddresses?: string[]
 }
 
+/**
+ * A stored challenge that carries erc7710 candidates but none (or more than
+ * one) that matches the authorized intent. Deterministic — the same inputs
+ * refuse forever — so the route answers 409 with a re-authorize instruction
+ * rather than a retryable 502 (#3117 review).
+ */
+export class StoredAcceptedMismatchError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'StoredAcceptedMismatchError'
+  }
+}
+
+/** The amount the SDK authorizes against: the official field wins (#3117). */
+function optionAuthorizedAmount(option: Record<string, unknown>): string | null {
+  const raw = option.maxAmountRequired ?? option.amount
+  return typeof raw === 'string' && /^[0-9]+$/.test(raw) && BigInt(raw) > 0n ? raw : null
+}
+
 /** Select by trusted settlement state; merchant metadata cannot change authority. */
 export function selectStoredAccepted(
   challenge: Record<string, unknown> | null,
@@ -234,26 +253,69 @@ export function selectStoredAccepted(
   trusted: X402AcceptedEcho,
 ): Record<string, unknown> | undefined {
   if (!challenge) return undefined // pre-stored-challenge compatibility
-  const matches = (Array.isArray(challenge.accepts) ? challenge.accepts : []).filter((value: unknown) => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-    const option = value as Record<string, unknown>
+  const sameAddress = (value: unknown, expected: string) =>
+    typeof value === 'string' && value.toLowerCase() === expected.toLowerCase()
+  // Shape only: which entries could ever have been the erc7710 option the
+  // agent authorized. A challenge carrying NONE predates the stored echo (or
+  // describes another scheme entirely), so it keeps the legacy reconstruction
+  // rather than dead-ending an already-signed intent (#3117 review).
+  const candidates = (Array.isArray(challenge.accepts) ? challenge.accepts : []).filter(
+    (value: unknown): value is Record<string, unknown> => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+      const option = value as Record<string, unknown>
+      const extra = option.extra as Record<string, unknown> | undefined
+      return option.scheme === 'exact' && option.network === network &&
+        extra?.assetTransferMethod === 'erc7710'
+    },
+  )
+  if (candidates.length === 0) return undefined
+  const matches = candidates.filter((option) => {
     const extra = option.extra as Record<string, unknown> | undefined
-    const sameAddress = (value: unknown, expected: string) =>
-      typeof value === 'string' && value.toLowerCase() === expected.toLowerCase()
     // The intent stores a canonical bigint string; retain the merchant's
-    // original decimal spelling in the echo after comparing its value.
-    const sameAmount = typeof option.amount === 'string' && /^[0-9]+$/.test(option.amount) &&
-      BigInt(option.amount) > 0n && BigInt(option.amount) === BigInt(trusted.amount)
-    const facilitators = extra?.facilitatorAddresses ?? []
+    // original decimal spelling in the echo after comparing its value. The
+    // SDK authorizes `maxAmountRequired ?? amount`, so compare THAT — an
+    // offer spelled with maxAmountRequired settled before this guard existed.
+    const authorized = optionAuthorizedAmount(option)
+    const sameAmount = authorized !== null && BigInt(authorized) === BigInt(trusted.amount)
+    // The pins are what the child is redeemable by, and the SDK forwards only
+    // the ADDRESS-SHAPED subset of what the merchant advertised (see
+    // x402FacilitatorAddresses). Require containment, not deep equality:
+    // equality refuses an offer whose list the SDK legitimately filtered or
+    // re-ordered, after the agent has already signed.
+    const advertised = extra?.facilitatorAddresses
     const pins = trusted.facilitatorAddresses ?? []
-    return option.scheme === 'exact' && option.network === network &&
-      sameAmount && sameAddress(option.payTo, trusted.payTo) &&
-      sameAddress(option.asset, trusted.asset) && option.maxTimeoutSeconds === trusted.maxTimeoutSeconds &&
-      extra?.assetTransferMethod === 'erc7710' && Array.isArray(facilitators) &&
-      facilitators.length === pins.length && facilitators.every((value, i) => sameAddress(value, pins[i]))
-  }) as Record<string, unknown>[]
-  if (matches.length !== 1) throw new Error('Stored challenge does not identify one matching settlement option — re-authorize')
-  return matches[0]
+    const pinsAdvertised = pins.length === 0 ||
+      (Array.isArray(advertised) &&
+        pins.every((pin) => advertised.some((value) => sameAddress(value, pin))))
+    return sameAmount && sameAddress(option.payTo, trusted.payTo) &&
+      sameAddress(option.asset, trusted.asset) &&
+      option.maxTimeoutSeconds === trusted.maxTimeoutSeconds && pinsAdvertised
+  })
+  // Byte-identical duplicates are unambiguous data, not an ambiguous offer.
+  const distinct = matches.filter(
+    (option, i) => matches.findIndex((other) => stableStringify(other) === stableStringify(option)) === i,
+  )
+  if (distinct.length === 0) {
+    throw new StoredAcceptedMismatchError(
+      'The stored 402 challenge advertises no erc7710 option matching this authorization — re-authorize',
+    )
+  }
+  if (distinct.length > 1) {
+    throw new StoredAcceptedMismatchError(
+      'The stored 402 challenge advertises more than one erc7710 option matching this authorization — re-authorize',
+    )
+  }
+  return distinct[0]
+}
+
+/** Key-order-independent deep equality for the duplicate-offer check. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined'
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`
 }
 
 /**

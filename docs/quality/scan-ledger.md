@@ -800,8 +800,10 @@ advertised timeouts clamped before echo and stripped `extra` metadata; unchanged
 controls passed. Reproduction scripts and owner-approved acceptance criteria
 are preserved in [#3117](https://github.com/d-hinders/Haven-AI/issues/3117).
 
-Disposition: approved and filed as standalone #3117; implementation underway.
-The other approved candidates remain separately tracked: capability selection
-[#3116](https://github.com/d-hinders/Haven-AI/issues/3116) and native MCP transport
+Disposition: approved, filed as standalone #3117, and implemented there. The
+other approved candidates remain separately tracked: *Reject unsupported x402
+transfer methods and payment flows before funding or signing*
+[#3116](https://github.com/d-hinders/Haven-AI/issues/3116) and *Support native
+MCP x402 tool-result challenges and payment metadata*
 [#3118](https://github.com/d-hinders/Haven-AI/issues/3118). No new scan conducted
 in the implementation pass; no new structural finding.

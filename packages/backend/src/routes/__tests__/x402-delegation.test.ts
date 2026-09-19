@@ -1414,8 +1414,9 @@ describe('x402 delegation-rail settlement (#830)', () => {
       payload: { signature: await signChild(childFixture) },
     })
     if (mismatch) {
-      expect(res.statusCode).toBe(502)
-      expect(res.json().details).toMatch(/matching settlement option/)
+      // Deterministic, so 409 + re-authorize rather than a retryable 502.
+      expect(res.statusCode).toBe(409)
+      expect(res.json().error).toMatch(/re-authorize/)
       expect(mockQuery.mock.calls.some(c => /status = 'submitted'/.test(String(c[0])))).toBe(false)
       return
     }
@@ -1440,7 +1441,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     const extensions = { bazaar: { schema: 'v1' } }
     const stringMetadata = JSON.stringify({
       settlement_scheme: 'erc7710',
-      payment_required: { x402Version: 2, resource: { url: 'https://merchant.example/resource' }, accepts: [{ scheme: 'exact', network: 'eip155:84532', amount: '1000', payTo: MERCHANT, asset: USDC, maxTimeoutSeconds: 300, extra: { assetTransferMethod: 'erc7710' } }], extensions },
+      payment_required: { x402Version: 2, resource: { url: 'https://merchant.example/resource' }, accepts: [], extensions },
     })
     mockQuery.mockImplementation((sql: string) => {
       if (/SELECT id, status, execution_rail/.test(String(sql))) {

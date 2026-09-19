@@ -115,6 +115,14 @@ describe('x402 helpers', () => {
       expect(parsePaymentRequired(responseWithTimeout(0)).accepts[0].maxTimeoutSeconds).toBe(1)
     })
 
+    // The old clamp floored, and the authorize body types this `integer` —
+    // preserving a fractional advertised value would 400 a working merchant
+    // and put a fractional beforeThreshold in the child's caveat (#3117).
+    it('floors a fractional advertised window to an integer', () => {
+      expect(parsePaymentRequired(responseWithTimeout(300.5)).accepts[0].maxTimeoutSeconds).toBe(300)
+      expect(parsePaymentRequired(responseWithTimeout(1200.9)).accepts[0].maxTimeoutSeconds).toBe(1200)
+    })
+
     it('clamps at the pre-sign choke point for unparsed options', () => {
       const requirements = toStandardPaymentRequirements(paymentRequired, {
         ...accepted,

@@ -143,10 +143,13 @@ function normalizePaymentOption(value: unknown): X402PaymentOption | null {
     // Keep the merchant offer intact for v2 `accepted` matching. Only the
     // signing conversion may cap its authorization lifetime (#3117).
     // Retain legacy fallback behavior for missing or unusable timeouts.
+    // Integer, because the authorize body types it `integer` and the child's
+    // timestamp caveat is built from it — the old clamp floored, so keeping a
+    // fractional value here would 400 a merchant that used to work (#3117).
     maxTimeoutSeconds:
       typeof candidate.maxTimeoutSeconds === 'number' &&
       Number.isFinite(candidate.maxTimeoutSeconds) && candidate.maxTimeoutSeconds >= 1
-        ? candidate.maxTimeoutSeconds
+        ? Math.floor(candidate.maxTimeoutSeconds)
         : clampAuthorizationWindow(candidate.maxTimeoutSeconds),
     extra: candidate.extra,
   }

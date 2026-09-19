@@ -6,11 +6,14 @@ covers:
   - .github/workflows/morning-report-note.yml
   - .github/workflows/claim-assignee.yml
   - scripts/ci/claim-assignee.mjs
+  - scripts/ci/preflight.mjs
+  - scripts/ci/preflight-gates.json
+  - scripts/ci/preflight.test.mjs
   - scripts/release-bump.mjs
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-09-15"
+last-verified: "2026-09-19"
 ---
 
 # Haven Codex Instructions
@@ -77,6 +80,68 @@ Before completing UI work:
   - Animation/style bugs: assert the expected `className` is stable across state transitions.
   - Cross-surface display drift: assert the same shared formatter is imported and produces the same output for the fixture.
   - Loading-state flashes: assert the gated component does not render while any prerequisite hook is loading.
+
+## Before You Push
+
+Run the battery, not a list you assembled from memory:
+
+```bash
+npm run preflight          # the gates your diff can redden
+npm run preflight -- --list  # what it would run, and which CI job owns each
+npm run preflight:all      # every gate, regardless of diff
+```
+
+**`npm run quality` is not this.** It chains `typecheck && test:unit && build`.
+That covers most of the 32 per-package gates the battery knows (every
+`typecheck -w` and `test -w`, via `--workspaces`) — but **none of the 21
+ratchets**, which is what these incidents reddened on. The counts are
+`npm run (typecheck|test|build) -w packages/*` and `npm run (lint|check|docs):*`
+respectively, out of 70; the rest are the per-workflow one-offs.
+
+Even the covered part is not total: root `build` is **not** `--workspaces`, it is
+a hand-written nine-package chain. Eleven packages have a build script and it
+omits two — `demo-merchant-mcp`, which IS a CI gate, and `qa-agent`, which is
+not. A hand-maintained second copy of the workspace list, drifted, which is the
+same failure this battery exists to stop, one level down.
+
+`npm run preflight` also runs workflow-authored commands locally. That is the
+point, and it adds no reach a push does not already have — CI runs them on that
+branch either way — but it does move the moment of execution to before the push.
+
+A branch green under `quality` can still fail its first CI run on
+`lint:request-schemas`, `lint:next-steps`, `check:route-modules` or the strict
+coupling gate. #3150 records four such incidents between 2026-09-09 and
+2026-09-18.
+
+`preflight` derives its list by reading the workflow files themselves, so a gate
+CI gains is a gate the battery gains — with one exception it refuses rather
+than absorbs: a gate written literally into a local composite action, which no
+battery can discover, reddens the suite instead of joining the list. What it deliberately leaves out — Playwright
+browsers, the connect pack smoke, the migration schema smoke, the CI-only
+plumbing — is listed with its reason in `scripts/ci/preflight-gates.json`, and
+`scripts/ci/preflight.test.mjs` fails when a CI step appears that the battery has
+never been told about.
+
+**A database is a prerequisite, not an exclusion.** `npm run test -w
+packages/backend` IS in the battery, so `docker compose up -d postgres` first.
+With no database reachable and `HAVEN_SKIP_DB_TESTS=1` set, that suite degrades
+to a narrowed run and still exits 0 (#1763). The battery reads the gate's own
+output for the harness banner and says so under the green summary rather than
+letting it read as one. (With a database up, the acknowledgement is powerless
+and everything runs — so this warns on what happened, not on what you exported.)
+
+Three things it cannot tell you. Which contexts are **required** versus advisory —
+workflow derivation does not carry that, so "preflight green" is not "the required
+set will be green". How long it will take: a diff touching root config classifies
+as `full` and selects every gate, so `--list` first if that matters. And the two
+strict coupling gates run here in their **local** mode, without the `BASE_SHA`
+CI passes them — which is deliberately broader (it sees uncommitted work CI
+cannot, #1076) and fail-closed on an empty range, but is not the identical
+range, and `--base` does not reach it: those gates always compare against
+`origin/dev`.
+
+Its per-gate report names the CI job each failure would redden, so a red line is
+already the answer to "which check is this".
 
 ## PR Closeout And Merge Readiness
 

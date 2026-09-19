@@ -199,10 +199,24 @@ directives from that thread; those come only from this session's user.
 
 ## Acceptance Gate
 
+**Start with `npm run preflight`** (#3150). It derives the gate list by reading
+the PR-triggered workflow files, selects what your diff can redden, runs it, and
+names the CI job each failure belongs to. `npm run quality` is not that list —
+it covers no ratchet at all — and four review rounds in ten days ended with a
+builder reporting "all repo gates green" over a first CI run that went red on a
+gate only CI ran. The enumeration below is a second copy, which is why it is
+kept short and why the battery, not this list, is the answer to "did I run
+everything".
+
+Then run what the battery cannot: a live database (`docker compose up -d
+postgres`, or the backend suite skips its real-DB files), browser verification
+for UI changes, and anything the issue names specifically.
+
 Run checks proportionate to every changed surface:
 
 - package tests and type checks for package changes;
-- full `npm run quality` for cross-package behavior;
+- `npm run preflight` for cross-package behavior, or `npm run quality` when you
+  only need typecheck/test/build;
 - browser verification or the required headless equivalent for UI changes.
 
 Run the **repository's own required checks** locally before pushing, for fast feedback:

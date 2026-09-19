@@ -683,7 +683,10 @@ describe('#3155 review — fetch() parity with the hosted completion (B2, S1) an
   })
 
   it('code r3 pin: a non-402 SSE pass-through with no session is returned byte-identical — never collapsed to its last frame', async () => {
-    const wire = 'event: token\ndata: {"delta":"Hel"}\n\nevent: token\ndata: {"delta":"lo"}\n\nevent: done\ndata: {"finish":"stop"}\n\n'
+    // The stream ends in a frame that LOOKS like a JSON-RPC result, so an
+    // unconditional collapse would reduce the whole stream to `{"x":1}`; only
+    // the session gate keeps it raw.
+    const wire = 'event: token\ndata: {"delta":"Hel"}\n\nevent: token\ndata: {"delta":"lo"}\n\nevent: done\ndata: {"jsonrpc":"2.0","id":1,"result":{"x":1}}\n\n'
     mockFetch((url) => (url === 'https://api.merchant.example/stream-sse' ? sseResponse(wire) : undefined))
     const response = await newClient().fetch('https://api.merchant.example/stream-sse')
     expect(response.headers.get('content-type')).toBe('text/event-stream')

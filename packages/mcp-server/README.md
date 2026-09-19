@@ -91,7 +91,7 @@ sequenceDiagram
     Signer-->>Agent: signature, payment_header
     Agent->>Hosted: haven_settle_mcp_tool { payment_id, signature, payment_header, merchant context }
     Hosted->>Hosted: relay funding signature and wait for confirmation
-    Hosted->>Merchant: tools/call with signed payment header (both wire names)
+    Hosted->>Merchant: tools/call with signed payment header (both wire names) and params._meta["x402/payment"]
     Merchant-->>Hosted: tool result
     Hosted->>Hosted: verify the merchant's reported settlement on-chain (fail-closed, #2971)
     Hosted-->>Agent: settled result + evidence/reconciliation status

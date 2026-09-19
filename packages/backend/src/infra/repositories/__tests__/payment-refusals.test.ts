@@ -69,6 +69,7 @@ function refusalInput(fix: Fixtures, overrides: Partial<RecordRefusalInput> = {}
     amountAtomic: '10000',
     usdValue: 0.1,
     eurValue: 0.092,
+    sekValue: 0.95,
     merchantTo: '0x' + 'cc'.repeat(20),
     resourceUrl: `https://merchant.example/r-${seq}`,
     reason: 'delegation_budget_exceeded',
@@ -111,18 +112,20 @@ describeDb('payment_refusals repository (#2945)', () => {
       account_id: string | null
       usd_value: string | null
       eur_value: string | null
+      sek_value: string | null
       detail: Record<string, string> | null
       merchant_to: string | null
       token_symbol: string
       amount_atomic: string
       chain_id: number
       source: string
-    }>(`SELECT account_id, usd_value, eur_value, detail, merchant_to, token_symbol, amount_atomic, chain_id, source
+    }>(`SELECT account_id, usd_value, eur_value, sek_value, detail, merchant_to, token_symbol, amount_atomic, chain_id, source
          FROM payment_refusals WHERE user_id = $1`, [fix.userId])
     expect(full[0].account_id).toBe(accountId)
     // NUMERIC(20,6) round-trips as a string; the value is what was booked.
     expect(Number(full[0].usd_value)).toBeCloseTo(0.1, 6)
     expect(Number(full[0].eur_value)).toBeCloseTo(0.092, 6)
+    expect(Number(full[0].sek_value)).toBeCloseTo(0.95, 6)
     expect(full[0].detail).toMatchObject({ error_code: 'delegation_budget_exceeded', remaining_atomic: '40000' })
     expect(full[0].merchant_to).toBe('0x' + 'cc'.repeat(20))
     expect(full[0].token_symbol).toBe('USDC')

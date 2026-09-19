@@ -717,6 +717,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           usdValue: fiatValues.usd,
           eurValue: fiatValues.eur,
           agentId: agent.id,
+          sekValue: fiatValues.sek,
         })
 
         if (!confirmed) {

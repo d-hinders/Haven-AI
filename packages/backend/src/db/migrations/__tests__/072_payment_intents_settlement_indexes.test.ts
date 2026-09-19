@@ -199,6 +199,7 @@ describeDb('migration 072: payment_intents settlement indexes (#2095)', () => {
         txHash: HASH,
         usdValue: null,
         eurValue: null,
+        sekValue: null,
         windowSeconds: 840,
         delegationBound: false,
       })
@@ -211,6 +212,7 @@ describeDb('migration 072: payment_intents settlement indexes (#2095)', () => {
         txHash: `0x${'b'.repeat(64)}`,
         usdValue: null,
         eurValue: null,
+        sekValue: null,
         windowSeconds: 840,
         delegationBound: false,
       })

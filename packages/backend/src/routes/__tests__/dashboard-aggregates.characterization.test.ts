@@ -138,10 +138,14 @@ describe('dashboard aggregates (characterization, #1167)', () => {
     transactionMocks.mergeX402Transactions.mockReset()
     fiatMocks.getFiatValuesForTokenAmount.mockReset()
 
-    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({ totalUsd: 100, totalEur: 92 })
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
+      totalUsd: 100,
+      totalEur: 92,
+      totalSek: 920,
+    })
     transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
-    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0, eur: 0 })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0, eur: 0, sek: 0 })
   })
 
   async function getOverview() {
@@ -161,7 +165,9 @@ describe('dashboard aggregates (characterization, #1167)', () => {
       expect(response.statusCode).toBe(200)
       const inserts = callsMatching('INSERT INTO user_daily_portfolio_snapshots')
       expect(inserts).toHaveLength(1)
-      expect(inserts[0][1]).toEqual(['user-1', snapshotDate(0), 100, 92])
+      // The SEK total rides the same first-write: one price read books all
+      // three currencies beside each other (#3127 round 2).
+      expect(inserts[0][1]).toEqual(['user-1', snapshotDate(0), 100, 92, 920])
     })
 
     it("does NOT re-write the snapshot when today's row already exists", async () => {
@@ -191,7 +197,7 @@ describe('dashboard aggregates (characterization, #1167)', () => {
     it("derives amounts and percentages from yesterday's snapshot", async () => {
       installQueryMock({
         snapshots: [
-          { snapshot_date: snapshotDate(-1), total_usd: '80', total_eur: '75' },
+          { snapshot_date: snapshotDate(-1), total_usd: '80', total_eur: '75', total_sek: '740' },
         ],
       })
 
@@ -200,8 +206,10 @@ describe('dashboard aggregates (characterization, #1167)', () => {
       expect(body.change.available).toBe(true)
       expect(body.change.usdAmount).toBeCloseTo(20, 10)
       expect(body.change.eurAmount).toBeCloseTo(17, 10)
+      expect(body.change.sekAmount).toBeCloseTo(180, 10)
       expect(body.change.usdPercent).toBeCloseTo(25, 10)
       expect(body.change.eurPercent).toBeCloseTo((17 / 75) * 100, 10)
+      expect(body.change.sekPercent).toBeCloseTo((180 / 740) * 100, 10)
     })
 
     it('reports change as unavailable and zeroed when yesterday has no snapshot', async () => {
@@ -213,9 +221,29 @@ describe('dashboard aggregates (characterization, #1167)', () => {
         available: false,
         usdAmount: 100,
         eurAmount: 92,
+        // No SEK baseline either — the wire carries null, not a fabricated 0.
+        sekAmount: null,
         usdPercent: 0,
         eurPercent: 0,
+        sekPercent: 0,
       })
+    })
+
+    it('reports the SEK change as unavailable when yesterday predates migration 090 (total_sek NULL) — never a fabricated -100% (#3127 round 2)', async () => {
+      installQueryMock({
+        snapshots: [
+          { snapshot_date: snapshotDate(-1), total_usd: '80', total_eur: '75', total_sek: null },
+        ],
+      })
+
+      const body = (await getOverview()).json()
+
+      expect(body.change.available).toBe(true)
+      expect(body.change.sekAmount).toBe(null)
+      expect(body.change.sekPercent).toBe(0)
+      // The pre-090 day prices the usd/eur pair exactly as before.
+      expect(body.change.usdAmount).toBeCloseTo(20, 10)
+      expect(body.change.eurAmount).toBeCloseTo(17, 10)
     })
 
     it('reports a zero percentage rather than dividing by a zero baseline', async () => {
@@ -240,7 +268,7 @@ describe('dashboard aggregates (characterization, #1167)', () => {
     it('sums the payment aggregate alone — the approval aggregate is gone (#2055)', async () => {
       installQueryMock({
         paymentSpend: [
-          { token_symbol: 'USDC', usd_sum: '10', eur_sum: '9', fallback_amount: '0' },
+          { token_symbol: 'USDC', usd_sum: '10', eur_sum: '9', sek_sum: '95', fallback_amount: '0' },
         ],
       })
 
@@ -248,14 +276,15 @@ describe('dashboard aggregates (characterization, #1167)', () => {
 
       expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(10, 10)
       expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(9, 10)
+      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(95, 10)
       expect(fiatMocks.getFiatValuesForTokenAmount).not.toHaveBeenCalled()
     })
 
     it('prices rows carrying a fallback amount through the fiat lookup', async () => {
-      fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 2, eur: 1.8 })
+      fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 2, eur: 1.8, sek: 18 })
       installQueryMock({
         paymentSpend: [
-          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', fallback_amount: '2' },
+          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '0', fallback_amount: '2' },
         ],
       })
 
@@ -264,6 +293,7 @@ describe('dashboard aggregates (characterization, #1167)', () => {
       expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenCalledWith('USDC', '2')
       expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(2, 10)
       expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(1.8, 10)
+      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(18, 10)
     })
 
     it('scopes the month-to-date aggregate to the authenticated user', async () => {

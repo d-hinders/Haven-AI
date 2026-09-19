@@ -328,7 +328,7 @@ describeDb('x402-authorizations repository (#1222)', () => {
     const id = await seedIntent({ agentId, userId })
 
     expect(
-      await confirmX402Intent({ txHash: `0x${'f'.repeat(64)}`, intentId: id, usdValue: '0.10', eurValue: '0.09', agentId }),
+      await confirmX402Intent({ txHash: `0x${'f'.repeat(64)}`, intentId: id, usdValue: '0.10', eurValue: '0.09', sekValue: '0.95', agentId }),
     ).toBe(true)
     const row = await readIntent(id)
     expect(row.status).toBe('confirmed')
@@ -338,7 +338,7 @@ describeDb('x402-authorizations repository (#1222)', () => {
     // The second settle attempt — same call, row already confirmed with a
     // tx_hash — must be refused, leaving the FIRST tx_hash in place.
     expect(
-      await confirmX402Intent({ txHash: `0x${'9'.repeat(64)}`, intentId: id, usdValue: '0.10', eurValue: '0.09', agentId }),
+      await confirmX402Intent({ txHash: `0x${'9'.repeat(64)}`, intentId: id, usdValue: '0.10', eurValue: '0.09', sekValue: '0.95', agentId }),
     ).toBe(false)
     expect((await readIntent(id)).tx_hash).toBe(`0x${'f'.repeat(64)}`)
   })

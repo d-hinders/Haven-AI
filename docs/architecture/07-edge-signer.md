@@ -367,11 +367,11 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
 
 ## Scope Notes
 
-- The edge-signer surface serves the **legacy AllowanceModule rail** — which
-  since #1986 **no longer executes payments**. The AllowanceModule-hash signing
+- The edge-signer surface ONCE served the **legacy AllowanceModule rail** —
+  which since #1986 **no longer executes payments** (the backend answers HTTP
+  410 before it ever produces a hash to sign). The AllowanceModule-hash signing
   surface is GONE, not merely unreachable: #3169 removed `signPaymentHash` and
-  `haven_sign` refuses a bare hash, on top of the backend's HTTP 410 (#1986)
-  before it ever produces a hash to sign. The rail's history is kept here for
+  `haven_sign` refuses a bare hash. The rail's history is kept here for
   reference only: as of #1987 its backend code
   is **deleted**, not merely refused — there is no `generateTransferHash` and
   no `executeAllowanceTransfer` left to reach. Nothing here is a path a caller

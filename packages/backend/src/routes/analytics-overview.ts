@@ -36,7 +36,7 @@ import {
  */
 
 const RANGE_DAYS: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90 }
-const CURRENCIES = new Set(['usd', 'eur'])
+const CURRENCIES = new Set(['usd', 'eur', 'sek'])
 
 /**
  * `Intl.DateTimeFormat`'s own constructor accepts far more than IANA zone
@@ -66,7 +66,7 @@ function resolveMerchantLabel(address: string, sources: MerchantLabelSources): s
 export default async function analyticsOverviewRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  // GET /analytics/overview?range=7d|30d|90d&currency=usd|eur&tz=<IANA>
+  // GET /analytics/overview?range=7d|30d|90d&currency=usd|eur|sek&tz=<IANA>
   app.get<{ Querystring: { range?: string; currency?: string; tz?: string } }>(
     '/overview',
     async (request, reply) => {
@@ -79,7 +79,7 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
       }
       const currency = (currencyParam ?? 'usd').toLowerCase()
       if (!CURRENCIES.has(currency)) {
-        return reply.code(400).send({ error: 'currency must be one of: usd, eur' })
+        return reply.code(400).send({ error: 'currency must be one of: usd, eur, sek' })
       }
       const tz = tzParam ?? 'UTC'
       if (!isValidTimeZone(tz)) {
@@ -88,7 +88,7 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
         // instrument this endpoint must not become.
         return reply.code(400).send({ error: 'unsupported tz' })
       }
-      const cur = currency as 'usd' | 'eur'
+      const cur = currency as 'usd' | 'eur' | 'sek'
 
       const now = new Date()
       const to = now
@@ -164,13 +164,19 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
       }
       let refusedPreviousCount = 0
       for (const a of refusalsPreviousByAgent) refusedPreviousCount += a.refusals
-      const refusedAmount = cur === 'usd' ? refusalAmount.refused_amount_usd : refusalAmount.refused_amount_eur
+      const refusedAmount =
+        cur === 'usd'
+          ? refusalAmount.refused_amount_usd
+          : cur === 'eur'
+            ? refusalAmount.refused_amount_eur
+            : refusalAmount.refused_amount_sek
 
       // ── by_day: spend (from SQL) + refusals (from REFUSALS_BY_DAY_SQL, same tz bucketing). ──
       const byDayMap = new Map<string, { spent_by_agent: Record<string, string>; refusals: number }>()
       for (const row of byDaySpend) {
         const entry = byDayMap.get(row.day) ?? { spent_by_agent: {}, refusals: 0 }
-        entry.spent_by_agent[row.agent_id] = cur === 'usd' ? row.usd : row.eur
+        entry.spent_by_agent[row.agent_id] =
+          cur === 'usd' ? row.usd : cur === 'eur' ? row.eur : row.sek
         byDayMap.set(row.day, entry)
       }
       for (const row of refusalsByDayRows) {
@@ -185,12 +191,13 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
       // ── agents[] ──────────────────────────────────────────────────────────
       const topMerchantByAgent = new Map(perAgentTopMerchant.map((m) => [m.agent_id, m.merchant_key]))
       const totalSpentAcrossAgents = perAgentSpend.reduce(
-        (sum, a) => sum + Number(cur === 'usd' ? a.spent_usd : a.spent_eur),
+        (sum, a) =>
+          sum + Number(cur === 'usd' ? a.spent_usd : cur === 'eur' ? a.spent_eur : a.spent_sek),
         0,
       )
       const agents = perAgentSpend.map((a) => {
         const refusalAgg = refusalsCurrentByAgent.find((r) => r.agent_id === a.agent_id)
-        const spent = Number(cur === 'usd' ? a.spent_usd : a.spent_eur)
+        const spent = Number(cur === 'usd' ? a.spent_usd : cur === 'eur' ? a.spent_eur : a.spent_sek)
         const merchantKey = topMerchantByAgent.get(a.agent_id) ?? null
         const budgets = (budgetsByAgent.get(a.agent_id) ?? []).map((b) => ({
           token: b.token,
@@ -205,7 +212,7 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
           id: a.agent_id,
           name: a.name,
           status: a.status,
-          spent: (cur === 'usd' ? a.spent_usd : a.spent_eur),
+          spent: cur === 'usd' ? a.spent_usd : cur === 'eur' ? a.spent_eur : a.spent_sek,
           share: totalSpentAcrossAgents > 0 ? spent / totalSpentAcrossAgents : 0,
           payments: Number(a.payments),
           refusals: refusalAgg?.refusals ?? 0,
@@ -222,7 +229,7 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
       const merchants = topMerchants.map((m) => ({
         label: resolveMerchantLabel(m.merchant_key, labelSources),
         address: m.merchant_key,
-        spent: cur === 'usd' ? m.spent_usd : m.spent_eur,
+        spent: cur === 'usd' ? m.spent_usd : cur === 'eur' ? m.spent_eur : m.spent_sek,
         payments: Number(m.payments),
         agent_ids: m.agent_ids,
         first_seen: m.first_seen,
@@ -230,10 +237,16 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
       }))
 
       // ── balance_by_day[] ─────────────────────────────────────────────────
+      // The SEK column is nullable (migration 090 backfills only days with
+      // evidence): a pre-090 day has no SEK figure, and `Number(null)` would
+      // read that absence as a real `0` on the chart — the same fabricated
+      // swing the dashboard change guard refuses. Pre-090 days are DROPPED
+      // for SEK rather than zeroed; the section's own sparse-floor renders
+      // the honest empty state when too few days survive.
       const balanceSeries = balanceByDay.map((b) => ({
         date: b.snapshot_date,
-        value: cur === 'usd' ? b.total_usd : b.total_eur,
-      }))
+        value: cur === 'usd' ? b.total_usd : cur === 'eur' ? b.total_eur : b.total_sek,
+      })).filter((p) => p.value != null) as { date: string; value: string }[]
 
       const gasSponsoredOps = sumValueBearingGasOps(gasByChain)
 
@@ -258,16 +271,27 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
           refusals_recorded_from: refusalLedgerFloor,
         },
         totals: {
-          spent: cur === 'usd' ? totals.spent_usd : totals.spent_eur,
-          spent_previous: cur === 'usd' ? totals.spent_previous_usd : totals.spent_previous_eur,
+          spent:
+            cur === 'usd' ? totals.spent_usd : cur === 'eur' ? totals.spent_eur : totals.spent_sek,
+          spent_previous:
+            cur === 'usd'
+              ? totals.spent_previous_usd
+              : cur === 'eur'
+                ? totals.spent_previous_eur
+                : totals.spent_previous_sek,
           refused_count: refusedCount,
           refused_attempts: refusedAttempts,
           refused_amount: refusedAmount,
           refused_previous_count: refusedPreviousCount,
           budget_bands: budgetBands,
           fees: {
-            amount: cur === 'usd' ? fees.fee_usd : fees.fee_eur,
-            previous: cur === 'usd' ? fees.fee_usd_previous : fees.fee_eur_previous,
+            amount: cur === 'usd' ? fees.fee_usd : cur === 'eur' ? fees.fee_eur : fees.fee_sek,
+            previous:
+              cur === 'usd'
+                ? fees.fee_usd_previous
+                : cur === 'eur'
+                  ? fees.fee_eur_previous
+                  : fees.fee_sek_previous,
             flag_on: config.feeEnabled,
           },
           gas_sponsored_ops: gasSponsoredOps,

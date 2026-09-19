@@ -349,6 +349,22 @@ chain.
 > never a security state, only a crash. Scope of this note: that one
 > expression. Nothing else in this document was re-verified.
 
+> **Re-verified #3127 (converted amounts on the transaction feed):** this diff
+> touched three files in this document's coverage list — `routes/transactions.ts`,
+> `infra/repositories/transaction-history.ts` and `routes/auth.ts` — and none of
+> them moves an authority or custody boundary. The transactions change is
+> additive projection only: every route keeps its auth hook and its
+> `user_id`-scoped queries (the two machine-payment SQL statements gained
+> `mpe.fx_rates` in their SELECT list — one more column from the same row, same
+> WHERE, same bind shape); the new per-request read is the same
+> `SELECT currency_preference FROM users WHERE id = $1` the preferences route
+> already served, scoped by the JWT subject; and `routes/auth.ts`'s change is
+> the signup INSERT gaining a `currency_preference` value (the user's own row,
+> from a constant — nothing about session issuance, device flow or credential
+> verification moves). No file here that signs, delegates, relays or gates is
+> touched. Scope of this note: those three files and the two SQL statements'
+> SELECT lists. Nothing else in this document was re-verified.
+
 > **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
 > migration):** this diff touched one file in this document's coverage list,
 > `infra/repositories/smart-accounts.ts`, and only its comment: the retired

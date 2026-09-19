@@ -264,9 +264,13 @@
       "amountSek": "Book-time SEK value (#463) for the accounting feed.",
       "fxRateSek": "The rate amountSek was struck at (#2871).",
       "fxSource": "Where that rate came from.",
-      "accounting": "Accounting-feed sync state joined by paymentId (#2870).",
       "timestamp": "The row's non-null unix-seconds SORT KEY: the block timestamp on explorer rows, `confirmed_at ?? created_at` on x402-synthesized rows. Its counterpart for 'when did this settle' is `confirmedAt` (paired above, #3132); on the JSON rows the fallback is marked by `timestampSource` -- the CSV export's settled_at projection of it is not (see the settled-at reason).",
-      "timestampSource": "#3132: which column produced `timestamp` ('block' | 'confirmed_at' | 'created_at') -- the mark that turns the sort key's fallback from a silent substitution into a stated one. A receipt has no sort-key fallback to mark."
+      "timestampSource": "#3132: which column produced `timestamp` ('block' | 'confirmed_at' | 'created_at') -- the mark that turns the sort key's fallback from a silent substitution into a stated one. A receipt has no sort-key fallback to mark.",
+      "convertedAmount": "#3127: the settled amount in the user's currency_preference -- a DASHBOARD projection computed at enrichment from the row's own book-time capture (the SEK columns, or the fx_rates map), never a serve-time price read. A receipt is the settlement's own record and strikes no preference-driven figure.",
+      "convertedCurrency": "#3127: which currency convertedAmount is denominated in -- the user's preference, SEK when none is set. The receipt surface has no preference dimension.",
+      "convertedFxRate": "#3127: the token-to-currency rate the converted amount was struck at; null on the SEK path, which already carries fxRateSek. No receipt counterpart for the same reason as convertedAmount.",
+      "fxRates": "#3127: the row's own book-time rate map (machine_payment_evidence.fx_rates, migration 082) -- one rate per supported ledger currency frozen at settlement. The receipt carries the settled figures themselves and does not restate the capture.",
+      "accounting": "Accounting-feed sync state joined by paymentId (#2870)."
     }
   },
   "cliConventions": {

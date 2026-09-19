@@ -140,6 +140,34 @@ const transactionBaseProperties = {
    */
   fxRateSek: { type: ['string', 'null'] },
   fxSource: { type: ['string', 'null'] },
+  // #3127: the converted amount in the user's preferred currency, that
+  // currency named as a FIELD, and the rate it was struck at — additive to
+  // the SEK-named originals above, which stay on the wire unchanged. Struck
+  // from the same stored book-time capture as `amountSek` (the SEK columns,
+  // or the row's `fx_rates` map frozen at settlement), never a serve-time
+  // price read, so provenance stays auditable. Null follows the currency:
+  // SEK mirrors `amountSek`; USD/EUR additionally need a usable rate in the
+  // row's book-time rate map (pre-082 rows and price-outage rows yield
+  // null). Null is "not ready to convert", never another currency. The
+  // currency enum is the offered set (`PUT /user/preferences`), whose SEK
+  // entry is the no-preference default — the enum and the served currency
+  // agree since #3127.
+  convertedAmount: { type: ['string', 'null'] },
+  convertedCurrency: {
+    type: 'string',
+    enum: ['SEK', 'USD', 'EUR'],
+    description: 'The currency `convertedAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set. SEK mirrors `amountSek`; USD/EUR are struck from the row’s book-time rate map (`machine_payment_evidence.fx_rates`, migration 082) and are null when no rate was captured there.',
+  },
+  convertedFxRate: { type: ['string', 'null'] },
+  // #3127: the row's own stored book-time rate map (migration 082), carried
+  // for auditability — the same capture `convertedFxRate` names the one used
+  // rate out of. Keys are the settlement-time supported ledger currencies;
+  // null on pre-082 rows and raw transfers.
+  fxRates: {
+    type: ['object', 'null'],
+    additionalProperties: { type: 'number' },
+    description: 'Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row.',
+  },
   // #2870: accounting-feed state joined from the sync ledger by
   // `paymentId`. PRESENT only when the feed is available to the
   // account, the user has a provider connection, and a sync row exists
@@ -3111,7 +3139,7 @@ export const openapiSpec = {
         tags: ['Dashboard'],
         operationId: 'updateUserPreferences',
         summary: 'Set the display-currency preference.',
-        description: 'Display only — it changes no balance, no price and no settlement asset.',
+        description: 'Names the currency a transaction’s converted amount (`convertedAmount`) is struck in. Display only — it changes no balance, no price and no settlement asset.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -3120,7 +3148,12 @@ export const openapiSpec = {
               schema: {
                 type: 'object',
                 required: ['currency_preference'],
-                properties: { currency_preference: { type: 'string', enum: ['USD', 'EUR'] } },
+                // #3127: SEK joins the set — the served default had no way to
+                // be selected, so the enum and the served currency disagreed.
+                // Kept in lockstep with `domain/transaction-currency.ts`'s
+                // `TRANSACTION_CURRENCIES`, the same list the transaction
+                // path converts against.
+                properties: { currency_preference: { type: 'string', enum: ['SEK', 'USD', 'EUR'] } },
               },
             },
           },
@@ -4539,7 +4572,7 @@ export const openapiSpec = {
         operationId: 'getAnalyticsOverview',
         summary: 'One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.',
         description:
-          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one \"based on N payments\" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz`. Delegation-rail accounts only.",
+          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one \"based on N payments\" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. Delegation-rail accounts only.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           {
@@ -4552,8 +4585,9 @@ export const openapiSpec = {
           {
             name: 'currency',
             in: 'query',
-            schema: { type: 'string', enum: ['usd', 'eur'], default: 'usd' },
-            description: 'Display currency — a sum of already-booked values, never re-converted.',
+            schema: { type: 'string', enum: ['usd', 'eur', 'sek'], default: 'usd' },
+            description:
+              'Display currency — a sum of already-booked values, never re-converted. SEK reads the `sek_value` column booked beside usd/eur by the same confirm UPDATE (#3127); days snapshotted before that column existed carry no SEK figure in `balance_by_day` and are omitted rather than zeroed.',
           },
           {
             name: 'tz',
@@ -4582,7 +4616,7 @@ export const openapiSpec = {
                         previous_to: { type: 'string', format: 'date-time' },
                       },
                     },
-                    currency: { type: 'string', enum: ['usd', 'eur'] },
+                    currency: { type: 'string', enum: ['usd', 'eur', 'sek'] },
                     basis: {
                       type: 'object',
                       required: [
@@ -8796,6 +8830,7 @@ export const openapiSpec = {
           formatted: { type: 'string' },
           usdValue: { type: 'number', description: '0 when the price feed failed.' },
           eurValue: { type: 'number' },
+          sekValue: { type: 'number', description: 'Same one price read as usd/eur (#3127 round 2); 0 when the price feed failed.' },
         },
         additionalProperties: false,
       },
@@ -8805,6 +8840,7 @@ export const openapiSpec = {
         properties: {
           totalUsd: { type: 'number' },
           totalEur: { type: 'number' },
+          totalSek: { type: 'number' },
           breakdown: { type: 'array', items: { $ref: '#/components/schemas/PortfolioBreakdown' } },
         },
         additionalProperties: false,
@@ -8896,7 +8932,17 @@ export const openapiSpec = {
           totals: {
             type: 'object',
             required: ['usd', 'eur'],
-            properties: { usd: { type: 'number' }, eur: { type: 'number' } },
+            properties: {
+              usd: { type: 'number' },
+              eur: { type: 'number' },
+              // #3127 round 2: additive optional keys — the display path now
+              // prices the default currency (SEK) beside the historical pair.
+              // Optional, not required, so a pre-round-2 consumer reads the
+              // same response unchanged (same compatibility posture as the
+              // transaction feed's converted triple: additive, nothing to
+              // dual-emit).
+              sek: { type: 'number' },
+            },
             additionalProperties: false,
           },
           change: {
@@ -8906,8 +8952,10 @@ export const openapiSpec = {
               available: { type: 'boolean', description: 'true iff a yesterday snapshot existed to diff against.' },
               usdAmount: { type: 'number' },
               eurAmount: { type: 'number' },
+              sekAmount: { type: ['number', 'null'], description: 'Null when yesterday’s snapshot predates migration 090 (no SEK baseline stored) — the client reports the change as unavailable rather than reading a fabricated swing.' },
               usdPercent: { type: 'number', description: '0 when unavailable or the previous total was 0.' },
               eurPercent: { type: 'number' },
+              sekPercent: { type: 'number', description: '0 when the SEK baseline is missing or the previous total was 0.' },
             },
             additionalProperties: false,
           },
@@ -8918,6 +8966,7 @@ export const openapiSpec = {
               connectedAgents: { type: 'integer', description: "Agents with status 'active' only." },
               monthlyAgentSpendUsd: { type: 'number' },
               monthlyAgentSpendEur: { type: 'number' },
+              monthlyAgentSpendSek: { type: 'number' },
               successfulTransactions: { type: 'integer' },
               activeAccounts: { type: 'integer', description: 'All linked Safes, regardless of activity.' },
             },

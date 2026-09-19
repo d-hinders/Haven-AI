@@ -107,6 +107,7 @@ describe('dashboard routes', () => {
     portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
       totalUsd: 100,
       totalEur: 92,
+      totalSek: 920,
     })
     transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
@@ -356,7 +357,7 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
   afterAll(async () => app.close())
 
   it('a delegator_hybrid agent reports the active delegation, not the frozen mirror', async () => {
-    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({ totalUsd: 0, totalEur: 0 })
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({ totalUsd: 0, totalEur: 0, totalSek: 0 })
     transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
     mockQuery.mockImplementation((sql: string) => {

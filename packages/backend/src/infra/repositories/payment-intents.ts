@@ -536,7 +536,8 @@ export const CONFIRM_SUBMITTED_INTENT_SQL = `UPDATE payment_intents
              tx_hash = $1,
              confirmed_at = NOW(),
              usd_value = $3,
-             eur_value = $4
+             eur_value = $4,
+             sek_value = $6
          WHERE id = $2 AND agent_id = $5 AND status = 'submitted'
          RETURNING id`
 
@@ -548,6 +549,7 @@ export async function confirmSubmittedIntent(
     usdValue: number | string | null
     eurValue: number | string | null
     agentId: string
+    sekValue: number | string | null
   },
   db: Executor = pool,
 ): Promise<boolean> {
@@ -557,6 +559,7 @@ export async function confirmSubmittedIntent(
     input.usdValue,
     input.eurValue,
     input.agentId,
+    input.sekValue,
   ])
   return result.rows.length > 0
 }

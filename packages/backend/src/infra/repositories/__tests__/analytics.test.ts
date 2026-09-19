@@ -573,6 +573,7 @@ describeDb('analytics-overview repository (#2946)', () => {
       amountAtomic: '5000',
       usdValue: 1.5,
       eurValue: 1.4,
+      sekValue: 14.5,
       reason: 'delegation_budget_exceeded',
       source: 'x402_authorize',
     })
@@ -595,11 +596,11 @@ describeDb('analytics-overview repository (#2946)', () => {
 
     await recordPaymentRefusal({
       userId, accountId, agentId, chainId: 84532, tokenSymbol: 'USDC', amountAtomic: '1000',
-      usdValue: 1, eurValue: 0.9, reason: 'delegation_budget_exceeded', source: 'x402_authorize',
+      usdValue: 1, eurValue: 0.9, sekValue: 9.5, reason: 'delegation_budget_exceeded', source: 'x402_authorize',
     })
     await recordPaymentRefusal({
       userId, accountId, agentId, chainId: 84532, tokenSymbol: 'USDC', amountAtomic: '2000',
-      usdValue: 2, eurValue: 1.8, reason: 'relayer_budget', source: 'payment',
+      usdValue: 2, eurValue: 1.8, sekValue: 19, reason: 'relayer_budget', source: 'payment',
     })
 
     // Padded upper bound: the two refusals above land at `NOW()` (DB clock,
@@ -626,7 +627,7 @@ describeDb('analytics-overview repository (#2946)', () => {
     const instant = '2030-06-01T22:30:00Z'
     await recordPaymentRefusal({
       userId, accountId, agentId, chainId: 84532, tokenSymbol: 'USDC', amountAtomic: '1000',
-      usdValue: 1, eurValue: 0.9, reason: 'delegation_budget_exceeded', source: 'x402_authorize',
+      usdValue: 1, eurValue: 0.9, sekValue: 9.5, reason: 'delegation_budget_exceeded', source: 'x402_authorize',
     })
     await db.query(
       `UPDATE payment_refusals SET created_at = $1 WHERE user_id = $2`,
@@ -763,6 +764,7 @@ describeDb('analytics-overview repository (#2946)', () => {
       amountAtomic: '9999',
       usdValue: 77,
       eurValue: 66,
+      sekValue: 770,
       reason: 'delegation_budget_exceeded',
       source: 'x402_authorize',
     })

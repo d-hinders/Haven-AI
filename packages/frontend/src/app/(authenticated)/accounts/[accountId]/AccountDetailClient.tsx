@@ -45,8 +45,8 @@ import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
-function formatFiatValue(value: number, currency: 'USD' | 'EUR'): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
+function formatFiatValue(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
+  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US', {
     style: 'currency',
     currency,
     minimumFractionDigits: 2,
@@ -125,6 +125,7 @@ export default function AccountDetailClient() {
   const {
     totalUsd,
     totalEur,
+    totalSek,
     breakdown,
     loading: portfolioLoading,
     error: portfolioError,
@@ -147,7 +148,10 @@ export default function AccountDetailClient() {
     refresh: refetchTx,
   } = useTransactionsFeed({ accountId }, 10)
 
-  const totalFiat = currency === 'EUR' ? totalEur : totalUsd
+  // SEK (#3127): the portfolio hook now exposes the wire's `totalSek`, so the
+  // headline and per-token rows read the SEK figures the endpoint prices —
+  // never a USD value relabelled "kr".
+  const totalFiat = currency === 'EUR' ? totalEur : currency === 'SEK' ? totalSek : totalUsd
   const chain = getChainConfig(chainId)
   const formattedTotal = formatFiatValue(totalFiat, currency)
   const balanceUnavailable = Boolean(portfolioError || balancesError)
@@ -388,7 +392,7 @@ export default function AccountDetailClient() {
                 </span>
               </div>
               {breakdown.map((item) => {
-                const fiatValue = currency === 'EUR' ? item.eurValue : item.usdValue
+                const fiatValue = currency === 'EUR' ? item.eurValue : currency === 'SEK' ? item.sekValue : item.usdValue
                 return (
                   <div
                     key={item.symbol}
@@ -399,7 +403,7 @@ export default function AccountDetailClient() {
                       {item.formatted}
                     </span>
                     <span className="text-sm text-[var(--v2-ink)] text-right v2-tabular">
-                      {formatFiatValue(fiatValue, currency)}
+                      {formatFiatValue(fiatValue ?? 0, currency)}
                     </span>
                   </div>
                 )

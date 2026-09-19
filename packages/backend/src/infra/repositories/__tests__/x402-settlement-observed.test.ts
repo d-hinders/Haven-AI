@@ -105,6 +105,7 @@ const confirm = (
     agentId,
     usdValue: 0.1,
     eurValue: 0.09,
+    sekValue: 0.95,
     windowSeconds: WINDOW_SECONDS,
     delegationBound,
   })

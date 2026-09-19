@@ -87,6 +87,7 @@ export default function SettingsClient() {
                 options={[
                   { value: 'USD', label: '$ USD' },
                   { value: 'EUR', label: '€ EUR' },
+                  { value: 'SEK', label: 'kr SEK' },
                 ]}
               />
             )}

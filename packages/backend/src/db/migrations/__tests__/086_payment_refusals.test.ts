@@ -24,7 +24,9 @@ import db from '../../../db.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb, withMigrationReverted } from '../../../infra/__tests__/helpers/db-harness.js'
 import { DELETE_USER_ACCOUNT_SQL, ORPHAN_AGENTS_FOR_ACCOUNT_SQL } from '../../../infra/repositories/smart-accounts.js'
 import { recordPaymentRefusal } from '../../../infra/repositories/payment-refusals.js'
-import { up, down, version } from '../086_payment_refusals.js'
+import { down, up, version } from '../086_payment_refusals.js'
+import { down as down087, up as up087 } from '../087_payment_refusals_source_hosted.js'
+import { down as down090, up as up090 } from '../090_display_currency_sek.js'
 
 async function constraintExists(table: string, conname: string): Promise<boolean> {
   const { rows } = await db.query<{ exists: boolean }>(
@@ -154,6 +156,7 @@ describeDb('migration 086: payment_refusals ledger (#2945)', () => {
       amountAtomic: '10000',
       usdValue: null,
       eurValue: null,
+      sekValue: null,
       reason: 'onchain_revert',
       source: 'x402_authorize',
     })
@@ -318,11 +321,22 @@ describeDb('migration 086: payment_refusals ledger (#2945)', () => {
       await insertRefusal({ user_id: userId })
 
       await withMigrationReverted(
-        () => down(client),
+        // Later migrations touching payment_refusals ride along, newest-first
+        // (same sandwich as 073/084): 090's sek_value column and 087's source
+        // widen would otherwise survive 086's table drop/recreate as drift.
+        async () => {
+          await down090(client)
+          await down087(client)
+          await down(client)
+        },
         async () => {
           await expect(db.query(`SELECT 1 FROM payment_refusals LIMIT 1`)).rejects.toMatchObject({ code: '42P01' })
         },
-        () => up(client),
+        async () => {
+          await up(client)
+          await up087(client)
+          await up090(client)
+        },
       )
 
       // The seeded row is gone with the table (down() dropped it); a fresh
@@ -336,12 +350,24 @@ describeDb('migration 086: payment_refusals ledger (#2945)', () => {
   it('down() then up() round-trips back to the exact head shape (no drift)', async () => {
     const client = await db.connect()
     try {
-      await down(client)
-      await up(client)
-      expect(await constraintExists('payment_refusals', 'payment_refusals_account_id_fkey')).toBe(true)
-      const def = await constraintDef('payment_refusals', 'payment_refusals_reason_check')
-      expect(def).toContain('delegation_budget_exceeded')
-      expect(def).not.toContain('recipient_not_allowed')
+      await withMigrationReverted(
+        async () => {
+          await down090(client)
+          await down087(client)
+        },
+        async () => {
+          await down(client)
+          await up(client)
+          expect(await constraintExists('payment_refusals', 'payment_refusals_account_id_fkey')).toBe(true)
+          const def = await constraintDef('payment_refusals', 'payment_refusals_reason_check')
+          expect(def).toContain('delegation_budget_exceeded')
+          expect(def).not.toContain('recipient_not_allowed')
+        },
+        async () => {
+          await up087(client)
+          await up090(client)
+        },
+      )
     } finally {
       client.release()
     }

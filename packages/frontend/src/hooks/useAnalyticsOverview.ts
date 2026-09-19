@@ -5,8 +5,8 @@ import { api } from '@/lib/api'
 import { browserTimeZone } from '@/lib/analytics-range'
 import type { AnalyticsOverviewResponse, AnalyticsRangeValue } from '@/types/analytics'
 
-/** The display currency the Settings preference stores, lower-cased for the wire. */
-export type AnalyticsCurrencyParam = 'usd' | 'eur'
+/** The display currency the Settings surface stores, lower-cased for the wire. */
+export type AnalyticsCurrencyParam = 'usd' | 'eur' | 'sek'
 
 export type UseAnalyticsOverviewResult = {
   data: AnalyticsOverviewResponse | null

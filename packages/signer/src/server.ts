@@ -7,7 +7,7 @@ import {
   registeredSignerToolNames,
   type SignerConsentDecision,
 } from './consent.js'
-import { isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk'
+import { isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk/edge'
 import { createEdgeSigner, type EdgeSigner } from './core.js'
 import { loadSignerCredentials, type SignerCredentials } from './credentials.js'
 import {
@@ -190,10 +190,14 @@ export async function runSignerStdioServer(options: SignerOptions = {}): Promise
   if (!options.skipConsent) {
     const decision = await runSignerConsentGate(signer, credentials, options)
     if (!decision.ok) {
+      // #3173: an MCP host shows only this message (and "Connection closed");
+      // the consent block above went to stderr. Name the connector's doctor,
+      // which diagnoses exactly this state, so the operator has a next step.
       const err: NodeJS.ErrnoException = new Error(
-        decision.reason === 'env_var_mismatch'
+        (decision.reason === 'env_var_mismatch'
           ? 'Haven edge signer consent acknowledgement does not match the current configuration.'
-          : 'Haven edge signer requires a one-time consent acknowledgement before starting.',
+          : 'Haven edge signer requires a one-time consent acknowledgement before starting.') +
+          ' See the consent block above; if the Haven connector wired this signer, run: npx @haven_ai/connect --doctor',
       )
       err.code = 'HAVEN_SIGNER_NO_CONSENT'
       throw err

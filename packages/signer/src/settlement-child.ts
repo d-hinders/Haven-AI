@@ -47,7 +47,7 @@
  * is the correct outcome and is pinned by a test.
  */
 
-import { HavenSigningError } from '@haven_ai/sdk'
+import { HavenSigningError } from '@haven_ai/sdk/edge'
 
 /** DelegationManager, the EIP-712 `verifyingContract` for a delegation. */
 export const DELEGATION_MANAGER = '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3'

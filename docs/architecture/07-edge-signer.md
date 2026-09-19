@@ -353,6 +353,13 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
   resulting binding is process-local and is consumed after one successful
   merchant header. The fresh `payment_required` must match the authenticated
   funding-intent amount, merchant, resource URL, asset, and network.
+- Startup (#3173): the signer imports `@haven_ai/sdk/edge`, never the SDK
+  barrel, and loads `x402/schemes` only on the merchant-header leg, so no
+  `ethers` or `x402` module resolves at startup (measured: `--help` 1.47 s →
+  0.71 s, consent refusal 1.55 s → 0.77 s). Unknown CLI options are refused
+  (exit 2, naming `--help`); `--help` lists every registered tool; the consent
+  block summarises each tool in one line and, like the no-consent exit message,
+  names `npx @haven_ai/connect --doctor` for the connector-wired case.
 - Local secret handling mirrors `@haven_ai/mcp`: key from `HAVEN_DELEGATE_KEY`
   or a credential file selected by `--credentials` / `HAVEN_CREDENTIALS`, with
   a permissive-file warning.

@@ -105,7 +105,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     // settled-nothing guarantee), verified against mcp-merchant-transport.ts
     // deliverPaymentRecoveringSession and its two callers. Nothing else in
     // the README re-verified in this pass.
-    'last-verified': '2026-09-19',
+    // #3173: § Install gained the two-entry paragraph (`@haven_ai/sdk/edge`),
+    // verified against package.json exports, tsup.config.ts and edge.ts.
+    'last-verified': '2026-09-20',
   },
   {
     doc: 'packages/signer/README.md',
@@ -181,7 +183,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // 32-byte hash on the schema, a failed audit write never fails a produced
     // signature) against audit.ts, file-mode.ts and tools.ts.
     // Nothing else in the README re-verified in this pass.
-    'last-verified': '2026-09-19',
+    // #3173: new § "Startup, CLI options and the consent screen" verified
+    // against cli-args.ts, consent.ts, server.ts, core.ts (lazy x402) and the
+    // measured numbers in the PR; nothing else re-verified.
+    'last-verified': '2026-09-20',
   },
   {
     doc: 'packages/mcp/README.md',

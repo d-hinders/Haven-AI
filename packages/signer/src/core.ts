@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { hashMessage, hashTypedData, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { exact } from 'x402/schemes'
 import {
   chainIdForNetwork,
   isSettlementChildTypedData,
@@ -33,7 +32,7 @@ import {
   type X402ExpectedAuth,
   type X402PaymentRequired,
   type X402PaymentOption,
-} from '@haven_ai/sdk'
+} from '@haven_ai/sdk/edge'
 
 /**
  * The edge signer core.
@@ -374,6 +373,10 @@ export function createEdgeSigner(
 
       const account = privateKeyToAccount(delegateKey as `0x${string}`)
       const requirements = toStandardPaymentRequirements(paymentRequired, option)
+      // #3173: `x402/schemes` costs ~750 ms of module init on top of viem and
+      // is needed only here, on the merchant-header leg — never at startup,
+      // never for `haven_sign`'s typed-data path. Loaded on first use.
+      const { exact } = await import('x402/schemes')
       const header = await exact.evm.createPaymentHeader(
         account,
         paymentRequired.x402Version,

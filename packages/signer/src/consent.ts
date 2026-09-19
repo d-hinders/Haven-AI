@@ -1,7 +1,28 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { toolDescriptions, toolSchemas, type SignerToolName } from './tools.js'
+import { toolSchemas, type SignerToolName } from './tools.js'
+
+/**
+ * #3173: one human-sized line per tool for the consent block. The full
+ * `toolDescriptions` are LLM-addressed operating instructions (~4.5 KB across
+ * the four) and were rendered verbatim into what is a person's one-time
+ * approval screen. These summarise WHAT each tool signs; the descriptions stay
+ * the agent's. Not part of the consent hash (which covers tool NAMES), so
+ * editing a summary never re-prompts anyone. `consent.test.ts` pins that every
+ * registered tool has one.
+ */
+export const toolSummaries: Record<SignerToolName, string> = {
+  haven_sign: 'signs one Haven-prepared payment (typed data, or the x402 funding hash against a Haven-signed context)',
+  haven_x402_sign_header: 'builds and signs the EIP-3009 merchant payment header for an x402 payment',
+  haven_sign_x402: 'the two above in one call: funding hash + merchant header',
+  haven_sign_sweep_delegate: 'signs a Haven-prepared gasless sweep of stranded funds back to your own account',
+}
+
+/** #3173: what an operator who was wired by the connector should run when this signer refuses. */
+export const CONNECTOR_DOCTOR_HINT =
+  'Wired by the Haven connector (Claude Desktop, Codex, ...)? Diagnose and repair with: npx @haven_ai/connect --doctor\n' +
+  '  (this state shows there as local_signer_ack_required; the repair is the connector\'s --ack-local-tools).'
 
 export interface SignerConsentInput {
   delegateAddress: string
@@ -84,10 +105,10 @@ export function renderSignerConsentBlock(input: SignerConsentInput, hash: string
   lines.push('On-chain Safe rules remain the real spend gate, and the wallet owner can')
   lines.push('pause or revoke agent authority outside this signer.')
   lines.push('')
-  lines.push('Tools this signer will expose to your agent runtime:')
+  lines.push('Tools this signer will expose to your agent runtime (one line each; the')
+  lines.push('full agent-facing descriptions are what the runtime sees):')
   for (const name of input.toolNames) {
-    lines.push(`  - ${name}`)
-    lines.push(`      ${toolDescriptions[name]}`)
+    lines.push(`  - ${name}: ${toolSummaries[name]}`)
   }
   lines.push('')
   lines.push('A local audit entry is appended for every signing operation. Audit entries')
@@ -100,6 +121,8 @@ export function renderSignerConsentBlock(input: SignerConsentInput, hash: string
   lines.push(`  - set ${SIGNER_ACK_ENV}=${hash} in this process's environment, OR`)
   lines.push('  - re-run with --ack to write the acknowledgement next to your')
   lines.push('    credential file (sidecar <credentials>.signer-ack.json).')
+  lines.push('')
+  lines.push(CONNECTOR_DOCTOR_HINT)
   lines.push('')
   lines.push('------------------------------------------------------------')
   lines.push('')

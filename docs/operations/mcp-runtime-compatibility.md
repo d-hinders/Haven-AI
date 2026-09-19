@@ -189,6 +189,21 @@ last-verified: "2026-09-19"
 > re-stamped: it already reads 2026-09-19. Nothing else in this document was
 > re-verified in this pass.
 >
+> **Recent re-verification (#3173):** the edge signer now imports
+> `@haven_ai/sdk/edge` (a new, ethers-free SDK entry) instead of the barrel and
+> lazy-loads `x402/schemes`; its CLI refuses unknown options and its consent
+> block/refusal name the connector doctor. No tool added, renamed or re-shaped
+> on either runtime — arguments, schemas, descriptions and the registered
+> tool-name set are untouched — so the consent hash and the version-skew
+> contract do not move. One NEW coupling to state: a signer at or above this
+> version resolves `@haven_ai/sdk/edge`, which does not exist on an SDK below
+> this version; the signer pins its SDK exactly (`release-bump.mjs` re-pins),
+> and the connector installs the pinned pair, so a mixed pair cannot arise
+> through the supported install path — a hand-installed older SDK beside a new
+> signer fails at import with a clear module-not-found, before any key is read.
+> `last-verified` is not re-stamped: this block is the scope. Nothing else in
+> this document was re-verified in this pass.
+>
 > **Recent re-verification (#3172):** the edge signer's audit sidecar is now
 > created owner-only, tightened in place when found permissive, and rotated at
 > 8 MiB; and `payload_hash` / `typed_data_hash` are bounded on the tool

@@ -9,7 +9,10 @@ import {
   renderSignerConsentBlock,
   SIGNER_ACK_ENV,
   type SignerConsentInput,
+  registeredSignerToolNames,
+  toolSummaries,
 } from './consent.js'
+import { toolDescriptions } from './tools.js'
 
 function captureWriter() {
   const chunks: string[] = []
@@ -67,6 +70,30 @@ describe('signer consent gate', () => {
     expect(block).toContain('cannot show a live allowance summary')
     expect(block).toContain('haven_sign')
     expect(block).toContain(`${SIGNER_ACK_ENV}=${hash}`)
+  })
+
+  it('#3173: summarises every registered tool in one line each — never the agent-facing description — and names the connector doctor', () => {
+    const names = registeredSignerToolNames()
+    const block = renderSignerConsentBlock({ ...input, toolNames: names }, computeSignerConsentHash({ ...input, toolNames: names }))
+    for (const name of names) {
+      expect(toolSummaries[name]).toBeTruthy()
+      expect(toolSummaries[name]).not.toContain('\n')
+      expect(block).toContain(`  - ${name}: ${toolSummaries[name]}`)
+      // The full description is LLM prose; its distinctive clauses must not be in the human block.
+      expect(block).not.toContain(toolDescriptions[name].slice(0, 60))
+    }
+    expect(block.length).toBeLessThan(2500)
+    expect(block).toContain('npx @haven_ai/connect --doctor')
+    expect(block).toContain('local_signer_ack_required')
+    expect(block).toContain('--ack-local-tools')
+  })
+
+  it('#3173: the summaries and the doctor hint are outside the consent hash', () => {
+    // Hash covers identity + tool NAMES + surface version — asserted by
+    // recomputing after the block changes shape (the block is not an input).
+    const hash = computeSignerConsentHash(input)
+    expect(renderSignerConsentBlock(input, hash)).toContain(`Consent hash: ${hash}`)
+    expect(computeSignerConsentHash(input)).toBe(hash)
   })
 
   it('makes missing wallet metadata explicit', () => {

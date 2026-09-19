@@ -102,6 +102,39 @@ verifies something before it signs, and `haven_sign` called with a bare
 `payload_hash` answers `BARE_HASH_REFUSED` with a typed next step instead of a
 signature.
 
+## Startup, CLI options and the consent screen (#3173)
+
+**Startup cost.** The signer loads `@haven_ai/sdk/edge` — the ethers-free
+subset of the SDK it actually calls (error classes, typed-next-step builder,
+x402 message builders, viem-based key helpers) — never the SDK barrel, and it
+loads the `x402` package only on the merchant-header leg, on first use. Measured
+on the same machine (median of 5 cold runs, macOS, Node 22): `--help` 1.47 s →
+0.71 s; the consent refusal 1.55 s → 0.77 s; `import('@haven_ai/sdk')` 1135 ms
+versus `import('@haven_ai/sdk/edge')` 385 ms, of which viem is ~330 ms and stays
+(the signer signs typed data with it). A loader hook resolving every module at
+startup finds zero packages named `ethers` or `x402` (the SDK barrel, as a
+positive control, resolves two). Two tests keep it so: `sdk-edge-import.test.ts`
+fails if any runtime file imports the barrel or `x402/schemes` statically, and
+the SDK's `edge-imports.test.ts` fails if the subpath's import graph ever
+reaches ethers, `x402` or the HTTP client.
+
+**CLI.** `--credentials <path>`, `--ack`, `--help`/`-h`. Any other option is
+refused with one stderr line naming `--help` and exit code 2 — before #3173 an
+unknown flag was silently ignored, so `--ack-local-tools` (the connector's
+flag, which the connector's doctor tells you to pass to the *connector*)
+produced only the consent wall. `--help` lists every registered tool (pinned
+against `toolSchemas`, so a fifth tool cannot drift out of the text) and names
+`npx @haven_ai/connect --doctor`.
+
+**Consent screen.** The first-launch block summarises each tool in one
+human-sized line (the full agent-facing descriptions are what the runtime sees,
+not what a person approves) and ends by naming the connector's doctor for the
+connector-wired case, where this state shows as `local_signer_ack_required` and
+the repair is the connector's `--ack-local-tools`. The refusal an MCP host
+relays ("Connection closed" plus this process's exit message) names the same
+command. The consent hash covers identity, tool names and the surface version —
+not the block's prose — so neither change re-prompts an acknowledged install.
+
 ## Orchestration
 
 Direct payment:

@@ -7,7 +7,7 @@ import {
   HavenUnsupportedSignerVersionError,
   connectorRerunCommand,
   type X402PaymentRequired,
-} from '@haven_ai/sdk'
+} from '@haven_ai/sdk/edge'
 import { z } from 'zod/v3'
 import { isSettlementChildTypedData } from './settlement-child.js'
 import { HavenBareHashRefusedError } from './bare-hash.js'

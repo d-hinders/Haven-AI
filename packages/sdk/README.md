@@ -21,6 +21,12 @@ and managing the account from the shell with `@haven_ai/cli`.
 npm install @haven_ai/sdk@alpha
 ```
 
+The package has two entries. `@haven_ai/sdk` is the full client. `@haven_ai/sdk/edge`
+(#3173) is the ethers-free subset the local signer imports — error classes, the
+typed-next-step builder, the x402 message builders, viem-based key helpers — and
+loads in about a third of the time; use it when you need those helpers without
+the HTTP client. A class imported from either entry is the same class.
+
 ## Quick Start
 
 ```typescript

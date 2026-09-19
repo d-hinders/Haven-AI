@@ -28,6 +28,7 @@ covers:
   - packages/backend/src/domain/agent-payment-taxonomy.ts
   - packages/backend/src/modules/transactions/csv-export.ts
   - packages/sdk/src/types.ts
+  - packages/sdk/src/x402.ts
   - packages/sdk/src/tool-descriptions.ts
   - packages/sdk/src/next-step.ts
   - packages/mcp-server/src/server.ts

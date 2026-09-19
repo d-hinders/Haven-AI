@@ -23,6 +23,16 @@ describe('stored erc7710 accepted requirements', () => {
     const server = new x402ResourceServer()
     expect(server.findMatchingRequirements([option as PaymentRequirements], decoded)).toEqual(option)
   })
+  it('matches canonical intent amounts while echoing the original decimal spelling', () => {
+    const advertised = { ...option, amount: '001000' }
+    const selected = selectStoredAccepted({ accepts: [advertised] }, option.network, trusted)
+    const decoded = JSON.parse(Buffer.from(encodeXPaymentHeader(option.network, payload, trusted, { accepted: selected }), 'base64').toString())
+    expect(decoded.accepted.amount).toBe('001000')
+    expect(new x402ResourceServer().findMatchingRequirements([advertised as PaymentRequirements], decoded)).toEqual(advertised)
+  })
+  it.each(['1e3', '0x3e8', '-1000', '1000.0', '', '0'])('refuses a non-positive-decimal amount %s', amount => {
+    expect(() => selectStoredAccepted({ accepts: [{ ...option, amount }] }, option.network, trusted)).toThrow()
+  })
   it.each([
     { amount: '999' }, { payTo: `0x${'bb'.repeat(20)}` }, { asset: `0x${'bb'.repeat(20)}` },
     { network: 'eip155:8453' }, { scheme: 'other' }, { maxTimeoutSeconds: 301 },

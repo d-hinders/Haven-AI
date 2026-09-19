@@ -240,10 +240,14 @@ export function selectStoredAccepted(
     const extra = option.extra as Record<string, unknown> | undefined
     const sameAddress = (value: unknown, expected: string) =>
       typeof value === 'string' && value.toLowerCase() === expected.toLowerCase()
+    // The intent stores a canonical bigint string; retain the merchant's
+    // original decimal spelling in the echo after comparing its value.
+    const sameAmount = typeof option.amount === 'string' && /^[0-9]+$/.test(option.amount) &&
+      BigInt(option.amount) > 0n && BigInt(option.amount) === BigInt(trusted.amount)
     const facilitators = extra?.facilitatorAddresses ?? []
     const pins = trusted.facilitatorAddresses ?? []
     return option.scheme === 'exact' && option.network === network &&
-      option.amount === trusted.amount && sameAddress(option.payTo, trusted.payTo) &&
+      sameAmount && sameAddress(option.payTo, trusted.payTo) &&
       sameAddress(option.asset, trusted.asset) && option.maxTimeoutSeconds === trusted.maxTimeoutSeconds &&
       extra?.assetTransferMethod === 'erc7710' && Array.isArray(facilitators) &&
       facilitators.length === pins.length && facilitators.every((value, i) => sameAddress(value, pins[i]))

@@ -1,4 +1,10 @@
 import {
+  BaseError,
+  ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  HttpRequestError,
+  InsufficientFundsError,
+  TimeoutError,
   createPublicClient,
   createWalletClient,
   decodeAbiParameters,
@@ -841,7 +847,46 @@ export function createX402PaymentProcessor(
       payTo: getAddress(params.merchantAddress),
       nonce: contextHash,
       settlementMethod: ERC7710_TRANSFER_METHOD,
-      submit: () => erc7710Client.submitRedeemDelegations(redeemCall),
+      // #3170: explain a submit-time revert the way the EIP-3009 rail explains
+      // its pre-submit failures (#1519). `writeContract` raises viem's
+      // `ContractFunctionExecutionError` on a revert, which is not a
+      // `PaymentError`, so `handlePaymentGate` reported every such revert as a
+      // merchant-side FAULT — "this merchant is broken" — when the likeliest
+      // causes are facts about the PAYER: the settlement child's exact-amount
+      // caveat exhausted, the delegator's account short of the price, the
+      // child redeemed elsewhere between simulate and submit. The chain-truth
+      // check runs first (the money may already have moved: #1515's
+      // already-settled decision, served rather than refused); a genuine RPC
+      // or gas fault keeps its fault classification (#2979's reason codes).
+      submit: async () => {
+        try {
+          return await erc7710Client.submitRedeemDelegations(redeemCall)
+        } catch (err) {
+          if (
+            await erc7710AlreadyRedeemed(
+              erc7710Client,
+              options.erc7710?.erc20TransferAmountEnforcer,
+              payment,
+              params.expectedAmount,
+            )
+          ) {
+            throw new AuthorizationAlreadyUsedError(
+              `ERC-7710 settlement child ${contextHash} was already redeemed on-chain for ` +
+                `${payment.delegator}. This purchase already settled — do not resubmit it.`,
+            )
+          }
+          if (isContractRevert(err)) {
+            throw new PaymentError(
+              `ERC-7710 delegation redemption reverted at submit: ${revertReason(err)}. This is a ` +
+                `fact about the payer's delegation, not about this merchant: the settlement child's ` +
+                `transfer-amount caveat is exhausted, the delegator ${payment.delegator} holds less ` +
+                `than the price, or the child was redeemed elsewhere. Nothing settled here — re-quote ` +
+                `and pay with a fresh authorization.`,
+            )
+          }
+          throw err
+        }
+      },
     }
     try {
       await erc7710Client.simulateRedeemDelegations(redeemCall)
@@ -1487,6 +1532,40 @@ function parseBigIntField(value: string, field: string): bigint {
   } catch {
     throw new PaymentError(`Invalid payment authorization field: ${field}`)
   }
+}
+
+/**
+ * #3170: is this failure the CHAIN refusing the transaction (a revert — a fact
+ * about the payer's delegation or balance), as opposed to the merchant failing
+ * to reach or pay for the chain (an RPC or gas fault)? viem wraps a revert in
+ * `ContractFunctionExecutionError` with `ContractFunctionRevertedError` (or the
+ * enforcer's revert string) in the cause chain; a custom client may throw a
+ * plain `Error` whose message names the revert or the enforcer. Gas and RPC
+ * failures are excluded first so they keep #2979's fault reason codes.
+ */
+export function isContractRevert(err: unknown): boolean {
+  if (err instanceof BaseError) {
+    if (err.walk((e) => e instanceof InsufficientFundsError || e instanceof HttpRequestError || e instanceof TimeoutError)) {
+      return false
+    }
+    if (err.walk((e) => e instanceof ContractFunctionRevertedError)) return true
+    if (err instanceof ContractFunctionExecutionError) return true
+  }
+  const haystack = `${err instanceof Error ? err.name : ''} ${err instanceof Error ? err.message : String(err)}`.toLowerCase()
+  if (haystack.includes('insufficient funds') || haystack.includes('fetch failed') || haystack.includes('econnrefused') || haystack.includes('timeout')) {
+    return false
+  }
+  return /revert|enforcer|allowance-exceeded/.test(haystack)
+}
+
+/** The revert's own words, short enough for a 402 body. */
+function revertReason(err: unknown): string {
+  if (err instanceof BaseError) {
+    const reverted = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null
+    const reason = reverted?.reason ?? reverted?.shortMessage ?? err.shortMessage
+    if (reason) return reason.slice(0, 200)
+  }
+  return (err instanceof Error ? err.message : String(err)).slice(0, 200)
 }
 
 function sameAddress(a: string, b: string): boolean {

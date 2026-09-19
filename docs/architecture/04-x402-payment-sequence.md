@@ -625,6 +625,12 @@ then names HTTP 200, which is the status the merchant really returned. The
 hosted quote (`haven_pay_mcp_tool`, `haven_quote_mcp_tool`) accepts the
 profile's tool-result challenge through the same `quoteMcpX402` path, and the
 settle leg delivers the payment in both the header and `params._meta`.
+Since #3170 the demo merchant explains an erc7710 redemption that reverts at
+submit as a payer-side decision (the child's caveat exhausted, the delegator
+short, or the child redeemed elsewhere — after first asking the chain whether
+the money already moved, #1515) instead of a `merchant_fault`, so the
+`MERCHANT_REJECTED_AFTER_FUNDING` message the agent sees carries the cause and
+the next action rather than "see merchant logs".
 
 ## Guided Catalog Purchase Preflight (#1306)
 

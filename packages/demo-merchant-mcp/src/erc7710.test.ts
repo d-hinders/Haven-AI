@@ -1,6 +1,6 @@
 import type { Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { encodeAbiParameters, keccak256, type Address, type Hex } from 'viem'
+import { BaseError, ContractFunctionRevertedError, TimeoutError, encodeAbiParameters, keccak256, type Address, type Hex } from 'viem'
 import { DelegationManager as DELEGATION_MANAGER_PACKAGE_ABI, ERC20TransferAmountEnforcer } from '@metamask/delegation-abis'
 import { encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
@@ -14,6 +14,7 @@ import {
   createX402PaymentProcessor,
   decodeLeafDelegation,
   decodeTransferAmountCap,
+  isContractRevert,
   type Erc7710SettlementClient,
   type SettlementClient,
   type X402PaymentProcessorOptions,
@@ -564,6 +565,75 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
     expect(rejected.status).toBe(402)
     expect(body.error).toContain('simulation failed')
     expect(client.submitRedeemDelegations).not.toHaveBeenCalled()
+  })
+
+  // #3170: a revert at SUBMIT (simulation passed moments earlier) used to be
+  // reported as a merchant-side FAULT — "this merchant is broken" — the exact
+  // `x402-erc7710-hosted` failure of the 2026-09-19 qa-dev run. The likeliest
+  // causes are facts about the payer, and the chain may even say the money
+  // already moved. Mirrors #1519 on the EIP-3009 rail.
+  describe('a revert at submit is explained, not reported as a merchant fault (#3170)', () => {
+    function submitRevertingClient(params: { spent: bigint | null; error: Error }): Erc7710SettlementClient {
+      const client = restartedClient({ spent: params.spent })
+      vi.mocked(client.simulateRedeemDelegations).mockResolvedValue(undefined)
+      vi.mocked(client.submitRedeemDelegations).mockRejectedValue(params.error)
+      return client
+    }
+
+    it('an unredeemed child whose submit reverts is REFUSED as a payer-side decision, with the next action, not as merchant_fault', async () => {
+      const client = submitRevertingClient({ spent: 0n, error: new Error('ERC20TransferAmountEnforcer: allowance-exceeded') })
+      const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
+      const unpaid = await postBuyVpn(url)
+      const paymentRequired = await unpaid.json() as PaymentRequired
+      const rejected = await postBuyVpn(url, { [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, { permissionContext: realPermissionContext() }) }, 2)
+      const body = await rejected.json() as PaymentRequired & { reason_code?: string }
+      expect(rejected.status).toBe(402)
+      expect(body.error).toContain('reverted at submit')
+      expect(body.error).toContain('allowance-exceeded')
+      expect(body.error).toContain('fact about the payer')
+      expect(body.error).toContain('re-quote')
+      expect(body.error).not.toContain('merchant-side fault')
+      expect(body.reason_code).toBeUndefined()
+      expect(client.submitRedeemDelegations).toHaveBeenCalledTimes(1)
+    })
+
+    it('a submit revert whose chain state says the child already moved the money is SERVED as already settled', async () => {
+      const client = submitRevertingClient({ spent: PRICE, error: new Error('ERC20TransferAmountEnforcer: allowance-exceeded') })
+      const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
+      const unpaid = await postBuyVpn(url)
+      const paymentRequired = await unpaid.json() as PaymentRequired
+      const served = await postBuyVpn(url, { [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, { permissionContext: realPermissionContext() }) }, 2)
+      const text = await served.text()
+      expect(served.status).toBe(200)
+      expect(text).toContain('"status":"already_settled_earlier"')
+      expect(client.submitRedeemDelegations).toHaveBeenCalledTimes(1)
+      expect(client.spentOnDelegation).toHaveBeenCalledWith(ENFORCER, DELEGATION_MANAGER, LEAF_HASH)
+    })
+
+    it('an RPC failure at submit is still a merchant FAULT with its #2979 reason code — the classifier does not eat it', async () => {
+      const rpc = new Error('fetch failed')
+      rpc.name = 'HttpRequestError'
+      const client = submitRevertingClient({ spent: 0n, error: rpc })
+      const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
+      const unpaid = await postBuyVpn(url)
+      const paymentRequired = await unpaid.json() as PaymentRequired
+      const rejected = await postBuyVpn(url, { [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, { permissionContext: realPermissionContext() }) }, 2)
+      const body = await rejected.json() as PaymentRequired & { reason_code?: string }
+      expect(rejected.status).toBe(402)
+      expect(body.error).toContain('merchant-side fault')
+      expect(body.reason_code).toBe('settlement_rpc_unreachable')
+    })
+
+    it('isContractRevert: viem reverts and enforcer strings are reverts; gas, RPC and timeouts are not', () => {
+      const reverted = new ContractFunctionRevertedError({ abi: [], functionName: 'redeemDelegations', message: 'execution reverted' })
+      expect(isContractRevert(new BaseError('call failed', { cause: reverted }))).toBe(true)
+      expect(isContractRevert(new Error('ERC20TransferAmountEnforcer: allowance-exceeded'))).toBe(true)
+      expect(isContractRevert(new Error('execution reverted: AllowedTargetsEnforcer'))).toBe(true)
+      expect(isContractRevert(new BaseError('call failed', { cause: new TimeoutError({ body: {}, url: 'https://rpc.example' }) }))).toBe(false)
+      expect(isContractRevert(new Error('insufficient funds for gas * price + value'))).toBe(false)
+      expect(isContractRevert(new Error('fetch failed'))).toBe(false)
+      expect(isContractRevert(new Error('something else entirely'))).toBe(false)
+    })
   })
 
   it('SECURITY: a forged caveat enforcer is NOT trusted — no free goods from an attacker oracle', async () => {

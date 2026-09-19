@@ -257,6 +257,17 @@ carries a `reason_code` additively — `settlement_wallet_out_of_gas`,
 `settlement_rpc_unreachable`, or `merchant_fault` — so a client can branch on
 it without parsing the message prose. The message text itself is unchanged.
 
+Since #3170 an ERC-7710 redemption that REVERTS at submit (the simulation
+passed moments earlier) is no longer one of those faults: the merchant first
+asks the chain whether the settlement child already moved the money (the #1515
+already-settled decision, served) and otherwise refuses it as a payer-side
+DECISION — a 402 whose `error` names the revert and the likely causes (the
+child's transfer-amount caveat exhausted, the delegator short of the price, the
+child redeemed elsewhere) and the next action (re-quote, pay with a fresh
+authorization; nothing settled). No `reason_code` rides a decision. A genuine
+RPC or gas failure at submit keeps its fault classification and reason code —
+the same split #1519 drew for the EIP-3009 rail's pre-submit checks.
+
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
 `SETTLEMENT_PRIVATE_KEY` is the gas-funded key that submits USDC
 `transferWithAuthorization`; it does not need to be the receiving wallet and

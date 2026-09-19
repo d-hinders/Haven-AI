@@ -20,6 +20,25 @@ export function redactForAutomation(value: string): string {
     .replace(/(?:~|\/)[^\s`"']*\/\.env\b/g, '[credential-env-redacted]')
 }
 
+/**
+ * A URL with any `user:pass@` userinfo removed and trailing slashes dropped —
+ * for log lines, `--json` records, the binding record's `api_url` and every
+ * place a stored record is echoed or compared (#3154 reviews N6 / doc r2 /
+ * doc r4: a record written before the write-side strip may still carry
+ * userinfo, so the doctor strips on read as well). Unparseable input is
+ * returned unchanged.
+ */
+export function withoutUserinfo(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.username = ''
+    parsed.password = ''
+    return parsed.toString().replace(/\/+$/, '')
+  } catch {
+    return url
+  }
+}
+
 export function shortAddress(address: string): string {
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return address
   return `${address.slice(0, 6)}...${address.slice(-4)}`

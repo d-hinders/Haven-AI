@@ -55,7 +55,7 @@ import { getLocalSignerConsentStatus } from './signer-consent.js'
 import { TOMBSTONE_FILENAME, readAgentTombstone, readTombstoneRecords } from './tombstone.js'
 import { serverNamesFor, type ServerNames } from './server-names.js'
 import { CONNECT_OUTCOME_FILENAME, readConnectOutcomeRuntime, readMcpServerBinding, REKEY_PENDING_FILENAME, inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
-import { shortAddress } from './redact.js'
+import { shortAddress, withoutUserinfo } from './redact.js'
 
 /**
  * #3121: three verdicts, not two. `ok` is "nothing to say"; `advisory` is
@@ -1301,10 +1301,11 @@ export async function runDoctor(
   if (rebound.length > 0) {
     const parts = rebound.map(([name, items]) => {
       const ordered = [...items].sort((a, b) => (a.binding.bound_at < b.binding.bound_at ? -1 : a.binding.bound_at > b.binding.bound_at ? 1 : 0))
-      const backends = new Set(ordered.map((i) => i.binding.api_url))
+      // Stripped on read (#3154 doc r4): a legacy record may carry userinfo.
+      const backends = new Set(ordered.map((i) => withoutUserinfo(i.binding.api_url)))
       return (
         `'${name}': ` +
-        ordered.map((i) => `${i.binding.agent_id} on ${i.binding.api_url} at ${i.binding.bound_at} [${i.entry.classification}]`).join(' → ') +
+        ordered.map((i) => `${i.binding.agent_id} on ${withoutUserinfo(i.binding.api_url)} at ${i.binding.bound_at} [${i.entry.classification}]`).join(' → ') +
         (backends.size > 1 ? ' (BACKEND CHANGED)' : '')
       )
     })

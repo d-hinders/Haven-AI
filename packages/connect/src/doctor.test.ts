@@ -2207,6 +2207,24 @@ describe('rebound MCP server names (#3122)', () => {
   })
 })
 
+describe('rebound MCP server names strip URL userinfo on read (#3154 doc review r4)', () => {
+  it('a legacy record carrying user:pass@ for the SAME backend is not a backend change, and the secret is echoed nowhere', async () => {
+    const { homeDir, dir } = await healthyHome()
+    const { writeMcpServerBinding } = await import('./storage.js')
+    await writeMcpServerBinding(dir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-1', api_url: 'https://api.haven.example', bound_at: '2026-09-18T12:00:00.000Z' })
+    const oldDir = join(homeDir, '.haven', 'agents', 'agent-old')
+    await mkdir(oldDir, { recursive: true })
+    await writeFile(join(oldDir, 'identity.json'), JSON.stringify({ agent_id: 'agent-old' }))
+    await writeMcpServerBinding(oldDir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-old', api_url: 'https://ops:s3cret@api.haven.example/', bound_at: '2026-09-01T00:00:00.000Z' })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'mcp_server_name_rebound')
+    expect(check?.level).toBe('advisory')
+    expect(check?.detail).toContain('agent-old on https://api.haven.example at')
+    expect(check?.detail).not.toContain('BACKEND CHANGED')
+    expect(JSON.stringify(report)).not.toContain('s3cret')
+  })
+})
+
 describe('rebound MCP server names ignore RETIRED directories (#3154 review)', () => {
   it('a tombstoned, key-less directory whose binding record survived a by-the-book reset does not make the name "changed hands"', async () => {
     const { homeDir, dir } = await healthyHome()

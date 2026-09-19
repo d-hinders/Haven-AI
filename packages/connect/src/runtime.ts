@@ -9,7 +9,7 @@ import {
   hashAgentApiKey,
   type LocalDelegateKey,
 } from './key.js'
-import { redactForAutomation, redactSecrets, shortAddress } from './redact.js'
+import { redactForAutomation, redactSecrets, shortAddress, withoutUserinfo } from './redact.js'
 import { assertValidServerSlug, serverNamesFor } from './server-names.js'
 import {
   assertServerSlugAvailable,
@@ -1692,18 +1692,6 @@ async function listExistingKeyedAgents(baseDir: string | undefined): Promise<Arr
     }
   }
   return out
-}
-
-/** A URL with any `user:pass@` userinfo removed — for log lines, the --json record and the binding record's `api_url` (#3154 review N6 / doc r2). */
-function withoutUserinfo(url: string): string {
-  try {
-    const parsed = new URL(url)
-    parsed.username = ''
-    parsed.password = ''
-    return parsed.toString().replace(/\/+$/, '')
-  } catch {
-    return url
-  }
 }
 
 async function listOtherAgentIds(baseDir: string | undefined, currentDirectory: string): Promise<string[] | null> {

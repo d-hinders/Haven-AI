@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ethers } from 'ethers'
 import {
   normalizeLedgerRates,
   toAccountingEntry,
@@ -152,5 +153,39 @@ describe('normalizeLedgerRates (#2877)', () => {
 
   it('a partially bad map keeps its good half', () => {
     expect(normalizeLedgerRates({ SEK: 10.42, EUR: -1, DKK: 6.87 })).toEqual({ SEK: 10.42, DKK: 6.87 })
+  })
+})
+
+/**
+ * #3129: the bookkeeping underlag documents the SAME payment the transaction
+ * feed reports. Before #3129 both emitted the lowercase `payment_intents`
+ * casing and agreed by accident; normalising only the feed would have made
+ * one payment read `0xabcd…1234` on its receipt and `0xAbCd…1234` in the
+ * transaction it documents.
+ */
+describe('address form on the accounting entry (#3129)', () => {
+  const MERCHANT = ethers.getAddress('0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef')
+  const TREASURY = ethers.getAddress('0xab5801a7d398351b8be11c439e05c5b3259aec9b')
+
+  it('canonicalises the merchant and treasury addresses the column stored lowercase', () => {
+    const entry = toAccountingEntry(
+      row({ merchant_address: MERCHANT.toLowerCase(), payer_address: TREASURY.toLowerCase() }),
+    )
+
+    expect(entry.counterparty.address).toBe(MERCHANT)
+    expect(entry.treasuryAccount).toBe(TREASURY)
+  })
+
+  it('CONTROL: the two forms really differ, so the assertions above can fail', () => {
+    expect(MERCHANT).not.toBe(MERCHANT.toLowerCase())
+    expect(TREASURY).not.toBe(TREASURY.toLowerCase())
+  })
+
+  it('leaves a non-address value alone rather than inventing one', () => {
+    // The file's other fixtures use `'0xmerchant'`, which is not an address.
+    // Settling casing is not validating: an unexpected value stays visible.
+    const entry = toAccountingEntry(row())
+    expect(entry.counterparty.address).toBe('0xmerchant')
+    expect(entry.treasuryAccount).toBe('0xtreasury')
   })
 })

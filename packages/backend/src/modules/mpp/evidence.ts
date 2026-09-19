@@ -21,6 +21,8 @@ import {
   getIntentSettlementFields,
   insertResidueEvent,
   listEvidenceReceiptsForAgent,
+  countEvidenceReceiptsForAgent,
+  receiptCursorResolvesForAgent,
   resolveReconciliationForPayment,
   upsertEvidenceBase,
   type IntentSettlementFields,
@@ -655,6 +657,15 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       selected_payment: row.selected_payment,
       payment_proof_header_name: row.payment_proof_header_name,
       protocol_receipt_header_name: row.protocol_receipt_header_name,
+      // #3125: relayed VERBATIM — the merchant's PAYMENT-RESPONSE object,
+      // opaque and merchant-controlled. Nothing inside it (including `payer`)
+      // is Haven's record: Haven's own payer is `payer_address` above, and the
+      // authoritative party set is the `withParties` payload below. Wire
+      // namespacing/key-prefix was decided AGAINST (#3125): the relay must
+      // stay the merchant's object verbatim (settlement-hash derivation above
+      // reads payload.transaction), and prefixing the envelope could not
+      // prefix the merchant-controlled keys inside it — provenance is stated
+      // at the read surfaces instead (SDK type doc, tool description).
       protocol_receipt_payload: row.protocol_receipt_payload,
       merchant_status: row.merchant_status,
       confirmed_at: row.confirmed_at,
@@ -674,9 +685,32 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
 }
 
 /** `GET /receipts` orchestration: recent evidence rows, agent-scoped. */
-export async function listReceipts(agentId: string, limit: number) {
-  const receipts = await listEvidenceReceiptsForAgent<MachinePaymentEvidenceRow>(agentId, limit)
-  return receipts.map((row) => mapEvidence(row))
+/**
+ * #3128: a page, not a bare array. `total` is the count Haven holds for the
+ * agent, so `receipts: []` with `total: 0` is "no receipt exists" — there is
+ * no indexing delay behind this list (a receipt row is written when evidence
+ * attaches, synchronously with the settlement report), so a settled payment
+ * without a receipt is a payment-status question, not a retry-later one.
+ * `has_more` comes from fetching one row past the limit; `next_cursor` is
+ * the last returned receipt's id, fed back as `cursor`. A cursor that names
+ * no receipt of this agent returns `null` (the route answers 400) rather
+ * than an empty page beside a non-zero total.
+ */
+export async function listReceipts(agentId: string, limit: number, cursor: string | null = null) {
+  if (cursor !== null && !(await receiptCursorResolvesForAgent(agentId, cursor))) return null
+  const [rows, total] = await Promise.all([
+    listEvidenceReceiptsForAgent<MachinePaymentEvidenceRow>(agentId, limit + 1, cursor),
+    countEvidenceReceiptsForAgent(agentId),
+  ])
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  const receipts = page.map((row) => mapEvidence(row))
+  return {
+    receipts,
+    total,
+    has_more: hasMore,
+    next_cursor: hasMore ? page[page.length - 1]!.id : null,
+  }
 }
 
 /**

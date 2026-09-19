@@ -49,6 +49,7 @@ import { composeDescription, toolDescriptions as sharedDescriptions } from '@hav
 export type HostedToolName =
   | 'haven_get_agent'
   | 'haven_get_allowances'
+  | 'haven_check_funds'
   | 'haven_send'
   | 'haven_pay'
   | 'haven_submit'
@@ -146,9 +147,29 @@ export type DiscoveryEntry = {
   merchant?: { id: string; slug: string; name: string; listing_status: string; is_test_merchant: boolean }
 } & DiscoveryHint
 
-export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
+export const toolSchemas = {
   haven_get_agent: {},
   haven_get_allowances: {},
+  // #3126: the amount arrives in the pay tools' cap spelling (#1351) —
+  // max_amount_human in whole tokens ("1" = 1 USDC, preferred) or max_amount
+  // in atomic units — so a figure learned from a quote flows in unchanged.
+  // Exactly one is REQUIRED (readMaxAmountCap refuses both-or-neither): this
+  // tool answers a coverage question about a stated amount, never an
+  // open-ended balance read.
+  haven_check_funds: {
+    token: z.string().min(1),
+    max_amount: z
+      .string()
+      .regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount')
+      .optional(),
+    max_amount_human: z
+      .string()
+      .regex(
+        /^[0-9]+(\.[0-9]+)?$/,
+        'max_amount_human must be a plain decimal amount in whole tokens, e.g. "1" or "0.25"',
+      )
+      .optional(),
+  },
   haven_sweep_delegate: {
     // Phase 2 only: the authorization returned by phase 1 and the signature from
     // the local signer. Omit both to run phase 1 (prepare). Passed through to the
@@ -414,11 +435,16 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   },
   haven_list_receipts: {
     limit: z.number().int().min(1).max(100).optional(),
+    /** #3128: the previous page's next_cursor (a receipt id). */
+    cursor: z.string().min(1).optional(),
   },
   haven_verify_receipt: {
     receipt: z.unknown(),
   },
-}
+// #3101: `as const satisfies` keeps every key on the type — under a plain
+// `Record<HostedToolName, z.ZodRawShape>` annotation a probe assigning
+// `{ totally_not_a_key: 1 }` to a tool's inferred argument type compiled clean.
+} as const satisfies Record<HostedToolName, z.ZodRawShape>
 
 // ── Strict input (#2312) ─────────────────────────────────────────────────────
 
@@ -752,8 +778,9 @@ export const STRICT_INPUT_TOOLS = {
     'The resume state is rehydrated by payment_id alone; nothing else selects it. Any other ' +
     'key used to be dropped in silence.',
   haven_list_receipts:
-    'This list takes limit only. An offset, cursor, page, status or token filter sent here ' +
-    'used to be dropped in silence and the first page came back looking filtered.',
+    'This list takes limit and cursor (the previous page\'s next_cursor) only. An offset, page, ' +
+    'status or token filter sent here used to be dropped in silence and the first page came ' +
+    'back looking filtered.',
   haven_verify_receipt:
     'Verification is offline and reads only the receipt object itself: the signer is ' +
     'recovered from receipt.authorization and compared with the delegate the receipt names. ' +
@@ -768,6 +795,15 @@ export const STRICT_INPUT_TOOLS = {
     'name, description, price, tool_name or contact sent here used to be dropped in silence ' +
     '— the directory learns everything else from the live merchant probe and the ownership ' +
     'proof, never from this call.',
+  // #3126: the amount argument arrives in the pay tools' cap spelling, and the
+  // cap convention's both-or-neither refusal (readMaxAmountCap) is the strict
+  // refusal's own refusal — declaring the tool strict makes a decorated call
+  // meet THAT documented error instead of a silent strip. No live caller
+  // predates strictness here: the tool ships new.
+  haven_check_funds:
+    'Exactly one of max_amount_human or max_amount selects the amount the coverage question is ' +
+    'asked about — both or neither is refused before anything is read. An undeclared key ' +
+    'cannot select or filter what the chain is asked, so it is refused rather than dropped.',
 } as const satisfies Partial<Record<HostedToolName, string>>
 
 export type StrictInputToolName = keyof typeof STRICT_INPUT_TOOLS
@@ -1067,6 +1103,19 @@ const SWEEP_DELEGATE_DESCRIPTION = [
   'USDC only — stranded native ETH is not recoverable through this path.',
 ].join(' ')
 
+// #3126 — the hosted sufficiency check, deliberately NOT a balance tool: the
+// constrained actor reads a boolean (covered true/false/null), never the
+// treasury total. Kept lean by hand (not the full composed fragment) because
+// the #1591 mean budget is a per-tool property measured at the cap; the
+// shared fragment's summary leads verbatim so the drift test holds.
+const CHECK_FUNDS_DESCRIPTION = [
+  sharedDescriptions.checkFunds.summary + '.',
+  'Pass the token contract address and exactly ONE amount spelling: max_amount_human (whole tokens, preferred) or max_amount (atomic units).',
+  'Returns covered: true (holds at least the amount), false (a live chain read reports less — stop and tell the user the funds are missing), or null (the read failed — unverifiable, never absence; coverage_error says why).',
+  'The balance itself is deliberately not returned — a sufficiency signal, not a balance read; budget_remaining_atomic is the PERMITTED figure (haven_get_allowances).',
+  'Read-only: grants no authority, moves nothing; both retired rails answer 410.',
+].join(' ')
+
 const DISCOVER_TOOLS_DESCRIPTION = composeDescription({
   ...sharedDescriptions.discoverTools,
   nextActionGuidance:
@@ -1077,6 +1126,7 @@ const DISCOVER_TOOLS_DESCRIPTION = composeDescription({
 export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
+  haven_check_funds: CHECK_FUNDS_DESCRIPTION,
   haven_sweep_delegate: SWEEP_DELEGATE_DESCRIPTION,
   haven_discover_tools: DISCOVER_TOOLS_DESCRIPTION,
   haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
@@ -1127,6 +1177,18 @@ export interface ToolFailure {
    * cap refusal.
    */
   retry_with_new_quote?: boolean
+  /**
+   * #3101 (epic #3105, decision 7): a refusal that carries a next step emits
+   * the same `next_tool` family a success does, built by the SDK's typed
+   * builder. Additive; `next_tool` is never null — an absent tool says why in
+   * `next_tool_omitted_reason`.
+   */
+  next_tool?: string
+  next_tool_server?: string
+  next_tool_name?: string
+  next_tool_server_role?: 'hosted' | 'signer'
+  next_arguments?: Record<string, unknown>
+  next_tool_omitted_reason?: string
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure

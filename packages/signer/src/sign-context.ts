@@ -17,6 +17,8 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AgentPaymentNextAction, HavenSigningError } from '@haven_ai/sdk'
+import type { NextStep } from '@haven_ai/sdk'
+import { nextStepWireFields, signerRefusalStep } from './next-step.js'
 
 export interface HavenIdentity {
   apiUrl: string
@@ -77,6 +79,24 @@ export class HavenSignContextError extends HavenSigningError {
    * plain `HavenError` branch already does for that code.
    */
   readonly next_action: string
+  /**
+   * #3103 (epic #3105, decisions 1 and 3): the typed next step beside the
+   * action. A refusal Haven made (`SIGN_CONTEXT_REFUSED`, not expired) names
+   * the hosted status read with the payment id; a transport failure or a
+   * malformed body names no tool — the remedy is re-running the SAME quote
+   * tool with `include_signing_payload: true` — and an expired window names
+   * none either (which quote tool depends on the flow). Never null: a step
+   * with no tool carries `next_tool_omitted_reason`. Additive: the class is
+   * not exported from the package index — the published surface is the
+   * `ToolFailure` envelope `tools.ts` builds from these fields — and every
+   * constructor call site is in this file.
+   */
+  readonly next_tool?: string
+  readonly next_tool_server?: string
+  readonly next_tool_name?: string
+  readonly next_tool_server_role?: 'hosted' | 'signer'
+  readonly next_arguments?: Record<string, unknown>
+  readonly next_tool_omitted_reason?: string
   readonly retry_with_new_quote?: true
   /** Present only for `SIGN_CONTEXT_REFUSED` (the backend's HTTP status). */
   readonly http_status?: number
@@ -86,24 +106,45 @@ export class HavenSignContextError extends HavenSigningError {
   constructor(
     message: string,
     code: SignContextErrorCode,
-    refusal?: { httpStatus: number; errorCode?: string },
+    refusal: { httpStatus: number; errorCode?: string } | undefined,
+    /** #3103: the payment the context was fetched for, so a refusal can name the status read. */
+    paymentId: string,
   ) {
     super(message)
     ;(this as { code: string }).code = code
     this.name = 'HavenSignContextError'
+    let step: NextStep
     if (code === 'SIGN_CONTEXT_REFUSED') {
       this.http_status = refusal?.httpStatus
       this.backend_error_code = refusal?.errorCode
       if (refusal?.httpStatus === 410 || refusal?.errorCode === 'expired') {
         this.next_action = AgentPaymentNextAction.PaymentWindowExpired
         this.retry_with_new_quote = true
+        step = signerRefusalStep({
+          nextAction: AgentPaymentNextAction.PaymentWindowExpired,
+          nextTool: null,
+          nextToolOmittedReason:
+            're-run the hosted quote tool you called with the same idempotency_key; which one depends on the flow',
+        })
       } else {
         this.next_action = AgentPaymentNextAction.StopAndTellUser
+        step = signerRefusalStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: 'haven_get_payment_status',
+          nextArguments: { payment_id: paymentId },
+        })
       }
     } else {
       this.fallback = 'typed_data_b64'
       this.next_action = AgentPaymentNextAction.StopAndTellUser
+      step = signerRefusalStep({
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason:
+          're-run the SAME hosted quote tool with the same idempotency_key and include_signing_payload: true, then pass its typed_data_b64 to this signer',
+      })
     }
+    Object.assign(this, nextStepWireFields(step))
   }
 }
 
@@ -189,6 +230,8 @@ export async function fetchX402SignContext(
           `${err instanceof Error ? err.message : String(err)}. ` +
           'Retry, or pass typed_data_b64 from the quote result instead.',
       timedOut ? 'SIGN_CONTEXT_TIMEOUT' : 'SIGN_CONTEXT_UNREACHABLE',
+      undefined,
+      paymentId,
     )
   }
   // #2985 review: the same signal bounds the BODY read. A stalled body used
@@ -203,7 +246,9 @@ export async function fetchX402SignContext(
         `Haven did not finish sending the signing context for ${paymentId} within ${timeoutMs} ms. ` +
           'Retry, or pass typed_data_b64 from the quote result instead.',
         'SIGN_CONTEXT_TIMEOUT',
-      )
+      undefined,
+      paymentId,
+    )
     }
     body = {}
   }
@@ -219,6 +264,7 @@ export async function fetchX402SignContext(
             : ''),
       'SIGN_CONTEXT_REFUSED',
       { httpStatus: response.status, errorCode: typeof body.error_code === 'string' ? body.error_code : undefined },
+      paymentId,
     )
   }
   const signData = body.sign_data as Record<string, unknown> | undefined
@@ -234,6 +280,8 @@ export async function fetchX402SignContext(
       'The Haven sign-context response is missing sign_data.typed_data or x402_expected — ' +
         'the backend may predate #1263. Pass typed_data_b64 from the quote result instead.',
       'SIGN_CONTEXT_MALFORMED',
+      undefined,
+      paymentId,
     )
   }
   const paymentRequired = body.payment_required

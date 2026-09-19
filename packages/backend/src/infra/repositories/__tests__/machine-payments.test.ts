@@ -18,6 +18,8 @@ import {
   insertPreparedSweepForBoundAgent,
   insertMerchantReceiptOnce,
   listEvidenceReceiptsForAgent,
+  countEvidenceReceiptsForAgent,
+  receiptCursorResolvesForAgent,
   markSweepSubmitted,
   releaseSweepClaim,
   resolveReconciliationForPayment,
@@ -442,5 +444,84 @@ describeDb('machine-payments repository (#1224)', () => {
     expect(receipts).toHaveLength(1)
     expect(receipts[0].settlement_scheme).toBe('erc7710')
     expect(await listEvidenceReceiptsForAgent(other.agentId, 10)).toHaveLength(0)
+  })
+
+  // ── #3128: keyset paging on the real planner ────────────────────────────
+  // The route test proves the parameters reach the SQL; this proves what the
+  // SQL DOES: newest-first with the id as tiebreak, a cursor that resumes
+  // exactly after the row it names (no skip, no repeat — including across
+  // rows that share a created_at), a cursor scoped to the calling agent,
+  // and a count that is the agent's alone.
+  it('#3128: receipts page by keyset — no skip, no repeat across equal created_at; foreign and unknown cursors yield nothing', async () => {
+    const agent = await seedAgent()
+    const other = await seedAgent()
+    const ids: string[] = []
+    for (let i = 0; i < 4; i += 1) {
+      const intentId = await seedIntent(agent.agentId, agent.userId)
+      await upsertEvidenceBase(evidenceInput(agent, { paymentIntentId: intentId, txHash: `0x${String(i).repeat(64)}` }))
+      const row = await db.query<{ id: string }>(
+        `SELECT id FROM machine_payment_evidence WHERE payment_intent_id = $1`, [intentId],
+      )
+      ids.push(row.rows[0].id)
+    }
+    const foreignIntent = await seedIntent(other.agentId, other.userId)
+    await upsertEvidenceBase(evidenceInput(other, { paymentIntentId: foreignIntent, txHash: `0x${'9'.repeat(64)}` }))
+    const foreignId = (await db.query<{ id: string }>(
+      `SELECT id FROM machine_payment_evidence WHERE payment_intent_id = $1`, [foreignIntent],
+    )).rows[0].id
+
+    // Pin created_at: ids[0] oldest … ids[3] newest, with ids[1] and ids[2]
+    // sharing the SAME instant so the (created_at, id) tiebreak is exercised.
+    await db.query(`UPDATE machine_payment_evidence SET created_at = NOW() - interval '4 minutes' WHERE id = $1`, [ids[0]])
+    await db.query(`UPDATE machine_payment_evidence SET created_at = NOW() - interval '2 minutes' WHERE id = ANY($1::uuid[])`, [[ids[1], ids[2]]])
+    await db.query(`UPDATE machine_payment_evidence SET created_at = NOW() - interval '1 minute' WHERE id = $1`, [ids[3]])
+    // Make the tie ADVERSARIAL to physical order: the row inserted first gets
+    // the LOWER id, so a sort without the id tiebreak (insertion-stable for a
+    // handful of rows) would emit the lower id first and a cursor on it would
+    // skip the higher one. With the tiebreak the higher id comes first.
+    const LOW = '11111111-1111-4111-8111-111111111111'
+    const HIGH = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+    await db.query(`UPDATE machine_payment_evidence SET id = $2 WHERE id = $1`, [ids[1], LOW])
+    await db.query(`UPDATE machine_payment_evidence SET id = $2 WHERE id = $1`, [ids[2], HIGH])
+    ids[1] = LOW
+    ids[2] = HIGH
+    const tied = [HIGH, LOW] // DESC by id within the tie
+
+    // One full page, newest first, the tie broken by id DESC.
+    const full = await listEvidenceReceiptsForAgent<{ id: string }>(agent.agentId, 10, null)
+    expect(full.map((r) => r.id)).toEqual([ids[3], HIGH, LOW, ids[0]])
+
+    // Walk with limit 1 (limit + 1 fetched by the service; the repository takes the fetch size verbatim).
+    const seen: string[] = []
+    let cursor: string | null = null
+    for (let hop = 0; hop < 6; hop += 1) {
+      const rows: Array<{ id: string }> = await listEvidenceReceiptsForAgent<{ id: string }>(agent.agentId, 1, cursor)
+      if (rows.length === 0) break
+      seen.push(rows[0].id)
+      cursor = rows[0].id
+    }
+    expect(seen).toEqual([ids[3], tied[0], tied[1], ids[0]])
+    expect(new Set(seen).size).toBe(4)
+
+    // A page cut inside the tie resumes with the tie's other member, never skipping it.
+    const afterFirstTied = await listEvidenceReceiptsForAgent<{ id: string }>(agent.agentId, 10, tied[0])
+    expect(afterFirstTied.map((r) => r.id)).toEqual([tied[1], ids[0]])
+
+    // Another agent's receipt id as a cursor resolves to nothing under this
+    // agent's scope — an empty page, never a window into either history.
+    expect(await listEvidenceReceiptsForAgent(agent.agentId, 10, foreignId)).toHaveLength(0)
+    expect(await listEvidenceReceiptsForAgent(agent.agentId, 10, '00000000-0000-4000-8000-000000000000')).toHaveLength(0)
+
+    // The count is the agent's alone.
+    expect(await countEvidenceReceiptsForAgent(agent.agentId)).toBe(4)
+    expect(await countEvidenceReceiptsForAgent(other.agentId)).toBe(1)
+
+    // The resolver (review finding 2): own receipt → true; another agent's
+    // receipt and an unknown id → false, so the route refuses instead of
+    // answering an empty page beside `total: 4`.
+    expect(await receiptCursorResolvesForAgent(agent.agentId, ids[0])).toBe(true)
+    expect(await receiptCursorResolvesForAgent(agent.agentId, foreignId)).toBe(false)
+    expect(await receiptCursorResolvesForAgent(other.agentId, foreignId)).toBe(true)
+    expect(await receiptCursorResolvesForAgent(agent.agentId, '00000000-0000-4000-8000-000000000000')).toBe(false)
   })
 })

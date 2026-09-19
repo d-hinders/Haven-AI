@@ -500,6 +500,9 @@ describe('haven_x402_sign_header tool', () => {
     expect(payload.next_action).toBe(AgentPaymentNextAction.PaymentWindowExpired)
     expect(payload.retry_with_new_quote).toBe(true)
     expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
+    // #3103: the window-expired refusal names no tool (which quote tool depends on the flow) and says why.
+    expect(payload.next_tool).toBeUndefined()
+    expect(payload.next_tool_omitted_reason).toMatch(/same idempotency_key/)
   })
 
   it('unwraps the whole x402 object passed as x402_expected, and the binding round-trips', async () => {
@@ -575,6 +578,9 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
     expect(payload.code).toBe(AgentPaymentFailureCode.PaymentWindowExpired)
     expect(payload.retry_with_new_quote).toBe(true)
     expect(payload.suggested_tool).toBe('haven_pay_mcp_tool')
+    // #3103: the window-expired refusal names no tool (which quote tool depends on the flow) and says why.
+    expect(payload.next_tool).toBeUndefined()
+    expect(payload.next_tool_omitted_reason).toMatch(/same idempotency_key/)
   })
 
   it('unwraps the whole x402 object when passed as x402_expected (common handoff mistake)', async () => {

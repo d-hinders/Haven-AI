@@ -14,6 +14,7 @@ import {
   sumAgentSpendThisWeek,
   sumAgentSpendToday,
 } from '../infra/repositories/agent-activity.js'
+import { toCanonicalAddress } from '../modules/transactions/index.js'
 
 // ── Routes ────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           token: p.token_symbol,
           amount_raw: p.amount_raw,
           amount: p.amount_human,
-          to: p.to_address,
+          to: toCanonicalAddress(p.to_address),
           status: p.status,
           tx_hash: p.tx_hash,
           payment_id: p.id,
@@ -69,11 +70,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           payment_attention_reason: lifecycle.paymentAttentionReason,
           source: p.source ?? 'direct',
           x402_resource_url: p.x402_resource_url,
-          x402_merchant_address: p.x402_merchant_address,
+          x402_merchant_address: toCanonicalAddress(p.x402_merchant_address),
           chain_id: p.chain_id,
-          token_address: p.token_address,
+          token_address: toCanonicalAddress(p.token_address),
           account_id: p.account_id,
-          account_address: p.account_address,
+          account_address: toCanonicalAddress(p.account_address),
           account_name: p.account_name,
           explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
           // #799: which on-chain mechanism moved the money, and (session rail)
@@ -193,7 +194,7 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           token: p.token_symbol,
           amount_raw: p.amount_raw,
           amount: p.amount_human,
-          to: p.to_address,
+          to: toCanonicalAddress(p.to_address),
           status: p.status,
           tx_hash: p.tx_hash,
           payment_id: p.id,
@@ -202,11 +203,11 @@ export default async function agentActivityRoutes(app: FastifyInstance): Promise
           payment_attention_reason: lifecycle.paymentAttentionReason,
           source: p.source ?? 'direct',
           x402_resource_url: p.x402_resource_url,
-          x402_merchant_address: p.x402_merchant_address,
+          x402_merchant_address: toCanonicalAddress(p.x402_merchant_address),
           chain_id: p.chain_id,
-          token_address: p.token_address,
+          token_address: toCanonicalAddress(p.token_address),
           account_id: p.account_id,
-          account_address: p.account_address,
+          account_address: toCanonicalAddress(p.account_address),
           account_name: p.account_name,
           explorer_url: p.tx_hash ? getExplorerUrl(p.chain_id, 'tx', p.tx_hash) : null,
           // #799: which on-chain mechanism moved the money, and (session rail)

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import type { DoctorLevel, DoctorReport } from './doctor.js'
 import { realpathSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { helpText, parseArgs } from './args.js'
@@ -57,6 +58,22 @@ function failSubcommand(
     )
   }
   return 1
+}
+
+/** #3121: one marker per verdict level — `✓` ok, `!` advisory, `✗` failed. */
+function levelMarker(level: DoctorLevel): string {
+  return level === 'ok' ? '✓' : level === 'advisory' ? '!' : '✗'
+}
+
+/** Advisories across the flat list and every wired agent's checks — the same set the rolled-up level reads. */
+function advisoryCount(report: DoctorReport): number {
+  // The primary directory's checks ARE the flat list (doctor.ts copies them by
+  // id), so it is excluded here or the single-agent case counts itself twice
+  // (#3145 review, finding 1) — the same set the "Other agents" section prints.
+  const others = report.agents
+    .filter((agent) => agent.classification === 'wired' && agent.directory !== report.credentialDirectory)
+    .flatMap((agent) => agent.checks)
+  return [...report.checks, ...others].filter((check) => check.level === 'advisory').length
 }
 
 export async function runCli(
@@ -154,9 +171,13 @@ export async function runCli(
         slug: parsed.options.serverName,
         reason: parsed.unwire.reason,
         replacedBy: parsed.unwire.replacedBy,
+        destroyKeyMaterial: parsed.unwire.destroyKeyMaterial,
         homeDir,
       })
       const failures = result.runtimes.filter((r) => r.status === 'refused' || r.status === 'unreadable')
+      // #3123: a retained teardown is a refusal too — the wiring is gone, the
+      // key material deliberately is not, and the exit code says so.
+      const retained = result.teardown.status === 'retained'
       if (parsed.json) {
         io.stdout(
           `${redactSecrets(
@@ -172,6 +193,13 @@ export async function runCli(
                 status: r.status,
                 ...(r.detail ? { detail: r.detail } : {}),
               })),
+              // #3123: additive — what happened to the key material and why.
+              teardown: {
+                status: result.teardown.status,
+                probe: result.teardown.probe,
+                detail: result.teardown.detail,
+                ...(result.teardown.remedy ? { remedy: result.teardown.remedy } : {}),
+              },
             }),
           )}\n`,
         )
@@ -186,25 +214,81 @@ export async function runCli(
           const mark = r.status === 'removed' ? '✓' : r.status === 'clean' ? '–' : '✗'
           io.stdout(redactSecrets(`  ${mark} ${r.label}: ${r.status}${r.detail ? ` — ${r.detail}` : ''}\n`))
         }
+        const t = result.teardown
+        io.stdout(redactSecrets(`  ${t.status === 'retained' ? '✗' : t.status === 'forced' ? '!' : '✓'} Key material: ${t.status} (probe: ${t.probe}) — ${t.detail}\n`))
+        if (t.remedy) io.stdout(redactSecrets(`    ↳ ${t.remedy}\n`))
         io.stdout(
           failures.length > 0
             ? '  Some entries were NOT removed (✗ above). Re-run `--unwire` after resolving each refusal —\n' +
               '  it is idempotent.\n'
-            : '  Verify: `--doctor --runtime <runtime>` per host should report this agent as `retired` with a\n' +
-              '  clean runtime-config check.\n',
+            : retained
+              ? '  The wiring is gone; the key material is not (✗ above). `--doctor` will keep reporting this directory\n' +
+                '  as `superseded` until the key is revoked or destroyed — that is the honest state.\n'
+              : '  Verify: `--doctor --runtime <runtime>` per host should report this agent as `retired` with a\n' +
+                '  clean runtime-config check.\n',
         )
         io.stdout(
           'Restart EVERY long-lived MCP host (gateway, TUI workers, editors): each holds the wiring snapshot\n' +
-            'from its own start time. This directory\u2019s local key material was removed and the tombstone\n' +
+            'from its own start time. ' +
+            (retained
+              ? 'This directory\u2019s local key material was KEPT (see above); the tombstone\n'
+              : 'This directory\u2019s local key material was removed and the tombstone\n') +
             'record + #2155 mirror survive — but nothing was REVOKED on the backend. If you have not\n' +
             'already, revoke the agent on the Haven agent page to stop it spending entirely.\n',
         )
       }
-      return failures.length > 0 ? 1 : 0
+      return failures.length > 0 || retained ? 1 : 0
     } catch (err) {
       return failSubcommand(io, parsed.json, err, { unwired: false }, {
         code: 'unwire_failed',
         nextAction: 'review_the_error_and_rerun_unwire_which_is_idempotent',
+      })
+    }
+  }
+  if (parsed.pruneSignerRuntimes) {
+    // #3123: reclaim signer-runtime directories no credential directory
+    // references. Its own flag — not part of --repair (which installs) and
+    // never automatic. Exit 1 only when a removal FAILED.
+    const { pruneSignerRuntimes } = await import('./prune-runtimes.js')
+    try {
+      const report = await pruneSignerRuntimes(
+        { dryRun: parsed.pruneSignerRuntimes.dryRun },
+        { credentialsDir: parsed.options.credentialsDir },
+      )
+      if (parsed.json) {
+        io.stdout(`${redactSecrets(JSON.stringify({
+          pruned: true,
+          version: report.version,
+          dry_run: report.dryRun,
+          level: report.level,
+          root: report.root,
+          removed: report.removed,
+          reclaimed_bytes: report.reclaimedBytes,
+          entries: report.entries.map((e) => ({
+            key: e.key, kind: e.kind, bytes: e.bytes, action: e.action, level: e.level,
+            referenced_by: e.referencedBy, detail: e.detail,
+          })),
+        }))}\n`)
+      } else {
+        io.stdout(`Signer runtimes under ${report.root}${report.dryRun ? ' (dry run — nothing removed)' : ''}:\n`)
+        if (report.entries.length === 0) io.stdout('  (none)\n')
+        for (const e of report.entries) {
+          const mark = e.level === 'failed' ? '✗' : e.level === 'advisory' ? '!' : e.action === 'removed' ? '✓' : '•'
+          // A kept directory is never sized (#3151 review): say so instead of printing a false 0 MB.
+          const size = e.bytes > 0 ? `${Math.round(e.bytes / 1024 / 1024)} MB` : e.action === 'kept' ? 'not sized' : '0 MB'
+          io.stdout(redactSecrets(`  ${mark} ${e.key} (${e.kind}, ${size}): ${e.detail}\n`))
+        }
+        io.stdout(
+          report.dryRun
+            ? `Would remove ${report.entries.filter((e) => e.action === 'would_remove').length} director(y/ies); re-run without --dry-run to reclaim.\n`
+            : `Removed ${report.removed} director(y/ies), reclaimed ${Math.round(report.reclaimedBytes / 1024 / 1024)} MB.\n`,
+        )
+      }
+      return report.level === 'failed' ? 1 : 0
+    } catch (err) {
+      return failSubcommand(io, parsed.json, err, { pruned: false }, {
+        code: 'prune_failed',
+        nextAction: 'review_the_error_and_rerun_prune_which_is_idempotent',
       })
     }
   }
@@ -285,8 +369,10 @@ export async function runCli(
       if (parsed.json) {
         io.stdout(`${redactSecrets(JSON.stringify(report))}\n`)
       } else {
+        // #3121: three markers for three levels. `!` is an advisory — worth
+        // reading, nothing broken, and it never reaches the exit code.
         for (const check of report.checks) {
-          io.stdout(redactSecrets(`${check.ok ? '✓' : '✗'} ${check.label}: ${check.detail}\n`))
+          io.stdout(redactSecrets(`${levelMarker(check.level)} ${check.label}: ${check.detail}\n`))
           if (check.repair) io.stdout(redactSecrets(`    ↳ repair: ${check.repair}\n`))
         }
         // #1697: the other agents on this machine. The flat list above
@@ -297,9 +383,14 @@ export async function runCli(
           io.stdout('\nOther agents on this machine:\n')
           for (const agent of otherAgents) {
             const name = agent.slug ? `${agent.slug} (${agent.agentId ?? 'unknown'})` : agent.agentId ?? 'unknown'
-            const failed = agent.checks.filter((check) => !check.ok)
+            const failed = agent.checks.filter((check) => check.level === 'failed')
+            const advised = agent.checks.filter((check) => check.level === 'advisory')
             const verdict = agent.classification === 'wired'
-              ? failed.length === 0 ? 'wired, all checks passed' : `wired, ${failed.length} check(s) FAILED`
+              ? failed.length > 0
+                ? `wired, ${failed.length} check(s) FAILED`
+                : advised.length > 0
+                  ? `wired, ${advised.length} advisory finding(s)`
+                  : 'wired, all checks passed'
               // #1915: `parked` is the one classification whose bare name says
               // nothing a reader can act on — it is not a broken agent, it is
               // a directory with no agent in it and a private key still in it.
@@ -308,16 +399,24 @@ export async function runCli(
               : agent.classification === 'parked'
                 ? 'parked re-key only — no identity.json in this directory, but key material is still there'
                 : agent.classification
-            io.stdout(redactSecrets(`  ${failed.length > 0 ? '✗' : '•'} ${name}: ${verdict}\n`))
-            for (const check of failed) {
-              io.stdout(redactSecrets(`      ✗ ${check.label}: ${check.detail}\n`))
+            io.stdout(redactSecrets(`  ${failed.length > 0 ? '✗' : advised.length > 0 ? '!' : '•'} ${name}: ${verdict}\n`))
+            for (const check of [...failed, ...advised]) {
+              io.stdout(redactSecrets(`      ${levelMarker(check.level)} ${check.label}: ${check.detail}\n`))
               if (check.repair) io.stdout(redactSecrets(`        ↳ repair: ${check.repair}\n`))
             }
           }
         }
-        io.stdout(report.ok ? 'All checks passed.\n' : 'One or more checks FAILED — see repairs above.\n')
+        io.stdout(
+          report.level === 'failed'
+            ? 'One or more checks FAILED — see repairs above.\n'
+            : report.level === 'advisory'
+              ? `No failures. ${advisoryCount(report)} advisory finding(s) — see the ! line(s) above.\n`
+              : 'All checks passed.\n',
+        )
       }
-      return report.ok ? 0 : 1
+      // #3121: the exit code counts only real failures. `report.ok` is the
+      // same predicate (`level !== 'failed'`), kept for --json consumers.
+      return report.level === 'failed' ? 1 : 0
     } catch (err) {
       return failSubcommand(io, parsed.json, err, { doctor: 'failed' }, {
         code: 'doctor_failed',

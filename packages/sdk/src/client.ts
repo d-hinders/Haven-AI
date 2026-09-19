@@ -40,8 +40,10 @@ import type {
   HavenAgentSummary,
   HavenAgentAllowanceSummary,
   HavenAllowanceSummary,
+  HavenBalanceCoverage,
   PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
+  HavenPaymentReceiptsPage,
   CatalogSubmissionAccepted,
   HavenCatalogEntry,
   HavenCatalogSubmission,
@@ -646,6 +648,22 @@ export class HavenClient {
   }
 
   /**
+   * #3126 — is the checked amount of the token actually HELD on the
+   * agent's own account?
+   *
+   * This is the companion to {@link getAllowances}, not a variant of it:
+   * allowances answer what the agent is PERMITTED to spend this period;
+   * this answers whether the account HOLDS funds behind that permission,
+   * as a sufficiency signal — `covered: true | false | null` — never as a
+   * balance. `covered: null` means the chain read failed: treat it as
+   * unverifiable, not as absence (`coverageError` says why). The account's
+   * balance itself is deliberately not returned.
+   */
+  async checkFunds(input: { token: string; amountAtomic: string }): Promise<HavenBalanceCoverage> {
+    return this.accountReads.checkFunds(input)
+  }
+
+  /**
    * `POST /machine-payments/budget-precheck` (#3054): ask Haven to decide —
    * server-side — whether `amountAtomic` of `token` fits the agent's
    * remaining delegation budget, the same compare the guided prepare used to
@@ -851,6 +869,11 @@ export class HavenClient {
    */
   async listReceipts(options: { limit?: number } = {}): Promise<HavenPaymentReceipt[]> {
     return this.accountReads.listReceipts(options)
+  }
+
+  /** #3128: one page of receipts with `total`, `hasMore` and `nextCursor`. */
+  async listReceiptsPage(options: { limit?: number; cursor?: string } = {}): Promise<HavenPaymentReceiptsPage> {
+    return this.accountReads.listReceiptsPage(options)
   }
 
   /**

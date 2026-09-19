@@ -16,9 +16,11 @@ export interface ParsedCli {
    * Hermes dotenv key from every runtime config. No token required; refuses
    * rather than guess when a bare pair is owned by a different agent.
    */
-  unwire?: { reason?: string; replacedBy?: string }
+  unwire?: { reason?: string; replacedBy?: string; destroyKeyMaterial?: boolean }
   /** Optional positional value of --unwire <dir> (else --name / --credentials-dir resolve it). */
   unwireDir?: string
+  /** #3123: reclaim signer-runtime directories no credential directory references. */
+  pruneSignerRuntimes?: { dryRun: boolean }
   /**
    * #1700: replace an agent's signing key on this machine. Two phases, because
    * the dashboard sits between them — `start` generates the key and prints its
@@ -42,7 +44,10 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   let tombstoneDir: string | undefined
   let tombstoneReason: string | undefined
   let tombstoneReplacedBy: string | undefined
-  let unwire: { reason?: string; replacedBy?: string } | undefined
+  let unwire: { reason?: string; replacedBy?: string; destroyKeyMaterial?: boolean } | undefined
+  let destroyKeyMaterial = false
+  let pruneSignerRuntimes = false
+  let dryRun = false
   let unwireDir: string | undefined
   let replace = false
 
@@ -73,6 +78,12 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
         unwireDir = next
         i += 1
       }
+    } else if (arg === '--destroy-key-material') {
+      destroyKeyMaterial = true
+    } else if (arg === '--prune-signer-runtimes') {
+      pruneSignerRuntimes = true
+    } else if (arg === '--dry-run') {
+      dryRun = true
     } else if (arg === '--reason') {
       tombstoneReason = requireValue(argv, ++i, arg)
     } else if (arg === '--replaced-by') {
@@ -129,7 +140,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     // #2551: refuse rather than silently discard (the #1681 finding-2 rule).
     // --replace answers one question — "this bare-pair setup collides with an
     // existing agent; overwrite?" — which only a --setup run ever asks.
-    if (rekeyPhase || tombstoneDir || unwire || doctor || repair) {
+    if (rekeyPhase || tombstoneDir || unwire || doctor || repair || pruneSignerRuntimes) {
       throw new Error('--replace belongs to a --setup run: it says what to do when the bare haven / haven-signer pair is already wired to another agent.')
     }
     if (options.serverName) {
@@ -141,6 +152,24 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     options.replaceExistingWiring = true
   }
 
+  // #3123 review: these guards sit ABOVE the --rekey early return so the
+  // flags are refused, never silently discarded, on every path (#1681 f2).
+  if (destroyKeyMaterial && !unwire) {
+    throw new Error('--destroy-key-material only applies to --unwire.')
+  }
+  if (destroyKeyMaterial && unwire) unwire = { ...unwire, destroyKeyMaterial: true }
+  if (dryRun && !pruneSignerRuntimes) {
+    throw new Error('--dry-run only applies to --prune-signer-runtimes.')
+  }
+  if (pruneSignerRuntimes) {
+    if (unwire || tombstoneDir || rekeyPhase || doctor || repair) {
+      throw new Error('--prune-signer-runtimes is its own operation; run it alone.')
+    }
+    if (options.setupToken) {
+      throw new Error('--prune-signer-runtimes takes no --setup token; it reads stored state only.')
+    }
+    return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey, unwire, unwireDir, pruneSignerRuntimes: { dryRun } }
+  }
   if (rekey) {
     // Re-key reuses STORED credentials, like --doctor: the whole point is that
     // the agent already exists here, so a setup token is exactly what it does
@@ -258,7 +287,7 @@ export function helpText(): string {
     '                             Only available for Claude Code and Codex. Default is hosted MCP + local signer.',
     '  --json                     Emit one versioned, secret-free result object on stdout; progress stays on stderr.',
     '  --doctor                   Diagnose an existing setup (read-only, no token): config, credentials,',
-    '                             signer runtime, hosted MCP, and a live signer handshake. Exits non-zero on any failure.',
+    '                             signer runtime, hosted MCP, and a live signer handshake. Exits non-zero only on a failed check; an advisory (!) exits 0.',
     '  --repair                   Repair, then re-diagnose (implies --doctor): reinstall the pinned signer',
     '                             runtime, rewrite the wrapper and runtime config from stored credentials.',
     '                             Hosted topology only (refuses to touch a --local config). No keys, no token.',
@@ -285,6 +314,12 @@ export function helpText(): string {
     '                             API key are removed locally (record kept via the #2155 tombstone mirror) and',
     '                             nothing is ever revoked on the backend — that stays an owner action on the',
     '                             Haven agent page.',
+    '  --destroy-key-material     With --unwire: destroy the signer key + stored API key even when the agent',
+    '                             is still active or cannot be verified (#3123). Local sweep recovery ends.',
+    '  --prune-signer-runtimes    Remove ~/.haven/signer-runtime directories no credential directory references',
+    '                             (version- and override-keyed alike); --dry-run lists them. Exits 1 only on a',
+    '                             removal that failed (#3123).',
+    '  --dry-run                  With --prune-signer-runtimes: report, remove nothing.',
     '  --reason <text>            Reason recorded in the tombstone (with --tombstone or --unwire).',
     '  --replaced-by <agent-id>   Successor agent recorded in the tombstone (with --tombstone or --unwire).',
     '  --help                     Show this help.',

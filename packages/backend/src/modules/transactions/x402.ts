@@ -8,6 +8,7 @@ import { machinePaymentLifecycle } from '../../domain/machine-payment-lifecycle.
 import {
   findConfirmedX402PaymentIntents,
 } from '../../infra/repositories/transaction-history.js'
+import { toCanonicalAddress } from './normalize.js'
 import { parseIsoTimestamp, paymentAgentIdentityKey } from './ordering.js'
 import type { EnrichedTransaction, SmartAccountRow } from './types.js'
 
@@ -43,24 +44,34 @@ export async function fetchConfirmedX402Transactions(
     return {
       hash: row.tx_hash,
       type: 'erc20',
-      from: row.account_address,
-      to: merchantAddress,
+      from: toCanonicalAddress(row.account_address),
+      to: toCanonicalAddress(merchantAddress),
       value: row.amount_raw,
       valueFormatted: row.amount_human,
       asset: row.token_symbol,
       decimals: tokenConfig?.decimals ?? 18,
       direction: 'out',
       timestamp: parseIsoTimestamp(row.confirmed_at ?? row.created_at),
-      blockNumber: 0,
+      // #3129: `null`, not `0`. This row is SYNTHESIZED from a payment intent
+      // and no block number is stored anywhere — there is no `block_number`
+      // column in any migration — so `0` was a placeholder meaning "unknown"
+      // that read as a real block. The zero was not a failed `parseInt`: the
+      // explorer legs in `aggregate.ts` do populate this field — on Base, the
+      // default chain, `V2Transaction.block_number` is non-optional, so the
+      // Blockscout leg cannot produce a zero. (The Etherscan-shaped Gnosis leg
+      // is unvalidated passthrough, which is what `toBlockNumber` now guards;
+      // that is a different, narrower case.) Every row in the 2026-09-18 field
+      // run read zero because all five were payments — this path.
+      blockNumber: null,
       isError: false,
-      tokenAddress: row.token_address,
+      tokenAddress: toCanonicalAddress(row.token_address),
       tokenSymbol: row.token_symbol,
       source: 'x402',
       x402ResourceUrl: row.x402_resource_url,
-      x402MerchantAddress: row.x402_merchant_address,
+      x402MerchantAddress: toCanonicalAddress(row.x402_merchant_address),
       chainId: row.chain_id,
       accountId: row.account_id,
-      accountAddress: row.account_address,
+      accountAddress: toCanonicalAddress(row.account_address),
       accountName: row.account_name,
       agentId: row.agent_id,
       agentName: row.agent_name,

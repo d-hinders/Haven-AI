@@ -10,7 +10,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-09-08"
+last-verified: "2026-09-18"
 ---
 
 # Autonomous PR loop
@@ -418,15 +418,18 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      **Require status checks to pass** on **15 contexts**: **Lint, Type-check &
      Build**, **Detect changed surfaces** and **Repo CI config checks** — the
      last runs the whole `scripts/ci/*.test.mjs` glob plus the dist-freshness
-     self-test and the workspace-pin lint — plus every per-surface quality
+     self-test, the workspace-pin lint and the MCP↔CLI vocabulary guard
+     (#3131, whose two inputs sit behind the `sdk` and `backend` gates, so it
+     cannot live in either job) — plus every per-surface quality
      check: **Backend checks**, **Frontend checks**, **SDK checks**, **CLI
      checks**, **MCP server checks**, **MCP checks**, **Connect checks**,
      **Signer checks** — and the blocking gates **Banned product-copy terms**
      (#902), **Design-system coupling (strict)** (#1023), **Docs front-matter &
      agent skills** (#1023) and **Contract-doc coupling** (#646). Inside
      *Backend checks*, the shrink-only ratchet steps gain the request-schema
-     ratchet (#3029) — a step, not a new required context: the context list
-     above is unchanged. Do **not**
+     ratchet (#3029) and the typed next-step ratchet (#3104, also run in the
+     hosted-MCP, signer and local-MCP jobs) — steps, not new required
+     contexts: the context list above is unchanged. Do **not**
      require **Docs links & style (advisory)** — it is the deliberately
      non-gating half of `docs.yml` (#1023) — and do **not** require **Vercel
      Preview Comments**, which isn't a quality gate.

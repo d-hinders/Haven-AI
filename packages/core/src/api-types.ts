@@ -2214,6 +2214,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/machine-payments/balance-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Report whether the account actually holds the amount behind the agent's budget (#3126).
+         * @description Answers the question no spend-authority read answers: is `amount_atomic` of `token` actually HELD on the authenticated agent's own account right now. The response is a sufficiency signal, never a balance: `covered` is true/false/null and the account's balance itself is deliberately not returned — a constrained agent has no business reading the treasury total, and the boolean answers the only decision an agent has (attempt the payment, or tell the user funds are missing). `covered: null` means the chain read FAILED — treat it as unverifiable, not as absence. Keep the two concepts apart: `budget_remaining_atomic` is spend AUTHORITY (the same figure GET /machine-payments/allowances reports as onchain.remaining); `covered` is about HELD funds. Rail-aware like every read: both retired rails answer 410. Reporting only — grants no authority, moves nothing; enforcement stays on-chain.
+         */
+        get: operations["getMachinePaymentBalanceCoverage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/machine-payments/authorize": {
         parameters: {
             query?: never;
@@ -2281,7 +2301,10 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** List stored machine-payment receipts for the authenticated agent. */
+        /**
+         * List stored machine-payment receipts for the authenticated agent.
+         * @description #3128: a page, newest first. `total` is how many receipts Haven holds for the agent, so an empty `receipts` with `total: 0` means none exist — there is no indexing delay behind this list. `has_more` says the page was cut at `limit`; pass `next_cursor` back as `cursor` for the next page.
+         */
         get: operations["listMachinePaymentReceipts"];
         put?: never;
         post?: never;
@@ -3777,6 +3800,23 @@ export type components = {
             /** @description #1319 provenance, same semantics as the allowances read's flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read). */
             remaining_is_from_chain?: boolean;
         };
+        /** @description The #3126 sufficiency answer — whether HELD funds cover the checked amount. Deliberately NOT a balance: no field carries the account's balance, and nothing is named like the authority figures (remaining/available). `covered` speaks only of holdings; `budget_remaining_atomic` is the PERMITTED figure the allowances read reports. */
+        BalanceCoverageResponse: {
+            /** @description true: the chain says the agent's account holds at least checked_amount_atomic of token. false: the chain read succeeded and reports LESS — tell the user the funds are missing rather than retrying. null: the chain read FAILED — unverifiable, never treated as absence; coverage_error carries why. */
+            covered: boolean | null;
+            /** @description Present only when covered is null: why the chain read could not answer. */
+            coverage_error?: string;
+            chain_id: number;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            token_address: string;
+            token_symbol: string;
+            /** @description The amount the coverage question was asked about, in ATOMIC units. */
+            checked_amount_atomic: string;
+            /** @description Context, AUTHORITY not holdings: the agent's remaining spend authority for the requested token, in ATOMIC units — the same derivation GET /machine-payments/allowances reports as onchain.remaining (#1090 derivation, #1145 enforcer read). Zero when no active budget row names the token. Compare it with covered, never instead of it. */
+            budget_remaining_atomic: string;
+            /** @description #1319 provenance, same semantics as the allowances read's flag: true when the budget figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read). */
+            budget_remaining_is_from_chain?: boolean;
+        };
         MachinePaymentReceipt: {
             /** Format: uuid */
             id: string;
@@ -3948,8 +3988,8 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
-            /** @description 0 for x402-synthesized rows with no on-chain receipt yet. */
-            blockNumber: number;
+            /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
+            blockNumber: number | null;
             isError: boolean;
             /** @example 0x1111111111111111111111111111111111111111 */
             tokenAddress?: string;
@@ -4013,8 +4053,8 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
-            /** @description 0 for x402-synthesized rows with no on-chain receipt yet. */
-            blockNumber: number;
+            /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
+            blockNumber: number | null;
             isError: boolean;
             /** @example 0x1111111111111111111111111111111111111111 */
             tokenAddress?: string;
@@ -14237,6 +14277,98 @@ export interface operations {
             };
         };
     };
+    getMachinePaymentBalanceCoverage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The coverage answer for the requested token and amount. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BalanceCoverageResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule (#2020). Fail-closed; there is no account this surface can describe. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     authorizeMachinePayment: {
         parameters: {
             query?: never;
@@ -14491,6 +14623,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                /** @description The `next_cursor` of the previous page (a receipt id). Omit for the first page. A value that is not a uuid, or that names no receipt of this agent, is refused with 400. */
+                cursor?: string;
             };
             header?: never;
             path?: never;
@@ -14498,7 +14632,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Machine-payment receipts. */
+            /** @description One page of machine-payment receipts. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14506,6 +14640,27 @@ export interface operations {
                 content: {
                     "application/json": {
                         receipts: components["schemas"]["MachinePaymentReceipt"][];
+                        /** @description Receipts Haven holds for this agent, across all pages. */
+                        total: number;
+                        /** @description True when receipts beyond this page exist. */
+                        has_more: boolean;
+                        /** @description Pass as `cursor` for the next page; null on the last page. */
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };

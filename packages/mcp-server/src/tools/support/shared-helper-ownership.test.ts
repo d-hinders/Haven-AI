@@ -133,6 +133,11 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // tools/support/guidance.ts — agent guidance and purchase summaries.
   buildAgentGuidance: { module: 'guidance', slices: ['s2809', 's2810', 's2811', 's2812'] },
   buildPurchaseSummary: { module: 'guidance', slices: ['s2810', 's2812'] },
+  // #3101: the status handoff for a refusal that may not know its payment id —
+  // the three `payment_id: null` sites, in the catalog and plain-HTTP slices.
+  paymentStatusHandoff: { module: 'guidance', slices: ['s2810', 's2811'] },
+  // #3102: the refusal-side builder — every HostedToolError that names an action.
+  refusalNextStep: { module: 'guidance', slices: ['s2810', 's2811', 's2812'] },
   // tools/support/cap-price.ts — cap/price selection.
   readMaxAmountCap: { module: 'cap-price', slices: ['s2810', 's2811'] },
   priceSelectedOption: { module: 'cap-price', slices: ['s2810', 's2811'] },
@@ -347,7 +352,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'paymentWindowExpiredErrorFor',
     'normalizeError',
   ],
-  guidance: ['buildAgentGuidance', 'buildPurchaseSummary'],
+  guidance: ['buildAgentGuidance', 'buildPurchaseSummary', 'paymentStatusHandoff', 'refusalNextStep'],
   'mcp-context': [
     'delegationSignFields',
     'isMerchantEndpointMiss',
@@ -821,7 +826,7 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     }
   })
 
-  it('contributes exactly the ten tools it claims, and only those', async () => {
+  it('contributes exactly the eleven tools it claims, and only those', async () => {
     const { STATE_DIRECT_RECOVERY_TOOLS, createStateDirectRecoveryHandlers } = await import(
       '../state-direct-recovery.js'
     )
@@ -831,6 +836,7 @@ describe('capability-module dependency rule (#2806, first enforced #2809)', () =
     expect(contributed).toEqual([...STATE_DIRECT_RECOVERY_TOOLS].sort())
     expect(contributed).toEqual(
       [
+        'haven_check_funds',
         'haven_get_agent',
         'haven_get_allowances',
         'haven_get_payment_status',

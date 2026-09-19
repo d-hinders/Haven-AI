@@ -34,6 +34,7 @@ import {
 const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_get_agent',
   'haven_get_allowances',
+  'haven_check_funds',
   'haven_send',
   'haven_pay',
   'haven_submit',
@@ -58,10 +59,10 @@ const HOSTED_TOOL_NAMES: readonly HostedToolName[] = [
 ]
 
 describe('hosted tool contract surface (#2807 characterization)', () => {
-  it('advertises exactly the 23 hosted tool names, each exactly once', () => {
+  it('advertises exactly the 24 hosted tool names, each exactly once', () => {
     const schemaKeys = Object.keys(toolSchemas)
-    expect(schemaKeys).toHaveLength(23)
-    expect(new Set(schemaKeys).size).toBe(23)
+    expect(schemaKeys).toHaveLength(24)
+    expect(new Set(schemaKeys).size).toBe(24)
     expect([...schemaKeys].sort()).toEqual([...HOSTED_TOOL_NAMES].sort())
   })
 
@@ -165,14 +166,15 @@ describe('hosted tool contract surface (#2807 characterization)', () => {
     const handlers = createToolHandlers(
       new HavenClient({ apiKey: 'test-key', baseUrl: 'http://haven.test' }),
     )
-    const strict = await handlers.haven_list_receipts({ cursor: 'page-2' } as never)
+    // #3128: `cursor` is declared now; `page` is the undeclared key.
+    const strict = await handlers.haven_list_receipts({ page: 2 } as never)
     expect(strict.success).toBe(false)
     if (!strict.success) {
-      expect(strict.message).toContain('haven_list_receipts does not accept "cursor"')
+      expect(strict.message).toContain('haven_list_receipts does not accept "page"')
       // #3100: the refusal also names the declared keys (and a rejected key's
-      // declared alias when one exists — `cursor` has none).
+      // declared alias when one exists — `page` has none).
       expect(strict.message).toBe(
-        'haven_list_receipts does not accept "cursor". It declares: limit. That is deliberate rather than an ' +
+        'haven_list_receipts does not accept "page". It declares: limit, cursor. That is deliberate rather than an ' +
           'omission: ' +
           STRICT_INPUT_TOOLS.haven_list_receipts +
           ' Send only the fields this tool declares.',
@@ -188,6 +190,6 @@ describe('hosted tool contract surface (#2807 characterization)', () => {
       expect(toolDescriptions[name as HostedToolName]).toBeTruthy()
       expect(toolInputSchema(name as HostedToolName)).toBeTruthy()
     }
-    expect(advertised.size).toBe(23)
+    expect(advertised.size).toBe(24)
   })
 })

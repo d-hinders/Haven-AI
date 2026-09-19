@@ -81,7 +81,7 @@ export type DiscoveryEntry = {
   verified_payable?: boolean
 } & DiscoveryHint
 
-export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
+export const toolSchemas = {
   haven_send: {
     asset: z.enum(['ETH', 'USDC']),
     recipient: z.string().min(1),
@@ -147,11 +147,14 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   },
   haven_list_receipts: {
     limit: z.number().int().min(1).max(100).optional(),
+    /** #3128: the previous page's next_cursor (a receipt id). */
+    cursor: z.string().min(1).optional(),
   },
   haven_verify_receipt: {
     receipt: z.unknown(),
   },
-}
+// #3101: keys survive on the type (see the hosted server's contracts.ts).
+} as const satisfies Record<HavenMcpToolName, z.ZodRawShape>
 
 /**
  * MCP tool descriptions, composed from the shared semantic source in
@@ -201,7 +204,25 @@ export interface ToolFailure {
   paymentId?: string
   status?: string
   phase?: string
+  /**
+   * @deprecated since #3103 — read `next_action`. Kept with the same value for
+   * one release (the #2908 pattern) and removed in the release after the one
+   * carrying #3103.
+   */
   nextAction?: string
+  /**
+   * #3103 (epic #3105, decision 10): the same value as `nextAction`, spelled
+   * the way the hosted server and the signer spell it. Dual-emitted for one
+   * release (the #2908 pattern) before `nextAction` is dropped.
+   */
+  next_action?: string
+  /** #3101 (epic #3105, decision 7): the typed next-step family, additive; `next_tool` never null. */
+  next_tool?: string
+  next_tool_server?: string
+  next_tool_name?: string
+  next_tool_server_role?: 'hosted' | 'signer'
+  next_arguments?: Record<string, unknown>
+  next_tool_omitted_reason?: string
   resume_state?: unknown
   body?: unknown
   /**
@@ -500,7 +521,8 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
     },
     haven_list_receipts: async (input) => {
       const args = objectInput('haven_list_receipts', input)
-      return runTool(async () => haven.listReceipts({ limit: args.limit }))
+      // #3128: same page shape as the hosted runtime.
+      return runTool(async () => haven.listReceiptsPage({ limit: args.limit, cursor: args.cursor }))
     },
     haven_verify_receipt: async (input) => {
       const args = objectInput('haven_verify_receipt', input)
@@ -779,7 +801,11 @@ function normalizeError(err: unknown): ToolFailure {
       message: err.message,
       statusCode: err.statusCode,
       nextAction: err.nextAction,
+      next_action: err.nextAction,
       retry_with_new_quote: err.retryWithNewQuote,
+      // #3103: the local runtime's one decision site — no tool can act until
+      // the merchant recovers; the message carries retry_after_s.
+      next_tool_omitted_reason: 'the merchant needs to recover first; re-quote after the retry_after_s in the message',
     }
   }
 
@@ -793,6 +819,7 @@ function normalizeError(err: unknown): ToolFailure {
       status: err.status,
       phase: err.phase,
       nextAction: err.nextAction,
+      next_action: err.nextAction,
       resume_state: err.resumeState,
       body: err.body,
     }
@@ -819,6 +846,10 @@ function normalizeError(err: unknown): ToolFailure {
         stringOrUndefined(body?.nextAction) ??
         stringOrUndefined(body?.next_action) ??
         AgentPaymentNextAction.StopAndTellUser,
+      next_action:
+        stringOrUndefined(body?.nextAction) ??
+        stringOrUndefined(body?.next_action) ??
+        AgentPaymentNextAction.StopAndTellUser,
       body: err.body,
     }
   }
@@ -838,6 +869,10 @@ function normalizeError(err: unknown): ToolFailure {
     code: 'UNKNOWN_ERROR',
     message: err instanceof Error ? err.message : String(err),
     nextAction: AgentPaymentNextAction.StopAndTellUser,
+    next_action: AgentPaymentNextAction.StopAndTellUser,
+    // #3103: the second local decision site — nothing structured can follow an
+    // error this runtime did not recognise.
+    next_tool_omitted_reason: 'an error this runtime does not recognise; tell the user what the message says',
   }
 }
 

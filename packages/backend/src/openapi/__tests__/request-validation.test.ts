@@ -18,7 +18,13 @@ import { readFile } from 'node:fs/promises'
 // cannot resolve breaks the mock-factory census equation (261 ≠ 262).
 const mockQuery = vi.fn()
 
-import { installRequestValidation, requestValidationOpsSnapshot, requestSchemaForOperation, prefixIsEnforced } from '../request-validation.js'
+import {
+  installRequestValidation,
+  requestValidationOpsSnapshot,
+  requestSchemaForOperation,
+  moduleIsEnforced,
+  routeModuleFor,
+} from '../request-validation.js'
 import { openapiSpec } from '../spec.js'
 import { makeSpecAjv, REQUEST_AJV_OPTIONS } from '../ajv.js'
 
@@ -55,6 +61,59 @@ describe('requestSchemaForOperation (#3029)', () => {
     expect(params.id).toMatchObject({ format: 'uuid' })
     expect(query.limit).toMatchObject({ type: 'integer', minimum: 1 })
     expect(query.offset).toMatchObject({ type: 'integer', minimum: 0 })
+  })
+
+  it('#3135: path-item parameters arrive as an ARGUMENT and the operation is not written to', () => {
+    const operation = { parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }] }
+    const before = structuredClone(operation)
+    const schema = requestSchemaForOperation(operation as never, [
+      { name: 'tenant', in: 'query', schema: { type: 'string' } },
+    ])
+    const query = (schema?.querystring?.properties ?? {}) as Record<string, unknown>
+    expect(query.tenant).toEqual({ type: 'string' })
+    // The old hand-off wrote `__pathItemParameters` onto the SHARED spec object
+    // and deleted it a line later (`response-shape.ts:120` forbids exactly
+    // that). Nothing is written now — not even transiently.
+    expect(operation).toEqual(before)
+    expect(Object.keys(operation)).not.toContain('__pathItemParameters')
+  })
+
+  it("#3135: resolves $ref'd parameters — 40 of the spec's request params were dropped", () => {
+    // `POST /agents/{id}/rekey`'s only declared parameter is
+    // `$ref: '#/components/parameters/AgentId'`. A $ref node has no `in`, so
+    // the path/query filter used to skip it and the route compiled with NO
+    // params schema at all — no uuid format check on a money-adjacent route,
+    // which is the #1464 class epic #3028 cites as demonstrated cost.
+    const post = spec.paths['/agents/{id}/rekey'].post
+    expect(post.parameters?.[0]?.$ref).toBe('#/components/parameters/AgentId')
+    const schema = requestSchemaForOperation(post)
+    const params = (schema?.params?.properties ?? {}) as Record<string, unknown>
+    expect(params.id).toMatchObject({ type: 'string', format: 'uuid' })
+    expect(schema?.params?.required).toEqual(['id'])
+  })
+
+  it('#3135: an INLINE parameter still resolves — the fix did not trade one for the other', () => {
+    const put = spec.paths['/contacts/{id}'].put
+    expect(put.parameters?.[0]?.in).toBe('path')
+    const params = (requestSchemaForOperation(put)?.params?.properties ?? {}) as Record<string, unknown>
+    expect(params.id).toMatchObject({ format: 'uuid' })
+  })
+
+  it('#3135: a $ref the spec does not define is SKIPPED, not thrown on', () => {
+    const operation = { parameters: [{ $ref: '#/components/parameters/NotAThing' }] }
+    expect(requestSchemaForOperation(operation as never)).toBeNull()
+  })
+
+  it('#3135: a FROZEN spec operation still resolves — proof the resolver never writes', () => {
+    // The strongest form of the assertion above: under a frozen object a write
+    // THROWS in strict mode (ES modules are strict), so this test cannot pass
+    // while any write survives, transient or not.
+    const put = structuredClone(spec.paths['/contacts/{id}'].put)
+    Object.freeze(put)
+    const pathItemParameters = Object.freeze([
+      Object.freeze({ name: 'id', in: 'path', required: true, schema: { type: 'string' } }),
+    ])
+    expect(() => requestSchemaForOperation(put, pathItemParameters)).not.toThrow()
   })
 })
 
@@ -110,12 +169,43 @@ describe('the OPEN-budget body against the REAL spec and the REAL request ajv (#
   })
 })
 
-describe('prefixIsEnforced (#3029)', () => {
-  it('matches the exact mount and anything beneath it, nothing else', () => {
-    expect(prefixIsEnforced('/contacts', ['/contacts'])).toBe(true)
-    expect(prefixIsEnforced('/contacts/sub', ['/contacts'])).toBe(true)
-    expect(prefixIsEnforced('/contacts-elsewhere', ['/contacts'])).toBe(false)
-    expect(prefixIsEnforced('/catalog', ['/contacts'])).toBe(false)
+describe('the flip is keyed on the route FILE (#3135, epic #3028 decision 7)', () => {
+  it('moduleIsEnforced matches the file EXACTLY — no prefix or startsWith semantics', () => {
+    expect(moduleIsEnforced('routes/contacts.ts', ['routes/contacts.ts'])).toBe(true)
+    expect(moduleIsEnforced('routes/contacts.ts', ['routes/catalog.ts'])).toBe(false)
+    // The failure mode the old `startsWith` key had: a listed key must not
+    // drag a differently-named sibling along with it.
+    expect(moduleIsEnforced('routes/contacts-archive.ts', ['routes/contacts.ts'])).toBe(false)
+    // An operation the generated table does not attribute is never enforced,
+    // which is what the assertion below proves. That is the UNATTRIBUTED case
+    // only: a MOVED route keeps its old attribution and stays enforced under a
+    // file nobody listed — see `routeModuleFor`'s JSDoc for both directions.
+    expect(moduleIsEnforced(undefined, ['routes/contacts.ts'])).toBe(false)
+  })
+
+  it('the four route files sharing the /agents mount are attributed SEPARATELY', () => {
+    // This is the whole reason for the re-key: a prefix key could only flip
+    // all four of these at once, and epic #3028 puts agent-delegations.ts in
+    // slice 3 and the other three in slice 4.
+    expect(routeModuleFor('POST', '/agents')).toBe('routes/agents.ts')
+    expect(routeModuleFor('POST', '/agents/{id}/delegations/build')).toBe('routes/agent-delegations.ts')
+    expect(routeModuleFor('POST', '/agents/{id}/rekey')).toBe('routes/agent-rekey.ts')
+    expect(routeModuleFor('POST', '/agents/{id}/passport')).toBe('routes/agent-passports.ts')
+  })
+
+  it('the routes declared on the app itself are keyed `index.ts`, not a route file', () => {
+    // The old root prefix `''` matched EVERY module under a startsWith test.
+    expect(routeModuleFor('GET', '/chains')).toBe('index.ts')
+    expect(routeModuleFor('GET', '/health')).toBe('routes/health.ts')
+  })
+
+  it('the two production-enforced modules resolve to the keys index.ts lists', async () => {
+    const indexSource = await readFile(new URL('../../index.ts', import.meta.url), 'utf8')
+    const listed = indexSource.match(/enforcedModules:\s*\[([^\]]*)\]/)?.[1] ?? ''
+    expect(listed).toContain("'routes/contacts.ts'")
+    expect(listed).toContain("'routes/merchants.ts'")
+    expect(routeModuleFor('POST', '/contacts')).toBe('routes/contacts.ts')
+    expect(routeModuleFor('GET', '/merchants/{slug}')).toBe('routes/merchants.ts')
   })
 })
 
@@ -372,7 +462,7 @@ describe('installRequestValidation — off mode (#3029)', () => {
     ;(app.log as unknown as { info: typeof originalInfo }).info = originalInfo
   })
 
-  it('off does not disable an enforcedPrefixes module — the proof-module override holds', async () => {
+  it('off does not disable an enforcedModules module — the proof-module override holds', async () => {
     // Re-installed below in its own app; asserted there. Here we pin that the
     // OFF app did not inject a schema at all (the probe answers regardless).
     const res = await app.inject({
@@ -398,9 +488,9 @@ describe('installRequestValidation — enforce mode (#3029)', () => {
       void reply.status(statusCode).send({ error: error.message })
     })
     await app.register(fastifyJwt, { secret: 'test-secret' })
-    // enforcedPrefixes flips the module REGARDLESS of the env mode — proven by
-    // pairing mode:'off' with the contacts prefix enforced.
-    installRequestValidation(app, { mode: 'off', enforcedPrefixes: ['/contacts'] })
+    // enforcedModules flips the module REGARDLESS of the env mode — proven by
+    // pairing mode:'off' with the contacts FILE enforced.
+    installRequestValidation(app, { mode: 'off', enforcedModules: ['routes/contacts.ts'] })
     await app.register(contactProbeRoutes, { prefix: '/contacts' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
   })
@@ -409,7 +499,7 @@ describe('installRequestValidation — enforce mode (#3029)', () => {
     await app.close()
   })
 
-  it('mode:off + enforcedPrefixes still refuses with the 400 envelope', async () => {
+  it('mode:off + enforcedModules still refuses with the 400 envelope', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/contacts',
@@ -428,6 +518,88 @@ describe('installRequestValidation — enforce mode (#3029)', () => {
     const res = await app.inject({ method: 'GET', url: '/contacts/boom', headers: { authorization: `Bearer ${token}` } })
     expect(res.statusCode).toBe(503)
     expect(res.json()).toEqual({ error: 'probe boom' })
+  })
+
+  // ── The `'/'`-under-prefix registration, proven rather than assumed (#3135) ──
+  //
+  // A route declared at `'/'` under a prefix registers TWICE: fastify adds the
+  // `/contacts` variant and then, under the default `prefixTrailingSlash:
+  // 'both'`, the `/contacts/` variant with `prefixing: true`, which SKIPS the
+  // onRoute hooks (fastify 5.8.5, lib/route.js). Epic #3028 and #3030 both
+  // recorded that as a permanent hole in "every route".
+  //
+  // It is not one. `addNewRoute` mutates and reuses ONE `opts` object, and the
+  // Context for the second variant is built from that same mutated object — so
+  // the schema, `attachValidation` and `errorHandler` the first variant's hook
+  // installed are exactly what the trailing-slash variant gets. The claim was
+  // read off the hook count; these tests read it off the answers.
+  it('#3135: the trailing-slash variant of a `/` route is enforced TOO', async () => {
+    const offSpec = { name: 'Acme' } // POST /contacts requires `address`
+    const bare = await app.inject({ method: 'POST', url: '/contacts', headers: { authorization: `Bearer ${token}` }, payload: offSpec })
+    const slash = await app.inject({ method: 'POST', url: '/contacts/', headers: { authorization: `Bearer ${token}` }, payload: offSpec })
+    expect(bare.statusCode).toBe(400)
+    expect(slash.statusCode).toBe(400)
+    expect(slash.json()).toEqual(bare.json())
+  })
+
+  it('#3135: CONTROL — a conformant body is accepted on BOTH URLs', async () => {
+    // Without this, the test above is satisfied by a route that refuses
+    // everything, which is not what "both URLs validate" means.
+    const conformant = { name: 'Acme', address: `0x${'ab'.repeat(20)}` }
+    const bare = await app.inject({ method: 'POST', url: '/contacts', headers: { authorization: `Bearer ${token}` }, payload: conformant })
+    const slash = await app.inject({ method: 'POST', url: '/contacts/', headers: { authorization: `Bearer ${token}` }, payload: conformant })
+    expect(bare.statusCode).toBe(200)
+    expect(slash.statusCode).toBe(200)
+  })
+})
+
+describe('two modules sharing one mount prefix flip INDEPENDENTLY (#3135)', () => {
+  // The re-key exists for exactly this: `/agents` is shared by agents.ts,
+  // agent-delegations.ts (epic #3028 slice 3), agent-rekey.ts and
+  // agent-passports.ts (slice 4). Under the old `enforcedPrefixes` key,
+  // listing `/agents` flipped all four at once and there was no way to flip
+  // one — which is the partition the epic's build order depends on.
+  let app: FastifyInstance
+  let token: string
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    app.setErrorHandler((error: FastifyError, _request, reply) => {
+      void reply.status(error.statusCode ?? 500).send({ error: error.message })
+    })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    // ONE of the four /agents files is enforced; the other is left in shadow.
+    installRequestValidation(app, { mode: 'shadow', enforcedModules: ['routes/agent-delegations.ts'] })
+    await app.register(agentsProbeRoutes, { prefix: '/agents' })
+    token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
+  })
+
+  afterAll(async () => {
+    await app.close()
+  })
+
+  function post(url: string, payload: object) {
+    return app.inject({ method: 'POST', url, headers: { authorization: `Bearer ${token}` }, payload })
+  }
+
+  it('the ENFORCED file refuses an off-spec body with the 400 envelope', async () => {
+    const res = await post(`/agents/${AGENT_ID}/delegations/build`, { nonsense: true })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ error_code: 'invalid_request', statusCode: 400 })
+  })
+
+  it('the SHADOWED file under the SAME prefix still answers normally', async () => {
+    // Same mount, same request shape, opposite outcome — impossible to express
+    // with a prefix key, which is the finding this whole change answers.
+    const res = await post('/agents', { nonsense: true })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ probe: 'agents' })
+  })
+
+  it('CONTROL: the enforced file accepts a conformant body', async () => {
+    const res = await post(`/agents/${AGENT_ID}/delegations/build`, CONFORMANT_DELEGATION_BUILD)
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ probe: 'delegations' })
   })
 })
 
@@ -476,6 +648,38 @@ async function contactProbeRoutes(app: FastifyInstance): Promise<void> {
   })
 }
 
+const AGENT_ID = '11111111-2222-4333-8444-555555555555'
+
+/**
+ * A conformant `POST /agents/{id}/delegations/build` body — the enforced half
+ * of the independent-flip proof needs an input the spec ACCEPTS, or "enforced"
+ * and "broken" look identical. Written out rather than synthesised from the
+ * schema: a generator that guesses at `pattern` produces an input whose
+ * conformance nobody has checked, which is the opposite of a control.
+ */
+const CONFORMANT_DELEGATION_BUILD = {
+  token_address: `0x${'11'.repeat(20)}`,
+  budget_atomic: '1000000',
+  period_seconds: 86_400,
+}
+
+/**
+ * Two of the four route files that share the `/agents` mount, as one probe
+ * module: the paths are what attribute each route to its FILE through the
+ * generated table, not which function registered them.
+ */
+async function agentsProbeRoutes(app: FastifyInstance): Promise<void> {
+  app.addHook('onRequest', (req, reply, done) => {
+    if (!req.headers.authorization?.startsWith('Bearer ')) {
+      void reply.code(401).send({ error: 'Unauthorized' })
+      return
+    }
+    done()
+  })
+  app.post('/', async () => ({ probe: 'agents' }))
+  app.post('/:id/delegations/build', async () => ({ probe: 'delegations' }))
+}
+
 // The x402 characterization surface: the REAL prefix (routes/x402.ts:203) and
 // a handler that only echoes arrival. The plugin resolves the REAL
 // /x402/authorize operation and injects X402AuthorizeRequest — the probe never
@@ -501,4 +705,13 @@ it('the plugin header keeps the spiked fastify contract documented', async () =>
   expect(source).toContain('validateParam')
   expect(source).toContain('attachValidation === false')
   expect(source).toContain('ROOT-SCOPE')
+})
+
+// The generated table is what makes `enforcedModules` resolvable in the
+// deployed image; the header must keep saying WHY it is generated, because the
+// alternative (deriving at boot) fails silently in production.
+it('the plugin header keeps the generated-table rationale documented (#3135)', async () => {
+  const source = await readFile(new URL('../request-validation.ts', import.meta.url), 'utf8')
+  expect(source).toContain('route-modules.generated.ts')
+  expect(source).toContain('dist/*.js')
 })

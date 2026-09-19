@@ -6,18 +6,32 @@
 // operation declares request constraints (a requestBody, or query/path
 // parameters) is either SHADOWED (the plugin injects the schema and logs
 // would-be refusals) or ENFORCED (the module is in the plugin's
-// `enforcedPrefixes`, and a refusal is the 400 envelope). This gate freezes
+// `enforcedModules`, and a refusal is the 400 envelope). This gate freezes
 // that rollout so it can only advance:
 //
-//   shadow  — per route file, 1 while any registered route in the file is
-//             still shadowed, 0 once every route the spec constrains in the
-//             file is enforced (slices 2-4 flip modules one at a time).
-//   typeof  — per route file, the number of lines carrying a `typeof` guard.
-//             These are the hand-rolled request checks the spec's own schemas
-//             replace (`typeof name !== 'string'`, `typeof amount !== ...`);
-//             a module leaves shadow by deleting them, so the count is the
-//             per-file measure of the same migration. Slices 2-4 drive it to
-//             zero; at slice 4 every entry is zeros.
+//   shadow    — per route file, 1 while any registered route in the file is
+//               still shadowed, 0 once every route the spec constrains in the
+//               file is enforced (slices 2-4 flip modules one at a time).
+//   typeof    — per route file, the number of lines carrying a `typeof` guard.
+//               These are the hand-rolled request checks the spec's own schemas
+//               replace (`typeof name !== 'string'`, `typeof amount !== ...`);
+//               a module leaves shadow by deleting them, so the count is the
+//               per-file measure of the same migration. Slices 2-4 drive it to
+//               zero; at slice 4 every entry is zeros.
+//   ownSchema — per route file, the number of routes declaring their OWN
+//               Fastify `schema:` option (#3135). The plugin refuses to clobber
+//               one (`request-validation.ts`: "never clobber a route's own
+//               schema"), so such a route escapes spec validation AND — before
+//               this key existed — escaped this gate too: it is neither
+//               shadowed nor enforced, and "all zeros" at slice 4 could not
+//               see it. Zero today; the key exists so it cannot grow unseen.
+//   unspecced — per route file, the number of registered routes with NO spec
+//               operation at all (#3135). "No operation → no schema" means the
+//               plugin never touches them, so they are invisible to `shadow`
+//               for the same reason. One today: `POST /safe/deploy`, the
+//               retired-rail tombstone that carries a coverage-gate exemption
+//               (epic #3028 open question 1, answered "keep the exemption and
+//               count it, so all-zeros stays honest").
 //
 // The baseline shape is the engine's `{ "routes/<file>.ts": { key: n } }`
 // (scripts/lib/ratchet.mjs). A SCALAR is not a baseline — the engine refuses
@@ -33,7 +47,7 @@
 // (`fastifyPathToOpenApi`: `:param` → `{param}`), and the file is shadowed
 // when ANY of its registered operations carries `parameters` (query/path) or a
 // `requestBody`. `contacts.ts` reports shadow: 0 — it is the PROOF module,
-// enforced via `enforcedPrefixes` as of slice 1; the wiring is load-bearing
+// enforced via `enforcedModules` as of slice 1; the wiring is load-bearing
 // and pinned by the self-test (removing it reddens this gate).
 //
 // The boundary this gate deliberately does not police (same honesty as
@@ -42,8 +56,18 @@
 // are registered nowhere is invisible to index.ts and reads as unmounted (its
 // routes then never resolve to a spec path and it reports shadow: 0, which is
 // the safe direction — an unregistered file ships no refusals to shrink); and
-// a route absent from the spec entirely is #1443's coverage gate's problem,
-// not this one. The HEAD auto-twin is skipped, as the plugin skips it.
+// whether a route belongs in the spec AT ALL is #1443's coverage gate's
+// problem, not this one — `unspecced` counts such routes so slice 4's
+// "all zeros" cannot silently exclude them, and says nothing about whether
+// each is legitimately exempt. The HEAD auto-twin is skipped, as the plugin
+// skips it.
+//
+// `ownSchema`'s gauge is narrower than the others and says so: it counts lines
+// matching `/^\s*schema:\s/` in a route file with whole-line comments removed,
+// which is the shape a Fastify route options object uses. A `schema:` written
+// inline on the same line as the path literal would be missed. Zero today in
+// every route file, so the key starts as a tripwire rather than a measurement
+// of existing debt.
 //
 //   node scripts/lint-request-schemas.mjs            # check against the baseline
 //   node scripts/lint-request-schemas.mjs --update   # tighten after a reduction
@@ -69,10 +93,11 @@ const SPEC_TS = join(ROOT, 'packages/backend/src/openapi/spec.ts')
 const BASELINE_PATH = join(ROOT, 'scripts/lint-request-schemas-baseline.json')
 
 const REMEDY =
-  'A request-validation rollout regression: a module re-entered shadow, or a `typeof` ' +
-  'ladder regrew. Slices of epic #3028 only ever ADD enforced modules and DELETE ' +
-  '`typeof` guards — if your change did that by accident, fix it; if it genuinely ' +
-  'needs the old shape, say so on the epic instead of growing this baseline.'
+  'A request-validation rollout regression: a module re-entered shadow, a `typeof` ' +
+  'ladder regrew, a route took its own `schema:` out of the plugin\'s reach, or a route ' +
+  'was registered with no spec operation. Slices of epic #3028 only ever ADD enforced ' +
+  'modules and REMOVE residue — if your change did that by accident, fix it; if it ' +
+  'genuinely needs the old shape, say so on the epic instead of growing this baseline.'
 
 /**
  * The `fastifyPathToOpenApi` mapping — copied byte-for-byte from
@@ -102,23 +127,24 @@ export function prefixesFromIndex(indexSource, importName) {
 }
 
 /**
- * The `enforcedPrefixes` the production install declares (`src/index.ts`,
- * `installRequestValidation(app, { … enforcedPrefixes: ['/contacts'] })`).
+ * The `enforcedModules` the production install declares (`src/index.ts`,
+ * `installRequestValidation(app, { … enforcedModules: ['routes/contacts.ts'] })`).
  * The plugin is registered by index.ts and by route tests, never inline, so
- * this one site is the rollout's state: a module mounted at a listed prefix
- * is ENFORCED, and this gate's whole mutation story hangs off it — removing
- * `/contacts` from that array re-enters the module in shadow here and reddens
- * the gate against its `shadow: 0` baseline entry.
+ * this one site is the rollout's state: a listed route FILE is ENFORCED, and
+ * this gate's whole mutation story hangs off it — removing
+ * `routes/contacts.ts` from that array re-enters the module in shadow here and
+ * reddens the gate against its `shadow: 0` baseline entry.
+ *
+ * Keyed on the file since #3135 (epic #3028 decision 7). The old
+ * `enforcedPrefixes` key could not express the epic's slice partition —
+ * `/agents` is shared by four route files across two slices — and this gate
+ * now reads exactly the string the baseline keys its entries with, so the
+ * plugin and the ratchet cannot key the rollout two different ways.
  */
-export function enforcedPrefixesFromIndex(indexSource) {
-  const m = indexSource.match(/installRequestValidation\([\s\S]*?enforcedPrefixes:\s*\[([^\]]*)\]/)
+export function enforcedModulesFromIndex(indexSource) {
+  const m = indexSource.match(/installRequestValidation\([\s\S]*?enforcedModules:\s*\[([^\]]*)\]/)
   if (!m) return []
   return [...m[1].matchAll(/'([^']*)'/g)].map((x) => x[1])
-}
-
-/** The plugin's own prefix rule (`prefixIsEnforced`), mirrored for the scanner. */
-export function prefixIsEnforced(prefix, enforcedPrefixes) {
-  return enforcedPrefixes.some((p) => prefix === p || prefix.startsWith(`${p}/`))
 }
 
 /** The import name `src/index.ts` binds the route file to (null when unimported). */
@@ -148,14 +174,41 @@ export function registeredRoutes(moduleSource) {
  * True when the spec operation declares request constraints: a requestBody,
  * or `parameters` carrying a query/path parameter (headers are out of scope —
  * the plugin does not compile them either).
+ *
+ * `$ref`'d parameters are resolved against `components.parameters`, mirroring
+ * the plugin's `resolveParameter` (#3135). Both instruments dropped them
+ * before that — a `$ref` node has no `in`, so the query/path filter skipped
+ * it — and a `$ref` is how every `AgentId`/`PaymentId`/`SetupId` path
+ * parameter in the spec is written. The two must share the rule or the gate
+ * and the runtime disagree about which modules carry residue.
  */
-export function operationHasRequestConstraints(operation) {
+export function operationHasRequestConstraints(operation, componentParameters = {}) {
   if (!operation || typeof operation !== 'object') return false
   if (operation.requestBody && typeof operation.requestBody === 'object') return true
   if (!Array.isArray(operation.parameters)) return false
-  return operation.parameters.some(
-    (p) => p && typeof p === 'object' && (p.in === 'query' || p.in === 'path'),
-  )
+  return operation.parameters.some((entry) => {
+    if (!entry || typeof entry !== 'object') return false
+    const p =
+      typeof entry.$ref === 'string'
+        ? componentParameters[entry.$ref.replace('#/components/parameters/', '')]
+        : entry
+    return Boolean(p) && (p.in === 'query' || p.in === 'path')
+  })
+}
+
+/**
+ * The number of routes in `source` declaring their own Fastify `schema:`
+ * option (#3135). Whole-line comments are dropped first so a JSDoc mention of
+ * `schema:` is not a hit — the gauge's narrowness is stated in the header.
+ */
+export function ownSchemaRoutes(source) {
+  return source
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim()
+      return !(trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*'))
+    })
+    .filter((line) => /^\s*schema:\s/.test(line)).length
 }
 
 /** The number of lines in `source` that mention `typeof` — the metric. */
@@ -169,12 +222,15 @@ export function typeofLines(source) {
  * `scripts/generate-api-types.mjs` uses, so this gate sees exactly what
  * `/openapi.json` serves.
  */
-async function loadSpecPaths() {
+async function loadSpec() {
   const TSX = join(ROOT, 'node_modules/.bin/tsx')
   const { execFileSync } = await import('node:child_process')
   const json = execFileSync(
     TSX,
-    ['-e', "import('./packages/backend/src/openapi/spec.ts').then(m => process.stdout.write(JSON.stringify(m.openapiSpec.paths)))"],
+    [
+      '-e',
+      "import('./packages/backend/src/openapi/spec.ts').then(m => process.stdout.write(JSON.stringify({ paths: m.openapiSpec.paths, parameters: m.openapiSpec.components?.parameters ?? {} })))",
+    ],
     { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   )
   return JSON.parse(json)
@@ -187,68 +243,93 @@ async function loadSpecPaths() {
  * debt). Direct-registration modules (`registerHealthRoutes(app)`) mount at
  * ''.
  */
-export async function scanRoutes({ indexSource, specPaths, readModule }) {
+export async function scanRoutes({ indexSource, specPaths, componentParameters = {}, readModule }) {
   const counts = {}
-  const enforcedPrefixes = enforcedPrefixesFromIndex(indexSource)
+  const enforcedModules = enforcedModulesFromIndex(indexSource)
   for (const entry of (await readdir(ROUTES_DIR)).sort()) {
     if (!entry.endsWith('.ts')) continue
     const base = entry.replace(/\.ts$/, '')
     const relKey = `routes/${base}.ts`
     const source = await readModule(join(ROUTES_DIR, entry))
 
-    const total = typeofLines(source)
-    if (total > 0) counts[relKey] = { shadow: 0, typeof: total }
+    // `shadow` and `typeof` are written together, zeros included, so an entry
+    // always states both — the shape the baseline has carried since #3029.
+    // `ownSchema` and `unspecced` are written only when NON-ZERO: the engine
+    // reads a missing key as 0, so a zero entry would be 26 lines of noise
+    // saying nothing, and their whole job is to be visible when they are not
+    // zero.
+    const ensure = () => (counts[relKey] ??= { shadow: 0, typeof: 0 })
+    const bump = (key, n) => {
+      if (n === 0) return
+      ensure()[key] = n
+    }
+
+    const typeofTotal = typeofLines(source)
+    if (typeofTotal > 0) ensure().typeof = typeofTotal
+    bump('ownSchema', ownSchemaRoutes(source))
 
     const importName = importNameFromIndex(indexSource, base)
     if (!importName) continue
     const prefixes = prefixesFromIndex(indexSource, importName)
+    // An enforced module is not shadow, whatever its spec operations declare —
+    // the plugin injects the same schema and refuses instead of logging. The
+    // PROOF module (contacts, slice 1) and merchants (#3078) ride this. The
+    // key is the route FILE since #3135, the same one the plugin resolves.
+    const enforced = enforcedModules.includes(relKey)
     let shadowed = false
+    let unspecced = 0
     for (const prefix of prefixes) {
-      // An enforced module is not shadow, whatever its spec operations
-      // declare — the plugin injects the same schema and refuses instead of
-      // logging. The PROOF module (contacts, slice 1) rides this.
-      if (prefixIsEnforced(prefix, enforcedPrefixes)) continue
       for (const { method, path } of registeredRoutes(source)) {
         const pathItem = specPaths[fastifyPathToOpenApi(prefix, path)]
-        if (!pathItem) continue
+        if (!pathItem?.[method]) {
+          // No spec operation at all: the plugin never touches this route, so
+          // neither `shadow` nor `enforced` can describe it. Counted on its
+          // own key so slice 4's "every entry zero" cannot be reached while
+          // an unvalidated route is still registered (#3135).
+          unspecced += 1
+          continue
+        }
+        if (enforced) continue
         // Path-item-level parameters merge beneath operation-level ones —
-        // the same resolution rule the plugin implements via its
-        // `__pathItemParameters` hand-off (none exist in the spec today;
-        // kept here so the scanner cannot drift from the plugin when one
-        // is added).
+        // the same resolution rule the plugin implements by passing
+        // `pathItem.parameters` to `requestSchemaForOperation` (none exist in
+        // the spec today; kept here so the scanner cannot drift from the
+        // plugin when one is added).
         const parameters = [
           ...(Array.isArray(pathItem.parameters) ? pathItem.parameters : []),
           ...(Array.isArray(pathItem[method]?.parameters) ? pathItem[method].parameters : []),
         ]
         const operation = pathItem[method]
         const effective = parameters.length > 0 ? { ...operation, parameters } : operation
-        if (operationHasRequestConstraints(effective)) shadowed = true
+        if (operationHasRequestConstraints(effective, componentParameters)) shadowed = true
       }
     }
-    if (shadowed) {
-      counts[relKey] = { shadow: 1, typeof: counts[relKey]?.typeof ?? 0 }
-    }
+    if (shadowed) ensure().shadow = 1
+    bump('unspecced', unspecced)
   }
   return counts
 }
 
 const MODE_ENFORCED_NOTE =
   'routes/contacts.ts must stay shadow: 0 — it is the slice-1 PROOF module, enforced ' +
-  'through installRequestValidation({ enforcedPrefixes: [\'/contacts\'] }) in src/index.ts. ' +
-  'If this gate reddens on it, the enforcedPrefixes wiring was removed.'
+  "through installRequestValidation({ enforcedModules: ['routes/contacts.ts'] }) in src/index.ts. " +
+  'If this gate reddens on it, the enforcedModules wiring was removed.'
 
 async function main() {
-  const [indexSource, specPaths] = await Promise.all([readFile(INDEX_TS, 'utf8'), loadSpecPaths()])
+  const [indexSource, spec] = await Promise.all([readFile(INDEX_TS, 'utf8'), loadSpec()])
   const counts = await scanRoutes({
     indexSource,
-    specPaths,
+    specPaths: spec.paths,
+    componentParameters: spec.parameters,
     readModule: (p) => readFile(p, 'utf8'),
   })
 
+  const sum = (key) => Object.values(counts).reduce((total, k) => total + (k[key] ?? 0), 0)
   const shadowModules = Object.values(counts).filter((k) => k.shadow === 1).length
-  const typeofTotal = Object.values(counts).reduce((s, k) => s + k.typeof, 0)
   console.log(
-    `request-schemas gauge: ${shadowModules} shadow module(s), ${typeofTotal} typeof line(s) across ${Object.keys(counts).length} file(s).`,
+    `request-schemas gauge: ${shadowModules} shadow module(s), ${sum('typeof')} typeof line(s), ` +
+      `${sum('ownSchema')} own-schema route(s), ${sum('unspecced')} unspecced route(s) ` +
+      `across ${Object.keys(counts).length} file(s).`,
   )
 
   const { baseline, firstRun } = loadBaseline(BASELINE_PATH)

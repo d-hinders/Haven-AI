@@ -120,7 +120,18 @@ interface FortnoxSupplier {
 export function supplierNameFor(tx: FeedTransaction): string {
   if (tx.counterparty.name) return tx.counterparty.name.slice(0, 100)
   if (tx.counterparty.address) {
-    const a = tx.counterparty.address
+    // #3129: lowercased, so this name does not depend on the ADDRESS FORM.
+    // `findOrCreateSupplier` looks the name up with a REMOTE
+    // `GET /suppliers?name=<name>` filter whose case sensitivity is Fortnox's,
+    // not ours, and nothing here can pin it. When #3129 made
+    // `counterparty.address` checksummed, an unnamed merchant's derived name
+    // would have gone from `Merchant 0xdead-beef` to `Merchant 0xDeaD-BeEf`;
+    // if that filter is case-sensitive, the first push after the change finds
+    // no match for a merchant already booked and creates a DUPLICATE supplier
+    // in a customer's live accounting system. Lowercasing here keeps the name
+    // byte-identical to every one already written, and makes it stable under
+    // any future casing change.
+    const a = tx.counterparty.address.toLowerCase()
     // ASCII hyphen, NOT the app's canonical … ellipsis: Fortnox rejects it in
     // the supplier Name too (error 2000359 — found live on the first real
     // feed, 2026-07-16, same class as the Comments gotcha).

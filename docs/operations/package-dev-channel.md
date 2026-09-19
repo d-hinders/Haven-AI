@@ -18,10 +18,11 @@ covers:
   - packages/connect/src/args.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
+  - packages/connect/src/prune-runtimes.ts
   - packages/signer/src/credentials.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
-last-verified: "2026-09-17"
+last-verified: "2026-09-18"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -63,6 +64,19 @@ and the `release` skill.
 > whole-document re-verification this release did not perform. Scope of this
 > note: `CONNECTOR_VERSION` and the channel constant's unchanged value — nothing
 > else in this document was re-verified.
+
+> **Re-verification (#3135, request-validation flip re-key, 2026-09-18):** this
+> doc is coupled again through the same `covers:` entry on
+> `packages/backend/src/config.ts`, and again only a JSDoc block and the
+> boot-refusal error string changed: the per-module override is now keyed on
+> the route FILE (`enforcedModules: ['routes/contacts.ts', …]`) rather than the
+> mount prefix. The accepted values, the default, the restart semantics and the
+> variable's irrelevance to package selection are all untouched, so **nothing in
+> this document was made false or stale by that edit** — step 5's claim was
+> re-read against the merged tree and holds. `last-verified` is deliberately
+> NOT bumped: the re-read confirmed the existing claims rather than adding or
+> changing one, and a date moved for that is a rubber stamp the staleness audit
+> would then rank on.
 
 > **Re-verification (#3082, request-validation body restore, 2026-09-17):** this
 > doc is coupled because `packages/backend/src/config.ts` is in its `covers:` and
@@ -345,7 +359,11 @@ throughout.
 
    The doctor reports the installed signer and SDK versions (the snapshot),
    starts the local signer for a real stdio handshake and prints its advertised
-   compat versions. Its hosted MCP row proves endpoint reachability; the
+   compat versions. On the dev channel the pinned build moves often: an install
+   that is intact but behind the connector's current pin is reported as an
+   **advisory** (`!` marker, "intact, but outdated", both versions named) and
+   exits 0 — only a real failure exits 1 (#3121). Run `--doctor --repair` to
+   catch up when you want the newer snapshot. Its hosted MCP row proves endpoint reachability; the
    `identity_match` row is the authenticated stored-credential check. Every
    "re-run `npx @haven_ai/connect@<tag>`" hint the
    snapshot's packages print names **`@dev`**, because the tag is a build-time
@@ -392,11 +410,28 @@ contract — the three variables, what each replaces, the sidecar and wrapper
 records — is in the connector's own README:
 [`packages/connect/README.md` § *Installing an unpublished signer / SDK / MCP build*](../../packages/connect/README.md#installing-an-unpublished-signer--sdk--mcp-build-haven_signer_spec-2424).
 
+Every pin and every override key leaves its directory behind when you move
+on; nothing reclaimed them before #3123. `--prune-signer-runtimes --dry-run`
+lists the directories no credential directory's sidecar or wrapper names (the
+current pin is always kept), and without `--dry-run` removes them; `--doctor` reports them
+as the `signer_runtime_unused` advisory. It never removes a directory any
+credential directory names, so switching channels back and forth costs disk
+only until you prune.
+
 > **Re-verified #2963:** for a *pinned* (non-override) install `--doctor`'s
 > `signer_runtime` check compares intactness against the sidecar and currency
 > against the manifest — a dev-channel snapshot that is intact but behind the
 > pin now reads as version drift, not `stale or empty`; the override path
 > described above is unchanged (it already compared against the sidecar).
+
+> **Re-verified #3120:** the doctor/repair surfaces this loop uses keep their
+> contracts. `--doctor` (and `--doctor --repair`) now resolve the runtime from
+> the agent directory's `last-connect-outcome.json` when the `--runtime` flag
+> is absent, and an unknown runtime makes `--repair` refuse before any write or
+> npm spawn — the override flow above always names its runtime, so it never
+> enters that path. The section's commands keep explicit `--runtime <name>`
+> flags and behave exactly as written; the snapshot channel rules, the five
+> guards and `HAVEN_CONNECTOR_CHANNEL` did not move.
 
 
 The two loops compose: `@dev` picks the connector, the override picks the

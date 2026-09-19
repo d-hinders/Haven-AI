@@ -106,29 +106,41 @@ export const toolDescriptions = {
   },
   getAgent: {
     summary:
-      'Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, spend_authority_readiness, and per-token remaining allowance (atomic + human-readable). The recommended first call in a new session to confirm who you are and whether Haven will let you spend right now.',
+      'Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, spend_authority_readiness, per-token remaining allowance (atomic + human-readable). The recommended first call in a new session.',
     selectionGuidance:
-      'Use this as the one-shot orientation/bootstrap at the start of a session, or whenever you need to confirm identity together with whether the agent can spend right now. For a detailed per-token breakdown (configured vs spent vs reset window) use haven_get_allowances.',
+      'Use this as the session bootstrap, or to confirm identity together with whether the agent can spend right now. For per-token detail (configured vs spent vs reset window) use haven_get_allowances.',
     behavior:
-      'Reads identity plus the live spend-authority snapshot in one shot — the agent\'s active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves: there is no approval queue, so ask the owner to grant or raise the budget in Haven rather than waiting for an approval. allowances[] carries remainingAtomic and remainingDisplay per token. Identity fields: id, name, status, accountAddress, delegateAddress, chainId.',
+      'Reads identity plus the live spend-authority snapshot — the active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. It covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify the signer with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves; there is no approval queue — ask the owner to grant or raise the budget in Haven. allowances[] carries id, tokenAddress, remainingAtomic, remainingDisplay per token. Identity fields: id, name, status, accountAddress, delegateAddress, chainId.',
     nextActionGuidance: '',
   },
   getAllowances: {
     summary:
       'Return configured and on-chain allowance state for the authenticated agent. On-chain allowance is the real spend gate.',
     selectionGuidance:
-      'Use this when the user asks about allowance, budget, spend limit, remaining amount, remaining allowance, remaining budget, daily limit, reset period, what can I spend, or what the agent can still spend.',
+      'Use this when the user asks about allowance, budget, spend limit, remaining amount, remaining allowance, remaining budget, daily limit, reset period, what can I spend, or what the agent can still spend. For whether the account actually HOLDS funds behind the budget use haven_check_funds.',
     behavior:
-      'Returns the per-token spend authority for the account: the active budget delegation (remaining = the period budget, which re-arms natively at the period boundary). An over-budget payment is declined before any money moves; nothing queues. Configured amounts from Haven are returned alongside.',
+      'Returns the per-token spend authority for the account: the active budget delegation (remaining = the period budget, which re-arms natively at the period boundary), each with id, onchain.remaining, remainingDisplay. An over-budget payment is declined before any money moves; nothing queues. Configured amounts from Haven are returned alongside.',
     nextActionGuidance: '',
+  },
+  // #3126 — the sufficiency signal, deliberately NOT a balance tool. The
+  // constrained actor reads a boolean, never the treasury total.
+  checkFunds: {
+    summary:
+      'Check whether the agent\'s account actually holds at least the given amount of a token — funds held, not spend permitted.',
+    selectionGuidance:
+      'Use this before attempting a payment when it matters whether the money is really there: allowance answers say what you are PERMITTED to spend, never whether the account HOLDS it. For allowance, budget, spend-limit, remaining-budget, reset-period, or what-can-I-spend questions use the allowance lookup tool instead.',
+    behavior:
+      'Returns covered: true (the account holds at least the checked amount), false (a live chain read reports less — the budget is backed by an empty account; stop and tell the user funds are missing), or null (the chain read failed — unverifiable, never treat it as absence; coverageError says why). The account balance itself is deliberately not returned: this is a sufficiency signal, not a balance read. budget_remaining_atomic is the permitted figure from the allowance lookup (the SDK spells it budgetRemainingAtomic), named so it can never be confused with holdings.',
+    nextActionGuidance:
+      'On covered=false, do not attempt the payment — tell the user the account is short and let them fund it; on covered=null, retry the check shortly or proceed knowing the payment may fail on-chain.',
   },
   listReceipts: {
     summary:
-      'List recent machine-payment receipts and evidence for bookkeeping.',
+      'List machine-payment receipts, newest first, by page.',
     selectionGuidance:
-      'Use this for transaction history, receipts, payment evidence, or bookkeeping; use the allowance tool instead for remaining allowance, budget, spend-limit, or what-can-I-spend questions.',
+      'For transaction history or payment evidence; use the allowance tool instead for remaining allowance or what-can-I-spend questions.',
     behavior:
-      'Returns the agent\'s recent machine-payment receipts ordered by recency. Proof header values are not returned.',
+      "Page: { receipts, total, hasMore, nextCursor }; total 0 = none exist (no indexing delay); hasMore = cut at limit, send nextCursor as cursor. parties.treasuryAccount is Haven's authoritative payer. protocolReceiptPayload is the merchant's PAYMENT-RESPONSE, relayed verbatim: merchant-controlled, unverified, not Haven's record; payer may differ from payerAddress. Proof header values are omitted.",
     nextActionGuidance: '',
   },
   verifyReceipt: {
@@ -195,7 +207,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
       'Do NOT use for normal payments — use haven_pay_x402. ' +
-      'Do NOT use to read balances only — use haven_get_allowances.',
+      'Do NOT use to read balances only — use haven_get_allowances, or haven_check_funds for whether the account holds funds.',
     behavior:
       'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating account (hardcoded destination). ' +
       'The delegate key signs locally — Haven never sees it and the backend never constructs signed transactions (CASP/MiCA Red Line #2). ' +
@@ -213,7 +225,8 @@ export const toolDescriptions = {
     selectionGuidance:
       'Use this for plain transfers — refunding a user, paying a freelancer, topping up a co-agent\'s wallet, or moving funds between addresses. ' +
       'Do NOT use for x402 paid endpoints — use haven_pay_x402 instead. ' +
-      'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances.',
+      'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. ' +
+      'Do NOT use to check whether funds are held before sending — use haven_check_funds.',
     behavior:
       'Sends the requested amount by redeeming the agent\'s on-chain budget delegation, account to recipient with no funding leg. ' +
       'Budget, recipient and expiry are enforced on-chain while the transfer is prepared, so a request outside them is declined before any money moves and before the agent is asked to sign — it is never queued for a human to approve later. ' +

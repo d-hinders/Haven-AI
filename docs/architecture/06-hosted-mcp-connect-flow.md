@@ -20,7 +20,7 @@ covers:
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
-last-verified: "2026-09-10"
+last-verified: "2026-09-18"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -243,7 +243,9 @@ best-effort, to `POST /machine-payments/:id/merchant-receipt`.
 
 ## Tool surfaces
 
-Hosted MCP provides identity and allowance reads, direct send/prepare/submit,
+Hosted MCP provides identity and allowance reads, the #3126 sufficiency check
+(whether the account actually holds a stated amount — `haven_check_funds`, a
+boolean `covered` answer, never a balance), direct send/prepare/submit,
 x402 and MPP quote/resume/status operations, paid-MCP prepare/settle,
 receipt listing and verification, discovery, and gasless USDC sweep
 orchestration. The exact registered union is in
@@ -251,8 +253,8 @@ orchestration. The exact registered union is in
 `packages/mcp-server/src/tools.ts`, which stays the facade every embedder
 imports.
 
-**An argument the tool does not declare is refused — on 21 of the 23 hosted
-tools (#2312, #2348, #2349, #2353).** It began with the money-path tools that read
+**An argument the tool does not declare is refused — on 22 of the 24 hosted
+tools (#2312, #2348, #2349, #2353, #3126).** It began with the money-path tools that read
 from a record: several hosted tools take a `payment_id` and read the rest —
 amount, recipient, merchant, resource URL, funding transaction — from the
 payment's own stored row. A permissive parse dropped any other key silently, so

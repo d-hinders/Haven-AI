@@ -71,7 +71,7 @@ import {
   readMaxAmountCap,
 } from './support/cap-price.js'
 import { HostedToolError, normalizeError, runTool } from './support/errors.js'
-import { buildAgentGuidance } from './support/guidance.js'
+import { buildAgentGuidance, paymentStatusHandoff, type HostedHandoff, refusalNextStep } from './support/guidance.js'
 import { buildX402SigningContext, coerceJsonField } from './support/mcp-context.js'
 import {
   isPendingApproval,
@@ -84,6 +84,13 @@ import {
 // URL existed to compare against. On the pay-from-declaration path nothing was
 // compared, and a literal `false` there read as "the merchant agrees with what
 // you quoted" (haven-reviewer on #3112).
+/** #3101: the handoff after a reported outcome — sweep on a rejection, nothing (with the reason) on acceptance. */
+function reportOutcomeHandoff(outcome: 'accepted' | 'rejected'): HostedHandoff {
+  return outcome === 'rejected'
+    ? { nextTool: 'haven_sweep_delegate', nextArguments: {} }
+    : { nextTool: null, nextToolOmittedReason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' }
+}
+
 function differsFromRequest(target: X402RetryTarget): { resource_url_differs_from_request?: boolean } {
   return target.resourceUrlDiffersFromRequest === undefined
     ? {}
@@ -250,7 +257,7 @@ export function createPlainHttpX402Handlers(
               'returns it as request_url), and treat a merchant whose challenge downgrades the ' +
               'scheme as suspect. Nothing was funded or signed.',
             statusCode: 400,
-            nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+            nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the https URL you quoted as url; nothing was funded or signed' }),
           })
         }
         // #1351: shape-check the cap before the funding intent — this tool has
@@ -299,7 +306,7 @@ export function createPlainHttpX402Handlers(
                 'cap. No funding intent was created and no funds were moved. Re-quote the ' +
                 'merchant with haven_quote_x402.',
               statusCode: 400,
-              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again; suggested_tool names the tool for after that' }),
               suggestedTool: 'haven_quote_x402',
             })
           }
@@ -382,7 +389,7 @@ export function createPlainHttpX402Handlers(
               ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
               ...buildAgentGuidance({
                 nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-                nextTool: 'mcp__haven-signer__haven_sign',
+                nextTool: 'haven_sign',
                 nextArguments: { payment_id: prepared.paymentId },
                 safeToContinue: true,
                 reason:
@@ -428,7 +435,7 @@ export function createPlainHttpX402Handlers(
             // #1308: decomposed-path next step.
             ...buildAgentGuidance({
               nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-              nextTool: 'mcp__haven-signer__haven_sign_x402',
+              nextTool: 'haven_sign_x402',
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               // #2291: this said "relay via haven_submit and finish with
@@ -473,8 +480,8 @@ export function createPlainHttpX402Handlers(
               // is a payload that contradicts itself, and the field wins.
               ...buildAgentGuidance({
                 nextAction: AgentPaymentNextAction.StopAndTellUser,
-                nextTool: 'mcp__haven__haven_get_payment_status',
-                nextArguments: { payment_id: err.paymentId ?? null },
+                // #3101: omitted + reason when the id is unknown (decision 3).
+                ...paymentStatusHandoff(err.paymentId),
                 safeToContinue: false,
                 reason:
                   'The amount exceeds the remaining budget, so the payment was declined. ' +
@@ -564,7 +571,7 @@ export function createPlainHttpX402Handlers(
               'check haven_get_payment_status, and if no settlement appears within the payment ' +
               'window, recover the delegate balance with haven_sweep_delegate. Do not pay again.',
             statusCode: 400,
-            nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+            nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the https URL you originally quoted as url; the status and sweep exits are in the message' }),
             paymentId: state.paymentId,
             phase: 'funded_but_unsettled',
             suggestedTool: 'haven_get_payment_status',
@@ -639,9 +646,7 @@ export function createPlainHttpX402Handlers(
               (report.outcome === 'rejected'
                 ? AgentPaymentNextAction.SweepStrandedFunds
                 : AgentPaymentNextAction.None),
-            ...(report.outcome === 'rejected'
-              ? { nextTool: 'mcp__haven__haven_sweep_delegate' as const, nextArguments: {} }
-              : {}),
+            ...reportOutcomeHandoff(report.outcome),
             safeToContinue: true,
             reason:
               report.outcome === 'rejected'

@@ -28,6 +28,7 @@ import {
   type HavenIdentity,
   type FetchedSignContext,
 } from './sign-context.js'
+import { nextStepWireFields, signerRefusalStep } from './next-step.js'
 
 /**
  * Local signer tool set. These run on the agent's machine, next to the key,
@@ -118,7 +119,7 @@ const x402ExpectedShape = {
 
 const x402ExpectedSchema = z.object(x402ExpectedShape)
 
-export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
+export const toolSchemas = {
   haven_sign_sweep_delegate: {
     // The authorization fields prepared by Haven's POST /sweep/prepare. Passed
     // through verbatim from the hosted haven_sweep_delegate tool — the signer
@@ -186,7 +187,8 @@ export const toolSchemas: Record<SignerToolName, z.ZodRawShape> = {
     // #1255: see haven_sign.typed_data_b64 — the copy-through-safe form.
     typed_data_b64: z.string().min(1).max(262144).optional(),
   },
-}
+// #3101: keys survive on the type (see the hosted server's contracts.ts).
+} as const satisfies Record<SignerToolName, z.ZodRawShape>
 
 const SIGN_DESCRIPTION = [
   'Sign an unsigned Haven payment hash with the local delegate key. The delegate key never leaves',
@@ -359,6 +361,13 @@ export interface ToolFailure {
   next_action?: string
   retry_with_new_quote?: boolean
   suggested_tool?: string
+  /** #3101 (epic #3105, decision 7): the typed next-step family, additive; `next_tool` never null. */
+  next_tool?: string
+  next_tool_server?: string
+  next_tool_name?: string
+  next_tool_server_role?: 'hosted' | 'signer'
+  next_arguments?: Record<string, unknown>
+  next_tool_omitted_reason?: string
   /**
    * #1309: present on `UNSUPPORTED_EXPECTED_CONTEXT_VERSION` /
    * `UNSUPPORTED_SWEEP_BINDING_VERSION` refusals — the exact version set this
@@ -727,6 +736,12 @@ function normalizeError(err: unknown): ToolFailure {
       received_version: err.receivedVersion,
       fallback: err.fallback,
       next_action: AgentPaymentNextAction.StopAndTellUser,
+      // #3103: no tool can fix a version skew from inside the call.
+      ...nextStepWireFields(signerRefusalStep({
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: 'update @haven_ai/signer by re-running the connector, then repeat the same call',
+      })),
     }
   }
   if (err instanceof HavenSignContextError) {
@@ -744,6 +759,13 @@ function normalizeError(err: unknown): ToolFailure {
       ...(err.retry_with_new_quote ? { retry_with_new_quote: true } : {}),
       ...(err.http_status !== undefined ? { http_status: err.http_status } : {}),
       ...(err.backend_error_code !== undefined ? { backend_error_code: err.backend_error_code } : {}),
+      // #3103: the typed step the error decided beside its action.
+      ...(err.next_tool ? { next_tool: err.next_tool } : {}),
+      ...(err.next_tool_server ? { next_tool_server: err.next_tool_server } : {}),
+      ...(err.next_tool_name ? { next_tool_name: err.next_tool_name } : {}),
+      ...(err.next_tool_server_role ? { next_tool_server_role: err.next_tool_server_role } : {}),
+      ...(err.next_arguments ? { next_arguments: err.next_arguments } : {}),
+      ...(err.next_tool_omitted_reason ? { next_tool_omitted_reason: err.next_tool_omitted_reason } : {}),
     }
   }
   if (err instanceof HavenSigningError) {
@@ -764,6 +786,12 @@ function normalizeError(err: unknown): ToolFailure {
             next_action: AgentPaymentNextAction.PaymentWindowExpired,
             retry_with_new_quote: true,
             suggested_tool: 'haven_pay_mcp_tool',
+            // #3103: same omission as the hosted window-expired helper.
+            ...nextStepWireFields(signerRefusalStep({
+              nextAction: AgentPaymentNextAction.PaymentWindowExpired,
+              nextTool: null,
+              nextToolOmittedReason: 're-run the hosted quote tool you called with the same idempotency_key; which one depends on the flow (suggested_tool names the MCP one)',
+            })),
           }
         : {}),
     }

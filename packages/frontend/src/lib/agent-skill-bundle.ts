@@ -55,8 +55,10 @@ the \`mcp__haven-signer__\` namespace and keep the delegate key on this machine.
 That namespacing is Claude-family; other runtimes name the servers by their
 own config keys (Codex: \`haven\`, \`haven_signer\`). Tool results carry the
 exact next step (\`next_action\`, \`next_tool\`, \`next_arguments\`, plus the
-runtime-neutral \`next_tool_server\` + \`next_tool_name\` — the bare tool name
-on that logical server, whatever your runtime calls it).
+runtime-neutral \`next_tool_server\` + \`next_tool_name\` + \`next_tool_server_role\`
+— the bare tool name on that logical server, whatever your runtime calls it).
+When no tool follows, \`next_tool\` is absent and \`next_tool_omitted_reason\`
+says why; that is a complete answer.
 Follow those fields first; the prose below is fallback and orientation, not
 the source of truth.
 
@@ -143,6 +145,13 @@ spending:
   local signer; the signer is verified by calling any signer tool.
 - \`mcp__haven__haven_get_allowances\` — detailed per-token breakdown
   (configured, spent, reset window) when you need more than the summary.
+- \`mcp__haven__haven_check_funds\` — whether the account actually HOLDS at
+  least a given amount of a token. Allowance answers above say what you are
+  permitted to spend; this one says whether the money is really there,
+  answered as \`covered\` true/false/null — never as a balance. On
+  \`covered: false\`, stop and tell the user the account is short; on
+  \`covered: null\` (the chain read failed), treat it as unverifiable rather
+  than as absence.
 
 Budgets reset on a period the user chose. If a payment exceeds the remaining
 budget it is declined before any money moves — tell the user; they can raise
@@ -271,8 +280,10 @@ check on in-flight payments. Do not poll in a tight loop.
 ## Failure handling
 
 Haven tool failures are shaped like \`{ success: false, code, message, ... }\`
-or older \`{ error, status, details? }\` responses. Branch on \`code\` when
-present and surface \`message\` or \`error\` verbatim. Common cases:
+or older \`{ error, status, details? }\` responses. A failure carries the same
+\`next_action\` / \`next_tool\` / \`next_arguments\` / \`next_tool_omitted_reason\`
+fields a success does; follow them first, then branch on \`code\` and surface
+\`message\` or \`error\` verbatim. Common cases:
 
 - \`insufficient_funds\`: the Haven wallet doesn't hold enough of that token.
   Suggest the user add funds in the Haven dashboard.

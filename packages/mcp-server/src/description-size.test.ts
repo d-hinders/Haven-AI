@@ -60,24 +60,30 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * on its own evidence — not a silent return to a number nobody re-derived.
  */
 /**
- * **Headroom is nearly gone, and that is not what the pin above describes
- * (#2341).** The comment reads as though 874.0 came from a clean
- * "18,354 / 21 tools" baseline with #2292's own tool pushing the mean down to
- * 862.5. That was true when written. #2341 then spent almost all of it making
- * the x402 header guidance scheme-aware — three words on
- * `PAY_X402_QUOTE_DESCRIPTION` and, offsetting them, a 24-byte overclaim
- * removed from `SETTLE_MCP_TOOL_DESCRIPTION`. The surface now sits ONE byte
- * per tool under the cap.
- *
- * So if you are reading this because the guard just failed on a change that
- * has nothing to do with descriptions being bloated: it is not accusing you of
- * bloat, and the answer is not to bump the number. Trim a real overclaim (that
- * is what #2341 found — a summary promising behaviour its own branch no longer
- * had), or re-argue the constant on its own evidence the way #2292 did. The
- * cap has never been raised and raising it silently is how this stops meaning
- * anything.
+ * **Re-derived at the measured value — round 3 of #3126, second custody
+ * merge (2026-09-19) — the #2292 move, stated where the pin itself demands
+ * it.** The 874.0 pin first broke on `dev`, not on this branch: #3125
+ * rewrote `listReceipts.behavior` (+145 UTF-8 bytes of receipt provenance
+ * wording), which landed through the round-2 custody merge of dev c0ae079f
+ * and was re-derived at 20,978 / 24 (commit 3cbfe426). The second custody
+ * merge of dev 2018100c then carried #3146's SDK description rewrites into
+ * the composed surface: `listReceipts.behavior` gained the pagination
+ * contract sentence (Page envelope, total, hasMore, nextCursor),
+ * `getAllowances.behavior` gained the per-entry field enumeration, and
+ * `getAgent` was trimmed to match — net +22 bytes (20,978 → 21,000, mean
+ * 874.083 → 875.0), again invisible on dev because the mcp-server checks
+ * job surface-skips SDK-only changes, and exposed here on the first
+ * mcp-server-touching PR since. Neither remedy besides re-derivation
+ * applies: there is no overclaim to trim — the new wording states each
+ * tool's real output shape (#3146's deliverable) and this branch's own
+ * `haven_check_funds` description sits below the mean — and the constant
+ * cannot stay while the tree the PR must merge into already exceeds it. So
+ * the pin moves to the exact measured mean of THIS surface, 21,000 / 24,
+ * and stays shrink-only from here; the absolute assertion stays the integer
+ * total so the two can never disagree.
  */
-const MAX_MEAN_BYTES = 874
+const MAX_TOTAL_BYTES = 21_000
+const MAX_MEAN_BYTES = MAX_TOTAL_BYTES / 24
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {
@@ -85,8 +91,9 @@ describe('tool description payload (#1591)', () => {
     const total = sizes.reduce((n, size) => n + size, 0)
     const mean = total / sizes.length
     expect(mean).toBeLessThanOrEqual(MAX_MEAN_BYTES)
-    // The same bound stated absolutely, so the two can never disagree.
-    expect(total).toBeLessThanOrEqual(MAX_MEAN_BYTES * sizes.length)
+    // The same bound stated absolutely against the integer total, so the two
+    // can never disagree (and no float rounding can split them).
+    expect(total).toBeLessThanOrEqual(MAX_TOTAL_BYTES)
   })
 
   it('no agent-visible description or instruction contains internal issue archaeology (#N)', () => {

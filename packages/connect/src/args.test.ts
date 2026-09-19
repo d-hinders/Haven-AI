@@ -203,3 +203,34 @@ describe('--replace (#2551)', () => {
     expect(help).toContain('wiring_collision')
   })
 })
+
+describe('parseArgs --destroy-key-material / --prune-signer-runtimes (#3123)', () => {
+  it('--unwire --destroy-key-material sets the override on the unwire request', () => {
+    const parsed = parseArgs(['--unwire', '/tmp/agents/agent-old', '--destroy-key-material'], {})
+    expect(parsed.unwire).toEqual({ destroyKeyMaterial: true })
+    expect(parsed.unwireDir).toBe('/tmp/agents/agent-old')
+  })
+
+  it('--destroy-key-material without --unwire is refused, naming the flag it belongs to', () => {
+    expect(() => parseArgs(['--doctor', '--runtime', 'codex-cli', '--destroy-key-material'], {})).toThrow(/only applies to --unwire/)
+  })
+
+  it('--prune-signer-runtimes parses alone, with --dry-run, needs no token, and refuses to combine with another operation', () => {
+    expect(parseArgs(['--prune-signer-runtimes'], {}).pruneSignerRuntimes).toEqual({ dryRun: false })
+    expect(parseArgs(['--prune-signer-runtimes', '--dry-run', '--json'], {}).pruneSignerRuntimes).toEqual({ dryRun: true })
+    expect(() => parseArgs(['--prune-signer-runtimes', '--doctor', '--runtime', 'codex-cli'], {})).toThrow(/its own operation/)
+    expect(() => parseArgs(['--dry-run'], {})).toThrow(/only applies to --prune-signer-runtimes/)
+  })
+})
+
+describe('#3123 flags are refused, never silently discarded, on the --rekey path (#3151 review)', () => {
+  it('--destroy-key-material with --rekey / --rekey-finish throws instead of vanishing', () => {
+    expect(() => parseArgs(['--rekey', '--destroy-key-material'], {})).toThrow(/only applies to --unwire/)
+    expect(() => parseArgs(['--rekey-finish', '--api-key', 'sk_new', '--destroy-key-material'], {})).toThrow(/only applies to --unwire/)
+  })
+  it('--dry-run with --rekey throws; --prune-signer-runtimes with --rekey or a --setup token throws', () => {
+    expect(() => parseArgs(['--rekey', '--dry-run'], {})).toThrow(/only applies to --prune-signer-runtimes/)
+    expect(() => parseArgs(['--rekey', '--prune-signer-runtimes'], {})).toThrow(/its own operation/)
+    expect(() => parseArgs(['--prune-signer-runtimes', '--setup', 'tok'], {})).toThrow(/takes no --setup token/)
+  })
+})

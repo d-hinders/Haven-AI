@@ -1045,6 +1045,17 @@ them instead. An epic with no such section predates the template change — the 
 says so and exits 0, and the report names the absence. The epic stays open across
 the promotion until a human ticks the last box.
 
+**An unticked box is not always outstanding work — it may be a mis-written box.**
+A box phrased so that no outcome can make it true (a waived operator step still
+worded as "proof recorded") reports not-ready on every run, forever, while the
+evidence accumulates in comments this tool does not read. That is #2906, which
+reported not-ready for five days with every step done or deliberately waived.
+When the checker names a box no work can ever satisfy, say so in the report and
+point at [`new-task` § *Epics*](../new-task/SKILL.md#epics) — the box is rewritten
+to record the disposition and ticked, naming who waived the step and linking
+where. Ship-next never makes that decision itself; it reports that the box, not
+the work, is what is blocking.
+
 **Scan-ledger disposition.** When the epic being reported ready to close (or being
 closed by whoever holds that decision — ship-next itself never closes an epic, per
 the rule above) traces to a [quality-scan](../quality-scan/SKILL.md) finding, the

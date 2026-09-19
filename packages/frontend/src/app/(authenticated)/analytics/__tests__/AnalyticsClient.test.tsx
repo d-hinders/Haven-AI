@@ -80,7 +80,7 @@ function settled(overrides: Record<string, unknown> = {}) {
   return { data: POPULATED, loading: false, failed: false, refetch: mockRefetch, ...overrides }
 }
 
-function preferences(currency: 'USD' | 'EUR' = 'USD') {
+function preferences(currency: 'USD' | 'EUR' | 'SEK' = 'USD') {
   mockUsePreferences.mockReturnValue({ currency, setCurrency: vi.fn(), saving: false })
 }
 
@@ -460,6 +460,19 @@ describe('Analytics — the currency is the one the Settings surface owns', () =
     render(<AnalyticsClient />)
     expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('30d', 'usd')
     expect(screen.getByTestId('stat-tile-spent').textContent).toMatch(/\$324\.75/)
+  })
+
+  it('sends sek on the wire for a SEK preference and renders sv-SE figures in the tiles (#3127)', () => {
+    // SEK is the served default and the currency no user could previously
+    // select; the tile must show the endpoint's figure in the currency's own
+    // locale voice — "324,75 kr", never a USD figure relabelled "kr".
+    preferences('SEK')
+    render(<AnalyticsClient />)
+    expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('30d', 'sek')
+    const tile = screen.getByTestId('stat-tile-spent')
+    expect(tile.textContent).toContain('324,75\u00a0kr')
+    expect(tile.textContent).not.toContain('$')
+    expect(tile.textContent).not.toContain('€')
   })
 })
 

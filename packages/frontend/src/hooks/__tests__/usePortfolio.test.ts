@@ -16,6 +16,7 @@ const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
 const PORTFOLIO: PortfolioResponse = {
   totalUsd: 12.34,
   totalEur: 11.22,
+  totalSek: 118.5,
   breakdown: [
     {
       symbol: 'USDC',
@@ -23,6 +24,7 @@ const PORTFOLIO: PortfolioResponse = {
       formatted: '1.00',
       usdValue: 1,
       eurValue: 0.92,
+      sekValue: 9.4,
     },
   ],
 }
@@ -41,6 +43,9 @@ describe('usePortfolio', () => {
     expect(mockApiGet).toHaveBeenCalledWith(`/portfolio/${SAFE_ADDRESS}?chain_id=8453`)
     expect(result.current.totalUsd).toBe(12.34)
     expect(result.current.totalEur).toBe(11.22)
+    // #3127: the SEK total rides beside USD/EUR so the display side can
+    // honour a SEK preference without re-deriving anything.
+    expect(result.current.totalSek).toBe(118.5)
     expect(result.current.breakdown).toEqual(PORTFOLIO.breakdown)
   })
 

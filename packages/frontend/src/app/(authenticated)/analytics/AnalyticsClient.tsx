@@ -115,7 +115,7 @@ const UNRECORDED_REFUSALS_NOTE =
   "Price-cap refusals in your agent's runtime are not recorded, and neither are budget refusals raised when Haven's hosted tools prepare a purchase."
 
 /** The four figures, in the order the reader scans them. */
-function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currency: 'USD' | 'EUR' }) {
+function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currency: 'USD' | 'EUR' | 'SEK' }) {
   if (data === null) return null
   const { totals, basis, range } = data
   const windowCaption = `vs previous ${range.days} days`
@@ -279,7 +279,7 @@ export default function AnalyticsClient() {
   // reading" and the reader would believe the louder one.
   const { data, loading, failed, refetch } = useAnalyticsOverview(
     range,
-    currency === 'EUR' ? 'eur' : 'usd',
+    currency === 'EUR' ? 'eur' : currency === 'SEK' ? 'sek' : 'usd',
   )
 
   const changeRange = (next: AnalyticsRangeValue) => {

@@ -30,8 +30,8 @@ import { truncateAddress } from '@/components/haven'
 // elsewhere are deletion slice #1989's scope, not this one's.
 // ── Per-Safe card (handles its own portfolio fetch) ────────────────
 
-function formatFiat(value: number, currency: 'USD' | 'EUR'): string {
-  const symbol = currency === 'USD' ? '$' : '€'
+function formatFiat(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
+  const symbol = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : 'kr'
   if (value === 0) return `${symbol}0.00`
   if (value < 0.01) return `< ${symbol}0.01`
   return `${symbol}${value.toLocaleString(undefined, {
@@ -46,7 +46,7 @@ interface SafeCardProps {
   showActiveBadge: boolean
   agentCount: number
   showDefaultBadge: boolean
-  currency: 'USD' | 'EUR'
+  currency: 'USD' | 'EUR' | 'SEK'
   staggerIndex: number
   onClick: () => void
   onSetActive: () => void
@@ -71,17 +71,20 @@ function SafeCard({
   const {
     totalUsd,
     totalEur,
+    totalSek,
     breakdown,
     loading: portfolioLoading,
   } = usePortfolio(safe.account_address, { chainId: safe.chain_id })
-  const fiatTotal = currency === 'USD' ? totalUsd : totalEur
+  // SEK (#3127): `?? 0` as on every currency here — the wire's `totalSek` /
+  // `sekValue` are optional and an absent key must degrade to 0, not crash.
+  const fiatTotal = currency === 'USD' ? totalUsd : currency === 'EUR' ? totalEur : totalSek
 
   // The breakdown comes back sorted by value, but make it explicit so we never
   // accidentally show dust above a meaningful holding.
   const sortedBreakdown = [...breakdown].sort((a, b) => {
-    const aValue = currency === 'USD' ? a.usdValue : a.eurValue
-    const bValue = currency === 'USD' ? b.usdValue : b.eurValue
-    return bValue - aValue
+    const aValue = currency === 'USD' ? a.usdValue : currency === 'EUR' ? a.eurValue : a.sekValue
+    const bValue = currency === 'USD' ? b.usdValue : currency === 'EUR' ? b.eurValue : b.sekValue
+    return (bValue ?? 0) - (aValue ?? 0)
   })
   const visibleTokens = sortedBreakdown.slice(0, TOP_TOKENS_PREVIEW)
   const hiddenTokenCount = Math.max(0, sortedBreakdown.length - TOP_TOKENS_PREVIEW)
@@ -330,7 +333,7 @@ function SafeCard({
         ) : (
           <>
             {visibleTokens.map((item) => {
-              const fiatValue = currency === 'USD' ? item.usdValue : item.eurValue
+              const fiatValue = currency === 'USD' ? item.usdValue : currency === 'EUR' ? item.eurValue : item.sekValue
               return (
                 <div
                   key={item.symbol}
@@ -341,7 +344,7 @@ function SafeCard({
                     <span className="v2-tabular text-[var(--v2-ink-3)]">{item.formatted}</span>
                   </span>
                   <span className="v2-tabular flex-shrink-0 text-[var(--v2-ink-3)]">
-                    {formatFiat(fiatValue, currency)}
+                    {formatFiat(fiatValue ?? 0, currency)}
                   </span>
                 </div>
               )

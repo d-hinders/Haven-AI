@@ -206,6 +206,9 @@ export interface ConnectOutcome {
    * is not proof of a clean machine.
    */
   existing_agents_before_write?: ReadonlyArray<{ agent_id: string; account_address: string | null }>
+  // (A strict SUBSET of `superseded_agent_ids`, which names every other
+  // directory with an identity.json at all — key-less and tombstoned ones
+  // included; this list is the ones that still hold a key.)
   /**
    * #3122, additive. Present only when this run took an MCP server name over
    * from another agent's local binding record (`mcp-server-binding.json` in
@@ -573,7 +576,7 @@ async function executeConnect(
   if (existingAgents.length > 0) {
     log('')
     log(
-      `Heads-up (before anything is written): this machine already carries ${existingAgents.length} agent director` +
+      `Heads-up (before anything is written to this machine): it already carries ${existingAgents.length} agent director` +
         `${existingAgents.length === 1 ? 'y' : 'ies'} with stored keys — ` +
         existingAgents
           .map((a) => `${a.agentId}${a.accountAddress ? ` (spends from ${shortAddress(a.accountAddress)})` : ''}`)
@@ -583,18 +586,32 @@ async function executeConnect(
   }
   const hostedNameForRun = serverNamesFor(serverName).hosted
   let reboundFrom: ConnectOutcome['server_name_rebound_from']
-  for (const { binding } of await listMcpServerBindings(options.credentialsDir)) {
-    if (binding.server_name !== hostedNameForRun) continue
+  // The NEWEST previous holder is the one a saved session most likely means
+  // (#3154 review S1): several records can claim one name when directories
+  // are retired by hand, and readdir order is neither recency nor portable.
+  const holders = (await listMcpServerBindings(options.credentialsDir))
+    .filter(({ binding }) => binding.server_name === hostedNameForRun)
+    .sort((a, b) => (a.binding.bound_at < b.binding.bound_at ? 1 : a.binding.bound_at > b.binding.bound_at ? -1 : 0))
+  const newest = holders[0]
+  if (newest) {
+    const { binding, directory } = newest
     const backendChanged = binding.api_url.replace(/\/+$/, '') !== options.apiBaseUrl.replace(/\/+$/, '')
-    reboundFrom = { server_name: binding.server_name, agent_id: binding.agent_id, api_url: binding.api_url, bound_at: binding.bound_at, backend_changed: backendChanged }
+    const previousApiUrl = withoutUserinfo(binding.api_url)
+    reboundFrom = { server_name: binding.server_name, agent_id: binding.agent_id, api_url: previousApiUrl, bound_at: binding.bound_at, backend_changed: backendChanged }
+    // On a --replace run the newest holder is normally the directory this run
+    // is about to retire: the owner just consented to that, so say so rather
+    // than sound the takeover alarm about their own decision (review N3).
+    const beingReplaced = replacing?.superseded.some((entry) => entry.directory === directory) ?? false
     log(
-      `Heads-up: the MCP server name '${binding.server_name}' was bound to agent ${binding.agent_id} on ${binding.api_url} ` +
-        `at ${binding.bound_at} (locally recorded). This run rebinds it to a new agent on ${options.apiBaseUrl}` +
+      `Heads-up: the MCP server name '${binding.server_name}' was bound to agent ${binding.agent_id} on ${previousApiUrl} ` +
+        `at ${binding.bound_at} (locally recorded${holders.length > 1 ? `; ${holders.length - 1} older record${holders.length > 2 ? 's' : ''} also claim${holders.length > 2 ? '' : 's'} it` : ''}). ` +
+        (beingReplaced
+          ? `This run replaces that wiring, as you chose, with a new agent on ${withoutUserinfo(options.apiBaseUrl)}`
+          : `This run rebinds it to a new agent on ${withoutUserinfo(options.apiBaseUrl)}`) +
         (backendChanged
           ? ' — a DIFFERENT backend: any saved session, script or document naming this MCP server now resolves to a different backend and agent.'
           : '.'),
     )
-    break
   }
 
   const localKey = generateKey()
@@ -1671,6 +1688,18 @@ async function listExistingKeyedAgents(baseDir: string | undefined): Promise<Arr
     }
   }
   return out
+}
+
+/** A URL with any `user:pass@` userinfo removed — for log lines and the --json record (#3154 review N6). */
+function withoutUserinfo(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.username = ''
+    parsed.password = ''
+    return parsed.toString().replace(/\/+$/, '')
+  } catch {
+    return url
+  }
 }
 
 async function listOtherAgentIds(baseDir: string | undefined, currentDirectory: string): Promise<string[] | null> {

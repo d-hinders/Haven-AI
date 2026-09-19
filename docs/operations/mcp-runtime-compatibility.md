@@ -1351,7 +1351,9 @@ agents included, so the boolean is never to be read against it), and
 `error.superseded_agent_ids` / `error.suggested_name` on a `wiring_collision`
 refusal; since #3122, also additive, `existing_agents_before_write` (always
 present on a completed run — the other live-keyed directories, named BEFORE the
-first write, with the account each spends from) and `server_name_rebound_from`
+first write, with the account each spends from; a strict subset of
+`superseded_agent_ids`, which also names key-less and tombstoned directories)
+and `server_name_rebound_from`
 (only when the run took a server name over from another directory's local
 `mcp-server-binding.json`, with `backend_changed`); and since #2528, also
 additive, `approval.url` — the absolute link to

@@ -2685,7 +2685,7 @@ describe('runConnect terminal outcome record (#2173)', () => {
         log: (message) => { sequence.push(`log:${message}`) },
         writeCredentials: vi.fn(async () => { sequence.push("write:credentials"); return writer() }) as never,
       })
-      const headsUp = sequence.findIndex((s) => s.startsWith('log:') && s.includes('Heads-up (before anything is written)'))
+      const headsUp = sequence.findIndex((s) => s.startsWith('log:') && s.includes('Heads-up (before anything is written to this machine)'))
       const write = sequence.indexOf('write:credentials')
       expect(headsUp).toBeGreaterThanOrEqual(0)
       expect(write).toBeGreaterThan(headsUp)
@@ -2748,6 +2748,10 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(outcome.server_name_rebound_from).toEqual({
         server_name: 'haven', agent_id: 'agent-prod', api_url: 'https://api.prod.haven.example', bound_at: '2026-09-17T09:00:00.000Z', backend_changed: true,
       })
+      // S2: the retired holder has NO stored key, so it is not "live" — the
+      // pre-write list is the keyed subset, never every directory.
+      expect(outcome.existing_agents_before_write).toEqual([])
+      expect(outcome.superseded_agent_ids).toContain('agent-prod')
     })
 
     it('the same backend is a rebind without the backend-change warning; an unrelated name is no rebind at all', async () => {
@@ -2766,6 +2770,44 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(logs.join('\n')).not.toContain('haven-ops')
     })
 
+    it('S1: with several records claiming the name, the NEWEST previous holder is named — not the first readdir hit', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-newest-'))
+      // Directory names chosen so readdir/alphabetical order is the OPPOSITE of recency.
+      await seedRetiredWithBinding(root, 'a-oldest', 'agent-oldest', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-oldest', api_url: API_BASE_URL, bound_at: '2026-09-01T00:00:00.000Z' })
+      await seedRetiredWithBinding(root, 'z-newest', 'agent-newest', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-newest', api_url: API_BASE_URL, bound_at: '2026-09-15T00:00:00.000Z' })
+      await seedRetiredWithBinding(root, 'm-middle', 'agent-middle', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-middle', api_url: API_BASE_URL, bound_at: '2026-09-08T00:00:00.000Z' })
+      const logs: string[] = []
+      const { outcome } = await runInto(root, { log: (m) => logs.push(m) })
+      expect(outcome.server_name_rebound_from?.agent_id).toBe('agent-newest')
+      const notice = logs.find((l) => l.includes("MCP server name 'haven' was bound"))!
+      expect(notice).toContain('agent-newest')
+      expect(notice).toContain('2 older records also claim it')
+    })
+
+    it('N1/N6: the notice says "to this machine" (a challenge row was already created server-side), and a userinfo-bearing api_url is stripped from the log and the record', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-userinfo-'))
+      await seedKeyedAgent(root, 'ops', 'agent-ops')
+      await seedRetiredWithBinding(root, 'agent-prev', 'agent-prev', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-prev', api_url: 'https://user:s3cret@api.prod.haven.example', bound_at: '2026-09-17T09:00:00.000Z' })
+      const logs: string[] = []
+      const { outcome } = await runInto(root, { log: (m) => logs.push(m) })
+      expect(logs.some((l) => l.includes('Heads-up (before anything is written to this machine)'))).toBe(true)
+      expect(logs.join('\n')).not.toContain('s3cret')
+      expect(outcome.server_name_rebound_from?.api_url).toBe('https://api.prod.haven.example')
+      expect(JSON.stringify(outcome)).not.toContain('s3cret')
+    })
+
+    it('a --name run records its own pair in the binding (signer_name is not the bare name)', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-named-'))
+      await runConnect({
+        setupToken: 'hv_setup_test', apiBaseUrl: API_BASE_URL, runtime: 'claude-code', credentialsDir: root, waitForApproval: false, serverName: 'research',
+      }, {
+        api: outcomeApi(), nodeVersion: SUPPORTED_NODE, generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY), generateApiKey: () => AGENT_API_KEY,
+        preflightStorage: vi.fn(async () => root), writeCredentials: credentialWriter(root), installRuntime: vi.fn(async () => completedInstall('claude-code')), log: () => undefined,
+      })
+      const binding = JSON.parse(await readFile(join(root, 'agent-1', 'mcp-server-binding.json'), 'utf8'))
+      expect(binding).toMatchObject({ server_name: 'haven-research', signer_name: 'haven-signer-research' })
+    })
+
     it('D2: no network call is added — the api client sees exactly the pre-#3122 calls and the global fetch is never touched', async () => {
       const root = await mkdtemp(join(tmpdir(), 'haven-3122-nonet-'))
       await seedKeyedAgent(root, 'ops', 'agent-ops')
@@ -2775,7 +2817,7 @@ describe('runConnect terminal outcome record (#2173)', () => {
       try {
         await runInto(root, { api })
         const called = Object.entries(api).filter(([, fn]) => (fn as { mock?: { calls: unknown[] } }).mock?.calls.length).map(([name]) => name).sort()
-        expect(called).toEqual(['registerSetup', 'reportInstallStatus', 'resolveSetup', 'updateInstallStatus'].filter((n) => called.includes(n)).sort())
+        expect(called).toEqual(['registerSetup', 'resolveSetup', 'updateInstallStatus'])
         expect(called).not.toContain('getAgentIdentity')
         expect(called).not.toContain('getConnectorStatus')
         expect(fetchSpy).not.toHaveBeenCalled()

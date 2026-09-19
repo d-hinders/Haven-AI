@@ -109,7 +109,7 @@ report stays `version: 1`; `level` is additive.
 | Level | Meaning | Example |
 | --- | --- | --- |
 | `ok` | Nothing to say. | The installed signer matches the connector's pin. |
-| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered); `signer_runtime_unused` (#3123): runtime directories nothing references. `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
+| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered); `signer_runtime_unused` (#3123): runtime directories nothing references; `mcp_server_name_rebound` (#3122): two local binding records claim one server name. `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
 | `failed` | A real failure with one repair action. Exit 1. | A stale or empty runtime directory; a live key in a directory the runtime's config demonstrably does not use. |
 
 What stays blocking is live spend authority: a directory whose stored key
@@ -290,7 +290,9 @@ added; the backend is not asked whether any key still authenticates):
   refusal would change behaviour for every non-interactive caller, including
   the dashboard's connect flow. `--json` carries the same list as
   `existing_agents_before_write: [{ agent_id, account_address }]`, always
-  present on a completed run (`[]` on a clean machine).
+  present on a completed run (`[]` on a clean machine) — a strict subset of
+  `superseded_agent_ids`, which names every other directory that has an
+  `identity.json` at all, key-less and tombstoned ones included.
 - **Each setup records what it bound** in a non-secret
   `mcp-server-binding.json` beside `last-connect-outcome.json`: `{ version:
   1, server_name, signer_name, agent_id, api_url, hosted_mcp_url?, bound_at }`
@@ -299,14 +301,18 @@ added; the backend is not asked whether any key still authenticates):
   file, and "who else claims this name" is answered by scanning the root,
   which setup and the doctor already do. When a setup is about to bind a
   server name another directory's record holds, it says so before the write —
-  previous agent, previous backend URL, when — and flags a **DIFFERENT
-  backend** explicitly, because that is the case the backend cannot see and
+  previous agent (the NEWEST holder when several records claim the name),
+  previous backend URL, when — and flags a **DIFFERENT backend** explicitly, because that is the case the backend cannot see and
   the one that silently repoints a saved session; `--json` carries it as
   `server_name_rebound_from: { server_name, agent_id, api_url, bound_at,
   backend_changed }`. `--unwire` (and a `--replace` retirement) release the
   record, so a legitimately free name does not warn forever, and `--doctor`
   reports two records claiming one name as the `mcp_server_name_rebound`
-  advisory (oldest → newest, backend change flagged).
+  advisory (oldest → newest, backend change flagged). The record is written
+  after the credentials, best-effort: a directory with credentials and no
+  record (a crash in between, or one retired by hand) is not proof the name
+  is free — the absence of a warning is not a guarantee, as with
+  `superseded_agent_ids`.
 
 **What wins when the local record disagrees with the backend.** The backend's
 `agents.mcp_server_name` is the authority for the same backend; the local

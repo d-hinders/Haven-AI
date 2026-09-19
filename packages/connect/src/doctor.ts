@@ -1291,7 +1291,7 @@ export async function runDoctor(
   const rebound = [...byName.entries()].filter(([, items]) => items.length > 1)
   if (rebound.length > 0) {
     const parts = rebound.map(([name, items]) => {
-      const ordered = [...items].sort((a, b) => a.binding.bound_at.localeCompare(b.binding.bound_at))
+      const ordered = [...items].sort((a, b) => (a.binding.bound_at < b.binding.bound_at ? -1 : a.binding.bound_at > b.binding.bound_at ? 1 : 0))
       const backends = new Set(ordered.map((i) => i.binding.api_url))
       return (
         `'${name}': ` +

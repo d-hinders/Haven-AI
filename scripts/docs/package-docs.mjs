@@ -371,7 +371,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     // the issue. Nothing else in the README re-verified in this pass (the
     // Products table, hosted URLs and Run sections were read only far enough
     // to place the section).
-    'last-verified': '2026-09-02',
+    // #3170: the paragraph after the reason-code catalog (erc7710 submit
+    // revert = payer-side decision; the wrapper-is-not-proof rule) added and
+    // verified against x402.ts isContractRevert and its tests; the #2979
+    // catalog paragraph re-read, not edited. Nothing else re-verified.
+    'last-verified': '2026-09-19',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

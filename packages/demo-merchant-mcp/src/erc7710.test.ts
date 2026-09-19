@@ -1,6 +1,7 @@
 import type { Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BaseError, ContractFunctionRevertedError, TimeoutError, encodeAbiParameters, keccak256, type Address, type Hex } from 'viem'
+import { BaseError, ContractFunctionRevertedError, ExecutionRevertedError, InternalRpcError, LimitExceededRpcError, NonceTooLowError, RpcRequestError, TimeoutError, TransactionExecutionError, TransactionRejectedRpcError, encodeAbiParameters, encodeErrorResult, keccak256, parseAbi, type Address, type Hex } from 'viem'
+import { getContractError } from 'viem/utils'
 import { DelegationManager as DELEGATION_MANAGER_PACKAGE_ABI, ERC20TransferAmountEnforcer } from '@metamask/delegation-abis'
 import { encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
@@ -624,7 +625,80 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
       expect(body.reason_code).toBe('settlement_rpc_unreachable')
     })
 
-    it('isContractRevert: viem reverts and enforcer strings are reverts; gas, RPC and timeouts are not', () => {
+    // Build the errors exactly as viem's `writeContract` throws them: every
+    // failure — revert or not — arrives wrapped in a ContractFunctionExecutionError
+    // (getContractError), and node-level failures sit inside a
+    // TransactionExecutionError first. The classifier must see through the wrapper.
+    const CONTRACT = { abi: parseAbi(['function redeemDelegations(bytes[] p, uint8[] m, bytes[] e)', 'error AllowanceExceeded(uint256 spent)']), address: MERCHANT, functionName: 'redeemDelegations' }
+    function asWriteContract(inner: BaseError): BaseError {
+      return getContractError(inner, { ...CONTRACT, args: [], sender: MERCHANT })
+    }
+    function asSendTransaction(inner: BaseError): BaseError {
+      return asWriteContract(new TransactionExecutionError(inner, { account: { address: MERCHANT, type: 'json-rpc' }, chain: undefined }))
+    }
+    function rpcError(code: number, message: string, data?: Hex): RpcRequestError {
+      return new RpcRequestError({ body: {}, url: 'https://rpc.example', error: { code, message, ...(data ? { data } : {}) } })
+    }
+    const revertWithData = asWriteContract(rpcError(3, 'execution reverted', encodeErrorResult({ abi: parseAbi(['error Error(string)']), errorName: 'Error', args: ['ERC20TransferAmountEnforcer:allowance-exceeded'] })))
+    const revertWithCustomError = asWriteContract(rpcError(3, 'execution reverted', encodeErrorResult({ abi: CONTRACT.abi, errorName: 'AllowanceExceeded', args: [1n] })))
+    const revertNoData = asSendTransaction(new ExecutionRevertedError({ cause: rpcError(-32000, 'execution reverted'), message: 'execution reverted' }))
+    const nonceTooLow = asSendTransaction(new NonceTooLowError({ cause: rpcError(-32000, 'nonce too low'), nonce: 7 }))
+    const alreadyKnown = asSendTransaction(new TransactionRejectedRpcError(rpcError(-32003, 'already known')))
+    const rateLimited = asSendTransaction(new LimitExceededRpcError(rpcError(-32005, 'rate limit exceeded')))
+    const internalError = asWriteContract(new InternalRpcError(rpcError(-32603, 'internal error')))
+
+    it('isContractRevert: only a proven revert is a revert — every other writeContract failure is the merchant\'s fault', () => {
+      expect(isContractRevert(revertWithData)).toBe(true)
+      expect(isContractRevert(revertWithCustomError)).toBe(true)
+      expect(isContractRevert(revertNoData)).toBe(true)
+      // The wrapper alone proves nothing: these are merchant-side node faults.
+      expect(isContractRevert(nonceTooLow)).toBe(false)
+      expect(isContractRevert(alreadyKnown)).toBe(false)
+      expect(isContractRevert(rateLimited)).toBe(false)
+      expect(isContractRevert(internalError)).toBe(false)
+      expect(isContractRevert(asSendTransaction(new TimeoutError({ body: {}, url: 'https://rpc.example' })))).toBe(false)
+    })
+
+    it('a nonce fault on the merchant\'s own settlement key stays a merchant FAULT with its reason code — never "a fact about the payer"', async () => {
+      const client = submitRevertingClient({ spent: 0n, error: nonceTooLow })
+      const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
+      const unpaid = await postBuyVpn(url)
+      const paymentRequired = await unpaid.json() as PaymentRequired
+      const rejected = await postBuyVpn(url, { [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, { permissionContext: realPermissionContext() }) }, 2)
+      const body = await rejected.json() as PaymentRequired & { reason_code?: string }
+      expect(rejected.status).toBe(402)
+      expect(body.error).toContain('merchant-side fault')
+      expect(body.error).not.toContain('fact about the payer')
+      expect(body.reason_code).toBe('merchant_fault')
+    })
+
+    it('a real writeContract revert (decoded data) is REFUSED payer-side, and the next action survives the hosted 500-byte relay window', async () => {
+      const client = submitRevertingClient({ spent: 0n, error: revertWithData })
+      const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
+      const unpaid = await postBuyVpn(url)
+      const paymentRequired = await unpaid.json() as PaymentRequired
+      const rejected = await postBuyVpn(url, { [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, { permissionContext: realPermissionContext() }) }, 2)
+      const body = await rejected.json() as PaymentRequired & { reason_code?: string }
+      expect(rejected.status).toBe(402)
+      expect(body.error).toContain('allowance-exceeded')
+      expect(body.reason_code).toBeUndefined()
+      // paid-mcp-completion.ts relays JSON.stringify(body).slice(0, 500); `error` is the first key.
+      expect(JSON.stringify(body).slice(0, 500)).toContain('re-quote and pay with a fresh authorization')
+    })
+
+    it('the next action survives the relay window even for a 120-char-capped revert reason', async () => {
+      const longReason = 'x'.repeat(400)
+      const client = submitRevertingClient({ spent: 0n, error: asSendTransaction(new ExecutionRevertedError({ cause: rpcError(-32000, longReason), message: `execution reverted: ${longReason}` })) })
+      const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
+      const unpaid = await postBuyVpn(url)
+      const paymentRequired = await unpaid.json() as PaymentRequired
+      const rejected = await postBuyVpn(url, { [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, { permissionContext: realPermissionContext() }) }, 2)
+      const body = await rejected.json() as PaymentRequired
+      expect(rejected.status).toBe(402)
+      expect(JSON.stringify(body).slice(0, 500)).toContain('re-quote and pay with a fresh authorization')
+    })
+
+    it('isContractRevert: enforcer strings from a custom client are reverts; gas, RPC and timeouts are not', () => {
       const reverted = new ContractFunctionRevertedError({ abi: [], functionName: 'redeemDelegations', message: 'execution reverted' })
       expect(isContractRevert(new BaseError('call failed', { cause: reverted }))).toBe(true)
       expect(isContractRevert(new Error('ERC20TransferAmountEnforcer: allowance-exceeded'))).toBe(true)

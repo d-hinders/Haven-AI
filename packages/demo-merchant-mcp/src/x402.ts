@@ -1,7 +1,7 @@
 import {
   BaseError,
-  ContractFunctionExecutionError,
   ContractFunctionRevertedError,
+  ExecutionRevertedError,
   HttpRequestError,
   InsufficientFundsError,
   TimeoutError,
@@ -876,12 +876,15 @@ export function createX402PaymentProcessor(
             )
           }
           if (isContractRevert(err)) {
+            // The next action comes BEFORE the cause list: the hosted relay
+            // keeps the first 500 bytes of this body (paid-mcp-completion.ts),
+            // and the revert reason is capped so the instruction always fits.
             throw new PaymentError(
-              `ERC-7710 delegation redemption reverted at submit: ${revertReason(err)}. This is a ` +
-                `fact about the payer's delegation, not about this merchant: the settlement child's ` +
+              `ERC-7710 delegation redemption reverted at submit: ${revertReason(err)}. Nothing ` +
+                `settled here — re-quote and pay with a fresh authorization. The revert is a fact ` +
+                `about the payer's delegation, not about this merchant: the settlement child's ` +
                 `transfer-amount caveat is exhausted, the delegator ${payment.delegator} holds less ` +
-                `than the price, or the child was redeemed elsewhere. Nothing settled here — re-quote ` +
-                `and pay with a fresh authorization.`,
+                `than the price, or the child was redeemed elsewhere.`,
             )
           }
           throw err
@@ -1537,19 +1540,26 @@ function parseBigIntField(value: string, field: string): bigint {
 /**
  * #3170: is this failure the CHAIN refusing the transaction (a revert — a fact
  * about the payer's delegation or balance), as opposed to the merchant failing
- * to reach or pay for the chain (an RPC or gas fault)? viem wraps a revert in
- * `ContractFunctionExecutionError` with `ContractFunctionRevertedError` (or the
- * enforcer's revert string) in the cause chain; a custom client may throw a
- * plain `Error` whose message names the revert or the enforcer. Gas and RPC
- * failures are excluded first so they keep #2979's fault reason codes.
+ * to reach, pay for or correctly address the chain (an RPC, gas, nonce, fee or
+ * key fault)? viem's `writeContract` wraps EVERY failure in
+ * `ContractFunctionExecutionError`, so that outer class proves nothing; a
+ * revert is proven only by a `ContractFunctionRevertedError` that carries
+ * decoded revert data, an undecodable error signature or a revert reason (viem
+ * also wraps a bare JSON-RPC -32603 "internal error" in that class, with none
+ * of the three), or by the node's `ExecutionRevertedError`. A custom client
+ * may throw a plain `Error` whose message names the revert or the enforcer.
+ * Everything else a viem client throws — nonce too low, fee cap, "already
+ * known", rate limit, chain mismatch, HTTP or timeout — is the merchant's
+ * fault and keeps #2979's fault reason code.
  */
 export function isContractRevert(err: unknown): boolean {
   if (err instanceof BaseError) {
-    if (err.walk((e) => e instanceof InsufficientFundsError || e instanceof HttpRequestError || e instanceof TimeoutError)) {
-      return false
+    const reverted = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null
+    if (reverted && (reverted.data !== undefined || reverted.signature !== undefined || /revert/i.test(reverted.reason ?? ''))) {
+      return true
     }
-    if (err.walk((e) => e instanceof ContractFunctionRevertedError)) return true
-    if (err instanceof ContractFunctionExecutionError) return true
+    if (err.walk((e) => e instanceof ExecutionRevertedError)) return true
+    return false
   }
   const haystack = `${err instanceof Error ? err.name : ''} ${err instanceof Error ? err.message : String(err)}`.toLowerCase()
   if (haystack.includes('insufficient funds') || haystack.includes('fetch failed') || haystack.includes('econnrefused') || haystack.includes('timeout')) {
@@ -1558,14 +1568,19 @@ export function isContractRevert(err: unknown): boolean {
   return /revert|enforcer|allowance-exceeded/.test(haystack)
 }
 
-/** The revert's own words, short enough for a 402 body. */
+/**
+ * The revert's own words, capped so the next-action sentence that follows it
+ * stays inside the hosted relay's 500-byte window even for viem's longest
+ * `shortMessage` (measured in erc7710.test.ts).
+ */
+const REVERT_REASON_MAX = 120
 function revertReason(err: unknown): string {
   if (err instanceof BaseError) {
     const reverted = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null
     const reason = reverted?.reason ?? reverted?.shortMessage ?? err.shortMessage
-    if (reason) return reason.slice(0, 200)
+    if (reason) return reason.slice(0, REVERT_REASON_MAX)
   }
-  return (err instanceof Error ? err.message : String(err)).slice(0, 200)
+  return (err instanceof Error ? err.message : String(err)).slice(0, REVERT_REASON_MAX)
 }
 
 function sameAddress(a: string, b: string): boolean {

@@ -261,12 +261,21 @@ Since #3170 an ERC-7710 redemption that REVERTS at submit (the simulation
 passed moments earlier) is no longer one of those faults: the merchant first
 asks the chain whether the settlement child already moved the money (the #1515
 already-settled decision, served) and otherwise refuses it as a payer-side
-DECISION — a 402 whose `error` names the revert and the likely causes (the
+DECISION — a 402 whose `error` names the revert, then the next action (nothing
+settled; re-quote, pay with a fresh authorization), then the likely causes (the
 child's transfer-amount caveat exhausted, the delegator short of the price, the
-child redeemed elsewhere) and the next action (re-quote, pay with a fresh
-authorization; nothing settled). No `reason_code` rides a decision. A genuine
-RPC or gas failure at submit keeps its fault classification and reason code —
-the same split #1519 drew for the EIP-3009 rail's pre-submit checks.
+child redeemed elsewhere). No `reason_code` rides a decision. Only a PROVEN
+revert takes that branch — viem's `ContractFunctionRevertedError` carrying
+decoded data, an error signature or a revert reason, or the node's
+`ExecutionRevertedError`; viem wraps every `writeContract` failure in
+`ContractFunctionExecutionError`, so the wrapper alone is not proof. Everything
+else the merchant's own settlement key or node can fail with — nonce too low,
+fee cap, "already known", a JSON-RPC rate limit or internal error, an
+unreachable RPC, gas — keeps its fault classification and `reason_code`, the
+same split #1519 drew for the EIP-3009 rail's pre-submit checks. The next
+action is placed first and the revert reason capped at 120 characters because
+the hosted server relays the first 500 bytes of this body
+(`paid-mcp-completion.ts`).
 
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
 `SETTLEMENT_PRIVATE_KEY` is the gas-funded key that submits USDC

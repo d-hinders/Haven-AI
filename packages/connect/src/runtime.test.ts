@@ -2808,6 +2808,29 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(binding).toMatchObject({ server_name: 'haven-research', signer_name: 'haven-signer-research' })
     })
 
+    it('N7: on a --replace run the rebind notice says the run replaces that wiring as chosen — not the takeover alarm', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-replace-'))
+      // A keyed BARE directory (what --replace exists for) that also holds the 'haven' binding record.
+      const oldDir = join(root, 'agent-old')
+      await mkdir(oldDir, { recursive: true })
+      await writeFile(join(oldDir, 'identity.json'), JSON.stringify({ agent_id: 'agent-old', api_key: 'sk_agent-old', account_address: '0x' + 'ab'.repeat(20) }))
+      await writeFile(join(oldDir, 'mcp-server-binding.json'), JSON.stringify({ version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-old', api_url: API_BASE_URL, bound_at: '2026-09-17T09:00:00.000Z' }))
+      const logs: string[] = []
+      const { outcome } = await runConnect({
+        setupToken: 'hv_setup_test', apiBaseUrl: API_BASE_URL, runtime: 'claude-code', credentialsDir: root, waitForApproval: false, replaceExistingWiring: true,
+      }, {
+        api: outcomeApi(), nodeVersion: SUPPORTED_NODE, generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY), generateApiKey: () => AGENT_API_KEY,
+        preflightStorage: vi.fn(async () => root), writeCredentials: credentialWriter(root), installRuntime: vi.fn(async () => completedInstall('claude-code')), log: (m) => logs.push(m),
+      })
+      const notice = logs.find((l) => l.includes("MCP server name 'haven' was bound to agent agent-old"))!
+      expect(notice).toContain('This run replaces that wiring, as you chose')
+      expect(notice).not.toContain('rebinds it to a new agent')
+      expect(outcome.server_name_rebound_from?.agent_id).toBe('agent-old')
+      // The retired directory's record is released by the replace retirement.
+      await expect(readFile(join(oldDir, 'mcp-server-binding.json'), 'utf8')).rejects.toThrow()
+      expect(outcome.retired_agent_ids).toEqual(['agent-old'])
+    })
+
     it('D2: no network call is added — the api client sees exactly the pre-#3122 calls and the global fetch is never touched', async () => {
       const root = await mkdtemp(join(tmpdir(), 'haven-3122-nonet-'))
       await seedKeyedAgent(root, 'ops', 'agent-ops')

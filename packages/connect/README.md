@@ -295,6 +295,14 @@ added; the backend is not asked whether any key still authenticates):
   present on a completed run (`[]` on a clean machine) — a strict subset of
   `superseded_agent_ids`, which names every other directory that has an
   `identity.json` at all, key-less and tombstoned ones included.
+  "Holds a stored key" is the whole test: a tombstoned directory whose key
+  files were never deleted is counted (it can still spend), which is the
+  opposite side of the doctor's rule that ignores a retired directory's
+  binding record (it launches nothing). The scan covers the credential root
+  in use — under `--credentials-dir`, that directory alone, never a union with
+  `~/.haven/agents` (the same convention as `--doctor`'s superseded scan and
+  #2551's collision check; #3123's union was for the one shared
+  `signer-runtime` root).
 - **Each setup records what it bound** in a non-secret
   `mcp-server-binding.json` beside `last-connect-outcome.json`: `{ version:
   1, server_name, signer_name, agent_id, api_url, hosted_mcp_url?, bound_at }`

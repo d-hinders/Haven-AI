@@ -691,7 +691,18 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
       expect(JSON.stringify(body).slice(0, 500)).toContain('re-quote and pay with a fresh authorization')
     })
 
-    it('the next action survives the relay window even for a 120-char-capped revert reason that JSON-escapes to six bytes a character', async () => {
+    it('a decoded custom-error revert names the error, not viem\'s generic "reverted." sentence', async () => {
+      const client = submitRevertingClient({ spent: 0n, error: revertWithCustomError })
+      const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
+      const unpaid = await postBuyVpn(url)
+      const paymentRequired = await unpaid.json() as PaymentRequired
+      const rejected = await postBuyVpn(url, { [PAYMENT_SIGNATURE_HEADER]: erc7710Header(paymentRequired, { permissionContext: realPermissionContext() }) }, 2)
+      const body = await rejected.json() as PaymentRequired
+      expect(rejected.status).toBe(402)
+      expect(body.error).toContain('reverted at submit: AllowanceExceeded')
+    })
+
+    it('the next action survives the relay window even for a 120-char-capped revert reason that JSON-escapes to six characters each', async () => {
       const longReason = '\u0001'.repeat(400)
       const client = submitRevertingClient({ spent: 0n, error: asSendTransaction(new ExecutionRevertedError({ cause: rpcError(-32000, longReason), message: `execution reverted: ${longReason}` })) })
       const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })

@@ -1546,8 +1546,11 @@ function parseBigIntField(value: string, field: string): bigint {
  * of the three), or by the node's `ExecutionRevertedError` — except geth's
  * "gas required exceeds allowance", which viem files under that class although
  * it means the MERCHANT's settlement key cannot pay for gas (#2979's
- * `settlement_wallet_out_of_gas` band). A custom client may throw a plain
- * `Error` whose message names the revert or the enforcer.
+ * `settlement_wallet_out_of_gas` band). The reason guard is written to
+ * op-geth's wording ("execution reverted"); a hardhat/anvil-style "VM
+ * Exception … revert" under -32603 stays a fault, the pre-#3170 behaviour. A
+ * custom client may throw a plain `Error` whose message names the revert or
+ * the enforcer.
  * Everything else a viem client throws — nonce too low, fee cap, "already
  * known", rate limit, chain mismatch, HTTP or timeout — is the merchant's
  * fault and keeps #2979's fault reason code.

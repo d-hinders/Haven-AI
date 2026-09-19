@@ -228,6 +228,115 @@ export interface X402AcceptedEcho {
 }
 
 /**
+ * A stored challenge that carries erc7710 candidates but none (or more than
+ * one) that matches the authorized intent. Deterministic — the same inputs
+ * refuse forever — so the route answers 409 with a re-authorize instruction
+ * rather than a retryable 502 (#3117 review).
+ */
+export class StoredAcceptedMismatchError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'StoredAcceptedMismatchError'
+  }
+}
+
+/** Mirrors the SDK's own address shape test, so the two agree on what a pin is. */
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+
+/** The amount the SDK authorizes against: the official field wins (#3117). */
+function optionAuthorizedAmount(option: Record<string, unknown>): string | null {
+  const raw = option.maxAmountRequired ?? option.amount
+  return typeof raw === 'string' && /^[0-9]+$/.test(raw) && BigInt(raw) > 0n ? raw : null
+}
+
+/** Select by trusted settlement state; merchant metadata cannot change authority. */
+export function selectStoredAccepted(
+  challenge: Record<string, unknown> | null,
+  network: string,
+  trusted: X402AcceptedEcho,
+): Record<string, unknown> | undefined {
+  if (!challenge) return undefined // pre-stored-challenge compatibility
+  const sameAddress = (value: unknown, expected: string) =>
+    typeof value === 'string' && value.toLowerCase() === expected.toLowerCase()
+  // Shape only: which entries could ever have been the erc7710 option the
+  // agent authorized. A challenge carrying NONE predates the stored echo (or
+  // describes another scheme entirely), so it keeps the legacy reconstruction
+  // rather than dead-ending an already-signed intent (#3117 review).
+  const candidates = (Array.isArray(challenge.accepts) ? challenge.accepts : []).filter(
+    (value: unknown): value is Record<string, unknown> => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+      const option = value as Record<string, unknown>
+      const extra = option.extra as Record<string, unknown> | undefined
+      return option.scheme === 'exact' && option.network === network &&
+        extra?.assetTransferMethod === 'erc7710'
+    },
+  )
+  if (candidates.length === 0) return undefined
+  const matches = candidates.filter((option) => {
+    const extra = option.extra as Record<string, unknown> | undefined
+    // The intent stores a canonical bigint string; retain the merchant's
+    // original decimal spelling in the echo after comparing its value. The
+    // SDK authorizes `maxAmountRequired ?? amount`, so compare THAT — an
+    // offer spelled with maxAmountRequired settled before this guard existed.
+    const authorized = optionAuthorizedAmount(option)
+    const sameAmount = authorized !== null && BigInt(authorized) === BigInt(trusted.amount)
+    // The pins are what the child is redeemable by, and the SDK forwards only
+    // the ADDRESS-SHAPED subset of what the merchant advertised (see
+    // x402FacilitatorAddresses). Require containment, not deep equality:
+    // equality refuses an offer whose list the SDK legitimately filtered or
+    // re-ordered, after the agent has already signed.
+    const advertised = extra?.facilitatorAddresses
+    const pins = trusted.facilitatorAddresses ?? []
+    const pinsAdvertised = pins.length === 0 ||
+      (Array.isArray(advertised) &&
+        pins.every((pin) => advertised.some((value) => sameAddress(value, pin))))
+    return sameAmount && sameAddress(option.payTo, trusted.payTo) &&
+      sameAddress(option.asset, trusted.asset) &&
+      option.maxTimeoutSeconds === trusted.maxTimeoutSeconds && pinsAdvertised
+  })
+  // Deep-equal duplicates are unambiguous data, not an ambiguous offer.
+  // Serialise each match ONCE: this runs on a money route over a challenge
+  // the caller supplies, bounded only by the 64KB cap.
+  const keyed = matches.map((option) => [stableStringify(option), option] as const)
+  const seen = new Set<string>()
+  let distinct = keyed.filter(([key]) => !seen.has(key) && (seen.add(key), true)).map(([, option]) => option)
+  if (distinct.length > 1) {
+    // Containment can leave two offers matching where an exact pin set would
+    // have picked one. Prefer that one rather than calling the pair ambiguous.
+    const exact = distinct.filter((option) => {
+      const advertised = (option.extra as Record<string, unknown> | undefined)?.facilitatorAddresses
+      const pins = trusted.facilitatorAddresses ?? []
+      if (!Array.isArray(advertised)) return pins.length === 0
+      const shaped = advertised.filter((value): value is string => typeof value === 'string' && ADDRESS_RE.test(value))
+      return shaped.length === pins.length &&
+        shaped.every((value) => pins.some((pin) => sameAddress(value, pin)))
+    })
+    if (exact.length === 1) distinct = exact
+  }
+  if (distinct.length === 0) {
+    throw new StoredAcceptedMismatchError(
+      'The stored 402 challenge advertises no erc7710 option matching this authorization — re-authorize',
+    )
+  }
+  if (distinct.length > 1) {
+    throw new StoredAcceptedMismatchError(
+      'The stored 402 challenge advertises more than one erc7710 option matching this authorization — re-authorize',
+    )
+  }
+  return distinct[0]
+}
+
+/** Key-order-independent deep equality for the duplicate-offer check. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined'
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`
+}
+
+/**
  * The base64 X-PAYMENT header for an exact-scheme erc7710 payment.
  *
  * x402 v2 shape: the payer ECHOES the accepted requirements entry (`accepted`)
@@ -242,6 +351,8 @@ export function encodeXPaymentHeader(
   payload: X402Erc7710Payload,
   accepted: X402AcceptedEcho,
   challengeEcho?: {
+    /** Selected against trusted settlement state, then echoed without reconstruction. */
+    accepted?: Record<string, unknown>
     /** The merchant 402's `resource` object, echoed VERBATIM (#2361). */
     resource?: Record<string, unknown>
     /**
@@ -262,7 +373,7 @@ export function encodeXPaymentHeader(
     ...(resource && typeof resource === 'object' && !Array.isArray(resource)
       ? { resource }
       : {}),
-    accepted: {
+    accepted: challengeEcho?.accepted ?? {
       scheme: 'exact',
       network,
       amount: accepted.amount,

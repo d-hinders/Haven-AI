@@ -13,10 +13,13 @@
  * Do not weaken these assertions to permissive matchers.
  */
 import { describe, it, expect } from 'vitest'
+import { x402ResourceServer } from '@x402/core/server'
+import type { PaymentPayload, PaymentRequirements } from '@x402/core/types'
 import { privateKeyToAccount } from 'viem/accounts'
 import { recoverTypedDataAddress } from 'viem'
 import {
   buildX402ExpectedMessage,
+  normalizePaymentRequired,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
   X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
 } from '@haven_ai/sdk'
@@ -108,10 +111,10 @@ async function expectedX402() {
   }
 }
 
-async function buildHeader(): Promise<{ header: DecodedHeader; delegateAddress: string }> {
+async function buildHeader(paymentRequired = PAYMENT_REQUIRED): Promise<{ header: DecodedHeader; delegateAddress: string }> {
   const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
   const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
-  const result = await signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding)
+  const result = await signer.buildX402PaymentHeader(paymentRequired, funding.x402Binding)
   return { header: decodeHeader(result.paymentHeader), delegateAddress: signer.delegateAddress }
 }
 
@@ -137,6 +140,20 @@ function recover(
 }
 
 describe('edge signer EIP-3009 authorization fields', () => {
+  it.each([60, 600, 601, 1200])('preserves a parsed %i-second offer while bounding signed lifetime (#3117)', async (timeout) => {
+    const advertised = { ...ACCEPTED, maxTimeoutSeconds: timeout }
+    const challenge = { ...PAYMENT_REQUIRED, accepts: [advertised] }
+    const parsed = normalizePaymentRequired(challenge)!
+    const before = Math.floor(Date.now() / 1000)
+    const { header } = await buildHeader(parsed as typeof PAYMENT_REQUIRED)
+    const after = Math.floor(Date.now() / 1000)
+    expect(header.accepted).toEqual(advertised)
+    expect(new x402ResourceServer().findMatchingRequirements([advertised as PaymentRequirements], header as PaymentPayload)).toEqual(advertised)
+    const lifetime = Math.min(timeout, X402_MAX_AUTHORIZATION_WINDOW_SECONDS) + X402_SETTLEMENT_FORWARD_MARGIN_SECONDS
+    expect(Number(header.payload.authorization.validBefore)).toBeGreaterThanOrEqual(before + lifetime)
+    expect(Number(header.payload.authorization.validBefore)).toBeLessThanOrEqual(after + lifetime)
+  })
+
   it('carries exact from/to/value matching the delegate and the accepted option', async () => {
     const { header, delegateAddress } = await buildHeader()
     const auth = header.payload.authorization

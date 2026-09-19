@@ -14,6 +14,8 @@ import { recoverDelegationSigner } from '../../rails/delegation-policy.js'
 import {
   assembleSettlementPayload,
   encodeXPaymentHeader,
+  selectStoredAccepted,
+  StoredAcceptedMismatchError,
 } from './x402-delegation.js'
 import { storedPaymentRequiredFromMetadata } from './sign-context.js'
 import { passportReferenceFor } from '../passport/index.js'
@@ -96,19 +98,21 @@ export async function settleX402(
     const storedChallenge = storedPaymentRequiredFromMetadata(intent.machine_metadata)
     const challengeResource = storedChallenge?.resource
     const challengeExtensions = storedChallenge?.extensions
+    const accepted = {
+      amount: intent.amount_raw,
+      payTo: intent.to_address as `0x${string}`,
+      asset: intent.token_address as `0x${string}`,
+      // Pre-#1064 intents stored no echo value; 300 is the same default
+      // the child expiry was built with, so the echo stays consistent.
+      maxTimeoutSeconds: state.maxTimeoutSeconds ?? 300,
+      facilitatorAddresses: state.facilitatorAddresses,
+    }
     const header = encodeXPaymentHeader(
       state.network,
       payload,
+      accepted,
       {
-        amount: intent.amount_raw,
-        payTo: intent.to_address as `0x${string}`,
-        asset: intent.token_address as `0x${string}`,
-        // Pre-#1064 intents stored no echo value; 300 is the same default
-        // the child expiry was built with, so the echo stays consistent.
-        maxTimeoutSeconds: state.maxTimeoutSeconds ?? 300,
-        facilitatorAddresses: state.facilitatorAddresses,
-      },
-      {
+        accepted: selectStoredAccepted(storedChallenge, state.network, accepted),
         ...(challengeResource && typeof challengeResource === 'object' && !Array.isArray(challengeResource)
           ? { resource: challengeResource as Record<string, unknown> }
           : {}),
@@ -150,6 +154,12 @@ export async function settleX402(
       },
     }
   } catch (err) {
+    // Deterministic refusal, not a transport loss: the same stored challenge
+    // refuses forever, so a 502 would send clients into a retry loop that can
+    // never converge. 409 matches the other pre-submission refusals above.
+    if (err instanceof StoredAcceptedMismatchError) {
+      return { code: 409, body: { error: err.message } }
+    }
     return {
       code: 502,
       body: {

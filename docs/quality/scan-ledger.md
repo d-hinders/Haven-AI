@@ -790,3 +790,20 @@ the argument-spelling convergence (#2366) was declared done.
   4 of 135 in-scope commits since 08-15 mention flake or rerun.
 - comment archaeology → `TODO|FIXME|HACK` in the four packages → 0; the most
   repeated warning (×4) explains a refusal, not a workaround.
+
+## 2026-09-18 — x402 requirement echo candidate C2
+
+The scoped x402 protocol scan at `475e5eaedaf93d6c20797c8d497b7777656ce051`
+found SDK timeout normalization and backend ERC-7710 encoding changed the
+merchant's selected `accepted` requirements. Official core matching rejected
+advertised timeouts clamped before echo and stripped `extra` metadata; unchanged
+controls passed. Reproduction scripts and owner-approved acceptance criteria
+are preserved in [#3117](https://github.com/d-hinders/Haven-AI/issues/3117).
+
+Disposition: approved, filed as standalone #3117, and implemented there. The
+other approved candidates remain separately tracked: *Reject unsupported x402
+transfer methods and payment flows before funding or signing*
+[#3116](https://github.com/d-hinders/Haven-AI/issues/3116) and *Support native
+MCP x402 tool-result challenges and payment metadata*
+[#3118](https://github.com/d-hinders/Haven-AI/issues/3118). No new scan conducted
+in the implementation pass; no new structural finding.

@@ -67,9 +67,10 @@ function optionAuthorizationAmount(option: X402PaymentOption): string {
  * challenge — without a cap, a malicious or sloppy merchant can request a
  * year-long window and a leaked signed authorization stays spendable that
  * whole time. 600 s is generous for any facilitator settle (typical is
- * 30–60 s); we CLAMP rather than reject so payments keep flowing while
- * exposure stays bounded. `validBefore` is a deadline, not a demand —
- * settling earlier is always valid.
+ * 30–60 s). This cap applies only to the signed authorization, never to the
+ * advertised requirements echoed in `accepted`. A merchant requiring more
+ * than the bounded lifetime can still reject at verification; preserving its
+ * offer does not widen Haven's signing policy.
  */
 export const X402_MAX_AUTHORIZATION_WINDOW_SECONDS = 600
 
@@ -139,7 +140,17 @@ function normalizePaymentOption(value: unknown): X402PaymentOption | null {
     mimeType: candidate.mimeType,
     asset: candidate.asset,
     payTo: candidate.payTo,
-    maxTimeoutSeconds: clampAuthorizationWindow(candidate.maxTimeoutSeconds),
+    // Keep the merchant offer intact for v2 `accepted` matching. Only the
+    // signing conversion may cap its authorization lifetime (#3117).
+    // Retain legacy fallback behavior for missing or unusable timeouts.
+    // Integer, because the authorize body types it `integer` and the child's
+    // timestamp caveat is built from it — the old clamp floored, so keeping a
+    // fractional value here would 400 a merchant that used to work (#3117).
+    maxTimeoutSeconds:
+      typeof candidate.maxTimeoutSeconds === 'number' &&
+      Number.isFinite(candidate.maxTimeoutSeconds) && candidate.maxTimeoutSeconds >= 1
+        ? Math.floor(candidate.maxTimeoutSeconds)
+        : clampAuthorizationWindow(candidate.maxTimeoutSeconds),
     extra: candidate.extra,
   }
 }
@@ -731,14 +742,11 @@ export function toStandardPaymentRequirements(
       'application/octet-stream',
     payTo: option.payTo,
     asset: option.asset,
-    // Second enforcement point (#715): the parse path clamps too, but this is
-    // the last stop before the x402 library turns the timeout into
-    // `validBefore` — options constructed without parsing are bounded here.
-    // The forward margin (#1256) is added ONLY here, at signing: the parse
-    // path keeps recording the merchant's advertised timeout unchanged, and
-    // the library's `validBefore = now + this value` then carries enough
-    // slack to satisfy the facilitator's `validBefore ≥ now + maxTimeout`
-    // verify rule after our funding leg confirms.
+    // Signing-only policy (#715/#3117): parsed and directly supplied options
+    // share this cap before the library computes validBefore. Keep the offer
+    // echoed in `accepted` unchanged. The forward margin (#1256) adds time
+    // for funding/retry, but does not guarantee a merchant timeout above the
+    // total bounded lifetime can pass facilitator verification.
     maxTimeoutSeconds:
       clampAuthorizationWindow(option.maxTimeoutSeconds) +
       X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,

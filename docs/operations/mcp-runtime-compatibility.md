@@ -28,6 +28,7 @@ covers:
   - packages/backend/src/domain/agent-payment-taxonomy.ts
   - packages/backend/src/modules/transactions/csv-export.ts
   - packages/sdk/src/types.ts
+  - packages/sdk/src/x402.ts
   - packages/sdk/src/tool-descriptions.ts
   - packages/sdk/src/next-step.ts
   - packages/mcp-server/src/server.ts
@@ -36,7 +37,7 @@ covers:
   - scripts/lint-next-steps.mjs
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # MCP Runtime Compatibility
@@ -879,6 +880,13 @@ environment sets is an operator action this repository cannot observe and does
 not record here.
 
 ## Hosted-runtime connector profiles
+
+The SDK's parsed v2 payment requirements retain the merchant's advertised
+`maxTimeoutSeconds`, floored to an integer, for the `accepted` echo (#3117). SDK and local signer
+still bound the signed authorization lifetime separately; an offer can match
+its echo yet exceed that lifetime at facilitator verification. This changes
+neither tool arguments nor the funding-binding contract. Existing credentials
+and signer/backend combinations require no migration.
 
 For the hosted fast-settle path, the local signer may produce either the
 supported legacy x402 v1 envelope or the current v2 `{ x402Version, resource?,

@@ -50,7 +50,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -1712,12 +1712,48 @@ existing SDKs gained delegation-rail merchant reach with no client change:
 **The erc7710 `X-PAYMENT` header is x402 v2-shaped (#1064):** alongside the
 scheme payload it ECHOES the accepted requirements entry (`accepted`:
 scheme/network/amount/payTo/asset/maxTimeoutSeconds +
-`extra.assetTransferMethod: 'erc7710'`) — @x402/core v2 merchants match the
+`extra.assetTransferMethod: 'erc7710'`; since #3117 the merchant's own stored
+entry, with its full `extra`, whenever the stored challenge carries a matching
+one — see below) — @x402/core v2 merchants match the
 echo field-for-field before touching the chain, and the quoted
 `maxTimeoutSeconds` must round-trip (stored at authorize; pre-#1064 intents
 echo the 300 default their child expiry was built with). The v1 payload-only
 shape made every v2 merchant reject with a generic failure — caught by the
 #1064 QA leg's first live run.
+
+**Requirement preservation (#3117).** The SDK keeps valid advertised timeouts
+in the v2 `accepted` entry, floored to an integer, and applies the
+authorization cap only when building signing requirements. The existing cap
+plus forward margin is unchanged; requirement matching is not a guarantee that
+a longer merchant timeout can pass facilitator verification. Backend ERC-7710
+settlement recovers the unique stored offer matching the authorized amount
+(`maxAmountRequired ?? amount`, the field the SDK authorizes against),
+recipient, asset, network and timeout, and containing the facilitator pins the
+child is redeemable by, then echoes its full `extra` metadata.
+
+**What that refusal covers, and what it deliberately does not.** A stored
+challenge that carries erc7710 entries for this network but no unique match
+refuses with **409 + re-authorize** before the intent becomes submitted — the
+refusal is deterministic, so a retryable 502 would loop forever. A challenge
+carrying NO erc7710 entry for this network (stored empty, describing only the
+3009 scheme, or advertising erc7710 only for another network or scheme)
+keeps the reconstructed legacy echo, as do older intents with no stored
+challenge at all: refusing those would dead-end an intent the agent has
+already signed. Deep-equal duplicate entries — key order and
+nested key order included — are de-duplicated before the uniqueness check, and facilitator pins are matched by containment rather than
+deep equality, because `x402FacilitatorAddresses` forwards only the
+address-shaped subset of what the merchant advertised; where containment alone
+leaves two offers matching, the one whose address-shaped pin set EQUALS the
+pins wins rather than the pair being called ambiguous. No metadata can change
+the signed child or its spend limits.
+
+**The settle-time refusal is a backstop, not the first line.** `POST /x402`
+runs the same match at authorize time and answers **400** when the caller's
+`maxTimeoutSeconds` / `facilitatorAddresses` disagree with the `paymentRequired`
+it sent alongside them — those are independent fields of one request, and
+refusing there costs a retry instead of stranding an intent the agent has
+already signed. The SDK derives all three from the same option, so only a
+direct-API caller can trip it.
 
 **Since #2361 the envelope also echoes the merchant challenge's `resource`
 and `extensions` objects VERBATIM** — on this erc7710 path sourced from the

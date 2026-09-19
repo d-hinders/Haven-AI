@@ -65,7 +65,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     doc: 'packages/sdk/README.md',
     owner: '@d-hinders',
     status: 'current',
-    covers: ['packages/sdk/src/**'],
+    covers: ['packages/sdk/src/**', 'packages/sdk/package.json', 'packages/sdk/tsup.config.ts'],
     // #2341: re-verified and EDITED (every merchant-retry header instruction,
     // six sites). #2330 made them all say "both names" — correct then, and
     // wrong on erc7710 the moment #2341 scoped the send by scheme. This is the
@@ -113,7 +113,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     doc: 'packages/signer/README.md',
     owner: '@d-hinders',
     status: 'current',
-    covers: ['packages/signer/src/**'],
+    covers: ['packages/signer/src/**', 'packages/sdk/src/edge-imports.test.ts'],
     // #2515: EDITED, scope = the one connector command example. `@alpha` became
     // `<channel>`, with the sentence beside it still naming `@alpha` as what
     // production hands out. Same reason as the connect README: this file ships in

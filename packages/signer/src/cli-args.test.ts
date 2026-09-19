@@ -41,8 +41,10 @@ describe('signer CLI arguments (#3173)', () => {
   it('--help names the connector doctor and the --ack-local-tools repair', () => {
     const text = helpText()
     expect(text).toContain(CONNECTOR_DOCTOR_COMMAND)
+    expect(text).toContain("failed 'Signer stdio handshake'")
     expect(text).toContain('local_signer_ack_required')
     expect(text).toContain('--ack-local-tools')
+    expect(text).toContain('--credentials-path')
     expect(parseSignerArgs(['-h'])).toMatchObject({ kind: 'help' })
   })
 })

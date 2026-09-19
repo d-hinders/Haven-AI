@@ -375,8 +375,14 @@ export function createEdgeSigner(
       const requirements = toStandardPaymentRequirements(paymentRequired, option)
       // #3173: `x402/schemes` costs ~750 ms of module init on top of viem and
       // is needed only here, on the merchant-header leg — never at startup,
-      // never for `haven_sign`'s typed-data path. Loaded on first use.
-      const { exact } = await import('x402/schemes')
+      // never for `haven_sign`'s typed-data path. Loaded on first use. A load
+      // failure is a structured refusal, not UNKNOWN_ERROR: before #3173 a
+      // broken x402 install failed at process start where the connector doctor
+      // sees it; now it would surface here, after the funding leg was signed.
+      const { exact } = await loadX402Schemes()
+      // The first load in a process costs real time; re-check the window it
+      // was asserted open against before building the header.
+      assertX402PaymentWindowOpen(expected)
       const header = await exact.evm.createPaymentHeader(
         account,
         paymentRequired.x402Version,
@@ -767,6 +773,19 @@ function assertPayerMatchesDelegate(
       'session authenticates as the old agent while the signer on disk belongs to the new ' +
       'one. Nothing was signed. Restart the host so it re-reads its wiring, then re-quote.',
   )
+}
+
+/** #3173: lazy, and a load failure is a HavenSigningError with the connector-doctor remedy. */
+export async function loadX402Schemes(): Promise<typeof import('x402/schemes')> {
+  try {
+    return await import('x402/schemes')
+  } catch (err) {
+    throw new HavenSigningError(
+      'The x402 scheme module could not be loaded, so no merchant header was built (nothing was ' +
+        `sent to the merchant): ${err instanceof Error ? err.message : String(err)}. The signer's ` +
+        'runtime install is incomplete — run: npx @haven_ai/connect --doctor',
+    )
+  }
 }
 
 function assertX402PaymentWindowOpen(expected: X402ExpectedPayment): void {

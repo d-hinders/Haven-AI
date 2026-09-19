@@ -17,8 +17,18 @@ import { HavenSigningError } from './types.js'
  * over the hash — never the EIP-191 prefixed digest.
  */
 
-function strip0x(hex: string): string {
-  return hex.startsWith('0x') || hex.startsWith('0X') ? hex.slice(2) : hex
+/** secp256k1 order / 2 — a signature with s above this is the malleable twin ethers rejects. */
+const HALF_N = BigInt('0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0')
+
+/**
+ * ethers' parity, not leniency: it requires the `0x` prefix and refuses the
+ * wrong byte length, so the same inputs that throw there throw here.
+ */
+function hexBytes(value: string, bytes: number, what: string): string {
+  if (!/^0x[0-9a-fA-F]+$/.test(value) || value.length !== 2 + bytes * 2) {
+    throw new Error(`${what} must be a 0x-prefixed ${bytes}-byte hex string`)
+  }
+  return value.slice(2)
 }
 
 export function addressFromKey(privateKey: string): string {
@@ -33,7 +43,7 @@ export function addressFromKey(privateKey: string): string {
 
 export function signHash(privateKey: string, hash: string): string {
   try {
-    const { r, s, recovery } = secp256k1.sign(strip0x(hash), strip0x(privateKey), { lowS: true })
+    const { r, s, recovery } = secp256k1.sign(hexBytes(hash, 32, 'hash'), hexBytes(privateKey, 32, 'private key'), { lowS: true })
     // viem serialises the trailing byte from yParity (0/1 → 27/28), the same
     // `v` ethers' `Signature.serialized` writes.
     return serializeSignature({
@@ -50,14 +60,16 @@ export function signHash(privateKey: string, hash: string): string {
 
 export function verifySignature(hash: string, signature: string, expectedAddress: string): boolean {
   try {
-    const sig = strip0x(signature)
-    if (sig.length !== 130) return false
+    const sig = hexBytes(signature, 65, 'signature')
+    const hashHex = hexBytes(hash, 32, 'hash')
+    // Reject the high-s malleable twin, as ethers does — one signature per message.
+    if (BigInt(`0x${sig.slice(64, 128)}`) > HALF_N) return false
     const yParityOrV = Number.parseInt(sig.slice(128), 16)
     const recoveryBit = yParityOrV === 0 || yParityOrV === 27 ? 0 : yParityOrV === 1 || yParityOrV === 28 ? 1 : -1
     if (recoveryBit < 0) return false
     const publicKey = secp256k1.Signature.fromCompact(sig.slice(0, 128))
       .addRecoveryBit(recoveryBit)
-      .recoverPublicKey(strip0x(hash))
+      .recoverPublicKey(hashHex)
       .toHex(false)
     const recovered = publicKeyToAddress(`0x${publicKey}`)
     return recovered.toLowerCase() === expectedAddress.toLowerCase()

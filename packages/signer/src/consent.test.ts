@@ -84,16 +84,18 @@ describe('signer consent gate', () => {
     }
     expect(block.length).toBeLessThan(2500)
     expect(block).toContain('npx @haven_ai/connect --doctor')
+    expect(block).toContain("failed 'Signer stdio handshake' check")
     expect(block).toContain('local_signer_ack_required')
     expect(block).toContain('--ack-local-tools')
   })
 
-  it('#3173: the summaries and the doctor hint are outside the consent hash', () => {
-    // Hash covers identity + tool NAMES + surface version — asserted by
-    // recomputing after the block changes shape (the block is not an input).
+  it('#3173: the summaries and the doctor hint are outside the consent hash — the fixture hash is pinned', () => {
+    // Pinned literal: the same fixture hashed to this before #3173 rewrote the
+    // block, so any drift in the block's prose that leaked into the hash — or
+    // a surface-version bump — goes red here, where recomputing twice would not.
     const hash = computeSignerConsentHash(input)
+    expect(hash).toBe('094465953abf89ad')
     expect(renderSignerConsentBlock(input, hash)).toContain(`Consent hash: ${hash}`)
-    expect(computeSignerConsentHash(input)).toBe(hash)
   })
 
   it('makes missing wallet metadata explicit', () => {

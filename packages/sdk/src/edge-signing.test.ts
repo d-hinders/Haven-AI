@@ -50,6 +50,30 @@ describe('edge-signing (#3173) is byte-equivalent to the ethers implementation',
     expect(verifySignature(HASHES[0], ethersSignHash(KEYS[0], HASHES[0]), address)).toBe(true)
   })
 
+  it('rejects the high-s malleable twin, unprefixed inputs and wrong lengths exactly like ethers', () => {
+    const sig = signHash(KEYS[0], HASHES[0])
+    const address = addressFromKey(KEYS[0])
+    // s' = N - s with the v byte flipped recovers the same address — ethers refuses it; so do we.
+    const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141')
+    const s = BigInt(`0x${sig.slice(66, 130)}`)
+    const highS = `${sig.slice(0, 66)}${(N - s).toString(16).padStart(64, '0')}${sig.slice(-2) === '1b' ? '1c' : '1b'}`
+    expect(ethersVerifySignature(HASHES[0], highS, address)).toBe(false)
+    expect(verifySignature(HASHES[0], highS, address)).toBe(false)
+    // Unprefixed: parity with ethers (false). `0X`: ethers happens to accept
+    // the uppercase prefix; we are stricter and refuse it — stated, not hidden.
+    const unprefixed = sig.slice(2)
+    expect(ethersVerifySignature(HASHES[0], unprefixed, address)).toBe(false)
+    expect(verifySignature(HASHES[0], unprefixed, address)).toBe(false)
+    expect(verifySignature(HASHES[0], `0X${unprefixed}`, address)).toBe(false)
+    for (const badHash of [HASHES[0].slice(2), `0x${'ab'.repeat(31)}`, `0x${'ab'.repeat(33)}`, '0x']) {
+      expect(verifySignature(badHash, sig, address)).toBe(false)
+      expect(() => signHash(KEYS[0], badHash)).toThrow(HavenSigningError)
+      expect(() => ethersSignHash(KEYS[0], badHash)).toThrow()
+    }
+    expect(() => signHash(KEYS[0].slice(2), HASHES[0])).toThrow(HavenSigningError)
+    expect(() => signHash(`0X${KEYS[0].slice(2)}`, HASHES[0])).toThrow(HavenSigningError)
+  })
+
   it('signs the RAW hash — not valid under the EIP-191 personal-sign digest', () => {
     const sig = signHash(KEYS[0], HASHES[0])
     expect(ethers.verifyMessage(ethers.getBytes(HASHES[0]), sig).toLowerCase()).not.toBe(addressFromKey(KEYS[0]).toLowerCase())

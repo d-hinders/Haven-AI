@@ -31,7 +31,7 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-19"
+last-verified: "2026-09-20"
 ---
 
 # Haven — Edge Signer
@@ -355,8 +355,10 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
   funding-intent amount, merchant, resource URL, asset, and network.
 - Startup (#3173): the signer imports `@haven_ai/sdk/edge`, never the SDK
   barrel, and loads `x402/schemes` only on the merchant-header leg, so no
-  `ethers` or `x402` module resolves at startup (measured: `--help` 1.47 s →
-  0.71 s, consent refusal 1.55 s → 0.77 s). Unknown CLI options are refused
+  `ethers` or `x402` module resolves at startup (roughly halved: `--help`
+  1.47 s → 0.71 s, consent refusal 1.55 s → 0.77 s, medians of 5 cold runs on
+  macOS / Node 22 — conditions and the import-timing split in
+  `packages/signer/README.md`). Unknown CLI options are refused
   (exit 2, naming `--help`); `--help` lists every registered tool; the consent
   block summarises each tool in one line and, like the no-consent exit message,
   names `npx @haven_ai/connect --doctor` for the connector-wired case.

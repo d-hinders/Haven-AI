@@ -118,7 +118,8 @@ fails if any runtime file imports the barrel or `x402/schemes` statically, and
 the SDK's `edge-imports.test.ts` fails if the subpath's import graph ever
 reaches ethers, `x402` or the HTTP client.
 
-**CLI.** `--credentials <path>`, `--ack`, `--help`/`-h`. Any other option is
+**CLI.** `--credentials <path>` (alias `--credentials-path`), `--ack`,
+`--help`/`-h`. Any other option is
 refused with one stderr line naming `--help` and exit code 2 — before #3173 an
 unknown flag was silently ignored, so `--ack-local-tools` (the connector's
 flag, which the connector's doctor tells you to pass to the *connector*)
@@ -129,8 +130,10 @@ against `toolSchemas`, so a fifth tool cannot drift out of the text) and names
 **Consent screen.** The first-launch block summarises each tool in one
 human-sized line (the full agent-facing descriptions are what the runtime sees,
 not what a person approves) and ends by naming the connector's doctor for the
-connector-wired case, where this state shows as `local_signer_ack_required` and
-the repair is the connector's `--ack-local-tools`. The refusal an MCP host
+connector-wired case, where the doctor shows this as a failed *Signer stdio
+handshake* check (the connector's setup outcome reports it as
+`local_signer_ack_required`) and the repair is the connector's
+`--ack-local-tools`. The refusal an MCP host
 relays ("Connection closed" plus this process's exit message) names the same
 command. The consent hash covers identity, tool names and the surface version —
 not the block's prose — so neither change re-prompts an acknowledged install.

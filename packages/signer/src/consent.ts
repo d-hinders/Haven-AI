@@ -5,7 +5,7 @@ import { toolSchemas, type SignerToolName } from './tools.js'
 
 /**
  * #3173: one human-sized line per tool for the consent block. The full
- * `toolDescriptions` are LLM-addressed operating instructions (~4.5 KB across
+ * `toolDescriptions` are LLM-addressed operating instructions (~4.8 KB across
  * the four) and were rendered verbatim into what is a person's one-time
  * approval screen. These summarise WHAT each tool signs; the descriptions stay
  * the agent's. Not part of the consent hash (which covers tool NAMES), so
@@ -20,9 +20,11 @@ export const toolSummaries: Record<SignerToolName, string> = {
 }
 
 /** #3173: what an operator who was wired by the connector should run when this signer refuses. */
-export const CONNECTOR_DOCTOR_HINT =
-  'Wired by the Haven connector (Claude Desktop, Codex, ...)? Diagnose and repair with: npx @haven_ai/connect --doctor\n' +
-  '  (this state shows there as local_signer_ack_required; the repair is the connector\'s --ack-local-tools).'
+export const CONNECTOR_DOCTOR_HINT = [
+  'Wired by the Haven connector (Claude Desktop, Codex, ...)? Diagnose and repair with: npx @haven_ai/connect --doctor',
+  "  (the doctor shows this as a failed 'Signer stdio handshake' check; the connector's setup outcome reports it as",
+  "  local_signer_ack_required; the repair is the connector's --ack-local-tools).",
+].join('\n')
 
 export interface SignerConsentInput {
   delegateAddress: string

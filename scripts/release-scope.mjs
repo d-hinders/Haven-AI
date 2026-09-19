@@ -104,7 +104,12 @@ function publishedPackages() {
     // future entry named src/server.ts would not be required at all, reopening
     // the partial-dist hole). A bundle missing from these fields is definitionally
     // a broken tarball.
-    const entryRefs = [manifest.main, manifest.module, ...Object.values(manifest.bin ?? {})].filter(
+    // #3173: `exports` subpaths are entries too — `@haven_ai/sdk/edge` resolves
+    // dist/edge.{js,cjs}, which main/module/bin never name. Walk the conditions
+    // map to its string leaves.
+    const exportLeaves = (node) =>
+      typeof node === 'string' ? [node] : node && typeof node === 'object' ? Object.values(node).flatMap(exportLeaves) : []
+    const entryRefs = [manifest.main, manifest.module, ...Object.values(manifest.bin ?? {}), ...exportLeaves(manifest.exports)].filter(
       (v) => typeof v === 'string',
     )
     const requiredBundles = [

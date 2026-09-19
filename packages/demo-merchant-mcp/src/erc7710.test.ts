@@ -646,6 +646,9 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
     const alreadyKnown = asSendTransaction(new TransactionRejectedRpcError(rpcError(-32003, 'already known')))
     const rateLimited = asSendTransaction(new LimitExceededRpcError(rpcError(-32005, 'rate limit exceeded')))
     const internalError = asWriteContract(new InternalRpcError(rpcError(-32603, 'internal error')))
+    const internalErrorSayingRevert = asWriteContract(new InternalRpcError(rpcError(-32603, 'failed to revert to snapshot')))
+    // geth's eth_estimateGas answer when the SENDER cannot pay for gas — viem maps it to ExecutionRevertedError.
+    const gasExceedsAllowance = asSendTransaction(new ExecutionRevertedError({ cause: rpcError(-32000, 'gas required exceeds allowance (12345)'), message: 'gas required exceeds allowance (12345)' }))
 
     it('isContractRevert: only a proven revert is a revert — every other writeContract failure is the merchant\'s fault', () => {
       expect(isContractRevert(revertWithData)).toBe(true)
@@ -656,6 +659,8 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
       expect(isContractRevert(alreadyKnown)).toBe(false)
       expect(isContractRevert(rateLimited)).toBe(false)
       expect(isContractRevert(internalError)).toBe(false)
+      expect(isContractRevert(internalErrorSayingRevert)).toBe(false)
+      expect(isContractRevert(gasExceedsAllowance)).toBe(false)
       expect(isContractRevert(asSendTransaction(new TimeoutError({ body: {}, url: 'https://rpc.example' })))).toBe(false)
     })
 
@@ -686,8 +691,8 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
       expect(JSON.stringify(body).slice(0, 500)).toContain('re-quote and pay with a fresh authorization')
     })
 
-    it('the next action survives the relay window even for a 120-char-capped revert reason', async () => {
-      const longReason = 'x'.repeat(400)
+    it('the next action survives the relay window even for a 120-char-capped revert reason that JSON-escapes to six bytes a character', async () => {
+      const longReason = '\u0001'.repeat(400)
       const client = submitRevertingClient({ spent: 0n, error: asSendTransaction(new ExecutionRevertedError({ cause: rpcError(-32000, longReason), message: `execution reverted: ${longReason}` })) })
       const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
       const unpaid = await postBuyVpn(url)

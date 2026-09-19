@@ -2,9 +2,6 @@ import {
   BaseError,
   ContractFunctionRevertedError,
   ExecutionRevertedError,
-  HttpRequestError,
-  InsufficientFundsError,
-  TimeoutError,
   createPublicClient,
   createWalletClient,
   decodeAbiParameters,
@@ -1546,8 +1543,11 @@ function parseBigIntField(value: string, field: string): bigint {
  * revert is proven only by a `ContractFunctionRevertedError` that carries
  * decoded revert data, an undecodable error signature or a revert reason (viem
  * also wraps a bare JSON-RPC -32603 "internal error" in that class, with none
- * of the three), or by the node's `ExecutionRevertedError`. A custom client
- * may throw a plain `Error` whose message names the revert or the enforcer.
+ * of the three), or by the node's `ExecutionRevertedError` — except geth's
+ * "gas required exceeds allowance", which viem files under that class although
+ * it means the MERCHANT's settlement key cannot pay for gas (#2979's
+ * `settlement_wallet_out_of_gas` band). A custom client may throw a plain
+ * `Error` whose message names the revert or the enforcer.
  * Everything else a viem client throws — nonce too low, fee cap, "already
  * known", rate limit, chain mismatch, HTTP or timeout — is the merchant's
  * fault and keeps #2979's fault reason code.
@@ -1555,10 +1555,11 @@ function parseBigIntField(value: string, field: string): bigint {
 export function isContractRevert(err: unknown): boolean {
   if (err instanceof BaseError) {
     const reverted = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null
-    if (reverted && (reverted.data !== undefined || reverted.signature !== undefined || /revert/i.test(reverted.reason ?? ''))) {
+    if (reverted && (reverted.data !== undefined || reverted.signature !== undefined || /execution reverted/i.test(reverted.reason ?? ''))) {
       return true
     }
-    if (err.walk((e) => e instanceof ExecutionRevertedError)) return true
+    const executionReverted = err.walk((e) => e instanceof ExecutionRevertedError) as ExecutionRevertedError | null
+    if (executionReverted && !/gas required exceeds allowance/i.test(executionReverted.message)) return true
     return false
   }
   const haystack = `${err instanceof Error ? err.name : ''} ${err instanceof Error ? err.message : String(err)}`.toLowerCase()
@@ -1574,13 +1575,17 @@ export function isContractRevert(err: unknown): boolean {
  * `shortMessage` (measured in erc7710.test.ts).
  */
 const REVERT_REASON_MAX = 120
+/** Non-printable characters JSON-escape to six bytes each; flatten them first so the cap holds in bytes. */
+function clampReason(reason: string): string {
+  return reason.replace(/[^\x20-\x7e]/g, ' ').slice(0, REVERT_REASON_MAX)
+}
 function revertReason(err: unknown): string {
   if (err instanceof BaseError) {
     const reverted = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null
-    const reason = reverted?.reason ?? reverted?.shortMessage ?? err.shortMessage
-    if (reason) return reason.slice(0, REVERT_REASON_MAX)
+    const reason = reverted?.reason ?? reverted?.data?.errorName ?? reverted?.shortMessage ?? err.shortMessage
+    if (reason) return clampReason(reason)
   }
-  return (err instanceof Error ? err.message : String(err)).slice(0, REVERT_REASON_MAX)
+  return clampReason(err instanceof Error ? err.message : String(err))
 }
 
 function sameAddress(a: string, b: string): boolean {

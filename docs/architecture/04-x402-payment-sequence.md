@@ -633,9 +633,9 @@ short, or the child redeemed elsewhere — after first asking the chain whether
 the money already moved, #1515) instead of a `merchant_fault`, so the
 `MERCHANT_REJECTED_AFTER_FUNDING` message the agent sees carries the cause and
 the next action rather than "see merchant logs" — the merchant puts the next
-action before the cause list and caps the revert reason at 120 characters
-because `paid-mcp-completion.ts` relays only the first 500 bytes of the 402
-body. A failure of the merchant's own settlement key or node (nonce, fee,
+action before the cause list and caps the revert reason at 120 printable
+ASCII characters because `paid-mcp-completion.ts` relays only the first 500
+bytes of the 402 body. A failure of the merchant's own settlement key or node (nonce, fee,
 rate limit, unreachable RPC) is still reported as a `merchant_fault` with its
 #2979 `reason_code`.
 

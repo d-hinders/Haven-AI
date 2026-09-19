@@ -19,10 +19,11 @@ covers:
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
   - packages/connect/src/prune-runtimes.ts
+  - packages/connect/src/storage.ts
   - packages/signer/src/credentials.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -349,7 +350,16 @@ throughout.
    wiring is untouched. Do **not** answer `--replace` on a machine whose
    production wiring you want to keep: it retires that agent's local key files.
    `--doctor` enumerates every agent on the machine regardless of name, so
-   step 5 is unchanged.
+   step 5 is unchanged. Since #3122 the run also says, BEFORE it writes
+   anything, which other directories on the machine still hold a stored key
+   and the account each spends from (a warning, never a refusal), and records
+   the server name it bound in a non-secret `mcp-server-binding.json` beside
+   `last-connect-outcome.json` — so a later run that repoints `haven` at a
+   different backend (the channel switch this page describes) names the
+   previous binding and flags the backend change before the write; the doctor
+   reports two records claiming one name as the `mcp_server_name_rebound`
+   advisory. The backend's own record stays the authority for the same
+   backend; the local one is a reporting aid.
 
 5. **Verify the install.**
 

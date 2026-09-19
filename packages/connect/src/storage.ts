@@ -672,3 +672,84 @@ export async function readConnectOutcomeRuntime(directory: string): Promise<stri
     return null
   }
 }
+
+// ── #3122: the local MCP-server-name binding record ─────────────────────────
+//
+// The backend persists the binding (`agents.mcp_server_name`, migration 067)
+// and is the authority for the same-backend case. What it cannot answer is
+// the two cases that bit on 2026-09-18: the same name repointed to a DIFFERENT
+// backend, and a machine that is offline. So each credential directory keeps
+// a non-secret record of what its setup bound — server name → agent id,
+// backend base URL, bound-at — beside `last-connect-outcome.json`. Per
+// DIRECTORY, not machine-wide: two concurrent setups never write the same
+// file, and "who else claims this name" is answered by scanning the root,
+// which setup and doctor already do. It is a reporting aid: it never asserts
+// itself as the backend's current truth, and the doctor says so when two
+// records disagree. Carries no API key by construction (pinned by test).
+
+export const MCP_SERVER_BINDING_FILENAME = 'mcp-server-binding.json'
+
+export interface McpServerBinding {
+  version: 1
+  /** The hosted MCP server name this directory's setup wired (`haven` or `haven-<slug>`). */
+  server_name: string
+  /** The paired signer server name (`haven-signer` or `haven-signer-<slug>`). */
+  signer_name: string
+  agent_id: string
+  /** The `--api` backend base URL the agent was registered with — the axis the backend cannot see a change on. */
+  api_url: string
+  hosted_mcp_url?: string
+  bound_at: string
+}
+
+/** Overwrites: a binding is a single slot per directory, like the outcome record. 0o600 inside a 0o700 directory. */
+export async function writeMcpServerBinding(directory: string, binding: McpServerBinding): Promise<string> {
+  const path = join(directory, MCP_SERVER_BINDING_FILENAME)
+  await writeFile(path, `${JSON.stringify(binding, null, 2)}\n`, { mode: 0o600 })
+  return path
+}
+
+/** Never throws: no record, unreadable or malformed all read as `null`. */
+export async function readMcpServerBinding(directory: string): Promise<McpServerBinding | null> {
+  try {
+    const parsed = JSON.parse(await readFile(join(directory, MCP_SERVER_BINDING_FILENAME), 'utf8')) as unknown
+    if (typeof parsed !== 'object' || parsed === null) return null
+    const record = parsed as Partial<McpServerBinding>
+    if (record.version !== 1 || typeof record.server_name !== 'string' || typeof record.agent_id !== 'string' || typeof record.api_url !== 'string' || typeof record.bound_at !== 'string') return null
+    return record as McpServerBinding
+  } catch {
+    return null
+  }
+}
+
+/** `--unwire` (and a `--replace` retirement) release the name: a legitimately free name must not warn forever. */
+export async function clearMcpServerBinding(directory: string): Promise<boolean> {
+  try {
+    await rm(join(directory, MCP_SERVER_BINDING_FILENAME))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Every directory under the credential root that carries a binding record, except `excludeDirectory`. Never throws. */
+export async function listMcpServerBindings(
+  baseDir: string | undefined,
+  excludeDirectory?: string,
+): Promise<Array<{ directory: string; binding: McpServerBinding }>> {
+  const root = defaultCredentialRoot(baseDir)
+  let entries: string[] = []
+  try {
+    entries = await readdir(root)
+  } catch {
+    return []
+  }
+  const out: Array<{ directory: string; binding: McpServerBinding }> = []
+  for (const entry of entries) {
+    const directory = join(root, entry)
+    if (excludeDirectory && directory === excludeDirectory) continue
+    const binding = await readMcpServerBinding(directory)
+    if (binding) out.push({ directory, binding })
+  }
+  return out
+}

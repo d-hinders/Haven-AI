@@ -1361,7 +1361,14 @@ run that replaced existing wiring (the latter names only the collision set that
 was actually retired — `superseded_agent_ids` is every other directory, named
 agents included, so the boolean is never to be read against it), and
 `error.superseded_agent_ids` / `error.suggested_name` on a `wiring_collision`
-refusal; and since #2528, also additive, `approval.url` — the absolute link to
+refusal; since #3122, also additive, `existing_agents_before_write` (always
+present on a completed run — the other live-keyed directories, named BEFORE the
+first write, with the account each spends from; a subset of
+`superseded_agent_ids`, which also names key-less and tombstoned directories)
+and `server_name_rebound_from`
+(only when the run took a server name over from another directory's local
+`mcp-server-binding.json`, with `backend_changed`); and since #2528, also
+additive, `approval.url` — the absolute link to
 this setup's budget approval, echoed from the register response and present
 only when `approval.required` is true AND the backend is new enough to return
 one, so a consumer must test for the key rather than assume it. The connector
@@ -2216,6 +2223,31 @@ to call next in structured fields, and those fields are typed end to end
   > `--replace` paragraph under the wiring-collision section (now states that
   > `--replace`'s teardown is unconditional and unprobed) and the JSON-envelope
   > bullet above (a retained teardown is the second non-zero-exit case).
+  > Nothing else in this document was re-verified in this pass.
+
+  > **Re-verified #3122:** a wallet warning is now emitted BEFORE the first
+  > credential write. Setup now reads every other credential directory's stored key and
+  > account (local files only — no network call is added, and the backend is
+  > not asked whether a key still authenticates) and logs `Heads-up (before
+  > anything is written): …` naming each agent and the account it spends from,
+  > then proceeds — it warns, it does not refuse (owner decision 1 on #3119);
+  > #2551's name-slot refusal is unchanged. `--json` gains
+  > `existing_agents_before_write` (always present on a completed run). Each
+  > setup writes a non-secret `mcp-server-binding.json` beside
+  > `last-connect-outcome.json` (server name → agent id, backend URL,
+  > bound-at; per credential directory, never machine-wide); a name another
+  > directory's record holds is named before the write with a DIFFERENT-backend
+  > flag (`server_name_rebound_from`) — the case the backend's
+  > `agents.mcp_server_name` cannot see. That backend column stays the
+  > authority for the same backend; the local record is a reporting aid and
+  > every message reading it says "locally recorded". `--unwire` releases the
+  > record (its `--json` record gains `binding_released`), and so does the
+  > `--replace` retirement (the setup outcome carries no such field);
+  > `--tombstone` leaves it, so `--doctor` ignores a RETIRED directory's record
+  > and reports two records claiming one name as the `mcp_server_name_rebound`
+  > advisory (#3121 level), excluding tombstoned (retired) directories only,
+  > absent otherwise. The #1688 completion heads-up is unchanged — #3122 ADDS
+  > the earlier notice, it does not move or remove the later one.
   > Nothing else in this document was re-verified in this pass.
 
   This is local teardown, **not** backend revocation: Connect reports what it

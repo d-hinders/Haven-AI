@@ -113,7 +113,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     doc: 'packages/signer/README.md',
     owner: '@d-hinders',
     status: 'current',
-    covers: ['packages/signer/src/**', 'packages/sdk/src/edge-imports.test.ts'],
+    covers: ['packages/signer/src/**', 'packages/sdk/src/edge.ts', 'packages/sdk/src/edge-imports.test.ts'],
     // #2515: EDITED, scope = the one connector command example. `@alpha` became
     // `<channel>`, with the sentence beside it still naming `@alpha` as what
     // production hands out. Same reason as the connect README: this file ships in

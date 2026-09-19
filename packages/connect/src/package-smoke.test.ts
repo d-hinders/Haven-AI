@@ -474,8 +474,11 @@ describeSmoke('published package smoke', () => {
     const signerTarball = await npmPack(packageDir('signer'), packDir, cacheDir)
     await extractPackageTarball(sdkTarball, join(nodeModules, '@haven_ai', 'sdk'))
     await extractPackageTarball(signerTarball, join(nodeModules, '@haven_ai', 'signer'))
-    // The signer pulls in the SDK, which imports ethers at module load.
-    for (const dependency of ['@modelcontextprotocol', 'ethers', 'viem', 'x402', 'zod']) {
+    // #3173: the signer pulls in the SDK's `/edge` entry, which imports viem
+    // and @noble/curves at module load (ethers no longer; x402 is loaded lazily
+    // on the merchant-header leg). ethers and x402 stay linked because the
+    // packed SDK's barrel still declares them.
+    for (const dependency of ['@modelcontextprotocol', '@noble', 'ethers', 'viem', 'x402', 'zod']) {
       await linkWorkspaceDependency(nodeModules, dependency)
     }
 

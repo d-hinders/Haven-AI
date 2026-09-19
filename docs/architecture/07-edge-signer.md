@@ -19,6 +19,7 @@ covers:
   - packages/sdk/src/client.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/signer.ts
+  - packages/sdk/src/edge.ts
   - packages/sdk/src/sweep.ts
   - packages/sdk/src/x402.ts
   - packages/backend/src/rails/sweep.ts

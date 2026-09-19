@@ -17,6 +17,7 @@ covers:
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/edge.ts
   - packages/sdk/package.json
+  - packages/sdk/tsup.config.ts
   - scripts/release-bump.mjs
   - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts

@@ -13,16 +13,21 @@ import { HavenSigningError } from './types.js'
  * async), so `@haven_ai/sdk/edge` stays ethers-free and a signer session stops
  * paying for module init it never uses. Byte-equivalence with the ethers forms
  * is pinned in `edge-signing.test.ts`: same address, same 65-byte `r‖s‖v`
- * serialisation with low-s and v = 27/28, same recovery verdicts. Raw ECDSA
- * over the hash — never the EIP-191 prefixed digest.
+ * serialisation with low-s and v = 27/28, same recovery verdicts, and the same
+ * refusals (high-s twin, wrong lengths) — with three stated strict-direction
+ * exceptions, see `hexBytes`. Raw ECDSA over the hash — never the EIP-191
+ * prefixed digest.
  */
 
 /** secp256k1 order / 2 — a signature with s above this is the malleable twin ethers rejects. */
 const HALF_N = BigInt('0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0')
 
 /**
- * ethers' parity, not leniency: it requires the `0x` prefix and refuses the
- * wrong byte length, so the same inputs that throw there throw here.
+ * Stricter than ethers, never looser: the lowercase `0x` prefix and the exact
+ * byte length are required. Ethers accepts an unprefixed private key, an
+ * uppercase `0X` prefix on a signature and the 64-byte EIP-2098 compact form;
+ * all three are refused here — the divergences are pinned in
+ * `edge-signing.test.ts`, every well-formed input is byte-equivalent.
  */
 function hexBytes(value: string, bytes: number, what: string): string {
   if (!/^0x[0-9a-fA-F]+$/.test(value) || value.length !== 2 + bytes * 2) {

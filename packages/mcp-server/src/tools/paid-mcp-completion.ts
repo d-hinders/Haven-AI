@@ -384,6 +384,15 @@ export async function deliverMerchantPayment(
     throw err
   }
   if (!result.ok) {
+    // #3118 / #3155 review S5: a native-profile merchant refuses IN-BAND under
+    // HTTP 2xx (an `isError` payment-required result or `success: false`).
+    // The SDK reports `ok: false` with the real status; the refusal thrown
+    // here carries 402 (what the merchant said in-band — the same mapping the
+    // local retry uses) so no failure object rides an HTTP-200 status, and
+    // the message names both.
+    const inBandRefusal = result.status >= 200 && result.status < 300
+    const merchantStatus = inBandRefusal ? 402 : result.status
+    const merchantHttp = inBandRefusal ? `HTTP ${result.status}, refused in-band` : `HTTP ${result.status}`
     let status: Awaited<ReturnType<HavenClient['getPaymentStatus']>> | null = null
     try {
       status = await haven.getPaymentStatus(args.payment_id)
@@ -412,7 +421,7 @@ export async function deliverMerchantPayment(
       // "stop-and-sweep" advice is overridden explicitly in the message.
       const notReady = merchantNotReadyBodyFor(result.body)
       const message = notReady
-        ? `Merchant refused to deliver the resource (HTTP ${result.status}) and reported it ` +
+        ? `Merchant refused to deliver the resource (${merchantHttp}) and reported it ` +
           `cannot settle right now` +
           (notReady.reasonCode ? ` (reason_code: ${notReady.reasonCode})` : '') +
           `. erc7710 has no funding leg and the merchant did not attempt settlement, so no ` +
@@ -420,7 +429,7 @@ export async function deliverMerchantPayment(
           `is no delegate balance to sweep. Re-quote` +
           (notReady.retryAfterS ? ` after approximately ${notReady.retryAfterS}s` : ' later') +
           `. Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`
-        : `Merchant refused to deliver the resource (HTTP ${result.status}). erc7710 has no ` +
+        : `Merchant refused to deliver the resource (${merchantHttp}). erc7710 has no ` +
           `funding leg, so there is no delegate balance to sweep — ignore this code's sweep ` +
           `guidance. Haven has NOT observed a settlement, but the merchant held a single-use ` +
           `settlement authorization valid for up to the payment window (typically 300s) and ` +
@@ -430,7 +439,7 @@ export async function deliverMerchantPayment(
       throw new HostedToolError({
         code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
         message,
-        statusCode: result.status,
+        statusCode: merchantStatus,
         paymentId: args.payment_id,
         status: status?.status ?? 'merchant_rejected_after_funding',
         phase: status?.phase ?? 'not_delivered',
@@ -454,10 +463,10 @@ export async function deliverMerchantPayment(
     throw new HostedToolError({
       code: AgentPaymentFailureCode.MerchantRejectedAfterFunding,
       message:
-        `Merchant rejected the payment after funding (HTTP ${result.status}). ` +
+        `Merchant rejected the payment after funding (${merchantHttp}). ` +
         `The delegate wallet may hold stranded funds — reconcile with haven_sweep_delegate. ` +
         `Merchant response: ${JSON.stringify(result.body).slice(0, 500)}`,
-      statusCode: result.status,
+      statusCode: merchantStatus,
       paymentId: args.payment_id,
       status: status?.status ?? 'merchant_rejected_after_funding',
       phase: status?.phase ?? 'funded_but_unsettled',
@@ -476,7 +485,8 @@ export async function deliverMerchantPayment(
     ok: result.ok,
     result: result.body,
     // #2968: the response-level zero-hash ban. `settlementTxHash` here is the
-    // MERCHANT's word (the PAYMENT-RESPONSE header), and the demo merchant's
+    // MERCHANT's word (the PAYMENT-RESPONSE header, or since #3118 the native
+    // MCP profile's `result._meta["x402/payment-response"]`), and the demo merchant's
     // own "delivered, not settled" marker is `0x00…00` — a value shaped like a
     // hash gets rendered like one by every consumer downstream, so a sentinel
     // is collapsed to null at this boundary instead of being handed out as a

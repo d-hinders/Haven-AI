@@ -38,16 +38,16 @@ import {
 /**
  * The edge signer core.
  *
- * Holds the delegate key in this process and exposes the two signing
- * operations a hosted-MCP flow needs. It performs no network I/O and never
+ * Holds the delegate key in this process and exposes the signing operations a
+ * hosted-MCP flow needs — five, none of them a raw-hash primitive (#3169): each
+ * takes a payload something can check — a Haven binding verified here, typed
+ * data the account validates on-chain, or a sweep authorization. It performs no network I/O and never
  * returns the key — only signatures and the standard x402 header. See
  * docs/architecture/07-edge-signer.md.
  */
 export interface EdgeSigner {
   /** Address derived from the delegate key. */
   readonly delegateAddress: string
-  /** Sign an AllowanceModule funding/transfer hash (raw ECDSA, 65 bytes). */
-  signPaymentHash(hash: string): string
   /**
    * Sign a DIRECT delegation-rail payment's EIP-712 typed data (#1254) — the
    * non-x402 counterpart of `signX402FundingTypedData`. The Hybrid account
@@ -238,10 +238,6 @@ export function createEdgeSigner(
 
   return {
     delegateAddress,
-
-    signPaymentHash(hash: string): string {
-      return signAndVerify(hash)
-    },
 
     async signDelegationTypedData(typedData: Record<string, unknown>): Promise<string> {
       const account = privateKeyToAccount(delegateKey as `0x${string}`)

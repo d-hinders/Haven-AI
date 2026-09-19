@@ -70,12 +70,16 @@ describe('createEdgeSigner', () => {
     expect(() => createEdgeSigner('not-a-key')).toThrow(HavenSigningError)
   })
 
-  it('signs a hash so it recovers to the delegate address', () => {
+  it('#3169: exposes NO raw-hash signing primitive — a bare hash is never signable', () => {
     const signer = createEdgeSigner(TEST_KEY)
-    const sig = signer.signPaymentHash(HASH)
-    // 0x + r(32) + s(32) + v(1) = 132 chars
-    expect(sig).toMatch(/^0x[0-9a-f]{130}$/i)
-    expect(verifySignature(HASH, sig, signer.delegateAddress)).toBe(true)
+    // Inverted pin: the AllowanceModule-era `signPaymentHash(hash)` is gone. Every
+    // remaining signing method verifies something before it signs (a Haven
+    // binding, typed data the account validates, or a sweep authorization).
+    expect('signPaymentHash' in signer).toBe(false)
+    expect(Object.keys(signer).sort()).toEqual([
+      'buildX402PaymentHeader', 'delegateAddress', 'signDelegationTypedData', 'signSweepAuthorization',
+      'signX402FundingHash', 'signX402FundingTypedData',
+    ].sort())
   })
 })
 

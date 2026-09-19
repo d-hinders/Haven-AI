@@ -30,6 +30,7 @@ covers:
   - packages/signer/src/tools.ts
   - packages/signer/src/sign-context.ts
   - packages/signer/src/next-step.ts
+  - packages/signer/src/bare-hash.ts
   - packages/mcp-server/src/next-step-signer-parity.test.ts
   - packages/mcp-server/src/test-support/next-step-fixtures.ts
   - packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts

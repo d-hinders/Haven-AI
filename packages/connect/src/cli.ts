@@ -193,6 +193,8 @@ export async function runCli(
                 status: r.status,
                 ...(r.detail ? { detail: r.detail } : {}),
               })),
+              // #3122: additive — whether the local server-name binding record was released.
+              binding_released: result.bindingReleased,
               // #3123: additive — what happened to the key material and why.
               teardown: {
                 status: result.teardown.status,
@@ -214,6 +216,9 @@ export async function runCli(
           const mark = r.status === 'removed' ? '✓' : r.status === 'clean' ? '–' : '✗'
           io.stdout(redactSecrets(`  ${mark} ${r.label}: ${r.status}${r.detail ? ` — ${r.detail}` : ''}\n`))
         }
+        io.stdout(result.bindingReleased
+          ? '  ✓ MCP server-name binding: released (the name is free for the next setup).\n'
+          : '  – MCP server-name binding: none recorded for this directory.\n')
         const t = result.teardown
         io.stdout(redactSecrets(`  ${t.status === 'retained' ? '✗' : t.status === 'forced' ? '!' : '✓'} Key material: ${t.status} (probe: ${t.probe}) — ${t.detail}\n`))
         if (t.remedy) io.stdout(redactSecrets(`    ↳ ${t.remedy}\n`))

@@ -191,7 +191,9 @@ npx @haven_ai/connect@<channel> --unwire --name research [--reason "..."]
 touches local files only, so any published connector does the same job.
 
 It tombstone-first (so a stale long-lived host still hears `HAVEN-TOMBSTONE`,
-never a masked `ENOENT`), then removes THAT agent's hosted + signer pair from
+never a masked `ENOENT`), releases the directory's local server-name binding
+record (#3122, whatever the key-material decision below), then removes THAT
+agent's hosted + signer pair from
 every runtime config it appears in (Hermes YAML, Codex TOML, the Cursor / VS
 Code / Insiders / Claude Desktop JSON configs), plus the Hermes dotenv API-key
 line — bare `MCP_HAVEN_API_KEY` or named `MCP_HAVEN_<SLUG>_API_KEY`. Then it
@@ -271,6 +273,47 @@ revoked on the backend; `connect reports, the user decides` (#1688) survives,
 and revocation stays an owner action on the Haven agent page. Restart every
 long-lived host afterwards, as with any retirement.
 
+### The wallet warning arrives before the write; names are bound locally (#3122)
+
+Setup guards the **name slot** (a taken `--name`, the bare pair already wired
+— #2551 refuses or asks) but never the **wallet**: a machine can carry several
+agents with live keys, and until #3122 the "your previous agent(s) still exist
+with their own keys" heads-up was printed 180 lines after the credentials were
+written. Two things changed, both from local files only (no network call is
+added; the backend is not asked whether any key still authenticates):
+
+- **Before the key is minted or anything is written**, setup names every
+  other credential directory that still holds a stored key, with the account
+  it can spend from — `Heads-up (before anything is written): this machine
+  already carries N agent director(y/ies) with stored keys — <id> (spends
+  from 0x…)`. It **warns, it does not refuse** (owner decision on #3119): a
+  refusal would change behaviour for every non-interactive caller, including
+  the dashboard's connect flow. `--json` carries the same list as
+  `existing_agents_before_write: [{ agent_id, account_address }]`, always
+  present on a completed run (`[]` on a clean machine).
+- **Each setup records what it bound** in a non-secret
+  `mcp-server-binding.json` beside `last-connect-outcome.json`: `{ version:
+  1, server_name, signer_name, agent_id, api_url, hosted_mcp_url?, bound_at }`
+  — no key material, by construction (pinned by test). Per credential
+  directory, not machine-wide: two concurrent setups never write the same
+  file, and "who else claims this name" is answered by scanning the root,
+  which setup and the doctor already do. When a setup is about to bind a
+  server name another directory's record holds, it says so before the write —
+  previous agent, previous backend URL, when — and flags a **DIFFERENT
+  backend** explicitly, because that is the case the backend cannot see and
+  the one that silently repoints a saved session; `--json` carries it as
+  `server_name_rebound_from: { server_name, agent_id, api_url, bound_at,
+  backend_changed }`. `--unwire` (and a `--replace` retirement) release the
+  record, so a legitimately free name does not warn forever, and `--doctor`
+  reports two records claiming one name as the `mcp_server_name_rebound`
+  advisory (oldest → newest, backend change flagged).
+
+**What wins when the local record disagrees with the backend.** The backend's
+`agents.mcp_server_name` is the authority for the same backend; the local
+record is a reporting aid that covers the two cases the backend cannot —
+another backend, or offline — and it never asserts itself as the backend's
+current truth. Every message that reads it says "locally recorded".
+
 ### Structured output for automation
 
 Pass `--json` when a launcher needs a machine-readable completion record. Connect
@@ -282,9 +325,12 @@ whenever ready and verify later with the read-only `haven_get_agent`
 tool. The object includes runtime/topology status,
 probe result, activation and next-action guidance, approval state/expiry (null
 when the backend does not provide an approval expiry) and `approval.url`, the two
-read-only verification tools, `hosted_mcp_url`, `superseded_agent_ids`, and —
-on a run that replaced existing wiring — `superseded_agents_retired_locally`
-with `retired_agent_ids`. It
+read-only verification tools, `hosted_mcp_url`, `superseded_agent_ids`,
+`existing_agents_before_write` (#3122 — the other live-keyed directories named
+before the first write, each with the account it spends from), and — on a run
+that replaced existing wiring — `superseded_agents_retired_locally` with
+`retired_agent_ids`; `server_name_rebound_from` (#3122) appears only when the
+run took a server name over from another directory's local binding record. It
 contains no API key, private key, credential
 contents, full credential paths, or full delegate address. The same redacted
 object is available to library callers as `runConnect(...).outcome`; the older

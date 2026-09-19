@@ -2177,3 +2177,32 @@ describe('unused signer-runtime directories (#3123)', () => {
     expect(report.level).toBe('ok')
   })
 })
+
+/**
+ * #3122 — two directories whose local binding records claim the same hosted
+ * MCP server name: the name changed hands. An ADVISORY naming both, oldest →
+ * newest, flagging a backend change; absent when no name is claimed twice.
+ */
+describe('rebound MCP server names (#3122)', () => {
+  it('two records for one name → advisory naming both holders in bound-at order and the backend change; none when names are unique', async () => {
+    const { homeDir, dir } = await healthyHome()
+    const { writeMcpServerBinding } = await import('./storage.js')
+    await writeMcpServerBinding(dir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-1', api_url: 'https://api.dev.haven.example', bound_at: '2026-09-18T12:00:00.000Z' })
+    const clean = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    expect(clean.checks.find((c) => c.id === 'mcp_server_name_rebound')).toBeUndefined()
+
+    const oldDir = join(homeDir, '.haven', 'agents', 'agent-old')
+    await mkdir(oldDir, { recursive: true })
+    await writeFile(join(oldDir, 'identity.json'), JSON.stringify({ agent_id: 'agent-old' })) // keys gone, no tombstone → orphaned; still a record
+    await writeMcpServerBinding(oldDir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-old', api_url: 'https://api.haven.example', bound_at: '2026-09-01T00:00:00.000Z' })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'mcp_server_name_rebound')
+    expect(check?.level).toBe('advisory')
+    expect(check?.detail).toContain("'haven': agent-old on https://api.haven.example at 2026-09-01T00:00:00.000Z")
+    expect(check?.detail).toMatch(/agent-old .* → agent-1 on https:\/\/api\.dev\.haven\.example/)
+    expect(check?.detail).toContain('BACKEND CHANGED')
+    expect(check?.detail).toContain('locally recorded')
+    expect(check?.repair).toContain('--unwire')
+    expect(report.ok).toBe(true)
+  })
+})

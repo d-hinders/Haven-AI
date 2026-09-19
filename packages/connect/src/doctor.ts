@@ -54,7 +54,7 @@ import { normalizeRuntimeName, restartRequiredForRuntime, RUNTIME_FLAG_VALUE_LIS
 import { getLocalSignerConsentStatus } from './signer-consent.js'
 import { TOMBSTONE_FILENAME, readAgentTombstone, readTombstoneRecords } from './tombstone.js'
 import { serverNamesFor, type ServerNames } from './server-names.js'
-import { CONNECT_OUTCOME_FILENAME, readConnectOutcomeRuntime, REKEY_PENDING_FILENAME, inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
+import { CONNECT_OUTCOME_FILENAME, readConnectOutcomeRuntime, readMcpServerBinding, REKEY_PENDING_FILENAME, inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
 import { shortAddress } from './redact.js'
 
 /**
@@ -1267,6 +1267,47 @@ export async function runDoctor(
                 'then remove their director(y/ies) under ~/.haven/agents. Connect never revokes or deletes for you.',
             }
           : {}),
+    })
+  }
+
+  // ── Rebound MCP server names (#3122) — advisory, only when two records ──
+  // collide. Each directory's `mcp-server-binding.json` says what ITS setup
+  // bound. Two directories claiming the same hosted name means the name
+  // changed hands locally: the later binding is what a runtime launches now,
+  // the earlier agent is what a saved session or document may still mean.
+  // Locally recorded facts only — the backend's `agents.mcp_server_name` is
+  // the authority for the same backend; this check does not assert
+  // otherwise, and names a backend change explicitly because that is the case
+  // the backend cannot see.
+  const bindings = (
+    await Promise.all(inventory.map(async (entry) => ({ entry, binding: await readMcpServerBinding(entry.directory) })))
+  ).filter((item): item is { entry: AgentInventoryEntry; binding: NonNullable<typeof item.binding> } => item.binding !== null)
+  const byName = new Map<string, typeof bindings>()
+  for (const item of bindings) {
+    const list = byName.get(item.binding.server_name) ?? []
+    list.push(item)
+    byName.set(item.binding.server_name, list)
+  }
+  const rebound = [...byName.entries()].filter(([, items]) => items.length > 1)
+  if (rebound.length > 0) {
+    const parts = rebound.map(([name, items]) => {
+      const ordered = [...items].sort((a, b) => a.binding.bound_at.localeCompare(b.binding.bound_at))
+      const backends = new Set(ordered.map((i) => i.binding.api_url))
+      return (
+        `'${name}': ` +
+        ordered.map((i) => `${i.binding.agent_id} on ${i.binding.api_url} at ${i.binding.bound_at} [${i.entry.classification}]`).join(' → ') +
+        (backends.size > 1 ? ' (BACKEND CHANGED)' : '')
+      )
+    })
+    checks.push({
+      id: 'mcp_server_name_rebound',
+      label: 'MCP server names bound more than once',
+      level: 'advisory',
+      detail:
+        `${rebound.length} MCP server name${rebound.length === 1 ? '' : 's'} changed hands on this machine (locally recorded ` +
+        `bindings; the backend's own record is the authority for the same backend): ${parts.join('; ')}. A saved session, ` +
+        'script or document naming the server may still mean the earlier agent.',
+      repair: `Retire the earlier director(y/ies) with ${RERUN} --unwire <dir> to release the name, or keep both and address them by --name.`,
     })
   }
 

@@ -2651,6 +2651,140 @@ describe('runConnect terminal outcome record (#2173)', () => {
     expect((error as ConnectError).code).toBe('runtime_undetermined')
     expect(writeOutcomeRecord).not.toHaveBeenCalled()
   })
+
+  // ── #3122: warn before the write; a local binding record ─────────────────
+  describe('collision warns before the first write, and a rebind is recorded locally (#3122)', () => {
+    /**
+     * A second, NAMED agent directory that still holds a stored key and an
+     * account. Named, because a keyed BARE directory trips #2551's name-slot
+     * refusal on a bare run — that is the name-slot guard, not the wallet
+     * warning this slice adds; #3122 warns about the wallet and refuses nothing.
+     */
+    async function seedKeyedAgent(root: string, name: string, agentId: string, account = '0x' + 'ab'.repeat(20)) {
+      const dir = join(root, name)
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'identity.json'), JSON.stringify({ agent_id: agentId, api_key: `sk_${agentId}`, account_address: account }))
+      await writeFile(join(dir, 'signer-runtime.json'), JSON.stringify({ server_name: name, wrapper_path: join(dir, 'bin', 'haven-signer.mjs') }))
+      return dir
+    }
+    /** A previous holder of a name whose keys are gone (retired by hand) but whose binding record survived. */
+    async function seedRetiredWithBinding(root: string, name: string, agentId: string, binding: Record<string, unknown>) {
+      const dir = join(root, name)
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'identity.json'), JSON.stringify({ agent_id: agentId }))
+      await writeFile(join(dir, 'mcp-server-binding.json'), JSON.stringify(binding))
+      return dir
+    }
+
+    it('D1: the heads-up is emitted BEFORE the first credential write, names the agent and its account, and the run still succeeds', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-order-'))
+      await seedKeyedAgent(root, 'ops', 'agent-0', '0x' + '11'.repeat(20))
+      const sequence: string[] = []
+      const writer = credentialWriter(root)
+      const result = await runInto(root, {
+        log: (message) => { sequence.push(`log:${message}`) },
+        writeCredentials: vi.fn(async () => { sequence.push("write:credentials"); return writer() }) as never,
+      })
+      const headsUp = sequence.findIndex((s) => s.startsWith('log:') && s.includes('Heads-up (before anything is written)'))
+      const write = sequence.indexOf('write:credentials')
+      expect(headsUp).toBeGreaterThanOrEqual(0)
+      expect(write).toBeGreaterThan(headsUp)
+      expect(sequence[headsUp]).toContain('agent-0')
+      expect(sequence[headsUp]).toContain('spends from 0x1111')
+      expect(sequence[headsUp]).toContain('revokes nothing')
+      expect(result.outcome.outcome).toBe('complete')
+      expect(result.outcome.existing_agents_before_write).toEqual([{ agent_id: 'agent-0', account_address: '0x' + '11'.repeat(20) }])
+    })
+
+    it('D1, non-interactive --json run: a second live agent does NOT refuse — outcome complete, the field carries the agent', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-json-'))
+      await seedKeyedAgent(root, 'ops', 'agent-0')
+      const result = await runConnect({
+        setupToken: 'hv_setup_test', apiBaseUrl: API_BASE_URL, runtime: 'claude-code', credentialsDir: root,
+        waitForApproval: false, interactive: false, runMode: 'json',
+      }, {
+        api: outcomeApi(), nodeVersion: SUPPORTED_NODE, generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY), generateApiKey: () => AGENT_API_KEY,
+        preflightStorage: vi.fn(async () => root), writeCredentials: credentialWriter(root), installRuntime: vi.fn(async () => completedInstall('claude-code')), log: () => undefined,
+      })
+      expect(result.outcome.outcome).toBe('complete')
+      expect(result.outcome.existing_agents_before_write).toEqual([{ agent_id: 'agent-0', account_address: '0x' + 'ab'.repeat(20) }])
+      expect(result.outcome.superseded_agent_ids).toEqual(['agent-0'])
+    })
+
+    it('a clean first run reports an empty list, always present', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-clean-'))
+      const { outcome } = await runInto(root)
+      expect(outcome.existing_agents_before_write).toEqual([])
+      expect(outcome).not.toHaveProperty('server_name_rebound_from')
+    })
+
+    it('writes a non-secret mcp-server-binding.json beside the outcome record: name → agent id, backend URL, bound-at; no key material', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-binding-'))
+      await runInto(root)
+      const raw = await readFile(join(root, 'agent-1', 'mcp-server-binding.json'), 'utf8')
+      const binding = JSON.parse(raw)
+      expect(binding).toMatchObject({ version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-1', api_url: API_BASE_URL })
+      expect(typeof binding.bound_at).toBe('string')
+      expect(raw).not.toContain(AGENT_API_KEY)
+      expect(raw).not.toContain(PRIVATE_KEY.slice(2, 20))
+      expect(raw).not.toMatch(/sk_agent|delegate_key|api_key/)
+    })
+
+    it('a name taken over from another agent on a DIFFERENT backend is named before the write, with the previous binding, and lands in --json', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-rebind-'))
+      // The previous holder's keys are gone (retired by hand, so #2551 has nothing to refuse on) — its record survived.
+      await seedRetiredWithBinding(root, 'agent-prod', 'agent-prod', {
+        version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-prod',
+        api_url: 'https://api.prod.haven.example', bound_at: '2026-09-17T09:00:00.000Z',
+      })
+      const logs: string[] = []
+      const { outcome } = await runInto(root, { log: (m) => logs.push(m) })
+      const notice = logs.find((l) => l.includes("MCP server name 'haven' was bound to agent agent-prod"))
+      expect(notice).toBeDefined()
+      expect(notice).toContain('https://api.prod.haven.example')
+      expect(notice).toContain('2026-09-17T09:00:00.000Z')
+      expect(notice).toContain('DIFFERENT backend')
+      expect(logs.indexOf(notice!)).toBeLessThan(logs.findIndex((l) => l.includes('Tucking your credentials away')))
+      expect(outcome.server_name_rebound_from).toEqual({
+        server_name: 'haven', agent_id: 'agent-prod', api_url: 'https://api.prod.haven.example', bound_at: '2026-09-17T09:00:00.000Z', backend_changed: true,
+      })
+    })
+
+    it('the same backend is a rebind without the backend-change warning; an unrelated name is no rebind at all', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-samebackend-'))
+      await seedRetiredWithBinding(root, 'agent-prev', 'agent-prev', {
+        version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-prev', api_url: `${API_BASE_URL}/`, bound_at: '2026-09-17T09:00:00.000Z',
+      })
+      const other = await seedKeyedAgent(root, 'ops', 'agent-ops')
+      await writeFile(join(other, 'mcp-server-binding.json'), JSON.stringify({
+        version: 1, server_name: 'haven-ops', signer_name: 'haven-signer-ops', agent_id: 'agent-ops', api_url: 'https://elsewhere.example', bound_at: '2026-09-17T09:00:00.000Z',
+      }))
+      const logs: string[] = []
+      const { outcome } = await runInto(root, { log: (m) => logs.push(m) })
+      expect(outcome.server_name_rebound_from).toMatchObject({ agent_id: 'agent-prev', backend_changed: false })
+      expect(logs.join('\n')).not.toContain('DIFFERENT backend')
+      expect(logs.join('\n')).not.toContain('haven-ops')
+    })
+
+    it('D2: no network call is added — the api client sees exactly the pre-#3122 calls and the global fetch is never touched', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-nonet-'))
+      await seedKeyedAgent(root, 'ops', 'agent-ops')
+      await seedRetiredWithBinding(root, 'agent-prev', 'agent-prev', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-prev', api_url: 'https://api.haven.example', bound_at: '2026-09-17T09:00:00.000Z' })
+      const api = outcomeApi()
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      try {
+        await runInto(root, { api })
+        const called = Object.entries(api).filter(([, fn]) => (fn as { mock?: { calls: unknown[] } }).mock?.calls.length).map(([name]) => name).sort()
+        expect(called).toEqual(['registerSetup', 'reportInstallStatus', 'resolveSetup', 'updateInstallStatus'].filter((n) => called.includes(n)).sort())
+        expect(called).not.toContain('getAgentIdentity')
+        expect(called).not.toContain('getConnectorStatus')
+        expect(fetchSpy).not.toHaveBeenCalled()
+      } finally {
+        fetchSpy.mockRestore()
+      }
+    })
+  })
+
 })
 
 // #2174: the refusal now narrows the retry from the nine-value allowed_runtimes

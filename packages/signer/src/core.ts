@@ -46,7 +46,6 @@ import {
 export interface EdgeSigner {
   /** Address derived from the delegate key. */
   readonly delegateAddress: string
-  /** Sign an AllowanceModule funding/transfer hash (raw ECDSA, 65 bytes). */
   /**
    * Sign a DIRECT delegation-rail payment's EIP-712 typed data (#1254) — the
    * non-x402 counterpart of `signX402FundingTypedData`. The Hybrid account

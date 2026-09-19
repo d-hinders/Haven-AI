@@ -158,8 +158,9 @@ last-verified: "2026-09-19"
 > tool was added, renamed or re-shaped, so the consent hash (identity + tool
 > names + surface version, `packages/signer/src/consent.ts`) and the
 > version-skew contract do not move; an older signer against the same backend
-> keeps signing the bare hash — updating the signer is the remedy, as for any
-> signer defect. Nothing else in this document was re-verified in this pass.
+> keeps signing the bare hash WHEN A CALLER HANDS IT ONE — no Haven flow emits
+> that shape (the legacy rail answers 410), so the exposure is caller-driven;
+> updating the signer is the remedy, as for any signer defect. Nothing else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#3125):** the `haven_list_receipts` description
 > prose changed on BOTH runtimes — it is one shared fragment

@@ -192,8 +192,9 @@ export const toolSchemas = {
 } as const satisfies Record<SignerToolName, z.ZodRawShape>
 
 const SIGN_DESCRIPTION = [
-  'Sign an unsigned Haven payment hash with the local delegate key. The delegate key never leaves',
-  'this process. Pass the payload_hash returned by haven_pay or haven_pay_x402_quote.',
+  'Sign an unsigned Haven payment with the local delegate key. The delegate key never leaves',
+  'this process. Pass payment_id (preferred), or the payload_hash from haven_pay / haven_pay_x402_quote',
+  'TOGETHER WITH typed_data / typed_data_b64 or x402_expected — never a payload_hash alone.',
   'For x402, also pass x402_expected from haven_pay_x402_quote; the signer records it locally',
   'and returns { signature, x402_binding }. x402_expected includes expires_at; sign before that',
   'window closes. DELEGATION-RAIL x402 accounts (#1263): pass payment_id ALONE (preferred) — this',

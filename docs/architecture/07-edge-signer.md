@@ -198,8 +198,9 @@ one opaque base64 string, #1255). Prefer passing `typed_data_b64` to
 re-emitting the nested JSON between tool calls can truncate or reshape it,
 which the signer's digest check then refuses. The Hybrid account validates
 the typed data; a bare-hash signature is rejected on-chain (AA24, #1254).
-Legacy-rail results omit all three fields and `haven_sign` signs
-`payload_hash`. The `haven_pay_mcp_tool` / `haven_pay_x402_quote` results are
+Legacy-rail results omit all three fields, and since #3169 `haven_sign`
+REFUSES such a call (`BARE_HASH_REFUSED`) rather than signing `payload_hash`.
+The `haven_pay_mcp_tool` / `haven_pay_x402_quote` results are
 **compact by default** (#1272): they keep `signature_scheme` but omit
 `typed_data`/`typed_data_b64` unless the call sets
 `include_signing_payload=true`, because the preferred signing call needs
@@ -367,10 +368,11 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
 ## Scope Notes
 
 - The edge-signer surface serves the **legacy AllowanceModule rail** — which
-  since #1986 **no longer executes payments**. The AllowanceModule-hash tools
-  described here are therefore unreachable in practice: the backend refuses
-  with HTTP 410 before it ever produces a hash to sign. The surface is
-  documented as-is for historical reference only: as of #1987 its backend code
+  since #1986 **no longer executes payments**. The AllowanceModule-hash signing
+  surface is GONE, not merely unreachable: #3169 removed `signPaymentHash` and
+  `haven_sign` refuses a bare hash, on top of the backend's HTTP 410 (#1986)
+  before it ever produces a hash to sign. The rail's history is kept here for
+  reference only: as of #1987 its backend code
   is **deleted**, not merely refused — there is no `generateTransferHash` and
   no `executeAllowanceTransfer` left to reach. Nothing here is a path a caller
   can complete, and nothing here is a path that still exists server-side.
@@ -381,8 +383,9 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
   `signUserOpTypedDataForDelegation` — and are not exposed as edge-signer or
   hosted-MCP tools today. The retired session rail's `eip191_userop` scheme is
   refused (#834).
-- Regular payment/AllowanceModule-hash signing is chain-neutral; the
-  backend-provided payload and on-chain wallet rules define the transfer.
+- Regular payment signing is chain-neutral; the backend-provided payload and
+  on-chain wallet rules define the transfer (AllowanceModule-hash signing:
+  removed, #3169).
 - Standard merchant-verifiable x402 is exact-scheme USDC on Base and Base
   Sepolia.
 - Gasless `haven_sign_sweep_delegate` recovery currently supports canonical

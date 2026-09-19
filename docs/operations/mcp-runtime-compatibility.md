@@ -1351,7 +1351,7 @@ agents included, so the boolean is never to be read against it), and
 `error.superseded_agent_ids` / `error.suggested_name` on a `wiring_collision`
 refusal; since #3122, also additive, `existing_agents_before_write` (always
 present on a completed run — the other live-keyed directories, named BEFORE the
-first write, with the account each spends from; a strict subset of
+first write, with the account each spends from; a subset of
 `superseded_agent_ids`, which also names key-less and tombstoned directories)
 and `server_name_rebound_from`
 (only when the run took a server name over from another directory's local
@@ -2233,7 +2233,7 @@ to call next in structured fields, and those fields are typed end to end
   > `--replace` retirement (the setup outcome carries no such field);
   > `--tombstone` leaves it, so `--doctor` ignores a RETIRED directory's record
   > and reports two records claiming one name as the `mcp_server_name_rebound`
-  > advisory (#3121 level) only among directories that still launch something,
+  > advisory (#3121 level), excluding tombstoned (retired) directories only,
   > absent otherwise. The #1688 completion heads-up is unchanged — #3122 ADDS
   > the earlier notice, it does not move or remove the later one.
   > Nothing else in this document was re-verified in this pass.

@@ -292,7 +292,7 @@ added; the backend is not asked whether any key still authenticates):
   refusal would change behaviour for every non-interactive caller, including
   the dashboard's connect flow. `--json` carries the same list as
   `existing_agents_before_write: [{ agent_id, account_address }]`, always
-  present on a completed run (`[]` on a clean machine) — a strict subset of
+  present on a completed run (`[]` on a clean machine) — a subset of
   `superseded_agent_ids`, which names every other directory that has an
   `identity.json` at all, key-less and tombstoned ones included.
   "Holds a stored key" is the whole test: a tombstoned directory whose key
@@ -319,7 +319,7 @@ added; the backend is not asked whether any key still authenticates):
   `binding_released`), and so does a `--replace` retirement, so a legitimately
   free name does not warn forever; `--tombstone` leaves it, and `--doctor`
   ignores a retired directory's record. `--doctor` reports two records
-  claiming one name — among directories that still launch something — as the
+  claiming one name — excluding tombstoned (retired) directories — as the
   `mcp_server_name_rebound` advisory (oldest → newest, backend change
   flagged). The record is written
   after the credentials, best-effort: a directory with credentials and no

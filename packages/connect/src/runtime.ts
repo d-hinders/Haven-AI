@@ -206,7 +206,7 @@ export interface ConnectOutcome {
    * is not proof of a clean machine.
    */
   existing_agents_before_write?: ReadonlyArray<{ agent_id: string; account_address: string | null }>
-  // (A strict SUBSET of `superseded_agent_ids`, which names every other
+  // (A subset of `superseded_agent_ids`, which names every other
   // directory with an identity.json at all — key-less and tombstoned ones
   // included; this list is the ones that still hold a key.)
   /**
@@ -696,7 +696,7 @@ async function executeConnect(
       server_name: hostedNameForRun,
       signer_name: serverNamesFor(serverName).signer,
       agent_id: registration.agent_id,
-      api_url: options.apiBaseUrl,
+      api_url: withoutUserinfo(options.apiBaseUrl), // never persist `user:pass@` (#3154 doc review r2)
       ...(registration.hosted_mcp_url ? { hosted_mcp_url: registration.hosted_mcp_url } : {}),
       bound_at: new Date().toISOString(),
     }
@@ -1690,7 +1690,7 @@ async function listExistingKeyedAgents(baseDir: string | undefined): Promise<Arr
   return out
 }
 
-/** A URL with any `user:pass@` userinfo removed — for log lines and the --json record (#3154 review N6). */
+/** A URL with any `user:pass@` userinfo removed — for log lines, the --json record and the binding record's `api_url` (#3154 review N6 / doc r2). */
 function withoutUserinfo(url: string): string {
   try {
     const parsed = new URL(url)

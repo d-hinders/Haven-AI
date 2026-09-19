@@ -2796,6 +2796,19 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(JSON.stringify(outcome)).not.toContain('s3cret')
     })
 
+    it('the binding record never persists URL userinfo: `--api https://user:pass@host` is stored without `user:pass@`', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-userinfo-write-'))
+      await runConnect({
+        setupToken: 'hv_setup_test', apiBaseUrl: 'https://ops:s3cret@api.haven.example', runtime: 'claude-code', credentialsDir: root, waitForApproval: false,
+      }, {
+        api: outcomeApi(), nodeVersion: SUPPORTED_NODE, generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY), generateApiKey: () => AGENT_API_KEY,
+        preflightStorage: vi.fn(async () => root), writeCredentials: credentialWriter(root), installRuntime: vi.fn(async () => completedInstall('claude-code')), log: () => undefined,
+      })
+      const raw = await readFile(join(root, 'agent-1', 'mcp-server-binding.json'), 'utf8')
+      expect(raw).not.toContain('s3cret')
+      expect(JSON.parse(raw).api_url).toBe('https://api.haven.example')
+    })
+
     it('a --name run records its own pair in the binding (signer_name is not the bare name)', async () => {
       const root = await mkdtemp(join(tmpdir(), 'haven-3122-named-'))
       await runConnect({

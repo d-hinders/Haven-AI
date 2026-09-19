@@ -240,6 +240,9 @@ export class StoredAcceptedMismatchError extends Error {
   }
 }
 
+/** Mirrors the SDK's own address shape test, so the two agree on what a pin is. */
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+
 /** The amount the SDK authorizes against: the official field wins (#3117). */
 function optionAuthorizedAmount(option: Record<string, unknown>): string | null {
   const raw = option.maxAmountRequired ?? option.amount
@@ -291,10 +294,25 @@ export function selectStoredAccepted(
       sameAddress(option.asset, trusted.asset) &&
       option.maxTimeoutSeconds === trusted.maxTimeoutSeconds && pinsAdvertised
   })
-  // Byte-identical duplicates are unambiguous data, not an ambiguous offer.
-  const distinct = matches.filter(
-    (option, i) => matches.findIndex((other) => stableStringify(other) === stableStringify(option)) === i,
-  )
+  // Deep-equal duplicates are unambiguous data, not an ambiguous offer.
+  // Serialise each match ONCE: this runs on a money route over a challenge
+  // the caller supplies, bounded only by the 64KB cap.
+  const keyed = matches.map((option) => [stableStringify(option), option] as const)
+  const seen = new Set<string>()
+  let distinct = keyed.filter(([key]) => !seen.has(key) && (seen.add(key), true)).map(([, option]) => option)
+  if (distinct.length > 1) {
+    // Containment can leave two offers matching where an exact pin set would
+    // have picked one. Prefer that one rather than calling the pair ambiguous.
+    const exact = distinct.filter((option) => {
+      const advertised = (option.extra as Record<string, unknown> | undefined)?.facilitatorAddresses
+      const pins = trusted.facilitatorAddresses ?? []
+      if (!Array.isArray(advertised)) return pins.length === 0
+      const shaped = advertised.filter((value): value is string => typeof value === 'string' && ADDRESS_RE.test(value))
+      return shaped.length === pins.length &&
+        shaped.every((value) => pins.some((pin) => sameAddress(value, pin)))
+    })
+    if (exact.length === 1) distinct = exact
+  }
   if (distinct.length === 0) {
     throw new StoredAcceptedMismatchError(
       'The stored 402 challenge advertises no erc7710 option matching this authorization — re-authorize',

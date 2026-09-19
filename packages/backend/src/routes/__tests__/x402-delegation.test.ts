@@ -885,6 +885,45 @@ describe('x402 delegation-rail settlement (#830)', () => {
     }))
   })
 
+  // #3117: settle echoes the stored challenge's own matching offer, so a
+  // caller whose decomposed fields disagree with the challenge it sent has
+  // nothing to echo. That must be a 400 HERE, not a 409 at settle — by then
+  // the agent has signed the child and every retry fails identically.
+  it.each([
+    { label: 'a maxTimeoutSeconds the challenge does not advertise', body: { maxTimeoutSeconds: 60 }, expect400: true },
+    { label: 'a facilitator the challenge does not advertise', body: { facilitatorAddresses: [`0x${'ee'.repeat(20)}`] }, expect400: true },
+    { label: 'fields taken from the advertised option', body: {}, expect400: false },
+  ])('authorize refuses $label before any child is signed', async ({ body, expect400 }) => {
+    const advertised = {
+      scheme: 'exact', network: 'eip155:84532', amount: '100000', asset: USDC, payTo: MERCHANT,
+      maxTimeoutSeconds: 300,
+      extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [`0x${'fa'.repeat(20)}`] },
+    }
+    mockSelect.mockResolvedValue({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({
+        settlementScheme: 'erc7710',
+        facilitatorAddresses: [`0x${'fa'.repeat(20)}`],
+        paymentRequired: { x402Version: 2, resource: { url: 'https://merchant.example/resource' }, accepts: [advertised] },
+        ...body,
+      }),
+    })
+    if (expect400) {
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/does not advertise one erc7710 option/)
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+    } else {
+      expect(res.statusCode).toBe(201)
+    }
+  })
+
   it('persists delegate_account_address into machine_metadata on BOTH delegation branches (#2960 write path)', async () => {
     // Same discipline as the #1307/#1355 write-path tests above: prove the
     // authorize call STORES the delegate account, or dropping the metadata

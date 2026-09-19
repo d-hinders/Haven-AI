@@ -4762,7 +4762,7 @@ export const openapiSpec = {
         operationId: 'settleX402Payment',
         summary: 'MONEY PATH: settle a delegation-rail x402 payment with the delegate signature.',
         description:
-          "The delegation rail's settlement step, and the reason the rail has no funding leg: the agent signs the settlement child delegation, Haven assembles the merchant X-PAYMENT header, and the merchant redeems the chain directly from the budget delegation — **money moves account→merchant, never through a delegate hot balance**. Retry the merchant with the returned `payment_header`; it is a signed, single-use, amount-and-merchant-bound authorization, not a key. Refusals are specific on purpose: a payment on the wrong rail is a 409 rather than a confusing 400, and a lost settlement context is a 502 telling you to re-authorize rather than a silent failure. Agent-authenticated and rate-limited on the money-path limiter.",
+          "The delegation rail's settlement step, and the reason the rail has no funding leg: the agent signs the settlement child delegation, Haven assembles the merchant X-PAYMENT header, and the merchant redeems the chain directly from the budget delegation — **money moves account→merchant, never through a delegate hot balance**. Retry the merchant with the returned `payment_header`; it is a signed, single-use, amount-and-merchant-bound authorization, not a key. Refusals are specific on purpose: a payment on the wrong rail is a 409 rather than a confusing 400; a stored 402 challenge that advertises no unique matching erc7710 option is also a 409 telling you to re-authorize, because that refusal is deterministic and retrying it can never succeed; and a lost settlement context is a 502 telling you to re-authorize rather than a silent failure. Agent-authenticated and rate-limited on the money-path limiter.",
         security: [{ AgentApiKey: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Payment intent id from authorize.' }],
         requestBody: {
@@ -4799,7 +4799,7 @@ export const openapiSpec = {
           '400': { ...errorResponse, description: 'A delegate signature is required.' },
           '401': errorResponse,
           '404': { ...errorResponse, description: 'Payment not found.' },
-          '409': { ...errorResponse, description: 'Not a delegation-rail settlement, or not awaiting a signature.' },
+          '409': { ...errorResponse, description: 'Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize.' },
           '429': { ...errorResponse, description: 'Money-path rate limit.' },
           '502': { ...errorResponse, description: 'Settlement state was lost — re-authorize.' },
         },

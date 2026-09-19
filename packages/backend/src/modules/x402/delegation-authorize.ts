@@ -18,6 +18,8 @@ import { computeHybridAccountAddress, ensureHybridDeployed } from '../../rails/h
 import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
 import {
   buildSettlementDelegation,
+  selectStoredAccepted,
+  StoredAcceptedMismatchError,
   typedDataDigest,
 } from './x402-delegation.js'
 import { serializeUserOp } from '../../rails/execution-rail.js'
@@ -589,6 +591,37 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         },
       },
     )
+  }
+
+  // #3117: the settle leg echoes the stored challenge's own matching offer,
+  // so a caller whose `maxTimeoutSeconds` / `facilitatorAddresses` disagree
+  // with the challenge it also sent has nothing to echo. Refuse HERE, where
+  // it is a cheap 400 and no child has been signed — deferring it to settle
+  // turns a caller mistake into a dead intent the agent has already signed.
+  // The SDK derives all three from the same option, so it cannot trip this.
+  // The settle-time check stays as the backstop.
+  if (paymentRequired && typeof paymentRequired === 'object' && !Array.isArray(paymentRequired)) {
+    try {
+      selectStoredAccepted(paymentRequired as Record<string, unknown>, network, {
+        amount: amountRaw.toString(),
+        payTo: payTo as `0x${string}`,
+        asset: tokenAddress as `0x${string}`,
+        maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
+        facilitatorAddresses,
+      })
+    } catch (err) {
+      if (err instanceof StoredAcceptedMismatchError) {
+        return {
+          code: 400,
+          body: {
+            error:
+              'The 402 challenge you sent does not advertise one erc7710 option matching this request — ' +
+              'amount, payTo, asset, maxTimeoutSeconds and facilitatorAddresses must come from the option you are paying.',
+          },
+        }
+      }
+      throw err
+    }
   }
 
   // #2094: the intent id is generated HERE, before the child is built, and

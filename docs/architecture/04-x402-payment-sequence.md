@@ -50,7 +50,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -1735,14 +1735,25 @@ child is redeemable by, then echoes its full `extra` metadata.
 challenge that carries erc7710 entries for this network but no unique match
 refuses with **409 + re-authorize** before the intent becomes submitted — the
 refusal is deterministic, so a retryable 502 would loop forever. A challenge
-carrying NO erc7710 entry (stored empty, or describing only the 3009 scheme)
+carrying NO erc7710 entry for this network (stored empty, describing only the
+3009 scheme, or advertising erc7710 only for another network or scheme)
 keeps the reconstructed legacy echo, as do older intents with no stored
 challenge at all: refusing those would dead-end an intent the agent has
-already signed. Byte-identical duplicate entries are de-duplicated before the
-uniqueness check, and facilitator pins are matched by containment rather than
+already signed. Deep-equal duplicate entries — key order and
+nested key order included — are de-duplicated before the uniqueness check, and facilitator pins are matched by containment rather than
 deep equality, because `x402FacilitatorAddresses` forwards only the
-address-shaped subset of what the merchant advertised. No metadata can change
+address-shaped subset of what the merchant advertised; where containment alone
+leaves two offers matching, the one whose address-shaped pin set EQUALS the
+pins wins rather than the pair being called ambiguous. No metadata can change
 the signed child or its spend limits.
+
+**The settle-time refusal is a backstop, not the first line.** `POST /x402`
+runs the same match at authorize time and answers **400** when the caller's
+`maxTimeoutSeconds` / `facilitatorAddresses` disagree with the `paymentRequired`
+it sent alongside them — those are independent fields of one request, and
+refusing there costs a retry instead of stranding an intent the agent has
+already signed. The SDK derives all three from the same option, so only a
+direct-API caller can trip it.
 
 **Since #2361 the envelope also echoes the merchant challenge's `resource`
 and `extensions` objects VERBATIM** — on this erc7710 path sourced from the

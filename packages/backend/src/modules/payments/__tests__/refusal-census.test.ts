@@ -10,8 +10,9 @@
  *
  * Explicitly OUT of scope, named so a later worker does not enumerate them
  * as residue (owner verdict on #3056, note 4): everything in
- * `modules/x402/settle.ts` — its 409/502 family (including the `:38`
- * 'Settlement state was lost — re-authorize' 502) is STATE LOSS or
+ * `modules/x402/settle.ts` — its 409/502 family (including the
+ * 'Settlement state was lost — re-authorize' 502 and the #3117 stored-offer
+ * mismatch 409) is STATE LOSS or
  * client-error reporting, not spend policy — and the RelayerBudgetExceeded /
  * deploy 502 family in `routes/agent-delegations.ts` (`:528` and siblings),
  * which is grant-activation infrastructure. This guard reads ONLY the two

@@ -83,8 +83,43 @@ describe('stored erc7710 accepted requirements', () => {
     expect(() => selectStoredAccepted({ accepts: [{ ...option, maxTimeoutSeconds: '300' }] }, option.network, trusted))
       .toThrow(StoredAcceptedMismatchError)
   })
-  it('treats byte-identical duplicate offers as one unambiguous offer', () => {
+  it('treats deep-equal duplicate offers as one unambiguous offer', () => {
     expect(selectStoredAccepted({ accepts: [option, { ...option }] }, option.network, trusted)).toEqual(option)
+  })
+  // The de-dup key is key-order-independent on purpose — a plain
+  // JSON.stringify would call these two an ambiguous pair.
+  it('de-duplicates offers that differ only in key order, nested keys included', () => {
+    const reordered = {
+      network: option.network, scheme: option.scheme, maxTimeoutSeconds: option.maxTimeoutSeconds,
+      asset: option.asset, payTo: option.payTo, amount: option.amount,
+      extra: {
+        merchant: { enabled: option.extra.merchant.enabled, tiers: option.extra.merchant.tiers },
+        facilitatorAddresses: option.extra.facilitatorAddresses,
+        version: option.extra.version, name: option.extra.name,
+        assetTransferMethod: option.extra.assetTransferMethod,
+      },
+    }
+    expect(selectStoredAccepted({ accepts: [option, reordered] }, option.network, trusted)).toEqual(option)
+  })
+  // Array ORDER is data, not formatting: two offers whose nested arrays differ must
+  // stay distinct, so the de-dup must not collapse them into one.
+  it('keeps offers differing only in nested array order distinct, and calls that ambiguous', () => {
+    const swapped = { ...option, extra: { ...option.extra, merchant: { ...option.extra.merchant, tiers: ['b', 'a'] } } }
+    expect(() => selectStoredAccepted({ accepts: [option, swapped] }, option.network, trusted))
+      .toThrow(StoredAcceptedMismatchError)
+  })
+  // Containment can leave two offers matching where an exact pin set picks one.
+  it('prefers the offer whose pin set equals the pins over a merely containing one', () => {
+    const superset = {
+      ...option,
+      extra: { ...option.extra, facilitatorAddresses: [...trusted.facilitatorAddresses, `0x${'ee'.repeat(20)}`] },
+    }
+    expect(selectStoredAccepted({ accepts: [superset, option] }, option.network, trusted)).toEqual(option)
+  })
+  it('refuses when a trusted pin is absent from the advertised list', () => {
+    const missing = { ...option, extra: { ...option.extra, facilitatorAddresses: [`0x${'ee'.repeat(20)}`] } }
+    expect(() => selectStoredAccepted({ accepts: [missing] }, option.network, trusted))
+      .toThrow(StoredAcceptedMismatchError)
   })
   it.each([
     { label: 'no accepts entries', accepts: [] },

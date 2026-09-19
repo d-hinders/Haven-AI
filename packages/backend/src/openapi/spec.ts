@@ -8684,7 +8684,7 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       Transaction: {
-        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
+        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields (since #3132 it does carry the base-shape `timestampSource` / `confirmedAt`). Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
         type: 'object',
         required: [...transactionBaseRequired, 'chainId', 'accountId', 'accountAddress', 'accountName'],
         properties: {

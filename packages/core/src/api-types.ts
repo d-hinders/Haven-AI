@@ -4047,7 +4047,7 @@ export type components = {
             /** @description Failure or skip reason; on a pushed row, a non-fatal note (#498). Null when clean. */
             error: string | null;
         };
-        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
+        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields (since #3132 it does carry the base-shape `timestampSource` / `confirmedAt`). Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
         Transaction: {
             hash: string;
             /** @enum {string} */

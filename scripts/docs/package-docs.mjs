@@ -348,7 +348,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     doc: 'packages/demo-merchant-mcp/README.md',
     owner: '@d-hinders',
     status: 'current',
-    covers: ['packages/demo-merchant-mcp/src/**'],
+    // #3170: the README states the hosted relay's 500-character window, so a
+    // change to that slice must re-implicate it.
+    covers: ['packages/demo-merchant-mcp/src/**', 'packages/mcp-server/src/tools/paid-mcp-completion.ts'],
     // #2403: the § "Extensions echo" fixture paragraph re-verified and EDITED.
     // It enumerated the echo-rule tests as a fixed list of four; #2401 made it
     // five and #2403 adds more, so the sentence now names the BRANCHES pinned
@@ -371,7 +373,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     // the issue. Nothing else in the README re-verified in this pass (the
     // Products table, hosted URLs and Run sections were read only far enough
     // to place the section).
-    'last-verified': '2026-09-02',
+    // #3170: the paragraph after the reason-code catalog (erc7710 submit
+    // revert = payer-side decision; the wrapper-is-not-proof rule) added and
+    // verified against x402.ts isContractRevert and its tests; the #2979
+    // catalog paragraph re-read, not edited. Nothing else re-verified.
+    'last-verified': '2026-09-19',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

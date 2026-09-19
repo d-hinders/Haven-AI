@@ -22,7 +22,8 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-09-14"
+  - packages/demo-merchant-mcp/src/x402.ts
+last-verified: "2026-09-19"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -1453,7 +1454,13 @@ merchant log shows `ERC20: transfer amount exceeds balance`. That is a
 reverts during gas estimation, so it never becomes a transaction and leaves no
 trace on-chain. Since #1519 the merchant checks `authorizationState` and
 `balanceOf` before submitting and reports both cases in plain language, so this
-should not recur; if something like it does, take the funding `tx_hash` from
+should not recur. Since #3170 the erc7710 `submit` does the same once the
+submit rejects: chain-truth first (the #1515 already-settled check), then a
+proven revert is a payer-side 402 naming the next action, never a
+merchant-side fault — while a failure of the merchant's own key or node
+(nonce, fee, RPC) still is one, with its #2979 `reason_code`. If something
+like it does recur, take the funding
+`tx_hash` from
 the QA failure line and look at what follows it on the delegate's ERC-20 tab
 before assuming Haven is at fault.
 

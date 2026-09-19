@@ -1,4 +1,7 @@
 import {
+  BaseError,
+  ContractFunctionRevertedError,
+  ExecutionRevertedError,
   createPublicClient,
   createWalletClient,
   decodeAbiParameters,
@@ -841,7 +844,49 @@ export function createX402PaymentProcessor(
       payTo: getAddress(params.merchantAddress),
       nonce: contextHash,
       settlementMethod: ERC7710_TRANSFER_METHOD,
-      submit: () => erc7710Client.submitRedeemDelegations(redeemCall),
+      // #3170: explain a submit-time revert the way the EIP-3009 rail explains
+      // its pre-submit failures (#1519). `writeContract` raises viem's
+      // `ContractFunctionExecutionError` on a revert, which is not a
+      // `PaymentError`, so `handlePaymentGate` reported every such revert as a
+      // merchant-side FAULT — "this merchant is broken" — when the likeliest
+      // causes are facts about the PAYER: the settlement child's exact-amount
+      // caveat exhausted, the delegator's account short of the price, the
+      // child redeemed elsewhere between simulate and submit. The chain-truth
+      // check runs first (the money may already have moved: #1515's
+      // already-settled decision, served rather than refused); a genuine RPC
+      // or gas fault keeps its fault classification (#2979's reason codes).
+      submit: async () => {
+        try {
+          return await erc7710Client.submitRedeemDelegations(redeemCall)
+        } catch (err) {
+          if (
+            await erc7710AlreadyRedeemed(
+              erc7710Client,
+              options.erc7710?.erc20TransferAmountEnforcer,
+              payment,
+              params.expectedAmount,
+            )
+          ) {
+            throw new AuthorizationAlreadyUsedError(
+              `ERC-7710 settlement child ${contextHash} was already redeemed on-chain for ` +
+                `${payment.delegator}. This purchase already settled — do not resubmit it.`,
+            )
+          }
+          if (isContractRevert(err)) {
+            // The next action comes BEFORE the cause list: the hosted relay
+            // keeps the first 500 characters of this body (paid-mcp-completion.ts),
+            // and the revert reason is capped so the instruction always fits.
+            throw new PaymentError(
+              `ERC-7710 delegation redemption reverted at submit: ${revertReason(err)}. Nothing ` +
+                `settled here — re-quote and pay with a fresh authorization. The revert is a fact ` +
+                `about the payer's delegation, not about this merchant: the settlement child's ` +
+                `transfer-amount caveat is exhausted, the delegator ${payment.delegator} holds less ` +
+                `than the price, or the child was redeemed elsewhere.`,
+            )
+          }
+          throw err
+        }
+      },
     }
     try {
       await erc7710Client.simulateRedeemDelegations(redeemCall)
@@ -1487,6 +1532,64 @@ function parseBigIntField(value: string, field: string): bigint {
   } catch {
     throw new PaymentError(`Invalid payment authorization field: ${field}`)
   }
+}
+
+/**
+ * #3170: is this failure the CHAIN refusing the transaction (a revert — a fact
+ * about the payer's delegation or balance), as opposed to the merchant failing
+ * to reach, pay for or correctly address the chain (an RPC, gas, nonce, fee or
+ * key fault)? viem's `writeContract` wraps EVERY failure in
+ * `ContractFunctionExecutionError`, so that outer class proves nothing; a
+ * revert is proven only by a `ContractFunctionRevertedError` that carries
+ * decoded revert data, an undecodable error signature or a reason matching
+ * /execution reverted/i (viem also wraps a bare JSON-RPC -32603 "internal
+ * error" in that class, with none of the three — its reason names an internal
+ * error, not an execution revert), or by the node's `ExecutionRevertedError` — except geth's
+ * "gas required exceeds allowance", which viem files under that class although
+ * it means the MERCHANT's settlement key cannot pay for gas (#2979's
+ * `settlement_wallet_out_of_gas` band). The reason guard is written to
+ * op-geth's wording ("execution reverted"); a hardhat/anvil-style "VM
+ * Exception … revert" under -32603 stays a fault, the pre-#3170 behaviour. A
+ * custom client may throw a plain `Error` whose message names the revert or
+ * the enforcer.
+ * Everything else a viem client throws — nonce too low, fee cap, "already
+ * known", rate limit, chain mismatch, HTTP or timeout — is the merchant's
+ * fault and keeps #2979's fault reason code.
+ */
+export function isContractRevert(err: unknown): boolean {
+  if (err instanceof BaseError) {
+    const reverted = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null
+    if (reverted && (reverted.data !== undefined || reverted.signature !== undefined || /execution reverted/i.test(reverted.reason ?? ''))) {
+      return true
+    }
+    const executionReverted = err.walk((e) => e instanceof ExecutionRevertedError) as ExecutionRevertedError | null
+    if (executionReverted && !/gas required exceeds allowance/i.test(executionReverted.message)) return true
+    return false
+  }
+  const haystack = `${err instanceof Error ? err.name : ''} ${err instanceof Error ? err.message : String(err)}`.toLowerCase()
+  if (haystack.includes('insufficient funds') || haystack.includes('fetch failed') || haystack.includes('econnrefused') || haystack.includes('timeout')) {
+    return false
+  }
+  return /revert|enforcer|allowance-exceeded/.test(haystack)
+}
+
+/**
+ * The revert's own words, capped so the next-action sentence that follows it
+ * stays inside the hosted relay's 500-character window even for a 400-character
+ * reason (the relay-window tests in erc7710.test.ts).
+ */
+const REVERT_REASON_MAX = 120
+/** A control character can JSON-escape to six characters (\uXXXX); flatten everything outside printable ASCII first so the 120-character cap survives JSON.stringify. */
+function clampReason(reason: string): string {
+  return reason.replace(/[^\x20-\x7e]/g, ' ').slice(0, REVERT_REASON_MAX)
+}
+function revertReason(err: unknown): string {
+  if (err instanceof BaseError) {
+    const reverted = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null
+    const reason = reverted?.reason ?? reverted?.data?.errorName ?? reverted?.shortMessage ?? err.shortMessage
+    if (reason) return clampReason(reason)
+  }
+  return clampReason(err instanceof Error ? err.message : String(err))
 }
 
 function sameAddress(a: string, b: string): boolean {

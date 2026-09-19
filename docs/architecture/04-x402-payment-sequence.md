@@ -11,6 +11,8 @@ covers:
   - packages/backend/src/infra/chain/settlement-transfer-verifier.ts
   - packages/backend/src/rails/delegation-rail.ts
   - packages/backend/src/routes/catalog.ts
+  - packages/demo-merchant-mcp/src/x402.ts
+  - packages/demo-merchant-mcp/src/http.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402-protocol.ts
@@ -625,6 +627,18 @@ then names HTTP 200, which is the status the merchant really returned. The
 hosted quote (`haven_pay_mcp_tool`, `haven_quote_mcp_tool`) accepts the
 profile's tool-result challenge through the same `quoteMcpX402` path, and the
 settle leg delivers the payment in both the header and `params._meta`.
+Since #3170 the demo merchant explains an erc7710 redemption that reverts at
+submit as a payer-side decision (the child's caveat exhausted, the delegator
+short, or the child redeemed elsewhere — after first asking the chain whether
+the money already moved, #1515) instead of a `merchant_fault`, so the
+`MERCHANT_REJECTED_AFTER_FUNDING` message the agent sees carries the cause and
+the next action rather than "see merchant logs" — the merchant puts the next
+action before the cause list and caps the revert reason at 120 printable
+ASCII characters because `paid-mcp-completion.ts` relays only the first 500
+characters of the 402 body. A failure of the merchant's own settlement key or node (nonce, fee,
+rate limit, unreachable RPC) is still reported as a merchant-side fault
+carrying its #2979 `reason_code` (`settlement_rpc_unreachable`,
+`settlement_wallet_out_of_gas`, or the generic `merchant_fault`).
 
 ## Guided Catalog Purchase Preflight (#1306)
 

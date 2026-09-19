@@ -147,6 +147,20 @@ last-verified: "2026-09-19"
 > consent-hash contracts do not move (descriptions are not a skew axis — #2330
 > precedent). Nothing else in this document was re-verified in this pass.
 >
+> **Recent re-verification (#3169):** the edge signer's `haven_sign` no longer
+> signs a bare `payload_hash` (no `payment_id`, no `typed_data` /
+> `typed_data_b64`, no `x402_expected`): that arm was raw secp256k1 over caller
+> bytes for the retired AllowanceModule rail, and it now answers the structured
+> `BARE_HASH_REFUSED` refusal (`next_action: stop_and_tell_user`, a typed step
+> with no tool and the reason) — the same envelope shape as the #3001/#3103
+> signer refusals. `haven_sign`'s ARGUMENTS are unchanged (the refusal is on
+> one combination of them), its description text changed to say so, and no
+> tool was added, renamed or re-shaped, so the consent hash (identity + tool
+> names + surface version, `packages/signer/src/consent.ts`) and the
+> version-skew contract do not move; an older signer against the same backend
+> keeps signing the bare hash — updating the signer is the remedy, as for any
+> signer defect. Nothing else in this document was re-verified in this pass.
+>
 > **Recent re-verification (#3125):** the `haven_list_receipts` description
 > prose changed on BOTH runtimes — it is one shared fragment
 > (`packages/sdk/src/tool-descriptions.ts` `listReceipts`), composed verbatim by

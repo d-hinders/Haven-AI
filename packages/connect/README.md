@@ -298,11 +298,13 @@ added; the backend is not asked whether any key still authenticates):
   "Holds a stored key" is the whole test: a tombstoned directory whose key
   files were never deleted is counted (it can still spend), which is the
   opposite side of the doctor's rule that ignores a retired directory's
-  binding record (it launches nothing). The scan covers the credential root
-  in use — under `--credentials-dir`, that directory alone, never a union with
-  `~/.haven/agents` (the same convention as `--doctor`'s superseded scan and
-  #2551's collision check; #3123's union was for the one shared
-  `signer-runtime` root).
+  binding record (it launches nothing). The scan covers exactly the credential
+  root this run writes into — `~/.haven/agents`, or the root given by
+  `--credentials-dir` — and never unions the two (#2551's collision check uses
+  the same root; `--doctor` shares the no-union rule but reads its
+  `--credentials-dir` as the agent directory itself, so its root is that
+  directory's parent; #3123's union was for the one shared `signer-runtime`
+  root).
 - **Each setup records what it bound** in a non-secret
   `mcp-server-binding.json` beside `last-connect-outcome.json`: `{ version:
   1, server_name, signer_name, agent_id, api_url, hosted_mcp_url?, bound_at }`

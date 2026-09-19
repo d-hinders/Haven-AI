@@ -2796,6 +2796,36 @@ describe('runConnect terminal outcome record (#2173)', () => {
       expect(JSON.stringify(outcome)).not.toContain('s3cret')
     })
 
+    it('backend_changed compares both sides stripped: a same-backend run whose --api carries userinfo is NOT a backend change (and a bare control agrees)', async () => {
+      for (const [current, stored, expected] of [
+        ['https://ops:s3cret@api.haven.example', 'https://api.haven.example', false],          // probe: current carries userinfo, record stripped
+        ['https://api.haven.example', 'https://ops:old@api.haven.example', false],             // legacy record written before the strip
+        ['https://api.haven.example', 'https://api.haven.example', false],                     // control: both bare
+        ['https://ops:s3cret@api.haven.example', 'https://api.other.example', true],           // a real change is still a change
+      ] as const) {
+        const root = await mkdtemp(join(tmpdir(), 'haven-3122-userinfo-compare-'))
+        await seedRetiredWithBinding(root, 'agent-prev', 'agent-prev', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-prev', api_url: stored, bound_at: '2026-09-17T09:00:00.000Z' })
+        const logs: string[] = []
+        const { outcome } = await runConnect({
+          setupToken: 'hv_setup_test', apiBaseUrl: current, runtime: 'claude-code', credentialsDir: root, waitForApproval: false,
+        }, {
+          api: outcomeApi(), nodeVersion: SUPPORTED_NODE, generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY), generateApiKey: () => AGENT_API_KEY,
+          preflightStorage: vi.fn(async () => root), writeCredentials: credentialWriter(root), installRuntime: vi.fn(async () => completedInstall('claude-code')), log: (m) => logs.push(m),
+        })
+        expect(outcome.server_name_rebound_from?.backend_changed, `${current} vs ${stored}`).toBe(expected)
+        expect(logs.join('\n').includes('DIFFERENT backend'), `${current} vs ${stored}`).toBe(expected)
+        expect(logs.join('\n')).not.toContain('s3cret')
+      }
+    })
+
+    it('a tombstoned directory that still holds its key IS counted before the write (a tombstone revokes nothing)', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-tombstoned-keyed-'))
+      const dir = await seedKeyedAgent(root, 'old', 'agent-old')
+      await writeFile(join(dir, 'TOMBSTONE.json'), JSON.stringify({ retired_at: '2026-09-01T00:00:00.000Z', reason: 'test' }))
+      const { outcome } = await runInto(root)
+      expect(outcome.existing_agents_before_write).toEqual([{ agent_id: 'agent-old', account_address: '0x' + 'ab'.repeat(20) }])
+    })
+
     it('the binding record never persists URL userinfo: `--api https://user:pass@host` is stored without `user:pass@`', async () => {
       const root = await mkdtemp(join(tmpdir(), 'haven-3122-userinfo-write-'))
       await runConnect({

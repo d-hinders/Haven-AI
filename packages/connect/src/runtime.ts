@@ -595,7 +595,11 @@ async function executeConnect(
   const newest = holders[0]
   if (newest) {
     const { binding, directory } = newest
-    const backendChanged = binding.api_url.replace(/\/+$/, '') !== options.apiBaseUrl.replace(/\/+$/, '')
+    // Both sides stripped (#3154 code review r4): the record is written
+    // stripped since eb725028, but a record written before that may still
+    // carry userinfo, and the CURRENT run's --api may carry it too. Trailing
+    // slashes are normalised by the same helper.
+    const backendChanged = withoutUserinfo(binding.api_url) !== withoutUserinfo(options.apiBaseUrl)
     const previousApiUrl = withoutUserinfo(binding.api_url)
     reboundFrom = { server_name: binding.server_name, agent_id: binding.agent_id, api_url: previousApiUrl, bound_at: binding.bound_at, backend_changed: backendChanged }
     // On a --replace run the newest holder is normally the directory this run

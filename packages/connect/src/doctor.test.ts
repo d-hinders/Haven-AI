@@ -2150,12 +2150,22 @@ describe('unused signer-runtime directories (#3123)', () => {
     const stale = join(homeDir, '.haven', 'signer-runtime', '0.0.0-dev.202607010000.0000000', 'node_modules', '@haven_ai', 'signer', 'dist')
     await mkdir(stale, { recursive: true })
     await writeFile(join(stale, 'cli.js'), 'x'.repeat(2048))
-    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    // #3151 review N2: the doctor asks the prune for NAMES only — a spy pins
+    // `measure: false`, so the file walk cannot come back into --doctor silently.
+    const { pruneSignerRuntimes } = await import('./prune-runtimes.js')
+    const pruneSpy = vi.fn(pruneSignerRuntimes)
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps(), pruneSignerRuntimes: pruneSpy })
+    expect(pruneSpy).toHaveBeenCalledTimes(1)
+    expect(pruneSpy.mock.calls[0][0]).toEqual({ dryRun: true, measure: false })
     const check = report.checks.find((c) => c.id === 'signer_runtime_unused')
     expect(check?.level).toBe('advisory')
     expect(check?.detail).toContain('0.0.0-dev.202607010000.0000000')
     expect(check?.detail).not.toContain(MCP_RUNTIME_MANIFEST.signerVersion)
     expect(check?.repair).toContain('--prune-signer-runtimes')
+    // #3151 review N2: the doctor names, it does not size — no MB figure here
+    // (sizing walks every file under the root; that is --dry-run's job).
+    expect(check?.detail).not.toMatch(/\bMB\b/)
+    expect(check?.detail).toContain('sizes: --prune-signer-runtimes --dry-run')
     expect(report.ok).toBe(true)
     expect(report.level).toBe('advisory')
   })

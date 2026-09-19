@@ -33,9 +33,10 @@
  * the entry is reported `failed` and the exit code says so; nothing else is
  * affected.
  *
- * Sizes: `directoryBytes` walks every file (287k files / 1.2 GB on one
- * developer machine — tens of seconds warm, ~18 minutes cold in the #3151
- * review's sandbox; the number is the reviewer's, not a contract), so it
+ * Sizes: `directoryBytes` walks every file (287k files, 2.0 GB on disk, on
+ * one developer machine: 28 s cold / 34 s warm in one #3151 reviewer's run,
+ * 1059 s cold in the other reviewer's sandbox — cache- and box-dependent,
+ * none of it a contract), so it
  * runs only for the directories the run would remove, and only when the
  * caller asks (`measure: true`, the CLI). The doctor's dry run passes
  * `measure: false` and reports names only.

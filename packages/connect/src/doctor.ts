@@ -121,6 +121,8 @@ export interface DoctorReport {
 }
 
 export interface DoctorDeps {
+  /** #3123 test seam: the dry-run prune the doctor consults (names only — see the call site). */
+  pruneSignerRuntimes?: typeof pruneSignerRuntimes
   homeDir?: string
   fetch?: typeof fetch
   probeSignerTools?: typeof probeLocalMcpTools
@@ -1336,10 +1338,12 @@ export async function runDoctor(
   // hand-editing directories; absent when there is nothing to reclaim, so a
   // single-agent install reads exactly as before.
   // `measure: false`: names only. Sizing walks every file under the root —
-  // 287k files / 1.2 GB on one developer machine, tens of seconds warm and
-  // ~18 minutes cold in the #3151 review's sandbox — and the doctor is the
-  // command a user runs when something is already broken.
-  const prune = await pruneSignerRuntimes({ dryRun: true, measure: false }, { homeDir, credentialsDir: input.credentialsDir })
+  // 287k files, 2.0 GB on disk, on one developer machine: 28 s cold / 34 s
+  // warm in one #3151 reviewer's run, 1059 s cold in the other reviewer's
+  // sandbox (the figure depends on the cache and the box; none is a
+  // contract) — and the doctor is the command a user runs when something is
+  // already broken.
+  const prune = await (deps.pruneSignerRuntimes ?? pruneSignerRuntimes)({ dryRun: true, measure: false }, { homeDir, credentialsDir: input.credentialsDir })
   const unused = prune.entries.filter((entry) => entry.action === 'would_remove')
   if (unused.length > 0) {
     checks.push({

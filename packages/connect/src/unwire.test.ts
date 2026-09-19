@@ -401,6 +401,11 @@ describe('teardown refuses before destroying the recovery credential (#3123)', (
     expect(text).toMatch(/archived/)
     expect(text).toMatch(/paused/)
     expect(text).not.toMatch(/worthless/)
+    // #3151 review N3: the sweep-acceptance clause is hedged — a 401 does not
+    // license "holds the only credential the routes still accept".
+    expect(text).toMatch(/may hold the only local credential/)
+    expect(text).toMatch(/would still accept/)
+    expect(text).not.toMatch(/holds the only local credential/)
   })
 
   it('probe network_error: unknown is not "safe to delete" — refused, with retry as the remedy', async () => {

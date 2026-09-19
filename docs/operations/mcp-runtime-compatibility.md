@@ -416,6 +416,26 @@ last-verified: "2026-09-18"
 > auth step, consent hash, or version-skew contract changes, and nothing about
 > the local runtime's capabilities moves.
 >
+> **Recent re-verification (#3127):** the transaction feed (whose route and
+> CSV module are on this document's coverage list) now stamps a converted
+> amount triple on every row — `convertedAmount` / `convertedCurrency` /
+> `convertedFxRate`, struck in the user's `currency_preference` (SEK when
+> none is set), from the row's OWN stored book-time capture
+> (`machine_payment_evidence.amount_sek` columns and the migration-082
+> `fx_rates` map), never a serve-time price read; `fxRates` rides declared
+> for auditability. Compatibility treatment: ADDITIVE to a published JSON
+> surface — `amountSek`/`fxRateSek`/`fxSource` are unchanged and no field is
+> renamed, so there is nothing to dual-emit and no release boundary to
+> wait for; the agent-visible effect is new optional keys on
+> `activity list --json` rows (the CLI forwards them untouched), and an
+> existing consumer parsing `amountSek` reads byte-identical values. The
+> CSV export APPENDS two columns at the END of its contract
+> (`reporting_currency`, `converted_currency`) — the export's amounts stay
+> the deliberate fixed-SEK accounting branch — which shifts nothing for an
+> importer keyed on pre-#3127 column indices. No MCP tool, flag, auth step,
+> consent hash, or version-skew contract changes; nothing about the local
+> runtime's capabilities moves.
+>
 > **Recent re-verification (#2811):** the same for the hosted server's
 > plain-HTTP x402 lifecycle handlers — `haven_quote_x402`,
 > `haven_pay_x402_quote`, `haven_resume_x402_payment` and

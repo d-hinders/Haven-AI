@@ -76,6 +76,7 @@ const X402_ROW: X402PaymentIntentRow = {
   amount_sek: null,
   fx_rate_sek: null,
   fx_source: null,
+  fx_rates: null,
   settlement_scheme: 'eip3009',
   confirmed_at: '2026-08-01T00:00:00.000Z',
   created_at: '2026-08-01T00:00:00.000Z',
@@ -97,6 +98,7 @@ const PI_ROW: PaymentIntentAgentRow = {
   amount_sek: null,
   fx_rate_sek: null,
   fx_source: null,
+  fx_rates: null,
 }
 
 /** Delegate-sweep attribution row returned by `findDelegateSweepAgentMatches`. */

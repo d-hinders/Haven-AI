@@ -8,7 +8,7 @@ covers:
   - packages/backend/src/openapi/spec.ts
   - scripts/ci/vocabulary-map.json
   - scripts/ci/vocabulary-divergence.mjs
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # CLI `--json` conventions
@@ -68,7 +68,10 @@ every key the backend sends, including several that appear in no interface —
 
 So: to know what `activity list --json` can contain, read the `Transaction`
 schema, not `interface Txn`. Scripting against the interface will miss fields
-that are already being emitted.
+that are already being emitted. (#3127 continues the pattern: rows now also
+carry `convertedAmount` / `convertedCurrency` / `convertedFxRate` — the amount
+in the user's `currency_preference`, currency as a field — plus the row's
+`fxRates` book-time map; all forward untouched through the pass-through.)
 
 ## Per command
 

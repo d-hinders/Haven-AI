@@ -50,6 +50,7 @@ export {
   filterEnrichedTransactions,
   mergeSortDedupeAndEnrich,
   paginateByOffset,
+  resolveTransactionCurrency,
   resolveTransactionFilters,
   type AggregateAccountTransactionsResult,
   type OffsetPage,

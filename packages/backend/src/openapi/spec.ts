@@ -127,6 +127,34 @@ const transactionBaseProperties = {
    */
   fxRateSek: { type: ['string', 'null'] },
   fxSource: { type: ['string', 'null'] },
+  // #3127: the converted amount in the user's preferred currency, that
+  // currency named as a FIELD, and the rate it was struck at — additive to
+  // the SEK-named originals above, which stay on the wire unchanged. Struck
+  // from the same stored book-time capture as `amountSek` (the SEK columns,
+  // or the row's `fx_rates` map frozen at settlement), never a serve-time
+  // price read, so provenance stays auditable. Null follows the currency:
+  // SEK mirrors `amountSek`; USD/EUR additionally need a usable rate in the
+  // row's book-time rate map (pre-082 rows and price-outage rows yield
+  // null). Null is "not ready to convert", never another currency. The
+  // currency enum is the offered set (`PUT /user/preferences`), whose SEK
+  // entry is the no-preference default — the enum and the served currency
+  // agree since #3127.
+  convertedAmount: { type: ['string', 'null'] },
+  convertedCurrency: {
+    type: 'string',
+    enum: ['SEK', 'USD', 'EUR'],
+    description: 'The currency `convertedAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set. SEK mirrors `amountSek`; USD/EUR are struck from the row’s book-time rate map (`machine_payment_evidence.fx_rates`, migration 082) and are null when no rate was captured there.',
+  },
+  convertedFxRate: { type: ['string', 'null'] },
+  // #3127: the row's own stored book-time rate map (migration 082), carried
+  // for auditability — the same capture `convertedFxRate` names the one used
+  // rate out of. Keys are the settlement-time supported ledger currencies;
+  // null on pre-082 rows and raw transfers.
+  fxRates: {
+    type: ['object', 'null'],
+    additionalProperties: { type: 'number' },
+    description: 'Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row.',
+  },
   // #2870: accounting-feed state joined from the sync ledger by
   // `paymentId`. PRESENT only when the feed is available to the
   // account, the user has a provider connection, and a sync row exists
@@ -3098,7 +3126,7 @@ export const openapiSpec = {
         tags: ['Dashboard'],
         operationId: 'updateUserPreferences',
         summary: 'Set the display-currency preference.',
-        description: 'Display only — it changes no balance, no price and no settlement asset.',
+        description: 'Names the currency a transaction’s converted amount (`convertedAmount`) is struck in. Display only — it changes no balance, no price and no settlement asset.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -3107,7 +3135,12 @@ export const openapiSpec = {
               schema: {
                 type: 'object',
                 required: ['currency_preference'],
-                properties: { currency_preference: { type: 'string', enum: ['USD', 'EUR'] } },
+                // #3127: SEK joins the set — the served default had no way to
+                // be selected, so the enum and the served currency disagreed.
+                // Kept in lockstep with `domain/transaction-currency.ts`'s
+                // `TRANSACTION_CURRENCIES`, the same list the transaction
+                // path converts against.
+                properties: { currency_preference: { type: 'string', enum: ['SEK', 'USD', 'EUR'] } },
               },
             },
           },

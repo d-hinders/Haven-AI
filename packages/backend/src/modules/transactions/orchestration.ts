@@ -12,6 +12,12 @@ import {
   type TransactionFilterAgentRow,
 } from '../../infra/repositories/transaction-history.js'
 import { getChain } from '../../domain/chains.js'
+import {
+  DEFAULT_TRANSACTION_CURRENCY,
+  transactionCurrencyOrDefault,
+  type TransactionCurrency,
+} from '../../domain/transaction-currency.js'
+import { findCurrencyPreference } from '../../infra/repositories/users.js'
 import { fetchAccountTransactions } from './aggregate.js'
 import { toCanonicalAddress } from './normalize.js'
 import { compareEnrichedTransactions, enrichedTransactionIdentityKey } from './ordering.js'
@@ -103,6 +109,7 @@ export async function mergeSortDedupeAndEnrich(
   userId: string,
   safes: SmartAccountRow[],
   merged: EnrichedTransaction[],
+  currency: TransactionCurrency = DEFAULT_TRANSACTION_CURRENCY,
 ): Promise<EnrichedTransaction[]> {
   const mergedWithX402 = await mergeX402Transactions(userId, safes, merged)
 
@@ -116,7 +123,17 @@ export async function mergeSortDedupeAndEnrich(
     return true
   })
 
-  return enrichTransactionsWithAgents(userId, deduped)
+  return enrichTransactionsWithAgents(userId, deduped, currency)
+}
+
+/**
+ * The currency this user's converted amounts are struck in (#3127): their
+ * stored `currency_preference`, or SEK when none is set — the documented
+ * default, not an inherited one. One preference read per request, on the
+ * same scoped repository read `/user/preferences` serves.
+ */
+export async function resolveTransactionCurrency(userId: string): Promise<TransactionCurrency> {
+  return transactionCurrencyOrDefault(await findCurrencyPreference(userId))
 }
 
 export interface TransactionFilterOptions {
@@ -189,6 +206,12 @@ export interface AccountTransactionsPageParams {
   fresh: boolean
   page: number
   limit: number
+  /**
+   * The currency the converted triple is struck in (#3127). The route
+   * resolves it from the user's preference and passes it in — this pipeline
+   * stays preference-blind like the rest of the module.
+   */
+  currency?: TransactionCurrency
 }
 
 export interface AccountTransactionsPage {
@@ -207,7 +230,7 @@ export interface AccountTransactionsPage {
 export async function buildAccountTransactionsPage(
   params: AccountTransactionsPageParams,
 ): Promise<AccountTransactionsPage> {
-  const { userId, accountId, accountAddress, chainId, log, fresh, page, limit } = params
+  const { userId, accountId, accountAddress, chainId, log, fresh, page, limit, currency = DEFAULT_TRANSACTION_CURRENCY } = params
   const { transactions: allTransactions } = await fetchAccountTransactions({
     accountId,
     accountAddress,
@@ -257,7 +280,7 @@ export async function buildAccountTransactionsPage(
   const start = (page - 1) * limit
   const paginated = enrichedAllTransactions.slice(start, start + limit)
 
-  const attributed = await enrichTransactionsWithAgents(userId, paginated)
+  const attributed = await enrichTransactionsWithAgents(userId, paginated, currency)
   // #2870: after agent enrichment — that is what puts `paymentId` on raw
   // explorer rows — and over the PAGE only, so this is one ledger query.
   const transactions = await enrichTransactionsWithAccounting(userId, attributed, log)

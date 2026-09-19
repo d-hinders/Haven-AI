@@ -17,7 +17,7 @@ import {
 } from '../csv-export.js'
 import type { EnrichedTransaction } from '../types.js'
 
-const NEVER_NAMED = { resolveName: () => null }
+const NEVER_NAMED = { resolveName: () => null, reportingCurrency: 'SEK' }
 
 function tx(overrides: Partial<EnrichedTransaction> = {}): EnrichedTransaction {
   return {
@@ -67,7 +67,7 @@ describe('transactionCsvRow', () => {
         tokenSymbol: 'USDC',
         tokenAddress: '0xusdc',
       }),
-      { resolveName: () => 'Merchant Ltd' },
+      { resolveName: () => 'Merchant Ltd', reportingCurrency: 'SEK' },
     )
 
     expect(row).toEqual({
@@ -90,6 +90,10 @@ describe('transactionCsvRow', () => {
       agent_name: 'Buyer',
       initiator: 'agent',
       account_address: '0xsafe',
+      // #3127: the fixed-reporting-currency statement and the row's own
+      // converted currency, appended at the end of the contract.
+      reporting_currency: 'SEK',
+      converted_currency: '',
     })
   })
 

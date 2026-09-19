@@ -827,6 +827,41 @@ describe('#3155 partner review — the spec\'s canonical mcp://tool/<name> resou
   })
 })
 
+describe('#3155 review r6 — the POST-payment read is not gated on the request body', () => {
+  const plainUrl = 'https://api.merchant.example/paid-data'
+  /** HTTP-402 challenge on a plain GET (header dialect), then a profile-style refusal on the paid answer. */
+  function mixedRoutes(paidAnswer: () => Response): Route {
+    return (url, init) => {
+      if (url === `${backendUrl}/x402`) return fundingPendingSignature(plainUrl)
+      if (url === `${backendUrl}/payments/pay_123/sign`) return fundingConfirmed()
+      if (url !== plainUrl) return undefined
+      const headers = new Headers(init?.headers)
+      if (headers.get('PAYMENT-SIGNATURE') || headers.get('X-PAYMENT')) return paidAnswer()
+      return json(paymentRequiredFor(plainUrl), { status: 402 })
+    }
+  }
+
+  it('an isError payment-required on the paid GET answer is the post-funding rejection (402, reconciliation event, no evidence)', async () => {
+    const fetchMock = mockFetch(mixedRoutes(() => json(rpcResult(2, nativeChallenge(plainUrl)))))
+    await expect(newClient().fetch(plainUrl)).rejects.toMatchObject({ statusCode: 402, body: expect.objectContaining({ marker: 'x402_retry_rejected_after_funding' }) })
+    expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events')).toHaveLength(1)
+    expect(backendCalls(fetchMock, '/machine-payments/evidence')).toHaveLength(0)
+  })
+
+  it('a _meta success:false on the paid GET answer is the same rejection', async () => {
+    const fetchMock = mockFetch(mixedRoutes(() => json(rpcResult(2, { content: [], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: { success: false } } }))))
+    await expect(newClient().fetch(plainUrl)).rejects.toMatchObject({ statusCode: 402 })
+    expect(backendCalls(fetchMock, '/machine-payments/reconciliation-events')).toHaveLength(1)
+  })
+
+  it('control: a real paid answer on the GET path still resolves with evidence', async () => {
+    const fetchMock = mockFetch(mixedRoutes(() => json({ data: 'paid' })))
+    const response = await newClient().fetch(plainUrl)
+    expect(response.status).toBe(200)
+    expect(backendCalls(fetchMock, '/machine-payments/evidence')).toHaveLength(1)
+  })
+})
+
 // ── Client: local fetch() ─────────────────────────────────────────
 
 describe('#3118 native MCP profile — fetch()', () => {

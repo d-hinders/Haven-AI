@@ -454,7 +454,15 @@ function parseJsonRpcToolsCall(body: unknown): (Record<string, unknown> & { para
   return request as Record<string, unknown> & { params: Record<string, unknown> }
 }
 
-/** #3155: whether a request body is a JSON-RPC `tools/call` — the only request a native challenge can answer. */
+/**
+ * #3155: whether a request body is a JSON-RPC `tools/call` — the only request a
+ * native challenge can answer. Decided boundaries: a `Uint8Array`/`Buffer`
+ * body is NOT recognised (the quote path's `snapshotRequestBody` refuses
+ * non-string bodies too), and neither is a JSON-RPC batch array, a
+ * `resources/read`, or a `tools/call` without an object `params` — a paid
+ * request in any of those shapes is returned as an ordinary answer and no
+ * payment is created (safe direction; state it, do not widen it silently).
+ */
 export function isJsonRpcToolsCallBody(body: unknown): boolean {
   return parseJsonRpcToolsCall(body) !== undefined
 }

@@ -151,7 +151,12 @@ export class MerchantCompletion {
     // completion reads). Either is a rejection after funding exactly like a
     // non-2xx answer; the thrown status is 402 (what the merchant said
     // in-band) while the captured `merchant_status` keeps the real 200.
-    const toolResult = retryResponse.ok ? await this.merchantTransport.readToolResult(retryResponse, initialInit) : undefined
+    // NOT gated on the request body (#3155 review r6): this read runs AFTER
+    // the funding leg moved money, and a merchant that mixes dialects (HTTP-402
+    // challenge, profile-style refusal on the paid answer) must still be seen.
+    // The content-type gate inside readToolResult keeps binary/streaming paid
+    // resources unbuffered.
+    const toolResult = retryResponse.ok ? await this.merchantTransport.readToolResult(retryResponse) : undefined
     const inBandChallenge = toolResult ? extractMcpPaymentRequired(toolResult) : undefined
     const metaSettlement = toolResult ? mcpSettlementFromToolResult(toolResult) : undefined
     const inBandRejection = inBandChallenge !== undefined || metaSettlement?.success === false

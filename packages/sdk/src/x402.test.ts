@@ -2210,7 +2210,7 @@ describe('selectStandardPaymentOption — characterization before #1453', () => 
       ).toBeNull()
     })
 
-    it('selectX402SettlementScheme refuses an unsupported-only challenge on both rails', () => {
+    it('selectX402SettlementScheme refuses an unsupported-only challenge on each rail', () => {
       const permit2Only = [opt({ extra: { assetTransferMethod: 'permit2' } })]
       const flowOnly = [opt({ extra: { paymentFlow: 'unrecognized-future-flow' } })]
       for (const accepts of [permit2Only, flowOnly]) {

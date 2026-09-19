@@ -171,6 +171,22 @@ last-verified: "2026-09-19"
 > `typed_data`). Nothing
 > else in this document was re-verified in this pass.
 >
+> **Recent re-verification (#3172):** the edge signer's audit sidecar is now
+> created owner-only, tightened in place when found permissive, and rotated at
+> 8 MiB; and `payload_hash` / `typed_data_hash` are bounded on the tool
+> schemas to a 32-byte hash (`^0x[0-9a-fA-F]{64}$`, previously `+`). No tool
+> added, renamed or re-shaped — the argument NAMES and the registered tool-name
+> set are untouched — so the consent hash (`packages/signer/src/consent.ts`
+> hashes identity, tool names and surface version) does not move, and the
+> consent text's audit promise is unchanged in wording. Version skew: every
+> value Haven emits for those two fields is a 32-byte hash, so a new signer
+> against any backend sees no change; an older signer keeps accepting hex of
+> any length WHEN A CALLER HANDS IT ONE, which no Haven flow does — updating the
+> signer is the remedy, as for any signer defect. The sidecar change is local
+> to the machine and has no wire or skew dimension. `last-verified` is not
+> re-stamped: it already reads 2026-09-19. Nothing else in this document was
+> re-verified in this pass.
+>
 > **Recent re-verification (#3125):** the `haven_list_receipts` description
 > prose changed on BOTH runtimes — it is one shared fragment
 > (`packages/sdk/src/tool-descriptions.ts` `listReceipts`), composed verbatim by

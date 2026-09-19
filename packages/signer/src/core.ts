@@ -353,14 +353,20 @@ export function createEdgeSigner(
             'bindings live in memory only — re-sign to mint a fresh one.',
         )
       }
-      try {
-        assertX402PaymentWindowOpen(expected)
-      } catch (err) {
-        x402Bindings.delete(x402Binding)
-        // No header was built on this path — the window closed first.
-        retireX402Binding(x402Binding, 'window_expired')
-        throw err
+      // No header is built on either window path — the window closed first —
+      // so the binding is retired with the precise remedy (#3173 review: the
+      // post-load re-check must retire too, or the binding dangles in memory
+      // holding user payment context).
+      const assertWindowOpenOrRetire = (): void => {
+        try {
+          assertX402PaymentWindowOpen(expected)
+        } catch (err) {
+          x402Bindings.delete(x402Binding)
+          retireX402Binding(x402Binding, 'window_expired')
+          throw err
+        }
       }
+      assertWindowOpenOrRetire()
       const option = selectStandardPaymentOption(paymentRequired.accepts)
       if (!option) {
         throw new HavenApiError(
@@ -381,8 +387,9 @@ export function createEdgeSigner(
       // sees it; now it would surface here, after the funding leg was signed.
       const { exact } = await loadX402Schemes()
       // The first load in a process costs real time; re-check the window it
-      // was asserted open against before building the header.
-      assertX402PaymentWindowOpen(expected)
+      // was asserted open against before building the header — retiring the
+      // binding on expiry exactly as the first check does.
+      assertWindowOpenOrRetire()
       const header = await exact.evm.createPaymentHeader(
         account,
         paymentRequired.x402Version,

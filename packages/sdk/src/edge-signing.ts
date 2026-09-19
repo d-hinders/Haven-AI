@@ -33,7 +33,8 @@ function hexBytes(value: string, bytes: number, what: string): string {
 
 export function addressFromKey(privateKey: string): string {
   try {
-    return privateKeyToAddress(privateKey as Hex)
+    // Same gate as signHash: a key that derives an address must also sign.
+    return privateKeyToAddress(`0x${hexBytes(privateKey, 32, 'private key')}`)
   } catch (err) {
     throw new HavenSigningError(
       `Invalid private key: ${err instanceof Error ? err.message : String(err)}`,

@@ -169,7 +169,7 @@ function bundledSources(pkg) {
     throw new Refusal(
       `${pkg.name}: packages/${pkg.dir}/dist has sourcemaps but none for ${missingBundles
         .map((b) => `${b}.js`)
-        .join(', ')}, though package.json's main/module/bin resolve to it. A partial dist under-reports whatever the ` +
+        .join(', ')}, though package.json's main/module/bin/exports resolve to it. A partial dist under-reports whatever the ` +
         `missing bundle carried, silently. Rebuild the package.`,
     )
   }

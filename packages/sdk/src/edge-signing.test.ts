@@ -72,6 +72,16 @@ describe('edge-signing (#3173) is byte-equivalent to the ethers implementation',
     }
     expect(() => signHash(KEYS[0].slice(2), HASHES[0])).toThrow(HavenSigningError)
     expect(() => signHash(`0X${KEYS[0].slice(2)}`, HASHES[0])).toThrow(HavenSigningError)
+    // addressFromKey and signHash share one gate: a key that derives an address
+    // must also sign (review r2: a `0X` key used to derive at startup and then
+    // fail at the first signature). Ethers accepts an unprefixed key here and
+    // refuses `0X`; we refuse both — strict direction, stated.
+    expect(() => addressFromKey(`0X${KEYS[0].slice(2)}`)).toThrow(HavenSigningError)
+    expect(() => addressFromKey(KEYS[0].slice(2))).toThrow(HavenSigningError)
+    expect(() => ethersAddressFromKey(`0X${KEYS[0].slice(2)}`)).toThrow()
+    // Remaining strict-direction divergences, stated: `0X` anywhere, and the
+    // 64-byte EIP-2098 compact signature on verify (ethers accepts both).
+    expect(verifySignature(HASHES[0], `0x${sig.slice(2, 130)}`, address)).toBe(false)
   })
 
   it('signs the RAW hash — not valid under the EIP-191 personal-sign digest', () => {

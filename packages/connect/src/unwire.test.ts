@@ -29,6 +29,7 @@ import {
 } from './config-writers.js'
 import { serverNamesFor } from './server-names.js'
 import { unwireAgent } from './unwire.js'
+import { readMcpServerBinding, writeMcpServerBinding } from './storage.js'
 import { runDoctor, type DoctorDeps } from './doctor.js'
 import { acknowledgeLocalSignerConsent } from './signer-consent.js'
 import { isolateHermesHome, restoreHermesHome } from './test-helpers.js'
@@ -487,5 +488,33 @@ describe('teardown refuses before destroying the recovery credential (#3123)', (
     } finally {
       globalFetch.mockRestore()
     }
+  })
+})
+
+describe('--unwire releases the local MCP server-name binding (#3122)', () => {
+  it('removes mcp-server-binding.json from the directory and reports bindingReleased; a directory without one reports false', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-unwire-binding-'))
+    const wrapper = join(homeDir, '.haven', 'agents', 'research', 'bin', 'haven-signer.mjs')
+    const dir = await seedAgent(homeDir, { agentId: 'agent-research', slug: 'research', apiKey: 'sk_x', hostedUrl: HOSTED_URL, wrapperPath: wrapper })
+    await writeMcpServerBinding(dir, { version: 1, server_name: 'haven-research', signer_name: 'haven-signer-research', agent_id: 'agent-research', api_url: 'https://api.haven.example', bound_at: '2026-09-18T00:00:00.000Z' })
+    const result = await unwireAgent({ directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+    expect(result.bindingReleased).toBe(true)
+    expect(await readMcpServerBinding(dir)).toBeNull()
+    // Idempotent re-run: nothing left to release.
+    const again = await unwireAgent({ directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+    expect(again.bindingReleased).toBe(false)
+  })
+
+  it('the release does not depend on the key-material decision: a RETAINED teardown still frees the name', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-unwire-binding-retained-'))
+    const wrapper = join(homeDir, '.haven', 'agents', 'research', 'bin', 'haven-signer.mjs')
+    const dir = await seedAgent(homeDir, { agentId: 'agent-research', slug: 'research', apiKey: 'sk_x', hostedUrl: HOSTED_URL, wrapperPath: wrapper })
+    const identity = JSON.parse(await readFile(join(dir, 'identity.json'), 'utf8')) as Record<string, unknown>
+    await writeFile(join(dir, 'identity.json'), JSON.stringify({ ...identity, api_url: 'https://api.haven.example' }))
+    await writeMcpServerBinding(dir, { version: 1, server_name: 'haven-research', signer_name: 'haven-signer-research', agent_id: 'agent-research', api_url: 'https://api.haven.example', bound_at: '2026-09-18T00:00:00.000Z' })
+    const result = await unwireAgent({ directory: dir, homeDir, tombstonesDir: join(homeDir, '.haven', 'tombstones'), probeHostedIdentity: async () => ({ status: 'ok', agentId: 'agent-research', delegateAddress: '0x' + 'cd'.repeat(20) }) })
+    expect(result.teardown.status).toBe('retained')
+    expect(result.bindingReleased).toBe(true)
+    expect(await readMcpServerBinding(dir)).toBeNull()
   })
 })

@@ -2651,6 +2651,248 @@ describe('runConnect terminal outcome record (#2173)', () => {
     expect((error as ConnectError).code).toBe('runtime_undetermined')
     expect(writeOutcomeRecord).not.toHaveBeenCalled()
   })
+
+  // ── #3122: warn before the write; a local binding record ─────────────────
+  describe('collision warns before the first write, and a rebind is recorded locally (#3122)', () => {
+    /**
+     * A second, NAMED agent directory that still holds a stored key and an
+     * account. Named, because a keyed BARE directory trips #2551's name-slot
+     * refusal on a bare run — that is the name-slot guard, not the wallet
+     * warning this slice adds; #3122 warns about the wallet and refuses nothing.
+     */
+    async function seedKeyedAgent(root: string, name: string, agentId: string, account = '0x' + 'ab'.repeat(20)) {
+      const dir = join(root, name)
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'identity.json'), JSON.stringify({ agent_id: agentId, api_key: `sk_${agentId}`, account_address: account }))
+      await writeFile(join(dir, 'signer-runtime.json'), JSON.stringify({ server_name: name, wrapper_path: join(dir, 'bin', 'haven-signer.mjs') }))
+      return dir
+    }
+    /** A previous holder of a name whose keys are gone (retired by hand) but whose binding record survived. */
+    async function seedRetiredWithBinding(root: string, name: string, agentId: string, binding: Record<string, unknown>) {
+      const dir = join(root, name)
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'identity.json'), JSON.stringify({ agent_id: agentId }))
+      await writeFile(join(dir, 'mcp-server-binding.json'), JSON.stringify(binding))
+      return dir
+    }
+
+    it('D1: the heads-up is emitted BEFORE the first credential write, names the agent and its account, and the run still succeeds', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-order-'))
+      await seedKeyedAgent(root, 'ops', 'agent-0', '0x' + '11'.repeat(20))
+      const sequence: string[] = []
+      const writer = credentialWriter(root)
+      const result = await runInto(root, {
+        log: (message) => { sequence.push(`log:${message}`) },
+        writeCredentials: vi.fn(async () => { sequence.push("write:credentials"); return writer() }) as never,
+      })
+      const headsUp = sequence.findIndex((s) => s.startsWith('log:') && s.includes('Heads-up (before anything is written to this machine)'))
+      const write = sequence.indexOf('write:credentials')
+      expect(headsUp).toBeGreaterThanOrEqual(0)
+      expect(write).toBeGreaterThan(headsUp)
+      expect(sequence[headsUp]).toContain('agent-0')
+      expect(sequence[headsUp]).toContain('spends from 0x1111')
+      expect(sequence[headsUp]).toContain('revokes nothing')
+      expect(result.outcome.outcome).toBe('complete')
+      expect(result.outcome.existing_agents_before_write).toEqual([{ agent_id: 'agent-0', account_address: '0x' + '11'.repeat(20) }])
+    })
+
+    it('D1, non-interactive --json run: a second live agent does NOT refuse — outcome complete, the field carries the agent', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-json-'))
+      await seedKeyedAgent(root, 'ops', 'agent-0')
+      const result = await runConnect({
+        setupToken: 'hv_setup_test', apiBaseUrl: API_BASE_URL, runtime: 'claude-code', credentialsDir: root,
+        waitForApproval: false, interactive: false, runMode: 'json',
+      }, {
+        api: outcomeApi(), nodeVersion: SUPPORTED_NODE, generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY), generateApiKey: () => AGENT_API_KEY,
+        preflightStorage: vi.fn(async () => root), writeCredentials: credentialWriter(root), installRuntime: vi.fn(async () => completedInstall('claude-code')), log: () => undefined,
+      })
+      expect(result.outcome.outcome).toBe('complete')
+      expect(result.outcome.existing_agents_before_write).toEqual([{ agent_id: 'agent-0', account_address: '0x' + 'ab'.repeat(20) }])
+      expect(result.outcome.superseded_agent_ids).toEqual(['agent-0'])
+    })
+
+    it('a clean first run reports an empty list, always present', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-clean-'))
+      const { outcome } = await runInto(root)
+      expect(outcome.existing_agents_before_write).toEqual([])
+      expect(outcome).not.toHaveProperty('server_name_rebound_from')
+    })
+
+    it('writes a non-secret mcp-server-binding.json beside the outcome record: name → agent id, backend URL, bound-at; no key material', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-binding-'))
+      await runInto(root)
+      const raw = await readFile(join(root, 'agent-1', 'mcp-server-binding.json'), 'utf8')
+      const binding = JSON.parse(raw)
+      expect(binding).toMatchObject({ version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-1', api_url: API_BASE_URL })
+      expect(typeof binding.bound_at).toBe('string')
+      expect(raw).not.toContain(AGENT_API_KEY)
+      expect(raw).not.toContain(PRIVATE_KEY.slice(2, 20))
+      expect(raw).not.toMatch(/sk_agent|delegate_key|api_key/)
+    })
+
+    it('a name taken over from another agent on a DIFFERENT backend is named before the write, with the previous binding, and lands in --json', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-rebind-'))
+      // The previous holder's keys are gone (retired by hand, so #2551 has nothing to refuse on) — its record survived.
+      await seedRetiredWithBinding(root, 'agent-prod', 'agent-prod', {
+        version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-prod',
+        api_url: 'https://api.prod.haven.example', bound_at: '2026-09-17T09:00:00.000Z',
+      })
+      const logs: string[] = []
+      const { outcome } = await runInto(root, { log: (m) => logs.push(m) })
+      const notice = logs.find((l) => l.includes("MCP server name 'haven' was bound to agent agent-prod"))
+      expect(notice).toBeDefined()
+      expect(notice).toContain('https://api.prod.haven.example')
+      expect(notice).toContain('2026-09-17T09:00:00.000Z')
+      expect(notice).toContain('DIFFERENT backend')
+      expect(logs.indexOf(notice!)).toBeLessThan(logs.findIndex((l) => l.includes('Tucking your credentials away')))
+      expect(outcome.server_name_rebound_from).toEqual({
+        server_name: 'haven', agent_id: 'agent-prod', api_url: 'https://api.prod.haven.example', bound_at: '2026-09-17T09:00:00.000Z', backend_changed: true,
+      })
+      // S2: the retired holder has NO stored key, so it is not "live" — the
+      // pre-write list is the keyed subset, never every directory.
+      expect(outcome.existing_agents_before_write).toEqual([])
+      expect(outcome.superseded_agent_ids).toContain('agent-prod')
+    })
+
+    it('the same backend is a rebind without the backend-change warning; an unrelated name is no rebind at all', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-samebackend-'))
+      await seedRetiredWithBinding(root, 'agent-prev', 'agent-prev', {
+        version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-prev', api_url: `${API_BASE_URL}/`, bound_at: '2026-09-17T09:00:00.000Z',
+      })
+      const other = await seedKeyedAgent(root, 'ops', 'agent-ops')
+      await writeFile(join(other, 'mcp-server-binding.json'), JSON.stringify({
+        version: 1, server_name: 'haven-ops', signer_name: 'haven-signer-ops', agent_id: 'agent-ops', api_url: 'https://elsewhere.example', bound_at: '2026-09-17T09:00:00.000Z',
+      }))
+      const logs: string[] = []
+      const { outcome } = await runInto(root, { log: (m) => logs.push(m) })
+      expect(outcome.server_name_rebound_from).toMatchObject({ agent_id: 'agent-prev', backend_changed: false })
+      expect(logs.join('\n')).not.toContain('DIFFERENT backend')
+      expect(logs.join('\n')).not.toContain('haven-ops')
+    })
+
+    it('S1: with several records claiming the name, the NEWEST previous holder is named — not the first readdir hit', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-newest-'))
+      // Directory names chosen so readdir/alphabetical order is the OPPOSITE of recency.
+      await seedRetiredWithBinding(root, 'a-oldest', 'agent-oldest', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-oldest', api_url: API_BASE_URL, bound_at: '2026-09-01T00:00:00.000Z' })
+      await seedRetiredWithBinding(root, 'z-newest', 'agent-newest', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-newest', api_url: API_BASE_URL, bound_at: '2026-09-15T00:00:00.000Z' })
+      await seedRetiredWithBinding(root, 'm-middle', 'agent-middle', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-middle', api_url: API_BASE_URL, bound_at: '2026-09-08T00:00:00.000Z' })
+      const logs: string[] = []
+      const { outcome } = await runInto(root, { log: (m) => logs.push(m) })
+      expect(outcome.server_name_rebound_from?.agent_id).toBe('agent-newest')
+      const notice = logs.find((l) => l.includes("MCP server name 'haven' was bound"))!
+      expect(notice).toContain('agent-newest')
+      expect(notice).toContain('2 older records also claim it')
+    })
+
+    it('N1/N6: the notice says "to this machine" (a challenge row was already created server-side), and a userinfo-bearing api_url is stripped from the log and the record', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-userinfo-'))
+      await seedKeyedAgent(root, 'ops', 'agent-ops')
+      await seedRetiredWithBinding(root, 'agent-prev', 'agent-prev', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-prev', api_url: 'https://user:s3cret@api.prod.haven.example', bound_at: '2026-09-17T09:00:00.000Z' })
+      const logs: string[] = []
+      const { outcome } = await runInto(root, { log: (m) => logs.push(m) })
+      expect(logs.some((l) => l.includes('Heads-up (before anything is written to this machine)'))).toBe(true)
+      expect(logs.join('\n')).not.toContain('s3cret')
+      expect(outcome.server_name_rebound_from?.api_url).toBe('https://api.prod.haven.example')
+      expect(JSON.stringify(outcome)).not.toContain('s3cret')
+    })
+
+    it('backend_changed compares both sides stripped: a same-backend run whose --api carries userinfo is NOT a backend change (and a bare control agrees)', async () => {
+      for (const [current, stored, expected] of [
+        ['https://ops:s3cret@api.haven.example', 'https://api.haven.example', false],          // probe: current carries userinfo, record stripped
+        ['https://api.haven.example', 'https://ops:old@api.haven.example', false],             // legacy record written before the strip
+        ['https://api.haven.example', 'https://api.haven.example', false],                     // control: both bare
+        ['https://ops:s3cret@api.haven.example', 'https://api.other.example', true],           // a real change is still a change
+      ] as const) {
+        const root = await mkdtemp(join(tmpdir(), 'haven-3122-userinfo-compare-'))
+        await seedRetiredWithBinding(root, 'agent-prev', 'agent-prev', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-prev', api_url: stored, bound_at: '2026-09-17T09:00:00.000Z' })
+        const logs: string[] = []
+        const { outcome } = await runConnect({
+          setupToken: 'hv_setup_test', apiBaseUrl: current, runtime: 'claude-code', credentialsDir: root, waitForApproval: false,
+        }, {
+          api: outcomeApi(), nodeVersion: SUPPORTED_NODE, generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY), generateApiKey: () => AGENT_API_KEY,
+          preflightStorage: vi.fn(async () => root), writeCredentials: credentialWriter(root), installRuntime: vi.fn(async () => completedInstall('claude-code')), log: (m) => logs.push(m),
+        })
+        expect(outcome.server_name_rebound_from?.backend_changed, `${current} vs ${stored}`).toBe(expected)
+        expect(logs.join('\n').includes('DIFFERENT backend'), `${current} vs ${stored}`).toBe(expected)
+        expect(logs.join('\n')).not.toContain('s3cret')
+      }
+    })
+
+    it('a tombstoned directory that still holds its key IS counted before the write (a tombstone revokes nothing)', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-tombstoned-keyed-'))
+      const dir = await seedKeyedAgent(root, 'old', 'agent-old')
+      await writeFile(join(dir, 'TOMBSTONE.json'), JSON.stringify({ retired_at: '2026-09-01T00:00:00.000Z', reason: 'test' }))
+      const { outcome } = await runInto(root)
+      expect(outcome.existing_agents_before_write).toEqual([{ agent_id: 'agent-old', account_address: '0x' + 'ab'.repeat(20) }])
+    })
+
+    it('the binding record never persists URL userinfo: `--api https://user:pass@host` is stored without `user:pass@`', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-userinfo-write-'))
+      await runConnect({
+        setupToken: 'hv_setup_test', apiBaseUrl: 'https://ops:s3cret@api.haven.example', runtime: 'claude-code', credentialsDir: root, waitForApproval: false,
+      }, {
+        api: outcomeApi(), nodeVersion: SUPPORTED_NODE, generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY), generateApiKey: () => AGENT_API_KEY,
+        preflightStorage: vi.fn(async () => root), writeCredentials: credentialWriter(root), installRuntime: vi.fn(async () => completedInstall('claude-code')), log: () => undefined,
+      })
+      const raw = await readFile(join(root, 'agent-1', 'mcp-server-binding.json'), 'utf8')
+      expect(raw).not.toContain('s3cret')
+      expect(JSON.parse(raw).api_url).toBe('https://api.haven.example')
+    })
+
+    it('a --name run records its own pair in the binding (signer_name is not the bare name)', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-named-'))
+      await runConnect({
+        setupToken: 'hv_setup_test', apiBaseUrl: API_BASE_URL, runtime: 'claude-code', credentialsDir: root, waitForApproval: false, serverName: 'research',
+      }, {
+        api: outcomeApi(), nodeVersion: SUPPORTED_NODE, generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY), generateApiKey: () => AGENT_API_KEY,
+        preflightStorage: vi.fn(async () => root), writeCredentials: credentialWriter(root), installRuntime: vi.fn(async () => completedInstall('claude-code')), log: () => undefined,
+      })
+      const binding = JSON.parse(await readFile(join(root, 'agent-1', 'mcp-server-binding.json'), 'utf8'))
+      expect(binding).toMatchObject({ server_name: 'haven-research', signer_name: 'haven-signer-research' })
+    })
+
+    it('N7: on a --replace run the rebind notice says the run replaces that wiring as chosen — not the takeover alarm', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-replace-'))
+      // A keyed BARE directory (what --replace exists for) that also holds the 'haven' binding record.
+      const oldDir = join(root, 'agent-old')
+      await mkdir(oldDir, { recursive: true })
+      await writeFile(join(oldDir, 'identity.json'), JSON.stringify({ agent_id: 'agent-old', api_key: 'sk_agent-old', account_address: '0x' + 'ab'.repeat(20) }))
+      await writeFile(join(oldDir, 'mcp-server-binding.json'), JSON.stringify({ version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-old', api_url: API_BASE_URL, bound_at: '2026-09-17T09:00:00.000Z' }))
+      const logs: string[] = []
+      const { outcome } = await runConnect({
+        setupToken: 'hv_setup_test', apiBaseUrl: API_BASE_URL, runtime: 'claude-code', credentialsDir: root, waitForApproval: false, replaceExistingWiring: true,
+      }, {
+        api: outcomeApi(), nodeVersion: SUPPORTED_NODE, generateKey: () => delegateKeyFromPrivateKey(PRIVATE_KEY), generateApiKey: () => AGENT_API_KEY,
+        preflightStorage: vi.fn(async () => root), writeCredentials: credentialWriter(root), installRuntime: vi.fn(async () => completedInstall('claude-code')), log: (m) => logs.push(m),
+      })
+      const notice = logs.find((l) => l.includes("MCP server name 'haven' was bound to agent agent-old"))!
+      expect(notice).toContain('This run replaces that wiring, as you chose')
+      expect(notice).not.toContain('rebinds it to a new agent')
+      expect(outcome.server_name_rebound_from?.agent_id).toBe('agent-old')
+      // The retired directory's record is released by the replace retirement.
+      await expect(readFile(join(oldDir, 'mcp-server-binding.json'), 'utf8')).rejects.toThrow()
+      expect(outcome.retired_agent_ids).toEqual(['agent-old'])
+    })
+
+    it('D2: no network call is added — the api client sees exactly the pre-#3122 calls and the global fetch is never touched', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'haven-3122-nonet-'))
+      await seedKeyedAgent(root, 'ops', 'agent-ops')
+      await seedRetiredWithBinding(root, 'agent-prev', 'agent-prev', { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-prev', api_url: 'https://api.haven.example', bound_at: '2026-09-17T09:00:00.000Z' })
+      const api = outcomeApi()
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      try {
+        await runInto(root, { api })
+        const called = Object.entries(api).filter(([, fn]) => (fn as { mock?: { calls: unknown[] } }).mock?.calls.length).map(([name]) => name).sort()
+        expect(called).toEqual(['registerSetup', 'resolveSetup', 'updateInstallStatus'])
+        expect(called).not.toContain('getAgentIdentity')
+        expect(called).not.toContain('getConnectorStatus')
+        expect(fetchSpy).not.toHaveBeenCalled()
+      } finally {
+        fetchSpy.mockRestore()
+      }
+    })
+  })
+
 })
 
 // #2174: the refusal now narrows the retry from the nine-value allowed_runtimes

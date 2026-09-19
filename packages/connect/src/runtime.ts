@@ -9,7 +9,7 @@ import {
   hashAgentApiKey,
   type LocalDelegateKey,
 } from './key.js'
-import { redactForAutomation, redactSecrets, shortAddress } from './redact.js'
+import { redactForAutomation, redactSecrets, shortAddress, withoutUserinfo } from './redact.js'
 import { assertValidServerSlug, serverNamesFor } from './server-names.js'
 import {
   assertServerSlugAvailable,
@@ -17,8 +17,13 @@ import {
   preflightCredentialStorage,
   writeConnectOutcomeRecord,
   writeCredentialFiles,
+  writeMcpServerBinding,
+  clearMcpServerBinding,
+  listMcpServerBindings,
+  readStoredAccountAddress,
   CONNECT_OUTCOME_FILENAME,
   type StoredCredentialPaths,
+  type McpServerBinding,
 } from './storage.js'
 import {
   installRuntime,
@@ -45,7 +50,7 @@ import { readIdentityFile, teardownLocalKeyMaterial, tombstoneDirectoryIfAbsent 
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.3.0-alpha.0'
+export const CONNECTOR_VERSION = '0.4.0-alpha.0'
 
 export interface ConnectOptions {
   setupToken: string
@@ -188,6 +193,30 @@ export interface ConnectOutcome {
    */
   superseded_agents_retired_locally?: boolean
   retired_agent_ids?: readonly string[]
+  /**
+   * #3122, additive within schema_version 1. Every OTHER credential directory
+   * on this machine that still held key material when this run began — named
+   * BEFORE the first credential write (the same list the pre-write heads-up
+   * prints), with the account each can spend from, so a `--json` caller
+   * learns of the condition without parsing prose. "Live" here means "holds
+   * a stored API key locally" — no network call is made to ask the backend
+   * whether the key still authenticates (that is the doctor's probe). Always
+   * present on a completed run, `[]` on a clean machine; like
+   * `superseded_agent_ids`, an empty list from a root that could not be read
+   * is not proof of a clean machine.
+   */
+  existing_agents_before_write?: ReadonlyArray<{ agent_id: string; account_address: string | null }>
+  // (A subset of `superseded_agent_ids`, which names every other
+  // directory with an identity.json at all — key-less and tombstoned ones
+  // included; this list is the ones that still hold a key.)
+  /**
+   * #3122, additive. Present only when this run took an MCP server name over
+   * from another agent's local binding record (`mcp-server-binding.json` in
+   * that directory): the previous holder, the backend it pointed at, when it
+   * was bound, and whether the backend changed — the case the backend cannot
+   * answer and the one that silently repoints a saved session.
+   */
+  server_name_rebound_from?: { server_name: string; agent_id: string; api_url: string; bound_at: string; backend_changed: boolean }
   /**
    * #2091, additive within schema_version 1: `message` is the redacted human
    * refusal (automation used to get code + next_action and nothing to act
@@ -537,6 +566,58 @@ async function executeConnect(
     }
   }
 
+  // ── #3122: the two heads-ups that used to arrive AFTER the writes. ────────
+  // Both are computed here — after the local reads, BEFORE the key is minted,
+  // the agent registered or a credential written — from local files only (no
+  // network call; the backend is not asked whether any key still
+  // authenticates). The run still succeeds: this warns, it does not refuse
+  // (owner decision 1 on #3119).
+  const existingAgents = await listExistingKeyedAgents(options.credentialsDir)
+  if (existingAgents.length > 0) {
+    log('')
+    log(
+      `Heads-up (before anything is written to this machine): it already carries ${existingAgents.length} agent director` +
+        `${existingAgents.length === 1 ? 'y' : 'ies'} with stored keys — ` +
+        existingAgents
+          .map((a) => `${a.agentId}${a.accountAddress ? ` (spends from ${shortAddress(a.accountAddress)})` : ''}`)
+          .join(', ') +
+        '. This setup creates a NEW agent alongside them and revokes nothing.',
+    )
+  }
+  const hostedNameForRun = serverNamesFor(serverName).hosted
+  let reboundFrom: ConnectOutcome['server_name_rebound_from']
+  // The NEWEST previous holder is the one a saved session most likely means
+  // (#3154 review S1): several records can claim one name when directories
+  // are retired by hand, and readdir order is neither recency nor portable.
+  const holders = (await listMcpServerBindings(options.credentialsDir))
+    .filter(({ binding }) => binding.server_name === hostedNameForRun)
+    .sort((a, b) => (a.binding.bound_at < b.binding.bound_at ? 1 : a.binding.bound_at > b.binding.bound_at ? -1 : 0))
+  const newest = holders[0]
+  if (newest) {
+    const { binding, directory } = newest
+    // Both sides stripped (#3154 code review r4): the record is written
+    // stripped since eb725028, but a record written before that may still
+    // carry userinfo, and the CURRENT run's --api may carry it too. Trailing
+    // slashes are normalised by the same helper.
+    const backendChanged = withoutUserinfo(binding.api_url) !== withoutUserinfo(options.apiBaseUrl)
+    const previousApiUrl = withoutUserinfo(binding.api_url)
+    reboundFrom = { server_name: binding.server_name, agent_id: binding.agent_id, api_url: previousApiUrl, bound_at: binding.bound_at, backend_changed: backendChanged }
+    // On a --replace run the newest holder is normally the directory this run
+    // is about to retire: the owner just consented to that, so say so rather
+    // than sound the takeover alarm about their own decision (review N3).
+    const beingReplaced = replacing?.superseded.some((entry) => entry.directory === directory) ?? false
+    log(
+      `Heads-up: the MCP server name '${binding.server_name}' was bound to agent ${binding.agent_id} on ${previousApiUrl} ` +
+        `at ${binding.bound_at} (locally recorded${holders.length > 1 ? `; ${holders.length - 1} older record${holders.length > 2 ? 's' : ''} also claim${holders.length > 2 ? '' : 's'} it` : ''}). ` +
+        (beingReplaced
+          ? `This run replaces that wiring, as you chose, with a new agent on ${withoutUserinfo(options.apiBaseUrl)}`
+          : `This run rebinds it to a new agent on ${withoutUserinfo(options.apiBaseUrl)}`) +
+        (backendChanged
+          ? ' — a DIFFERENT backend: any saved session, script or document naming this MCP server now resolves to a different backend and agent.'
+          : '.'),
+    )
+  }
+
   const localKey = generateKey()
   const localApiKey = generateLocalApiKey()
   log('Minting a fresh signing key and API key — both stay on this machine.')
@@ -610,6 +691,25 @@ async function executeConnect(
   })
   // From here on a failure has somewhere to leave its verdict (#2173).
   trace.directory = credentialPaths.directory
+  // #3122: record what this setup bound, beside the outcome record. Non-secret
+  // by construction (no key material is passed in); best-effort like the
+  // outcome record — never lets a completed write fail.
+  try {
+    const bindingRecord: McpServerBinding = {
+      version: 1,
+      server_name: hostedNameForRun,
+      signer_name: serverNamesFor(serverName).signer,
+      agent_id: registration.agent_id,
+      api_url: withoutUserinfo(options.apiBaseUrl), // never persist `user:pass@` (#3154 doc review r2)
+      ...(registration.hosted_mcp_url ? { hosted_mcp_url: registration.hosted_mcp_url } : {}),
+      bound_at: new Date().toISOString(),
+    }
+    await writeMcpServerBinding(credentialPaths.directory, bindingRecord)
+  } catch {
+    // Best-effort, like the outcome record — and no error text here, which
+    // would carry the directory path into a run whose output is redacted.
+    log('Could not record the MCP server-name binding locally (non-fatal; the next setup cannot see this binding).')
+  }
   log(`Stored Haven identity credential locally: ${credentialPaths.identityPath}`)
   log(`Stored local signer credential locally: ${credentialPaths.signerPath}`)
   log(`Stored non-secret agent orientation locally: ${credentialPaths.agentPath}`)
@@ -737,6 +837,8 @@ async function executeConnect(
             replacedBy: registration.agent_id,
           })
           await teardownLocalKeyMaterial(entry.directory, await readIdentityFile(entry.directory))
+          // #3122: a retired directory releases its server-name binding.
+          await clearMcpServerBinding(entry.directory)
           retiredAgentIds.push(entry.agentId)
           log(`Retired previous agent ${entry.agentId} locally: tombstoned, local key files removed.`)
         } catch (err) {
@@ -861,6 +963,8 @@ async function executeConnect(
     supersededAgentIds,
     supersededAgentsRetiredLocally,
     ...(replacing ? { retiredAgentIds } : {}),
+    existingAgentsBeforeWrite: existingAgents.map((a) => ({ agent_id: a.agentId, account_address: a.accountAddress })),
+    ...(reboundFrom ? { serverNameReboundFrom: reboundFrom } : {}),
     setupChallengeExpiresAt: setup.challenge.expires_at,
     approvalRequired: registration.agent_status === 'pending_approval',
     approvalUrl: registration.approval_url,
@@ -896,6 +1000,8 @@ export function completionOutcome(input: {
   setupChallengeExpiresAt?: string
   approvalRequired: boolean
   approvalUrl?: string
+  existingAgentsBeforeWrite?: ReadonlyArray<{ agent_id: string; account_address: string | null }>
+  serverNameReboundFrom?: ConnectOutcome['server_name_rebound_from']
 }): ConnectOutcome {
   const { runtimeInstall } = input
   const manualSetup = runtimeInstall.errorCode === 'manual_runtime_setup_required'
@@ -951,6 +1057,10 @@ export function completionOutcome(input: {
       ? { superseded_agents_retired_locally: input.supersededAgentsRetiredLocally }
       : {}),
     ...(input.retiredAgentIds ? { retired_agent_ids: input.retiredAgentIds } : {}),
+    // #3122: always emitted on a completed run (empty list included), for the
+    // same reason as superseded_agent_ids above.
+    existing_agents_before_write: input.existingAgentsBeforeWrite ?? [],
+    ...(input.serverNameReboundFrom ? { server_name_rebound_from: input.serverNameReboundFrom } : {}),
     ...(input.setupChallengeExpiresAt ? { setup_challenge_expires_at: input.setupChallengeExpiresAt } : {}),
     ...(runtimeInstall.errorCode
       ? { error: { code: runtimeInstall.errorCode, next_action: nextAction } }
@@ -1547,6 +1657,43 @@ const RERUN_HINT = connectorRerunCommand()
  * guarantee, and saying so here is cheaper than a reader inferring the
  * opposite.
  */
+/**
+ * #3122: every credential directory under the root that still holds a stored
+ * API key, with the account it can spend from (read from identity.json /
+ * agent.json, never from signer.json). Local files only — no network. Runs
+ * BEFORE this setup writes anything, so it needs no exclusion and names no
+ * directory that does not yet exist. Never throws: an unreadable root is an
+ * empty list (not proof of a clean machine, as the outcome field's doc says).
+ */
+async function listExistingKeyedAgents(baseDir: string | undefined): Promise<Array<{ agentId: string; directory: string; accountAddress: string | null }>> {
+  const root = defaultCredentialRoot(baseDir)
+  let entries: string[] = []
+  try {
+    entries = await readdir(root)
+  } catch {
+    return []
+  }
+  const out: Array<{ agentId: string; directory: string; accountAddress: string | null }> = []
+  for (const entry of entries) {
+    const directory = join(root, entry)
+    try {
+      const identity = JSON.parse(await readFile(join(directory, 'identity.json'), 'utf8')) as Record<string, unknown>
+      if (typeof identity.api_key !== 'string' || identity.api_key.length === 0) continue
+      let agent: Record<string, unknown> = {}
+      try {
+        agent = JSON.parse(await readFile(join(directory, 'agent.json'), 'utf8')) as Record<string, unknown>
+      } catch {
+        // No agent.json: the account may still be on identity.json.
+      }
+      const { accountAddress } = readStoredAccountAddress(identity, agent)
+      out.push({ agentId: typeof identity.agent_id === 'string' ? identity.agent_id : entry, directory, accountAddress: accountAddress ?? null })
+    } catch {
+      // No identity.json, or unreadable: not a keyed agent directory.
+    }
+  }
+  return out
+}
+
 async function listOtherAgentIds(baseDir: string | undefined, currentDirectory: string): Promise<string[] | null> {
   const root = defaultCredentialRoot(baseDir)
   let entries: string[] = []

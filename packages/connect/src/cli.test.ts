@@ -829,6 +829,7 @@ describe('--unwire teardown outcome and --prune-signer-runtimes (#3123)', () => 
       directory: '/home/u/.haven/agents/research', agentId: 'agent-research', slug: 'research', tombstoned: true,
       runtimes: [{ runtime: 'hermes', label: 'Hermes Agent config', path: '/home/u/.hermes/config.yaml', status: 'removed' as const }],
       teardown: teardown as never,
+      bindingReleased: true,
     }
   }
 

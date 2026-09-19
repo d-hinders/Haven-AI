@@ -16,7 +16,7 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-09-08"
+last-verified: "2026-09-19"
 ---
 
 # Haven
@@ -469,7 +469,8 @@ Response on success:
 | `npm run build` | Build SDK, connect, MCP packages, signer, CLI, backend, and frontend |
 | `npm run test` | Run workspace tests where configured |
 | `npm run typecheck` | Run workspace type checks |
-| `npm run quality` | Run typecheck, tests, and full build |
+| `npm run preflight` | **Run the gates CI will run on your diff**, derived from the workflow files (#3150). Start here before pushing. `preflight:all` ignores the diff and runs every gate; `preflight:list` prints the plan without running it |
+| `npm run quality` | Typecheck and unit tests across workspaces, then the root build chain. Despite the name this is **not** the pre-push gate list — it covers none of the ratchets (`lint:*`, `check:*`, the coupling gates), and the root build omits two packages. Use `preflight` |
 | `npm run docker:up` | Start PostgreSQL container |
 | `npm run docker:down` | Stop PostgreSQL container |
 | `npm run docker:logs` | Tail PostgreSQL logs |

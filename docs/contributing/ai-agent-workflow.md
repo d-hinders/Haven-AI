@@ -11,7 +11,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/ai-review-patterns.md
   - scripts/ci/review-isolation.mjs
-last-verified: "2026-09-09"
+last-verified: "2026-09-19"
 ---
 
 # Haven AI Agent Workflow
@@ -73,7 +73,9 @@ Workers can implement narrow slices, but the captain owns cross-surface consiste
 
 ## Captain Self-Check Preflight
 
-Before opening or pushing a non-trivial PR, the captain runs this preflight. Each item is one grep or one quick read. The list maps the recurring trap families from `docs/contributing/ai-review-patterns.md` to the smallest check that would have caught each of them on the first push.
+Before opening or pushing a non-trivial PR, the captain runs this preflight. Each item is one grep or one quick read.
+
+> **Not to be confused with `npm run preflight`** (#3150), which is the *gate battery* — it runs the checks CI will run on your diff. This list is the judgement half: trap families a green gate cannot catch. Run both; neither substitutes for the other. The list maps the recurring trap families from `docs/contributing/ai-review-patterns.md` to the smallest check that would have caught each of them on the first push.
 
 Run only the items that match the changed surface. Skip the rest.
 

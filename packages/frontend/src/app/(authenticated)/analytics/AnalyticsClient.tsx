@@ -84,35 +84,23 @@ import {
 const RANGE_DAYS: Record<AnalyticsRangeValue, 7 | 30 | 90> = { '7d': 7, '30d': 30, '90d': 90 }
 
 /**
- * The Refused tile's limit-of-visibility clause (#3055, epic #3056 slice 4),
- * shared by both arms of `refusedFootnote` — one string, not two literals, so
- * the tile cannot say one thing beside a count and another beside a zero.
+ * The limit of the Refused count, stated on the tile rather than left to be
+ * inferred: one class of refusal never reaches the ledger — a price cap the
+ * agent's own runtime applies. The cap lives in the agent's code and its SDK;
+ * a runtime that declines before ever asking Haven leaves no row anywhere,
+ * because there is no request to read. Who refuses is stated (the agent
+ * itself), because the count on the face of the tile is only ever what Haven
+ * refused and recorded.
  *
- * The tile counts rows in the `payment_refusals` ledger, and the ledger only
- * holds what the guardrails themselves refused. Two classes of refusal are
- * raised outside it, and the count silently omits both, so the tile says it:
- *
- *   (a) a price cap the agent's own runtime applies. The cap lives in the
- *       agent's code and its SDK; a runtime that declines before ever asking
- *       Haven leaves no row anywhere, because there is no request to read.
- *   (b) a budget the hosted tools decline at PREPARE — the step in
- *       `haven_prepare_catalog_purchase` that compares the purchase against
- *       the live delegation budget and refuses it (step 6). This is a
- *       prepare-time refusal, never a quote-time one: the quote tools only
- *       quote and refuse nothing, so the sentence must not name a quote.
- *
- * Who refuses is stated with each class, because the two are refused by
- * different parties: (a) by the agent itself, (b) by Haven's hosted tools
- * before any intent exists. Both are recorded nowhere; both are therefore
- * named here rather than counted on the face of the tile.
- *
- * The clause is deliberately a temporary one. When epic #3056 slice 3 gives
- * the hosted prepare-time refusal its server-side writer, (b) stops being
- * unrecorded and this string narrows back to the price-cap sentence alone —
- * that revert is the plan, and it is carried in #3055's issue, not here.
+ * Until #3109 this sentence also named a second class — a budget the hosted
+ * tools decline at PREPARE (`haven_prepare_catalog_purchase`, step 6). That
+ * refusal now has a server-side writer (`POST /machine-payments/budget-precheck`
+ * through `refuse()`, `source: 'hosted_prepare'`), so the tile COUNTS it, and a
+ * footnote that still called it unrecorded contradicted the count above it.
+ * #3055 (reopened) narrowed the sentence back to the price cap alone; do not
+ * widen it again without a refusal class the ledger genuinely cannot see.
  */
-const UNRECORDED_REFUSALS_NOTE =
-  "Price-cap refusals in your agent's runtime are not recorded, and neither are budget refusals raised when Haven's hosted tools prepare a purchase."
+const UNRECORDED_REFUSALS_NOTE = "Price-cap refusals in your agent's runtime are not recorded."
 
 /** The four figures, in the order the reader scans them. */
 function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currency: 'USD' | 'EUR' }) {

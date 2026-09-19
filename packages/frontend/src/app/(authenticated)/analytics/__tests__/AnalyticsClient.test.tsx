@@ -278,10 +278,13 @@ describe('Analytics — the populated page', () => {
     expect(tile.textContent).toMatch(/2 refused payments · across 3 attempts/)
     expect(tile.textContent).toMatch(/\$3\.00 attempted/)
     // The limit of the count, stated rather than left to be inferred: what
-    // the runtime refused on its own never reached this ledger — and neither
-    // did the budget refusal the hosted tools raise at prepare (#3055).
-    expect(tile.textContent).toMatch(/Price-cap refusals in your agent/)
-    expect(tile.textContent).toMatch(/budget refusals raised when Haven's hosted tools prepare a purchase/)
+    // the runtime refused on its own never reached this ledger. The hosted
+    // prepare-time budget refusal is NOT named any more — #3109 gave it a
+    // writer (`source: 'hosted_prepare'`) so the tile counts it, and the
+    // footnote must not tell the reader those rows do not exist (#3055 revert).
+    expect(tile.textContent).toMatch(/Price-cap refusals in your agent's runtime are not recorded\./)
+    expect(tile.textContent).not.toMatch(/hosted tools/)
+    expect(tile.textContent).not.toMatch(/prepare a purchase/)
     // The phrasing the issue retires: the quote tools quote and refuse
     // nothing, so a footnote that blames the quote describes a refusal no
     // code path raises.
@@ -308,12 +311,12 @@ describe('Analytics — the populated page', () => {
     render(<AnalyticsClient />)
     const tile = screen.getByTestId('stat-tile-refused')
     expect(tile.textContent).not.toMatch(/Refusals are recorded from/)
-    // The rest of the refusal sentence stays: the count and BOTH unrecorded
-    // classes are independent of the ledger floor — an empty ledger does not
-    // make the two paths the page cannot see any more visible (#3055).
+    // The rest of the refusal sentence stays: the count and the one
+    // unrecorded class are independent of the ledger floor — an empty ledger
+    // does not make the path the page cannot see any more visible (#3055).
     expect(tile.textContent).toMatch(/2 refused payments/)
     expect(tile.textContent).toMatch(/Price-cap refusals in your agent/)
-    expect(tile.textContent).toMatch(/budget refusals raised when Haven's hosted tools prepare a purchase/)
+    expect(tile.textContent).not.toMatch(/hosted tools/)
   })
 
   it('renders the budget bands as a count of agents over their own budgets', () => {

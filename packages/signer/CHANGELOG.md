@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+## 0.3.1-alpha.0 — 2026-09-19
+
 - **Refusals carry a typed next step (#3103, epic #3105).** `HavenSignContextError`
   and every structured signer refusal now also carry the `next_tool` family:
   a backend refusal of the signing context names the hosted status read

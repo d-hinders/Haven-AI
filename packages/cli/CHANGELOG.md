@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+## 0.3.1-alpha.0 — 2026-09-19
+
 ## 0.3.0-alpha.0 — 2026-09-17
 
 ### Fixed

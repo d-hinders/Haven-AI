@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+## 0.3.1-alpha.0 — 2026-09-19
+
 - #3128: `haven_list_receipts` accepts `cursor` and returns `{ receipts, total, hasMore, nextCursor }` instead of a bare array (via the SDK's `listReceiptsPage`).
 
 - **Failure envelope: `next_action` added, `nextAction` deprecated (#3103,

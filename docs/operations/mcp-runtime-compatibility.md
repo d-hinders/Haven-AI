@@ -719,6 +719,41 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.3.1-alpha.0 release, 2026-09-19):** the manifest table
+> above is re-pinned by the bump to `0.3.1-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`; the four numbers were not copied by hand. **Re-read, not
+> rubber-stamped**, and the table's non-version rows still hold: the Node floor
+> is unchanged (`>= 22.0.0`, CI on LTS 24 via `.nvmrc`), and the Codex and
+> Claude Code rows still describe local stdio MCP.
+>
+> **This release is NOT a break**, unlike the two before it. Measured against
+> the published `0.3.0-alpha.0` tarballs, the built declarations remove **zero**
+> names across all four packages and add **24** (23 `sdk`, 1 `signer`), so no
+> consumer loses a name and a PATCH step is the honest version.
+>
+> **What moved that a skew reader should know.** The typed-next-step surface
+> reaches all three published runtimes at once (epic #3105: `sdk` gains
+> `NextStep` and the builder, `signer` gains `SIGNER_HOSTED_HANDOFF_SHAPES`,
+> and the hosted MCP will not compile a bare `nextAction`). Because the
+> additions are additive and the hosted surface deploys from a branch while the
+> packages publish on the promotion, **a stale signer or local runtime does not
+> break** — it simply emits no typed next step, which is the same state it was
+> in before this release. That is the direction the skew table above already
+> covers: a missing optional field, not a changed one.
+>
+> The x402 retry-target guards (`assertSecureX402RetryTarget` and siblings,
+> #3097) and the unsupported-transfer-method refusal (#3116) are also additive
+> at the declaration level, but they **narrow runtime behaviour** in the
+> fail-closed direction — an old caller that relied on the paid retry following
+> a merchant-declared `http://` resource, or on a `permit2` entry being signed
+> as EIP-3009, now gets a typed refusal. Neither was a documented capability.
+>
+> `last-verified` is left as it stands: it **already reads 2026-09-19** from
+> #3116's change earlier today, so there is nothing to bump. This note is a
+> genuine re-read of the manifest table and the skew section rather than a
+> scoped check of one constant — but a date that is already correct does not
+> get re-stamped for the sake of it (#1366).
+
 > **Re-verification (0.3.0-alpha.0 release, 2026-09-17):** this release is a
 > **BREAK**, and the version says so — MINOR under the 0.x convention, the same
 > reason 0.2.0-alpha.0 was. It carries the naming-P5 contraction (#2914 /
@@ -795,10 +830,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.3.0-alpha.0` |
-| `@haven_ai/mcp` | `0.3.0-alpha.0` |
-| `@haven_ai/sdk` | `0.3.0-alpha.0` |
-| `@haven_ai/signer` | `0.3.0-alpha.0` |
+| `@haven_ai/connect` | `0.3.1-alpha.0` |
+| `@haven_ai/mcp` | `0.3.1-alpha.0` |
+| `@haven_ai/sdk` | `0.3.1-alpha.0` |
+| `@haven_ai/signer` | `0.3.1-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

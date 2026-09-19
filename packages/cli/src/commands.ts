@@ -22,7 +22,7 @@ import {
 export const DEFAULT_API = 'https://havenbackend-production-8a00.up.railway.app'
 // Self-reported CLI version. Owned by scripts/release-bump.mjs, which rewrites
 // the string literal below on every release — keep it a bare quoted literal.
-export const CLI_VERSION = '0.3.0-alpha.0'
+export const CLI_VERSION = '0.3.1-alpha.0'
 
 export interface RunDeps {
   sessionStore?: SessionStore

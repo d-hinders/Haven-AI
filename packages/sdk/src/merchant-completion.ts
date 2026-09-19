@@ -151,7 +151,7 @@ export class MerchantCompletion {
     // completion reads). Either is a rejection after funding exactly like a
     // non-2xx answer; the thrown status is 402 (what the merchant said
     // in-band) while the captured `merchant_status` keeps the real 200.
-    const toolResult = retryResponse.ok ? await this.merchantTransport.readToolResult(retryResponse) : undefined
+    const toolResult = retryResponse.ok ? await this.merchantTransport.readToolResult(retryResponse, initialInit) : undefined
     const inBandChallenge = toolResult ? extractMcpPaymentRequired(toolResult) : undefined
     const metaSettlement = toolResult ? mcpSettlementFromToolResult(toolResult) : undefined
     const inBandRejection = inBandChallenge !== undefined || metaSettlement?.success === false

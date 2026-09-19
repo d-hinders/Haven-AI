@@ -1000,7 +1000,7 @@ export class HavenClient {
       // or Bazaar); a stateless merchant that answered a bare `tools/call`
       // with a tool result has shown it needs no session, so nothing is
       // forced — `quoteMcpX402` still pins its own established session.
-      const toolResultChallenge = await this.merchantTransport.extractToolResultChallenge(response)
+      const toolResultChallenge = await this.merchantTransport.extractToolResultChallenge(response, initialInit)
       if (toolResultChallenge) {
         const mcpTransport = await this.merchantTransport.detect(url, toolResultChallenge, response)
         return buildX402Quote(toolResultChallenge, request, options.idempotencyKey, mcpTransport)
@@ -1301,7 +1301,7 @@ export class HavenClient {
     // that never spoke JSON-RPC must come back untouched.
     let nativeChallenge = false
     if (response.status !== 402) {
-      const toolResultChallenge = await this.merchantTransport.extractToolResultChallenge(response)
+      const toolResultChallenge = await this.merchantTransport.extractToolResultChallenge(response, requestInit)
       if (!toolResultChallenge) {
         return mcpSessionId ? this.merchantTransport.surfaceResult(response) : response
       }
@@ -1486,6 +1486,9 @@ export class HavenClient {
         : undefined
     const protocolReceiptHeader = headerReceipt ?? (metaSettlement ? encodeMcpSettlementReceipt(metaSettlement) : undefined)
     const settlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
+    // A JSON-RPC `error` envelope (no `result`) after payment stays `ok` on the
+    // HTTP status: it carries no settlement statement, and the two protocol
+    // signals above are the only ones that mean "nothing settled" (#3155 S4).
     const merchantAccepted = surfaced.ok && inBandChallenge === undefined && metaSettlement?.success !== false
 
     // #2970: declared here (not inside the `else` below) so it survives to

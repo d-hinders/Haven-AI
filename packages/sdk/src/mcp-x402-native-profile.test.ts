@@ -5,6 +5,7 @@ import {
   MCP_X402_PAYMENT_RESPONSE_META_KEY,
   McpMerchantTransport,
   extractMcpPaymentRequired,
+  isJsonRpcToolsCallBody,
   mcpSettlementFromToolResult,
   mcpToolResultOf,
   withMcpPaymentMeta,
@@ -733,6 +734,96 @@ describe('#3155 review — fetch() parity with the hosted completion (B2, S1) an
   it('S2: the same guard on quoteX402 — a text/plain 200 is the typed unexpected-status error without reading the body', async () => {
     mockFetch((url) => (url === 'https://api.merchant.example/plain' ? new Response('hello', { status: 200, headers: { 'Content-Type': 'text/plain' } }) : undefined))
     await expect(newClient().quoteX402('https://api.merchant.example/plain')).rejects.toBeInstanceOf(X402UnexpectedStatusError)
+  })
+})
+
+// ── #3155 partner review: the probe is gated on a tools/call request; mcp:// resources ──
+
+describe('#3155 partner review — the tool-result probe runs only for a JSON-RPC tools/call request', () => {
+  const apiUrl = 'https://api.merchant.example/data'
+  /** A 200 whose JSON body is SHAPED like a native challenge — but the request was a plain GET, so it cannot be one. */
+  const lookalike = () => json(rpcResult(1, nativeChallenge(apiUrl)))
+
+  it('quoteX402 on a plain GET: the body is not read and the answer is the typed unexpected-status error', async () => {
+    let served: Response | undefined
+    mockFetch((url) => (url === apiUrl ? (served = lookalike()) : undefined))
+    await expect(newClient().quoteX402(apiUrl)).rejects.toBeInstanceOf(X402UnexpectedStatusError)
+    expect(served?.bodyUsed).toBe(false)
+  })
+
+  it('fetch() on a plain GET returns the 200 untouched and creates no payment', async () => {
+    let served: Response | undefined
+    const fetchMock = mockFetch((url) => (url === apiUrl ? (served = lookalike()) : undefined))
+    const response = await newClient().fetch(apiUrl)
+    expect(response.status).toBe(200)
+    expect(served?.bodyUsed).toBe(false)
+    await expect(response.json()).resolves.toMatchObject({ jsonrpc: '2.0', result: { isError: true } })
+    expect(backendCalls(fetchMock, '/x402')).toHaveLength(0)
+  })
+
+  it('the same body on a tools/call POST IS a challenge (control)', async () => {
+    mockFetch((url) => (url === apiUrl ? lookalike() : undefined))
+    const quote = await newClient().quoteX402(apiUrl, { method: 'POST', body: toolCall('c') })
+    expect(quote.amountAtomic).toBe('20000')
+  })
+
+  it('isJsonRpcToolsCallBody: only a string JSON-RPC tools/call with object params', () => {
+    expect(isJsonRpcToolsCallBody(toolCall(1))).toBe(true)
+    expect(isJsonRpcToolsCallBody(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }))).toBe(false)
+    expect(isJsonRpcToolsCallBody(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call' }))).toBe(false)
+    expect(isJsonRpcToolsCallBody('{}')).toBe(false)
+    expect(isJsonRpcToolsCallBody(undefined)).toBe(false)
+    expect(isJsonRpcToolsCallBody(new URLSearchParams({ a: '1' }))).toBe(false)
+  })
+})
+
+describe('#3155 partner review — the spec\'s canonical mcp://tool/<name> resource', () => {
+  const mcpResource = 'mcp://tool/paid_tool'
+  function mcpChallenge(): Record<string, unknown> {
+    const c = nativeChallenge(mcpUrl)
+    ;(c.structuredContent as Record<string, unknown>).resource = { url: mcpResource, description: 'paid tool', mimeType: 'application/json' }
+    ;(c.content as Array<{ type: string; text: string }>)[0].text = JSON.stringify(c.structuredContent)
+    return c
+  }
+
+  it('quoteMcpX402 quotes it, keeping the mcp:// resource url and the merchant URL as the retry target', async () => {
+    mockFetch((url, _init, method) => {
+      if (url !== mcpUrl) return undefined
+      if (method === 'initialize') return initializeOk('sess-m')
+      if (method === 'notifications/initialized') return notificationAccepted()
+      return json(rpcResult('q', mcpChallenge()))
+    })
+    const quote = await newKeylessHostedClient().quoteMcpX402(mcpUrl, { method: 'POST', body: toolCall('q') })
+    expect(quote.resourceUrl).toBe(mcpResource)
+    expect(quote.request.url).toBe(mcpUrl)
+    expect(quote.amountAtomic).toBe('20000')
+  })
+
+  it('fetch() pays an mcp:// resource end to end and retries the merchant URL with the payment in _meta', async () => {
+    let paid = false
+    const fetchMock = mockFetch((url, init, method) => {
+      if (url === `${backendUrl}/x402`) return fundingPendingSignature(mcpResource)
+      if (url === `${backendUrl}/payments/pay_123/sign`) return fundingConfirmed()
+      if (url !== mcpUrl) return undefined
+      if (method === 'initialize') return initializeOk('sess-m2')
+      if (method === 'notifications/initialized') return notificationAccepted()
+      if (method === 'tools/call') {
+        const body = JSON.parse(init?.body as string) as { params: { _meta?: Record<string, unknown> } }
+        if (body.params._meta?.[MCP_X402_PAYMENT_META_KEY]) {
+          paid = true
+          return json(rpcResult(2, { content: [{ type: 'text', text: 'paid' }], _meta: { [MCP_X402_PAYMENT_RESPONSE_META_KEY]: { success: true, transaction: '0xmcp' } } }))
+        }
+        return json(rpcResult(2, mcpChallenge()))
+      }
+      return undefined
+    })
+    const response = await newClient().fetch(mcpUrl, { method: 'POST', body: toolCall(2) })
+    expect(paid).toBe(true)
+    expect(response.status).toBe(200)
+    const authorize = backendCalls(fetchMock, '/x402')
+    expect(authorize).toHaveLength(1)
+    // The mcp:// resource reaches Haven's authorize call as the resource, whatever the wire key.
+    expect(JSON.stringify(bodyOf(authorize[0]))).toContain('mcp://tool/paid_tool')
   })
 })
 

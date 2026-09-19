@@ -277,8 +277,8 @@ export class McpMerchantTransport {
    * error, a successful result that merely resembles a challenge, or an
    * unparseable body is never mistaken for a payment demand.
    */
-  async extractToolResultChallenge(response: Response): Promise<X402PaymentRequired | undefined> {
-    const toolResult = await this.readToolResult(response)
+  async extractToolResultChallenge(response: Response, init?: RequestInit): Promise<X402PaymentRequired | undefined> {
+    const toolResult = await this.readToolResult(response, init)
     return toolResult ? extractMcpPaymentRequired(toolResult) : undefined
   }
 
@@ -291,7 +291,12 @@ export class McpMerchantTransport {
    * timeout fired. A merchant that speaks JSON-RPC declares one of those two
    * content types.
    */
-  async readToolResult(response: Response): Promise<Record<string, unknown> | undefined> {
+  async readToolResult(response: Response, init?: RequestInit): Promise<Record<string, unknown> | undefined> {
+    // #3155 partner review: a native challenge can only answer a JSON-RPC
+    // `tools/call` request, so when the request is known and is not one, the
+    // body is not read at all — a plain `haven.fetch()` of a JSON API pays
+    // nothing for this probe.
+    if (init !== undefined && !isJsonRpcToolsCallBody(init.body)) return undefined
     const contentType = (response.headers.get('content-type') ?? '').toLowerCase()
     if (!contentType.includes('application/json') && !contentType.includes('text/event-stream')) return undefined
     return mcpToolResultOf(await this.readMessage(response))
@@ -402,17 +407,13 @@ export function mcpSettlementFromToolResult(toolResult: Record<string, unknown>)
  * `Content-Length` header would go stale (the runtime recomputes it for a
  * string body). Neither half of the dual delivery is size-bounded here; on
  * erc7710 the decoded envelope is smaller than its base64 header, and only
- * the header half counts against the 16 KB header ceiling (#2341).
+ * the header half counts against the 16 KB header ceiling (#2341). On erc7710
+ * the dual delivery therefore sends the delegation chain twice (header and
+ * body) — stated, accepted, and the partner reviewer's to weigh.
  */
 export function withMcpPaymentMeta(init: RequestInit, paymentHeader: string): RequestInit {
-  if (typeof init.body !== 'string') return init
-  let request: unknown
-  try {
-    request = JSON.parse(init.body)
-  } catch {
-    return init
-  }
-  if (!isRecord(request) || request.method !== 'tools/call' || !isRecord(request.params)) return init
+  const request = parseJsonRpcToolsCall(init.body)
+  if (!request) return init
   let envelope: unknown
   try {
     envelope = decodeBase64Json<unknown>(paymentHeader)
@@ -438,6 +439,24 @@ export function withMcpPaymentMeta(init: RequestInit, paymentHeader: string): Re
  */
 export function encodeMcpSettlementReceipt(settlement: McpX402SettlementMeta): string {
   return encodeBase64Json(settlement)
+}
+
+/** #3155: the request body parsed as a JSON-RPC `tools/call` with an object `params`, else undefined. */
+function parseJsonRpcToolsCall(body: unknown): (Record<string, unknown> & { params: Record<string, unknown> }) | undefined {
+  if (typeof body !== 'string') return undefined
+  let request: unknown
+  try {
+    request = JSON.parse(body)
+  } catch {
+    return undefined
+  }
+  if (!isRecord(request) || request.method !== 'tools/call' || !isRecord(request.params)) return undefined
+  return request as Record<string, unknown> & { params: Record<string, unknown> }
+}
+
+/** #3155: whether a request body is a JSON-RPC `tools/call` — the only request a native challenge can answer. */
+export function isJsonRpcToolsCallBody(body: unknown): boolean {
+  return parseJsonRpcToolsCall(body) !== undefined
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -682,6 +682,30 @@ describe('#3155 review — fetch() parity with the hosted completion (B2, S1) an
     await expect(response.json()).resolves.toEqual({ content: [{ type: 'text', text: 'paid over sse' }] })
   })
 
+  it('code r3 pin: a non-402 SSE pass-through with no session is returned byte-identical — never collapsed to its last frame', async () => {
+    const wire = 'event: token\ndata: {"delta":"Hel"}\n\nevent: token\ndata: {"delta":"lo"}\n\nevent: done\ndata: {"finish":"stop"}\n\n'
+    mockFetch((url) => (url === 'https://api.merchant.example/stream-sse' ? sseResponse(wire) : undefined))
+    const response = await newClient().fetch('https://api.merchant.example/stream-sse')
+    expect(response.headers.get('content-type')).toBe('text/event-stream')
+    await expect(response.text()).resolves.toBe(wire)
+  })
+
+  it('code r3: a paid retry whose SSE carries no JSON-RPC result is returned as it came, not reduced to its last frame', async () => {
+    const plainUrl = 'https://api.merchant.example/paid-stream'
+    const wire = 'data: {"delta":"pai"}\n\ndata: {"delta":"d!"}\n\n'
+    mockFetch((url, init, method) => {
+      if (url === `${backendUrl}/x402`) return fundingPendingSignature(plainUrl)
+      if (url === `${backendUrl}/payments/pay_123/sign`) return fundingConfirmed()
+      if (url !== plainUrl || method !== 'tools/call') return undefined
+      const body = JSON.parse(init?.body as string) as { params: { _meta?: Record<string, unknown> } }
+      if (body.params._meta?.[MCP_X402_PAYMENT_META_KEY]) return sseResponse(wire)
+      return json(rpcResult(2, nativeChallenge(plainUrl)))
+    })
+    const response = await newClient().fetch(plainUrl, { method: 'POST', body: toolCall(2) })
+    expect(response.headers.get('content-type')).toBe('text/event-stream')
+    await expect(response.text()).resolves.toBe(wire)
+  })
+
   it('S2: a non-JSON, non-SSE 200 is returned at once with its body untouched — a never-ending stream is not buffered', async () => {
     let pulled = 0
     const stream = new ReadableStream<Uint8Array>({

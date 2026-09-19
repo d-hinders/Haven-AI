@@ -183,7 +183,10 @@ An SSE-framed paid answer is collapsed to its result whether or not a session
 was established (a profile merchant on a plain URL answers without one): the
 hosted completion always collapses, and `fetch()` collapses the paid retry
 once the merchant has spoken JSON-RPC (a session or a tool-result challenge)
-while a non-402 pass-through that never did is returned as it came. The
+while a non-402 pass-through that never did is returned as it came; and the
+collapse happens only when the stream carries a JSON-RPC result or error —
+an SSE answer made of anything else is returned as it came, never reduced to
+its last frame. The
 Bazaar handshake signal is read from the tool-result challenge as well as
 from a 402 body. Only a JSON or SSE body is read when a non-402 answer is
 probed for a challenge, and the local paid retry reads a JSON or SSE answer

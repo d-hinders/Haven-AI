@@ -181,7 +181,10 @@ export class McpMerchantTransport {
     }
 
     const message = selectJsonRpcResult(parseSseJsonRpcMessages(text))
-    if (!message) return response
+    // #3155 review r3: collapse only a real JSON-RPC result or error. A stream
+    // whose frames are none of those (a paid SSE resource that is not MCP)
+    // would otherwise be reduced to its LAST frame — returned untouched instead.
+    if (!message || !('result' in message || 'error' in message)) return response
 
     const body = 'result' in message ? message.result : message
     const headers = new Headers(response.headers)

@@ -19,8 +19,9 @@ vi.mock('@/context/AuthContext', () => ({ useAuth: () => mockUseAuth() }))
 vi.mock('@/hooks/useAccounts', () => ({ useAccounts: () => mockUseAccounts() }))
 vi.mock('@/hooks/useAgents', () => ({ useAgents: () => mockUseAgents() }))
 vi.mock('@/hooks/usePreferences', () => ({ usePreferences: () => mockUsePreferences() }))
+const { mockUsePortfolio } = vi.hoisted(() => ({ mockUsePortfolio: vi.fn() }))
 vi.mock('@/hooks/usePortfolio', () => ({
-  usePortfolio: () => ({ totalUsd: 0, totalEur: 0, breakdown: [], loading: false }),
+  usePortfolio: (...args: unknown[]) => mockUsePortfolio(...args),
 }))
 vi.mock('@/hooks/useDeployableChains', () => ({
   useDeployableChains: () => ({
@@ -57,6 +58,7 @@ describe('AccountsOverviewClient — active account (#629)', () => {
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
+    mockUsePortfolio.mockReturnValue({ totalUsd: 0, totalEur: 0, totalSek: 0, breakdown: [], loading: false })
     mockUseAccounts.mockReturnValue({
       accounts: [BASE, SEPOLIA],
       loading: false,
@@ -96,6 +98,34 @@ describe('AccountsOverviewClient — active account (#629)', () => {
       `haven-reviewer` on this change.
     */
     expect(mockSetActiveSafe).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * #3127: a SEK preference must show SEK figures read from the portfolio
+   * hook's `totalSek` / `sekValue` — the pre-#3127 card had no SEK branch and
+   * served the USD figure. The card's compact formatter is symbol-PREFIXED
+   * ("kr") with the platform's digit grouping, deliberately unlike the
+   * sv-SE voices the dashboard and analytics tiles use; what matters here is
+   * that the NUMBER is the SEK one and the USD/EUR figures stay off the card.
+   */
+  it('renders SEK figures from the portfolio hook when the preference is SEK', () => {
+    mockUsePreferences.mockReturnValue({ currency: 'SEK' })
+    mockUsePortfolio.mockReturnValue({
+      totalUsd: 1234.56,
+      totalEur: 1100,
+      totalSek: 13000.5,
+      breakdown: [
+        { symbol: 'USDC', balance: '1000000', formatted: '1.00', usdValue: 1, eurValue: 0.92, sekValue: 9.4 },
+      ],
+      loading: false,
+    })
+    render(<AccountsOverviewClient />)
+
+    const activeCard = screen.getByLabelText('Base account')
+    expect(within(activeCard).getByText('kr13,000.50')).toBeInTheDocument()
+    expect(within(activeCard).getByText('kr9.40')).toBeInTheDocument()
+    expect(within(activeCard).queryByText('$1,234.56')).toBeNull()
+    expect(within(activeCard).queryByText('€1,100.00')).toBeNull()
   })
 })
 

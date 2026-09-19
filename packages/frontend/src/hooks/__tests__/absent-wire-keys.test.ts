@@ -100,6 +100,10 @@ describe('array wire keys default to [] when the response omits them (#3093)', (
     // The scalar totals feed `formatFiat(...).toLocaleString` on /accounts.
     expect(result.current.totalUsd).toBe(0)
     expect(result.current.totalEur).toBe(0)
+    // #3127: the SEK total degrades to 0 with the others — /accounts calls
+    // `.toLocaleString` on it, and `undefined` took the route down once
+    // already (#3093).
+    expect(result.current.totalSek).toBe(0)
   })
 
   it('useAccounting: overrides, providers, connections', async () => {

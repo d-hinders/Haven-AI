@@ -265,3 +265,27 @@ describe('formatAnalyticsTick — the y-axis tick, without cents (#3051)', () =>
     expect(formatAnalyticsTick(1240, 'EUR')).toBe('1.240\u00a0€')
   })
 })
+
+/**
+ * SEK, the served default (#3127). Same provenance rule as the header states
+ * for USD/EUR: the exact strings are this repo's Node (v24, full ICU) sv-SE
+ * output, read off the real formatter rather than guessed — NBSP group
+ * separators, decimal comma, the "kr" suffix behind an NBSP, and a true
+ * U+2212 minus sign (not the ASCII hyphen) on negatives.
+ */
+describe('SEK renders in the sv-SE voice (#3127)', () => {
+  it('formats a booked amount with the group separator, decimal comma, and suffix', () => {
+    expect(formatAnalyticsAmount('1234.56', 'SEK')).toBe('1\u00a0234,56\u00a0kr')
+    expect(formatAnalyticsAmount('0', 'SEK')).toBe('0,00\u00a0kr')
+  })
+
+  it('negatives carry the U+2212 minus the sv-SE locale actually emits', () => {
+    expect(formatAnalyticsAmount('-4.20', 'SEK')).toBe('\u22124,20\u00a0kr')
+  })
+
+  it('compacts, values, and ticks in the same voice as the other currencies', () => {
+    expect(formatAnalyticsAmountCompact('1234.00', 'SEK')).toBe('1,23\u00a0tn\u00a0kr')
+    expect(formatAnalyticsValue(1234.56, 'SEK')).toBe('1\u00a0234,56\u00a0kr')
+    expect(formatAnalyticsTick(1240, 'SEK')).toBe('1\u00a0240\u00a0kr')
+  })
+})

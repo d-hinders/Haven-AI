@@ -611,14 +611,21 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       })
     } catch (err) {
       if (err instanceof StoredAcceptedMismatchError) {
-        return {
-          code: 400,
-          body: {
-            error:
-              'The 402 challenge you sent does not advertise one erc7710 option matching this request — ' +
-              'amount, payTo, asset, maxTimeoutSeconds and facilitatorAddresses must come from the option you are paying.',
+        // #3053: through the shared choke point with a null ledger. This is a
+        // MALFORMED REQUEST — two fields of the caller's own body disagreeing
+        // — not a guardrail refusal, so it records nothing; the census
+        // allowlist owns that distinction, do not "fix" it here.
+        return refuse(
+          {
+            code: 400,
+            body: {
+              error:
+                'The 402 challenge you sent does not advertise one erc7710 option matching this request — ' +
+                'amount, payTo, asset, maxTimeoutSeconds and facilitatorAddresses must come from the option you are paying.',
+            },
           },
-        }
+          null,
+        )
       }
       throw err
     }

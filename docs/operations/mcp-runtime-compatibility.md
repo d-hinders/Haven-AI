@@ -132,8 +132,10 @@ last-verified: "2026-09-19"
 > `packages/sdk/src/tool-descriptions.ts` `listReceipts`): it now says "This
 > agent's payment evidence, not the wallet's transaction history (sweeps,
 > funding legs, other agents)" instead of inviting a transaction-history read,
-> and its `behavior` drops the proof-header sentence and compresses the paging
-> prose (the page fields are still named); the hosted description mean was re-measured under the
+> and its `behavior` was re-cut to stay under budget — the exact text is
+> `packages/sdk/src/tool-descriptions.ts` `listReceipts`, and
+> `packages/mcp-server/src/description-size.test.ts` holds it under the #1591
+> budget; the hosted description mean was re-measured under the
 > #1591 budget by `description-size.test.ts`. Each receipt row now carries
 > `scope: { source: 'agent', filter: null }` — additive on the wire
 > (`MachinePaymentReceipt.scope`, optional) and on the SDK type

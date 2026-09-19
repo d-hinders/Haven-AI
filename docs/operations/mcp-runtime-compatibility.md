@@ -28,6 +28,7 @@ covers:
   - packages/backend/src/domain/agent-payment-taxonomy.ts
   - packages/backend/src/modules/transactions/csv-export.ts
   - packages/sdk/src/types.ts
+  - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/x402.ts
   - packages/sdk/src/tool-descriptions.ts
   - packages/sdk/src/next-step.ts
@@ -113,8 +114,8 @@ last-verified: "2026-09-19"
 > `packages/sdk/src/tool-descriptions.ts` `listReceipts`): it now says "This
 > agent's payment evidence, not the wallet's transaction history (sweeps,
 > funding legs, other agents)" instead of inviting a transaction-history read,
-> and its `behavior` no longer restates the paging and proof-header facts the
-> row shape carries; the hosted description mean was re-measured under the
+> and its `behavior` drops the proof-header sentence and compresses the paging
+> prose (the page fields are still named); the hosted description mean was re-measured under the
 > #1591 budget by `description-size.test.ts`. Each receipt row now carries
 > `scope: { source: 'agent', filter: null }` — additive on the wire
 > (`MachinePaymentReceipt.scope`, optional) and on the SDK type

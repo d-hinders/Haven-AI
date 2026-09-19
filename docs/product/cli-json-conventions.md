@@ -72,7 +72,8 @@ that are already being emitted.
 
 Since #3132 every `activity list` row also carries `scope: { source: 'wallet',
 filter }` — the feed is wallet-scoped, and `--agent` / `--safe` NARROW it
-(`filter: 'agent' | 'account' | 'account+agent' | null`) rather than turning it
+(`filter: 'agent' | 'account' | 'account+agent' | null`; `--direction` is
+applied client-side after the response and is not part of `scope`) rather than turning it
 into the agent-scoped receipts view the MCP's `haven_list_receipts` returns
 (`{ source: 'agent', filter: null }`). Rows also carry `timestampSource`
 (`'block'` | `'confirmed_at'` | `'created_at'`), naming the column behind

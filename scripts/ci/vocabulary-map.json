@@ -104,7 +104,7 @@
         "note": "ISO 8601, nullable — added by #3132 on x402-synthesized rows, absent on explorer rows"
       },
       "disposition": "converged",
-      "reason": "Both views now report the RECORDED confirmation time under one name, nullable on both, so they can no longer disagree on whether a payment has one. The transaction row's `timestamp` keeps its `confirmed_at ?? created_at` fallback as a non-null sort key, but the substitution is MARKED by `timestampSource` (`singleSurface.transaction`) rather than hidden -- #3132's pattern for every silent fallback."
+      "reason": "Both views now report the RECORDED confirmation time under one name, nullable on both, so they can no longer disagree on whether a payment has one. The transaction row's `timestamp` keeps its `confirmed_at ?? created_at` fallback as a non-null sort key, but the substitution is MARKED by `timestampSource` (`singleSurface.transaction`) rather than hidden -- #3132's pattern for every silent fallback. The one remaining unmarked projection is the CSV export's settled_at column (modules/transactions/csv-export.ts), which serialises the same sort key under a settlement name and carries no mark -- out of #3132's scope (the JSON rows are), recorded here so 'converged' is not read as covering it."
     },
     {
       "concept": "transaction hash",
@@ -240,7 +240,7 @@
       "protocolReceiptHeaderName": "x402 protocol wiring.",
       "protocolReceiptPayload": "The merchant's own receipt body.",
       "merchantStatus": "The merchant's HTTP response state, not a chain fact.",
-      "createdAt": "Evidence-row lifecycle. The transaction surface has one time field and #3132 owns its semantics.",
+      "createdAt": "Evidence-row lifecycle. The transaction surface's 'when did this settle' is confirmedAt (paired, #3132) and its sort key is timestamp; neither is the evidence row's own creation time.",
       "updatedAt": "Evidence-row lifecycle.",
       "paymentIntentId": "Conditional key, present only when the raw row carries it. Links evidence to intent; no transfer-level counterpart.",
       "approvalRequestId": "Conditional key. Approval requests were dropped with the table (#2055); the field survives on the raw shape.",
@@ -265,7 +265,7 @@
       "fxRateSek": "The rate amountSek was struck at (#2871).",
       "fxSource": "Where that rate came from.",
       "accounting": "Accounting-feed sync state joined by paymentId (#2870).",
-      "timestamp": "The row's non-null unix-seconds SORT KEY: the block timestamp on explorer rows, `confirmed_at ?? created_at` on x402-synthesized rows. Its counterpart for 'when did this settle' is `confirmedAt` (paired above, #3132); the fallback is marked by `timestampSource`, never silent.",
+      "timestamp": "The row's non-null unix-seconds SORT KEY: the block timestamp on explorer rows, `confirmed_at ?? created_at` on x402-synthesized rows. Its counterpart for 'when did this settle' is `confirmedAt` (paired above, #3132); on the JSON rows the fallback is marked by `timestampSource` -- the CSV export's settled_at projection of it is not (see the settled-at reason).",
       "timestampSource": "#3132: which column produced `timestamp` ('block' | 'confirmed_at' | 'created_at') -- the mark that turns the sort key's fallback from a silent substitution into a stated one. A receipt has no sort-key fallback to mark."
     }
   },

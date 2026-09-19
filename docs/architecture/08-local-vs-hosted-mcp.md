@@ -19,6 +19,9 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/middleware/agentToolAudit.ts
   - packages/backend/src/modules/agents/agent-connection-setup.ts
+  - packages/backend/src/routes/transactions.ts
+  - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/modules/transactions/x402.ts
 last-verified: "2026-09-19"
 ---
 

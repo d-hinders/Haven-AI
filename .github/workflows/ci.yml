@@ -87,17 +87,19 @@ jobs:
       # which is the defect itself; the glob cannot.
       - name: Repo CI config suites (scripts/ci/*.test.mjs)
         run: node --test scripts/ci/*.test.mjs
-      # #3131: the MCP↔CLI vocabulary guard. Here rather than beside
-      # `lint:wire-types` in `frontend_checks`, which the issue offered as the
+      # #3131, extended by #3133: the vocabulary guard. Here rather than beside
+      # `lint:wire-types` in `frontend_checks`, which #3131 offered as the
       # precedent: that job is gated on `changes.outputs.frontend`, while this
-      # guard's two inputs are `packages/sdk/src/payment-mappers.ts` and
-      # `packages/backend/src/openapi/spec.ts` — the `sdk` and `backend` gates.
-      # A guard that either of two separately-gated surfaces can break has to
-      # live in a job neither gate can skip, and this is the ungated one. It is
-      # dependency-free (plain node over two source files), like its neighbours.
-      # Its own test needs no step: `scripts/ci/*.test.mjs` above already
-      # collects it.
-      - name: MCP↔CLI vocabulary divergence guard (#3131)
+      # guard's THREE inputs are `packages/sdk/src/payment-mappers.ts`,
+      # `packages/backend/src/openapi/spec.ts` and
+      # `packages/cli/src/commands.ts` — the `sdk`, `backend` and `cli` gates.
+      # A guard that any of three separately-gated surfaces can break has to
+      # live in a job none of those gates can skip, and this is the ungated one.
+      # (#3133 added the third and made the argument stronger, not weaker.) It
+      # is dependency-free (plain node over three source files), like its
+      # neighbours. Its own test needs no step: `scripts/ci/*.test.mjs` above
+      # already collects it.
+      - name: Vocabulary divergence guard (#3131, #3133)
         run: npm run lint:vocabulary
 
       # #1206: this suite previously ran NOWHERE — it lives outside every

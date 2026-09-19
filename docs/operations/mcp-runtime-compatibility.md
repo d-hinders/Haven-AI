@@ -46,6 +46,21 @@ last-verified: "2026-09-18"
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
 >
+> **Re-verified unchanged (#3131, and again for #3133):** this doc is coupled to
+> `.github/workflows/ci.yml`. #3131 added one dependency-free step to the
+> repo-config job, running a read-only CI guard; #3133 extended that guard to a
+> third input and rewrote the step's comment to say so. Nothing in this document
+> moves under either: no tool is added, renamed or re-shaped, no description text
+> changes, no schema or argument changes, and the runtime-skew and consent-hash
+> contracts are untouched. Neither change emits runtime code — #3133's whole
+> deliverable is a declaration and a documentation page, and its diff against
+> `packages/cli` and `packages/connect` is empty by design. Recorded here rather
+> than silently passed over because the coupling gate cannot tell a CI-wiring
+> edit from a contract edit, and a contract doc cleared without a reader is how
+> #2274 shipped a false sentence past a green tick. Kept as one note rather than
+> one per CI edit, so this section does not accumulate a paragraph every time a
+> step is added.
+>
 > **Recent re-verification (#3128):** `haven_list_receipts` is RE-SHAPED on
 > both runtimes — the one deliberate non-additive change on this surface
 > since #2330. Its schema gains an optional `cursor` (the previous page's
@@ -78,17 +93,6 @@ last-verified: "2026-09-18"
 > not this sentence, is the instrument) — the `getAgent` prose lost
 > phrasing, not guidance. Nothing else in
 > this document was re-verified in this pass.
->
-> **Re-verified unchanged (#3131):** this doc is coupled to
-> `.github/workflows/ci.yml`, which #3131 edits — it adds one dependency-free
-> step to the repo-config job, running a new read-only CI guard over two source
-> files this doc does not cover. Nothing in this document moves: no tool is
-> added, renamed or re-shaped, no description text changes, no schema or
-> argument changes, and the runtime-skew and consent-hash contracts are
-> untouched. The guard emits no runtime code. Recorded here rather than
-> silently passed over because the coupling gate cannot tell a CI-wiring edit
-> from a contract edit, and a contract doc cleared without a reader is how
-> #2274 shipped a false sentence past a green tick.
 >
 > **Recent re-verification (#3126):** the sufficiency read `GET
 > /machine-payments/balance-coverage` (tool `haven_check_funds`) ships in this

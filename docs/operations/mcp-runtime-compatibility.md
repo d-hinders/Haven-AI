@@ -436,6 +436,21 @@ last-verified: "2026-09-18"
 > consent hash, or version-skew contract changes; nothing about the local
 > runtime's capabilities moves.
 >
+> **Recent re-verification (#3127, round 2):** the transaction feed's
+> display-currency treatment is completed on the CONSUMER side — the
+> dashboard frontend now represents `SEK` end to end (the `Currency` type,
+> the Settings radio, and the dashboard, account, and analytics fiat
+> branches), which is the surface `routes/transactions.ts`' converted triple
+> is ultimately rendered by. The served enum (`USD`/`EUR`/`SEK`, SEK the
+> no-preference default) and everything the round-1 block asserts about the
+> wire are unchanged: the route, the CSV branch, and the additive fields
+> above still hold byte-identically, and the settings PUT was already
+> documented as accepting SEK. What moved is presentation only — a SEK user
+> now reads SEK figures in the sv-SE voice on every fiat surface instead of
+> USD totals under a SEK label. No MCP tool, flag, auth step, consent hash,
+> or version-skew contract changes; nothing about the local runtime's
+> capabilities moves.
+>
 > **Recent re-verification (#2811):** the same for the hosted server's
 > plain-HTTP x402 lifecycle handlers — `haven_quote_x402`,
 > `haven_pay_x402_quote`, `haven_resume_x402_payment` and

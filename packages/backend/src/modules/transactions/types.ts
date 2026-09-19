@@ -25,7 +25,7 @@ export interface Transaction {
    * "when this settled" reads `confirmedAt` and treats `created_at` here as
    * "not confirmed at a known time".
    */
-  timestampSource?: 'block' | 'confirmed_at' | 'created_at'
+  timestampSource: 'block' | 'confirmed_at' | 'created_at'
   /**
    * #3132: the recorded confirmation time (ISO 8601) of an x402-synthesized
    * row, `null` when the intent has none — the same nullable value the

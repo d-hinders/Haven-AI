@@ -52,7 +52,7 @@
         "field": "paymentProofStatus",
         "column": "proof_status",
         "value": "recorded",
-        "by": "modules/transactions/x402.ts `row.payment_proof_status ?? null` (#3132) — the same pass-through enrichment.ts always had",
+        "by": "modules/transactions/x402.ts `row.payment_proof_status ?? null` (#3132) \u2014 the same pass-through enrichment.ts always had",
         "alias": "payment_proof_status",
         "aliasedBy": "infra/repositories/transaction-history.ts:228,325 `mpe.proof_status AS payment_proof_status`"
       },
@@ -101,7 +101,7 @@
         "field": "confirmedAt",
         "column": "confirmed_at",
         "value": "recorded",
-        "note": "ISO 8601, nullable — added by #3132 on x402-synthesized rows, absent on explorer rows"
+        "note": "ISO 8601, nullable \u2014 added by #3132 on x402-synthesized rows, absent on explorer rows"
       },
       "disposition": "converged",
       "reason": "Both views now report the RECORDED confirmation time under one name, nullable on both, so they can no longer disagree on whether a payment has one. The transaction row's `timestamp` keeps its `confirmed_at ?? created_at` fallback as a non-null sort key, but the substitution is MARKED by `timestampSource` (`singleSurface.transaction`) rather than hidden -- #3132's pattern for every silent fallback. The one remaining unmarked projection is the CSV export's settled_at column (modules/transactions/csv-export.ts), which serialises the same sort key under a settlement name and carries no mark -- out of #3132's scope (the JSON rows are), recorded here so 'converged' is not read as covering it."
@@ -272,13 +272,13 @@
   "cliConventions": {
     "$comment": [
       "The CLI's `--json` casing split, declared rather than left as an accident",
-      "(#3133, owner decision 2026-09-18: KEEP the split — no rename, no dual-emit,",
+      "(#3133, owner decision 2026-09-18: KEEP the split \u2014 no rename, no dual-emit,",
       "no breaking change). `/user/accounts` already took one breaking rename this",
       "quarter (#2914/#3091), costing a dual-emit, a release boundary and a",
       "dist-tags verification; a second to the same surface inside two epics is not",
       "worth the tidiness. Normalising would also make the CLI stop being a",
       "pass-through and start owning a presentation contract that diverges from the",
-      "OpenAPI response schema — which is what `interface Txn` already does badly.",
+      "OpenAPI response schema \u2014 which is what `interface Txn` already does badly.",
       "",
       "ANCHORED ON FUNCTION NAMES, NOT LINE NUMBERS. #3133's own line anchors were",
       "wrong three times across two correction passes; a guard keyed on them would",
@@ -288,7 +288,7 @@
       "",
       "PASS-THROUGH vs SELF-CONSTRUCTED. `emit()` forwards straight to the output",
       "layer with no re-mapping, so a list command's casing IS the backend's and is",
-      "not the CLI's to choose. The `{ ok: true, … }` envelopes are the CLI's own",
+      "not the CLI's to choose. The `{ ok: true, \u2026 }` envelopes are the CLI's own",
       "construction, and those are what this section ratchets."
     ],
     "decided": "2026-09-18",
@@ -306,8 +306,8 @@
         "commands.ts. It was declared here from the start with nothing comparing it to",
         "the code, so the page could promise enforcement over a list free to drift.",
         "`interface Safe` / `interface Txn` in commands.ts are a NON-EXHAUSTIVE subset",
-        "the CLI happens to read — the emitted JSON carries every key the backend",
-        "sends — so they are not the authoritative shape and must not be read as it."
+        "the CLI happens to read \u2014 the emitted JSON carries every key the backend",
+        "sends \u2014 so they are not the authoritative shape and must not be read as it."
       ],
       "wallets list": {
         "convention": "snake",
@@ -317,7 +317,7 @@
       "activity list": {
         "convention": "camel",
         "keys": "accountAddress, chainId, tokenSymbol",
-        "reason": "Forwarded from GET /transactions unchanged (cmdActivityList). Same mechanism as wallets list, opposite convention, because the two backend surfaces differ — which is the divergence #3130 exists to record."
+        "reason": "Forwarded from GET /transactions unchanged (cmdActivityList). Same mechanism as wallets list, opposite convention, because the two backend surfaces differ \u2014 which is the divergence #3130 exists to record."
       },
       "activity export --format csv": {
         "convention": "snake-csv",
@@ -385,7 +385,7 @@
       "cmdLogout": {
         "convention": "snake",
         "keys": "ok, signed_out",
-        "reason": "Pure snake. #3133 listed this among the auth envelopes that mix; it does not — it carries no camel key. Recorded because the correction matters: the intra-object mixing is THREE sites, not four."
+        "reason": "Pure snake. #3133 listed this among the auth envelopes that mix; it does not \u2014 it carries no camel key. Recorded because the correction matters: the intra-object mixing is THREE sites, not four."
       },
       "cmdAgentLifecycle": {
         "convention": "snake",
@@ -405,7 +405,7 @@
       "cmdWalletRename": {
         "convention": "snake",
         "keys": "ok, account_id, name",
-        "reason": "Hybrid envelope on the wallet noun — `account_id`, the post-#2914 spelling, beside a bare `ok`."
+        "reason": "Hybrid envelope on the wallet noun \u2014 `account_id`, the post-#2914 spelling, beside a bare `ok`."
       },
       "cmdContactsRemove": {
         "convention": "snake",
@@ -455,7 +455,7 @@
       },
       "export wrapper": {
         "convention": "snake",
-        "keys": "ok, format, content — plus rows on the CSV branch only",
+        "keys": "ok, format, content \u2014 plus rows on the CSV branch only",
         "reason": "Built in packages/cli/src/output.ts, not commands.ts, so it is outside the census by construction -- the scanner reads one file. It wraps BOTH the CSV and the SIE export -- and the SIE branch passes no `rows`, so the key set differs by format -- and a reader who only saw the header list would parse the wrong thing: the body is inside `content`."
       },
       "failure envelope": {

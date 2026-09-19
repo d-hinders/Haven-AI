@@ -48,6 +48,7 @@ const RAW_TWIN = {
   decimals: 6,
   direction: 'out' as const,
   timestamp: 1_752_470_400,
+  timestampSource: 'block' as const,
   blockNumber: 21_000_000,
   isError: false,
   tokenAddress: '0xusdc',

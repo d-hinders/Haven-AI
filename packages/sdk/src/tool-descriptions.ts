@@ -140,7 +140,7 @@ export const toolDescriptions = {
     selectionGuidance:
       "This agent's payment evidence, not the wallet's transaction history (sweeps, funding legs, other agents); use the allowance tool instead for remaining allowance or what-can-I-spend questions.",
     behavior:
-      "Page: { receipts, total, hasMore, nextCursor }; total 0 = none; hasMore: pass nextCursor as cursor. parties.treasuryAccount is Haven's authoritative payer. protocolReceiptPayload is the merchant's PAYMENT-RESPONSE relayed verbatim: merchant-controlled, unverified, not Haven's record; payer may differ from payerAddress.",
+      "Page { receipts, total, hasMore, nextCursor }; hasMore: pass nextCursor as cursor. parties.treasuryAccount is Haven's authoritative payer. protocolReceiptPayload is the merchant's PAYMENT-RESPONSE relayed verbatim: merchant-controlled, unverified, not Haven's record; payer may differ from payerAddress. Proof header values omitted.",
     nextActionGuidance: '',
   },
   verifyReceipt: {

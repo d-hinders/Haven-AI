@@ -20,6 +20,7 @@ function tx(overrides: Partial<Transaction> = {}): Transaction {
     decimals: 18,
     direction: 'in',
     timestamp: 1000,
+    timestampSource: 'block',
     blockNumber: 100,
     isError: false,
     ...overrides,

@@ -1541,9 +1541,10 @@ function parseBigIntField(value: string, field: string): bigint {
  * key fault)? viem's `writeContract` wraps EVERY failure in
  * `ContractFunctionExecutionError`, so that outer class proves nothing; a
  * revert is proven only by a `ContractFunctionRevertedError` that carries
- * decoded revert data, an undecodable error signature or a revert reason (viem
- * also wraps a bare JSON-RPC -32603 "internal error" in that class, with none
- * of the three), or by the node's `ExecutionRevertedError` — except geth's
+ * decoded revert data, an undecodable error signature or a reason matching
+ * /execution reverted/i (viem also wraps a bare JSON-RPC -32603 "internal
+ * error" in that class, with none of the three — its reason names an internal
+ * error, not an execution revert), or by the node's `ExecutionRevertedError` — except geth's
  * "gas required exceeds allowance", which viem files under that class although
  * it means the MERCHANT's settlement key cannot pay for gas (#2979's
  * `settlement_wallet_out_of_gas` band). The reason guard is written to
@@ -1574,11 +1575,11 @@ export function isContractRevert(err: unknown): boolean {
 
 /**
  * The revert's own words, capped so the next-action sentence that follows it
- * stays inside the hosted relay's 500-character window even for viem's longest
- * `shortMessage` (measured in erc7710.test.ts).
+ * stays inside the hosted relay's 500-character window even for a 400-character
+ * reason (the relay-window tests in erc7710.test.ts).
  */
 const REVERT_REASON_MAX = 120
-/** Non-printable characters JSON-escape to six characters each; flatten them first so the cap survives JSON.stringify. */
+/** A control character can JSON-escape to six characters (\uXXXX); flatten everything outside printable ASCII first so the 120-character cap survives JSON.stringify. */
 function clampReason(reason: string): string {
   return reason.replace(/[^\x20-\x7e]/g, ' ').slice(0, REVERT_REASON_MAX)
 }

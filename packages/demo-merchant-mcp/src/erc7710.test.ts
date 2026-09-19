@@ -569,8 +569,10 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
   })
 
   // #3170: a revert at SUBMIT (simulation passed moments earlier) used to be
-  // reported as a merchant-side FAULT — "this merchant is broken" — the exact
-  // `x402-erc7710-hosted` failure of the 2026-09-19 qa-dev run. The likeliest
+  // reported as a merchant-side FAULT — "this merchant is broken" — the
+  // `x402-erc7710-hosted` failure of the 2026-09-19 qa-dev run (logged
+  // truncated at `ContractFunctionExecutio`; the tail is inferred from the
+  // #1517 fault template). The likeliest
   // causes are facts about the payer, and the chain may even say the money
   // already moved. Mirrors #1519 on the EIP-3009 rail.
   describe('a revert at submit is explained, not reported as a merchant fault (#3170)', () => {
@@ -677,7 +679,7 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
       expect(body.reason_code).toBe('merchant_fault')
     })
 
-    it('a real writeContract revert (decoded data) is REFUSED payer-side, and the next action survives the hosted 500-byte relay window', async () => {
+    it('a real writeContract revert (decoded data) is REFUSED payer-side, and the next action survives the hosted 500-character relay window', async () => {
       const client = submitRevertingClient({ spent: 0n, error: revertWithData })
       const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })
       const unpaid = await postBuyVpn(url)
@@ -702,7 +704,7 @@ describe('restart survival — the chain remembers what the maps forget (#1515)'
       expect(body.error).toContain('reverted at submit: AllowanceExceeded')
     })
 
-    it('the next action survives the relay window even for a 120-char-capped revert reason that JSON-escapes to six characters each', async () => {
+    it('the next action survives the relay window even for a 120-char-capped revert reason that JSON-escapes to six characters each (\\uXXXX)', async () => {
       const longReason = '\u0001'.repeat(400)
       const client = submitRevertingClient({ spent: 0n, error: asSendTransaction(new ExecutionRevertedError({ cause: rpcError(-32000, longReason), message: `execution reverted: ${longReason}` })) })
       const { url } = await startServer({ erc7710Client: client, options: ERC7710_OPTIONS })

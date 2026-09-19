@@ -636,8 +636,9 @@ the next action rather than "see merchant logs" — the merchant puts the next
 action before the cause list and caps the revert reason at 120 printable
 ASCII characters because `paid-mcp-completion.ts` relays only the first 500
 characters of the 402 body. A failure of the merchant's own settlement key or node (nonce, fee,
-rate limit, unreachable RPC) is still reported as a `merchant_fault` with its
-#2979 `reason_code`.
+rate limit, unreachable RPC) is still reported as a merchant-side fault
+carrying its #2979 `reason_code` (`settlement_rpc_unreachable`,
+`settlement_wallet_out_of_gas`, or the generic `merchant_fault`).
 
 ## Guided Catalog Purchase Preflight (#1306)
 

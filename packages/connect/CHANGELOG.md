@@ -8,6 +8,14 @@ alone.
 
 ## Unreleased
 
+## 0.4.0-alpha.0 — 2026-09-19
+
+- Setup names every other credential directory that still holds a stored key — with the account it can spend from — BEFORE the key is minted or anything is written, and still succeeds (#3122, owner decision: warn, not refuse); `--json` gains `existing_agents_before_write`. Each setup records what it bound in a non-secret `mcp-server-binding.json` (server name → agent id, backend URL, bound-at); a name taken over from another directory's record is named before the write, with a DIFFERENT-backend flag, as `server_name_rebound_from`; `--unwire` releases the record (its `--json` gains `binding_released`), and so does a `--replace` retirement (the setup outcome carries no such field); `--tombstone` leaves it and `--doctor` ignores a retired directory's record; `--doctor` reports two records claiming one name as the `mcp_server_name_rebound` advisory. No network call added.
+
+- `--unwire` refuses to destroy a directory's key material unless the identity probe says there is nothing to preserve (#3123, owner option c): `ok` (active), `unauthorized` (a stranded balance may exist and the connector cannot check) and `network_error`/`bad_response` all retain the signer key, parked re-key and stored API key (the config and Hermes-env copies are scrubbed first; a config the run could not clean is reported, not silent) and exit 1 with the wiring removed; `--destroy-key-material` proceeds and states that local sweep recovery ends. `--json` gains an additive `teardown` object. New `--prune-signer-runtimes [--dry-run]` reclaims `~/.haven/signer-runtime` directories no credential directory references (override-keyed ones included); `--doctor` surfaces them as the `signer_runtime_unused` advisory.
+
+- `--doctor` verdicts have three levels (#3121): every check and the report carry `level: ok | advisory | failed`; only `failed` reaches the exit code (advisories print `!` and exit 0); `ok` is now `level !== 'failed'` (was "every check passed"). Intact-but-outdated `signer_runtime` and `superseded_agents` on a runtime with no connector-owned config (claude-code, other) are advisories. Report stays `version: 1`; `level` is additive.
+
 ## 0.3.0-alpha.0 — 2026-09-17
 
 ### Fixed

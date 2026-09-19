@@ -41,6 +41,7 @@ describe('buildHostedMcpServer', () => {
         'haven_discover_tools',
         'haven_get_agent',
         'haven_get_allowances',
+        'haven_check_funds',
         'haven_get_payment_status',
         'haven_get_resume_state',
         'haven_list_receipts',

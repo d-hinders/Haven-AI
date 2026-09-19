@@ -67,3 +67,6 @@ export {
   type SigningAuditContext,
   type SigningAuditEntry,
 } from './audit.js'
+
+// #3103: the hosted tools this signer hands off to, declared here and pinned to the hosted schemas in the hosted server's suite.
+export { SIGNER_HOSTED_HANDOFF_SHAPES } from './next-step.js'

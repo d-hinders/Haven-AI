@@ -49,7 +49,7 @@ describe('contacts routes', () => {
     // contacts module is the slice-1 proof module, so it is enforced here;
     // a conformant body's path through the handler is unchanged (pinned by
     // the characterization test below, captured before this existed).
-    installRequestValidation(app, { mode: 'enforce', enforcedPrefixes: ['/contacts'] })
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/contacts.ts'] })
     await app.register(contactRoutes, { prefix: '/contacts' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
   })

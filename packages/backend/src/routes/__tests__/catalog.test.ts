@@ -195,7 +195,7 @@ describe('catalog routes', () => {
       .slice()
       .reverse()
       .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
-    expect(String(catalogCall?.[0])).toContain('network = $1')
+    expect(String(catalogCall?.[0])).toContain('mc.network = $1')
     expect(catalogCall?.[1]).toEqual(['eip155:8453'])
   })
 
@@ -213,9 +213,9 @@ describe('catalog routes', () => {
       .slice()
       .reverse()
       .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
-    expect(String(catalogCall?.[0])).toContain('LOWER(TRIM(category)) = LOWER(TRIM($1))')
-    expect(String(catalogCall?.[0])).toContain('rail = $2')
-    expect(String(catalogCall?.[0])).toContain('network = $3')
+    expect(String(catalogCall?.[0])).toContain('LOWER(TRIM(mc.category)) = LOWER(TRIM($1))')
+    expect(String(catalogCall?.[0])).toContain('mc.rail = $2')
+    expect(String(catalogCall?.[0])).toContain('mc.network = $3')
     expect(catalogCall?.[1]).toEqual(['storage', 'x402', 'eip155:8453'])
   })
 
@@ -231,9 +231,9 @@ describe('catalog routes', () => {
 
     expect(res.statusCode).toBe(200)
     const [sql, values] = mockQuery.mock.calls[0]
-    expect(String(sql)).toContain('LOWER(TRIM(category)) = LOWER(TRIM($1))')
-    expect(String(sql)).toContain('rail = $2')
-    expect(String(sql)).not.toContain('network = $3')
+    expect(String(sql)).toContain('LOWER(TRIM(mc.category)) = LOWER(TRIM($1))')
+    expect(String(sql)).toContain('mc.rail = $2')
+    expect(String(sql)).not.toContain('mc.network = $3')
     expect(values).toEqual(['media', 'x402'])
   })
 
@@ -254,7 +254,7 @@ describe('catalog routes', () => {
       category: 'vpn',
     })
     const [sql, values] = mockQuery.mock.calls[0]
-    expect(String(sql)).toContain('LOWER(TRIM(category)) = LOWER(TRIM($1))')
+    expect(String(sql)).toContain('LOWER(TRIM(mc.category)) = LOWER(TRIM($1))')
     expect(values).toEqual(['VPN'])
   })
 
@@ -274,12 +274,12 @@ describe('catalog routes', () => {
       .reverse()
       .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
     expect(String(catalogCall?.[0])).toContain(
-      `(name ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%' OR category ILIKE '%' || $2 || '%')`,
+      `(mc.name ILIKE '%' || $2 || '%' OR mc.description ILIKE '%' || $2 || '%' OR mc.category ILIKE '%' || $2 || '%')`,
     )
     expect(String(catalogCall?.[0])).toContain(`rail = $1`)
-    expect(String(catalogCall?.[0])).toContain(`network = $3`)
+    expect(String(catalogCall?.[0])).toContain(`mc.network = $3`)
     expect(String(catalogCall?.[0])).toContain(`status != 'delisted'`)
-    expect(String(catalogCall?.[0])).toContain('ORDER BY status = \'active\' DESC, category ASC, name ASC, id ASC')
+    expect(String(catalogCall?.[0])).toContain('ORDER BY mc.status = \'active\' DESC, mc.category ASC, mc.name ASC, mc.id ASC')
     expect(catalogCall?.[1]).toEqual(['x402', 'NordShield VPN Basic', 'eip155:8453'])
   })
 
@@ -303,7 +303,7 @@ describe('catalog routes', () => {
     ])
     const [sql, values] = mockQuery.mock.calls[0]
     expect(String(sql)).toContain(
-      `(name ILIKE '%' || $1 || '%' OR description ILIKE '%' || $1 || '%' OR category ILIKE '%' || $1 || '%')`,
+      `(mc.name ILIKE '%' || $1 || '%' OR mc.description ILIKE '%' || $1 || '%' OR mc.category ILIKE '%' || $1 || '%')`,
     )
     expect(values).toEqual(['VPN'])
   })
@@ -395,7 +395,7 @@ describe('catalog routes', () => {
       .slice()
       .reverse()
       .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
-    expect(String(catalogCall?.[0])).toContain('network = $2')
+    expect(String(catalogCall?.[0])).toContain('mc.network = $2')
     expect(catalogCall?.[1]).toEqual(['cat-1', 'eip155:8453'])
 
     mockQuery.mockResolvedValueOnce({ rows: [] })

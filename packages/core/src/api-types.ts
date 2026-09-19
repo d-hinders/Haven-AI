@@ -1696,7 +1696,7 @@ export type paths = {
         put?: never;
         /**
          * MONEY PATH: settle a delegation-rail x402 payment with the delegate signature.
-         * @description The delegation rail's settlement step, and the reason the rail has no funding leg: the agent signs the settlement child delegation, Haven assembles the merchant X-PAYMENT header, and the merchant redeems the chain directly from the budget delegation — **money moves account→merchant, never through a delegate hot balance**. Retry the merchant with the returned `payment_header`; it is a signed, single-use, amount-and-merchant-bound authorization, not a key. Refusals are specific on purpose: a payment on the wrong rail is a 409 rather than a confusing 400, and a lost settlement context is a 502 telling you to re-authorize rather than a silent failure. Agent-authenticated and rate-limited on the money-path limiter.
+         * @description The delegation rail's settlement step, and the reason the rail has no funding leg: the agent signs the settlement child delegation, Haven assembles the merchant X-PAYMENT header, and the merchant redeems the chain directly from the budget delegation — **money moves account→merchant, never through a delegate hot balance**. Retry the merchant with the returned `payment_header`; it is a signed, single-use, amount-and-merchant-bound authorization, not a key. Refusals are specific on purpose: a payment on the wrong rail is a 409 rather than a confusing 400; a stored 402 challenge that advertises no unique matching erc7710 option is also a 409 telling you to re-authorize, because that refusal is deterministic and retrying it can never succeed; and a lost settlement context is a 502 telling you to re-authorize rather than a silent failure. Agent-authenticated and rate-limited on the money-path limiter.
          */
         post: operations["settleX402Payment"];
         delete?: never;
@@ -2194,6 +2194,46 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/machine-payments/budget-precheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide server-side whether a quote amount fits the agent’s remaining budget.
+         * @description #3054: the guided prepare's budget compare moved server-side so an over-budget refusal is DECIDED by Haven — and reaches the payment_refusals ledger with source "hosted_prepare" through the refuse() choke point — instead of being computed in the agent's runtime where the ledger never saw it. The body carries the merchant quote facts (chainId/token/amountAtomic plus advisory merchantTo and the bought resourceUrl — the refusal dedupe window's discriminating column, never this endpoint's own URL); nothing about the caller's claim is trusted beyond which quote it asks about. Sufficiency answers { sufficient: true, remaining_atomic }. Insufficiency refuses 403 delegation_budget_exceeded with the same taxonomy body the x402 legs refuse with (phase, next_action, remaining/shortfall atomic+human). BOTH retired rails answer 410 like every rail-aware surface. Reporting-and-refusal only — enforcement stays on-chain: the budget delegation's ERC20PeriodTransferEnforcer still refuses an over-budget redemption.
+         */
+        post: operations["precheckMachinePaymentBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/machine-payments/balance-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Report whether the account actually holds the amount behind the agent's budget (#3126).
+         * @description Answers the question no spend-authority read answers: is `amount_atomic` of `token` actually HELD on the authenticated agent's own account right now. The response is a sufficiency signal, never a balance: `covered` is true/false/null and the account's balance itself is deliberately not returned — a constrained agent has no business reading the treasury total, and the boolean answers the only decision an agent has (attempt the payment, or tell the user funds are missing). `covered: null` means the chain read FAILED — treat it as unverifiable, not as absence. Keep the two concepts apart: `budget_remaining_atomic` is spend AUTHORITY (the same figure GET /machine-payments/allowances reports as onchain.remaining); `covered` is about HELD funds. Rail-aware like every read: both retired rails answer 410. Reporting only — grants no authority, moves nothing; enforcement stays on-chain.
+         */
+        get: operations["getMachinePaymentBalanceCoverage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/machine-payments/authorize": {
         parameters: {
             query?: never;
@@ -2261,7 +2301,10 @@ export type paths = {
             path?: never;
             cookie?: never;
         };
-        /** List stored machine-payment receipts for the authenticated agent. */
+        /**
+         * List stored machine-payment receipts for the authenticated agent.
+         * @description #3128: a page, newest first. `total` is how many receipts Haven holds for the agent, so an empty `receipts` with `total: 0` means none exist — there is no indexing delay behind this list. `has_more` says the page was cut at `limit`; pass `next_cursor` back as `cursor` for the next page.
+         */
         get: operations["listMachinePaymentReceipts"];
         put?: never;
         post?: never;
@@ -2550,7 +2593,7 @@ export type paths = {
         };
         /**
          * List curated payable services agents can discover and pay.
-         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly, and clients that pre-filter should treat the category as the structural signal.
+         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.
          */
         get: operations["listCatalog"];
         put?: never;
@@ -2618,6 +2661,46 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/merchants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the marketplace's merchants.
+         * @description The sell side of the catalog (#3078, epic #3077): every live merchant with at least one non-delisted offer on a chain this deployment lists (HAVEN_MARKETPLACE_CHAIN_IDS, else HAVEN_DEPLOY_CHAIN_IDS, else every chain) or a verified self-submitted offer, ordered real merchants first, then test merchants. Readable without a credential, like `GET /catalog`. `coming_soon` prospects appear only for an authenticated dashboard user when HAVEN_MARKETPLACE_PROSPECTS is on and no mainnet chain is listed. Read-only; nothing here creates payments or signatures.
+         */
+        get: operations["listMerchants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchants/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One merchant and its offers.
+         * @description The merchant and its non-delisted offers on the chains this deployment lists (an agent: its own chain), plus its verified self-submitted offers. A credential-less caller gets the offers in the public catalog shape. 404 — never 403 — for an unknown slug, a live merchant with nothing to show on these chains, or a prospect the caller may not see (the URL must not confirm a prospect exists).
+         */
+        get: operations["getMerchant"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 };
 export type webhooks = Record<string, never>;
 export type components = {
@@ -2672,6 +2755,45 @@ export type components = {
             /** Format: date-time */
             updated_at: string;
         };
+        CatalogEntryMerchant: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            /**
+             * @description Named apart from `CatalogEntry.status` (active|degraded|delisted) on purpose. A `coming_soon` merchant has no offers, so an entry never carries it in practice.
+             * @enum {string}
+             */
+            listing_status: "live" | "coming_soon";
+            /** @description True for Haven-run test content: the Haven demo store (real payments, demo goods) and the stranded-funds fixture. The structural signal for clients that pre-filter test content. */
+            is_test_merchant: boolean;
+        };
+        Merchant: {
+            /** Format: uuid */
+            id: string;
+            /** @description URL key: `/merchants/{slug}` and `/marketplace/<slug>`. */
+            slug: string;
+            name: string;
+            description: string;
+            website: string | null;
+            /** @description Only Haven-run and Ampersend rows carry one; prospects never do (monogram only). */
+            logo_url: string | null;
+            category: string;
+            /** @description ISO 3166-1 alpha-2, when known. */
+            country: string | null;
+            /**
+             * @description `coming_soon` is a prospect Haven is talking to — shown only to an authenticated dashboard user on a deployment that lists no mainnet chain and has HAVEN_MARKETPLACE_PROSPECTS on; never an agreement, never payable, never in an agent read or the credential-less shape.
+             * @enum {string}
+             */
+            listing_status: "live" | "coming_soon";
+            is_test_merchant: boolean;
+            /** @description Non-delisted offers on the chains this deployment lists (an agent: its own chain) plus verified self-submitted offers. Zero for a prospect. */
+            offer_count: number;
+            /** @description Distinct CAIP-2 networks of the listed operator offers, e.g. ["eip155:84532"]. Ingestion offers carry none. */
+            networks: string[];
+            /** @description Any offer verified payable — the same observation `CatalogEntry.verified_payable` records, at merchant level. */
+            verified_payable: boolean;
+        };
         CatalogEntry: {
             /** Format: uuid */
             id: string;
@@ -2679,6 +2801,8 @@ export type components = {
             description: string;
             category: string;
             resource_url: string;
+            /** @description The merchant this entry belongs to (#3078, epic #3077): every operator row has one after migration 088; an ingestion row has one once it is verified payable. Null only for a row the merchant join could not resolve. */
+            merchant: components["schemas"]["CatalogEntryMerchant"] | null;
             /** @enum {string} */
             rail: "x402" | "mpp";
             /** @enum {string} */
@@ -2708,6 +2832,10 @@ export type components = {
             verified_payable: boolean;
         };
         CatalogSubmitRequest: {
+            /** @description Optional (#3078): the seller's display name. Used to name the merchant when the submission is verified payable and no merchant owns the host yet; ignored when one does (the host proves the seller). Distinct from `website`. */
+            merchant_name?: string;
+            /** @description Optional (#3078): the seller's public site, https. Same rules as `merchant_name`. */
+            merchant_website?: string;
             /** @description https URL of the payable x402/MCP endpoint the seller wants verified and listed. This endpoint makes no request to it: the submission is queue-only, and ownership proof plus the verification probe run later, asynchronously under the leader-locked catalog monitor. */
             resource_url: string;
             /** @description Honeypot. Bots that fill this plausible-looking field are dropped with a fake success and nothing is written; human submitters leave it empty. */
@@ -3647,6 +3775,48 @@ export type components = {
                 };
             }[];
         };
+        /** @description The merchant quote facts the guided prepare asks Haven to pre-check (#3054). camelCase like the route family. `resourceUrl` is the merchant resource being bought — the refusal dedupe window's discriminating column — never this endpoint's own URL. */
+        BudgetPrecheckRequest: {
+            /** @description Advisory: the compare is scoped to the authenticated agent's own chain. */
+            chainId?: number;
+            /**
+             * @description The quote's asset contract address — the SELECTED settlement option's asset.
+             * @example 0x1111111111111111111111111111111111111111
+             */
+            token: string;
+            /** @description The amount that would be authorized, in ATOMIC units, as a non-negative integer string. */
+            amountAtomic: string;
+            /** @description Advisory: the merchant payTo address from the selected option. Carried onto the refusal row; it does not scope the compare — the budget is per-token and the enforcer is the gate on recipients. */
+            merchantTo?: string;
+            /** @description The merchant resource being bought. Lands on the refusal row's dedupe key when the pre-check refuses. */
+            resourceUrl?: string;
+        };
+        /** @description The sufficient branch of the server-side budget pre-check (#3054). The insufficient answer is not this schema — it is the 403 delegation_budget_exceeded refusal, which also lands a payment_refusals row with source "hosted_prepare". */
+        BudgetPrecheckResponse: {
+            /** @description Always true on this schema — insufficiency refuses 403 instead. */
+            sufficient: boolean;
+            /** @description The remaining period budget for the requested token, in ATOMIC units, after deciding this quote fits. */
+            remaining_atomic: string;
+            /** @description #1319 provenance, same semantics as the allowances read's flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read). */
+            remaining_is_from_chain?: boolean;
+        };
+        /** @description The #3126 sufficiency answer — whether HELD funds cover the checked amount. Deliberately NOT a balance: no field carries the account's balance, and nothing is named like the authority figures (remaining/available). `covered` speaks only of holdings; `budget_remaining_atomic` is the PERMITTED figure the allowances read reports. */
+        BalanceCoverageResponse: {
+            /** @description true: the chain says the agent's account holds at least checked_amount_atomic of token. false: the chain read succeeded and reports LESS — tell the user the funds are missing rather than retrying. null: the chain read FAILED — unverifiable, never treated as absence; coverage_error carries why. */
+            covered: boolean | null;
+            /** @description Present only when covered is null: why the chain read could not answer. */
+            coverage_error?: string;
+            chain_id: number;
+            /** @example 0x1111111111111111111111111111111111111111 */
+            token_address: string;
+            token_symbol: string;
+            /** @description The amount the coverage question was asked about, in ATOMIC units. */
+            checked_amount_atomic: string;
+            /** @description Context, AUTHORITY not holdings: the agent's remaining spend authority for the requested token, in ATOMIC units — the same derivation GET /machine-payments/allowances reports as onchain.remaining (#1090 derivation, #1145 enforcer read). Zero when no active budget row names the token. Compare it with covered, never instead of it. */
+            budget_remaining_atomic: string;
+            /** @description #1319 provenance, same semantics as the allowances read's flag: true when the budget figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read). */
+            budget_remaining_is_from_chain?: boolean;
+        };
         MachinePaymentReceipt: {
             /** Format: uuid */
             id: string;
@@ -3818,8 +3988,8 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
-            /** @description 0 for x402-synthesized rows with no on-chain receipt yet. */
-            blockNumber: number;
+            /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
+            blockNumber: number | null;
             isError: boolean;
             /** @example 0x1111111111111111111111111111111111111111 */
             tokenAddress?: string;
@@ -3883,8 +4053,8 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
-            /** @description 0 for x402-synthesized rows with no on-chain receipt yet. */
-            blockNumber: number;
+            /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
+            blockNumber: number | null;
             isError: boolean;
             /** @example 0x1111111111111111111111111111111111111111 */
             tokenAddress?: string;
@@ -9000,11 +9170,14 @@ export interface operations {
                          * @enum {string|null}
                          */
                         missing: "deleted" | "foreign_invoice" | null;
-                        /** @description A human has booked it. Null when not registered. */
+                        /** @description A human has booked it. Null when not registered (or not knowable). */
                         booked: boolean | null;
                         /** @description Registered but struck. Null when not registered. */
                         cancelled: boolean | null;
-                        invoice_number: number;
+                        /** @description The provider's own number for the record (what its UI shows). Null when the delivered object carries no number (#3018: an Accounted document) — document_ref names it instead. */
+                        invoice_number: number | null;
+                        /** @description The provider's id for the delivered document, when the record IS a document (Accounted: accounted:document:<id>). Null for invoice-shaped records (Fortnox). */
+                        document_ref: string | null;
                         /** @description `<series><number> <year>` once booked, e.g. "A123 2026". Null until then. */
                         voucher: string | null;
                         invoice_date: string | null;
@@ -11757,7 +11930,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Not a delegation-rail settlement, or not awaiting a signature. */
+            /** @description Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13990,6 +14163,212 @@ export interface operations {
             };
         };
     };
+    precheckMachinePaymentBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BudgetPrecheckRequest"];
+            };
+        };
+        responses: {
+            /** @description The amount fits the remaining budget. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetPrecheckResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The amount exceeds the agent's remaining delegation budget — decided here and recorded in the payment_refusals ledger (source "hosted_prepare"). Carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / merchant_address when the request carried them. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule (#2020). Fail-closed; there is no budget concept left to pre-check. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getMachinePaymentBalanceCoverage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The coverage answer for the requested token and amount. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BalanceCoverageResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule (#2020). Fail-closed; there is no account this surface can describe. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     authorizeMachinePayment: {
         parameters: {
             query?: never;
@@ -14244,6 +14623,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                /** @description The `next_cursor` of the previous page (a receipt id). Omit for the first page. A value that is not a uuid, or that names no receipt of this agent, is refused with 400. */
+                cursor?: string;
             };
             header?: never;
             path?: never;
@@ -14251,7 +14632,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Machine-payment receipts. */
+            /** @description One page of machine-payment receipts. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14259,6 +14640,27 @@ export interface operations {
                 content: {
                     "application/json": {
                         receipts: components["schemas"]["MachinePaymentReceipt"][];
+                        /** @description Receipts Haven holds for this agent, across all pages. */
+                        total: number;
+                        /** @description True when receipts beyond this page exist. */
+                        has_more: boolean;
+                        /** @description Pass as `cursor` for the next page; null on the last page. */
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };
@@ -15722,6 +16124,122 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listMerchants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Merchants. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        merchants: components["schemas"]["Merchant"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        detail?: string;
+                    };
+                };
+            };
+        };
+    };
+    getMerchant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Merchant and offers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        merchant: components["schemas"]["Merchant"];
+                        offers: components["schemas"]["CatalogEntry"][];
                     };
                 };
             };

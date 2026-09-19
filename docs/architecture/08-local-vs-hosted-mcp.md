@@ -4,6 +4,9 @@ status: current
 covers:
   - packages/mcp/**
   - packages/mcp-server/src/**
+  - packages/sdk/src/next-step.ts
+  - packages/sdk/src/types.ts
+  - scripts/lint-next-steps.mjs
   - packages/connect/src/**
   - packages/signer/src/**
   - packages/sdk/src/client.ts
@@ -16,7 +19,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/middleware/agentToolAudit.ts
   - packages/backend/src/modules/agents/agent-connection-setup.ts
-last-verified: "2026-09-10"
+last-verified: "2026-09-18"
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -346,3 +349,129 @@ since #1984 — are unaffected, hosted and local alike.
 - [Hosted connect flow](06-hosted-mcp-connect-flow.md)
 - [Edge signer](07-edge-signer.md)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)
+
+> **Re-verification (#3097, the paid retry's target, 2026-09-18):** this diff
+> touches `packages/mcp-server/src/tools/{plain-http-x402,contracts,paid-mcp-completion}.ts`,
+> `packages/mcp-server/src/tools/support/mcp-context.ts` and the SDK's
+> `mcp-merchant-transport.ts` (in this document's coverage list; the SDK's
+> `x402-protocol.ts` is covered by `04-x402-payment-sequence.md`). Both surfaces keep their contracts; what is new is an optional `url` on
+> `haven_pay_x402_quote` / `haven_resume_x402_payment` (the URL the agent
+> quoted), `request_url` / `retry_url` / `resource_url_differs_from_request` on
+> the quote, `retry_url` on pay and resume, and the `INSECURE_RETRY_TARGET`
+> refusal of a public `http://` retry target — the same rule on the SDK's
+> `McpMerchantTransport.deliverPayment` seam, which the local runtime crosses. The
+> local/hosted divergence this document describes is unchanged: the local
+> runtime always retried the caller's URL; the hosted surface now carries it.
+> Scope of this note: those fields and that refusal. Nothing else in this
+> document was re-verified.
+
+> **Re-verification (#3100, discovery hands out arguments its suggested tool
+> accepts, 2026-09-18):** this diff touches both discovery maps (`packages/mcp-server/src/tools/catalog-purchase.ts`, `packages/mcp/src/tools.ts`) and the hosted strict-refusal builder. Additive on the read side:
+> every discovery entry gains `suggested_arguments` in the suggested tool's
+> vocabulary (hosted MCP entries now suggest the cap-free
+> `haven_quote_catalog_purchase { catalog_id }` instead of prepare; HTTP entries
+> `haven_quote_x402 { url }`; the local runtime keeps its pay tools with
+> `{ merchant_url, tool_name, arguments }` / `{ url }`), and a hosted strict
+> refusal now names the declared keys and a rejected key's declared alias
+> (`TOOL_ARGUMENT_ALIASES` + folded-spelling equality) on both the handler and
+> the transport parse paths. No tool name, schema key, strict/permissive split,
+> expected-context version or signer contract changes; the local/hosted
+> divergence this document records is unchanged (the two surfaces suggest
+> different tools by design — same property, not the same values). The
+> `haven_quote_x402` reason no longer claims the hosted surface has no body
+> field (it has had one since #2366). A row no verbatim hint exists for — an MCP
+> row without `tool_name` on either surface, a degraded MCP row on the hosted
+> one — carries `suggested_tool_omitted_reason` instead of a hint, on BOTH
+> surfaces (review rounds 1–2), so that field is not a divergence. Scope of
+> this note: those fields and that text. Nothing else in this document was
+> re-verified.
+
+> **Re-verification (#3101, the typed next-step builder, 2026-09-18):** this
+> diff adds `packages/sdk/src/next-step.ts` (the builder, exported from the
+> SDK's `index.ts`) and touches `packages/mcp-server/src/tools/support/{guidance,errors}.ts`,
+> `packages/mcp-server/src/tools/{contracts,catalog-purchase,plain-http-x402,paid-mcp-completion,state-direct-recovery}.ts`,
+> `packages/mcp-server/src/server.ts` (instructions name the omitted-reason
+> field), the SDK's `types.ts` (a new optional `next_tool_omitted_reason` on
+> `AgentNextStep`) and `skill-content.ts`, and, annotation only,
+> `packages/signer/src/tools.ts` and `packages/mcp/src/tools.ts`. The
+> hosted `next_tool` family is now rendered by the SDK's builder from a bare
+> tool name + server role over a target map derived from the hosted
+> `toolSchemas` (which keeps its keys via `as const satisfies`) plus the two
+> signer handoff shapes the hosted server declares itself — it never imports
+> the edge signer at runtime; a test pins them to the signer's schemas; the
+> wire strings are byte-identical on the 9 sites the epic did not re-decide,
+> and all 17 `buildAgentGuidance` call sites (a census the characterization
+> test enforces — an 18th site fails it) are pinned by
+> `next-step-characterization.test.ts`, the 8 re-decided ones marked. New on the wire:
+> `next_tool_omitted_reason` wherever no tool is named (the three refusals
+> that used to hand `{ payment_id: null }` to a tool requiring a string, the
+> recovery module's own-HTTP-retry step, the report-accepted step and the
+> three settled done-states), and the same `next_tool` family on refusals
+> whose `HostedToolError` carries a step. No tool name, schema key,
+> strict/permissive split, expected-context version, signer contract, cap,
+> funding, signing or settlement decision changes; the local runtime's
+> `nextAction` emission is untouched (slice #3103). Scope of this note: those
+> fields. Nothing else in this document was re-verified.
+
+> **Re-verification (#3102, every hosted refusal names its next step, 2026-09-18):**
+> this diff touches `packages/mcp-server/src/tools/support/{errors,guidance,cap-price,catalog-entry,mcp-context}.ts`
+> and `packages/mcp-server/src/tools/{catalog-purchase,plain-http-x402,paid-mcp-completion}.ts`.
+> `HostedToolError` no longer takes a bare `nextAction`: a refusal thrown as a
+> `HostedToolError` names an action only through a typed `nextStep`
+> (`refusalNextStep`, the same builder and target map as the success path),
+> so each of the 28 refusal steps (27 sites, one of them following the live
+> payment state) now also carries either a tool with arguments that tool declares
+> (six name a tool: `haven_get_payment_status { payment_id }` on the
+> post-funding timeout, the erc7710 rejection and an eip3009 rejection whose
+> live state says retry or poll; `haven_sweep_delegate {}` on the eip3009
+> rejection and the funded insecure-target branch, as their messages say) or `next_tool_omitted_reason` (every stop-and-tell-user,
+> retry-with-explicit-context, fund-account and window-expired refusal). The
+> one other hosted refusal shape, the SDK's `HavenPaymentStateError` passed
+> through `normalizeError`, takes its step from the per-action default table
+> (status read, sweep) or says why none follows, so no hosted refusal carries
+> a bare `next_action`. `next_action` and `suggested_tool` are byte-identical
+> on every refusal, pinned by `next-step-refusals-characterization.test.ts`
+> (written before the change; a census of `refusalNextStep` calls enforces the
+> 27); `status`, `phase`, `rail` and `retry_with_new_quote` are untouched by
+> the diff and pinned where they were, in `tools.test.ts` and
+> `paid-mcp-completion.test.ts`. No tool name, schema
+> key, cap, funding, signing or settlement decision changes; the local
+> runtime is untouched (slice #3103). Scope of this note: those fields.
+> Nothing else in this document was re-verified.
+
+> **Re-verification (#3104, cross-surface handoff parity and the ratchet,
+> 2026-09-18):** this diff adds `scripts/lint-next-steps.mjs` (+ test +
+> zero baseline, wired in `ci.yml` and `package.json`), moves the hosted
+> next-step fixtures to `packages/mcp-server/src/test-support/next-step-fixtures.ts`,
+> and extends `packages/mcp-server/src/next-step-signer-parity.test.ts` into
+> the cross-surface walk: every hosted emission fixture is built for real and
+> its arguments parsed with the named tool's strict schema on the surface its
+> role names. No emission, tool name, schema key or decision changes; the epic's
+> contract as it stands after #3100–#3103 is what the walk and the ratchet
+> hold. Scope of this note: the tests and the gate. Nothing else in this
+> document was re-verified.
+
+> **Re-verification (#3103, the signer and the local runtime name a next tool,
+> 2026-09-18):** this diff adds `packages/signer/src/next-step.ts` (the signer's
+> declared hosted handoff shapes — `haven_get_payment_status { payment_id }` —
+> and its refusal-side builder over the SDK's) and touches
+> `packages/signer/src/{sign-context,tools,index}.ts` and `packages/mcp/src/tools.ts`.
+> The signer's five decision sites now carry a typed step beside `next_action`:
+> a backend refusal of the signing context (not expired) names the hosted
+> status read with the payment id through the role fields
+> (`next_tool_server_role: hosted`, `next_tool_name`), so a `--name <slug>`
+> install resolves it; a transport failure, a malformed body, an expired window
+> and a version skew name no tool and say why (`next_tool_omitted_reason`).
+> `HavenSignContextError` gains the optional `next_tool*` fields additively;
+> no signing decision, expected-context version or binding version changes.
+> The local runtime's failure envelope dual-emits `nextAction` and
+> `next_action` (decision 10, one release before the old spelling is dropped;
+> this supersedes the #2983 note's "its failure shape is camelCase") and its
+> two decision sites — the ones the signer's symmetric grep returns
+> (`nextAction: …` or `nextAction = …`): the `MERCHANT_NOT_READY` envelope
+> and the `UNKNOWN_ERROR` fallback — say why no tool follows.
+> Every field the refusals emitted before is byte-identical, pinned by
+> `next-step-characterization.test.ts` in each package (written before the
+> change). The hosted server's suite pins the signer's declared shapes to the
+> hosted schemas. Scope of this note: those fields. Nothing else in this
+> document was re-verified.

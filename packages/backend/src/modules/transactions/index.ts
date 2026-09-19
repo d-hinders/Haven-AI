@@ -34,6 +34,10 @@ export {
   type TransactionCsvColumn,
   type TransactionCsvLookups,
 } from './csv-export.js'
+// #3129: `routes/agent-activity.ts` renders the SAME payments as the
+// transaction feed, so it normalises through the same helper — otherwise
+// one payment reads in two address forms on two screens.
+export { toCanonicalAddress } from './normalize.js'
 export { compareTransactions, enrichedTransactionIdentityKey } from './ordering.js'
 export { fetchAccountTransactions } from './aggregate.js'
 export { enrichTransactionsWithAgents } from './enrichment.js'

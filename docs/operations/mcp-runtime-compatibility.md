@@ -11,6 +11,9 @@ covers:
   - .github/workflows/publish.yml
   - packages/cli/src/connect-runner.ts
   - packages/backend/src/routes/machine-payments.ts
+  - packages/sdk/src/account-reads.ts
+  - packages/sdk/src/client.ts
+  - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
   - packages/cli/src/commands.ts
@@ -25,7 +28,16 @@ covers:
   - packages/backend/src/domain/agent-payment-taxonomy.ts
   - packages/backend/src/modules/transactions/csv-export.ts
   - packages/sdk/src/types.ts
-last-verified: "2026-09-17"
+  - packages/sdk/src/x402.ts
+  - packages/sdk/src/tool-descriptions.ts
+  - packages/sdk/src/next-step.ts
+  - packages/mcp-server/src/server.ts
+  - packages/mcp-server/src/next-step-signer-parity.test.ts
+  - packages/mcp-server/src/test-support/next-step-fixtures.ts
+  - scripts/lint-next-steps.mjs
+  - scripts/lint-next-steps-baseline.json
+  - .github/workflows/ci.yml
+last-verified: "2026-09-19"
 ---
 
 # MCP Runtime Compatibility
@@ -33,6 +45,132 @@ last-verified: "2026-09-17"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Re-verified unchanged (#3131, and again for #3133):** this doc is coupled to
+> `.github/workflows/ci.yml`. #3131 added one dependency-free step to the
+> repo-config job, running a read-only CI guard; #3133 extended that guard to a
+> third input and rewrote the step's comment to say so. Nothing in this document
+> moves under either: no tool is added, renamed or re-shaped, no description text
+> changes, no schema or argument changes, and the runtime-skew and consent-hash
+> contracts are untouched. Neither change emits runtime code — #3133's whole
+> deliverable is a declaration and a documentation page, and its diff against
+> `packages/cli` and `packages/connect` is empty by design. Recorded here rather
+> than silently passed over because the coupling gate cannot tell a CI-wiring
+> edit from a contract edit, and a contract doc cleared without a reader is how
+> #2274 shipped a false sentence past a green tick. Kept as one note rather than
+> one per CI edit, so this section does not accumulate a paragraph every time a
+> step is added.
+>
+> **Recent re-verification (#3116):** the signer's merchant-header boundary
+> (`buildX402PaymentHeader`, `packages/signer/src/core.ts`) now refuses an
+> x402 challenge whose entries all advertise a transfer method or payment
+> flow the SDK cannot construct (`extra.assetTransferMethod: 'permit2'`, or
+> an unrecognized `extra.paymentFlow`) — via the same shared
+> `selectStandardPaymentOption` it already selected through, so the local
+> runtime's refusal and the SDK clients' refusal are the one rule, not two.
+> A mixed challenge still signs the supported entry behind the unsupported
+> one, and the explicitly-supported pair (`eip3009` + `authorization`) still
+> signs — the positive controls in `packages/signer/src/core.test.ts` pin
+> both. No tool name, schema, tool-NAME set, consent hash or next-step shape
+> moves: the refusal is the pre-existing `HavenApiError` "No compatible
+> payment option" path, now with a clause naming the capability reason.
+> Skew: none — the behavior change is inside both runtimes' bundled SDK, so
+> they tighten together; an older bundled SDK keeps the old (sign-anyway)
+> behavior, which is the bug this closes. Nothing else in this document was
+> re-verified in this pass.
+>
+> **Recent re-verification (#3128):** `haven_list_receipts` is RE-SHAPED on
+> both runtimes — the one deliberate non-additive change on this surface
+> since #2330. Its schema gains an optional `cursor` (the previous page's
+> `next_cursor`, a receipt id) beside `limit`, and its result is the page
+> object `{ receipts, total, hasMore, nextCursor }` instead of the bare
+> receipts array: `total` is how many receipts Haven holds for the agent
+> (`0` = none exist; there is no indexing delay behind this list), `hasMore`
+> says the page was cut at `limit`, and `nextCursor` is fed back as `cursor` —
+> which the backend refuses with 400 if it is not a uuid or names no receipt
+> of this agent, so a stale cursor is an error rather than a silently empty
+> page (an older hosted deploy answered it with an empty page).
+> Both runtimes call the SDK's new `listReceiptsPage()`; the SDK's
+> `listReceipts()` keeps returning the array, and the HTTP envelope
+> (`GET /machine-payments/receipts`) is additive (`total`, `has_more`,
+> `next_cursor` beside the unchanged `receipts`), so the qa-agent's and any
+> SDK caller's reads are untouched. Skew: an older `@haven_ai/mcp` bundles an
+> older `@haven_ai/sdk` and keeps serving the array with `limit` only; the
+> hosted server serves the page from its deploy onward; against a backend
+> older than #3128 the SDK maps the three page fields to `null` ("unknown"),
+> never a fabricated `0` / `false`. The strict/permissive split, the tool-NAME
+> set and the consent hash do not move (the hash covers identity, tool names
+> and allowances, not schemas — `packages/mcp/src/consent.ts:81-103`). The
+> two allowance reads are reconciled additively: `HavenAllowance` gains
+> `remainingDisplay` (derived client-side by the same function the bootstrap
+> summary uses) and `HavenAgentAllowanceSummary` gains `id` and
+> `tokenAddress`, pinned field for field on one fixture. The shared
+> description fragments (`listReceipts`, `getAgent`, `getAllowances`) were
+> re-cut under the #1591 mean cap — `packages/mcp-server/src/description-size.test.ts`
+> carries the measured mean (873.91 ≤ 874 at the delivered head; the test,
+> not this sentence, is the instrument) — the `getAgent` prose lost
+> phrasing, not guidance. Nothing else in
+> this document was re-verified in this pass.
+>
+> **Recent re-verification (#3126):** the sufficiency read `GET
+> /machine-payments/balance-coverage` (tool `haven_check_funds`) ships in this
+> same change as its backend route, so there is no version window to argue.
+> Round-2 rework relocated the route's two query guards (`token`,
+> `amount_atomic`) verbatim into `modules/mpp/balance-coverage-guards.ts`,
+> exported through the mpp barrel, to hold the #3029 shrink-only ratchet
+> baseline for `routes/machine-payments.ts` (19, unchanged). The wire contract
+> this document describes is untouched: same checks in the same order,
+> byte-identical 400 bodies (pinned by the 62-test real-DB route suite), no
+> tool added or renamed beyond this PR's own `haven_check_funds`, no schema or
+> description change, and the skew-flatness this document asserts holds — the
+> endpoint and the tool that calls it deploy in the same train. Nothing else
+> in this document was re-verified in this pass.
+>
+> **Recent re-verification (#3125):** the `haven_list_receipts` description
+> prose changed on BOTH runtimes — it is one shared fragment
+> (`packages/sdk/src/tool-descriptions.ts` `listReceipts`), composed verbatim by
+> the local stdio surface and the hosted `contracts.ts` module alike, and the
+> edit adds the payer-provenance boundary: `parties.treasuryAccount` is Haven's
+> authoritative payer record, `protocolReceiptPayload` is the merchant's
+> `PAYMENT-RESPONSE` relayed verbatim, merchant-controlled and unverified — not
+> Haven's record — and its payer may differ from `payerAddress`. No tool added,
+> renamed or re-shaped: arguments, schemas, the strict/permissive split and the
+> registered tool-NAME set are untouched, so the version-skew and consent-hash
+> contracts do not move (descriptions are not a skew axis — #2330 precedent —
+> and `computeConsentHash` hashes identity, tool names and allowances only, not
+> description text, verified at `packages/mcp/src/consent.ts:81-103`; an older
+> runtime simply serves the older guidance text from the `@haven_ai/sdk` it
+> bundles). The fragment was sized to keep the hosted description mean under
+> the #1591 per-tool cap (873.04 ≤ 874 bytes measured at the delivered head),
+> so the new guidance cost old phrasing, not the budget. The SDK type edit is
+> doc-comment-only (`HavenPaymentReceipt.protocolReceiptPayload`), no wire
+> shape change. Nothing else in this document was re-verified in this pass.
+>
+> **Recent re-verification (#3054):** the hosted guided prepare's over-budget
+> compare moved server-side. `haven_prepare_catalog_purchase`'s step 6 no
+> longer reads `GET /machine-payments/allowances` and compares locally; it
+> calls the new additive SDK method `client.precheckBudget(...)`
+> (`POST /machine-payments/budget-precheck` — agent-key auth, money-path rate
+> limit, orchestration in `modules/mpp/budget-precheck.ts`), one Haven round
+> trip replacing the allowances GET so the preflight's round-trip count is
+> unchanged (#1348 budget). The server decides with the SAME derived-budget
+> read the allowances endpoint uses (#1090 + the #1145 enforcer read, never
+> `agent_allowances`) and refuses through the #3053 choke point, so the
+> `payment_refusals` ledger records the refusal with `source =
+> 'hosted_prepare'` (migration 087 widens the CHECK; the dedupe fold key is
+> unchanged). The tool relays the decided 403 byte-identically —
+> `DELEGATION_BUDGET_EXCEEDED` shape characterization-pinned (95/95 in
+> `catalog-purchase.test.ts`) — and ANY other precheck outcome (transport
+> failure, a retired rail's 410, an older backend without the route)
+> degrades to the existing `sufficient: null` warning, never a refusal. No
+> tool added, renamed or re-shaped: arguments, schemas, descriptions and the
+> strict/permissive split are untouched, the local stdio runtime is not on
+> this path (`haven_pay_mcp_tool` has no pre-check today and needs none), and
+> the skew-flatness this document asserts holds — deploy order is backend →
+> hosted MCP, and an older MCP against the new backend merely degrades to the
+> warning path. The new route answers 410 on both retired rails like every
+> rail-aware surface. Nothing else in this document was re-verified in this
+> pass.
 >
 > **Recent re-verification (#3000):** the hosted server's
 > `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` refusal (the merchant-timeout branch of
@@ -268,6 +406,26 @@ last-verified: "2026-09-17"
 > local twin is unaffected — the #1301 bounded discovery helper it shares still
 > lives in `@haven_ai/sdk`, so the skew-flatness this document asserts is a
 > property of the SDK helper, not of which mcp-server file calls it.
+>
+> **Recent re-verification (#3078):** the merchant layer adds ONE field to
+> the catalog entry — `merchant { id, slug, name, listing_status,
+> is_test_merchant }` — on the SDK's `HavenCatalogEntry` (OPTIONAL there:
+> an installed SDK against a backend that predates migration 088 gets the
+> field absent, never null — `client-characterization.test.ts` pins both
+> readings) and on the hosted `haven_discover_tools` map in
+> `src/tools/catalog-purchase.ts` (wire-shaped, spread in only when the SDK
+> carries it). Additive on the read side only: no tool name, schema, strict/
+> permissive split, expected-context version or signer contract changes, and
+> the local server's `haven_pay_mcp_tool` twin and the #1301 discovery helper
+> are untouched. The skew-flatness this document asserts holds in both
+> directions — an old server against a new backend ignores the field, a new
+> server against an old backend omits it.
+>
+> **Recent re-verification (#3080):** one hosted-server TEST added
+> (`src/tools/catalog-purchase.test.ts`): `haven_discover_tools` reads
+> `GET /catalog` only — never `/merchants` — and so never returns a
+> `coming_soon` prospect. No runtime file under `src/tools/**` changed; the
+> compatibility contract is untouched.
 >
 > **Recent re-verification (#2850):** the CLI's transaction CSV/JSON export
 > relabelled `delegate_sweep` from "allowance funding" to "sweep" — the old
@@ -561,6 +719,64 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** the manifest table
+> above is re-pinned by the bump to `0.4.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`; the four numbers were not copied by hand. **Re-read, not
+> rubber-stamped**, and the table's non-version rows still hold: the Node floor
+> is unchanged (`>= 22.0.0`, CI on LTS 24 via `.nvmrc`), and the Codex and
+> Claude Code rows still describe local stdio MCP.
+>
+> **MINOR, and one tool's output contract is why.** `haven_list_receipts` on
+> the local MCP runtime now returns
+> `{ receipts, total, hasMore, nextCursor }` **instead of a bare array**, and
+> takes an optional `cursor` (#3128, via the SDK's new `listReceiptsPage`). For
+> an MCP server package the **tool result shape is the published contract**, so
+> an agent or script that indexed the old array meets an object. Under the 0.x
+> convention that made 0.2.0 and 0.3.0 MINOR, a break takes the minor step.
+>
+> **Record how nearly this was missed**, because the lesson is about the
+> instrument. Commit subjects carried no `!:` marker, and BOTH declaration-level
+> checks — a name-level `.d.ts` diff and a TypeScript-compiler-API pass that
+> recurses three levels into exported members — reported **zero removals across
+> all five packages**. They are correct and they are blind here: a tool's
+> runtime result shape appears in no `.d.ts`. The release's own CHANGELOG is
+> what names it. Treat "the declaration surface lost nothing" as evidence about
+> declarations only, never as evidence that a release carries no break.
+>
+> The SDK is NOT part of this break: `listReceipts(): Promise<HavenPaymentReceipt[]>`
+> is byte-identical to the published `0.3.0-alpha.0` declaration and
+> `listReceiptsPage` is additive. Measured against the published tarballs, the
+> built declarations remove **zero** names across all four affected packages and
+> add **24** (23 `sdk`, 1 `signer`).
+>
+> **What else moved that a skew reader should know.** The typed-next-step
+> surface reaches all three published runtimes at once (epic #3105: `sdk` gains
+> `NextStep` and `createNextStepBuilder`, `signer` gains
+> `SIGNER_HOSTED_HANDOFF_SHAPES`, and the hosted MCP will not compile a bare
+> `nextAction`). These are **outputs**, and nothing validates their presence at
+> runtime, so **a stale signer or local runtime simply emits no typed next
+> step** — the state it was already in before this release. Note this is the
+> fail-open-on-absence direction, which is NOT what the skew table below models:
+> that table is about a stale half refusing input it cannot validate. The sharp
+> edge there is *"An undeclared argument is refused, not stripped (#2312)"* —
+> checked, and it does not bite: `git diff` over `packages/signer/src/tools.ts`
+> across this range shows no `toolSchemas` schema change at all, only a
+> `Record<…>` → `as const satisfies Record<…>` annotation, so no new signer
+> argument exists to be refused.
+>
+> The x402 retry-target guards (`assertSecureX402RetryTarget` and siblings,
+> #3097) and the unsupported-transfer-method refusal (#3116) are additive at the
+> declaration level but **narrow runtime behaviour** in the fail-closed
+> direction — an old caller that relied on the paid retry following a
+> merchant-declared `http://` resource, or on a `permit2` entry being signed as
+> EIP-3009, now gets a typed refusal. Neither was a documented capability.
+>
+> `last-verified` is left as it stands: it **already reads 2026-09-19** from
+> #3116's change earlier today, so there is nothing to bump. This note is a
+> genuine re-read of the manifest table and the skew section rather than a
+> scoped check of one constant — but a date that is already correct does not get
+> re-stamped for the sake of it (#1366).
+
 > **Re-verification (0.3.0-alpha.0 release, 2026-09-17):** this release is a
 > **BREAK**, and the version says so — MINOR under the 0.x convention, the same
 > reason 0.2.0-alpha.0 was. It carries the naming-P5 contraction (#2914 /
@@ -637,10 +853,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.3.0-alpha.0` |
-| `@haven_ai/mcp` | `0.3.0-alpha.0` |
-| `@haven_ai/sdk` | `0.3.0-alpha.0` |
-| `@haven_ai/signer` | `0.3.0-alpha.0` |
+| `@haven_ai/connect` | `0.4.0-alpha.0` |
+| `@haven_ai/mcp` | `0.4.0-alpha.0` |
+| `@haven_ai/sdk` | `0.4.0-alpha.0` |
+| `@haven_ai/signer` | `0.4.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -741,6 +957,13 @@ not record here.
 
 ## Hosted-runtime connector profiles
 
+The SDK's parsed v2 payment requirements retain the merchant's advertised
+`maxTimeoutSeconds`, floored to an integer, for the `accepted` echo (#3117). SDK and local signer
+still bound the signed authorization lifetime separately; an offer can match
+its echo yet exceed that lifetime at facilitator verification. This changes
+neither tool arguments nor the funding-binding contract. Existing credentials
+and signer/backend combinations require no migration.
+
 For the hosted fast-settle path, the local signer may produce either the
 supported legacy x402 v1 envelope or the current v2 `{ x402Version, resource?,
 accepted, payload, extensions? }` envelope — since #2361 the signer echoes the
@@ -821,6 +1044,17 @@ detection it loses to it *loudly* — a printed notice naming the value that did
 nothing — because the detected client is the right write either way, and
 refusing there would turn every rollout window in which the dashboard learns a
 picker id before the published connector does into a hard failure.
+
+> **Recent re-verification (#3120):** the precedence ladder above is unchanged —
+> `--doctor`/`--repair` now resolve a runtime the same way when the `--runtime`
+> flag is ABSENT (explicit flag verbatim → the runtime recorded in the agent
+> directory's `last-connect-outcome.json` → unknown, never env-detection), but
+> with a flag present nothing moved: detection still beats a contradicting
+> hint, an explicit runtime still applies as given, `runtime_undetermined` /
+> `runtime_unrecognized` / `runtime_force_unrecognized` keep their codes and
+> allowed-value lists. The doctor's new unknown-runtime verdict reuses
+> `RUNTIME_FLAG_VALUE_LIST` for its prose, so the values it names cannot drift
+> from this ladder's vocabulary.
 
 ### Failure vocabulary for runtime selection (#1719)
 
@@ -943,9 +1177,11 @@ is Haven's hosted production backend, so a `haven` command run against another
 deployment without `--api` or `HAVEN_API_URL` reaches production rather than
 failing. That is a property of the CLI's own session, not of anything it hands the
 connector, and nothing in this paragraph changes because of it. And it is not a revoke: `--replace` retires the
-superseded directory **locally** (tombstone, then the `--unwire` key-material
-teardown, only once the runtime install actually completed — a failed install
-skips it and the outcome says so), and the owner still revokes on the Haven
+superseded directory **locally** (tombstone, then the unconditional key-material
+teardown — `--unwire` itself now runs that teardown only when its #3123 probe
+says there is nothing to preserve; `--replace` does not probe — only once the
+runtime install actually completed — a failed install skips it and the outcome
+says so), and the owner still revokes on the Haven
 agent page. The revoke route is owner-authenticated; the connector holds agent
 keys only.
 
@@ -1201,7 +1437,14 @@ run that replaced existing wiring (the latter names only the collision set that
 was actually retired — `superseded_agent_ids` is every other directory, named
 agents included, so the boolean is never to be read against it), and
 `error.superseded_agent_ids` / `error.suggested_name` on a `wiring_collision`
-refusal; and since #2528, also additive, `approval.url` — the absolute link to
+refusal; since #3122, also additive, `existing_agents_before_write` (always
+present on a completed run — the other live-keyed directories, named BEFORE the
+first write, with the account each spends from; a subset of
+`superseded_agent_ids`, which also names key-less and tombstoned directories)
+and `server_name_rebound_from`
+(only when the run took a server name over from another directory's local
+`mcp-server-binding.json`, with `backend_changed`); and since #2528, also
+additive, `approval.url` — the absolute link to
 this setup's budget approval, echoed from the register response and present
 only when `approval.required` is true AND the backend is new enough to return
 one, so a consumer must test for the key rather than assume it. The connector
@@ -1704,6 +1947,54 @@ true (unlike the signer's compatibility numbers above, which are point-in-time
 by design). See [`07-edge-signer.md`](../architecture/07-edge-signer.md) for
 what each server's instructions say and why they differ in length.
 
+## Typed next steps — the agent contract and its ratchet (epic #3105)
+
+Every response on a payment flow — success or refusal — tells the agent what
+to call next in structured fields, and those fields are typed end to end
+(#3100–#3104). Informational reads (`haven_get_agent`, `haven_get_allowances`,
+`haven_discover_tools` apart from its per-entry hints) carry none.
+
+- **The contract.** On a payment-flow response `next_action` (from
+  `AgentPaymentNextAction`) is present. When a tool follows, `next_tool` (`mcp__<server>__<tool>`, the
+  default server names), `next_tool_server`, `next_tool_name`,
+  `next_tool_server_role` (`hosted` | `signer` — the field to resolve against
+  your own server names) and `next_arguments` (spelled in the named tool's own
+  vocabulary and accepted by it verbatim) ride together. When no tool follows,
+  `next_tool` is absent — never null — and `next_tool_omitted_reason` says why.
+  A refusal carries the same fields a success does. Discovery entries carry
+  `suggested_tool` + `suggested_arguments` under the same rule, or
+  `suggested_tool_omitted_reason`.
+- **Where it is built.** The SDK's `createNextStepBuilder`
+  (`packages/sdk/src/next-step.ts`) over a target map; the hosted server, the
+  signer and the local runtime each declare the shapes they hand off to, and a
+  wrong key, a missing required key, an unregistered tool or an omitted
+  `nextTool` is a compile error at the site. Cross-surface handoffs are pinned
+  both ways in `packages/mcp-server/src/next-step-signer-parity.test.ts`:
+  every hosted emission fixture (19 fixtures for the 17 success sites, 28 for
+  the refusal steps) is built for real and its `next_arguments` parsed with the named tool's strict schema
+  on the surface its role names (hosted → hosted, hosted → signer from the
+  signer's built package); the signer's declared hosted shapes parse under the
+  hosted schemas; the local runtime's discovery hints parse under its own
+  tools in `packages/mcp/src/tools.test.ts`. Decision 9 rides along: an action with a default-table mapping names
+  its tool.
+- **The ratchet.** `npm run lint:next-steps` (`scripts/lint-next-steps.mjs`,
+  shrink-only, baseline `scripts/lint-next-steps-baseline.json` committed at
+  **zero**) counts, per file, emission blocks that name neither a tool nor a
+  reason (`unnamed`) and discovery entries without `suggested_arguments`
+  (`discovery_without_arguments`) across the hosted tools, the signer and the
+  local runtime. The numerator is defined in the script header, not grepped
+  loosely; the `wrongTool()` failure hints (the caller's own arguments) are
+  outside it by decision 7. Recorded run at the epic's head (#3104): **0 / 0**.
+  Positive control at the epic's base `4ed69592` (`--root=<tree>`): **44
+  unnamed + 2 discovery entries across 10 files** (43 under the pre-review
+  balanced-block rule; NAMED is tested over the emission's own top-level
+  keys, which finds one more `plain-http-x402.ts` block that a nested
+  literal had been naming). The gate runs in CI in the
+  hosted-server, signer and local-runtime jobs (each fires on its own
+  package's changes) and in `backend_checks` beside the request-schema
+  ratchet, and is self-tested (`lint:next-steps:test`). It is a step inside
+  those required contexts, not a new required context.
+
 ## Troubleshooting
 
 - **A stale local `dist/` masquerading as version skew (#1188).** The symptoms
@@ -1786,13 +2077,18 @@ what each server's instructions say and why they differ in length.
   existing local credentials, reinstall or reuse the pinned MCP runtime, and
   fail loudly if the wrapper handshake cannot list the required Haven tools.
 - **Tool naming across runtimes (#1588, corrected by #2550):** guidance
-  responses carry `next_tool` (Claude-family namespaced,
+  responses — since #3102 every hosted refusal, and since #3103 the edge
+  signer's refusals, which name hosted tools through the role fields for the
+  same reason — carry `next_tool` (Claude-family namespaced,
   `mcp__<server>__<tool>`, kept byte-identical for existing clients), the pair
   `next_tool_server` and `next_tool_name` (the bare tool name), and — since
-  #2550 — `next_tool_server_role`, one of `hosted` or `signer`.
+  #2550 — `next_tool_server_role`, one of `hosted` or `signer`; and — since
+  #3101 — `next_tool_omitted_reason` whenever no tool follows (`next_tool` is
+  then absent, never null).
   **Read the role, not the server name, whenever your servers are not the
   default pair.** `next_tool` and `next_tool_server` are built from a literal
-  in the hosted server, so they always say `haven` / `haven-signer`; that is
+  in the SDK's next-step builder (`NEXT_TOOL_SERVER_NAMES`, since #3101; the
+  hosted server before that), so they always say `haven` / `haven-signer`; that is
   the most the hosted server can know, because local server names are the
   client's config and never reach Haven. Two runtimes are already not the
   default: Codex names servers by config key — connect writes `haven_signer`
@@ -1820,6 +2116,26 @@ what each server's instructions say and why they differ in length.
   > the sidecar recorded, reports `stale or empty`. The repair action is
   > the same either way (`--doctor --repair`). Nothing else in this section
   > re-read.
+
+  > **Re-verified #3121:** three verdict levels. Every check and the report
+  > carry `level: ok | advisory | failed`; only `failed` reaches the exit
+  > code, so "exiting non-zero" above now means "on a failed check". The
+  > intact-but-outdated `signer_runtime` state from #2963 is an `advisory`
+  > (`!` marker, exit 0, both versions still named, `--repair` still
+  > offered), as is `superseded_agents` on a RECOGNISED runtime that owns no
+  > config file (Claude Code, `other`): the live keys are still named, and
+  > the check says why "wired" cannot be verified from this machine. `ok` on a check and on the report is derived (`true` unless
+  > `failed`) so `report.ok` stays the exit code's predicate for `--json`
+  > consumers; the report stays `version: 1`. A live key in a directory the
+  > readable config demonstrably does not use stays a failure, for every
+  > non-wired classification, and the unknown-runtime `runtime_config`
+  > verdict (#3120) stays a failure. A runtime string the connector does
+  > not recognise (`--runtime codex-clii`) is a new `runtime_config` failure
+  > of its own, naming the allowed values, and demotes nothing; a documented
+  > alias (`--runtime codex`) now resolves to its config file for the
+  > doctor's check, the repair's local-topology refusal and the repair's
+  > config write, instead of the "CLI-managed" skip and a repair that
+  > reported success having written nothing.
 
   The hosted MCP `tools/list` check proves only that its endpoint responds; it
   does not authenticate a bearer token. Credential verdicts instead use the
@@ -1934,8 +2250,8 @@ what each server's instructions say and why they differ in length.
   read as a success payload. That distinction earns its keep twice: `--doctor`'s
   success output *is* a JSON report (a failure record carries no `checks`), and
   `--unwire` reports `{"unwired": true}` with a **non-zero exit** when some
-  runtime entries were refused, which is a partial result rather than a
-  failure.
+  runtime entries were refused or the key-material teardown was retained
+  (#3123), which is a partial result rather than a failure.
 - **`--unwire [<dir>]` (#2169):** removes one agent's local wiring. Address
   the target by its credential directory, or resolve it with `--name <slug>`
   (or `--credentials-dir`). The positional value is always an existing
@@ -1946,6 +2262,69 @@ what each server's instructions say and why they differ in length.
   agent's hosted-MCP + local signer pair from every supported runtime config,
   removes its Hermes dotenv API-key line, and deletes the target directory's
   local signer, pending re-key, and stored API key.
+
+  > **Re-verified #3123:** the last step now ASKS before it destroys. A
+  > revoked agent's API key + delegate signature are exactly what the
+  > sweep-recovery routes still accept — the only local means of recovering a
+  > stranded delegate balance — so after the wiring is removed `--unwire` runs
+  > the one read it already has (`probeHostedAgentIdentity`, `GET
+  > /machine-payments/agent` with the stored key; no new network call, no
+  > backend change) and refuses to destroy the key material on every answer:
+  > `ok` (still active — revoke on the agent page first), `unauthorized` (a
+  > stranded balance MAY exist and the connector CANNOT check; the backend's
+  > 401 is deliberately ambiguous between revoked / archived / paused / rotated
+  > and the refusal says so), `network_error` / `bad_response` (unknown is not
+  > "safe to delete"). Only a directory with no stored API key + URL proceeds
+  > unprobed, as before. The refusal exits 1 with the wiring gone and the key
+  > left in the 0o600 credential file only — the config and Hermes-env copies
+  > are scrubbed BEFORE the decision (S3), so a refusal leaves the key in the
+  > credential file and in any config this run could not clean (reported
+  > `refused` / `unreadable`, never silently); `--doctor` then reports the directory as
+  > `superseded` until the key is revoked or destroyed, which is the honest
+  > state. `--destroy-key-material` proceeds on every answer and states that
+  > local recovery ends. `--json` carries an additive `teardown: { status:
+  > destroyed | retained | forced, probe, detail, remedy? }`. The `claude-code`
+  > copy of the key (`claude mcp add`, a config the connector does not own)
+  > stays out of `--unwire`'s scope, stated in the README. Companion:
+  > `--prune-signer-runtimes [--dry-run]` reclaims
+  > `~/.haven/signer-runtime/<key>` directories no credential directory's
+  > sidecar or wrapper names (walking the ROOT, so `override-<hash>`
+  > directories from #2424 are seen; the default agents root and an explicit
+  > `--credentials-dir`'s parent are read as a union; paths normalized on both
+  > sides), never one any credential directory names nor the current pin,
+  > reporting each entry through #3121's levels (a failed removal is the only
+  > exit 1); `--doctor` surfaces unused directories as the
+  > `signer_runtime_unused` advisory, names only — the size walk runs only in
+  > the prune itself. Also re-read in this pass: the
+  > `--replace` paragraph under the wiring-collision section (now states that
+  > `--replace`'s teardown is unconditional and unprobed) and the JSON-envelope
+  > bullet above (a retained teardown is the second non-zero-exit case).
+  > Nothing else in this document was re-verified in this pass.
+
+  > **Re-verified #3122:** a wallet warning is now emitted BEFORE the first
+  > credential write. Setup now reads every other credential directory's stored key and
+  > account (local files only — no network call is added, and the backend is
+  > not asked whether a key still authenticates) and logs `Heads-up (before
+  > anything is written): …` naming each agent and the account it spends from,
+  > then proceeds — it warns, it does not refuse (owner decision 1 on #3119);
+  > #2551's name-slot refusal is unchanged. `--json` gains
+  > `existing_agents_before_write` (always present on a completed run). Each
+  > setup writes a non-secret `mcp-server-binding.json` beside
+  > `last-connect-outcome.json` (server name → agent id, backend URL,
+  > bound-at; per credential directory, never machine-wide); a name another
+  > directory's record holds is named before the write with a DIFFERENT-backend
+  > flag (`server_name_rebound_from`) — the case the backend's
+  > `agents.mcp_server_name` cannot see. That backend column stays the
+  > authority for the same backend; the local record is a reporting aid and
+  > every message reading it says "locally recorded". `--unwire` releases the
+  > record (its `--json` record gains `binding_released`), and so does the
+  > `--replace` retirement (the setup outcome carries no such field);
+  > `--tombstone` leaves it, so `--doctor` ignores a RETIRED directory's record
+  > and reports two records claiming one name as the `mcp_server_name_rebound`
+  > advisory (#3121 level), excluding tombstoned (retired) directories only,
+  > absent otherwise. The #1688 completion heads-up is unchanged — #3122 ADDS
+  > the earlier notice, it does not move or remove the later one.
+  > Nothing else in this document was re-verified in this pass.
 
   This is local teardown, **not** backend revocation: Connect reports what it
   changed, while the owner revokes the agent on the Haven agent page. Named
@@ -2016,3 +2395,127 @@ what each server's instructions say and why they differ in length.
   informational, and nothing is deleted for you. Do not paste
   signer files, pending-rekey files, wrapper sidecars, or command output into
   public issues without redacting secrets.
+
+> **Re-verification (#3097, the paid retry's target, 2026-09-18):** this diff
+> touches `packages/mcp-server/src/tools/{plain-http-x402,contracts,paid-mcp-completion}.ts`,
+> `packages/mcp-server/src/tools/support/mcp-context.ts` and `packages/sdk/src/types.ts`
+> (the one SDK file in this document's coverage list; the SDK's x402 modules are
+> covered by `04-x402-payment-sequence.md`). Both surfaces keep their contracts; what is new is an optional `url` on
+> `haven_pay_x402_quote` / `haven_resume_x402_payment` (the URL the agent
+> quoted), `request_url` / `retry_url` / `resource_url_differs_from_request` on
+> the quote, `retry_url` on pay and resume, and the `INSECURE_RETRY_TARGET`
+> refusal of a public `http://` retry target — the same rule on the SDK's
+> `McpMerchantTransport.deliverPayment` seam, which the local runtime crosses. The
+> local/hosted divergence this document describes is unchanged: the local
+> runtime always retried the caller's URL; the hosted surface now carries it.
+> Scope of this note: those fields and that refusal. Nothing else in this
+> document was re-verified.
+
+> **Re-verification (#3100, discovery hands out arguments its suggested tool
+> accepts, 2026-09-18):** this diff touches the hosted `haven_discover_tools` map (`src/tools/catalog-purchase.ts`), the strict-refusal builder (`src/tools/registry.ts`) and the `STRICT_INPUT_TOOLS` reason for `haven_quote_x402` (`src/tools/contracts.ts`), plus the local runtime's discovery map (`packages/mcp/src/tools.ts`). Additive on the read side:
+> every discovery entry gains `suggested_arguments` in the suggested tool's
+> vocabulary (hosted MCP entries now suggest the cap-free
+> `haven_quote_catalog_purchase { catalog_id }` instead of prepare; HTTP entries
+> `haven_quote_x402 { url }`; the local runtime keeps its pay tools with
+> `{ merchant_url, tool_name, arguments }` / `{ url }`), and a hosted strict
+> refusal now names the declared keys and a rejected key's declared alias
+> (`TOOL_ARGUMENT_ALIASES` + folded-spelling equality) on both the handler and
+> the transport parse paths. No tool name, schema key, strict/permissive split,
+> expected-context version or signer contract changes; the local/hosted
+> divergence this document records is unchanged (the two surfaces suggest
+> different tools by design — same property, not the same values). The
+> `haven_quote_x402` reason no longer claims the hosted surface has no body
+> field (it has had one since #2366). A row no verbatim hint exists for (no
+> `tool_name`; hosted: degraded) carries `suggested_tool_omitted_reason` on
+> both surfaces instead of a hint. Scope of this note: those fields and that
+> text. Nothing else in this document was re-verified.
+
+> **Re-verification (#3101, the typed next-step builder, 2026-09-18):** this
+> diff adds `packages/sdk/src/next-step.ts` (the builder, exported from the
+> SDK's `index.ts`) and touches `packages/mcp-server/src/tools/support/{guidance,errors}.ts`,
+> `packages/mcp-server/src/tools/{contracts,catalog-purchase,plain-http-x402,paid-mcp-completion,state-direct-recovery}.ts`,
+> `packages/mcp-server/src/server.ts` (instructions name the omitted-reason
+> field), the SDK's `types.ts` (a new optional `next_tool_omitted_reason` on
+> `AgentNextStep`) and `skill-content.ts`, and, annotation only,
+> `packages/signer/src/tools.ts` and `packages/mcp/src/tools.ts`. The
+> hosted `next_tool` family is now rendered by the SDK's builder from a bare
+> tool name + server role over a target map derived from the hosted
+> `toolSchemas` (which keeps its keys via `as const satisfies`) plus the two
+> signer handoff shapes the hosted server declares itself — it never imports
+> the edge signer at runtime; a test pins them to the signer's schemas; the
+> wire strings are byte-identical on the 9 sites the epic did not re-decide,
+> and all 17 `buildAgentGuidance` call sites (a census the characterization
+> test enforces — an 18th site fails it) are pinned by
+> `next-step-characterization.test.ts`, the 8 re-decided ones marked. New on the wire:
+> `next_tool_omitted_reason` wherever no tool is named (the three refusals
+> that used to hand `{ payment_id: null }` to a tool requiring a string, the
+> recovery module's own-HTTP-retry step, the report-accepted step and the
+> three settled done-states), and the same `next_tool` family on refusals
+> whose `HostedToolError` carries a step. No tool name, schema key,
+> strict/permissive split, expected-context version, signer contract, cap,
+> funding, signing or settlement decision changes; the local runtime's
+> `nextAction` emission is untouched (slice #3103). Scope of this note: those
+> fields. Nothing else in this document was re-verified.
+
+> **Re-verification (#3102, every hosted refusal names its next step, 2026-09-18):**
+> this diff touches `packages/mcp-server/src/tools/support/{errors,guidance,cap-price,catalog-entry,mcp-context}.ts`
+> and `packages/mcp-server/src/tools/{catalog-purchase,plain-http-x402,paid-mcp-completion}.ts`.
+> `HostedToolError` no longer takes a bare `nextAction`: a refusal thrown as a
+> `HostedToolError` names an action only through a typed `nextStep`
+> (`refusalNextStep`, the same builder and target map as the success path),
+> so each of the 28 refusal steps (27 sites, one of them following the live
+> payment state) now also carries either a tool with arguments that tool declares
+> (six name a tool: `haven_get_payment_status { payment_id }` on the
+> post-funding timeout, the erc7710 rejection and an eip3009 rejection whose
+> live state says retry or poll; `haven_sweep_delegate {}` on the eip3009
+> rejection and the funded insecure-target branch, as their messages say) or `next_tool_omitted_reason` (every stop-and-tell-user,
+> retry-with-explicit-context, fund-account and window-expired refusal). The
+> one other hosted refusal shape, the SDK's `HavenPaymentStateError` passed
+> through `normalizeError`, takes its step from the per-action default table
+> (status read, sweep) or says why none follows, so no hosted refusal carries
+> a bare `next_action`. `next_action` and `suggested_tool` are byte-identical
+> on every refusal, pinned by `next-step-refusals-characterization.test.ts`
+> (written before the change; a census of `refusalNextStep` calls enforces the
+> 27); `status`, `phase`, `rail` and `retry_with_new_quote` are untouched by
+> the diff and pinned where they were, in `tools.test.ts` and
+> `paid-mcp-completion.test.ts`. No tool name, schema
+> key, cap, funding, signing or settlement decision changes; the local
+> runtime is untouched (slice #3103). Scope of this note: those fields.
+> Nothing else in this document was re-verified.
+
+> **Re-verification (#3104, cross-surface handoff parity and the ratchet,
+> 2026-09-18):** this diff adds `scripts/lint-next-steps.mjs` (+ test +
+> zero baseline, wired in `ci.yml` and `package.json`), moves the hosted
+> next-step fixtures to `packages/mcp-server/src/test-support/next-step-fixtures.ts`,
+> and extends `packages/mcp-server/src/next-step-signer-parity.test.ts` into
+> the cross-surface walk: every hosted emission fixture is built for real and
+> its arguments parsed with the named tool's strict schema on the surface its
+> role names. No emission, tool name, schema key or decision changes; the epic's
+> contract as it stands after #3100–#3103 is what the walk and the ratchet
+> hold. Scope of this note: the tests and the gate. Nothing else in this
+> document was re-verified.
+
+> **Re-verification (#3103, the signer and the local runtime name a next tool,
+> 2026-09-18):** this diff adds `packages/signer/src/next-step.ts` (the signer's
+> declared hosted handoff shapes — `haven_get_payment_status { payment_id }` —
+> and its refusal-side builder over the SDK's) and touches
+> `packages/signer/src/{sign-context,tools,index}.ts` and `packages/mcp/src/tools.ts`.
+> The signer's five decision sites now carry a typed step beside `next_action`:
+> a backend refusal of the signing context (not expired) names the hosted
+> status read with the payment id through the role fields
+> (`next_tool_server_role: hosted`, `next_tool_name`), so a `--name <slug>`
+> install resolves it; a transport failure, a malformed body, an expired window
+> and a version skew name no tool and say why (`next_tool_omitted_reason`).
+> `HavenSignContextError` gains the optional `next_tool*` fields additively;
+> no signing decision, expected-context version or binding version changes.
+> The local runtime's failure envelope dual-emits `nextAction` and
+> `next_action` (decision 10, one release before the old spelling is dropped;
+> this supersedes the #2983 note's "its failure shape is camelCase") and its
+> two decision sites — the ones the signer's symmetric grep returns
+> (`nextAction: …` or `nextAction = …`): the `MERCHANT_NOT_READY` envelope
+> and the `UNKNOWN_ERROR` fallback — say why no tool follows.
+> Every field the refusals emitted before is byte-identical, pinned by
+> `next-step-characterization.test.ts` in each package (written before the
+> change). The hosted server's suite pins the signer's declared shapes to the
+> hosted schemas. Scope of this note: those fields. Nothing else in this
+> document was re-verified.

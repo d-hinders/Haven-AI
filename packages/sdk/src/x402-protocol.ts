@@ -15,9 +15,11 @@ import type {
 } from './types.js'
 import {
   buildX402IdempotencyKey,
+  isErc7710Option,
   resolveTokenFromAddress,
   selectErc7710PaymentOption,
   selectStandardPaymentOption,
+  x402AssetTransferMethod,
   x402AuthorizationAmount,
 } from './x402.js'
 import { paymentStateStatusCode } from './payment-state.js'
@@ -176,6 +178,20 @@ export function noCompatiblePaymentOptionError(
   accepts: X402PaymentOption[],
 ): HavenApiError {
   const erc7710Only = selectErc7710PaymentOption(accepts) !== null
+  // #3116: when the refusal's real reason is a transfer method / payment flow
+  // this SDK cannot construct, say so — the same honesty rule #2054 applied
+  // to the erc7710 tag. Detected WITHOUT the supported-vocabulary sets, so a
+  // future supported entry cannot reclassify a merchant as unsupported.
+  const unsupportedOnly =
+    !erc7710Only &&
+    accepts.some(
+      (opt) =>
+        opt !== null &&
+        typeof opt === 'object' &&
+        !isErc7710Option(opt) &&
+        (x402AssetTransferMethod(opt) !== null ||
+          opt.extra?.paymentFlow !== undefined),
+    )
   return new HavenApiError(
     'No compatible payment option found in x402 requirements. ' +
       'Haven supports standard x402 exact payments on Base USDC.' +
@@ -185,7 +201,12 @@ export function noCompatiblePaymentOptionError(
           'payment path cannot settle — the limitation is the settlement scheme, not the ' +
           'asset. Paying this merchant requires a delegation-rail erc7710 flow ' +
           '(settleX402Erc7710, or the hosted MCP purchase tools).'
-        : ''),
+        : unsupportedOnly
+          ? ' Every option this merchant advertises asks for a transfer method or payment ' +
+            'flow Haven cannot construct (for example extra.assetTransferMethod: \'permit2\', ' +
+            'or an unrecognized extra.paymentFlow). No payment intent was created and no ' +
+            'funds moved.'
+          : ''),
     400,
   )
 }
@@ -222,6 +243,11 @@ export function buildX402Quote(
     request,
     ...(mcpTransport ? { mcpTransport } : {}),
     resourceUrl: paymentRequired.resource.url,
+    // #3097: the merchant's declaration vs the URL the caller quoted. The
+    // paid retry goes to the caller's URL; a quote that says the two disagree
+    // is how an agent sees a challenge that downgrades the scheme or moves
+    // the host before it pays.
+    resourceUrlDiffersFromRequest: paymentRequired.resource.url !== request.url,
     description: paymentRequired.resource.description ?? option.description ?? null,
     mimeType: paymentRequired.resource.mimeType ?? option.mimeType ?? null,
     amountAtomic: x402AuthorizationAmount(option),

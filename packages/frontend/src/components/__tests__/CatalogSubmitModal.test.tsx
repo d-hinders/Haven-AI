@@ -154,6 +154,33 @@ describe('CatalogSubmitModal (#1715)', () => {
     expect(honeypot?.parentElement?.className).toContain('absolute')
   })
 
+  it('passes merchant name and website as a second argument when given (#3078)', async () => {
+    mockSubmitCatalog.mockResolvedValue({
+      id: 'sub-1',
+      verify_token: 'tok-123',
+      status: 'submitted',
+    })
+    mockGetSubmissionStatus.mockResolvedValue(submitStatus('submitted'))
+    renderModal()
+
+    fireEvent.change(screen.getByLabelText('Resource URL'), { target: { value: URL } })
+    fireEvent.change(screen.getByLabelText('Merchant name (optional)'), {
+      target: { value: 'Merchant Example' },
+    })
+    fireEvent.change(screen.getByLabelText('Merchant website (optional)'), {
+      target: { value: 'https://merchant.example' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Submit for verification' }))
+      await Promise.resolve()
+    })
+
+    expect(mockSubmitCatalog).toHaveBeenCalledWith(URL, {
+      name: 'Merchant Example',
+      website: 'https://merchant.example',
+    })
+  })
+
   it('submits, then shows the token, the one-line well-known instruction and both proof options', async () => {
     mockSubmitCatalog.mockResolvedValue({
       id: 'sub-1',

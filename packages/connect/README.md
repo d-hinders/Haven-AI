@@ -87,12 +87,38 @@ every credential directory on the machine and classifies each one:
 | `retired` | Tombstoned (see below); key material removed. |
 | `orphaned` | No usable identity and no tombstone. |
 
-The exit code is non-zero if **any** wired agent fails **any** check — not
+The exit code is non-zero if **any** wired agent fails **any** check
+(`level: failed` — see the next section; an advisory does not count) — not
 only the one the report's main section describes. In `--json`, the same
 information is on `agents[]`, each entry carrying `slug`, `agentId`,
 `directory`, `classification` and its own `checks[]`; the flat `checks` array
 is retained and still describes one agent, so a single-agent install reads as
 it always did.
+
+### Three verdicts, not two (#3121)
+
+Every check carries a `level` — `ok`, `advisory` or `failed` — and the report
+carries the rolled-up `level` over the flat checks and every wired agent's
+checks. Only `failed` reaches the exit code; an advisory is printed with a `!`
+marker, gets its own summary line ("No failures. N advisory finding(s)") and
+exits 0. `ok` on a check and on the report is kept for `--json` consumers and
+means "nothing is broken": it is `true` for `ok` and `advisory`, `false` only
+for `failed`, so `report.ok` is always the exit code's predicate. The doctor
+report stays `version: 1`; `level` is additive.
+
+| Level | Meaning | Example |
+| --- | --- | --- |
+| `ok` | Nothing to say. | The installed signer matches the connector's pin. |
+| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered); `signer_runtime_unused` (#3123): runtime directories nothing references; `mcp_server_name_rebound` (#3122): two local binding records claim one server name. `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
+| `failed` | A real failure with one repair action. Exit 1. | A stale or empty runtime directory; a live key in a directory the runtime's config demonstrably does not use. |
+
+What stays blocking is live spend authority: a directory whose stored key
+still authenticates and whose classification is not `wired` fails the run, for
+every non-wired classification, whenever the runtime config could be read. The
+classification itself does not change on Claude Code — only the severity of
+the check that reads it — so `agents[]` reads as before. A runtime string the
+connector does not recognise (`--runtime codex-clii`) is not "no config": it
+fails `runtime_config` naming the allowed values, and demotes nothing.
 
 One check is worth calling out: **`identity_match`** compares the agent the
 stored API key actually authenticates as against the `delegate_address` in
@@ -165,13 +191,80 @@ npx @haven_ai/connect@<channel> --unwire --name research [--reason "..."]
 touches local files only, so any published connector does the same job.
 
 It tombstone-first (so a stale long-lived host still hears `HAVEN-TOMBSTONE`,
-never a masked `ENOENT`), then removes THAT agent's hosted + signer pair from
+never a masked `ENOENT`), releases the directory's local server-name binding
+record (#3122, whatever the key-material decision below), then removes THAT
+agent's hosted + signer pair from
 every runtime config it appears in (Hermes YAML, Codex TOML, the Cursor / VS
 Code / Insiders / Claude Desktop JSON configs), plus the Hermes dotenv API-key
-line — bare `MCP_HAVEN_API_KEY` or named `MCP_HAVEN_<SLUG>_API_KEY`. Finally it
-tears down the target directory's local key material (signer key, any abandoned
-re-key, the stored API key) so `--doctor` reports `retired`, not the
-still-spend-capable `superseded`; the #2155 tombstone mirror keeps the record.
+line — bare `MCP_HAVEN_API_KEY` or named `MCP_HAVEN_<SLUG>_API_KEY`. Then it
+decides about the target directory's local key material (signer key, any
+abandoned re-key, the stored API key) — and since #3123 it **asks before it
+destroys**.
+
+#### Teardown refuses before destroying the recovery credential (#3123)
+
+A revoked agent's API key and delegate signature are exactly what the
+sweep-recovery routes still accept — they are the only local means of
+recovering a stranded delegate balance. So after the wiring is removed,
+`--unwire` runs the one read it has (the identity probe, `GET
+/machine-payments/agent` with the stored key — no new network call, no
+backend change) and **refuses to destroy the key material on every answer**:
+
+| Probe | What it means | What `--unwire` does |
+| --- | --- | --- |
+| `ok` | The agent is still active: its key still spends. | Refuses; tells you to revoke on the Haven agent page (connect never revokes), then re-run. |
+| `unauthorized` | The key no longer authenticates on normal routes (revoked, archived, paused, pending approval, rotated, or not a key the backend knows — it does not say which). | Refuses; says plainly that a stranded balance **may** exist and the connector **cannot check**; recover first (`haven_sweep_delegate`, or the agent page). |
+| `network_error` / `bad_response` | Could not verify. | Refuses: unknown is not "safe to delete". Retry. |
+| *(no stored API key + URL)* | Nothing the recovery routes would accept. | Proceeds, unprobed — the pre-#3123 shape. |
+
+The refusal is exit 1 with the wiring already gone; the key stays in the
+0o600 credential file only (the config and Hermes-env copies are scrubbed
+first, so a refusal leaves the key in the credential file and in any config
+this run could not clean — those are reported `✗` above, never silently),
+and `--doctor` keeps reporting the directory as `superseded` until the key is
+revoked or destroyed — that is the honest state. **`--destroy-key-material`**
+proceeds on every answer, states what it destroyed and that local recovery
+of a stranded balance ends with it. In `--json` the record carries an
+additive `teardown: { status: destroyed | retained | forced, probe, detail,
+remedy? }` and, since #3122, `binding_released` (whether a local
+`mcp-server-binding.json` was removed).
+
+The `claude-code` copy of the key (written by `claude mcp add`, into a config
+the connector does not own) is out of scope for `--unwire`, as it always was:
+remove it with `claude mcp remove haven` / `haven-signer` (or the named
+pair) yourself; `--doctor --runtime claude-code` cannot see it either.
+
+### Pruning signer-runtime directories (`--prune-signer-runtimes`, #3123)
+
+Every pinned version — and, since #2424, every `HAVEN_*_SPEC` override — gets
+its own `~/.haven/signer-runtime/<key>/`, and nothing reclaimed them:
+
+```
+npx @haven_ai/connect@<channel> --prune-signer-runtimes --dry-run
+npx @haven_ai/connect@<channel> --prune-signer-runtimes
+```
+
+It walks the root (so override-keyed `override-<hash>` directories are seen,
+not only manifest versions), **keeps** every directory any credential
+directory names — through its `signer-runtime.json` or through the path its
+wrapper launches — wired, superseded or retired; the prune never decides who
+is live — and the connector's current pin (what
+`--repair` installs), and removes the rest, reporting each with a #3121
+level: kept/removed are `ok`, a dry-run candidate is an `advisory`, a removal
+that failed (a signer process still holding the directory open on a platform
+that refuses the unlink) is `failed` and the only thing that exits 1. On
+POSIX a running signer keeps its open files until it restarts, and since
+only directories no sidecar and no wrapper names go, a configured agent is
+not started against a removed one. The prune trusts those two reference
+sources (the sidecar's `runtime_directory` and the path the wrapper
+launches — so a directory whose sidecar is missing or corrupt but whose
+wrapper is intact keeps its runtime); it reads the default agents root AND
+the parent of an explicit `--credentials-dir`, a union, never either/or. It
+is its own flag — never part of `--repair`, never automatic; `--doctor`
+reports unused directories as an advisory (`signer_runtime_unused`) that
+names this command — names only; sizes come from `--dry-run`, and a kept
+directory is never sized (its row says "not sized"). `--json` emits
+`{ pruned: true, version: 1, root, dry_run, level, removed, reclaimed_bytes, entries[] }`.
 
 An **unnamed** pair (`haven` / `haven-signer`) is shared by every unnamed agent
 and is only removed when this directory's wrapper is the one the config
@@ -180,6 +273,67 @@ launches (or its key is the one the Hermes env holds) — otherwise `--unwire`
 revoked on the backend; `connect reports, the user decides` (#1688) survives,
 and revocation stays an owner action on the Haven agent page. Restart every
 long-lived host afterwards, as with any retirement.
+
+### The wallet warning arrives before the write; names are bound locally (#3122)
+
+Setup guards the **name slot** (a taken `--name`, the bare pair already wired
+— #2551 refuses or asks) but never the **wallet**: a machine can carry several
+agents with live keys, and until #3122 the "your previous agent(s) still exist
+with their own keys" heads-up was printed only after the credentials were
+written (that completion heads-up, #1688, is unchanged — this slice ADDS an
+earlier notice). Two things changed, both from local files only (no network call is
+added; the backend is not asked whether any key still authenticates):
+
+- **Before the key is minted or anything is written**, setup names every
+  other credential directory that still holds a stored key, with the account
+  it can spend from — `Heads-up (before anything is written): this machine
+  already carries N agent director(y/ies) with stored keys — <id> (spends
+  from 0x…)`. It **warns, it does not refuse** (owner decision on #3119): a
+  refusal would change behaviour for every non-interactive caller, including
+  the dashboard's connect flow. `--json` carries the same list as
+  `existing_agents_before_write: [{ agent_id, account_address }]`, always
+  present on a completed run (`[]` on a clean machine) — a subset of
+  `superseded_agent_ids`, which names every other directory that has an
+  `identity.json` at all, key-less and tombstoned ones included.
+  "Holds a stored key" is the whole test: a tombstoned directory whose key
+  files were never deleted is counted (it can still spend), which is the
+  opposite side of the doctor's rule that ignores a retired directory's
+  binding record (it launches nothing). The scan covers exactly the credential
+  root this run writes into — `~/.haven/agents`, or the root given by
+  `--credentials-dir` — and never unions the two (#2551's collision check uses
+  the same root; `--doctor` shares the no-union rule but reads its
+  `--credentials-dir` as the agent directory itself, so its root is that
+  directory's parent; #3123's union was for the one shared `signer-runtime`
+  root).
+- **Each setup records what it bound** in a non-secret
+  `mcp-server-binding.json` beside `last-connect-outcome.json`: `{ version:
+  1, server_name, signer_name, agent_id, api_url, hosted_mcp_url?, bound_at }`
+  — no key material, by construction (pinned by test). Per credential
+  directory, not machine-wide: two concurrent setups never write the same
+  file, and "who else claims this name" is answered by scanning the root,
+  which setup and the doctor already do. When a setup is about to bind a
+  server name another directory's record holds, it says so before the write —
+  previous agent (the NEWEST holder when several records claim the name),
+  previous backend URL, when — and flags a **DIFFERENT backend** explicitly, because that is the case the backend cannot see and
+  the one that silently repoints a saved session; `--json` carries it as
+  `server_name_rebound_from: { server_name, agent_id, api_url, bound_at,
+  backend_changed }`. `--unwire` releases the record (its `--json` gains
+  `binding_released`), and so does a `--replace` retirement, so a legitimately
+  free name does not warn forever; `--tombstone` leaves it, and `--doctor`
+  ignores a retired directory's record. `--doctor` reports two records
+  claiming one name — excluding tombstoned (retired) directories — as the
+  `mcp_server_name_rebound` advisory (oldest → newest, backend change
+  flagged). The record is written
+  after the credentials, best-effort: a directory with credentials and no
+  record (a crash in between, or one retired by hand) is not proof the name
+  is free — the absence of a warning is not a guarantee, as with
+  `superseded_agent_ids`.
+
+**What wins when the local record disagrees with the backend.** The backend's
+`agents.mcp_server_name` is the authority for the same backend; the local
+record is a reporting aid that covers the two cases the backend cannot —
+another backend, or offline — and it never asserts itself as the backend's
+current truth. Every message that reads it says "locally recorded".
 
 ### Structured output for automation
 
@@ -192,9 +346,12 @@ whenever ready and verify later with the read-only `haven_get_agent`
 tool. The object includes runtime/topology status,
 probe result, activation and next-action guidance, approval state/expiry (null
 when the backend does not provide an approval expiry) and `approval.url`, the two
-read-only verification tools, `hosted_mcp_url`, `superseded_agent_ids`, and —
-on a run that replaced existing wiring — `superseded_agents_retired_locally`
-with `retired_agent_ids`. It
+read-only verification tools, `hosted_mcp_url`, `superseded_agent_ids`,
+`existing_agents_before_write` (#3122 — the other live-keyed directories named
+before the first write, each with the account it spends from), and — on a run
+that replaced existing wiring — `superseded_agents_retired_locally` with
+`retired_agent_ids`; `server_name_rebound_from` (#3122) appears only when the
+run took a server name over from another directory's local binding record. It
 contains no API key, private key, credential
 contents, full credential paths, or full delegate address. The same redacted
 object is available to library callers as `runConnect(...).outcome`; the older
@@ -361,9 +518,11 @@ already-configured machine behaves as follows (characterized in
   managed Codex/Hermes equivalents) and re-points them at the new agent's
   credentials; unrelated MCP servers and configuration are preserved. Once
   the runtime install has actually completed, each superseded directory is
-  tombstoned and its local key files removed — the same teardown `--unwire`
-  performs — so `--doctor` reads it as `retired` rather than still
-  spend-capable. If the install ends with an error code the retirement is
+  tombstoned and its local key files removed — the unconditional key-material
+  teardown; `--unwire` itself runs that teardown only when its #3123 probe says
+  there is nothing to preserve, and `--replace` deliberately does not probe
+  (the owner has just chosen to overwrite; see the #3119 follow-up) — so
+  `--doctor` reads it as `retired` rather than still spend-capable. If the install ends with an error code the retirement is
   **skipped**, because the old wiring may still be the only working one; the
   outcome's `superseded_agents_retired_locally` says which happened and
   `retired_agent_ids` names exactly the directories it reached. With
@@ -496,9 +655,9 @@ the agent credential files, the pinned signer runtime install (and, since
 see the last section of this file), the hosted MCP
 (authorized `tools/list`), and starts the local signer for a real stdio
 handshake — reporting its advertised compat versions. Every failing check
-prints one concrete repair action; the exit code is non-zero on any failure.
-Add `--json` for a machine-readable report. No secret material is ever
-printed.
+prints one concrete repair action; the exit code is non-zero on any failure
+and zero on an advisory (see "Three verdicts, not two" above). Add `--json`
+for a machine-readable report. No secret material is ever printed.
 
 `--doctor` also probes every OTHER agent credential directory it did not
 select (#1688). A re-run of setup mints a NEW agent and, unless it ran with

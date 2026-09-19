@@ -885,6 +885,45 @@ describe('x402 delegation-rail settlement (#830)', () => {
     }))
   })
 
+  // #3117: settle echoes the stored challenge's own matching offer, so a
+  // caller whose decomposed fields disagree with the challenge it sent has
+  // nothing to echo. That must be a 400 HERE, not a 409 at settle — by then
+  // the agent has signed the child and every retry fails identically.
+  it.each([
+    { label: 'a maxTimeoutSeconds the challenge does not advertise', body: { maxTimeoutSeconds: 60 }, expect400: true },
+    { label: 'a facilitator the challenge does not advertise', body: { facilitatorAddresses: [`0x${'ee'.repeat(20)}`] }, expect400: true },
+    { label: 'fields taken from the advertised option', body: {}, expect400: false },
+  ])('authorize refuses $label before any child is signed', async ({ body, expect400 }) => {
+    const advertised = {
+      scheme: 'exact', network: 'eip155:84532', amount: '100000', asset: USDC, payTo: MERCHANT,
+      maxTimeoutSeconds: 300,
+      extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [`0x${'fa'.repeat(20)}`] },
+    }
+    mockSelect.mockResolvedValue({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({
+        settlementScheme: 'erc7710',
+        facilitatorAddresses: [`0x${'fa'.repeat(20)}`],
+        paymentRequired: { x402Version: 2, resource: { url: 'https://merchant.example/resource' }, accepts: [advertised] },
+        ...body,
+      }),
+    })
+    if (expect400) {
+      expect(res.statusCode).toBe(400)
+      expect(res.json().error).toMatch(/does not advertise one erc7710 option/)
+      expect(mockCreateIntent).not.toHaveBeenCalled()
+    } else {
+      expect(res.statusCode).toBe(201)
+    }
+  })
+
   it('persists delegate_account_address into machine_metadata on BOTH delegation branches (#2960 write path)', async () => {
     // Same discipline as the #1307/#1355 write-path tests above: prove the
     // authorize call STORES the delegate account, or dropping the metadata
@@ -1371,7 +1410,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
   // the settle envelope VERBATIM — the live bisection on #2360 proved a
   // strict facilitator rejects the echo-less envelope outright, and the
   // stored copy is the merchant's own bytes rather than a reconstruction.
-  it('settle echoes the stored challenge resource and extensions (#2361)', async () => {
+  it.each([false, true])('settle echoes matching stored requirements or refuses mismatched ones (mismatch=%s)', async mismatch => {
     const childFixture = JSON.parse(JSON.stringify(buildBudgetDelegation({
       agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
       delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
@@ -1397,7 +1436,11 @@ describe('x402 delegation-rail settlement (#830)', () => {
           // The #1355 verbatim blob, as a JSONB-parsed object.
           machine_metadata: {
             network: 'eip155:84532', settlement_scheme: 'erc7710',
-            payment_required: { x402Version: 2, resource, accepts: [], extensions },
+            payment_required: { x402Version: 2, resource, accepts: [{
+              scheme: 'exact', network: 'eip155:84532', amount: mismatch ? '999' : '1000',
+              payTo: MERCHANT, asset: USDC, maxTimeoutSeconds: 300,
+              extra: { assetTransferMethod: 'erc7710', name: 'USD Coin', version: '2', merchant: { tiers: ['a'] } },
+            }], extensions },
           },
         }] })
       }
@@ -1409,6 +1452,13 @@ describe('x402 delegation-rail settlement (#830)', () => {
       headers: { authorization: 'Bearer sk_agent_test' },
       payload: { signature: await signChild(childFixture) },
     })
+    if (mismatch) {
+      // Deterministic, so 409 + re-authorize rather than a retryable 502.
+      expect(res.statusCode).toBe(409)
+      expect(res.json().error).toMatch(/re-authorize/)
+      expect(mockQuery.mock.calls.some(c => /status = 'submitted'/.test(String(c[0])))).toBe(false)
+      return
+    }
     expect(res.statusCode).toBe(200)
     const decoded = JSON.parse(Buffer.from(res.json().payment_header, 'base64').toString('utf8'))
     expect(Object.keys(decoded).sort()).toEqual(
@@ -1416,6 +1466,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     )
     expect(decoded.resource).toEqual(resource)
     expect(decoded.extensions).toEqual(extensions)
+    expect(decoded.accepted.extra).toEqual({ assetTransferMethod: 'erc7710', name: 'USD Coin', version: '2', merchant: { tiers: ['a'] } })
   })
 
   // The metadata-less (pre-#1355) fallback is pinned by the CHARACTERIZATION

@@ -701,7 +701,17 @@ export function createX402PaymentProcessor(
       return (await promise).payment
     } finally {
       nextAttempt.promise = undefined
-      if (!nextAttempt.txHash && !settled.has(productKey)) {
+      // #3099: an attempt with no tx hash is over — either `submit` threw (retry
+      // must resubmit) or the chain said the authorization was already used
+      // (the `settled` cache now answers every later call for this key before
+      // `attempts` is consulted, and a different product is refused by the
+      // `settled` prefix scan above). The clause `&& !settled.has(productKey)`
+      // that used to guard this delete was unreachable in any observable way,
+      // so it is gone rather than left as a guard nothing can test. The delete
+      // itself IS observable: after a generic submit failure a different
+      // product on the same authorization must not be refused by the stale
+      // in-flight record — pinned by the test that mutates this `if` away.
+      if (!nextAttempt.txHash) {
         attempts.delete(paymentKey)
       }
     }

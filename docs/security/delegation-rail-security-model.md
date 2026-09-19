@@ -338,6 +338,17 @@ chain.
 > `ANY(...)` — the same ownership property, written differently. An earlier
 > draft of this note said `WHERE user_id = $1` flatly; review measured it.
 
+> **Re-verified #3093 (frontend hooks: array wire keys default to `[]`):** this
+> diff touched one file in this document's coverage list,
+> `hooks/useDelegationBudget.ts`, by one expression: `setBudgets(res.delegations)`
+> became `setBudgets(res.delegations ?? [])`, so a `GET /agents/{id}/delegations`
+> answer without the key renders an empty budget card instead of sending the
+> route into the ErrorBoundary. Nothing this document describes moves —
+> `pickSigningPath`, the passkey/EOA dispatch, the grant/revoke ceremonies and
+> the signer-set read (`/account-signers`) are untouched; a missing key was
+> never a security state, only a crash. Scope of this note: that one
+> expression. Nothing else in this document was re-verified.
+
 > **Re-verified #2912 (naming epic #2906, phase 3b — the `account_type` data
 > migration):** this diff touched one file in this document's coverage list,
 > `infra/repositories/smart-accounts.ts`, and only its comment: the retired

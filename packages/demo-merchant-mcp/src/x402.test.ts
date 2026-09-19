@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
 import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
+import { x402ResourceServer } from '@x402/core/server'
 import {
+  AuthorizationAlreadyUsedError,
   createX402PaymentProcessor,
   DEMO_MERCHANT_EXTENSIONS,
   PaymentError,
@@ -207,6 +209,69 @@ describe('x402 payment verification and settlement', () => {
 
     expect(first).toBe(second)
     expect(submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('an authorization the chain says already moved money settles as already_settled_earlier, is cached, and refuses a different product (#3099)', async () => {
+    // #1519 recovery path, end to end: the first submit throws the chain's
+    // "already used" answer; the processor must record the settlement (the
+    // goods are owed), answer the same product from the cache without a
+    // second submit, and refuse a DIFFERENT product on the same authorization.
+    // Pinned by mutation: dropping `settled.set(productKey, entry)` in that
+    // branch resubmits on the second call.
+    const submit = vi
+      .fn<SettlementClient['submit']>()
+      .mockRejectedValueOnce(new AuthorizationAlreadyUsedError('nonce 0xdead already used'))
+    const { processor } = makeProcessor({ submit })
+    const pr = paymentRequired()
+    const header = await signedHeader(pr)
+    const input = {
+      productId: 'vpn_basic' as const,
+      paymentHeader: header,
+      merchantAddress: MERCHANT,
+      expectedAmount: 1_000n,
+      paymentRequired: pr,
+    }
+
+    const first = await processor.verifyAndSettle(input)
+    expect(first.settlement).toBe('already_settled_earlier')
+    expect(submit).toHaveBeenCalledTimes(1)
+
+    const second = await processor.verifyAndSettle(input)
+    expect(second).toBe(first)
+    expect(submit).toHaveBeenCalledTimes(1)
+
+    await expect(processor.verifyAndSettle({ ...input, productId: 'vpn_pro' as const })).rejects.toThrow(
+      'already settled a different product',
+    )
+    expect(submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('a generic submit failure clears the in-flight record, so a different product on the same authorization is not refused as "already settling" (#3099 review)', async () => {
+    // The surviving half of the cleanup: `if (!nextAttempt.txHash) attempts.delete(paymentKey)`.
+    // Pinned by mutation: making that delete never fire leaves the failed
+    // attempt in `attempts`, and the next call for another product is refused
+    // by the in-flight check instead of settling.
+    const submit = vi
+      .fn<SettlementClient['submit']>()
+      .mockRejectedValueOnce(new Error('rpc down'))
+      .mockResolvedValueOnce('0xsettled')
+    const { processor } = makeProcessor({ submit })
+    const pr = paymentRequired()
+    const header = await signedHeader(pr)
+    const input = {
+      productId: 'vpn_basic' as const,
+      paymentHeader: header,
+      merchantAddress: MERCHANT,
+      expectedAmount: 1_000n,
+      paymentRequired: pr,
+    }
+
+    await expect(processor.verifyAndSettle(input)).rejects.toThrow('rpc down')
+    expect(submit).toHaveBeenCalledTimes(1)
+
+    const settled = await processor.verifyAndSettle({ ...input, productId: 'vpn_pro' as const })
+    expect(settled.settlement).toBe('settled_onchain')
+    expect(submit).toHaveBeenCalledTimes(2)
   })
 
   it('retries receipt confirmation without resubmitting after a submitted tx times out', async () => {
@@ -599,5 +664,24 @@ describe('x402 payment verification and settlement', () => {
       expectedAmount: 1_000n,
       paymentRequired: pr,
     })).rejects.toBeInstanceOf(PaymentError)
+  })
+})
+
+// Compare demo-generated offers with the official matcher, rather than relying
+// on the demo's deliberately scheme-specific verification subset (#3117).
+describe('demo requirement conformance fixtures', () => {
+  it.each(['eip3009', 'erc7710'] as const)('requires advertised metadata for %s official matching', (settlementMethod) => {
+    const processor = createX402PaymentProcessor({ submit: vi.fn(), waitForReceipt: vi.fn() }, { erc7710: { delegationManager: TRUSTED_DELEGATION_MANAGER } })
+    const challenge = processor.buildPaymentRequired({
+      merchantAddress: MERCHANT, amountUsdc: 1000n,
+      resource: 'https://merchant.test/mcp', description: 'conformance', settlementMethod,
+    })
+    const accepted = challenge.accepts[0]
+    const server = new x402ResourceServer()
+    const payload: PaymentPayload = { x402Version: 2, accepted, payload: {} }
+    expect(server.findMatchingRequirements(challenge.accepts, payload)).toEqual(accepted)
+    expect(accepted.extra).toMatchObject({ name: 'USD Coin', version: '2' })
+    const stripped = { ...payload, accepted: { ...accepted, extra: { assetTransferMethod: settlementMethod } } }
+    expect(server.findMatchingRequirements(challenge.accepts, stripped)).toBeUndefined()
   })
 })

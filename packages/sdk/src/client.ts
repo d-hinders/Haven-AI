@@ -40,8 +40,10 @@ import type {
   HavenAgentSummary,
   HavenAgentAllowanceSummary,
   HavenAllowanceSummary,
+  HavenBalanceCoverage,
   PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
+  HavenPaymentReceiptsPage,
   CatalogSubmissionAccepted,
   HavenCatalogEntry,
   HavenCatalogSubmission,
@@ -160,6 +162,19 @@ function mapCatalogEntry(entry: RawCatalogEntry): HavenCatalogEntry {
     source: entry.source,
     domainVerified: entry.domain_verified,
     verifiedPayable: entry.verified_payable,
+    // #3078: absent (older backend) or null (unresolved join) both mean "no
+    // merchant known" — the public field is then absent, never null.
+    ...(entry.merchant
+      ? {
+          merchant: {
+            id: entry.merchant.id,
+            slug: entry.merchant.slug,
+            name: entry.merchant.name,
+            listingStatus: entry.merchant.listing_status,
+            isTestMerchant: entry.merchant.is_test_merchant,
+          },
+        }
+      : {}),
   }
 }
 
@@ -633,6 +648,61 @@ export class HavenClient {
   }
 
   /**
+   * #3126 — is the checked amount of the token actually HELD on the
+   * agent's own account?
+   *
+   * This is the companion to {@link getAllowances}, not a variant of it:
+   * allowances answer what the agent is PERMITTED to spend this period;
+   * this answers whether the account HOLDS funds behind that permission,
+   * as a sufficiency signal — `covered: true | false | null` — never as a
+   * balance. `covered: null` means the chain read failed: treat it as
+   * unverifiable, not as absence (`coverageError` says why). The account's
+   * balance itself is deliberately not returned.
+   */
+  async checkFunds(input: { token: string; amountAtomic: string }): Promise<HavenBalanceCoverage> {
+    return this.accountReads.checkFunds(input)
+  }
+
+  /**
+   * `POST /machine-payments/budget-precheck` (#3054): ask Haven to decide —
+   * server-side — whether `amountAtomic` of `token` fits the agent's
+   * remaining delegation budget, the same compare the guided prepare used to
+   * run locally over its allowances read.
+   *
+   * On insufficiency Haven refuses (403, `delegation_budget_exceeded`) and
+   * the refusal reaches the `payment_refusals` ledger with
+   * `source: 'hosted_prepare'` — the point of the endpoint. This method
+   * surfaces that decision as a thrown {@link HavenApiError}; it does NOT
+   * swallow it, because swallowing would turn a decided refusal into the
+   * degrade-to-warning path and the ledger row would still land while the
+   * purchase proceeded.
+   *
+   * camelCase body like the route family; the response mirrors the wire
+   * (`sufficient`, `remaining_atomic`). `resourceUrl` is the merchant
+   * resource being bought — the ledger dedupe window's discriminating
+   * column — never this request's own URL.
+   */
+  async precheckBudget(input: {
+    chainId?: number
+    token: string
+    amountAtomic: string
+    merchantTo?: string
+    resourceUrl?: string
+  }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean }> {
+    return this.post<{
+      sufficient: boolean
+      remaining_atomic: string
+      remaining_is_from_chain?: boolean
+    }>('/machine-payments/budget-precheck', {
+      chainId: input.chainId,
+      token: input.token,
+      amountAtomic: input.amountAtomic,
+      ...(input.merchantTo !== undefined ? { merchantTo: input.merchantTo } : {}),
+      ...(input.resourceUrl !== undefined ? { resourceUrl: input.resourceUrl } : {}),
+    })
+  }
+
+  /**
    * Post-purchase allowance/budget summary for a settled payment (#1310).
    *
    * Reuses the EXACT rail-aware read path {@link getAllowances} / #1306's
@@ -799,6 +869,11 @@ export class HavenClient {
    */
   async listReceipts(options: { limit?: number } = {}): Promise<HavenPaymentReceipt[]> {
     return this.accountReads.listReceipts(options)
+  }
+
+  /** #3128: one page of receipts with `total`, `hasMore` and `nextCursor`. */
+  async listReceiptsPage(options: { limit?: number; cursor?: string } = {}): Promise<HavenPaymentReceiptsPage> {
+    return this.accountReads.listReceiptsPage(options)
   }
 
   /**

@@ -452,6 +452,18 @@ export const ROUTING_MATRIX = [
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
   },
   {
+    files: ['scripts/lint-next-steps.mjs'],
+    expect: ['code', 'backend', 'mcp_server', 'signer', 'mcp', 'connect', 'qa_agent'],
+    kind: CONTRACT,
+    why: 'The shrink-only typed next-step ratchet (#3104, epic #3105) polices packages/mcp-server, packages/signer and packages/mcp, so it runs in each of their jobs and in backend_checks beside the request-schema ratchet; connect and qa_agent follow from the package dependency table.',
+  },
+  {
+    files: ['scripts/lint-next-steps.test.mjs'],
+    expect: ['code', 'backend', 'mcp_server', 'signer', 'mcp', 'connect', 'qa_agent'],
+    kind: CONTRACT,
+    why: 'The ratchet’s self-test, same reason as dep-lint’s.',
+  },
+  {
     files: ['scripts/generate-api-types.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,
@@ -474,15 +486,19 @@ export const ROUTING_MATRIX = [
     expect: ['code', 'backend', 'frontend'],
     kind: CONTRACT,
     why:
-      'The shared ratchet engine backs SEVEN gates as of #3029 (six as of #2747): the ' +
+      'The shared ratchet engine backs NINE gates as of #3131 (eight as of #3104, ' +
+      'seven as of #3029, six as of #2747): the ' +
       'backend db-mock gate, the ' +
       'frontend wire-type gate (#1447), the retired-rail prose ratchet, the frontend copy ' +
       'lint, packages/frontend/scripts/design-lint.mjs — which an earlier draft of this row ' +
       'missed, and which had the same missing `--update` refusal the copy lint did — ' +
-      'scripts/docs/ui-gate-wording.mjs, and the request-schema ratchet ' +
-      '(scripts/lint-request-schemas.mjs, #3029). All seven share one `updateRefusals`; the count is ' +
+      'scripts/docs/ui-gate-wording.mjs, the request-schema ratchet ' +
+      '(scripts/lint-request-schemas.mjs, #3029), the typed next-step ratchet ' +
+      '(scripts/lint-next-steps.mjs, #3104) — which this row missed, leaving it stale a ' +
+      'THIRD time until #3131 swept it — and the MCP-CLI vocabulary guard ' +
+      '(scripts/ci/vocabulary-divergence.mjs, #3131). All nine share one `updateRefusals`; the count is ' +
       'pinned by scripts/lib/ratchet.test.mjs rather than trusted, because this row has now ' +
-      'been stale twice. Weakening the module must run both surfaces; ' +
+      'been stale three times. Weakening the module must run both surfaces; ' +
       'routing it to one would leave the other unguarded. Copy lint and design lint are ' +
       'covered regardless (frontend-copy-lint.yml is unconditional, design lint is a blocking ' +
       'frontend job), so this row understates the blast radius rather than overstating it.',

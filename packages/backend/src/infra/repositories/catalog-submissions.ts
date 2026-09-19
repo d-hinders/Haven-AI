@@ -52,8 +52,8 @@ const QUEUE_CAP_LOCK_NAMESPACE = KEYED_LOCK_NAMESPACES.catalogSubmissionQueue
 const QUEUE_CAP_LOCK_ID = 1711
 
 export const INSERT_CATALOG_SUBMISSION_SQL = `
-  INSERT INTO catalog_submissions (hostname, resource_url, status, submitter_ip, verify_token)
-  SELECT $1, $2, 'submitted', $3, $4
+  INSERT INTO catalog_submissions (hostname, resource_url, status, submitter_ip, verify_token, merchant_name, merchant_website)
+  SELECT $1, $2, 'submitted', $3, $4, $6, $7
   WHERE (
     SELECT COUNT(*) FROM catalog_submissions WHERE status IN (${PENDING_STATUSES})
   ) < $5
@@ -127,6 +127,9 @@ export async function insertCatalogSubmission(
     submitter_ip: string
     verify_token: string
     queueCap: number
+    /** #3078: what the submitter said the seller is; used only if no merchant owns the host at verification. */
+    merchant_name?: string | null
+    merchant_website?: string | null
   },
   db: Executor = pool,
 ): Promise<CatalogSubmissionHandle | null> {
@@ -141,6 +144,8 @@ export async function insertCatalogSubmission(
       params.submitter_ip,
       params.verify_token,
       params.queueCap,
+      params.merchant_name ?? null,
+      params.merchant_website ?? null,
     ])
     const row = result.rows[0]
     return row ? toHandle(row) : null
@@ -208,7 +213,23 @@ export const MARK_CATALOG_SUBMISSION_VERIFIED_PAYABLE_SQL = `
       consecutive_failures = 0,
       name = $2, description = $3, entrypoint = $4,
       updated_at = now()
-  WHERE id = $1 AND status IN ('ownership_verified', 'verified_payable')`
+  WHERE id = $1 AND status IN ('ownership_verified', 'verified_payable')
+  RETURNING id, hostname, merchant_id, merchant_name AS submitted_merchant_name, merchant_website AS submitted_merchant_website`
+
+/** What `markCatalogSubmissionVerifiedPayable` hands back for the merchant hook (#3078). */
+export interface VerifiedPayableMark {
+  id: string
+  hostname: string
+  merchant_id: string | null
+  /** What the SUBMITTER said the seller is — not the merchant's display name (that is the join's `merchant_name`). */
+  submitted_merchant_name: string | null
+  submitted_merchant_website: string | null
+}
+
+export const SET_CATALOG_SUBMISSION_MERCHANT_SQL = `
+  UPDATE catalog_submissions
+  SET merchant_id = $2, updated_at = now()
+  WHERE id = $1 AND merchant_id IS NULL`
 
 /**
  * Count one more consecutive failure and report the streak + the pre-update
@@ -281,13 +302,27 @@ export async function markCatalogSubmissionVerifiedPayable(
   id: string,
   metadata: { name: string; description: string | null; entrypoint: string },
   db: Executor = pool,
-): Promise<boolean> {
-  const result = await db.query(MARK_CATALOG_SUBMISSION_VERIFIED_PAYABLE_SQL, [
+): Promise<VerifiedPayableMark | null> {
+  const result = await db.query<VerifiedPayableMark>(MARK_CATALOG_SUBMISSION_VERIFIED_PAYABLE_SQL, [
     id,
     metadata.name,
     metadata.description,
     metadata.entrypoint,
   ])
+  return result.rows[0] ?? null
+}
+
+/**
+ * Attach a verified submission to its merchant (#3078). Once: a row that
+ * already has a merchant keeps it, so a re-verification cannot re-home an
+ * offer. Returns whether this call attached it.
+ */
+export async function setCatalogSubmissionMerchant(
+  id: string,
+  merchantId: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(SET_CATALOG_SUBMISSION_MERCHANT_SQL, [id, merchantId])
   return (result.rowCount ?? 0) > 0
 }
 
@@ -341,7 +376,7 @@ export async function deleteTerminalCatalogSubmissionsBefore(
 // caller ever seeing `verify_token` (the route decides what crosses the wire).
 // ---------------------------------------------------------------------------
 
-export interface CatalogSubmissionDetail extends CatalogLifecycleRow {
+export interface CatalogSubmissionDetail extends CatalogLifecycleRow, CatalogSubmissionMerchantJoin {
   resource_url: string
   updated_at: string
   last_verified_at: string | null
@@ -351,12 +386,27 @@ export interface CatalogSubmissionDetail extends CatalogLifecycleRow {
   entrypoint: string | null
 }
 
+/** The merchant columns a listing/detail read joins in (#3078); null before verification. */
+export interface CatalogSubmissionMerchantJoin {
+  merchant_id: string | null
+  merchant_slug: string | null
+  merchant_name: string | null
+  merchant_listing_status: 'live' | 'coming_soon' | null
+  merchant_is_test_merchant: boolean | null
+}
+
 export const GET_CATALOG_SUBMISSION_SQL = `
-  SELECT id, hostname, resource_url, status, submitter_ip, verify_token,
-         created_at, updated_at, last_verified_at, consecutive_failures,
-         failed_at, name, description, entrypoint
-  FROM catalog_submissions
-  WHERE id = $1
+  SELECT cs.id, cs.hostname, cs.resource_url, cs.status, cs.submitter_ip, cs.verify_token,
+         cs.created_at, cs.updated_at, cs.last_verified_at, cs.consecutive_failures,
+         cs.failed_at, cs.name, cs.description, cs.entrypoint,
+         cs.merchant_id,
+         m.slug AS merchant_slug,
+         m.name AS merchant_name,
+         m.listing_status AS merchant_listing_status,
+         m.is_test_merchant AS merchant_is_test_merchant
+  FROM catalog_submissions cs
+  LEFT JOIN merchants m ON m.id = cs.merchant_id
+  WHERE cs.id = $1
   LIMIT 1`
 
 export async function getCatalogSubmission(
@@ -368,19 +418,44 @@ export async function getCatalogSubmission(
 }
 
 /** Verified, listable rows — the ingestion half of the public catalogue. */
-export const LIST_VERIFIED_CATALOG_SUBMISSIONS_SQL = `
-  SELECT id, resource_url, name, description, entrypoint, last_verified_at
-  FROM catalog_submissions
-  WHERE status = 'verified_payable'
-  ORDER BY name ASC NULLS LAST, id ASC`
+const VERIFIED_LISTING_COLUMNS = `
+  cs.id, cs.resource_url, cs.name, cs.description, cs.entrypoint, cs.last_verified_at,
+  cs.merchant_id,
+  m.slug AS merchant_slug,
+  m.name AS merchant_name,
+  m.listing_status AS merchant_listing_status,
+  m.is_test_merchant AS merchant_is_test_merchant`
 
-export interface VerifiedCatalogListingRow {
+export const LIST_VERIFIED_CATALOG_SUBMISSIONS_SQL = `
+  SELECT ${VERIFIED_LISTING_COLUMNS}
+  FROM catalog_submissions cs
+  LEFT JOIN merchants m ON m.id = cs.merchant_id
+  WHERE cs.status = 'verified_payable'
+  ORDER BY cs.name ASC NULLS LAST, cs.id ASC`
+
+export const LIST_VERIFIED_CATALOG_SUBMISSIONS_FOR_MERCHANT_SQL = `
+  SELECT ${VERIFIED_LISTING_COLUMNS}
+  FROM catalog_submissions cs
+  LEFT JOIN merchants m ON m.id = cs.merchant_id
+  WHERE cs.status = 'verified_payable' AND cs.merchant_id = $1
+  ORDER BY cs.name ASC NULLS LAST, cs.id ASC`
+
+export interface VerifiedCatalogListingRow extends CatalogSubmissionMerchantJoin {
   id: string
   resource_url: string
   name: string | null
   description: string | null
   entrypoint: string | null
   last_verified_at: string | null
+}
+
+/** A merchant's verified self-submitted offers — the ingestion half of its page (#3078). */
+export async function listVerifiedCatalogSubmissionsForMerchant(
+  merchantId: string,
+  db: Executor = pool,
+): Promise<VerifiedCatalogListingRow[]> {
+  const result = await db.query<VerifiedCatalogListingRow>(LIST_VERIFIED_CATALOG_SUBMISSIONS_FOR_MERCHANT_SQL, [merchantId])
+  return result.rows
 }
 
 export async function listVerifiedCatalogSubmissions(

@@ -486,6 +486,8 @@ export interface X402Quote {
   request: X402RequestSnapshot
   mcpTransport?: X402McpTransport
   resourceUrl: string
+  /** #3097: `resourceUrl` (the merchant's declaration) is not `request.url` (what was quoted). */
+  resourceUrlDiffersFromRequest: boolean
   description: string | null
   mimeType: string | null
   amountAtomic: string
@@ -603,6 +605,14 @@ export interface HavenAllowance {
   tokenSymbol: string
   configuredAmount: string
   resetPeriodMin: number
+  /**
+   * #3128: human-readable `onchain.remaining`, e.g. "4.96 USDC" — the SAME
+   * string {@link HavenAgentAllowanceSummary.remainingDisplay} carries for
+   * this allowance, computed by one function from `onchain.remaining` and
+   * the token's decimals, so the two reads cannot disagree. Additive; the
+   * wire carries no display form (it is derived client-side).
+   */
+  remainingDisplay: string
   onchain: {
     amount: string
     spent: string
@@ -662,6 +672,76 @@ export interface PostPurchaseAllowanceSummary {
 }
 
 /**
+ * #3126 — the answer to "is there money actually HELD behind my budget?",
+ * asked as a sufficiency signal rather than a balance.
+ *
+ * Every other agent-readable figure in this package describes SPEND
+ * AUTHORITY — what the agent is PERMITTED to move this period
+ * ({@link HavenAllowanceSummary}). This shape answers the different question
+ * of whether the account HOLDS funds behind that authority, and deliberately
+ * answers it as `covered: boolean | null`, never as a figure: a constrained
+ * actor has no business reading the treasury total, and the boolean answers
+ * the only decision an agent has (attempt the payment, or tell the user
+ * funds are missing).
+ *
+ * The naming keeps the two concepts apart (the #3126 binding constraint):
+ * `budgetRemainingAtomic` is AUTHORITY — the same value
+ * {@link HavenAllowanceSummary} reports per token as `onchain.remaining` —
+ * while `covered` speaks only of HELD funds. Nothing here is named like the
+ * authority fields (`remaining`, `available`); nothing here returns a
+ * balance.
+ *
+ * `covered: null` means the chain read FAILED — unverifiable, never a
+ * guess. The same honesty rule `x402-funding-leg.ts`'s `delegateCanFund`
+ * established (#1521): treat null as "we do not know", not as "funded" or
+ * as absence; `coverageError` carries why.
+ */
+export interface HavenBalanceCoverage {
+  /**
+   * true: the chain reports the agent's account holds at least
+   * `checkedAmountAtomic` of the token. false: the chain read succeeded and
+   * reports LESS — tell the user funds are missing rather than retrying.
+   * null: the chain read failed — unverifiable, never treated as absence.
+   */
+  covered: boolean | null
+  /** Present only when `covered` is null: why the chain read could not answer. */
+  coverageError?: string
+  chainId: number
+  tokenAddress: string
+  tokenSymbol: string
+  /** The amount the coverage question was asked about, in atomic units. */
+  checkedAmountAtomic: string
+  /**
+   * Context, AUTHORITY not holdings: the agent's remaining spend authority
+   * for the requested token, in atomic units — the same derivation
+   * {@link HavenAllowanceSummary} reports (`onchain.remaining`; the #1090
+   * derivation, the #1145 enforcer read). Zero when no active budget row
+   * names the token. Compare it with `covered`, never instead of it.
+   */
+  budgetRemainingAtomic: string
+  /**
+   * Provenance of `budgetRemainingAtomic` (#1319, same semantics as
+   * {@link HavenAllowance.onchain.remainingIsFromChain}): true when the
+   * budget figure came from a live enforcer read, false when it fell back
+   * to the configured budget. Absent when no budget row existed for the
+   * token (nothing was read).
+   */
+  budgetRemainingIsFromChain?: boolean
+}
+
+/** @internal wire shape of {@link HavenBalanceCoverage}. */
+export interface RawHavenBalanceCoverage {
+  covered: boolean | null
+  coverage_error?: string
+  chain_id: number
+  token_address: string
+  token_symbol: string
+  checked_amount_atomic: string
+  budget_remaining_atomic: string
+  budget_remaining_is_from_chain?: boolean
+}
+
+/**
  * Affirmative spend-readiness for the authenticated agent, derived from the raw
  * agent status plus the remaining spend authority the backend reports per rail
  * (the on-chain AllowanceModule on the legacy rail; the active budget
@@ -686,9 +766,24 @@ export interface PostPurchaseAllowanceSummary {
  */
 export type HavenAgentReadiness = 'ready' | 'needs_approval' | 'revoked'
 
-/** Compact, agent-facing per-token spend authority for the bootstrap summary. */
+/**
+ * Compact, agent-facing per-token spend authority for the bootstrap summary.
+ *
+ * #3128: a deliberately DIFFERENT view of the same allowance as
+ * {@link HavenAllowance} — flat, no `onchain` block, no spent/nonce/reset-time
+ * detail — but never a disjoint one: every field here is present on or
+ * derived from the {@link HavenAllowance} with the same `id`, and
+ * `remainingAtomic` / `remainingDisplay` equal that allowance's
+ * `onchain.remaining` / `remainingDisplay` byte for byte (pinned by test). A
+ * client that wants the id AND a display amount can therefore use either
+ * read alone.
+ */
 export interface HavenAgentAllowanceSummary {
+  /** #3128: the {@link HavenAllowance.id} this row summarises. */
+  id: string
   tokenSymbol: string
+  /** #3128: the {@link HavenAllowance.tokenAddress}. */
+  tokenAddress: string
   /** Live on-chain remaining allowance in atomic units. */
   remainingAtomic: string
   /** Human-readable remaining, e.g. "4.96 USDC". */
@@ -785,6 +880,25 @@ export interface HavenPaymentReceipt {
   selectedPayment?: Record<string, unknown> | null
   paymentProofHeaderName: string | null
   protocolReceiptHeaderName: string | null
+  /**
+   * #3125 — the merchant's `PAYMENT-RESPONSE` object relayed VERBATIM:
+   * opaque, unvalidated, unverified, MERCHANT-CONTROLLED third-party data.
+   * Haven neither authors nor verifies anything inside it, including
+   * `protocolReceiptPayload.payer` —
+   * that `payer` is the merchant's claim, NOT Haven's record, and is not
+   * {@link payerAddress} (Haven's own, authoritative; field observation
+   * 2026-09-18: the two held different addresses on every row read). For who
+   * paid, read `parties` ({@link PaymentParties}) — `treasuryAccount`,
+   * `delegate`, `delegateAccount`, `merchant` are Haven-derived and
+   * authoritative; anything inside this object is not.
+   *
+   * Deliberately NOT namespaced or key-prefixed on the wire (#3125): the
+   * relay must stay the merchant's object verbatim (its `transaction` key
+   * feeds `settlementTxHash`), and prefixing the envelope could not prefix
+   * the merchant-controlled keys inside it — the `payer` collision lives
+   * there, so provenance is made legible at the read surfaces instead (this
+   * comment and the tool descriptions).
+   */
   protocolReceiptPayload?: Record<string, unknown> | null
   merchantStatus: number | null
   confirmedAt: string | null
@@ -1266,6 +1380,12 @@ export interface AgentNextStep {
   next_tool_server_role?: 'hosted' | 'signer'
   /** Small literal arguments for next_tool. Bulky fields are referenced by reason. */
   next_arguments?: Record<string, unknown>
+  /**
+   * #3101 (epic #3105, decision 3): present exactly when `next_tool` is
+   * absent — why no tool is named (the payment id is unknown, nothing is left
+   * to do, the arguments could not be built). `next_tool` is never null.
+   */
+  next_tool_omitted_reason?: string
   /** False when the agent should stop and involve the user before continuing. */
   safe_to_continue: boolean
   reason: string
@@ -1737,6 +1857,33 @@ export interface HavenCatalogEntry {
    * 'verified' })` filters on this field, not on `source`.
    */
   verifiedPayable: boolean
+  /**
+   * The merchant this entry belongs to (#3078). OPTIONAL on purpose: an
+   * installed SDK may face a backend that predates the merchant layer, and
+   * `discoverTools` must keep working against it — the field is absent, not
+   * null, in that case.
+   */
+  merchant?: HavenCatalogMerchant
+}
+
+/** A catalog entry's merchant as the wire carries it (#3078). */
+export interface HavenCatalogMerchant {
+  id: string
+  slug: string
+  name: string
+  /** `coming_soon` never reaches an entry in practice (a prospect has no offers). */
+  listingStatus: 'live' | 'coming_soon'
+  /** Haven-run test content: the demo store and the stranded-funds fixture. */
+  isTestMerchant: boolean
+}
+
+/** @internal */
+export interface RawCatalogEntryMerchant {
+  id: string
+  slug: string
+  name: string
+  listing_status: 'live' | 'coming_soon'
+  is_test_merchant: boolean
 }
 
 /** @internal */
@@ -1759,10 +1906,31 @@ export interface RawCatalogEntry {
   source: 'operator' | 'ingestion'
   domain_verified: boolean
   verified_payable: boolean
+  /** Absent from a backend older than #3078; null when the join resolved nothing. */
+  merchant?: RawCatalogEntryMerchant | null
 }
 
 export interface RawHavenPaymentReceiptsResponse {
   receipts: RawHavenPaymentReceipt[]
+  /** #3128 — optional on the wire so an older backend still maps. */
+  total?: number
+  has_more?: boolean
+  next_cursor?: string | null
+}
+
+/**
+ * #3128: one page of receipts. `total` is the count Haven holds for the
+ * agent (an empty page with `total: 0` means no receipt exists — there is no
+ * indexing delay behind this list); `hasMore` says the page was cut at the
+ * limit; `nextCursor` is fed back as `cursor` for the next page. Against a
+ * backend older than #3128 the three are `null` — "unknown", never a
+ * fabricated 0 / false.
+ */
+export interface HavenPaymentReceiptsPage {
+  receipts: HavenPaymentReceipt[]
+  total: number | null
+  hasMore: boolean | null
+  nextCursor: string | null
 }
 
 /** @internal */

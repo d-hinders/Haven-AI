@@ -31,7 +31,7 @@ export function StepList({ steps, tone = 'light' }: { steps: Step[]; tone?: Tone
   return (
     <ol className="grid grid-cols-1 md:grid-cols-3 gap-px bg-[var(--v2-border)] rounded-[10px] overflow-hidden border border-[var(--v2-border)]">
       {steps.map((s) => (
-        <li key={s.step} className="bg-white p-7 md:p-8">
+        <li key={s.step} className="bg-bg p-7 md:p-8">
           <div className="text-[12px] font-medium text-[var(--v2-brand)] mb-5 v2-tabular">
             {s.step}
           </div>

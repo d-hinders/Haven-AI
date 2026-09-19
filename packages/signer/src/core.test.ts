@@ -105,6 +105,97 @@ describe('buildX402PaymentHeader', () => {
     ).rejects.toThrow()
   })
 
+  // ── #3116: the signer boundary refuses unsupported methods/flows ─────────
+  // `buildX402PaymentHeader` selects through `selectStandardPaymentOption`
+  // and signs with `exact.evm.createPaymentHeader` — an EIP-3009
+  // `authorization` payload by construction. A permit2 entry, or one naming
+  // a paymentFlow this SDK does not recognize, must be refused HERE, before
+  // this process's delegate key produces any signature. The positive control
+  // pins the supported pair (explicit `eip3009` + `authorization`) as
+  // byte-for-byte signable — skipping must never widen into refusing it.
+  it('skips a permit2 entry listed first and signs the supported one behind it (#3116)', async () => {
+    // The binding (expectedX402) is computed from the SUPPORTED entry, so a
+    // successful header here proves the signer selected the second option —
+    // the permit2 one did not reach the signature.
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const result = await signer.buildX402PaymentHeader({
+      x402Version: 1,
+      resource: { url: 'https://merchant.test/paid' },
+      accepts: [
+        {
+          scheme: 'exact',
+          network: 'base',
+          amount: '1000000',
+          asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+          payTo: PAYMENT_REQUIRED.accepts[0].payTo,
+          maxTimeoutSeconds: 60,
+          extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'permit2' },
+        },
+        { ...PAYMENT_REQUIRED.accepts[0] },
+      ],
+    }, funding.x402Binding)
+    // `accepted` echoes the option actually paid — it must be the PLAIN one,
+    // with no permit2 tag leaked into the wire shape.
+    expect(result.accepted.extra?.assetTransferMethod).toBeUndefined()
+  })
+
+  it('refuses a permit2-ONLY challenge before any signature (#3116)', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    await expect(
+      signer.buildX402PaymentHeader({
+        x402Version: 1,
+        resource: { url: 'https://merchant.test/paid' },
+        accepts: [
+          {
+            scheme: 'exact',
+            network: 'base',
+            amount: '1000000',
+            asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+            payTo: PAYMENT_REQUIRED.accepts[0].payTo,
+            maxTimeoutSeconds: 60,
+            extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'permit2' },
+          },
+        ],
+      }, funding.x402Binding),
+    ).rejects.toThrow('No compatible payment option')
+  })
+
+  it('refuses an unrecognized paymentFlow on every entry (#3116)', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    await expect(
+      signer.buildX402PaymentHeader({
+        x402Version: 1,
+        resource: { url: 'https://merchant.test/paid' },
+        accepts: [
+          {
+            ...PAYMENT_REQUIRED.accepts[0],
+            extra: { name: 'USD Coin', version: '2', paymentFlow: 'unrecognized-future-flow' },
+          },
+        ],
+      }, funding.x402Binding),
+    ).rejects.toThrow('No compatible payment option')
+  })
+
+  it('still signs an explicitly-supported eip3009/authorization entry (#3116 positive control)', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const result = await signer.buildX402PaymentHeader({
+      x402Version: 1,
+      resource: { url: 'https://merchant.test/paid' },
+      accepts: [
+        {
+          ...PAYMENT_REQUIRED.accepts[0],
+          extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'eip3009', paymentFlow: 'authorization' },
+        },
+      ],
+    }, funding.x402Binding)
+    expect(typeof result.paymentHeader).toBe('string')
+    expect(result.paymentHeader.length).toBeGreaterThan(0)
+  })
+
   it('requires a locally recorded x402 funding binding before header signing', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
     await expect(signer.buildX402PaymentHeader(PAYMENT_REQUIRED, 'not-recorded')).rejects.toThrow(

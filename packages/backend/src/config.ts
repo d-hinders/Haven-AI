@@ -365,6 +365,28 @@ export const config = {
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n) && n > 0),
 
+  // Chains the MARKETPLACE lists for dashboard and credential-less readers
+  // (#3078, epic #3077 decision 4). Prod serves Sepolia deploys but must not
+  // show testnet merchants, so this is its own list: unset → `deployChainIds`;
+  // both unset → every supported chain (no environment or test returns zero
+  // rows by accident). An agent read never consults it — an agent on a chain
+  // is entitled to that chain's offers (its own clause, routes/catalog.ts).
+  // Prod sets `8453`; dev sets `84532,8453` (decision 11: the demo grid shows
+  // the mainnet merchants next to the Sepolia sandbox).
+  marketplaceChainIds: (process.env.HAVEN_MARKETPLACE_CHAIN_IDS ?? '')
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0),
+
+  // Prospects — merchants we are talking to, `listing_status: coming_soon`,
+  // seeded by #3080 — are listed only when this is on AND the marketplace
+  // lists no mainnet chain (the second line of defence lives in the route:
+  // a copied env cannot publish them on prod). Default off.
+  marketplaceProspectsEnabled: parseBooleanFlag(
+    'HAVEN_MARKETPLACE_PROSPECTS',
+    process.env.HAVEN_MARKETPLACE_PROSPECTS,
+  ),
+
   // Fortnox bookkeeping integration (P2 #465). Disabled unless all three are
   // set. Secrets — env only, never commit.
   fortnoxClientId: process.env.FORTNOX_CLIENT_ID ?? '',
@@ -514,8 +536,11 @@ export function parseAccountingEntitlementMode(raw: string | undefined | null): 
  * The request-validation plugin's mode (#3029, epic #3028).
  *
  *   off     — no schema is injected and no route is observed, EXCEPT a module
- *             in the plugin's `enforcedPrefixes` (`index.ts` sets
- *             `['/contacts']`), which stays enforced whatever the mode is
+ *             in the plugin's `enforcedModules` (`index.ts` sets
+ *             `['routes/contacts.ts', 'routes/merchants.ts']`), which stays
+ *             enforced whatever the mode is. Keyed on the route FILE since
+ *             #3135 — a mount prefix could not flip the four modules sharing
+ *             `/agents` independently.
  *   shadow  — every route's request is validated against the spec, a refusal
  *             is logged and counted, and the request CONTINUES. That last
  *             clause was ASPIRATIONAL until #3082: ajv coerces in place, so
@@ -546,7 +571,7 @@ export function parseRequestValidationMode(raw: string | undefined | null): Requ
   if (value === 'off' || value === 'shadow' || value === 'enforce') return value
   throw new Error(
     `HAVEN_REQUEST_VALIDATION is set to ${JSON.stringify(raw)}; it must be "off" ` +
-      '(nothing runs, except an enforcedPrefixes module), "shadow" (log and ' +
+      '(nothing runs, except an enforcedModules module), "shadow" (log and ' +
       'count would-be refusals; the body is restored, so the handler reads ' +
       'what the client sent) ' +
       'or "enforce" (refuse with the 400 envelope). Refusing to start rather than ' +

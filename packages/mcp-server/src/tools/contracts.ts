@@ -49,6 +49,7 @@ import { composeDescription, toolDescriptions as sharedDescriptions } from '@hav
 export type HostedToolName =
   | 'haven_get_agent'
   | 'haven_get_allowances'
+  | 'haven_check_funds'
   | 'haven_send'
   | 'haven_pay'
   | 'haven_submit'
@@ -108,9 +109,67 @@ const mcpTransportArg = z
   })
   .strict(MCP_TRANSPORT_CASE_HINT)
 
-export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
+/**
+ * #3100 (epic #3105, decision 4): the structured hint on a discovery entry.
+ * Either a tool the entry can be handed to with arguments that tool accepts
+ * VERBATIM — the argument shapes are the declared input of the named tool,
+ * and the discovery parity test parses each under that tool's strict schema —
+ * or, when no verbatim hint exists for the row, the REASON (decision 3's
+ * omitted-plus-reason shape; never a null hint). Slice #3101 turns the
+ * argument shapes into derived types once `toolSchemas` keeps its keys.
+ */
+export type DiscoveryHint =
+  | { suggested_tool: 'haven_quote_catalog_purchase'; suggested_arguments: { catalog_id: string } }
+  | { suggested_tool: 'haven_quote_x402'; suggested_arguments: { url: string } }
+  | { suggested_tool_omitted_reason: string }
+
+/** One `haven_discover_tools` entry on the hosted surface (wire-shaped). */
+export type DiscoveryEntry = {
+  id: string
+  name: string
+  description: string | null
+  category: string | null
+  resource_url: string
+  rail: string
+  protocol: string
+  tool_name: string | null
+  tool_arguments: Record<string, unknown> | null
+  price_display: string | null
+  price_atomic: string | null
+  price_is_indicative: true
+  asset: string | null
+  network: string | null
+  status: string
+  verified_at: string | null
+  source?: string
+  domain_verified?: boolean
+  verified_payable?: boolean
+  merchant?: { id: string; slug: string; name: string; listing_status: string; is_test_merchant: boolean }
+} & DiscoveryHint
+
+export const toolSchemas = {
   haven_get_agent: {},
   haven_get_allowances: {},
+  // #3126: the amount arrives in the pay tools' cap spelling (#1351) —
+  // max_amount_human in whole tokens ("1" = 1 USDC, preferred) or max_amount
+  // in atomic units — so a figure learned from a quote flows in unchanged.
+  // Exactly one is REQUIRED (readMaxAmountCap refuses both-or-neither): this
+  // tool answers a coverage question about a stated amount, never an
+  // open-ended balance read.
+  haven_check_funds: {
+    token: z.string().min(1),
+    max_amount: z
+      .string()
+      .regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount')
+      .optional(),
+    max_amount_human: z
+      .string()
+      .regex(
+        /^[0-9]+(\.[0-9]+)?$/,
+        'max_amount_human must be a plain decimal amount in whole tokens, e.g. "1" or "0.25"',
+      )
+      .optional(),
+  },
   haven_sweep_delegate: {
     // Phase 2 only: the authorization returned by phase 1 and the signature from
     // the local signer. Omit both to run phase 1 (prepare). Passed through to the
@@ -291,6 +350,13 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
     body: z.string().optional(),
   },
   haven_pay_x402_quote: {
+    // #3097: the URL the agent QUOTED — where the paid retry goes. The
+    // merchant's `payment_required.resource.url` is its declaration about
+    // itself, not the retry target: a challenge may declare `http://` for a
+    // resource served over https (the Ampersend sandbox does), and a public
+    // http:// retry target is refused. haven_quote_x402 returns this as
+    // `request_url`; pass it back verbatim.
+    url: z.string().url().optional(),
     // The parsed HTTP 402 PaymentRequired the agent received from the merchant
     // (or the paymentRequired field from a haven_quote_x402 result).
     // Validated downstream by the SDK; typed as an object (not z.unknown()) so
@@ -319,6 +385,8 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   haven_resume_x402_payment: {
     payment_id: z.string().optional(),
     resume_state: z.record(z.string(), z.unknown()).optional(),
+    // #3097: same as haven_pay_x402_quote — the https URL originally quoted.
+    url: z.string().url().optional(),
   },
   haven_report_x402_outcome: {
     // #2292: the plain-HTTP twin of haven_complete_mcp_tool's bookkeeping —
@@ -367,11 +435,16 @@ export const toolSchemas: Record<HostedToolName, z.ZodRawShape> = {
   },
   haven_list_receipts: {
     limit: z.number().int().min(1).max(100).optional(),
+    /** #3128: the previous page's next_cursor (a receipt id). */
+    cursor: z.string().min(1).optional(),
   },
   haven_verify_receipt: {
     receipt: z.unknown(),
   },
-}
+// #3101: `as const satisfies` keeps every key on the type — under a plain
+// `Record<HostedToolName, z.ZodRawShape>` annotation a probe assigning
+// `{ totally_not_a_key: 1 }` to a tool's inferred argument type compiled clean.
+} as const satisfies Record<HostedToolName, z.ZodRawShape>
 
 // ── Strict input (#2312) ─────────────────────────────────────────────────────
 
@@ -649,14 +722,13 @@ export const STRICT_INPUT_TOOLS = {
     "merchant quote inside a 5-minute bucket, so the caller's own replay scope was " +
     'silently replaced by a different one rather than merely lost.',
   haven_quote_x402:
-    'This is the HOSTED surface. It takes url, method, headers and body. The local MCP ' +
-    '(@haven_ai/mcp) additionally takes idempotencyKey — carrying it here used ' +
-    'to be dropped in silence, and a body-bearing POST was then probed with an EMPTY body, ' +
-    'so the quote described a different request than the one the caller meant to pay for. ' +
-    'The hosted surface has no body field to route it to; quote a GET resource, or use ' +
-    'haven_pay_mcp_tool for a merchant that needs a request payload.',
+    'This is the HOSTED surface. It takes url, method, headers and body (#2366 added body, so ' +
+    'a body-bearing POST paywall is quoted with the body the caller means to pay for). The ' +
+    'local MCP (@haven_ai/mcp) additionally takes idempotency_key, which the hosted quote ' +
+    'has no use for — carrying it here used to be dropped in silence. haven_discover_tools ' +
+    'hands you resource_url; this tool spells that argument url (#3100).',
   haven_pay_x402_quote:
-    'This is the HOSTED surface, which takes payment_required and idempotency_key ' +
+    'This is the HOSTED surface, which takes payment_required, idempotency_key and url ' +
     '(snake_case). The local MCP (@haven_ai/mcp) takes quote and idempotencyKey. Passing ' +
     'quote already failed loudly here, because payment_required is required — it is ' +
     'idempotencyKey that was dropped in silence, replacing the caller\'s replay scope with ' +
@@ -694,7 +766,8 @@ export const STRICT_INPUT_TOOLS = {
   haven_resume_x402_payment:
     'A resume rebuilds the merchant retry from the STORED payment (by payment_id) or from ' +
     'the resume_state you hand back verbatim — resource, amount, payee and the signed ' +
-    'header are read from there, never from arguments. A payment_header, payment_required ' +
+    'header are read from there, never from arguments; the one argument it does read is ' +
+    'url, the https retry target you quoted. A payment_header, payment_required ' +
     'or merchant_url sent alongside used to be dropped in silence while the retry proceeded ' +
     'against the stored one.',
   haven_get_payment_status:
@@ -705,8 +778,9 @@ export const STRICT_INPUT_TOOLS = {
     'The resume state is rehydrated by payment_id alone; nothing else selects it. Any other ' +
     'key used to be dropped in silence.',
   haven_list_receipts:
-    'This list takes limit only. An offset, cursor, page, status or token filter sent here ' +
-    'used to be dropped in silence and the first page came back looking filtered.',
+    'This list takes limit and cursor (the previous page\'s next_cursor) only. An offset, page, ' +
+    'status or token filter sent here used to be dropped in silence and the first page came ' +
+    'back looking filtered.',
   haven_verify_receipt:
     'Verification is offline and reads only the receipt object itself: the signer is ' +
     'recovered from receipt.authorization and compared with the delegate the receipt names. ' +
@@ -721,6 +795,15 @@ export const STRICT_INPUT_TOOLS = {
     'name, description, price, tool_name or contact sent here used to be dropped in silence ' +
     '— the directory learns everything else from the live merchant probe and the ownership ' +
     'proof, never from this call.',
+  // #3126: the amount argument arrives in the pay tools' cap spelling, and the
+  // cap convention's both-or-neither refusal (readMaxAmountCap) is the strict
+  // refusal's own refusal — declaring the tool strict makes a decorated call
+  // meet THAT documented error instead of a silent strip. No live caller
+  // predates strictness here: the tool ships new.
+  haven_check_funds:
+    'Exactly one of max_amount_human or max_amount selects the amount the coverage question is ' +
+    'asked about — both or neither is refused before anything is read. An undeclared key ' +
+    'cannot select or filter what the chain is asked, so it is refused rather than dropped.',
 } as const satisfies Partial<Record<HostedToolName, string>>
 
 export type StrictInputToolName = keyof typeof STRICT_INPUT_TOOLS
@@ -759,6 +842,26 @@ export const PERMISSIVE_INPUT_TOOLS = {
 } as const satisfies Partial<Record<HostedToolName, string>>
 
 export type PermissiveInputToolName = keyof typeof PERMISSIVE_INPUT_TOOLS
+
+/**
+ * #3100 (epic #3105, decision 5): the DECLARED aliases a strict refusal names.
+ *
+ * A rejected key matches a declared key when, after case-folding and
+ * stripping `_` / `-`, the two are equal (`merchantUrl` → `merchant_url`) —
+ * that half is computed, not listed. This table carries the pairs no
+ * normalisation can see: the field another Haven response hands the agent
+ * under one name and this tool declares under another. `haven_discover_tools`
+ * returns `resource_url` and `id`; the tools it points at take `url` and
+ * `catalog_id`. No containment, no similarity — an entry here is the
+ * mutation target of the test that pins the hint.
+ */
+export const TOOL_ARGUMENT_ALIASES: Partial<Record<HostedToolName, Readonly<Record<string, string>>>> = {
+  haven_quote_x402: { resource_url: 'url' },
+  haven_quote_catalog_purchase: { id: 'catalog_id' },
+  haven_prepare_catalog_purchase: { id: 'catalog_id' },
+  haven_quote_mcp_tool: { resource_url: 'merchant_url' },
+  haven_pay_mcp_tool: { resource_url: 'merchant_url' },
+}
 
 /**
  * #2349: every hosted tool carries an input decision, enforced at compile time.
@@ -900,15 +1003,16 @@ const QUOTE_X402_DESCRIPTION = composeDescription({
 const PAY_X402_QUOTE_DESCRIPTION = [
   'Step 1 of a direct x402 purchase (plain HTTP merchant, non-MCP): construct the funding step and',
   'return the unsigned hash for the local signer. Pass the payment_required from haven_quote_x402',
-  'or straight from the merchant 402. Read-only budget questions: haven_get_allowances.',
+  'or straight from the merchant 402, plus url (haven_quote_x402\'s request_url): the paid',
+  'retry goes there, never to the declared resource_url; public http:// is refused.',
+  'Read-only budget questions: haven_get_allowances.',
   'Cap rule here: max_amount_human (preferred) or max_amount, never both; omitting BOTH accepts the',
   'quoted price as-is and the response carries cap_warning.',
   'Returns { payment_id, payload_hash, expires_at, x402, signer_compatibility } — compact by default;',
   'include_signing_payload=true on a same-idempotency_key re-run returns the inline payload for an',
   'older signer. Over-budget is declined at prepare; nothing is ever held for later approval.',
   'The signer tool named in the response guidance (haven_sign_x402) returns payment_header INLINE',
-  'alongside the signature — it is a one-shot that spends its own binding building that',
-  'header, so do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
+  'alongside the signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
   'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
   'setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710.',
   'Haven never talks to this merchant and never holds the key. The header is built before funding',
@@ -951,14 +1055,14 @@ const RESUME_X402_DESCRIPTION = [
   'Resume an authorized x402 payment: retrieve the signing context so the signer can rebuild the',
   'merchant payment header and the agent can retry the merchant.',
   'Only call this after haven_get_payment_status reports nextAction=retry_original_x402_request —',
-  'that means Haven funding confirmed but no merchant response was ever recorded, typically because',
-  'the process crashed between funding and the merchant retry. Any other nextAction reports a',
-  'conflict instead of returning context; do not call this speculatively and do not pay again.',
+  'Haven funding confirmed but no merchant response was recorded (a crash between funding and',
+  'the retry). Any other nextAction reports a conflict; never call this speculatively or pay again.',
+  'Optional url: the https URL you quoted, used as x402.retry_url over the merchant\'s declaration.',
   'Returns { payment_id, payment_required, x402 } in the haven_pay_x402_quote shape. Then call',
   'haven_sign_x402 with this payment_id — the funding leg is already spent, so this signs nothing',
   'new on-chain and its signature must not be re-submitted. Take payment_header from ITS result',
-  'and retry the original resource_url with it. Do NOT pass its x402_binding to',
-  'haven_x402_sign_header: that binding is already spent, and the call can only refuse.',
+  'and retry x402.retry_url with it. Do NOT pass its x402_binding to haven_x402_sign_header:',
+  'it can only refuse.',
   // #2292: same obligation as the first-attempt path — a resumed retry Haven did not make is
   // just as unobservable as the original one.
   'Then report the outcome with haven_report_x402_outcome.',
@@ -999,6 +1103,19 @@ const SWEEP_DELEGATE_DESCRIPTION = [
   'USDC only — stranded native ETH is not recoverable through this path.',
 ].join(' ')
 
+// #3126 — the hosted sufficiency check, deliberately NOT a balance tool: the
+// constrained actor reads a boolean (covered true/false/null), never the
+// treasury total. Kept lean by hand (not the full composed fragment) because
+// the #1591 mean budget is a per-tool property measured at the cap; the
+// shared fragment's summary leads verbatim so the drift test holds.
+const CHECK_FUNDS_DESCRIPTION = [
+  sharedDescriptions.checkFunds.summary + '.',
+  'Pass the token contract address and exactly ONE amount spelling: max_amount_human (whole tokens, preferred) or max_amount (atomic units).',
+  'Returns covered: true (holds at least the amount), false (a live chain read reports less — stop and tell the user the funds are missing), or null (the read failed — unverifiable, never absence; coverage_error says why).',
+  'The balance itself is deliberately not returned — a sufficiency signal, not a balance read; budget_remaining_atomic is the PERMITTED figure (haven_get_allowances).',
+  'Read-only: grants no authority, moves nothing; both retired rails answer 410.',
+].join(' ')
+
 const DISCOVER_TOOLS_DESCRIPTION = composeDescription({
   ...sharedDescriptions.discoverTools,
   nextActionGuidance:
@@ -1009,6 +1126,7 @@ const DISCOVER_TOOLS_DESCRIPTION = composeDescription({
 export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
+  haven_check_funds: CHECK_FUNDS_DESCRIPTION,
   haven_sweep_delegate: SWEEP_DELEGATE_DESCRIPTION,
   haven_discover_tools: DISCOVER_TOOLS_DESCRIPTION,
   haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
@@ -1059,6 +1177,18 @@ export interface ToolFailure {
    * cap refusal.
    */
   retry_with_new_quote?: boolean
+  /**
+   * #3101 (epic #3105, decision 7): a refusal that carries a next step emits
+   * the same `next_tool` family a success does, built by the SDK's typed
+   * builder. Additive; `next_tool` is never null — an absent tool says why in
+   * `next_tool_omitted_reason`.
+   */
+  next_tool?: string
+  next_tool_server?: string
+  next_tool_name?: string
+  next_tool_server_role?: 'hosted' | 'signer'
+  next_arguments?: Record<string, unknown>
+  next_tool_omitted_reason?: string
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure

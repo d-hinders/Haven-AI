@@ -7,6 +7,10 @@ import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   handleGetAllowances,
+  handleBalanceCoverage,
+  handleBudgetPrecheck,
+  budgetPrecheckBodyError,
+  parseBalanceCoverageQuery,
   handleReconciliationEvent,
   handleSend,
   attachEvidenceHandler,
@@ -18,6 +22,7 @@ import {
   RECONCILIATION_EVENT_TYPES,
   SUPPORTED_ASSETS,
   type AuthorizeBody,
+  type BudgetPrecheckBody,
   type EvidenceBody,
   type ReconciliationEventBody,
   type SendAsset,
@@ -35,6 +40,9 @@ import {
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
+
+/** #3128: a receipts cursor is a receipt id (uuid). */
+const RECEIPT_CURSOR_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export default async function machinePaymentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', agentAuthMiddleware)
@@ -82,15 +90,48 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     return reply.code(result.statusCode).send(result.body)
   })
 
-  app.get<{ Querystring: { limit?: string } }>('/receipts', async (request, reply) => {
+  // #3126 — the sufficiency signal, NOT a balance tool. Answers "is this
+  // amount of this token actually HELD on my account?" as covered
+  // true/false/null; the account's balance itself is never returned, and
+  // every figure in the response is named for its concept (budget_* is
+  // authority, covered is holdings). See modules/mpp/balance-coverage.ts for
+  // the argument, and the OpenAPI entry for the agent-facing wording.
+  app.get<{ Querystring: { token?: string; amount_atomic?: string } }>(
+    '/balance-coverage',
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      // #3126 query guards relocated to the mpp module
+      // (parseBalanceCoverageQuery) so the #3029 request-schemas ratchet
+      // keeps its shrink-only baseline for this file — checks and 400 bodies
+      // unchanged. Parses the raw wire query (amount_atomic) into the
+      // handler's camelCase input.
+      const parsed = parseBalanceCoverageQuery(request.query)
+      if ('error' in parsed) {
+        return reply.code(400).send(parsed)
+      }
+      const result = await handleBalanceCoverage(agent, parsed)
+      return reply.code(result.statusCode).send(result.body)
+    },
+  )
+
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>('/receipts', async (request, reply) => {
     const agent = request.agent as AgentContext
     const parsedLimit = request.query.limit ? Number(request.query.limit) : 25
     const limit = Number.isInteger(parsedLimit)
       ? Math.min(Math.max(parsedLimit, 1), 100)
       : 25
+    // #3128: the cursor is a receipt id from a previous page. Anything else
+    // is refused up front rather than reaching the uuid cast in the query.
+    const cursor = request.query.cursor ?? null
+    if (cursor !== null && !RECEIPT_CURSOR_PATTERN.test(cursor)) {
+      return reply.code(400).send({ error: 'cursor must be the id of a receipt returned by a previous page (next_cursor).' })
+    }
 
-    const receipts = await listReceipts(agent.id, limit)
-    return reply.send({ receipts })
+    const page = await listReceipts(agent.id, limit, cursor)
+    if (page === null) {
+      return reply.code(400).send({ error: 'cursor does not name a receipt of this agent — pass the next_cursor of a previous page.' })
+    }
+    return reply.send(page)
   })
 
   app.get<{ Params: { id: string } }>('/:id/status', async (request, reply) => {
@@ -273,6 +314,32 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     )
     return reply.code(result.statusCode).send(result.body)
   })
+
+  // ── POST /budget-precheck — server-side budget gate for the hosted prepare ─
+  // #3054: the guided purchase's over-budget refusal is DECIDED here so it
+  // reaches the payment_refusals ledger (source hosted_prepare). Same
+  // posture as every writer: the row is recorded through refuse() only —
+  // never agent-asserted — and a fire-and-forget write can never change the
+  // decided response.
+  app.post<{ Body: BudgetPrecheckBody }>(
+    '/budget-precheck',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      // #3054 body guards relocated verbatim to the mpp module
+      // (budgetPrecheckBodyError) so the #3029 request-schemas ratchet keeps
+      // its shrink-only baseline for this file — checks and 400 bodies
+      // unchanged.
+      const body = (request.body ?? {}) as BudgetPrecheckBody
+      const bodyError = budgetPrecheckBodyError(body)
+      if (bodyError) {
+        return reply.code(400).send(bodyError)
+      }
+
+      const result = await handleBudgetPrecheck(agent, body)
+      return reply.code(result.statusCode).send(result.body)
+    },
+  )
 
   // ── POST /sweep/prepare — build a gasless USDC sweep authorization ──────────
   app.post('/sweep/prepare', { config: moneyPathRateLimit }, async (request, reply) => {

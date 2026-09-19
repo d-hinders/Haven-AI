@@ -6,10 +6,11 @@ covers:
   - .github/pull_request_template.md
   - package.json
   - scripts/ci/change-classifier.mjs
+  - scripts/ci/preflight.mjs
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
   - packages/frontend/package.json
-last-verified: "2026-09-10"
+last-verified: "2026-09-19"
 ---
 
 # PR Workflow Checklist
@@ -151,23 +152,71 @@ Green CI is necessary but not sufficient for risk-bearing work. The merge-readin
 
 ## Local Check Commands
 
-Use the smallest reliable set that matches the change.
+**Start with `npm run preflight`.** It reads the workflow files, works out which
+gates your diff can redden, runs them, and names the CI job each failure belongs
+to. That is the enumerable answer to "did I run everything"; the table below is
+not, and cannot be.
+
+```bash
+npm run preflight            # the gates this diff can redden
+npm run preflight -- --list  # the plan, without running it
+npm run preflight:all        # every gate
+```
+
+The table below is the **smallest reliable set for fast iteration** — what to
+re-run in a tight loop while you are still changing code. It is deliberately
+shorter than the battery and maintained by hand, so treat it as a convenience
+and not as coverage: a backend diff selects **36** gates and this table names
+**11** of them, measured at this change's head against the workflows as they
+stand at `ce79bf0c` (the battery does not exist at that commit, so the figures
+are re-derivable here, not there).
+
+The most consequential omission is `npm run check:route-modules` (#3135), one of
+the three that reddened #3126's first CI run. Re-derive both figures — the count
+resolves npm aliases, because the table names two of its gates by alias
+(`docs:coupling` and `lint:copy`) rather than by the command they run, and a
+raw-string match reports 9 and so undercounts the table:
+
+```bash
+node --input-type=module -e "
+import {buildPlan, selectGates} from './scripts/ci/preflight.mjs'
+import {readFileSync} from 'node:fs'
+const pkg = JSON.parse(readFileSync('package.json','utf8')).scripts
+const alias = new Map(Object.entries(pkg).map(([n,b]) => [b.trim(), 'npm run '+n]))
+const doc = readFileSync('docs/contributing/pr-workflow-checklist.md','utf8')
+// The TABLE, not the document: this prose names gates too, and searching the
+// whole file counts them as covered by the table it is describing (12 vs 11).
+// The needle carries a real leading newline, which this snippet's escaped \n
+// cannot match, so indexOf and lastIndexOf agree here -- lastIndexOf is belt
+// and braces for a future copy of the header appearing above the table.
+const table = doc.slice(doc.lastIndexOf('\n| Change type |')).split('\n\n')[0]
+const sel = selectGates(buildPlan(), ['code','backend']).map(g => g.command)
+const named = sel.filter(c => table.includes(c) || (alias.has(c) && table.includes(alias.get(c))))
+console.log(sel.length, named.length)"
+```
+
+This is why #3150 was filed four times over: every hand-maintained second copy of
+the gate set drifts, including this one. Growing the table would make the same
+mistake a fifth time.
 
 | Change type | Commands |
 | --- | --- |
 | Docs, prompts, or PR template only | `git diff --check` and `npm run docs:check` (front-matter + `covers` globs + agent-skill alignment + retired UI merge-gate wording, #2657) |
 | Any source file | `npm run docs:coupling` — the strict contract-doc gate, keyed on **code**, so the docs row above never covers the pure-code PR that needs it |
 | Payment, Safe, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
-| Backend/API | `npm run typecheck -w packages/backend`, `npm run test -w packages/backend`, `npm run lint:deps` (dependency boundaries, #982), `npm run lint:db-mocks` (positional DB-mock ratchet, #1227), `npm run lint:retired-rail-prose` (retired-rail prose ratchet, #2685 — scans all of `packages/**`, not just the backend), and `npm run lint:request-schemas` (request-schema ratchet, #3029 — shrink-only over the request-validation rollout, epic #3028) |
+| Backend/API | `npm run typecheck -w packages/backend`, `npm run test -w packages/backend`, `npm run lint:deps` (dependency boundaries, #982), `npm run lint:db-mocks` (positional DB-mock ratchet, #1227), `npm run lint:retired-rail-prose` (retired-rail prose ratchet, #2685 — scans all of `packages/**`, not just the backend), and `npm run lint:request-schemas` (request-schema ratchet, #3029 — shrink-only over the request-validation rollout, epic #3028), `npm run lint:next-steps` (typed next-step ratchet, #3104 — scans `packages/mcp-server`, `packages/signer` and `packages/mcp`, and runs in their jobs as well as here), and `npm run lint:vocabulary` (vocabulary guard, #3131 and #3133 — adding a property to the OpenAPI transaction base fails CI until the field is declared in the vocabulary map beside the guard; it runs in **Repo CI config checks**, not *Backend checks*, because its other two inputs are on the SDK receipt surface and in the CLI, #3133) |
 | Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run design:lint -w packages/frontend`, `npm run lint:copy`, `npm run test -w packages/frontend`, `npm run build -w packages/frontend`, and `npm run lint:runbook-parity` (generated runbook copies, #2727 — the frontend holds pinned derivations of the SDK's canonical agent runbook) |
-| SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, `npm run build -w packages/sdk`, and `npm run lint:runbook-parity` (generated runbook copies, #2727 — blocking in `sdk_checks`, `cli_checks` and `frontend_checks` alike) |
-| CLI | `npm run typecheck -w packages/cli`, `npm run test -w packages/cli`, `npm run build -w packages/cli`, and `npm run lint:runbook-parity` (generated runbook copies, #2727 — the CLI holds a full-text copy of the SDK's canonical agent runbook) |
+| SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, `npm run build -w packages/sdk`, `npm run lint:runbook-parity` (generated runbook copies, #2727 — blocking in `sdk_checks`, `cli_checks` and `frontend_checks` alike), and `npm run lint:vocabulary` when the change touches the receipt mapper (#3131, as in the Backend/API row) |
+| CLI | `npm run typecheck -w packages/cli`, `npm run test -w packages/cli`, `npm run build -w packages/cli`, `npm run lint:runbook-parity` (generated runbook copies, #2727 — the CLI holds a full-text copy of the SDK's canonical agent runbook), and `npm run lint:vocabulary` (#3133 — an object literal the CLI constructs itself and hands to `emit()`, any `emit*` helper, `d.o.data()` or `d.o.text()`, directly or through a same-function `const`, fails CI until `cliConventions` records which casing convention it chose and why; adding a key to an already-declared envelope fails it too) |
 | Cross-package or release-risk | `npm run quality` |
 | Browser UX or routing | Relevant unit/build checks plus `npm run test:e2e:gate:built -w packages/frontend` — both gating projects, desktop **and** mobile (#1768), plus the visual specs' structural assertions (#2827), against a built server rather than `next dev`, which is minutes rather than tens of minutes (#2730; see the frontend playbook § *Verification*). `test:e2e:desktop:built` / `test:e2e:mobile:built` narrow it to one while iterating — neither sets `VISUAL_STRUCTURE_ONLY=1`, so narrowing also drops the visual locators |
 
 Notes:
 
-- `npm run quality` means typecheck, unit tests, and builds across workspaces.
+- `npm run quality` means typecheck and unit tests across workspaces, then
+  `build` — which is **not** `--workspaces` but a hand-written nine-package
+  chain, omitting `demo-merchant-mcp` (a CI gate) and `qa-agent` (not one).
+  `npm run preflight` covers what it misses.
 - Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with two exceptions. Editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Markdown under `packages/frontend/public/` is served content rather than documentation, so it routes `frontend` — and `for-agents.md`, a generated copy of the SDK runbook, additionally routes the `sdk` and `cli` jobs that run `lint:runbook-parity` — and, through the `sdk` dependency closure, every package job (#2743). Editing `.github/workflows/*.yml` triggers full workflow checks.
 - Frontend ESLint (`next lint`) is still not a required gate because it currently prompts for ESLint setup; add it only after a dedicated non-interactive lint migration. The blocking frontend **design and copy** gates that DO exist are design-lint (part of *Frontend checks*), the *Banned product-copy terms* copy lint (#902), and the *Design visual regression* job (#897) — both shrink-only-baseline lints fail on NEW violations only. Deliberately a scoped list, not every blocking step in *Frontend checks*: that job also runs typecheck, the wire-type ratchet, the *Visual baseline inventory* (#2318), the unit tests, the build and `lint:runbook-parity` (#2727), none of which is a design or copy gate. The visual-baseline step is the easiest of those to mistake for one: it inventories which screens have baselines, and is not the *Design visual regression* job named above.
 - The backend gate is stricter than the frontend baselines: **dependency-boundary lint** (#982, absolute since #999), a blocking step inside *Backend checks* enforcing `docs/architecture/10-module-boundaries.md` with **no baseline at all** — it fails on ANY violation. Fix the boundary; a reviewed, deliberate exception uses an inline `// dep-lint-exempt: <concrete reason>` comment on the offending import. `no-circular` can never be waived.

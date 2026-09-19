@@ -65,7 +65,8 @@ export function useMerchantAccounts() {
     setError(null)
     try {
       const res = await api.get<{ overrides: MerchantAccountOverride[] }>('/accounting/categories')
-      if (!isCancelled()) setOverrides(res.overrides)
+      // `?? []` — an absent key must degrade, not crash the route (#3093).
+      if (!isCancelled()) setOverrides(res.overrides ?? [])
     } catch {
       if (!isCancelled()) setError('We could not load merchant accounts.')
     } finally {
@@ -148,7 +149,7 @@ export function useAccountingProviders() {
     setError(null)
     try {
       const res = await api.get<{ providers: AccountingProvider[] }>('/accounting/providers')
-      if (!isCancelled()) setProviders(res.providers)
+      if (!isCancelled()) setProviders(res.providers ?? [])
     } catch {
       if (!isCancelled()) setError('We could not load accounting providers.')
     } finally {
@@ -182,7 +183,7 @@ export function useAccountingConnections() {
     setError(null)
     try {
       const res = await api.get<{ connections: AccountingConnection[] }>('/accounting/connections')
-      if (!isCancelled()) setConnections(res.connections)
+      if (!isCancelled()) setConnections(res.connections ?? [])
     } catch {
       if (!isCancelled()) setError('We could not load your accounting connections.')
     } finally {

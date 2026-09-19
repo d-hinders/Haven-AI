@@ -12,7 +12,7 @@ import {
 } from './tools.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.3.0-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.4.0-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -45,7 +45,9 @@ export const HOSTED_INSTRUCTIONS = [
   'with the user. A cap the user DID state always wins over this convention.',
   'Every payment tool response carries next_action,',
   'next_tool, and next_arguments — follow those fields first; description prose',
-  'is fallback, not the source of truth. next_tool is Claude-family namespaced',
+  'is fallback, not the source of truth. When no tool follows, next_tool is absent and',
+  'next_tool_omitted_reason says why — that is a complete answer, not a gap to fill from',
+  'prose. next_tool is Claude-family namespaced',
   '(mcp__<server>__<tool>) and names the DEFAULT server names, which is all this',
   'server can know: your local server names are your config, not ours. If yours',
   'differ — a connector run with --name <slug> wires haven-<slug> and',

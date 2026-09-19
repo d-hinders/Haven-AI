@@ -24,6 +24,13 @@ export const en = {
   accountingBadge: {
     /** `provider` is the display name, e.g. "Fortnox". */
     inProvider: (provider: string) => `In ${provider}`,
+    /**
+     * The pushed label for a connector whose delivered record IS a document
+     * (#3018, Accounted): "in" reads as a ledger booking the provider made,
+     * and this connector only archives evidence Haven pushed — the sentence
+     * says what actually happened (#2870's naming rule).
+     */
+    evidenceArchived: 'Evidence archived',
     feeding: 'Feeding…',
     notFed: 'Not fed',
     /** Accessible name for the badge link — the label, then where it goes. */
@@ -64,6 +71,54 @@ export const en = {
       failed: 'Will retry',
       exhausted: 'Stopped retrying',
       exhaustedHelp: 'Retried 8 times without success. Sync now tries again.',
+    },
+    /**
+     * The live-delivery banner (#496), provider-neutral since #3018 — the
+     * sentence names no provider, so a deployment whose only live connector
+     * is not Fortnox still reads true.
+     */
+    previewBanner: {
+      title: 'Preview — not yet delivering',
+      body:
+        'The accounting feed is built and your settled payments are tracked here, but the live connection isn’t wired up yet — transactions are not being sent to your accounting tool. We’ll enable delivery in a follow-up; nothing you do here posts anywhere in the meantime.',
+    },
+    /**
+     * The row's identity line (#3018): the delivered record, named per
+     * provider. Fortnox rows carry an invoice number; Accounted rows carry
+     * a document id from the namespaced ref.
+     */
+    rowIdentity: {
+      invoice: (number: string) => `Fortnox invoice ${number}`,
+      document: (id: string) => `Accounted document ${id}`,
+    },
+    /**
+     * The verify result sentences (#1362), provider-conditional since #3018:
+     * a provider whose descriptor says `verify: false` answers from Haven's
+     * own record, so its sentences must never read as a provider read-back
+     * (the Fortnox sentences keep naming the provider — there the answer IS
+     * a live read-back).
+     */
+    verify: {
+      checkIn: (provider: string) => `Check in ${provider}`,
+      checkFailed: 'Could not check right now. Try again in a moment.',
+      /** Fortnox — a live read-back, so the provider is named. */
+      fortnox: {
+        deleted: (number: string) => `Not found in Fortnox — invoice ${number} no longer exists there.`,
+        cancelled: (number: string) => `Registered in Fortnox as invoice ${number}, but cancelled there.`,
+        booked: (number: string, voucher: string) => `Booked in Fortnox — invoice ${number}${voucher ? `, voucher ${voucher}` : ''}. Your accountant has accounted for it.`,
+        registered: (number: string) => `Registered in Fortnox as invoice ${number} — awaiting booking by your accountant.`,
+      },
+      /**
+       * Accounted — answered from Haven's own record (the descriptor says
+       * `verify: false`): the sentence says what Haven knows, not what the
+       * provider answered. `document` is the short document id.
+       */
+      accounted: {
+        registered: (document: string) => `Evidence archived in Accounted — document ${document}. Your accountant books from it.`,
+      },
+      /** The two verdicts the record-only connector can still surface — generic. */
+      foreign: 'Not found under this payment — the record belongs to another one.',
+      missing: 'The record was not found under this reference.',
     },
     /**
      * `hosted && !enabled` — the hosted Haven with the feed switched off

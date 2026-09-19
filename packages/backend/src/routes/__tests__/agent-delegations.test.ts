@@ -1661,20 +1661,26 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
  */
 describe('POST /:id/delegations/build — OPEN budget through request validation (#3082)', () => {
   // The fourth case is NOT `mode: 'enforce'`. Independent review caught that
-  // `enforced` is derived ONLY from `prefixIsEnforced(prefix,
-  // enforcedPrefixes)` in `request-validation.ts` — `mode` gates the `off`
-  // early-return and the counters, nothing else. So a bare `mode: 'enforce'`
-  // takes the SHADOW branch for any unlisted prefix, and a test that passed
-  // only the mode would silently be a duplicate of the shadow case while
-  // claiming to prove enforcement. `enforcedPrefixes: ['/agents']` is what
-  // actually enforces this route.
+  // `enforced` is derived ONLY from the module list in
+  // `request-validation.ts` — `mode` gates the `off` early-return and the
+  // counters, nothing else. So a bare `mode: 'enforce'` takes the SHADOW
+  // branch for any unlisted module, and a test that passed only the mode
+  // would silently be a duplicate of the shadow case while claiming to prove
+  // enforcement.
+  //
+  // The list is keyed on the route FILE since #3135, and this case is why the
+  // re-key matters here of all places: `enforcedPrefixes: ['/agents']` used to
+  // enforce all FOUR files mounted at `/agents`, so this suite's "enforced"
+  // case was really enforcing `agents.ts`, `agent-rekey.ts` and
+  // `agent-passports.ts` alongside the one file it is about. It now names
+  // exactly the module under test.
   const SETUPS = [
     { label: 'mode=off', options: { mode: 'off' as const } },
     { label: 'mode=shadow', options: { mode: 'shadow' as const } },
-    { label: 'mode=enforce (no prefix — still the shadow branch)', options: { mode: 'enforce' as const } },
+    { label: 'mode=enforce (module not listed — still the shadow branch)', options: { mode: 'enforce' as const } },
     {
-      label: 'ENFORCED via enforcedPrefixes',
-      options: { mode: 'shadow' as const, enforcedPrefixes: ['/agents'] },
+      label: 'ENFORCED via enforcedModules',
+      options: { mode: 'shadow' as const, enforcedModules: ['routes/agent-delegations.ts'] },
     },
   ]
   for (const { label, options } of SETUPS) {

@@ -32,6 +32,7 @@ const boundary: ClientBoundary = {
     'getAgent',
     'getAgentSummary',
     'getAllowances',
+    'checkFunds',
     'getCatalogEntry',
     'getCatalogSubmissionStatus',
     'getPayment',
@@ -42,10 +43,12 @@ const boundary: ClientBoundary = {
     'getResumeState',
     'getX402MerchantCallContext',
     'listReceipts',
+    'listReceiptsPage', // #3128
     'pay',
     'payX402Quote',
     'prepareSweep',
     'prepareX402Erc7710',
+    'precheckBudget',
     'quoteMcpX402',
     'quoteX402',
     'reportSettlementEvidence',
@@ -74,6 +77,7 @@ const boundary: ClientBoundary = {
     "async getAgent(): Promise<HavenAgent>",
     "async getAgentSummary(): Promise<HavenAgentSummary>",
     "async getAllowances(): Promise<HavenAllowanceSummary>",
+    "async checkFunds(input: { token: string; amountAtomic: string; }): Promise<HavenBalanceCoverage>",
     "async getCatalogEntry(id: string): Promise<HavenCatalogEntry>",
     "async getCatalogSubmissionStatus(id: string): Promise<{ id: string; status: 'submitted' | 'ownership_verified' | 'verified_payable' | 'failed' | 'delisted'; instructions?: { expires_at: string; well_known: { url: string; content: string; instruction: string; }; dns_txt: { name: string; value: string; instruction: string; }; } | null; }>",
     "async getPayment(paymentId: string): Promise<PaymentResult>",
@@ -84,8 +88,10 @@ const boundary: ClientBoundary = {
     "async getResumeState(paymentId: string): Promise<PaymentResumeState>",
     "async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext>",
     "async listReceipts(options: { limit?: number; } = {}): Promise<HavenPaymentReceipt[]>",
+    "async listReceiptsPage(options: { limit?: number; cursor?: string; } = {}): Promise<HavenPaymentReceiptsPage>",
     "async pay(request: PaymentRequest): Promise<PaymentResult>",
     "async payX402Quote(quote: X402Quote, options: X402AuthorizationOptions = {}): Promise<Response>",
+    "async precheckBudget(input: { chainId?: number; token: string; amountAtomic: string; merchantTo?: string; resourceUrl?: string; }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean; }>",
     "async prepareSweep(): Promise<SweepPrepareResponse>",
     "async prepareX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; delegationRail?: boolean; mcpCallContext?: X402McpCallContext; idempotencyKey?: string; } = {}): Promise<{ paymentId: string; signData: SignData; settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>; }>",
     "async quoteMcpX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
@@ -420,6 +426,7 @@ describe('HavenClient structural boundary', () => {
       // delegate sweep share. Public so a consumer reading `unconfirmed` can
       // see how long the SDK waited before saying so.
       'DEFAULT_CONFIRMATION_TIMEOUT_MS',
+      'DEFAULT_NEXT_TOOL_BY_ACTION', // #3101
       'DISCOVERY_MAX_BYTES',
       'ERC7710_ASSET_TRANSFER_METHOD',
       'HAVEN_AGENT_RUNBOOK_MD',
@@ -430,13 +437,17 @@ describe('HavenClient structural boundary', () => {
       'HavenApiError',
       'HavenClient',
       'HavenError',
+      'HavenInsecureRetryTargetError', // #3097
       'HavenPaymentStateError',
       'HavenSigningError',
       'HavenTimeoutError',
       'HavenUnsupportedSignerVersionError',
       'HavenZeroSettlementHashError',
+      'INSECURE_RETRY_TARGET_CODE', // #3097
       'MERCHANT_DISCOVERY_PATHS',
       'MerchantTimeoutError',
+      'NEXT_TOOL_SERVER_NAMES', // #3101
+      'NEXT_TOOL_SERVER_ROLES', // #3101
       'RECEIPT_VERSION',
       'SIGNER_UPDATE_FALLBACK',
       'SKILL_FOLDER_NAME',
@@ -457,6 +468,7 @@ describe('HavenClient structural boundary', () => {
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
       'addressFromKey',
+      'assertSecureX402RetryTarget', // #3097
       'buildSweepAuthorizationMessage',
       'buildSweepTypedData',
       'buildX402ExpectedMessage',
@@ -464,8 +476,10 @@ describe('HavenClient structural boundary', () => {
       'composeDescription',
       'connectorRerunCommand',
       'connectorSpec',
+      'createNextStepBuilder', // #3101
       'decodeBase64Json',
       'decodeBase64Utf8',
+      'defaultNextToolFor', // #3101
       'discoverMerchantMcpUrl',
       'encodeBase64Json',
       'encodeBase64Utf8',
@@ -473,15 +487,19 @@ describe('HavenClient structural boundary', () => {
       'havenTools',
       'isConnectorChannel',
       'isErc7710Option',
+      'isSecureX402RetryTarget', // #3097
       'isSupportedNodeVersion',
       'isSweepableChain',
       'isZeroSettlementTxHash', // #2970
       'normalizePaymentRequired',
+      'parseNextTool', // #3101
       'parsePaymentRequired',
       'parsePaymentRequiredResponse',
       'readX402ReceiptPayer',
+      'renderNextTool', // #3101
       'resolveConnectorChannel',
       'resolveTokenFromAddress',
+      'resolveX402RetryTarget', // #3097
       'sameUrl',
       'selectErc7710PaymentOption',
       'selectPaymentOption',
@@ -541,11 +559,21 @@ describe('HavenClient structural boundary', () => {
       'HavenAgentSummary',
       'HavenAllowance',
       'HavenAllowanceSummary',
+      'HavenBalanceCoverage', // #3126
       'HavenCatalogEntry',
+      'HavenCatalogMerchant', // #3078
       'HavenCatalogSubmission',
       'HavenClientConfig',
       'HavenPaymentReceipt',
+      'HavenPaymentReceiptsPage', // #3128
       'MachinePaymentRail',
+      'NextStep', // #3101
+      'NextStepArguments', // #3101
+      'NextStepHandoff', // #3101
+      'NextStepInput', // #3101
+      'NextStepTarget', // #3101
+      'NextStepTargets', // #3101
+      'NextToolServerRole', // #3101
       'OpenAITool',
       'PaymentFee',
       'PaymentIntent',
@@ -593,6 +621,7 @@ describe('HavenClient structural boundary', () => {
       'X402Receipt',
       'X402RequestSnapshot',
       'X402ResumeState',
+      'X402RetryTarget', // #3097
       'X402SchemeSelection',
     ])
   })

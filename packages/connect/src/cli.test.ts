@@ -400,9 +400,10 @@ describe('--doctor per-agent output (#1697)', () => {
     const spy = vi.spyOn(doctor, 'runDoctor').mockResolvedValue({
       version: 1,
       ok: false,
+      level: 'failed',
       runtime: 'codex-cli',
       credentialDirectory: '/home/u/.haven/agents/agent-1',
-      checks: [{ id: 'credentials', label: 'Agent credentials', ok: true, detail: 'fine' }],
+      checks: [{ id: 'credentials', label: 'Agent credentials', ok: true, level: 'ok', detail: 'fine' }],
       agents: [
         {
           agentId: 'agent-1', directory: '/home/u/.haven/agents/agent-1',
@@ -413,7 +414,7 @@ describe('--doctor per-agent output (#1697)', () => {
           classification: 'wired' as const,
           checks: [{
             id: 'identity_match', label: 'Hosted identity matches the local signing key',
-            ok: false, detail: 'MISMATCH: quote as one agent and sign as another.',
+            ok: false, level: 'failed', detail: 'MISMATCH: quote as one agent and sign as another.',
             repair: 'Re-run setup for this agent.',
           }],
         },
@@ -648,6 +649,281 @@ describe('every subcommand reports its failure on stdout under --json (#2184)', 
       expect(record.error.next_action).toBe('review_the_error_and_rerun_unwire_which_is_idempotent')
       expect(record.error).not.toHaveProperty('message')
       expect(stderr.join('')).toContain('synthetic unwire boom')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
+/**
+ * #3120 premise note, pinned as behavior: the SHIPPED CLI refuses flagless
+ * `--doctor` in the argument parser (args.ts, in place since #1597), so the
+ * fabricated-green path the issue describes is reachable only through
+ * `runDoctor` directly (library callers, tests). The doctor layer now resolves
+ * the runtime from the setup record anyway — the parser guard and the doctor's
+ * honest unknown-runtime verdicts are two doors to the same protection. These
+ * tests pin the parser door so the split cannot silently drift.
+ */
+describe('--doctor/--repair runtime requirement (#3120 premise note)', () => {
+  it('the parser refuses flagless --doctor, naming the flag and what it is for', async () => {
+    const stderr: string[] = []
+    const stdout: string[] = []
+    const exitCode = await runCli(['--doctor'], {
+      stdout: (m) => stdout.push(m),
+      stderr: (m) => stderr.push(m),
+    })
+    expect(exitCode).toBe(1)
+    expect(stdout).toHaveLength(0)
+    expect(stderr.join('')).toContain('--doctor/--repair need --runtime <runtime>')
+  })
+
+  it('the parser refuses flagless --repair the same way', async () => {
+    const stderr: string[] = []
+    const exitCode = await runCli(['--repair'], {
+      stdout: () => undefined,
+      stderr: (m) => stderr.push(m),
+    })
+    expect(exitCode).toBe(1)
+    expect(stderr.join('')).toContain('--doctor/--repair need --runtime <runtime>')
+  })
+})
+
+/**
+ * #3121 — three verdict levels. The exit code counts only `failed`; an
+ * advisory is printed with its own marker and its own summary line, exits 0,
+ * and rides in `--json` per check and rolled up. These tests pin the EXIT
+ * CODE, not only the strings.
+ */
+describe('--doctor verdict levels (#3121)', () => {
+  function reportWith(level: 'ok' | 'advisory' | 'failed') {
+    const signerRuntime = {
+      id: 'signer_runtime',
+      label: 'Signer runtime (preinstalled wrapper)',
+      ok: level !== 'failed',
+      level,
+      detail:
+        level === 'ok'
+          ? 'Installed @haven_ai/signer@1.2.3 at /rt'
+          : level === 'advisory'
+            ? "Installed version 1.2.2 does not match the connector's pinned 1.2.3 — intact, but outdated."
+            : 'Runtime directory is stale or empty (/rt) — the CLI or package versions are missing.',
+      ...(level === 'ok' ? {} : { repair: 'Run: npx -y @haven_ai/connect --doctor --repair --runtime codex-cli' }),
+    }
+    return {
+      version: 1 as const,
+      ok: level !== 'failed',
+      level,
+      runtime: 'codex-cli',
+      credentialDirectory: '/home/u/.haven/agents/agent-1',
+      checks: [{ id: 'credentials', label: 'Agent credentials', ok: true, level: 'ok' as const, detail: 'fine' }, signerRuntime],
+      agents: [{ agentId: 'agent-1', directory: '/home/u/.haven/agents/agent-1', classification: 'wired' as const, checks: [] }],
+    }
+  }
+
+  async function runWith(level: 'ok' | 'advisory' | 'failed', extra: string[] = []) {
+    const stdout: string[] = []
+    const spy = vi.spyOn(doctorModule, 'runDoctor').mockResolvedValue(reportWith(level))
+    try {
+      const exitCode = await runCli(['--doctor', '--runtime', 'codex-cli', ...extra], {
+        stdout: (m) => stdout.push(m), stderr: () => undefined,
+      })
+      return { exitCode, out: stdout.join('') }
+    } finally {
+      spy.mockRestore()
+    }
+  }
+
+  it('an advisory exits 0, is marked "!" and gets its own summary line — never "FAILED"', async () => {
+    const { exitCode, out } = await runWith('advisory')
+    expect(exitCode).toBe(0)
+    expect(out).toContain('! Signer runtime (preinstalled wrapper): Installed version 1.2.2')
+    expect(out).toContain('↳ repair:')
+    expect(out).toContain('No failures. 1 advisory finding(s)')
+    expect(out).not.toContain('FAILED')
+    expect(out).not.toContain('All checks passed')
+  })
+
+  it('MUTATION PROOF: a failed check still exits 1 with the "✗" marker and the FAILED summary', async () => {
+    const { exitCode, out } = await runWith('failed')
+    expect(exitCode).toBe(1)
+    expect(out).toContain('✗ Signer runtime (preinstalled wrapper): Runtime directory is stale or empty')
+    expect(out).toContain('One or more checks FAILED')
+  })
+
+  it('all ok: exit 0 and the unchanged "All checks passed." line (characterization)', async () => {
+    const { exitCode, out } = await runWith('ok')
+    expect(exitCode).toBe(0)
+    expect(out).toContain('✓ Signer runtime (preinstalled wrapper)')
+    expect(out).toContain('All checks passed.')
+  })
+
+  it('--json carries the level per check and rolled up, and ok tracks the exit code', async () => {
+    const { exitCode, out } = await runWith('advisory', ['--json'])
+    expect(exitCode).toBe(0)
+    const report = JSON.parse(out) as { ok: boolean; level: string; version: number; checks: Array<{ id: string; level: string; ok: boolean }> }
+    expect(report.version).toBe(1)
+    expect(report.level).toBe('advisory')
+    expect(report.ok).toBe(true)
+    expect(report.checks.find((c) => c.id === 'signer_runtime')).toMatchObject({ level: 'advisory', ok: true })
+    expect(report.checks.find((c) => c.id === 'credentials')).toMatchObject({ level: 'ok', ok: true })
+  })
+
+  it('the summary counts the primary agent ONCE — its checks are the flat list (review finding 1)', async () => {
+    // A real runDoctor report lists the primary in agents[] WITH its checks;
+    // the mocks above gave it none, which is why the double count slipped.
+    const stdout: string[] = []
+    const base = reportWith('advisory')
+    const spy = vi.spyOn(doctorModule, 'runDoctor').mockResolvedValue({
+      ...base,
+      agents: [{ ...base.agents[0], checks: base.checks }],
+    })
+    try {
+      const exitCode = await runCli(['--doctor', '--runtime', 'codex-cli'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(0)
+      const out = stdout.join('')
+      expect(out.match(/^! /gm)).toHaveLength(1)
+      expect(out).toContain('No failures. 1 advisory finding(s)')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('a WIRED agent\'s advisory in agents[] is shown with "!" and does not fail the run', async () => {
+    const stdout: string[] = []
+    const base = reportWith('ok')
+    const spy = vi.spyOn(doctorModule, 'runDoctor').mockResolvedValue({
+      ...base,
+      level: 'advisory',
+      agents: [
+        ...base.agents,
+        {
+          slug: 'ops', agentId: 'agent-ops', directory: '/home/u/.haven/agents/ops', classification: 'wired' as const,
+          checks: [{
+            id: 'signer_runtime', label: 'Signer runtime (preinstalled wrapper)', ok: true, level: 'advisory' as const,
+            detail: "Installed version 1.2.2 does not match the connector's pinned 1.2.3 — intact, but outdated.",
+          }],
+        },
+      ],
+    })
+    try {
+      const exitCode = await runCli(['--doctor', '--runtime', 'codex-cli'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(0)
+      const out = stdout.join('')
+      expect(out).toContain('! ops (agent-ops): wired, 1 advisory finding(s)')
+      expect(out).toContain('      ! Signer runtime (preinstalled wrapper): Installed version 1.2.2')
+      expect(out).toContain('No failures. 1 advisory finding(s)')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
+/**
+ * #3123 — the CLI surface of the teardown decision and the prune. A retained
+ * teardown is a refusal: the wiring is gone, the key material deliberately is
+ * not, and the exit code says so; `--json` carries `teardown` additively.
+ */
+describe('--unwire teardown outcome and --prune-signer-runtimes (#3123)', () => {
+  function unwireResult(teardown: { status: 'destroyed' | 'retained' | 'forced'; probe: string; detail: string; remedy?: string }) {
+    return {
+      directory: '/home/u/.haven/agents/research', agentId: 'agent-research', slug: 'research', tombstoned: true,
+      runtimes: [{ runtime: 'hermes', label: 'Hermes Agent config', path: '/home/u/.hermes/config.yaml', status: 'removed' as const }],
+      teardown: teardown as never,
+      bindingReleased: true,
+    }
+  }
+
+  it('retained: exit 1, the ✗ key-material line and the remedy are printed, --json carries teardown', async () => {
+    const spy = vi.spyOn(unwireModule, 'unwireAgent').mockResolvedValue(unwireResult({ status: 'retained', probe: 'unauthorized', detail: 'A stranded delegate balance MAY still exist and the connector CANNOT check.', remedy: 'Recover first, then --destroy-key-material.' }))
+    try {
+      const stdout: string[] = []
+      const exitCode = await runCli(['--unwire', '/home/u/.haven/agents/research'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(1)
+      const out = stdout.join('')
+      expect(out).toContain('✗ Key material: retained (probe: unauthorized)')
+      expect(out).toContain('↳ Recover first, then --destroy-key-material.')
+      expect(out).toContain('key material was KEPT')
+      expect(out).not.toContain('key material was removed')
+
+      const json: string[] = []
+      const exitJson = await runCli(['--unwire', '/home/u/.haven/agents/research', '--json'], { stdout: (m) => json.push(m), stderr: () => undefined })
+      expect(exitJson).toBe(1)
+      const record = JSON.parse(json[0])
+      expect(record.unwired).toBe(true)
+      expect(record.teardown).toEqual({ status: 'retained', probe: 'unauthorized', detail: 'A stranded delegate balance MAY still exist and the connector CANNOT check.', remedy: 'Recover first, then --destroy-key-material.' })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('forced under --destroy-key-material: exit 0, the flag reaches unwireAgent, the "!" line and the ended-recovery remedy are printed', async () => {
+    const spy = vi.spyOn(unwireModule, 'unwireAgent').mockResolvedValue(unwireResult({ status: 'forced', probe: 'ok', detail: 'Key material destroyed under --destroy-key-material (probe: ok).', remedy: 'Local recovery of a stranded delegate balance ends with it.' }))
+    try {
+      const stdout: string[] = []
+      const exitCode = await runCli(['--unwire', '/home/u/.haven/agents/research', '--destroy-key-material'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(0)
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ destroyKeyMaterial: true }))
+      const out = stdout.join('')
+      expect(out).toContain('! Key material: forced (probe: ok)')
+      expect(out).toContain('Local recovery of a stranded delegate balance ends')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('destroyed (nothing to preserve): exit 0 and the pre-#3123 verify line', async () => {
+    const spy = vi.spyOn(unwireModule, 'unwireAgent').mockResolvedValue(unwireResult({ status: 'destroyed', probe: 'not_probed', detail: 'No stored API key + API URL to probe with.' }))
+    try {
+      const stdout: string[] = []
+      const exitCode = await runCli(['--unwire', '/home/u/.haven/agents/research'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(0)
+      expect(stdout.join('')).toContain('✓ Key material: destroyed (probe: not_probed)')
+      expect(stdout.join('')).toContain('should report this agent as `retired`')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('--prune-signer-runtimes --json: the report with per-entry levels; exit 0 on advisory (dry run), 1 only on a failed removal', async () => {
+    const pruneModule = await import('./prune-runtimes.js')
+    const spy = vi.spyOn(pruneModule, 'pruneSignerRuntimes').mockResolvedValue({
+      version: 1, root: '/home/u/.haven/signer-runtime', dryRun: true, removed: 0, reclaimedBytes: 0, level: 'advisory',
+      entries: [{ directory: '/home/u/.haven/signer-runtime/override-abc', key: 'override-abc', kind: 'override', bytes: 1048576, referencedBy: [], action: 'would_remove', level: 'advisory', detail: 'would remove' }],
+    })
+    try {
+      const stdout: string[] = []
+      const exitCode = await runCli(['--prune-signer-runtimes', '--dry-run', '--json'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(0)
+      expect(spy).toHaveBeenCalledWith({ dryRun: true }, expect.anything())
+      const record = JSON.parse(stdout[0])
+      expect(record).toMatchObject({ pruned: true, dry_run: true, level: 'advisory', removed: 0, reclaimed_bytes: 0 })
+      expect(record.entries[0]).toMatchObject({ key: 'override-abc', kind: 'override', action: 'would_remove', level: 'advisory', referenced_by: [] })
+
+      spy.mockResolvedValue({
+        version: 1, root: '/home/u/.haven/signer-runtime', dryRun: false, removed: 0, reclaimedBytes: 0, level: 'failed',
+        entries: [{ directory: '/x', key: '0.0.1', kind: 'version', bytes: 10, referencedBy: [], action: 'failed', level: 'failed', detail: 'removal failed: EBUSY' }],
+      })
+      const prose: string[] = []
+      const exitFailed = await runCli(['--prune-signer-runtimes'], { stdout: (m) => prose.push(m), stderr: () => undefined })
+      expect(exitFailed).toBe(1)
+      expect(prose.join('')).toContain('✗ 0.0.1 (version, 0 MB): removal failed: EBUSY')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('--prune-signer-runtimes emits {pruned:false} with a next action when it throws', async () => {
+    const pruneModule = await import('./prune-runtimes.js')
+    const spy = vi.spyOn(pruneModule, 'pruneSignerRuntimes').mockRejectedValue(new Error('synthetic prune boom'))
+    try {
+      const stdout: string[] = []
+      const stderr: string[] = []
+      const exitCode = await runCli(['--prune-signer-runtimes', '--json'], { stdout: (m) => stdout.push(m), stderr: (m) => stderr.push(m) })
+      expect(exitCode).toBe(1)
+      const record = JSON.parse(stdout[0])
+      expect(record.pruned).toBe(false)
+      expect(record.error.code).toBe('prune_failed')
+      expect(stderr.join('')).toContain('synthetic prune boom')
     } finally {
       spy.mockRestore()
     }

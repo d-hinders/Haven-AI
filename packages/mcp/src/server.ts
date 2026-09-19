@@ -87,7 +87,7 @@ export async function createHavenMcpServer(options: HavenMcpServerOptions = {}):
  * `agent_tool_invocations` rows are always attributed to the right tool.
  */
 export const MCP_NAME = '@haven_ai/mcp'
-export const MCP_VERSION = '0.3.0-alpha.0'
+export const MCP_VERSION = '0.4.0-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -104,7 +104,8 @@ export const MCP_INSTRUCTIONS = [
   '',
   'To pay: haven_discover_tools to find a payable service, then',
   'haven_pay_mcp_tool for MCP merchants or haven_pay_x402 for any x402',
-  'paywall. Tool responses carry nextAction — follow it; description prose',
+  'paywall. Tool responses carry next_action (nextAction is the same value, kept one more',
+  'release) and, when no tool follows, next_tool_omitted_reason — follow them; description prose',
   'is fallback, not the source of truth.',
   '',
   'A payment outside the agent budget is declined before any money moves. Haven',

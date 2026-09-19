@@ -76,7 +76,11 @@ const BASE =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-brand)]'
 
 const VARIANT_CLASS: Record<Variant, string> = {
-  solid: 'bg-white text-[var(--v2-ink)] hover:bg-white/95 shadow-[0_1px_2px_rgba(16,24,40,0.06)]',
+  // The solid fill is a fixed white pill on the fixed dark band, so its ink is
+  // a fixed deep ink — NOT `var(--v2-ink)`: that token flips near-white in the
+  // dark palette (#3139) and read white-on-white on the closing CTA. The band
+  // and this control are fixed-on-fixed in both themes (#1867 doctrine).
+  solid: 'bg-white text-[#1a1f36] hover:bg-white/95 shadow-[0_1px_2px_rgba(16,24,40,0.06)]',
   translucent: 'bg-white/10 hover:bg-white/15 text-white border border-white/20 backdrop-blur',
 }
 

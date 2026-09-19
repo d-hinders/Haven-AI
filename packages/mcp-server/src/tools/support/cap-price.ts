@@ -23,6 +23,7 @@ import {
   type X402PaymentOption,
 } from '@haven_ai/sdk'
 import { HostedToolError } from './errors.js'
+import { refusalNextStep } from './guidance.js'
 
 /**
  * #1351: how the caller expressed this purchase's pre-funding cap.
@@ -81,7 +82,7 @@ export function assertWithinMaxAmount(
       code: 'INVALID_MAX_AMOUNT',
       message: 'max_amount and the authorized amount must be decimal atomic amounts.',
       statusCode: 400,
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again' }),
     })
   }
   if (authorized > cap) {
@@ -96,7 +97,7 @@ export function assertWithinMaxAmount(
         `this is the ceiling the merchant can settle at. No funds were moved. ` +
         `Confirm the higher amount with the user before retrying with a larger cap.`,
       statusCode: 400,
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again' }),
       retryWithNewQuote: true,
     })
   }
@@ -127,7 +128,7 @@ export function readMaxAmountCap(
         `max_amount_human for a cap the user stated in tokens ("no more than 1 USDC" → ` +
         `max_amount_human: "1"), or max_amount when you already hold an exact atomic figure.`,
       statusCode: 400,
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again' }),
     })
   }
   if (atomic !== undefined) return { kind: 'atomic', value: atomic }
@@ -143,7 +144,7 @@ export function readMaxAmountCap(
         '(whole tokens, e.g. "1" for 1 USDC — recommended) or max_amount (atomic units). ' +
         'No merchant was contacted and no funds were moved.',
       statusCode: 400,
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again' }),
     })
   }
   return { kind: 'none' }
@@ -194,7 +195,7 @@ export function resolveCapAtomic(
         `intent was created and no funds were moved. Re-send the cap as max_amount in atomic ` +
         `units of that asset, or ask the user to confirm this merchant is expected.`,
       statusCode: 400,
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again' }),
     })
   }
 
@@ -208,7 +209,7 @@ export function resolveCapAtomic(
         `Haven refuses instead. No funding intent was created and no funds were moved. Round ` +
         `the cap to ${quote.decimals} decimal places, or send an exact max_amount in atomic units.`,
       statusCode: 400,
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again' }),
     })
   }
   return { atomic: atomic.toString(), label: `max_amount_human ${cap.value} ${quote.token}` }
@@ -320,7 +321,7 @@ export function requireSettleableSelection(
             'than proceed on a guess. No payment intent was created and no funds moved. ' +
             'Retry when haven_get_agent succeeds.'),
       statusCode: 403,
-      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again; suggested_tool names the tool for after that' }),
       suggestedTool: 'haven_get_agent',
     })
   }

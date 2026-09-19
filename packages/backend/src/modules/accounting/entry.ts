@@ -2,6 +2,11 @@
 import pool from '../../db.js'
 import { isSupportedLedgerCurrency, type LedgerCurrency } from '../../domain/ledger-currency.js'
 import { vatTreatmentForCountry } from '../../domain/vat.js'
+// Imported from the leaf, not `../transactions/index.js`: the module index
+// pulls a cycle back into accounting, and `no-circular` can never be waived.
+// Module-to-module deep imports are outside `no-deep-cross-module-import`,
+// whose `from` excludes files that are themselves inside a module.
+import { toCanonicalAddress } from '../transactions/normalize.js'
 
 /**
  * Canonical accounting record for bookkeeping-ready export (epic #462, P0 #463).
@@ -145,8 +150,16 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     chainId: row.chain_id,
     settledAt: row.confirmed_at ?? row.created_at,
     direction: 'out',
-    treasuryAccount: row.payer_address ?? null,
-    counterparty: { address: row.merchant_address, name: null, country: row.country ?? null },
+    // #3129: the same canonical form the transaction feed emits. Before that
+    // change both were lowercase and agreed by accident; normalising only the
+    // feed would have made ONE payment read `0xabcd…1234` on its bookkeeping
+    // underlag and `0xAbCd…1234` in the transaction it documents.
+    treasuryAccount: toCanonicalAddress(row.payer_address ?? null),
+    counterparty: {
+      address: toCanonicalAddress(row.merchant_address),
+      name: null,
+      country: row.country ?? null,
+    },
     token: row.token_symbol,
     amountAtomic: row.amount_raw,
     amountHuman: row.amount_human,

@@ -4,9 +4,11 @@ status: current
 covers:
   - packages/backend/src/modules/catalog/lifecycle.ts
   - packages/backend/src/infra/repositories/catalog-submissions.ts
+  - packages/backend/src/infra/repositories/merchants.ts
   - packages/backend/src/index.ts
   - packages/backend/src/db/migrations/068_catalog_lifecycle.ts
-last-verified: "2026-08-24"
+  - packages/backend/src/db/migrations/088_merchants.ts
+last-verified: "2026-09-17"
 ---
 
 # Operations Runbook — Verified Payable Directory ingestion (#1714)
@@ -42,6 +44,27 @@ Only `submitted`, `ownership_verified` and `verified_payable` are "pending"
 for the per-hostname uniqueness index: one active row per hostname at a time,
 guaranteed by Postgres (migration 066). A terminal state releases the host
 for a fresh submission.
+
+## The merchant step (#3078)
+
+When a submission reaches `verified_payable` the lifecycle attaches it to a
+merchant (`merchants` table, migration 088) through the one writer every
+catalog path shares, `findOrCreateMerchantByHost` in
+`infra/repositories/merchants.ts`. The **hostname is the find key**: a
+submission on a host that already has offers in the catalog — a curated
+merchant's host, say `services.ampersend.ai` — joins that merchant, and the
+submitter's `merchant_name` / `merchant_website` are ignored (the host proves
+the seller; `verified_payable` proves the offer). On a host nobody owns, a
+merchant is founded from `merchant_name` (else the probe's own name for the
+endpoint) and `merchant_website`, with a slug from the name and a numeric
+suffix if that slug is taken by a different merchant. The attachment happens
+once (`merchant_id IS NULL` guard): a re-verification never re-homes an offer.
+
+A verified submission therefore renders on its merchant's page with the
+Verified badge and `source: 'ingestion'` — an operator did not curate it, and
+the page does not pretend otherwise. The Bazaar discovery cron
+(`catalog-discovery.ts`) goes through the same writer before its insert, so
+`merchant_catalog.merchant_id NOT NULL` holds by construction.
 
 ## Cadences and thresholds (module constants)
 

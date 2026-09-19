@@ -120,7 +120,7 @@ describeDb('receipts name funding_tx_hash / settlement_tx_hash (#2998)', () => {
       merchantStatus: 200,
     })
 
-    const [receipt] = await listReceipts(agent.agentId, 10)
+    const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts
     expect(receipt.tx_hash).toBe(fundingHash)
     expect(receipt.funding_tx_hash).toBe(fundingHash)
     expect(receipt.settlement_tx_hash).toBe(settlementHash)
@@ -133,7 +133,7 @@ describeDb('receipts name funding_tx_hash / settlement_tx_hash (#2998)', () => {
 
     await upsertEvidenceBase(evidenceInput(agent, { paymentIntentId: intentId, txHash: fundingHash }))
 
-    const [receipt] = await listReceipts(agent.agentId, 10)
+    const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts
     expect(receipt.tx_hash).toBe(fundingHash)
     expect(receipt.funding_tx_hash).toBe(fundingHash)
     expect(receipt.settlement_tx_hash).toBeNull()
@@ -160,7 +160,7 @@ describeDb('receipts name funding_tx_hash / settlement_tx_hash (#2998)', () => {
       merchantStatus: 200,
     })
 
-    const [receipt] = await listReceipts(agent.agentId, 10)
+    const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts
     expect(receipt.funding_tx_hash).toBe(fundingHash)
     expect(receipt.settlement_tx_hash).toBeNull()
   })
@@ -172,7 +172,7 @@ describeDb('receipts name funding_tx_hash / settlement_tx_hash (#2998)', () => {
 
     await upsertEvidenceBase(evidenceInput(agent, { paymentIntentId: intentId, txHash: settleHash }))
 
-    const [receipt] = await listReceipts(agent.agentId, 10)
+    const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts
     expect(receipt.tx_hash).toBe(settleHash)
     expect(receipt.funding_tx_hash).toBeNull()
     expect(receipt.settlement_tx_hash).toBe(settleHash)
@@ -187,7 +187,7 @@ describeDb('receipts name funding_tx_hash / settlement_tx_hash (#2998)', () => {
 
     await upsertEvidenceBase(evidenceInput(agent, { paymentIntentId: intentId, txHash: fundingHash, rail: 'x402' }))
 
-    const [receipt] = await listReceipts(agent.agentId, 10)
+    const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts
     expect(receipt.settlement_scheme ?? null).toBeNull()
     expect(receipt.funding_tx_hash).toBe(fundingHash)
     expect(receipt.settlement_tx_hash).toBeNull()
@@ -200,7 +200,7 @@ describeDb('receipts name funding_tx_hash / settlement_tx_hash (#2998)', () => {
 
     await upsertEvidenceBase(evidenceInput(agent, { paymentIntentId: intentId, txHash: settleHash, rail: 'mpp_demo' }))
 
-    const [receipt] = await listReceipts(agent.agentId, 10)
+    const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts
     expect(receipt.funding_tx_hash).toBeNull()
     expect(receipt.settlement_tx_hash).toBe(settleHash)
   })

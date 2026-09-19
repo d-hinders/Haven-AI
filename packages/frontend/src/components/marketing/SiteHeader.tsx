@@ -47,13 +47,25 @@ export function SiteHeader() {
       className={`sticky top-0 z-30 transition-colors duration-200 ${
         onDarkSection
           ? 'border-b border-transparent shadow-none'
-          : 'bg-white/95 border-b border-[var(--v2-border)]'
+          : 'bg-bg/95 border-b border-[var(--v2-border)]'
       }`}
     >
       {/*
-        The status-bar band, outside the blur (#2819) — `bg-transparent` so this
-        header's own background (solid-ish white, or the dark-section colour set
-        via `style`) shows through it rather than a second, wrong colour.
+        The two states split by THEME CLASS, not by light/dark page (#3139):
+
+        - Non-dark-section ground was `bg-white/95` — a fixed light bar under
+          token-driven ink, so dark-theme nav vanished whenever the header was
+          NOT over a dark band. It is now the page's own background at 95%
+          (`bg-bg/95`), and the ink rides the theme tokens as it always did.
+
+        - The dark-section branch keeps its fixed indigo ground and fixed
+          white ink in BOTH themes — it is the intentionally-dark band
+          treatment (#1867): `--v2-ink` flips near-white in the dark palette
+          and would vanish on the band, while in the LIGHT theme the ink would
+          sit near-black on it. Fixed-on-fixed is what makes mid-scroll legible
+          over the dark band in either theme. The mark stays tone-conditional
+          for the mirror reason: in the light theme the brand mark on that band
+          sits at ~2.6:1, which is why `inverse` exists.
       */}
       <SafeAreaBand className="bg-transparent" />
       <div className="backdrop-blur">

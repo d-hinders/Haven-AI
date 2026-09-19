@@ -66,7 +66,7 @@ const transactionBaseProperties = {
   decimals: { type: 'integer' },
   direction: { type: 'string', enum: ['in', 'out'] },
   timestamp: { type: 'integer' },
-  blockNumber: { type: 'integer', description: '0 for x402-synthesized rows with no on-chain receipt yet.' },
+  blockNumber: { type: ['integer', 'null'], description: 'On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero.' },
   isError: { type: 'boolean' },
   tokenAddress: address,
   tokenSymbol: { type: 'string' },
@@ -690,7 +690,7 @@ const providerRefusal = {
  */
 const invoiceVerification = {
   type: 'object',
-  required: ['registered', 'missing', 'booked', 'cancelled', 'invoice_number', 'voucher', 'invoice_date', 'total', 'checked_at'],
+  required: ['registered', 'missing', 'booked', 'cancelled', 'invoice_number', 'document_ref', 'voucher', 'invoice_date', 'total', 'checked_at'],
   properties: {
     registered: { type: 'boolean', description: 'The invoice exists in Fortnox under our external_ref.' },
     missing: {
@@ -699,9 +699,18 @@ const invoiceVerification = {
       description:
         "Why registered is false. 'deleted' = the number 404s; 'foreign_invoice' = an invoice exists at that number but carries someone else's ExternalInvoiceNumber (a company-switch collision). Null when registered. Both mean OUR record was never delivered under our ref — but an audit trail must not say \'no longer exists\' about an invoice that does.",
     },
-    booked: { type: ['boolean', 'null'], description: 'A human has booked it. Null when not registered.' },
+    booked: { type: ['boolean', 'null'], description: 'A human has booked it. Null when not registered (or not knowable).' },
     cancelled: { type: ['boolean', 'null'], description: 'Registered but struck. Null when not registered.' },
-    invoice_number: { type: 'integer' },
+    invoice_number: {
+      type: ['integer', 'null'],
+      description:
+        "The provider's own number for the record (what its UI shows). Null when the delivered object carries no number (#3018: an Accounted document) — document_ref names it instead.",
+    },
+    document_ref: {
+      type: ['string', 'null'],
+      description:
+        "The provider's id for the delivered document, when the record IS a document (Accounted: accounted:document:<id>). Null for invoice-shaped records (Fortnox).",
+    },
     voucher: { type: ['string', 'null'], description: '`<series><number> <year>` once booked, e.g. "A123 2026". Null until then.' },
     invoice_date: { type: ['string', 'null'] },
     total: { type: ['number', 'null'] },
@@ -4753,7 +4762,7 @@ export const openapiSpec = {
         operationId: 'settleX402Payment',
         summary: 'MONEY PATH: settle a delegation-rail x402 payment with the delegate signature.',
         description:
-          "The delegation rail's settlement step, and the reason the rail has no funding leg: the agent signs the settlement child delegation, Haven assembles the merchant X-PAYMENT header, and the merchant redeems the chain directly from the budget delegation — **money moves account→merchant, never through a delegate hot balance**. Retry the merchant with the returned `payment_header`; it is a signed, single-use, amount-and-merchant-bound authorization, not a key. Refusals are specific on purpose: a payment on the wrong rail is a 409 rather than a confusing 400, and a lost settlement context is a 502 telling you to re-authorize rather than a silent failure. Agent-authenticated and rate-limited on the money-path limiter.",
+          "The delegation rail's settlement step, and the reason the rail has no funding leg: the agent signs the settlement child delegation, Haven assembles the merchant X-PAYMENT header, and the merchant redeems the chain directly from the budget delegation — **money moves account→merchant, never through a delegate hot balance**. Retry the merchant with the returned `payment_header`; it is a signed, single-use, amount-and-merchant-bound authorization, not a key. Refusals are specific on purpose: a payment on the wrong rail is a 409 rather than a confusing 400; a stored 402 challenge that advertises no unique matching erc7710 option is also a 409 telling you to re-authorize, because that refusal is deterministic and retrying it can never succeed; and a lost settlement context is a 502 telling you to re-authorize rather than a silent failure. Agent-authenticated and rate-limited on the money-path limiter.",
         security: [{ AgentApiKey: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Payment intent id from authorize.' }],
         requestBody: {
@@ -4790,7 +4799,7 @@ export const openapiSpec = {
           '400': { ...errorResponse, description: 'A delegate signature is required.' },
           '401': errorResponse,
           '404': { ...errorResponse, description: 'Payment not found.' },
-          '409': { ...errorResponse, description: 'Not a delegation-rail settlement, or not awaiting a signature.' },
+          '409': { ...errorResponse, description: 'Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize.' },
           '429': { ...errorResponse, description: 'Money-path rate limit.' },
           '502': { ...errorResponse, description: 'Settlement state was lost — re-authorize.' },
         },
@@ -5643,6 +5652,105 @@ export const openapiSpec = {
         },
       },
     },
+    '/machine-payments/budget-precheck': {
+      post: {
+        tags: ['Machine payments'],
+        operationId: 'precheckMachinePaymentBudget',
+        summary: 'Decide server-side whether a quote amount fits the agent’s remaining budget.',
+        description:
+          '#3054: the guided prepare\'s budget compare moved server-side so an over-budget refusal ' +
+          'is DECIDED by Haven — and reaches the payment_refusals ledger with source ' +
+          '"hosted_prepare" through the refuse() choke point — instead of being computed in the ' +
+          'agent\'s runtime where the ledger never saw it. The body carries the merchant quote ' +
+          'facts (chainId/token/amountAtomic plus advisory merchantTo and the bought resourceUrl — ' +
+          'the refusal dedupe window\'s discriminating column, never this endpoint\'s own URL); ' +
+          'nothing about the caller\'s claim is trusted beyond which quote it asks about. ' +
+          'Sufficiency answers { sufficient: true, remaining_atomic }. Insufficiency refuses 403 ' +
+          'delegation_budget_exceeded with the same taxonomy body the x402 legs refuse with (phase, ' +
+          'next_action, remaining/shortfall atomic+human). BOTH retired rails answer 410 like ' +
+          'every rail-aware surface. Reporting-and-refusal only — enforcement stays on-chain: the ' +
+          'budget delegation\'s ERC20PeriodTransferEnforcer still refuses an over-budget redemption.',
+        security: [{ AgentApiKey: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/BudgetPrecheckRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The amount fits the remaining budget.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BudgetPrecheckResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': {
+            ...errorResponse,
+            description:
+              'The amount exceeds the agent\'s remaining delegation budget — decided here and ' +
+              'recorded in the payment_refusals ledger (source "hosted_prepare"). Carries ' +
+              'error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action ' +
+              '"fund_account_or_raise_allowance", plus remaining/remaining_atomic, ' +
+              'amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / ' +
+              'merchant_address when the request carried them.',
+          },
+          '410': {
+            ...errorResponse,
+            description:
+              'The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule (#2020). ' +
+              'Fail-closed; there is no budget concept left to pre-check.',
+          },
+          '429': errorResponse,
+          '502': errorResponse,
+        },
+      },
+    },
+    '/machine-payments/balance-coverage': {
+      get: {
+        tags: ['Machine payments'],
+        operationId: 'getMachinePaymentBalanceCoverage',
+        summary: 'Report whether the account actually holds the amount behind the agent\'s budget (#3126).',
+        description:
+          'Answers the question no spend-authority read answers: is `amount_atomic` of `token` ' +
+          'actually HELD on the authenticated agent\'s own account right now. The response is a ' +
+          'sufficiency signal, never a balance: `covered` is true/false/null and the account\'s ' +
+          'balance itself is deliberately not returned — a constrained agent has no business ' +
+          'reading the treasury total, and the boolean answers the only decision an agent has ' +
+          '(attempt the payment, or tell the user funds are missing). `covered: null` means the ' +
+          'chain read FAILED — treat it as unverifiable, not as absence. Keep the two concepts ' +
+          'apart: `budget_remaining_atomic` is spend AUTHORITY (the same figure ' +
+          'GET /machine-payments/allowances reports as onchain.remaining); `covered` is about ' +
+          'HELD funds. Rail-aware like every read: both retired rails answer 410. Reporting only — ' +
+          'grants no authority, moves nothing; enforcement stays on-chain.',
+        security: [{ AgentApiKey: [] }],
+        responses: {
+          '200': {
+            description: 'The coverage answer for the requested token and amount.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BalanceCoverageResponse' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': agentAuthForbidden,
+          '410': {
+            ...errorResponse,
+            description:
+              'The account is on a RETIRED rail — session (#993) or Safe/AllowanceModule (#2020). ' +
+              'Fail-closed; there is no account this surface can describe.',
+          },
+          '502': errorResponse,
+        },
+      },
+    },
     '/machine-payments/authorize': {
       post: {
         tags: ['Machine payments'],
@@ -5798,6 +5906,8 @@ export const openapiSpec = {
         tags: ['Machine payments'],
         operationId: 'listMachinePaymentReceipts',
         summary: 'List stored machine-payment receipts for the authenticated agent.',
+        description:
+          '#3128: a page, newest first. `total` is how many receipts Haven holds for the agent, so an empty `receipts` with `total: 0` means none exist — there is no indexing delay behind this list. `has_more` says the page was cut at `limit`; pass `next_cursor` back as `cursor` for the next page.',
         security: [{ AgentApiKey: [] }],
         parameters: [
           {
@@ -5806,26 +5916,37 @@ export const openapiSpec = {
             required: false,
             schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 },
           },
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            description: 'The `next_cursor` of the previous page (a receipt id). Omit for the first page. A value that is not a uuid, or that names no receipt of this agent, is refused with 400.',
+            schema: { type: 'string', format: 'uuid' },
+          },
         ],
         responses: {
           '200': {
-            description: 'Machine-payment receipts.',
+            description: 'One page of machine-payment receipts.',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['receipts'],
+                  required: ['receipts', 'total', 'has_more', 'next_cursor'],
                   properties: {
                     receipts: {
                       type: 'array',
                       items: { $ref: '#/components/schemas/MachinePaymentReceipt' },
                     },
+                    total: { type: 'integer', minimum: 0, description: 'Receipts Haven holds for this agent, across all pages.' },
+                    has_more: { type: 'boolean', description: 'True when receipts beyond this page exist.' },
+                    next_cursor: { type: ['string', 'null'], description: 'Pass as `cursor` for the next page; null on the last page.' },
                   },
                   additionalProperties: false,
                 },
               },
             },
           },
+          '400': errorResponse,
           '401': errorResponse,
           '403': agentAuthForbidden,
         },
@@ -6361,7 +6482,7 @@ export const openapiSpec = {
         summary: 'List curated payable services agents can discover and pay.',
         description:
           'Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. ' +
-          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: \'test-fixture\'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly, and clients that pre-filter should treat the category as the structural signal.',
+          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: \'test-fixture\'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.',
         security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
         parameters: [
           { name: 'category', in: 'query', schema: { type: 'string' } },
@@ -6470,6 +6591,67 @@ export const openapiSpec = {
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/CatalogEntry' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '403': agentAuthForbidden,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/merchants': {
+      get: {
+        tags: ['Catalog'],
+        operationId: 'listMerchants',
+        summary: 'List the marketplace\'s merchants.',
+        description:
+          'The sell side of the catalog (#3078, epic #3077): every live merchant with at least one non-delisted offer on a chain this deployment lists (HAVEN_MARKETPLACE_CHAIN_IDS, else HAVEN_DEPLOY_CHAIN_IDS, else every chain) or a verified self-submitted offer, ordered real merchants first, then test merchants. Readable without a credential, like `GET /catalog`. `coming_soon` prospects appear only for an authenticated dashboard user when HAVEN_MARKETPLACE_PROSPECTS is on and no mainnet chain is listed. Read-only; nothing here creates payments or signatures.',
+        security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Merchants.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['merchants'],
+                  properties: {
+                    merchants: { type: 'array', items: { $ref: '#/components/schemas/Merchant' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '403': agentAuthForbidden,
+        },
+      },
+    },
+    '/merchants/{slug}': {
+      get: {
+        tags: ['Catalog'],
+        operationId: 'getMerchant',
+        summary: 'One merchant and its offers.',
+        description:
+          'The merchant and its non-delisted offers on the chains this deployment lists (an agent: its own chain), plus its verified self-submitted offers. A credential-less caller gets the offers in the public catalog shape. 404 — never 403 — for an unknown slug, a live merchant with nothing to show on these chains, or a prospect the caller may not see (the URL must not confirm a prospect exists).',
+        security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
+        parameters: [
+          { name: 'slug', in: 'path', required: true, schema: { type: 'string', pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Merchant and offers.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['merchant', 'offers'],
+                  properties: {
+                    merchant: { $ref: '#/components/schemas/Merchant' },
+                    offers: { type: 'array', items: { $ref: '#/components/schemas/CatalogEntry' } },
+                  },
+                },
               },
             },
           },
@@ -6596,6 +6778,67 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      CatalogEntryMerchant: {
+        type: 'object',
+        required: ['id', 'slug', 'name', 'listing_status', 'is_test_merchant'],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          slug: { type: 'string' },
+          name: { type: 'string' },
+          listing_status: {
+            type: 'string',
+            enum: ['live', 'coming_soon'],
+            description:
+              'Named apart from `CatalogEntry.status` (active|degraded|delisted) on purpose. A `coming_soon` merchant has no offers, so an entry never carries it in practice.',
+          },
+          is_test_merchant: {
+            type: 'boolean',
+            description:
+              'True for Haven-run test content: the Haven demo store (real payments, demo goods) and the stranded-funds fixture. The structural signal for clients that pre-filter test content.',
+          },
+        },
+      },
+      Merchant: {
+        type: 'object',
+        required: [
+          'id', 'slug', 'name', 'description', 'website', 'logo_url', 'category', 'country',
+          'listing_status', 'is_test_merchant', 'offer_count', 'networks', 'verified_payable',
+        ],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          slug: { type: 'string', description: 'URL key: `/merchants/{slug}` and `/marketplace/<slug>`.' },
+          name: { type: 'string' },
+          description: { type: 'string' },
+          website: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          logo_url: {
+            anyOf: [{ type: 'string' }, { type: 'null' }],
+            description: 'Only Haven-run and Ampersend rows carry one; prospects never do (monogram only).',
+          },
+          category: { type: 'string' },
+          country: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'ISO 3166-1 alpha-2, when known.' },
+          listing_status: {
+            type: 'string',
+            enum: ['live', 'coming_soon'],
+            description:
+              '`coming_soon` is a prospect Haven is talking to — shown only to an authenticated dashboard user on a deployment that lists no mainnet chain and has HAVEN_MARKETPLACE_PROSPECTS on; never an agreement, never payable, never in an agent read or the credential-less shape.',
+          },
+          is_test_merchant: { type: 'boolean' },
+          offer_count: {
+            type: 'integer',
+            description:
+              'Non-delisted offers on the chains this deployment lists (an agent: its own chain) plus verified self-submitted offers. Zero for a prospect.',
+          },
+          networks: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Distinct CAIP-2 networks of the listed operator offers, e.g. ["eip155:84532"]. Ingestion offers carry none.',
+          },
+          verified_payable: {
+            type: 'boolean',
+            description: 'Any offer verified payable — the same observation `CatalogEntry.verified_payable` records, at merchant level.',
+          },
+        },
+      },
       CatalogEntry: {
         type: 'object',
         /**
@@ -6608,6 +6851,7 @@ export const openapiSpec = {
           'id', 'name', 'description', 'category', 'resource_url', 'rail', 'protocol', 'status',
           'tool_name', 'tool_arguments', 'price_display', 'price_atomic', 'asset', 'network',
           'asset_transfer_methods', 'verified_at', 'source', 'domain_verified', 'verified_payable',
+          'merchant',
         ],
         properties: {
           id: { type: 'string', format: 'uuid' },
@@ -6615,6 +6859,11 @@ export const openapiSpec = {
           description: { type: 'string' },
           category: { type: 'string' },
           resource_url: { type: 'string' },
+          merchant: {
+            anyOf: [{ $ref: '#/components/schemas/CatalogEntryMerchant' }, { type: 'null' }],
+            description:
+              'The merchant this entry belongs to (#3078, epic #3077): every operator row has one after migration 088; an ingestion row has one once it is verified payable. Null only for a row the merchant join could not resolve.',
+          },
           rail: { type: 'string', enum: ['x402', 'mpp'] },
           protocol: { type: 'string', enum: ['http', 'mcp'] },
           tool_name: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -6659,6 +6908,17 @@ export const openapiSpec = {
         type: 'object',
         required: ['resource_url'],
         properties: {
+          merchant_name: {
+            type: 'string',
+            maxLength: 120,
+            description:
+              'Optional (#3078): the seller\'s display name. Used to name the merchant when the submission is verified payable and no merchant owns the host yet; ignored when one does (the host proves the seller). Distinct from `website`.',
+          },
+          merchant_website: {
+            type: 'string',
+            maxLength: 2048,
+            description: 'Optional (#3078): the seller\'s public site, https. Same rules as `merchant_name`.',
+          },
           resource_url: {
             type: 'string',
             description:
@@ -8095,6 +8355,100 @@ export const openapiSpec = {
               },
               additionalProperties: false,
             },
+          },
+        },
+        additionalProperties: false,
+      },
+      BudgetPrecheckRequest: {
+        type: 'object',
+        description:
+          'The merchant quote facts the guided prepare asks Haven to pre-check (#3054). camelCase ' +
+          'like the route family. `resourceUrl` is the merchant resource being bought — the ' +
+          'refusal dedupe window\'s discriminating column — never this endpoint\'s own URL.',
+        required: ['token', 'amountAtomic'],
+        properties: {
+          chainId: { type: 'integer', description: 'Advisory: the compare is scoped to the authenticated agent\'s own chain.' },
+          token: { ...address, description: 'The quote\'s asset contract address — the SELECTED settlement option\'s asset.' },
+          amountAtomic: {
+            type: 'string',
+            pattern: '^[0-9]+$',
+            description: 'The amount that would be authorized, in ATOMIC units, as a non-negative integer string.',
+          },
+          merchantTo: {
+            type: 'string',
+            description: 'Advisory: the merchant payTo address from the selected option. Carried onto the refusal row; it does not scope the compare — the budget is per-token and the enforcer is the gate on recipients.',
+          },
+          resourceUrl: {
+            type: 'string',
+            description: 'The merchant resource being bought. Lands on the refusal row\'s dedupe key when the pre-check refuses.',
+          },
+        },
+        additionalProperties: false,
+      },
+      BudgetPrecheckResponse: {
+        type: 'object',
+        description:
+          'The sufficient branch of the server-side budget pre-check (#3054). The insufficient ' +
+          'answer is not this schema — it is the 403 delegation_budget_exceeded refusal, which ' +
+          'also lands a payment_refusals row with source "hosted_prepare".',
+        required: ['sufficient', 'remaining_atomic'],
+        properties: {
+          sufficient: { type: 'boolean', description: 'Always true on this schema — insufficiency refuses 403 instead.' },
+          remaining_atomic: {
+            type: 'string',
+            description: 'The remaining period budget for the requested token, in ATOMIC units, after deciding this quote fits.',
+          },
+          remaining_is_from_chain: {
+            type: 'boolean',
+            description:
+              '#1319 provenance, same semantics as the allowances read\'s flag: true when the remaining figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
+          },
+        },
+        additionalProperties: false,
+      },
+      BalanceCoverageResponse: {
+        type: 'object',
+        description:
+          'The #3126 sufficiency answer — whether HELD funds cover the checked amount. Deliberately ' +
+          'NOT a balance: no field carries the account\'s balance, and nothing is named like the ' +
+          'authority figures (remaining/available). `covered` speaks only of holdings; ' +
+          '`budget_remaining_atomic` is the PERMITTED figure the allowances read reports.',
+        required: ['covered', 'chain_id', 'token_address', 'token_symbol', 'checked_amount_atomic', 'budget_remaining_atomic'],
+        properties: {
+          covered: {
+            anyOf: [
+              { type: 'boolean' },
+              { type: 'null' },
+            ],
+            description:
+              'true: the chain says the agent\'s account holds at least checked_amount_atomic of ' +
+              'token. false: the chain read succeeded and reports LESS — tell the user the funds ' +
+              'are missing rather than retrying. null: the chain read FAILED — unverifiable, never ' +
+              'treated as absence; coverage_error carries why.',
+          },
+          coverage_error: {
+            type: 'string',
+            description: 'Present only when covered is null: why the chain read could not answer.',
+          },
+          chain_id: { type: 'integer' },
+          token_address: address,
+          token_symbol: { type: 'string' },
+          checked_amount_atomic: {
+            type: 'string',
+            description: 'The amount the coverage question was asked about, in ATOMIC units.',
+          },
+          budget_remaining_atomic: {
+            type: 'string',
+            description:
+              'Context, AUTHORITY not holdings: the agent\'s remaining spend authority for the ' +
+              'requested token, in ATOMIC units — the same derivation GET /machine-payments/allowances ' +
+              'reports as onchain.remaining (#1090 derivation, #1145 enforcer read). Zero when no ' +
+              'active budget row names the token. Compare it with covered, never instead of it.',
+          },
+          budget_remaining_is_from_chain: {
+            type: 'boolean',
+            description:
+              '#1319 provenance, same semantics as the allowances read\'s flag: true when the budget figure came from a live ERC20PeriodTransferEnforcer read, false when it fell back to the configured budget. Absent when no budget row existed for the token (nothing was read).',
           },
         },
         additionalProperties: false,

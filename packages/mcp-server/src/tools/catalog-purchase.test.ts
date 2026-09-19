@@ -22,6 +22,8 @@
  * Fixtures come from the #2808 shared module, never re-declared here.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
+import { parseStrict } from './parsing.js'
+import type { StrictInputToolName } from './contracts.js'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
@@ -30,6 +32,7 @@ import {
 import {
   AGENT_RESPONSE,
   PAYMENT_REQUIRED,
+  X402_EXPECTED_AUTH,
   X402_INTENT_RESPONSE,
   clearCalls,
   handlers,
@@ -59,6 +62,50 @@ beforeAll(async () => {
 })
 
 describe('haven_discover_tools', () => {
+  it('hands out suggested_arguments each suggested tool accepts VERBATIM — the discovery hop parity (#3100)', async () => {
+    const base = {
+      description: 'd', category: 'api', rail: 'x402', price_display: '$0.01 USDC', price_atomic: '10000',
+      asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', network: 'base', status: 'active',
+      verified_at: '2026-06-16T08:50:39.772Z',
+    }
+    stubFetch({
+      'GET /catalog': {
+        status: 200,
+        body: {
+          entries: [
+            { ...base, id: 'cat_mcp', name: 'create_text', resource_url: 'https://mcp.merchant.test/mcp', protocol: 'mcp', tool_name: 'create_text', tool_arguments: { prompt: 'hello' } },
+            { ...base, id: 'cat_http', name: 'Fact', resource_url: 'https://services.sandbox.ampersend.ai/api/fact', protocol: 'http', tool_name: null, tool_arguments: null },
+            // Round-2 (#3113): the two row shapes haven_quote_catalog_purchase refuses get a reason, not a hint.
+            { ...base, id: 'cat_mcp_nameless', name: 'Unnamed', resource_url: 'https://mcp.merchant.test/mcp', protocol: 'mcp', tool_name: null, tool_arguments: null },
+            { ...base, id: 'cat_mcp_degraded', name: 'Stale', resource_url: 'https://mcp.merchant.test/mcp', protocol: 'mcp', tool_name: 'x', tool_arguments: {}, status: 'degraded' },
+          ],
+        },
+      },
+    })
+    const result = ok<Array<{ id: string; resource_url: string; suggested_tool?: StrictInputToolName; suggested_arguments?: Record<string, unknown>; suggested_tool_omitted_reason?: string }>>(
+      await handlers().haven_discover_tools({}),
+    )
+    expect(result.data.map((e) => [e.suggested_tool, e.suggested_arguments])).toEqual([
+      ['haven_quote_catalog_purchase', { catalog_id: 'cat_mcp' }],
+      ['haven_quote_x402', { url: 'https://services.sandbox.ampersend.ai/api/fact' }],
+      [undefined, undefined],
+      [undefined, undefined],
+    ])
+    for (const id of ['cat_mcp_nameless', 'cat_mcp_degraded']) {
+      const row = result.data.find((e) => e.id === id)!
+      expect(row).not.toHaveProperty('suggested_tool')
+      expect(row.suggested_tool_omitted_reason).toContain('haven_quote_catalog_purchase refuses it')
+    }
+    // The property, not the literals: every hint parses under the strict
+    // schema of the tool it names. (The live bug: discovery said
+    // `resource_url`, the tool took `url`.)
+    for (const entry of result.data) {
+      if (!entry.suggested_tool) continue
+      expect(() => parseStrict(entry.suggested_tool!, entry.suggested_arguments), entry.suggested_tool).not.toThrow()
+      expect(() => parseStrict(entry.suggested_tool!, { resource_url: entry.resource_url })).toThrow(/Send "resource_url" as|does not accept/)
+    }
+  })
+
   it('marks catalog prices as indicative (not authoritative)', async () => {
     stubFetch({
       'GET /catalog': {
@@ -91,6 +138,7 @@ describe('haven_discover_tools', () => {
       price_is_indicative: boolean
       price_atomic: string
       suggested_tool: string
+      suggested_arguments: Record<string, unknown>
       tool_arguments: Record<string, unknown>
     }>>(
       await handlers().haven_discover_tools({}),
@@ -98,10 +146,43 @@ describe('haven_discover_tools', () => {
 
     expect(result.data[0].price_is_indicative).toBe(true)
     expect(result.data[0].price_atomic).toBe('10000')
-    // #1547: the structured field agrees with the description prose — MCP
-    // entries point at the GUIDED preflight, not the manual tool.
-    expect(result.data[0].suggested_tool).toBe('haven_prepare_catalog_purchase')
+    // #1547 pointed MCP entries at the GUIDED preflight rather than the manual
+    // tool; #3100 points them one step earlier, at the cap-free catalog quote
+    // (prepare REQUIRES a cap the server must never invent, so a verbatim
+    // hint for it cannot exist) — still the guided path, never the manual tool.
+    expect(result.data[0].suggested_tool).toBe('haven_quote_catalog_purchase')
+    expect(result.data[0].suggested_arguments).toEqual({ catalog_id: 'cat_1' })
     expect(result.data[0].tool_arguments).toEqual({ prompt: 'hello' })
+  })
+
+  it('carries the merchant wire-shaped when the backend sends one, and omits it when it does not (#3078)', async () => {
+    const base = {
+      id: 'cat_1', name: 'fact', description: 'One fact', category: 'api',
+      resource_url: 'https://services.sandbox.ampersend.ai/api/fact', rail: 'x402', protocol: 'http',
+      tool_name: null, tool_arguments: null, price_display: '0.001 USDC', price_atomic: '1000',
+      asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', network: 'eip155:84532', status: 'active',
+      verified_at: null, source: 'operator', domain_verified: false, verified_payable: false,
+    }
+    stubFetch({
+      'GET /catalog': {
+        status: 200,
+        body: {
+          entries: [
+            { ...base, merchant: { id: 'm_1', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false } },
+            { ...base, id: 'cat_2', merchant: { id: 'm_2', slug: 'haven-demo-store', name: 'Haven demo store', listing_status: 'live', is_test_merchant: true } },
+            { ...base, id: 'cat_3' },
+          ],
+        },
+      },
+    })
+    const result = ok<Array<Record<string, unknown>>>(await handlers().haven_discover_tools({}))
+    expect(result.data[0].merchant).toEqual({
+      id: 'm_1', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false,
+    })
+    // The structural signal for skipping Haven's own test content rides along.
+    expect((result.data[1].merchant as { is_test_merchant: boolean }).is_test_merchant).toBe(true)
+    // An older backend sends none: the key is absent, never null.
+    expect('merchant' in result.data[2]).toBe(false)
   })
 
   it('forwards case-insensitive category/search filters as one read-only GET', async () => {
@@ -122,6 +203,41 @@ describe('haven_discover_tools', () => {
     await handlers().haven_discover_tools({ search: '' })
     expect(recordedCalls()[0]?.url).toBe('http://haven.test/catalog?search=')
     expect(recordedCalls()).toHaveLength(1)
+  })
+
+  it('returns no prospect even with HAVEN_MARKETPLACE_PROSPECTS on: it reads GET /catalog only, never GET /merchants (#3080)', async () => {
+    // Prospects have zero offers by construction, so they never appear in
+    // `GET /catalog` regardless of the flag — the merchants route is the only
+    // listing surface for them, and this tool has no reason to call it. The
+    // fixture below is what `GET /catalog` returns on a dev deployment with
+    // the flag on: real offers only, `berget-ai` and `redpine` absent.
+    stubFetch({
+      'GET /catalog': {
+        status: 200,
+        body: {
+          entries: [
+            {
+              id: 'cat_1', name: 'Ampersend — fact', description: 'One fact', category: 'api',
+              resource_url: 'https://services.sandbox.ampersend.ai/api/fact', rail: 'x402', protocol: 'http',
+              tool_name: null, tool_arguments: null, price_display: '0.001 USDC', price_atomic: '1000',
+              asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', network: 'eip155:84532', status: 'active',
+              verified_at: null,
+              merchant: { id: 'm_amp', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false },
+            },
+          ],
+        },
+      },
+    })
+
+    const result = ok<Array<{ merchant?: { slug: string } }>>(await handlers().haven_discover_tools({}))
+
+    expect(result.data.map((e) => e.merchant?.slug)).toEqual(['ampersend-demo-api'])
+    expect(result.data.some((e) => e.merchant?.slug === 'berget-ai' || e.merchant?.slug === 'redpine')).toBe(false)
+    // The one call this tool ever makes is GET /catalog; it never touches
+    // /merchants, so a prospect could not reach it even if the fixture leaked one.
+    expect(recordedCalls()).toHaveLength(1)
+    expect(recordedCalls()[0]?.url).toMatch(/^http:\/\/haven\.test\/catalog(\?|$)/)
+    expect(recordedCalls().some((call) => call.url.includes('/merchants'))).toBe(false)
   })
 })
 
@@ -185,7 +301,7 @@ describe('haven_quote_mcp_tool', () => {
     // The MCP lifecycle needs the existing public delegate address for
     // x402-wallet. It must not read allowances, create an intent, or write.
     expect(recordedCalls().filter((call) => new URL(call.url).pathname.endsWith('/machine-payments/agent'))).toHaveLength(1)
-    expect(recordedCalls().find((call) => new URL(call.url).pathname.includes('/machine-payments/allowances'))).toBeUndefined()
+    expect(recordedCalls().find((call) => new URL(call.url).pathname.includes('/machine-payments/budget-precheck'))).toBeUndefined()
   })
 })
 
@@ -241,7 +357,7 @@ describe('haven_quote_catalog_purchase', () => {
     })
     expect(recordedCalls().find((call) => new URL(call.url).pathname.endsWith('/x402'))).toBeUndefined()
     expect(recordedCalls().filter((call) => new URL(call.url).pathname.endsWith('/machine-payments/agent'))).toHaveLength(1)
-    expect(recordedCalls().find((call) => new URL(call.url).pathname.includes('/machine-payments/allowances'))).toBeUndefined()
+    expect(recordedCalls().find((call) => new URL(call.url).pathname.includes('/machine-payments/budget-precheck'))).toBeUndefined()
   })
 
   it('preserves the catalog preflight refusal when a row cannot produce a live MCP quote', async () => {
@@ -283,39 +399,10 @@ describe('haven_prepare_catalog_purchase', () => {
 
   const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
 
-  // #1319: `remainingIsFromChain` mirrors the wire's `remaining_is_from_chain`
-  // — omitted by default (matches a legacy-rail row, and most delegation
-  // fixtures don't care), set explicitly where a test exercises the
-  // provenance warning.
-  function allowancesFixture(
-    remaining: string,
-    rail: 'legacy' | 'delegation' = 'legacy',
-    options: { remainingIsFromChain?: boolean } = {},
-  ) {
-    return {
-      agent_id: 'agt_1',
-      account_address: '0xSafe',
-      delegate_address: '0xDelegate',
-      chain_id: 8453,
-      allowances: [{
-        id: rail === 'delegation' ? 'delegation-1' : 'allowance-1',
-        token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-        token_symbol: 'USDC',
-        configured_amount: rail === 'delegation' ? '5.00' : '5000000',
-        reset_period_min: rail === 'delegation' ? 1440 : 60,
-        onchain: {
-          amount: remaining, spent: '0', remaining, effective_spent: '0',
-          reset_time_min: rail === 'delegation' ? 1440 : 60,
-          last_reset_min: rail === 'delegation' ? 0 : 100,
-          nonce: rail === 'delegation' ? 0 : 7,
-          is_reset_pending: false,
-          ...(options.remainingIsFromChain !== undefined
-            ? { remaining_is_from_chain: options.remainingIsFromChain }
-            : {}),
-        },
-      }],
-    }
-  }
+  // (allowancesFixture removed — #3054 replaced the GET allowances stub with a
+  // POST /machine-payments/budget-precheck stub, which takes the bare wire
+  // response body inline at each site: { sufficient, remaining_atomic,
+  // remaining_is_from_chain? } on 200, or the taxonomy refusal body on 403.)
 
   const baseRoutes = {
     'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
@@ -327,7 +414,7 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
     const result = ok<{
@@ -401,7 +488,7 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000', 'delegation') },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', remaining_is_from_chain: true } },
     })
 
     const result = ok<{ allowance: { rail: string; sufficient: boolean | null; remaining_atomic?: string; source: string } }>(
@@ -441,7 +528,7 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
     // Fixture's authoritative price is maxAmountRequired = 1500000.
@@ -495,7 +582,7 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('7500') },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '7500' } },
       // A pre-retirement row, echoed back — not a queue this rail could create.
       'POST /x402': { status: 202, body: { payment_id: 'over_1', status: 'pending_approval' } },
     })
@@ -510,11 +597,21 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 
-  it('delegation rail: over-budget REFUSES at prepare — no approval queue exists on this rail', async () => {
+  it('delegation rail: over-budget REFUSES at prepare — the decision is Haven\'s (precheck 403), no approval queue exists on this rail', async () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('100', 'delegation') },
+      'POST /machine-payments/budget-precheck': {
+        status: 403,
+        body: {
+          error: 'This payment of 1.5 USDC exceeds the agent\'s remaining budget for this period (0.0001 USDC, short by 1.4999 USDC). There is no approval queue on the delegation rail — an over-budget redemption reverts on-chain. Ask the wallet owner to grant or raise the budget in Haven, then retry.',
+          error_code: 'delegation_budget_exceeded',
+          phase: 'insufficient_funds',
+          next_action: 'fund_safe_or_raise_allowance',
+          remaining_atomic: '100',
+          amount_atomic: '1500000',
+        },
+      },
     })
 
     const payload = await handlers().haven_prepare_catalog_purchase({
@@ -529,6 +626,67 @@ describe('haven_prepare_catalog_purchase', () => {
     // Mutation-tested ordering: no funding intent was created — the refusal
     // fires before createX402Intent, unlike the legacy queue-and-proceed path.
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+    // #3054 characterization: the relay is byte-identical to the refusal the
+    // local compare used to throw — same code, same message shape (the
+    // selected option's amount against the remaining the SERVER reported),
+    // same next_action, same suggested tool.
+    expect(payload.message).toBe(
+      'The amount this purchase would authorize (1500000 USDC atomic) ' +
+        "exceeds the agent's remaining active delegation budget " +
+        '(100 USDC atomic). ' +
+        'There is no approval queue — an over-budget redemption would revert ' +
+        'on-chain. Ask the wallet owner to grant or raise the budget in Haven before retrying.',
+    )
+    expect(payload.suggested_tool).toBe('haven_get_allowances')
+  })
+
+  it('sends the server the quote facts it needs: the SELECTED option asset/amount, the merchant payTo, and the bought resource URL (#3054)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
+    })
+
+    ok(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    const precheck = recordedCalls().find((c) => new URL(c.url).pathname.endsWith('/machine-payments/budget-precheck'))
+    expect(precheck).toBeDefined()
+    expect(precheck?.method).toBe('POST')
+    // `resourceUrl` is the merchant resource being bought — the dedupe
+    // window's discriminating column — never the allowances read's URL or
+    // this endpoint's own. `token`/`amountAtomic` are the SELECTED option's
+    // (#2051); `merchantTo` is advisory metadata for the ledger row.
+    expect(precheck?.body).toMatchObject({
+      token: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      amountAtomic: '1500000',
+      merchantTo: PAYMENT_REQUIRED.accepts[0].payTo,
+      resourceUrl: 'http://merchant.test/mcp',
+    })
+    // The allowances GET is GONE — one budget read, now this POST (#1348).
+    expect(recordedCalls().find((c) => c.method === 'GET' && new URL(c.url).pathname.endsWith('/machine-payments/allowances'))).toBeUndefined()
+  })
+
+  it('a non-budget 403 from the pre-check is NOT a refusal — it degrades to sufficient: null with a warning (#3054)', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'POST /machine-payments/budget-precheck': {
+        status: 403,
+        body: { error: 'agent_paused', error_code: 'agent_paused' },
+      },
+    })
+
+    const result = ok<{
+      allowance: { rail: string; sufficient: boolean | null; source: string }
+      warnings: Array<{ code: string }>
+    }>(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
+
+    // Only the DECIDED delegation_budget_exceeded refusal stops the purchase;
+    // any other status/body degrades — the precheck can never become a
+    // refusal the server did not decide.
+    expect(result.data.allowance).toEqual({ rail: 'delegation', sufficient: null, source: 'active_delegations' })
+    expect(result.data.warnings.some((w) => w.code === 'ALLOWANCE_CHECK_UNAVAILABLE')).toBe(true)
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeDefined()
   })
 
   it('refuses a degraded catalog entry, naming haven_pay_mcp_tool as the manual fallback', async () => {
@@ -572,7 +730,7 @@ describe('haven_prepare_catalog_purchase', () => {
       ...baseRoutes,
       'GET /catalog/cat_1': { status: 200, body: { ...CATALOG_ENTRY_RESPONSE, price_atomic: '999999' } },
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
     const result = ok<{ warnings: Array<{ code: string; message: string }> }>(
@@ -589,7 +747,7 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
+      'POST /machine-payments/budget-precheck': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
     })
 
     const result = ok<{
@@ -612,7 +770,7 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
+      'POST /machine-payments/budget-precheck': { status: 502, body: { error: 'Failed to read on-chain allowance' } },
     })
 
     const result = ok<{
@@ -662,7 +820,7 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
     ok(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
@@ -672,7 +830,7 @@ describe('haven_prepare_catalog_purchase', () => {
     // The mutation this guards: dropping the delegateAddress pass-through to
     // createX402Intent silently re-adds its internal agent fetch → 2.
     expect(byPath('/machine-payments/agent')).toBe(1)
-    expect(byPath('/machine-payments/allowances')).toBe(1)
+    expect(byPath('/machine-payments/budget-precheck')).toBe(1)
     expect(byPath('/x402')).toBe(1)
     // #1360: the funding-leg intent DECLARES its scheme, so a stale delegate
     // address fails the backend's shape cross-check loudly.
@@ -680,27 +838,32 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(intentPost.body).toMatchObject({ settlementScheme: 'eip3009' })
   })
 
-  it('ROUND-TRIP OVERLAP: the agent/allowance reads are dispatched BEFORE the merchant probe resolves (#1348)', async () => {
+  it('ROUND-TRIP BUDGET: the agent read is dispatched before the merchant probe resolves; the budget pre-check rides the SAME round-trip count the allowances read used (#1348, #3054)', async () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
     ok(await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', max_amount: '2000000' }))
 
-    // Call order in the recorded log: both Haven reads must appear before the
-    // merchant's tools/call 402 probe response could have been consumed — i.e.
-    // they were dispatched during the probe, not after it. The merchant POSTs
-    // (initialize/notify/tools-call) and the Haven GETs interleave; asserting
-    // the GETs precede the LAST merchant POST proves the overlap without
-    // depending on scheduler timing.
+    // The AGENT read is dispatched before the merchant's tools/call 402 probe
+    // response could have been consumed — dispatched during the probe, not
+    // after it. The merchant POSTs (initialize/notify/tools-call) and the
+    // Haven agent GET interleave; asserting the GET precedes the LAST
+    // merchant POST proves the overlap without depending on scheduler timing.
+    // #3054: the budget pre-check deliberately does NOT overlap — it is a
+    // single POST that can only be issued once the SELECTED option's
+    // asset/amount are known (#2051), so it runs after the quote. The
+    // round-trip COUNT is the guarantee that survives: one Haven budget read
+    // (now POST budget-precheck, formerly GET allowances) exactly as before,
+    // so the refusal path gains none.
     const lastMerchantPost = recordedCalls().map((c, i) => ({ c, i })).filter(({ c }) => c.method === 'POST' && new URL(c.url).pathname === '/mcp').at(-1)!.i
     const agentIdx = recordedCalls().findIndex((c) => new URL(c.url).pathname.endsWith('/machine-payments/agent'))
-    const allowancesIdx = recordedCalls().findIndex((c) => new URL(c.url).pathname.endsWith('/machine-payments/allowances'))
     expect(agentIdx).toBeGreaterThan(-1)
     expect(agentIdx).toBeLessThan(lastMerchantPost)
-    expect(allowancesIdx).toBeLessThan(lastMerchantPost)
+    expect(recordedCalls().filter((c) => new URL(c.url).pathname.endsWith('/machine-payments/budget-precheck'))).toHaveLength(1)
+    expect(recordedCalls().find((c) => c.method === 'GET' && new URL(c.url).pathname.endsWith('/machine-payments/allowances'))).toBeUndefined()
   })
 
   it('FAILURE PRECEDENCE: when the merchant probe AND the agent read both fail, the quote error wins deterministically (#1348)', async () => {
@@ -708,7 +871,7 @@ describe('haven_prepare_catalog_purchase', () => {
       'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY_RESPONSE },
       'POST /mcp': { status: 500, body: {} },
       'GET /machine-payments/agent': { status: 500, body: { error: 'agent boom' } },
-      'GET /machine-payments/allowances': { status: 500, body: { error: 'allowance boom' } },
+      'POST /machine-payments/budget-precheck': { status: 500, body: { error: 'allowance boom' } },
     })
 
     const payload = await handlers().haven_prepare_catalog_purchase({
@@ -738,9 +901,9 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
-      'GET /machine-payments/allowances': {
+      'POST /machine-payments/budget-precheck': {
         status: 200,
-        body: allowancesFixture('5000000', 'delegation', { remainingIsFromChain: false }),
+        body: { sufficient: true, remaining_atomic: '5000000', remaining_is_from_chain: false },
       },
     })
 
@@ -766,9 +929,9 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
-      'GET /machine-payments/allowances': {
+      'POST /machine-payments/budget-precheck': {
         status: 200,
-        body: allowancesFixture('5000000', 'delegation', { remainingIsFromChain: true }),
+        body: { sufficient: true, remaining_atomic: '5000000', remaining_is_from_chain: true },
       },
     })
 
@@ -783,7 +946,7 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000', 'legacy') },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
     const result = ok<{ warnings: Array<{ code: string }> }>(
@@ -797,7 +960,7 @@ describe('haven_prepare_catalog_purchase', () => {
     stubFetch({
       ...baseRoutes,
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-      'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000') },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
     })
 
     ok(
@@ -858,12 +1021,9 @@ describe('haven_prepare_catalog_purchase', () => {
         'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': header } },
         'POST /x402': { status: 201, body: expectErc7710 ? CHILD : X402_INTENT_RESPONSE },
         'GET /machine-payments/agent': { status: 200, body: agent },
-        'GET /machine-payments/allowances': {
+        'POST /machine-payments/budget-precheck': {
           status: 200,
-          body: allowancesFixture(
-            '5000000',
-            (agent as { execution_rail?: string }).execution_rail === 'delegation' ? 'delegation' : 'legacy',
-          ),
+          body: { sufficient: true, remaining_atomic: '5000000' },
         },
       })
       return ok(
@@ -911,7 +1071,7 @@ describe('haven_prepare_catalog_purchase', () => {
         'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': erc7710Header } },
         'POST /x402': { status: 201, body: CHILD },
         'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
-        'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('5000000', 'delegation') },
+        'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000', remaining_is_from_chain: true } },
       })
       const res = ok<Record<string, any>>(
         await handlers().haven_prepare_catalog_purchase({
@@ -954,9 +1114,9 @@ describe('haven_prepare_catalog_purchase', () => {
         'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': erc7710Header } },
         'POST /x402': { status: 201, body: CHILD },
         'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
-        'GET /machine-payments/allowances': {
+        'POST /machine-payments/budget-precheck': {
           status: 200,
-          body: allowancesFixture('5000000', 'delegation'),
+          body: { sufficient: true, remaining_atomic: '5000000' },
         },
       })
       const res = ok<{ settlement_scheme: string; warnings: Array<{ code: string }> }>(
@@ -1526,24 +1686,9 @@ describe('#2051 — cap binds the authorized option', () => {
     verified_at: '2026-06-16T08:50:39.772Z',
   }
 
-  function allowances(remaining: string, rail: 'legacy' | 'delegation') {
-    return {
-      agent_id: 'agt_1',
-      account_address: '0xSafe',
-      delegate_address: '0xDelegate',
-      chain_id: 8453,
-      allowances: [
-        {
-          id: rail === 'delegation' ? 'delegation-1' : 'allowance-1',
-          token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-          token_symbol: 'USDC',
-          allowance_amount: '5.000000',
-          reset_period_min: 1440,
-          onchain: { amount: '5000000', spent: '0', remaining, is_active: true },
-        },
-      ],
-    }
-  }
+  // (allowances fixture removed — #3054 replaced the GET allowances stub with
+  // a POST /machine-payments/budget-precheck stub, which takes the bare wire
+  // response body inline at each site.)
 
   describe('haven_pay_mcp_tool', () => {
     async function pay(
@@ -1709,12 +1854,8 @@ describe('#2051 — cap binds the authorized option', () => {
       pr: unknown,
       agent: Record<string, unknown>,
       cap: Record<string, string>,
-      opts: { erc7710Intent?: boolean; remaining?: string } = {},
+      opts: { erc7710Intent?: boolean; remaining?: string; precheckStatus?: number; precheckBody?: Record<string, unknown> } = {},
     ) {
-      const rail =
-        (agent as { execution_rail?: string }).execution_rail === 'delegation'
-          ? 'delegation'
-          : 'legacy'
       stubFetch({
         'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY },
         'POST /mcp': {
@@ -1723,9 +1864,13 @@ describe('#2051 — cap binds the authorized option', () => {
         },
         'POST /x402': { status: 201, body: opts.erc7710Intent ? CHILD : X402_INTENT_RESPONSE },
         'GET /machine-payments/agent': { status: 200, body: agent },
-        'GET /machine-payments/allowances': {
-          status: 200,
-          body: allowances(opts.remaining ?? '5000000000', rail),
+        'POST /machine-payments/budget-precheck': {
+          status: opts.precheckStatus ?? 200,
+          body:
+            opts.precheckBody ??
+            (opts.remaining !== undefined
+              ? { sufficient: true, remaining_atomic: opts.remaining }
+              : { sufficient: true, remaining_atomic: '5000000000' }),
         },
       })
       return handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', ...cap })
@@ -1778,12 +1923,25 @@ describe('#2051 — cap binds the authorized option', () => {
     it('the delegation BUDGET pre-check also reads the authorized option, not the cheap standard one', async () => {
       // Same steer, aimed at the other client-side guard on this path: a
       // 0.50 USDC standard entry would sail past a 1 USDC remaining budget
-      // while the 900 USDC erc7710 entry is what gets authorized.
+      // while the 900 USDC erc7710 entry is what gets authorized. #3054: the
+      // server-side decision arrives as the pre-check's 403 — asked about the
+      // 900 USDC erc7710 amount, not the cheap standard entry.
       const res = await prepare(
         merchant('500000', '900000000'),
         DELEGATION_AGENT,
         { max_amount_human: '1000' },
-        { remaining: '1000000', erc7710Intent: true },
+        {
+          erc7710Intent: true,
+          precheckStatus: 403,
+          precheckBody: {
+            error: 'over budget',
+            error_code: 'delegation_budget_exceeded',
+            phase: 'insufficient_funds',
+            next_action: 'fund_safe_or_raise_allowance',
+            remaining_atomic: '1000000',
+            amount_atomic: '900000000',
+          },
+        },
       )
       expect(res.success).toBe(false)
       expect((res as { code?: string }).code).toBe('DELEGATION_BUDGET_EXCEEDED')
@@ -1867,6 +2025,55 @@ describe('#2054 — erc7710-only merchants', () => {
     ],
   }
 
+  /**
+   * #3116 — unique-amount fixtures for unsupported transfer methods and
+   * payment flows (3100000 / 3200000 atomic: 3.10 / 3.20 USDC, numbers
+   * nothing else in this file carries, so an assertion on them cannot be
+   * satisfied by an inherited fixture value — #2051's lesson).
+   */
+  const PERMIT2_ONLY_ATOMIC = '3100000'
+  const FLOW_ONLY_ATOMIC = '3200000'
+
+  /** A merchant advertising ONLY a permit2 entry — not EIP-3009-constructible. */
+  const PERMIT2_ONLY_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: PERMIT2_ONLY_ATOMIC,
+        maxAmountRequired: PERMIT2_ONLY_ATOMIC,
+        extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'permit2' },
+      },
+    ],
+  }
+
+  /** A merchant whose only entry names an unrecognized paymentFlow. */
+  const FLOW_ONLY_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: FLOW_ONLY_ATOMIC,
+        maxAmountRequired: FLOW_ONLY_ATOMIC,
+        extra: { name: 'USD Coin', version: '2', paymentFlow: 'unrecognized-future-flow' },
+      },
+    ],
+  }
+
+  /** Unsupported-first/supported-second: the plain entry behind must win. */
+  const MIXED_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: PERMIT2_ONLY_ATOMIC,
+        maxAmountRequired: PERMIT2_ONLY_ATOMIC,
+        extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'permit2' },
+      },
+      { ...PAYMENT_REQUIRED.accepts[0] },
+    ],
+  }
+
   const CHILD = {
     payment_id: 'pay_7710_only',
     status: 'pending_signature',
@@ -1875,6 +2082,21 @@ describe('#2054 — erc7710-only merchants', () => {
       signature_scheme: 'eip712_delegation',
       typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
     },
+  }
+
+  /**
+   * #3116 — a 3009-shaped intent response for the hosted prepare/pay tests
+   * that drive the STANDARD (EIP-3009) path: the SDK's `createX402Intent`
+   * refuses any intent without `x402_expected_auth` (client.ts), which the
+   * erc7710 CHILD fixture above never carries.
+   */
+  const CHILD_3009 = {
+    payment_id: 'pay_3116_3009',
+    status: 'pending_signature',
+    expires_at: '2099-01-01T00:00:00.000Z',
+    merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
+    x402_expected_auth: X402_EXPECTED_AUTH,
+    sign_data: { hash: '0x' + '33'.repeat(32) },
   }
 
   function x402Body() {
@@ -1889,6 +2111,7 @@ describe('#2054 — erc7710-only merchants', () => {
       pr: unknown,
       agentRoute: RouteDefinition,
       cap: Record<string, string>,
+      intentBody: unknown = CHILD,
     ) {
       stubFetch({
         'POST /mcp': {
@@ -1896,7 +2119,7 @@ describe('#2054 — erc7710-only merchants', () => {
           responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
         },
         'GET /machine-payments/agent': agentRoute,
-        'POST /x402': { status: 201, body: CHILD },
+        'POST /x402': { status: 201, body: intentBody },
       })
       return handlers().haven_pay_mcp_tool({
         merchant_url: 'http://merchant.test/mcp',
@@ -1990,6 +2213,41 @@ describe('#2054 — erc7710-only merchants', () => {
       expect((res as { message?: string }).message).toContain('No compatible payment option')
       expect(x402Body()).toBeUndefined()
     })
+
+    // ── #3116: unsupported transfer methods and payment flows ──────────────
+    // The hosted pay tool selects through `selectX402SettlementScheme`; a
+    // merchant whose only entries ask for permit2 or an unrecognized
+    // paymentFlow must be refused with the capability as the named reason,
+    // before any /x402 intent is POSTed. A mixed challenge falls back to the
+    // supported entry behind the unsupported one.
+    it('#3116: a permit2-ONLY merchant refuses with the capability as the reason', async () => {
+      const res = await pay(PERMIT2_ONLY_PR, { status: 200, body: DELEGATION_AGENT }, { max_amount_human: '9' })
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect((res as { message?: string }).message).toContain('transfer method or payment')
+      expect((res as { message?: string }).message).toContain("extra.assetTransferMethod: 'permit2'")
+      expect((res as { message?: string }).message).toContain('No payment intent was created and no funds moved')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('#3116: an unrecognized paymentFlow on the only entry refuses the same way', async () => {
+      const res = await pay(FLOW_ONLY_PR, { status: 200, body: DELEGATION_AGENT }, { max_amount_human: '9' })
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect((res as { message?: string }).message).toContain('unrecognized extra.paymentFlow')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('#3116: a mixed challenge skips the permit2 entry and pays the supported one', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(MIXED_PR, { status: 200, body: DELEGATION_AGENT }, { max_amount_human: '9' }, CHILD_3009),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      // The authorize carries the SUPPORTED entry — its maxAmountRequired
+      // (the authorization amount), not the unique permit2-tagged amount.
+      expect(x402Body()?.amount).toBe(PAYMENT_REQUIRED.accepts[0].maxAmountRequired)
+      expect(x402Body()?.amount).not.toBe(PERMIT2_ONLY_ATOMIC)
+    })
   })
 
   describe('haven_prepare_catalog_purchase', () => {
@@ -2011,46 +2269,28 @@ describe('#2054 — erc7710-only merchants', () => {
       verified_at: '2026-06-16T08:50:39.772Z',
     }
 
-    function allowances(remaining: string, rail: 'legacy' | 'delegation') {
-      return {
-        agent_id: 'agt_1',
-        account_address: '0xSafe',
-        delegate_address: '0xDelegate',
-        chain_id: 8453,
-        allowances: [
-          {
-            id: rail === 'delegation' ? 'delegation-1' : 'allowance-1',
-            token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-            token_symbol: 'USDC',
-            allowance_amount: '5.000000',
-            reset_period_min: 1440,
-            onchain: { amount: '5000000', spent: '0', remaining, is_active: true },
-          },
-        ],
-      }
-    }
+    // (allowances fixture removed — #3054: budget-precheck stubs carry the
+    // bare wire response body inline.)
 
     async function prepare(
       pr: unknown,
       agent: Record<string, unknown>,
       cap: Record<string, string>,
-      opts: { remaining?: string } = {},
+      opts: { remaining?: string; precheckStatus?: number; precheckBody?: Record<string, unknown>; intentBody?: unknown } = {},
     ) {
-      const rail =
-        (agent as { execution_rail?: string }).execution_rail === 'delegation'
-          ? 'delegation'
-          : 'legacy'
       stubFetch({
         'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY },
         'POST /mcp': {
           status: 402,
           responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
         },
-        'POST /x402': { status: 201, body: CHILD },
+        'POST /x402': { status: 201, body: opts.intentBody ?? CHILD },
         'GET /machine-payments/agent': { status: 200, body: agent },
-        'GET /machine-payments/allowances': {
-          status: 200,
-          body: allowances(opts.remaining ?? '5000000000', rail as 'legacy' | 'delegation'),
+        'POST /machine-payments/budget-precheck': {
+          status: opts.precheckStatus ?? 200,
+          body:
+            opts.precheckBody ??
+            { sufficient: true, remaining_atomic: opts.remaining ?? '5000000000' },
         },
       })
       return handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_1', ...cap })
@@ -2083,7 +2323,17 @@ describe('#2054 — erc7710-only merchants', () => {
 
     it('the delegation BUDGET pre-check reads the erc7710 amount on this newly reachable path', async () => {
       const res = await prepare(ERC7710_ONLY_PR, DELEGATION_AGENT, { max_amount_human: '3' }, {
-        remaining: '1000000', // under the 2.50 the erc7710 entry authorizes
+        // Haven decides server-side now: the erc7710 amount (2.50) exceeds
+        // the budget and the pre-check refuses.
+        precheckStatus: 403,
+        precheckBody: {
+          error: 'over budget',
+          error_code: 'delegation_budget_exceeded',
+          phase: 'insufficient_funds',
+          next_action: 'fund_safe_or_raise_allowance',
+          remaining_atomic: '1000000',
+          amount_atomic: ERC7710_ONLY_ATOMIC,
+        },
       })
       expect(res.success).toBe(false)
       expect((res as { code?: string }).code).toBe('DELEGATION_BUDGET_EXCEEDED')
@@ -2104,6 +2354,43 @@ describe('#2054 — erc7710-only merchants', () => {
       expect(res.success).toBe(false)
       expect((res as { message?: string }).message).toContain('No compatible payment option')
       expect(x402Body()).toBeUndefined()
+    })
+
+    // ── #3116: unsupported transfer methods and payment flows ──────────────
+    // The prepare tool refuses an unsupported-only merchant before the /x402
+    // intent is POSTed; a mixed challenge falls back to the supported entry.
+    it('#3116: a permit2-ONLY merchant refuses before the /x402 intent', async () => {
+      const res = await prepare(PERMIT2_ONLY_PR, DELEGATION_AGENT, { max_amount_human: '9' })
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect((res as { message?: string }).message).toContain("extra.assetTransferMethod: 'permit2'")
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('#3116: an unrecognized paymentFlow on the only entry refuses the same way', async () => {
+      const res = await prepare(FLOW_ONLY_PR, DELEGATION_AGENT, { max_amount_human: '9' })
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('#3116 positive control: a plain supported entry still pays — behavior unchanged', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(PAYMENT_REQUIRED, DELEGATION_AGENT, { max_amount_human: '9' }, { intentBody: CHILD_3009 }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(x402Body()?.settlementScheme).toBe('eip3009')
+      // maxAmountRequired is the authorization amount on this entry (#3116 note: unchanged behavior).
+      expect(x402Body()?.amount).toBe(PAYMENT_REQUIRED.accepts[0].maxAmountRequired)
+    })
+
+    it('#3116: a mixed challenge skips the permit2 entry and prepares the supported one', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(MIXED_PR, DELEGATION_AGENT, { max_amount_human: '9' }, { intentBody: CHILD_3009 }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(x402Body()?.amount).toBe(PAYMENT_REQUIRED.accepts[0].maxAmountRequired)
+      expect(x402Body()?.amount).not.toBe(PERMIT2_ONLY_ATOMIC)
     })
   })
 
@@ -2136,6 +2423,13 @@ describe('#2054 — erc7710-only merchants', () => {
       expect(res.data.erc7710_only).toBeUndefined()
       // Unchanged: the standard entry's own amount, not this suite's.
       expect(res.data.amount_atomic).toBe('1500000')
+    })
+
+    it('#3116: an unsupported-only merchant is refused, never described as payable', async () => {
+      const res = await quoteTool(PERMIT2_ONLY_PR)
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect((res as { message?: string }).message).toContain('transfer method or payment')
     })
 
     it('negative control: a merchant with NOTHING settleable is still refused at the quote', async () => {
@@ -2260,15 +2554,9 @@ describe('a merchant_not_ready 503 is reported as itself, not a wrong-endpoint m
           responseHeaders: { 'Retry-After': '60' },
         },
         'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
-        'GET /machine-payments/allowances': {
+        'POST /machine-payments/budget-precheck': {
           status: 200,
-          body: {
-            agent_id: 'agt_1',
-            account_address: '0xSafe',
-            delegate_address: '0xDelegate',
-            chain_id: 8453,
-            allowances: [],
-          },
+          body: { sufficient: true, remaining_atomic: '5000000' },
         },
       })
 
@@ -2338,24 +2626,8 @@ describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
     verified_at: '2026-06-16T08:50:39.772Z',
   }
 
-  function allowances(remaining: string) {
-    return {
-      agent_id: 'agt_1',
-      account_address: '0xSafe',
-      delegate_address: '0xDelegate',
-      chain_id: 8453,
-      allowances: [
-        {
-          id: 'delegation-1',
-          token_address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
-          token_symbol: 'USDC',
-          allowance_amount: '5.000000',
-          reset_period_min: 1440,
-          onchain: { amount: '5000000', spent: '0', remaining, is_active: true },
-        },
-      ],
-    }
-  }
+  // (allowances fixture removed — #3054: budget-precheck stubs carry the
+  // bare wire response body inline.)
 
   it('both entries + delegation rail: predicts erc7710 with no funding leg, even though accepted_scheme is "standard"', async () => {
     stubFetch({
@@ -2509,7 +2781,10 @@ describe('#2991 — expected_settlement_scheme / expected_funding_leg', () => {
         responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(bothEntriesMerchant())) },
       },
       'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
-      'GET /machine-payments/allowances': { status: 200, body: allowances('5000000000') },
+      'POST /machine-payments/budget-precheck': {
+        status: 200,
+        body: { sufficient: true, remaining_atomic: '5000000000' },
+      },
       'POST /x402': {
         status: 201,
         body: {

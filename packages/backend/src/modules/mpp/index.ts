@@ -33,6 +33,7 @@
 export { mppDemoRetired } from './challenge.js'
 export { handleSend } from './send.js'
 export { handleGetAllowances } from './allowances.js'
+export { handleBalanceCoverage } from './balance-coverage.js'
 export {
   attachEvidenceHandler,
   listReceipts,
@@ -51,6 +52,9 @@ export {
   RECONCILIATION_EVENT_TYPES,
 } from './reconciliation.js'
 export { prepareSweep, submitSweep } from './sweep.js'
+export { handleBudgetPrecheck } from './budget-precheck.js'
+export { budgetPrecheckBodyError } from './budget-precheck-guards.js'
+export { parseBalanceCoverageQuery } from './balance-coverage-guards.js'
 
 export type {
   MachinePaymentRail,
@@ -58,6 +62,7 @@ export type {
   AuthorizeBody,
   ReconciliationEventBody,
   EvidenceBody,
+  BudgetPrecheckBody,
   SendAsset,
   SendBody,
   SweepSubmitBody,

@@ -56,6 +56,9 @@ import {
   selectStandardPaymentOption,
   selectX402SettlementScheme,
   normalizePaymentRequired,
+  resolveX402RetryTarget,
+  isSecureX402RetryTarget,
+  type X402RetryTarget,
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
@@ -68,7 +71,7 @@ import {
   readMaxAmountCap,
 } from './support/cap-price.js'
 import { HostedToolError, normalizeError, runTool } from './support/errors.js'
-import { buildAgentGuidance } from './support/guidance.js'
+import { buildAgentGuidance, paymentStatusHandoff, type HostedHandoff, refusalNextStep } from './support/guidance.js'
 import { buildX402SigningContext, coerceJsonField } from './support/mcp-context.js'
 import {
   isPendingApproval,
@@ -76,6 +79,23 @@ import {
   settlementPredictionFields,
   wrongTool,
 } from './support/quote-response.js'
+
+// #3097: `resource_url_differs_from_request` is emitted only when a request
+// URL existed to compare against. On the pay-from-declaration path nothing was
+// compared, and a literal `false` there read as "the merchant agrees with what
+// you quoted" (haven-reviewer on #3112).
+/** #3101: the handoff after a reported outcome — sweep on a rejection, nothing (with the reason) on acceptance. */
+function reportOutcomeHandoff(outcome: 'accepted' | 'rejected'): HostedHandoff {
+  return outcome === 'rejected'
+    ? { nextTool: 'haven_sweep_delegate', nextArguments: {} }
+    : { nextTool: null, nextToolOmittedReason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' }
+}
+
+function differsFromRequest(target: X402RetryTarget): { resource_url_differs_from_request?: boolean } {
+  return target.resourceUrlDiffersFromRequest === undefined
+    ? {}
+    : { resource_url_differs_from_request: target.resourceUrlDiffersFromRequest }
+}
 
 /**
  * The tools this capability owns, as a tuple so the set is data rather than a
@@ -167,6 +187,12 @@ export function createPlainHttpX402Handlers(
             accepted_scheme: quote.acceptedScheme,
             ...(quote.acceptedScheme === 'erc7710' ? { erc7710_only: true } : {}),
             resource_url: quote.resourceUrl,
+            // #3097: the URL the agent quoted is the URL the paid retry goes
+            // to; the merchant's `resource_url` is its declaration about
+            // itself. Pass `request_url` back as `url` to haven_pay_x402_quote.
+            request_url: quote.request.url,
+            retry_url: quote.request.url,
+            resource_url_differs_from_request: quote.resourceUrlDiffersFromRequest,
             description: quote.description,
             mime_type: quote.mimeType,
             amount_atomic: quote.amountAtomic,
@@ -212,6 +238,28 @@ export function createPlainHttpX402Handlers(
         )
       }
       return runTool(async () => {
+        // #3097: where the paid retry will go, decided BEFORE any intent exists.
+        // The caller's `url` (the one it quoted) wins; the merchant-declared
+        // `resource.url` is the fallback. A public http:// target is refused
+        // here — this tool never retries the merchant itself, so this is the
+        // last point before a signed header is handed to the agent.
+        const retryTarget = resolveX402RetryTarget({
+          requestUrl: args.url,
+          resourceUrl: payReq.resource.url,
+        })
+        if (!isSecureX402RetryTarget(retryTarget.url)) {
+          throw new HostedToolError({
+            code: 'INSECURE_RETRY_TARGET',
+            message:
+              `Refusing to prepare a payment whose paid retry would go to ${retryTarget.url}: ` +
+              'the retry must target an https URL. The merchant\'s challenge declared this ' +
+              'resource URL; re-call with the https URL you quoted as `url` (haven_quote_x402 ' +
+              'returns it as request_url), and treat a merchant whose challenge downgrades the ' +
+              'scheme as suspect. Nothing was funded or signed.',
+            statusCode: 400,
+            nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the https URL you quoted as url; nothing was funded or signed' }),
+          })
+        }
         // #1351: shape-check the cap before the funding intent — this tool has
         // no merchant probe of its own, so this is the first thing that runs.
         const cap = readMaxAmountCap(args, { required: false })
@@ -258,7 +306,7 @@ export function createPlainHttpX402Handlers(
                 'cap. No funding intent was created and no funds were moved. Re-quote the ' +
                 'merchant with haven_quote_x402.',
               statusCode: 400,
-              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again; suggested_tool names the tool for after that' }),
               suggestedTool: 'haven_quote_x402',
             })
           }
@@ -333,11 +381,15 @@ export function createPlainHttpX402Handlers(
               asset: prepared.settlement.asset,
               network: prepared.settlement.network,
               resource_url: payReq.resource?.url,
+              // #3097: the URL to send the paid retry to — the caller's, not the
+              // merchant's declaration.
+              retry_url: retryTarget.url,
+              ...differsFromRequest(retryTarget),
               // #1275/#1351: the optional-cap nudge applies on both schemes.
               ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
               ...buildAgentGuidance({
                 nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-                nextTool: 'mcp__haven-signer__haven_sign',
+                nextTool: 'haven_sign',
                 nextArguments: { payment_id: prepared.paymentId },
                 safeToContinue: true,
                 reason:
@@ -374,13 +426,16 @@ export function createPlainHttpX402Handlers(
           })
           return {
             ...buildX402SigningContext(intent, args.include_signing_payload === true),
+            // #3097: see the erc7710 branch — the retry goes to the caller's URL.
+            retry_url: retryTarget.url,
+            ...differsFromRequest(retryTarget),
             // #1275: optional-cap soft nudge for this generic x402 flow.
             // #1351: either spelling of the cap clears it.
             ...(cap.kind === 'none' ? { cap_warning: CAP_WARNING_TEXT } : {}),
             // #1308: decomposed-path next step.
             ...buildAgentGuidance({
               nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-              nextTool: 'mcp__haven-signer__haven_sign_x402',
+              nextTool: 'haven_sign_x402',
               nextArguments: { payment_id: intent.paymentId },
               safeToContinue: true,
               // #2291: this said "relay via haven_submit and finish with
@@ -393,7 +448,7 @@ export function createPlainHttpX402Handlers(
                 'signer fetches payment_required itself; only if it reports the context carried ' +
                 'none, re-call with the payment_required you passed to this tool added VERBATIM). ' +
                 'It returns BOTH signature and payment_header. Relay signature via haven_submit, ' +
-                'then retry the original merchant URL yourself with payment_header. Do NOT call ' +
+                'then retry retry_url yourself with payment_header. Do NOT call ' +
                 'haven_x402_sign_header: haven_sign_x402 already spent its binding building that ' +
                 'header, so that call can only refuse. The header is signed before funding ' +
                 'confirms, so retry promptly.',
@@ -425,8 +480,8 @@ export function createPlainHttpX402Handlers(
               // is a payload that contradicts itself, and the field wins.
               ...buildAgentGuidance({
                 nextAction: AgentPaymentNextAction.StopAndTellUser,
-                nextTool: 'mcp__haven__haven_get_payment_status',
-                nextArguments: { payment_id: err.paymentId ?? null },
+                // #3101: omitted + reason when the id is unknown (decision 3).
+                ...paymentStatusHandoff(err.paymentId),
                 safeToContinue: false,
                 reason:
                   'The amount exceeds the remaining budget, so the payment was declined. ' +
@@ -491,6 +546,38 @@ export function createPlainHttpX402Handlers(
           )
         }
 
+        // #3097: same rule as haven_pay_x402_quote — the caller's `url`, else
+        // the captured request, else `state.url` (the SDK builder's "original
+        // paid URL", which survives when `request` was never captured); the
+        // merchant's `resourceUrl` is the last fallback. A public http:// target
+        // is refused before the signing context is handed out — AFTER the
+        // readiness gate above, so a payment that needs no retry is never
+        // refused for a retry it will not make (haven-reviewer on #3112).
+        // A resume from a bare payment_id reads the backend's resume_state,
+        // whose `url` IS the merchant declaration; for an http-declaring
+        // merchant that resume is refused every time unless the agent
+        // supplies `url`, which is why the message names the exits.
+        const retryTarget = resolveX402RetryTarget({
+          requestUrl: args.url ?? state.request?.url ?? state.url,
+          resourceUrl: state.resourceUrl,
+        })
+        if (!isSecureX402RetryTarget(retryTarget.url)) {
+          throw new HostedToolError({
+            code: 'INSECURE_RETRY_TARGET',
+            message:
+              `Refusing to hand out a signing context whose paid retry would go to ${retryTarget.url}: ` +
+              'the retry must target an https URL. Re-call with the https URL you originally quoted ' +
+              'as `url`. If that URL is gone, the funding leg is already confirmed for this payment: ' +
+              'check haven_get_payment_status, and if no settlement appears within the payment ' +
+              'window, recover the delegate balance with haven_sweep_delegate. Do not pay again.',
+            statusCode: 400,
+            nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.RetryWithExplicitContext, nextTool: null, nextToolOmittedReason: 're-call with the https URL you originally quoted as url; the status and sweep exits are in the message' }),
+            paymentId: state.paymentId,
+            phase: 'funded_but_unsettled',
+            suggestedTool: 'haven_get_payment_status',
+          })
+        }
+
         // Return the same signing context shape as haven_pay_x402_quote so the
         // signer can rebuild the merchant header from payment_id alone.
         // #2291: this comment used to name haven_x402_sign_header here, which
@@ -507,6 +594,7 @@ export function createPlainHttpX402Handlers(
           x402: {
             accepted: state.accepted,
             resource_url: state.resourceUrl,
+            retry_url: retryTarget.url,
             amount: state.amount,
             amount_atomic: state.amountAtomic,
             token: state.token,
@@ -558,9 +646,7 @@ export function createPlainHttpX402Handlers(
               (report.outcome === 'rejected'
                 ? AgentPaymentNextAction.SweepStrandedFunds
                 : AgentPaymentNextAction.None),
-            ...(report.outcome === 'rejected'
-              ? { nextTool: 'mcp__haven__haven_sweep_delegate' as const, nextArguments: {} }
-              : {}),
+            ...reportOutcomeHandoff(report.outcome),
             safeToContinue: true,
             reason:
               report.outcome === 'rejected'

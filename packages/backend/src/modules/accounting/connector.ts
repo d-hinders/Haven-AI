@@ -67,6 +67,13 @@ export interface PushResult {
  * Read-back verification (#1362), provider-neutral. Snake_case because this
  * IS the wire shape of `GET /accounting/feed/verify/:paymentId` — the route
  * returns it verbatim, and the dashboard reads it.
+ *
+ * `invoice_number` became `number | null` and `document_ref` joined in
+ * #3018: Accounted delivers a DOCUMENT (immutable, with a provider id but no
+ * number), so a verification answer may have nothing numeric to name — the
+ * field stays nullable and `document_ref` carries the delivered object
+ * instead. Fortnox keeps emitting the number and leaves `document_ref`
+ * null; the conformance suite proves both suites still run unchanged.
  */
 export interface AccountingVerification {
   /** The pushed record still exists at the provider under our reference. */
@@ -78,12 +85,18 @@ export interface AccountingVerification {
    * Null when registered.
    */
   missing: 'deleted' | 'foreign_invoice' | null
-  /** A human has booked it. Null when not registered. */
+  /** A human has booked it. Null when not registered (or not knowable). */
   booked: boolean | null
   /** Cancelled at the provider — registered but struck. Null when not registered. */
   cancelled: boolean | null
-  /** The provider's own number for the record (what its UI shows). */
-  invoice_number: number
+  /**
+   * The provider's own number for the record (what its UI shows). Null for a
+   * provider whose delivered object carries no number (#3018: Accounted
+   * documents) — `document_ref` names the object instead.
+   */
+  invoice_number: number | null
+  /** The provider's id for the delivered document, when the record IS one. Null otherwise. */
+  document_ref: string | null
   /** Voucher reference once booked, e.g. "A123 2026". Null until booked. */
   voucher: string | null
   invoice_date: string | null
@@ -262,7 +275,7 @@ export class InMemoryConnector implements AccountingConnector {
         ok: true,
         verification: {
           registered: false, missing: 'deleted', booked: null, cancelled: null,
-          invoice_number: n, voucher: null, invoice_date: null, total: null, checked_at,
+          invoice_number: n, document_ref: null, voucher: null, invoice_date: null, total: null, checked_at,
         },
       }
     }
@@ -271,7 +284,7 @@ export class InMemoryConnector implements AccountingConnector {
         ok: true,
         verification: {
           registered: false, missing: 'foreign_invoice', booked: null, cancelled: null,
-          invoice_number: n, voucher: null, invoice_date: null, total: null, checked_at,
+          invoice_number: n, document_ref: null, voucher: null, invoice_date: null, total: null, checked_at,
         },
       }
     }
@@ -279,7 +292,7 @@ export class InMemoryConnector implements AccountingConnector {
       ok: true,
       verification: {
         registered: true, missing: null, booked: inv.booked, cancelled: false,
-        invoice_number: n, voucher: inv.booked ? `M${n} 2026` : null,
+        invoice_number: n, document_ref: null, voucher: inv.booked ? `M${n} 2026` : null,
         invoice_date: inv.date, total: inv.total, checked_at,
       },
     }

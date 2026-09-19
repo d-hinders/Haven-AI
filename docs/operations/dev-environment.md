@@ -10,8 +10,10 @@ covers:
   - packages/frontend/src/lib/env.ts
   - packages/backend/src/config.ts
   - packages/backend/src/openapi/request-validation.ts
+  - packages/backend/src/openapi/route-modules.generated.ts
+  - packages/backend/scripts/generate-route-modules.ts
   - packages/backend/src/index.ts
-last-verified: "2026-09-17"
+last-verified: "2026-09-18"
 ---
 
 # Dev environment
@@ -241,6 +243,17 @@ Isolation rules that are non-negotiable for a payments product:
   logs a boot warning when its variable is unset, and the harness prints which
   endpoint CLASS it is observing through (never the URL) in its run preamble.
 
+- **Marketplace chains and prospects (#3078, epic #3077)** —
+  `HAVEN_MARKETPLACE_CHAIN_IDS=84532,8453` on dev (owner decision 11: the demo
+  grid shows the real mainnet merchants next to the Ampersend sandbox; a
+  mainnet offer is not payable from a Sepolia agent and its network chip says
+  so) and `8453` on prod (testnets hidden outright). Unset falls back to
+  `HAVEN_DEPLOY_CHAIN_IDS`, both unset lists every chain. The list scopes
+  dashboard and credential-less reads only — an agent's `GET /catalog` sees
+  its own chain regardless. `HAVEN_MARKETPLACE_PROSPECTS=true` (strict
+  boolean) lists the `coming_soon` merchants of #3080 to authenticated
+  dashboard users on dev only; the route refuses to list them when any
+  mainnet chain is listed, so a copied env cannot publish them on prod.
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A
@@ -277,7 +290,7 @@ Isolation rules that are non-negotiable for a payments product:
   that deterministic test so the normal 15-minute merchant-report grace stays
   in force; never set it in production.
 - **Request-validation mode** — `HAVEN_REQUEST_VALIDATION` on the backend is
-  `off` (no schema is injected — EXCEPT on an `enforcedPrefixes` module,
+  `off` (no schema is injected — EXCEPT on an `enforcedModules` module,
   which stays enforced regardless of the mode) | `shadow` (default: log and
   count would-be refusals;
   since #3082 the request BODY is restored after validation so nothing the
@@ -288,11 +301,27 @@ Isolation rules that are non-negotiable for a payments product:
   (#3029, epic #3028).
 
   **`enforce` is not global, despite the name.** A route is enforced only when
-  its prefix is in the plugin's `enforcedPrefixes`, which `index.ts` sets to
-  `['/contacts']` — `mode` gates the `off` early-return and the counters and
-  nothing else. Setting `HAVEN_REQUEST_VALIDATION=enforce` today therefore
-  refuses exactly what `shadow` refuses. Epic #3028 slices 2–4 widen the
-  prefix list; the variable is not the switch that does it.
+  the route FILE that declares it is in the plugin's `enforcedModules`, which
+  `index.ts` sets to `['routes/contacts.ts', 'routes/merchants.ts']` —
+  `mode` gates the `off` early-return and the counters and nothing else.
+  Setting `HAVEN_REQUEST_VALIDATION=enforce` today therefore refuses exactly
+  what `shadow` refuses, and since #3084 that includes off-spec
+  `/merchants/{slug}` requests (the required `slug` must match its pattern).
+  Epic #3028 slices 2–4 widen the list; the variable is not the switch
+  that does it.
+
+  **Keyed on the FILE, not the mount prefix, since #3135** (epic #3028
+  decision 7). A prefix could not express the epic's slice partition:
+  `/agents` is shared by `agents.ts`, `agent-delegations.ts`, `agent-rekey.ts`
+  and `agent-passports.ts`, which the epic splits across slices 3 and 4, and
+  the root prefix `''` matched every module beneath it. The key is resolved
+  per operation through the generated
+  `packages/backend/src/openapi/route-modules.generated.ts`; regenerate it with
+  `npm run generate:route-modules` after adding, moving or renaming a route
+  (`npm run check:route-modules` and the backend suite both fail on a stale
+  table). The `lint:request-schemas` gate keys its baseline entries with the
+  same string, so the gate and the runtime cannot disagree about which modules
+  are still shadowed.
 
   Any other value refuses the boot rather than falling
   back — a misspelled `enforce` must not silently mean `shadow`. **A mode
@@ -305,6 +334,56 @@ vars (client id/secret + redirect to the dev backend's
 #2862; the Fortnox app's registered redirect URI must match it) are set on the
 dev Railway backend, using a **separate dev Fortnox app** — never the prod
 credentials. The feed was live-proven against dev on 2026-07-16.
+
+  > **Re-verified #3126 (2026-09-18):** round 3 of PR #3148 regenerated
+  > `packages/backend/src/openapi/route-modules.generated.ts` — the branch
+  > added `GET /machine-payments/balance-coverage` to
+  > `routes/machine-payments.ts`, and #3138's generator tracks route files,
+  > so the committed table was STALE against the registered routes (the
+  > Backend-checks gate caught it on the PR). Regeneration ran
+  > `npm run generate:route-modules` (deriving from `src/index.ts` +
+  > `src/routes/*.ts` source) and adds exactly one row —
+  > `"GET /machine-payments/balance-coverage": "routes/machine-payments.ts"`
+  > — and `npm run check:route-modules` exits 0 at the new head. The plugin
+  > resolves `enforcedModules` through this table, so the new route is
+  > visible to request-validation in the same commit that registers it. The
+  > generator script, `request-validation.ts`, `index.ts` and `config.ts`
+  > claims above were re-read and are untouched by this PR.
+  >
+  > **Re-verified #3018 (2026-09-18):** the only `index.ts` change in PR
+  > #3110 is the comment block above `registerConnector(new AccountedConnector())`
+  > — it now describes the #3018 WORM document delivery (the receipt underlag
+  > uploaded as one WORM document, delivery proven by sha256 echo) where it
+  > previously said the connector's push half was still pending and skipped.
+  > Comment-only: no registration, wiring or boot-order change. The doc's
+  > other `index.ts` claims — boolean boot flags through `parseBooleanFlag`
+  > and the request-validation `off`/`shadow`/`enforce` modes — were re-read
+  > against the merged tree and hold; the doc makes no claim about
+  > accounting-connector registration itself. Found stale here but
+  > PRE-EXISTING and out of scope for #3018 (dev's own #3084 changed the code
+  > without touching this doc): the enforced-module sentence in the
+  > request-validation bullet above still named `['/contacts']` while
+  > `index.ts` had moved on — flagged, not edited. Nothing in this file was
+  > edited except this note and the `last-verified` date.
+  >
+  > **Resolved since:** #3111 corrected that sentence, and #3135 re-keyed the
+  > option itself from `enforcedPrefixes` to the file-keyed `enforcedModules`.
+  > The bullet above is current as of #3135.
+
+  > **Re-verified #3018 (2026-09-18, round-3 follow-up):** the staleness
+  > flagged in the blockquote above is fixed in this edit. The sentence now
+  > names `['/contacts', '/merchants']` with the #3084 attribution and
+  > re-derives the consequence: the refusal-set identity holds because an
+  > enforced prefix refuses in every mode (`mode` gates only the `off`
+  > early-return and the counters), and the widened enforcement is
+  > non-vacuous — `/merchants/{slug}`'s required `slug` path parameter is
+  > pattern-constrained in the spec. Re-read at dev tip ec41ee72 against
+  > `packages/backend/src/index.ts` (the `installRequestValidation` options),
+  > the plugin's `onRoute` wiring in
+  > `packages/backend/src/openapi/request-validation.ts` (enforcement is
+  > prefix-determined and mode-independent), the `/merchants` path items in
+  > the OpenAPI spec, and the read-only GET registrations in the
+  > `/merchants` route module.
 
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 

@@ -60,7 +60,7 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_submit_catalog_entry` | `POST /catalog/submit` (queue-only; ownership proof + quote probe required before listing) | no |
 | `haven_get_payment_status` | `GET /machine-payments/:id/status` | no |
 | `haven_get_resume_state` | `GET /machine-payments/:id/status` as resume state | no |
-| `haven_list_receipts` | `GET /machine-payments/receipts` | no |
+| `haven_list_receipts` | `GET /machine-payments/receipts` (paged, #3128: `limit` + `cursor` → `{ receipts, total, hasMore, nextCursor }`) | no |
 | `haven_sweep_delegate` | gasless stranded-funds sweep prepare/submit | no — relays signed sweep |
 | `haven_report_x402_outcome` | `POST /machine-payments/reconciliation-events` (rejected) or `POST /machine-payments/evidence` (accepted) | no — records a caller-asserted outcome; contacts no merchant |
 | `haven_report_settlement_evidence` | `POST /machine-payments/evidence` (fail-closed on-chain verification of an erc7710 settlement hash the agent holds; #2972) | no — hands over a hash; contacts no merchant |

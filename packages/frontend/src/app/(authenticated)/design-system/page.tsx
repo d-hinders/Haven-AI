@@ -16,6 +16,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { FilterPill } from '@/components/ui/FilterPill'
+import { Monogram } from '@/components/ui/Monogram'
+import { MerchantCard } from '@/components/marketplace/MerchantCard'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
@@ -264,14 +267,17 @@ const DS_BALANCE_SUMMARY = `Balance over 7 days: ends at ${dsMoney(DS_BALANCE_EN
 function Section({
   title,
   description,
+  testId,
   children,
 }: {
   title: string
   description: string
+  /** Optional stable hook for the visual-regression spec to clip the section (#3064). */
+  testId?: string
   children: ReactNode
 }) {
   return (
-    <section className="space-y-4">
+    <section data-testid={testId} className="space-y-4">
       <div>
         <h2 className="text-lg font-semibold tracking-tight text-[var(--v2-ink)]">{title}</h2>
         <p className="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">{description}</p>
@@ -308,6 +314,7 @@ function DotIcon() {
 
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
+  const [dsFilterPillActive, setDsFilterPillActive] = useState<string | null>(null)
   const [infoModalOpen, setInfoModalOpen] = useState(false)
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
@@ -2454,6 +2461,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="StackedBarChart"
+        testId="ds-stacked-bar-chart"
         description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the swatch beside its spend figure in the agents table (SeriesSwatch, exported from this file — the table reads the same index the chart paints with; never beside a name, where a dot reads as a status light). A partial day — the window's cut first or last day — is striped with the series token at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar or its cap would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top and its refusal cap stay visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
       >
         <Card hover={false} className="p-5">
@@ -2478,7 +2486,10 @@ export default function DesignSystemPage() {
           </div>
           {/* The swatch a table row carries to key itself to the chart above —
               the same `seriesColor(index)` the segments and the legend read. */}
-          <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]">
+          <ul
+            data-testid="ds-stacked-bar-swatch-list"
+            className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]"
+          >
             {DS_CHART_DAYS[0]?.series.map((s) => (
               <li key={s.id} className="inline-flex items-center gap-1.5">
                 <SeriesSwatch seriesIndex={s.seriesIndex} />
@@ -2491,7 +2502,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AreaChart"
-        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's spend annotated as the endpoint delta. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart."
+        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's spend annotated as the endpoint delta. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart, and the same pointer treatment too: the callout takes no pointer, a tap pins a day, and a second tap on the pinned day or Escape releases it (#3070)."
       >
         <Card hover={false} className="p-5">
           <AreaChart
@@ -2600,6 +2611,92 @@ export default function DesignSystemPage() {
             />
             </div>
           </div>
+        </div>
+      </Section>
+
+      <Section
+        title="FilterPill"
+        description="Segment pill for a filter row — active/inactive toggle, shared across every list surface that filters by a small set of options (category, verification source, network). Moved to components/ui on its second surface (#3079, epic #3077): CatalogPanel.tsx had it module-local, and the marketplace grid needed the identical pill."
+      >
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Design-system FilterPill example">
+          <FilterPill active={dsFilterPillActive === null} onClick={() => setDsFilterPillActive(null)}>
+            All
+          </FilterPill>
+          {['media', 'data', 'api'].map((c) => (
+            <FilterPill key={c} active={dsFilterPillActive === c} onClick={() => setDsFilterPillActive(c)}>
+              <span className="capitalize">{c}</span>
+            </FilterPill>
+          ))}
+        </div>
+      </Section>
+
+      <Section
+        title="Monogram"
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. sm (36px) for lists and cards, md (48px) for a page header."
+      >
+        <div className="flex flex-wrap items-center gap-4">
+          <Monogram name="Ampersend Demo API" />
+          <Monogram name="Berget" />
+          <Monogram name="Haven Demo Store" size="md" />
+        </div>
+      </Section>
+
+      <Section
+        title="Merchant card (marketplace)"
+        description="The /marketplace grid's card (#3079, epic #3077): monogram or logo, name, category chip, description clamped to two lines, network chips, and one of three footer states — an offer count, 'Coming soon' for a prospect, or the Haven test-merchant label. The Verified badge follows verified_payable — the wire's own proof (#3078) — where the catalog card it replaces read the row's source."
+      >
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <MerchantCard
+            merchant={{
+              id: 'ds-merchant-live',
+              slug: 'ds-merchant-live',
+              name: 'Ampersend Demo API',
+              description: 'Fact, joke and quote endpoints — a live x402 sandbox on Base and Base Sepolia.',
+              website: 'https://app.ampersend.ai',
+              logo_url: null,
+              category: 'api',
+              country: null,
+              listing_status: 'live',
+              is_test_merchant: false,
+              offer_count: 3,
+              networks: ['eip155:84532', 'eip155:8453'],
+              verified_payable: true,
+            }}
+          />
+          <MerchantCard
+            merchant={{
+              id: 'ds-merchant-test',
+              slug: 'ds-merchant-test',
+              name: 'Haven Demo Store',
+              description: 'CloudNest and NordShield — Haven-run fixtures for real payments against demo goods.',
+              website: null,
+              logo_url: null,
+              category: 'infrastructure',
+              country: null,
+              listing_status: 'live',
+              is_test_merchant: true,
+              offer_count: 1,
+              networks: ['eip155:84532'],
+              verified_payable: true,
+            }}
+          />
+          <MerchantCard
+            merchant={{
+              id: 'ds-merchant-coming-soon',
+              slug: 'ds-merchant-coming-soon',
+              name: 'Berget AI',
+              description: 'Sovereign Swedish inference — OpenAI-compatible API on Swedish data centres.',
+              website: 'https://berget.ai',
+              logo_url: null,
+              category: 'ai',
+              country: 'SE',
+              listing_status: 'coming_soon',
+              is_test_merchant: false,
+              offer_count: 0,
+              networks: [],
+              verified_payable: false,
+            }}
+          />
         </div>
       </Section>
 

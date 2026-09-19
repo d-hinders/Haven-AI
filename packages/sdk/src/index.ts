@@ -23,6 +23,22 @@ export {
   AGENT_COMMAND_MODIFICATION_SENTENCE,
   AGENT_ONBOARDING_PROMPT,
 } from './agent-guidance.js'
+export {
+  NEXT_TOOL_SERVER_NAMES,
+  NEXT_TOOL_SERVER_ROLES,
+  DEFAULT_NEXT_TOOL_BY_ACTION,
+  renderNextTool,
+  parseNextTool,
+  defaultNextToolFor,
+  createNextStepBuilder,
+  type NextToolServerRole,
+  type NextStepTarget,
+  type NextStepTargets,
+  type NextStepArguments,
+  type NextStepHandoff,
+  type NextStepInput,
+  type NextStep,
+} from './next-step.js'
 
 // The npm dist-tag every published package's "re-run the connector" hint names
 // (#2423). One build-time constant, written by `scripts/release-bump.mjs` from
@@ -109,12 +125,15 @@ export type {
   HavenAgentReadiness,
   HavenAllowance,
   HavenAllowanceSummary,
+  HavenBalanceCoverage,
   PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
+  HavenPaymentReceiptsPage,
   SweepResult,
   SweepEntry,
   SweepConfirmation,
   HavenCatalogEntry,
+  HavenCatalogMerchant,
   HavenCatalogSubmission,
   CatalogSubmissionAccepted,
 } from './types.js'
@@ -180,6 +199,14 @@ export type { X402MerchantOutcome, X402MerchantOutcomeReport } from './merchant-
 // own marker.
 export type { EvidenceReportOutcome } from './merchant-completion.js'
 export { isZeroSettlementTxHash } from './merchant-completion.js'
+export {
+  resolveX402RetryTarget,
+  isSecureX402RetryTarget,
+  assertSecureX402RetryTarget,
+  HavenInsecureRetryTargetError,
+  INSECURE_RETRY_TARGET_CODE,
+} from './x402-retry-target.js'
+export type { X402RetryTarget } from './x402-retry-target.js'
 
 export {
   SWEEP_BASE_CHAIN_ID,

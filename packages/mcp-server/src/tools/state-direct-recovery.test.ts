@@ -332,17 +332,47 @@ describe('haven_get_agent', () => {
 // ── haven_list_receipts ───────────────────────────────────────────────────────
 
 describe('haven_list_receipts', () => {
-  it('calls the receipts endpoint and returns results', async () => {
-    // listReceipts recordedCalls() /machine-payments/receipts
+  it('calls the receipts endpoint and returns the page (#3128): receipts + total + hasMore + nextCursor', async () => {
+    // listReceiptsPage recordedCalls() /machine-payments/receipts
     stubFetch({
       'GET /machine-payments/receipts': {
         status: 200,
-        body: { receipts: [{ id: 'rcpt_1', amount: '1.00', payment_id: 'pay_1', rail: 'x402' }] },
+        body: {
+          receipts: [{ id: 'rcpt_1', amount_human: '1.00', payment_id: 'pay_1', rail: 'x402' }],
+          total: 7,
+          has_more: true,
+          next_cursor: 'rcpt_1',
+        },
       },
     })
 
-    const result = ok<unknown[]>(await handlers().haven_list_receipts({}))
-    expect(Array.isArray(result.data)).toBe(true)
+    const result = ok<{ receipts: unknown[]; total: number | null; hasMore: boolean | null; nextCursor: string | null }>(
+      await handlers().haven_list_receipts({}),
+    )
+    expect(Array.isArray(result.data.receipts)).toBe(true)
+    expect(result.data).toMatchObject({ total: 7, hasMore: true, nextCursor: 'rcpt_1' })
+  })
+
+  it('forwards cursor and limit to the endpoint (#3128)', async () => {
+    stubFetch({
+      'GET /machine-payments/receipts': { status: 200, body: { receipts: [], total: 0, has_more: false, next_cursor: null } },
+    })
+    const result = ok<{ receipts: unknown[]; total: number | null; hasMore: boolean | null; nextCursor: string | null }>(
+      await handlers().haven_list_receipts({ limit: 5, cursor: 'rcpt_9' }),
+    )
+    // An empty page with total 0 is "none exist", not "not yet".
+    expect(result.data).toEqual({ receipts: [], total: 0, hasMore: false, nextCursor: null })
+    const url = String(recordedCalls().find((c) => c.url.includes('/machine-payments/receipts'))?.url)
+    expect(url).toContain('limit=5')
+    expect(url).toContain('cursor=rcpt_9')
+  })
+
+  it('against a pre-#3128 backend the three page fields are null — unknown, never a fabricated 0/false', async () => {
+    stubFetch({ 'GET /machine-payments/receipts': { status: 200, body: { receipts: [] } } })
+    const result = ok<{ receipts: unknown[]; total: number | null; hasMore: boolean | null; nextCursor: string | null }>(
+      await handlers().haven_list_receipts({}),
+    )
+    expect(result.data).toEqual({ receipts: [], total: null, hasMore: null, nextCursor: null })
   })
 })
 

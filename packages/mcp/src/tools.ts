@@ -46,7 +46,42 @@ export type HavenMcpToolName =
   | 'haven_discover_tools'
   | 'haven_submit_catalog_entry'
 
-export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
+/**
+ * #3100 (epic #3105, decision 4): the structured hint on a local discovery
+ * entry — a pay tool with arguments it accepts VERBATIM, or the reason no
+ * verbatim hint exists for the row (decision 3's omitted-plus-reason shape).
+ */
+export type DiscoveryHint =
+  | {
+      suggested_tool: 'haven_pay_mcp_tool'
+      suggested_arguments: { merchant_url: string; tool_name: string; arguments?: Record<string, unknown> }
+    }
+  | { suggested_tool: 'haven_pay_x402'; suggested_arguments: { url: string } }
+  | { suggested_tool_omitted_reason: string }
+
+/** One `haven_discover_tools` entry on the local surface (wire-shaped). */
+export type DiscoveryEntry = {
+  id: string
+  name: string
+  description: string | null
+  category: string | null
+  resource_url: string
+  rail: string
+  protocol: string
+  tool_name: string | null
+  tool_arguments: Record<string, unknown> | null
+  price_display: string | null
+  price_atomic: string | null
+  asset: string | null
+  network: string | null
+  status: string
+  verified_at: string | null
+  source?: string
+  domain_verified?: boolean
+  verified_payable?: boolean
+} & DiscoveryHint
+
+export const toolSchemas = {
   haven_send: {
     asset: z.enum(['ETH', 'USDC']),
     recipient: z.string().min(1),
@@ -112,11 +147,14 @@ export const toolSchemas: Record<HavenMcpToolName, z.ZodRawShape> = {
   },
   haven_list_receipts: {
     limit: z.number().int().min(1).max(100).optional(),
+    /** #3128: the previous page's next_cursor (a receipt id). */
+    cursor: z.string().min(1).optional(),
   },
   haven_verify_receipt: {
     receipt: z.unknown(),
   },
-}
+// #3101: keys survive on the type (see the hosted server's contracts.ts).
+} as const satisfies Record<HavenMcpToolName, z.ZodRawShape>
 
 /**
  * MCP tool descriptions, composed from the shared semantic source in
@@ -166,7 +204,25 @@ export interface ToolFailure {
   paymentId?: string
   status?: string
   phase?: string
+  /**
+   * @deprecated since #3103 — read `next_action`. Kept with the same value for
+   * one release (the #2908 pattern) and removed in the release after the one
+   * carrying #3103.
+   */
   nextAction?: string
+  /**
+   * #3103 (epic #3105, decision 10): the same value as `nextAction`, spelled
+   * the way the hosted server and the signer spell it. Dual-emitted for one
+   * release (the #2908 pattern) before `nextAction` is dropped.
+   */
+  next_action?: string
+  /** #3101 (epic #3105, decision 7): the typed next-step family, additive; `next_tool` never null. */
+  next_tool?: string
+  next_tool_server?: string
+  next_tool_name?: string
+  next_tool_server_role?: 'hosted' | 'signer'
+  next_arguments?: Record<string, unknown>
+  next_tool_omitted_reason?: string
   resume_state?: unknown
   body?: unknown
   /**
@@ -394,7 +450,7 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           rail: args.rail === 'x402' || args.rail === 'mpp' ? args.rail : undefined,
           verified: args.verified === 'verified' || args.verified === 'operator' ? args.verified : undefined,
         })
-        return entries.map((entry) => ({
+        return entries.map((entry): DiscoveryEntry => ({
           id: entry.id,
           name: entry.name,
           description: entry.description,
@@ -413,14 +469,39 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
           source: entry.source,
           domain_verified: entry.domainVerified,
           verified_payable: entry.verifiedPayable,
-          // Which Haven pay tool reaches this entry from the local MCP surface.
+          // Which Haven pay tool reaches this entry from the local MCP surface,
+          // and — #3100 (epic #3105, decision 4) — the arguments that tool
+          // accepts VERBATIM, spelled in ITS vocabulary (`merchant_url`, not
+          // the entry's `resource_url`). The local surface keeps pointing at
+          // its pay tools: they need no cap, so a verbatim hint exists.
           // #1328: the 'mpp' rail's only-ever catalog row (the Haven MPP demo
           // resource) is delisted with the mpp_demo retirement, so this
           // fallback is unreachable today; it stays x402 rather than naming a
           // deleted tool in case a future non-demo 'mpp' rail entry appears.
-          suggested_tool:
-            entry.protocol === 'mcp' ? 'haven_pay_mcp_tool'
-            : 'haven_pay_x402',
+          // A row without a tool_name cannot get a verbatim hint —
+          // haven_pay_mcp_tool requires tool_name — so it gets the REASON
+          // instead of a hint its own tool refuses (haven-reviewer on #3113;
+          // the epic's "omitted + reason, never null" shape, decision 3).
+          ...(entry.protocol === 'mcp'
+            ? entry.toolName
+              ? {
+                  suggested_tool: 'haven_pay_mcp_tool',
+                  suggested_arguments: {
+                    merchant_url: entry.resourceUrl,
+                    tool_name: entry.toolName,
+                    ...(entry.toolArguments ? { arguments: entry.toolArguments } : {}),
+                  },
+                }
+              : {
+                  suggested_tool_omitted_reason:
+                    'this catalog row carries no tool_name, which haven_pay_mcp_tool requires; ' +
+                    'read the merchant\'s tool list yourself, then call haven_pay_mcp_tool with ' +
+                    'merchant_url, tool_name and arguments',
+                }
+            : {
+                suggested_tool: 'haven_pay_x402',
+                suggested_arguments: { url: entry.resourceUrl },
+              }),
         }))
       })
     },
@@ -440,7 +521,8 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
     },
     haven_list_receipts: async (input) => {
       const args = objectInput('haven_list_receipts', input)
-      return runTool(async () => haven.listReceipts({ limit: args.limit }))
+      // #3128: same page shape as the hosted runtime.
+      return runTool(async () => haven.listReceiptsPage({ limit: args.limit, cursor: args.cursor }))
     },
     haven_verify_receipt: async (input) => {
       const args = objectInput('haven_verify_receipt', input)
@@ -719,7 +801,11 @@ function normalizeError(err: unknown): ToolFailure {
       message: err.message,
       statusCode: err.statusCode,
       nextAction: err.nextAction,
+      next_action: err.nextAction,
       retry_with_new_quote: err.retryWithNewQuote,
+      // #3103: the local runtime's one decision site — no tool can act until
+      // the merchant recovers; the message carries retry_after_s.
+      next_tool_omitted_reason: 'the merchant needs to recover first; re-quote after the retry_after_s in the message',
     }
   }
 
@@ -733,6 +819,7 @@ function normalizeError(err: unknown): ToolFailure {
       status: err.status,
       phase: err.phase,
       nextAction: err.nextAction,
+      next_action: err.nextAction,
       resume_state: err.resumeState,
       body: err.body,
     }
@@ -759,6 +846,10 @@ function normalizeError(err: unknown): ToolFailure {
         stringOrUndefined(body?.nextAction) ??
         stringOrUndefined(body?.next_action) ??
         AgentPaymentNextAction.StopAndTellUser,
+      next_action:
+        stringOrUndefined(body?.nextAction) ??
+        stringOrUndefined(body?.next_action) ??
+        AgentPaymentNextAction.StopAndTellUser,
       body: err.body,
     }
   }
@@ -778,6 +869,10 @@ function normalizeError(err: unknown): ToolFailure {
     code: 'UNKNOWN_ERROR',
     message: err instanceof Error ? err.message : String(err),
     nextAction: AgentPaymentNextAction.StopAndTellUser,
+    next_action: AgentPaymentNextAction.StopAndTellUser,
+    // #3103: the second local decision site — nothing structured can follow an
+    // error this runtime did not recognise.
+    next_tool_omitted_reason: 'an error this runtime does not recognise; tell the user what the message says',
   }
 }
 

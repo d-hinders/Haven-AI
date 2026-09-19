@@ -43,8 +43,13 @@ export const version = '086_payment_refusals'
  *
  * The hosted MCP's `PRICE_EXCEEDS_MAX` cap refusal (`cap-price.ts`) happens
  * in the agent's runtime BEFORE any backend call and is the user's own
- * instruction — it is not in this ledger. A `POST /machine-payments/refusals`
- * report from the hosted MCP is a possible follow-up and is not filed.
+ * instruction — it is not in this ledger. The hosted prepare BUDGET refusal
+ * left this ledger too when 086 was filed, by the same "happens before any
+ * backend call" reasoning; #3054 (migration 087) moved that DECISION
+ * server-side (`POST /machine-payments/budget-precheck` refusing through
+ * `refuse()`) precisely so the ledger could record it under the new
+ * `hosted_prepare` source — the ledger stays a record of what Haven's
+ * guardrail decided, never an agent-asserted row.
  *
  * ## `detail` is a JSONB ALLOWLIST, not a denylist
  *
@@ -111,7 +116,10 @@ export async function up(client: PoolClient): Promise<void> {
         )),
       source        TEXT NOT NULL
         CONSTRAINT payment_refusals_source_check
-        CHECK (source IN ('x402_authorize', 'payment', 'redeem')),
+        -- 086 filed the three original writers; 087 widened with
+        -- 'hosted_prepare' (#3054). Never narrow without the #1139
+        -- structural-down() rule 087 implements.
+        CHECK (source IN ('x402_authorize', 'payment', 'redeem', 'hosted_prepare')),
       detail        JSONB
         CONSTRAINT payment_refusals_detail_allowlist_check
         CHECK (detail IS NULL OR (

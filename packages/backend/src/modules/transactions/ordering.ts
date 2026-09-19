@@ -7,7 +7,11 @@ import type { EnrichedTransaction, Transaction } from './types.js'
 export function compareTransactions(a: Transaction, b: Transaction): number {
   return (
     b.timestamp - a.timestamp ||
-    b.blockNumber - a.blockNumber ||
+    // #3129: `blockNumber` is nullable (an x402-synthesized row has none).
+    // `?? 0` keeps this comparator's behaviour EXACTLY as it was, because the
+    // value it replaces was literally `0` — the ordering of those rows is
+    // unchanged, they just no longer claim to be in block zero.
+    (b.blockNumber ?? 0) - (a.blockNumber ?? 0) ||
     a.hash.localeCompare(b.hash) ||
     a.type.localeCompare(b.type) ||
     a.from.localeCompare(b.from) ||
@@ -24,7 +28,14 @@ export function compareEnrichedTransactions(
 
 export function transactionDedupKey(tx: Transaction): string {
   return [
-    tx.hash,
+    // #3129: lowercased, like every other component here and like
+    // `paymentAgentIdentityKey` below. It was the one raw component, so the
+    // two identity keys disagreed about whether hash casing matters — the
+    // same "same value, two forms" trap the addresses carried. Transaction
+    // hashes have no checksum, so lowercase IS their canonical form, and both
+    // providers already emit it; this makes the agreement structural instead
+    // of incidental.
+    tx.hash.toLowerCase(),
     tx.type,
     tx.from.toLowerCase(),
     tx.to.toLowerCase(),

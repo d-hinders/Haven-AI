@@ -9,7 +9,8 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { acknowledgeLocalSignerConsent } from './signer-consent.js'
-import { describeAccountAddressKey, runDoctor, runRepair, type DoctorDeps } from './doctor.js'
+import { CONNECT_OUTCOME_FILENAME } from './storage.js'
+import { describeAccountAddressKey, rollUpLevel, runDoctor, runRepair, type DoctorDeps } from './doctor.js'
 
 const API_KEY = 'sk_agent_1234567890abcdef1234567890abcdef'
 const DELEGATE_ADDRESS = '0x' + 'cd'.repeat(20)
@@ -210,7 +211,10 @@ describe('runDoctor (#1589)', () => {
 
     const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
     const check = report.checks.find((c) => c.id === 'signer_runtime')
-    expect(check?.ok).toBe(false)
+    // #3121: intact-but-outdated is an ADVISORY — `ok` stays true (nothing is
+    // broken) and the level says what there is to read.
+    expect(check?.level).toBe('advisory')
+    expect(check?.ok).toBe(true)
     expect(check?.detail).not.toMatch(/stale or empty/i)
     expect(check?.detail).toContain(oldVersion)
     expect(check?.detail).toContain(MCP_RUNTIME_MANIFEST.signerVersion)
@@ -318,6 +322,37 @@ describe('runRepair (#1589)', () => {
     expect(runCommand).not.toHaveBeenCalled()
     const config = await readFile(join(homeDir, '.codex', 'config.toml'), 'utf8')
     expect(config).toContain('bin/haven-mcp')
+  })
+
+  it('a runtime ALIAS repairs the same config codex-cli does (--runtime codex writes ~/.codex/config.toml) (#3145 review)', async () => {
+    // Before: `writeRuntimeConfig` fell to its "manual runtime" arm for the
+    // raw alias and the repair reported success having written nothing.
+    const { homeDir, dir } = await healthyHome()
+    await rm(join(homeDir, '.codex', 'config.toml'))
+    const runCommand = vi.fn()
+    const repair = await runRepair({ runtime: 'codex' }, { homeDir, runCommand })
+    expect(repair.ok).toBe(true)
+    expect(repair.messages.join('\n')).not.toContain('manually')
+    const config = await readFile(join(homeDir, '.codex', 'config.toml'), 'utf8')
+    expect(config).toContain(join(dir, 'bin', 'haven-signer.mjs'))
+    const report = await runDoctor({ runtime: 'codex' }, { homeDir, ...healthyDeps() })
+    expect(report.checks.find((c) => c.id === 'runtime_config')?.level).toBe('ok')
+  })
+
+  it('the same refusal fires under a runtime ALIAS (--runtime codex): the config path is looked up by the normalized id (#3145 review)', async () => {
+    // Before, `runtimeConfigPathFor('codex')` was null, the refusal was
+    // skipped and a repair would have rewritten a local-stdio config.
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(homeDir, '.codex', 'config.toml'), [
+      '[mcp_servers.haven]',
+      `command = "${join(dir, 'bin', 'haven-mcp')}"`,
+    ].join('\n'))
+    const runCommand = vi.fn()
+    const repair = await runRepair({ runtime: 'codex' }, { homeDir, runCommand })
+    expect(repair.ok).toBe(false)
+    expect(repair.messages.join('\n')).toContain('LOCAL-stdio topology')
+    expect(runCommand).not.toHaveBeenCalled()
+    expect(await readFile(join(homeDir, '.codex', 'config.toml'), 'utf8')).toContain('bin/haven-mcp')
   })
 
   it('refuses without stored credentials — repair never mints identity', async () => {
@@ -1639,5 +1674,570 @@ describe('credential address naming report (#2908)', () => {
     expect(describeAccountAddressKey({}, { safe_address: '0x1' })).toContain('pre-#2908 name safe_address')
     expect(describeAccountAddressKey({ safe_address: '0x1' }, undefined)).toContain('pre-#2908 name safe_address')
     expect(describeAccountAddressKey({}, {})).toBe('no account address stored')
+  })
+})
+
+/**
+ * #3120: `--doctor` with no `--runtime` used to fabricate a green
+ * "CLI-managed" runtime_config verdict. The absent flag reached the doctor as
+ * '', `runtimeConfigPathFor('')` fell through to null, and the doctor could
+ * not tell "nobody said" from Claude Code's real CLI-managed skip. The doctor
+ * now resolves the runtime from the `ConnectOutcome` record the setup parked
+ * in the agent credential directory (`last-connect-outcome.json`), and
+ * unknown stays unknown: no fabricated pass, no truncated repair command.
+ *
+ * These tests drive `runDoctor`/`runRepair` directly because the shipped CLI
+ * refuses flagless `--doctor` in the argument parser (args.ts) — the doctor
+ * layer is where the empty-runtime path is reachable, and the premise note in
+ * the PR body records that split.
+ */
+describe('runtime resolution when --runtime is absent (#3120)', () => {
+  it('resolves the recorded runtime from the primary directory and it reaches runtimeConfigPathFor', async () => {
+    const { homeDir, dir } = await healthyHome()
+    // The codex config healthyHome seeds would satisfy a codex resolution;
+    // the record says cursor, so the check must go look at the CURSOR file.
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ schema_version: 1, outcome: 'complete', runtime: 'cursor' }))
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    expect(report.runtime).toBe('cursor')
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.detail).toContain(join(homeDir, '.cursor', 'mcp.json'))
+  })
+
+  it('an explicit --runtime wins over the recorded value, verbatim', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    expect(report.runtime).toBe('codex-cli')
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.detail).toContain(join(homeDir, '.codex', 'config.toml'))
+  })
+
+  it('a record carrying an alias is resolved through the same table an explicit flag uses', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'Cowork' }))
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    // Verbatim in the report (the doctor reports what was recorded)...
+    expect(report.runtime).toBe('Cowork')
+    // ...but normalized where the registry consumes it: cowork is claude-code,
+    // which has no file-based config this connector owns.
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.ok).toBe(true)
+    expect(rc?.detail).toContain("'Cowork'")
+    expect(rc?.detail).toContain('CLI-managed')
+  })
+
+  it('no flag and no record: runtime_config stops claiming a pass and names the inspected directory', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    expect(report.runtime).toBe('')
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.ok).toBe(false)
+    expect(rc?.detail).toContain('Runtime is unknown')
+    expect(rc?.detail).toContain(homeDir)
+    expect(rc?.detail).toContain(CONNECT_OUTCOME_FILENAME)
+    expect(report.ok).toBe(false)
+  })
+
+  it('missing, unreadable, malformed or runtime-less records all degrade to unknown, never throw', async () => {
+    const cases: Array<[string, string | undefined]> = [
+      ['missing record', undefined],
+      ['malformed json', '{not json'],
+      ['json array, not object', '[1,2,3]'],
+      ['no runtime field', JSON.stringify({ outcome: 'complete' })],
+      ['non-string runtime', JSON.stringify({ runtime: 7 })],
+      ['empty runtime string', JSON.stringify({ runtime: '' })],
+      ['unrecognized runtime name', JSON.stringify({ runtime: 'terminal-bench' })],
+    ]
+    for (const [label, content] of cases) {
+      const { homeDir, dir } = await healthyHome()
+      if (content !== undefined) await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), content)
+      const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+      expect(report.runtime, label).toBe('')
+      const rc = report.checks.find((c) => c.id === 'runtime_config')
+      expect(rc?.ok, label).toBe(false)
+      expect(rc?.detail, label).toContain('Runtime is unknown')
+      await rm(homeDir, { recursive: true, force: true })
+    }
+  })
+
+  it('an unreadable record (mode 000) degrades to unknown too', async () => {
+    const { homeDir, dir } = await healthyHome()
+    const recordPath = join(dir, CONNECT_OUTCOME_FILENAME)
+    await writeFile(recordPath, JSON.stringify({ runtime: 'cursor' }))
+    await chmod(recordPath, 0o000)
+    try {
+      const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+      expect(report.runtime).toBe('')
+      const rc = report.checks.find((c) => c.id === 'runtime_config')
+      expect(rc?.ok).toBe(false)
+      expect(rc?.detail).toContain('Runtime is unknown')
+    } finally {
+      await chmod(recordPath, 0o644)
+    }
+  })
+
+  it("'other' is a RESOLVED runtime — the manual profile's honest skip, not unknown (decision pinned)", async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'other' }))
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    expect(report.runtime).toBe('other')
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.ok).toBe(true)
+    expect(rc?.detail).toContain('manual runtime')
+    expect(rc?.detail).not.toContain('unknown')
+  })
+
+  it('claude-code keeps the CLI-managed skip unchanged (scope boundary), naming the resolved runtime', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'claude-code' }))
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    expect(report.runtime).toBe('claude-code')
+    const rc = report.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.ok).toBe(true)
+    expect(rc?.detail).toContain("'claude-code'")
+    expect(rc?.detail).toContain('CLI-managed')
+  })
+
+  it('two credential directories resolve their runtimes independently — no bleed', async () => {
+    const { homeDir, dir } = await healthyHome()
+    const other = await seedCredentials(homeDir, 'agent-2')
+    const otherRuntime = await seedRuntime(homeDir, other)
+    // The newest agent owns the bare pair now, so IT is the wired primary the
+    // report describes.
+    await seedCodexConfig(homeDir, otherRuntime.wrapperPath)
+    await writeFile(join(other, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'hermes' }))
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
+
+    const newest = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    expect(newest.credentialDirectory).toBe(other)
+    expect(newest.runtime).toBe('hermes')
+
+    // Pointed at the older directory explicitly, the OLDER record answers.
+    const viaDir = await runDoctor({ runtime: '', credentialsDir: dir }, { homeDir, ...healthyDeps() })
+    expect(viaDir.runtime).toBe('cursor')
+  })
+
+  it('the restart check says "unknown" instead of "no restart requirement" when the runtime is unknown', async () => {
+    const { homeDir } = await healthyHome()
+    // env: {} matters: restartRequiredForRuntime falls back to env DETECTION
+    // for an unknown runtime (registry semantics — a shell that looks like a
+    // runtime gets that runtime's answer). The doctor's own resolution never
+    // guesses, and with no detection signal the degraded detail renders.
+    const report = await runDoctor({ runtime: '' }, { homeDir, env: {}, ...healthyDeps() })
+    const restart = report.checks.find((c) => c.id === 'restart')
+    expect(restart?.ok).toBe(true)
+    expect(restart?.detail).toContain('Runtime is unknown')
+    expect(restart?.detail).not.toContain('No restart requirement known')
+  })
+
+  it('no rendered check string ever carries a bare --runtime (the paste-truncation bug)', async () => {
+    // Unknown runtime: every degraded verdict renders.
+    const { homeDir: homeA } = await healthyHome()
+    const unknown = await runDoctor({ runtime: '' }, { homeDir: homeA, ...healthyDeps() })
+    // Known runtime with failing checks: every repair path renders with a value.
+    const { homeDir: homeB } = await healthyHome()
+    const known = await runDoctor({ runtime: 'codex-cli' }, { homeDir: homeB, ...healthyDeps() })
+    for (const report of [unknown, known]) {
+      const lines: string[] = []
+      for (const check of report.checks) lines.push(check.detail, check.repair ?? '')
+      for (const agent of report.agents) for (const check of agent.checks) lines.push(check.detail, check.repair ?? '')
+      lines.push(JSON.stringify(report))
+      for (const line of lines) {
+        // A `--runtime` whose value is missing — flag at end-of-line, trailing
+        // only whitespace, or followed by another flag — is the truncated
+        // command this issue forbids. `--runtime codex-cli` is fine.
+        expect(line, JSON.stringify(line)).not.toMatch(/--runtime(?:\s*$|\s+--)/)
+      }
+    }
+  })
+})
+
+describe('runtime resolution in --repair (#3120)', () => {
+  it('resolves the recorded runtime, states which runtime it resolved and from where, and repairs with it', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'codex-cli' }))
+    const runCommand = vi.fn(async () => undefined)
+    const repair = await runRepair({ runtime: '' }, { homeDir, runCommand })
+    expect(repair.ok).toBe(true)
+    const joined = repair.messages.join('\n')
+    expect(joined).toContain("resolved 'codex-cli'")
+    expect(joined).toContain(CONNECT_OUTCOME_FILENAME)
+  })
+
+  it('refuses BEFORE any write or spawn when the runtime is unknown — repair never guesses', async () => {
+    const { homeDir } = await healthyHome()
+    const runCommand = vi.fn(async () => undefined)
+    const repair = await runRepair({ runtime: '' }, { homeDir, runCommand })
+    expect(repair.ok).toBe(false)
+    expect(repair.messages.join('\n')).toContain('Runtime is unknown')
+    expect(repair.messages.join('\n')).toContain('codex-cli')
+    expect(runCommand).not.toHaveBeenCalled()
+  })
+
+  it('an explicit --runtime skips the record entirely — no resolved-from note', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
+    const runCommand = vi.fn(async () => undefined)
+    const repair = await runRepair({ runtime: 'codex-cli' }, { homeDir, runCommand })
+    expect(repair.ok).toBe(true)
+    expect(repair.messages.join('\n')).not.toContain('resolved')
+  })
+})
+
+/**
+ * #3121 — three verdict levels. Before this, a check had one verdict and
+ * `report.ok` rolled every `false` into the exit code, so "worth telling you,
+ * and nothing is broken" had to be reported as a failure or not at all. An
+ * install that passed one day failed the next because the pinned dev build
+ * had moved overnight, with no action by anyone.
+ *
+ * The blocking behaviour to preserve is LIVE SPEND AUTHORITY: probe `ok` AND
+ * `classification !== 'wired'` — for every non-wired classification — with
+ * a readable config. The `configText === null` class (every claude-code run)
+ * is the one place the classification is a fallback, not evidence, and it
+ * moves to advisory.
+ */
+describe('doctor verdict levels (#3121)', () => {
+  const OLD_KEY = 'sk_agent_oldsecret'
+
+  async function homeWithOutdatedRuntime() {
+    const { homeDir, dir } = await healthyHome()
+    const oldVersion = '0.0.0-dev.202609040858.f4467bb'
+    const oldRuntimeDirectory = join(homeDir, '.haven', 'signer-runtime', oldVersion)
+    const oldCliPath = join(oldRuntimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist', 'cli.js')
+    await mkdir(join(oldRuntimeDirectory, 'node_modules', '@haven_ai', 'signer', 'dist'), { recursive: true })
+    await writeFile(oldCliPath, '// cli (older, intact)')
+    for (const pkg of ['signer', 'sdk']) {
+      const pkgDir = join(oldRuntimeDirectory, 'node_modules', '@haven_ai', pkg)
+      await mkdir(pkgDir, { recursive: true })
+      await writeFile(join(pkgDir, 'package.json'), JSON.stringify({ version: oldVersion }))
+    }
+    const sidecarPath = join(dir, 'signer-runtime.json')
+    const sidecar = JSON.parse(await readFile(sidecarPath, 'utf8')) as Record<string, unknown>
+    await writeFile(sidecarPath, JSON.stringify({
+      ...sidecar, signer_version: oldVersion, sdk_version: oldVersion,
+      runtime_directory: oldRuntimeDirectory, cli_path: oldCliPath,
+    }))
+    expect(oldVersion).not.toBe(MCP_RUNTIME_MANIFEST.signerVersion)
+    return { homeDir, dir, oldVersion }
+  }
+
+  /** A second, live credential directory beside the selected one — the #1688 shape, reusable per runtime. */
+  async function homeWithSecondLiveDirectory() {
+    const { homeDir } = await healthyHome()
+    const oldDir = join(homeDir, '.haven', 'agents', 'agent-old')
+    await mkdir(oldDir, { recursive: true })
+    await writeFile(join(oldDir, 'identity.json'), JSON.stringify({
+      api_key: OLD_KEY, agent_id: 'agent-old', api_url: 'https://api.haven.example', hosted_mcp_url: HOSTED,
+    }))
+    const selected = join(homeDir, '.haven', 'agents', 'agent-1', 'identity.json')
+    await writeFile(selected, await readFile(selected, 'utf8'))
+    const deps = healthyDeps()
+    deps.probeHostedIdentity.mockImplementation(async (apiKey: string) =>
+      apiKey === OLD_KEY
+        ? { status: 'ok' as const, agentId: 'agent-old', delegateAddress: DELEGATE_ADDRESS }
+        : { status: 'ok' as const, agentId: 'agent-1', delegateAddress: DELEGATE_ADDRESS },
+    )
+    return { homeDir, oldDir, deps }
+  }
+
+  function everyCheck(report: Awaited<ReturnType<typeof runDoctor>>) {
+    return [...report.checks, ...report.agents.flatMap((agent) => agent.checks)]
+  }
+
+  it('intact but behind the pin: ADVISORY, report.ok true, level advisory, both versions named, repair still offered', async () => {
+    const { homeDir, oldVersion } = await homeWithOutdatedRuntime()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'signer_runtime')
+    expect(check?.level).toBe('advisory')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain(oldVersion)
+    expect(check?.detail).toContain(MCP_RUNTIME_MANIFEST.signerVersion)
+    expect(check?.detail).toContain('intact, but outdated')
+    expect(check?.repair).toContain('--repair')
+    // The report as a whole: nothing failed, so the exit-code predicate is green.
+    expect(report.level).toBe('advisory')
+    expect(report.ok).toBe(true)
+  })
+
+  it('MUTATION PROOF: a stale or empty runtime is still a FAILURE — the advisory is for intact installs only', async () => {
+    const { homeDir, runtimeDirectory } = await healthyHome()
+    await rm(runtimeDirectory, { recursive: true, force: true })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'signer_runtime')
+    expect(check?.level).toBe('failed')
+    expect(check?.ok).toBe(false)
+    expect(check?.detail).toMatch(/stale or empty/i)
+    expect(report.level).toBe('failed')
+    expect(report.ok).toBe(false)
+  })
+
+  describe('a live, genuinely unwired directory stays BLOCKING with a readable config — one test per classification', () => {
+    it('superseded: identity present, no config entry, key authenticates → failed', async () => {
+      const { homeDir, deps } = await homeWithSecondLiveDirectory()
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+      expect(report.agents.find((a) => a.agentId === 'agent-old')?.classification).toBe('superseded')
+      const check = report.checks.find((c) => c.id === 'superseded_agents')
+      expect(check?.level).toBe('failed')
+      expect(check?.detail).toMatch(/SPEND-CAPABLE/)
+      expect(check?.repair).toMatch(/Revoke agent-old/)
+      expect(report.ok).toBe(false)
+    })
+
+    it('tombstoned with the key still present (classified superseded, never retired) → failed: a tombstone is a marker, not a revocation', async () => {
+      const { homeDir, oldDir, deps } = await homeWithSecondLiveDirectory()
+      const { writeAgentTombstone } = await import('./tombstone.js')
+      await writeAgentTombstone({ directory: oldDir, agentId: 'agent-old', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+      // `retired` is only ever a directory WITHOUT an api key (doctor.ts: the
+      // tombstone decides inside the no-key branch), so a live retired entry
+      // cannot exist; with a key it is superseded-with-tombstone (#1688).
+      const entry = report.agents.find((a) => a.agentId === 'agent-old')
+      expect(entry?.classification).toBe('superseded')
+      const check = report.checks.find((c) => c.id === 'superseded_agents')
+      expect(check?.level).toBe('failed')
+      expect(check?.detail).toContain('tombstoned — key material still present')
+      expect(report.ok).toBe(false)
+    })
+
+    it('orphaned: no api key by construction, so it can never be probed live — reported as unverifiable, never green-washed', async () => {
+      const { homeDir, deps } = await homeWithSecondLiveDirectory()
+      const orphanDir = join(homeDir, '.haven', 'agents', 'orphan')
+      await mkdir(orphanDir, { recursive: true })
+      await writeFile(join(orphanDir, 'identity.json'), JSON.stringify({ agent_id: 'agent-orphan' }))
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+      expect(report.agents.find((a) => a.directory === orphanDir)?.classification).toBe('orphaned')
+      const check = report.checks.find((c) => c.id === 'superseded_agents')
+      expect(check?.detail).toContain('could not verify: orphan (no stored key/API URL to probe)')
+      // The live superseded sibling still fails the check — an orphan beside it changes nothing.
+      expect(check?.level).toBe('failed')
+    })
+
+    it('parked: a re-key-only directory has no identity to probe — reported through rekey_pending_elsewhere, never as live', async () => {
+      const { homeDir, deps } = await homeWithSecondLiveDirectory()
+      const parkedDir = join(homeDir, '.haven', 'agents', 'parked')
+      await mkdir(parkedDir, { recursive: true })
+      await writeFile(join(parkedDir, 'rekey-pending.json'), JSON.stringify({
+        version: 1, agent_id: 'agent-parked', address: '0x' + 'ee'.repeat(20), private_key: '0x' + '33'.repeat(32),
+        started_at: '2026-09-01T00:00:00.000Z', expires_at: '2026-09-01T01:00:00.000Z',
+      }))
+      const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps, now: () => Date.parse('2026-09-18T00:00:00.000Z') })
+      expect(report.agents.find((a) => a.directory === parkedDir)?.classification).toBe('parked')
+      const superseded = report.checks.find((c) => c.id === 'superseded_agents')
+      expect(superseded?.detail).toContain('could not verify: parked')
+      expect(superseded?.level).toBe('failed') // the live sibling
+      const parked = report.checks.find((c) => c.id === 'rekey_pending_elsewhere')
+      expect(parked?.level).toBe('failed') // an EXPIRED parked key is the abandoned case (#1911)
+      expect(report.ok).toBe(false)
+    })
+  })
+
+  it('claude-code (no readable config): a second live directory is an ADVISORY naming why the classification is unreliable — exit-code predicate green', async () => {
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const report = await runDoctor({ runtime: 'claude-code' }, { homeDir, ...deps })
+    // The classification itself is unchanged (decision 5): the fallback still says "superseded".
+    expect(report.agents.find((a) => a.agentId === 'agent-old')?.classification).toBe('superseded')
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.level).toBe('advisory')
+    expect(check?.ok).toBe(true)
+    expect(check?.detail).toContain('STILL SPEND-CAPABLE: agent-old')
+    expect(check?.detail).toContain("Runtime 'claude-code' has no config file the connector can read")
+    expect(check?.detail).toContain('cannot be verified from this machine')
+    expect(check?.repair).toMatch(/Check agent-old on the Haven agent page/)
+    expect(report.level).toBe('advisory')
+    expect(report.ok).toBe(true)
+  })
+
+  it("'other' (manual runtime, no connector-owned config) is demoted the same way as claude-code", async () => {
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const report = await runDoctor({ runtime: 'other' }, { homeDir, ...deps })
+    const check = report.checks.find((c) => c.id === 'superseded_agents')
+    expect(check?.level).toBe('advisory')
+    expect(check?.detail).toContain("Runtime 'other' has no config file the connector can read")
+    expect(report.ok).toBe(true)
+  })
+
+  it('MUTATION PROOF (review finding 2): an UNRECOGNISED runtime string does not demote — runtime_config fails and the live key stays a failure', async () => {
+    // `configPath` is null for a typo too (`runtimeConfigPathFor` has a null
+    // default) and args.ts does not validate the value, so `--runtime
+    // codex-clii` is CLI-reachable. Before this pin it read as "CLI-managed",
+    // demoted superseded_agents to advisory and exited 0 with a second key
+    // still spend-capable on a runtime demonstrably not using it.
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const report = await runDoctor({ runtime: 'codex-clii' }, { homeDir, ...deps })
+    const config = report.checks.find((c) => c.id === 'runtime_config')
+    expect(config?.level).toBe('failed')
+    expect(config?.detail).toContain("Runtime 'codex-clii' is not one the connector recognises")
+    expect(config?.detail).toContain('NOT checked')
+    expect(config?.repair).toContain('claude-code, codex-cli')
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.level).toBe('failed')
+    expect(report.level).toBe('failed')
+    expect(report.ok).toBe(false)
+  })
+
+  it('a documented ALIAS of a config-owning runtime reads that config (--runtime codex → ~/.codex/config.toml), never the CLI-managed skip', async () => {
+    // #3145 review: `runtimeConfigPathFor` switches on the raw string; the
+    // alias used to resolve to no path and report a green skip with the file
+    // unread (#3120's class). With two live keys it now behaves as codex-cli.
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const report = await runDoctor({ runtime: 'codex' }, { homeDir, ...deps })
+    expect(report.runtime).toBe('codex') // the flag stays verbatim in the report
+    const config = report.checks.find((c) => c.id === 'runtime_config')
+    expect(config?.level).toBe('ok')
+    expect(config?.detail).toContain('config.toml references the hosted server')
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.level).toBe('failed')
+  })
+
+  it('MUTATION PROOF (the twin): the SAME two directories on codex-cli, whose config names only agent-1, stay a failure', async () => {
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.level).toBe('failed')
+    expect(report.ok).toBe(false)
+  })
+
+  it('unknown runtime (#3120): runtime_config stays FAILED — "not checked" is not "nothing is broken"', async () => {
+    // Decided here rather than inherited (#3121, "this slice owns the exit
+    // code"): a check that could not look at a surface it owns is not an
+    // advisory, because an advisory promises the surface was examined. The
+    // #3120 shard's sentence "an unknown runtime can never ride a green exit
+    // code again" therefore still holds.
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'runtime_config')
+    expect(check?.level).toBe('failed')
+    expect(check?.detail).toContain('NOT checked')
+    expect(report.ok).toBe(false)
+  })
+
+  it('every level is reachable — the model cannot collapse back to binary unnoticed', async () => {
+    const healthy = await runDoctor({ runtime: 'codex-cli' }, { homeDir: (await healthyHome()).homeDir, ...healthyDeps() })
+    const outdated = await runDoctor({ runtime: 'codex-cli' }, { homeDir: (await homeWithOutdatedRuntime()).homeDir, ...healthyDeps() })
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    const failing = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps })
+    const levels = new Set([healthy, outdated, failing].flatMap((r) => everyCheck(r).map((c) => c.level)))
+    expect([...levels].sort()).toEqual(['advisory', 'failed', 'ok'])
+    expect([healthy.level, outdated.level, failing.level]).toEqual(['ok', 'advisory', 'failed'])
+  })
+
+  it('INVARIANT: ok === (level !== "failed") on every check and on the report, in every state', async () => {
+    const { homeDir, deps } = await homeWithSecondLiveDirectory()
+    for (const report of [
+      await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...deps }),
+      await runDoctor({ runtime: 'claude-code' }, { homeDir, ...deps }),
+      await runDoctor({ runtime: 'codex-cli' }, { homeDir: (await homeWithOutdatedRuntime()).homeDir, ...healthyDeps() }),
+    ]) {
+      for (const check of everyCheck(report)) expect(check.ok, check.id).toBe(check.level !== 'failed')
+      expect(report.ok).toBe(report.level !== 'failed')
+    }
+  })
+
+  it('rollUpLevel: failed beats advisory beats ok; empty is ok', () => {
+    expect(rollUpLevel([])).toBe('ok')
+    expect(rollUpLevel([{ level: 'ok' }, { level: 'ok' }])).toBe('ok')
+    expect(rollUpLevel([{ level: 'ok' }, { level: 'advisory' }])).toBe('advisory')
+    expect(rollUpLevel([{ level: 'advisory' }, { level: 'failed' }, { level: 'ok' }])).toBe('failed')
+  })
+})
+
+/**
+ * #3123 — the doctor surfaces signer-runtime directories nothing references
+ * as an ADVISORY (#3121 level), naming the prune command; absent when there
+ * is nothing to reclaim, so a single-agent install reads exactly as before.
+ */
+describe('unused signer-runtime directories (#3123)', () => {
+  it('a directory no credential directory names is an advisory naming --prune-signer-runtimes; the referenced one and the pin are not counted', async () => {
+    const { homeDir } = await healthyHome()
+    const stale = join(homeDir, '.haven', 'signer-runtime', '0.0.0-dev.202607010000.0000000', 'node_modules', '@haven_ai', 'signer', 'dist')
+    await mkdir(stale, { recursive: true })
+    await writeFile(join(stale, 'cli.js'), 'x'.repeat(2048))
+    // #3151 review N2: the doctor asks the prune for NAMES only — a spy pins
+    // `measure: false`, so the file walk cannot come back into --doctor silently.
+    const { pruneSignerRuntimes } = await import('./prune-runtimes.js')
+    const pruneSpy = vi.fn(pruneSignerRuntimes)
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps(), pruneSignerRuntimes: pruneSpy })
+    expect(pruneSpy).toHaveBeenCalledTimes(1)
+    expect(pruneSpy.mock.calls[0][0]).toEqual({ dryRun: true, measure: false })
+    const check = report.checks.find((c) => c.id === 'signer_runtime_unused')
+    expect(check?.level).toBe('advisory')
+    expect(check?.detail).toContain('0.0.0-dev.202607010000.0000000')
+    expect(check?.detail).not.toContain(MCP_RUNTIME_MANIFEST.signerVersion)
+    expect(check?.repair).toContain('--prune-signer-runtimes')
+    // #3151 review N2: the doctor names, it does not size — no MB figure here
+    // (sizing walks every file under the root; that is --dry-run's job).
+    expect(check?.detail).not.toMatch(/\bMB\b/)
+    expect(check?.detail).toContain('sizes: --prune-signer-runtimes --dry-run')
+    expect(report.ok).toBe(true)
+    expect(report.level).toBe('advisory')
+  })
+
+  it('no unused directory → no check at all (the #1589 id list is untouched)', async () => {
+    const { homeDir } = await healthyHome()
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    expect(report.checks.find((c) => c.id === 'signer_runtime_unused')).toBeUndefined()
+    expect(report.level).toBe('ok')
+  })
+})
+
+/**
+ * #3122 — two directories whose local binding records claim the same hosted
+ * MCP server name: the name changed hands. An ADVISORY naming both, oldest →
+ * newest, flagging a backend change; absent when no name is claimed twice.
+ */
+describe('rebound MCP server names (#3122)', () => {
+  it('two records for one name → advisory naming both holders in bound-at order and the backend change; none when names are unique', async () => {
+    const { homeDir, dir } = await healthyHome()
+    const { writeMcpServerBinding } = await import('./storage.js')
+    await writeMcpServerBinding(dir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-1', api_url: 'https://api.dev.haven.example', bound_at: '2026-09-18T12:00:00.000Z' })
+    const clean = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    expect(clean.checks.find((c) => c.id === 'mcp_server_name_rebound')).toBeUndefined()
+
+    const oldDir = join(homeDir, '.haven', 'agents', 'agent-old')
+    await mkdir(oldDir, { recursive: true })
+    await writeFile(join(oldDir, 'identity.json'), JSON.stringify({ agent_id: 'agent-old' })) // keys gone, no tombstone → orphaned; still a record
+    await writeMcpServerBinding(oldDir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-old', api_url: 'https://api.haven.example', bound_at: '2026-09-01T00:00:00.000Z' })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'mcp_server_name_rebound')
+    expect(check?.level).toBe('advisory')
+    expect(check?.detail).toContain("'haven': agent-old on https://api.haven.example at 2026-09-01T00:00:00.000Z")
+    expect(check?.detail).toMatch(/agent-old .* → agent-1 on https:\/\/api\.dev\.haven\.example/)
+    expect(check?.detail).toContain('BACKEND CHANGED')
+    expect(check?.detail).toContain('locally recorded')
+    expect(check?.repair).toContain('--unwire')
+    expect(report.ok).toBe(true)
+  })
+})
+
+describe('rebound MCP server names strip URL userinfo on read (#3154 doc review r4)', () => {
+  it('a legacy record carrying user:pass@ for the SAME backend is not a backend change, and the secret is echoed nowhere', async () => {
+    const { homeDir, dir } = await healthyHome()
+    const { writeMcpServerBinding } = await import('./storage.js')
+    await writeMcpServerBinding(dir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-1', api_url: 'https://api.haven.example', bound_at: '2026-09-18T12:00:00.000Z' })
+    const oldDir = join(homeDir, '.haven', 'agents', 'agent-old')
+    await mkdir(oldDir, { recursive: true })
+    await writeFile(join(oldDir, 'identity.json'), JSON.stringify({ agent_id: 'agent-old' }))
+    await writeMcpServerBinding(oldDir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-old', api_url: 'https://ops:s3cret@api.haven.example/', bound_at: '2026-09-01T00:00:00.000Z' })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    const check = report.checks.find((c) => c.id === 'mcp_server_name_rebound')
+    expect(check?.level).toBe('advisory')
+    expect(check?.detail).toContain('agent-old on https://api.haven.example at')
+    expect(check?.detail).not.toContain('BACKEND CHANGED')
+    expect(JSON.stringify(report)).not.toContain('s3cret')
+  })
+})
+
+describe('rebound MCP server names ignore RETIRED directories (#3154 review)', () => {
+  it('a tombstoned, key-less directory whose binding record survived a by-the-book reset does not make the name "changed hands"', async () => {
+    const { homeDir, dir } = await healthyHome()
+    const { writeMcpServerBinding } = await import('./storage.js')
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    await writeMcpServerBinding(dir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-1', api_url: 'https://api.haven.example', bound_at: '2026-09-18T12:00:00.000Z' })
+    const resetDir = join(homeDir, '.haven', 'agents', 'agent-reset')
+    await mkdir(resetDir, { recursive: true })
+    await writeAgentTombstone({ directory: resetDir, agentId: 'agent-reset', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+    await writeMcpServerBinding(resetDir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-reset', api_url: 'https://api.haven.example', bound_at: '2026-09-01T00:00:00.000Z' })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    expect(report.agents.find((a) => a.directory === resetDir)?.classification).toBe('retired')
+    expect(report.checks.find((c) => c.id === 'mcp_server_name_rebound')).toBeUndefined()
+    expect(report.level).toBe('ok')
   })
 })

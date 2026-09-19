@@ -55,8 +55,10 @@ export function useAgents() {
           setError(null)
         }
         const res = await api.get<{ agents: Agent[] }>('/agents')
-        setAgents(res.agents)
-        return res.agents
+        // `?? []` — an absent key must degrade, not crash the route (#3093).
+        const rows = res.agents ?? []
+        setAgents(rows)
+        return rows
       } catch (err) {
         if (!silent) {
           setError(err instanceof Error ? err.message : 'We could not load connected agents.')

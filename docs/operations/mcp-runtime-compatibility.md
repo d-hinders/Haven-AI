@@ -160,7 +160,12 @@ last-verified: "2026-09-19"
 > version-skew contract do not move; an older signer against the same backend
 > keeps signing the bare hash WHEN A CALLER HANDS IT ONE — no Haven flow emits
 > that shape (the legacy rail answers 410), so the exposure is caller-driven;
-> updating the signer is the remedy, as for any signer defect. Nothing else in this document was re-verified in this pass.
+> updating the signer is the remedy, as for any signer defect. The opposite
+> skew — a new signer against a pinned pre-#1254 hosted image that returns
+> `payload_hash` with no `typed_data_b64` — now gets `BARE_HASH_REFUSED` where
+> it previously got a signature the account rejected on-chain anyway (AA24):
+> a behaviour change for a pinned old backend, and the better outcome. Nothing
+> else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#3125):** the `haven_list_receipts` description
 > prose changed on BOTH runtimes — it is one shared fragment

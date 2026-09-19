@@ -38,8 +38,10 @@ import {
 /**
  * The edge signer core.
  *
- * Holds the delegate key in this process and exposes the two signing
- * operations a hosted-MCP flow needs. It performs no network I/O and never
+ * Holds the delegate key in this process and exposes the signing operations a
+ * hosted-MCP flow needs — five, every one verifying something before it signs
+ * (a Haven binding, typed data the account validates, or a sweep
+ * authorization); there is no raw-hash primitive (#3169). It performs no network I/O and never
  * returns the key — only signatures and the standard x402 header. See
  * docs/architecture/07-edge-signer.md.
  */

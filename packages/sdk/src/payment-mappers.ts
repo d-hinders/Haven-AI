@@ -132,6 +132,11 @@ export function mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentRece
   if ('payment_intent_id' in raw) {
     receipt.paymentIntentId = raw.payment_intent_id ?? null
   }
+  // #3132: carried when the backend states it; the mapper otherwise drops
+  // every key it does not name, which is why the declaration is per row.
+  if (raw.scope) {
+    receipt.scope = { source: raw.scope.source, filter: raw.scope.filter }
+  }
   if ('approval_request_id' in raw) {
     receipt.approvalRequestId = raw.approval_request_id ?? null
   }

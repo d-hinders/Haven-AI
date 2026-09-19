@@ -141,6 +141,7 @@ export async function fetchAccountTransactions({
         decimals: nativeToken.decimals,
         direction: tx.to.toLowerCase() === addrLower ? 'in' : 'out',
         timestamp: toUnixSeconds(tx.timeStamp),
+        timestampSource: 'block', // #3132: the block's timestamp, recorded
         blockNumber: toBlockNumber(tx.blockNumber),
         isError: tx.isError === '1',
       })
@@ -160,6 +161,7 @@ export async function fetchAccountTransactions({
         decimals: nativeToken.decimals,
         direction: tx.to.toLowerCase() === addrLower ? 'in' : 'out',
         timestamp: toUnixSeconds(tx.timeStamp),
+        timestampSource: 'block', // #3132: the block's timestamp, recorded
         blockNumber: toBlockNumber(tx.blockNumber),
         isError: tx.isError === '1',
       })
@@ -181,6 +183,7 @@ export async function fetchAccountTransactions({
         decimals,
         direction: tx.to.toLowerCase() === addrLower ? 'in' : 'out',
         timestamp: toUnixSeconds(tx.timeStamp),
+        timestampSource: 'block', // #3132: the block's timestamp, recorded
         blockNumber: toBlockNumber(tx.blockNumber),
         isError: false,
         tokenAddress: toCanonicalAddress(tx.contractAddress),

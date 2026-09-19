@@ -163,6 +163,7 @@ function stubOneNativeTransactionFetch(): ReturnType<typeof vi.fn> {
           hash: TX_HASH,
           block_number: 45725826,
           timestamp: '2026-05-08T11:49:59Z',
+          timestampSource: 'block',
           from: { hash: SENDER },
           to: { hash: SAFE_ADDRESS },
           value: '1000000000000000000',
@@ -362,6 +363,88 @@ describe('transaction routes', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  // #3132 (owner decision 3 on #3130): every row states its population and
+  // its narrowing as two values. The feed is wallet-scoped; agentId /
+  // accountId narrow it. Explorer rows mark their timestamp as the block's.
+  describe('per-row scope and marked timestamp (#3132)', () => {
+    const ACCOUNT_ID = '22222222-2222-4222-8222-222222222222'
+    const AGENT_ID = '33333333-3333-4333-8333-333333333333'
+    const INTENT_ID = '44444444-4444-4444-8444-444444444444'
+    /** One account, one agent, and one confirmed x402 intent WITHOUT a confirmation time and WITHOUT an evidence row. */
+    function mockOneAccountOneIntent() {
+      vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
+        const text = String(sql)
+        if (text.includes('FROM smart_accounts') && text.includes('ORDER BY created_at ASC')) {
+          return { rows: [{ id: ACCOUNT_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Base wallet' }] } as never
+        }
+        if (text.includes("pi.source = 'x402'")) {
+          return { rows: [{
+            id: INTENT_ID, tx_hash: '0x' + 'cd'.repeat(32), agent_id: AGENT_ID, agent_name: 'Buyer',
+            account_id: ACCOUNT_ID, account_address: SAFE_ADDRESS, account_name: 'Base wallet', chain_id: 8453,
+            token_symbol: 'USDC', token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', to_address: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
+            amount_raw: '20000', amount_human: '0.02', x402_merchant_address: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
+            x402_resource_url: 'https://merchant.example/paid', payment_proof_status: null, payment_reconciliation_event_type: null,
+            amount_sek: null, fx_rate_sek: null, fx_source: null, settlement_scheme: 'erc7710', confirmed_at: null, created_at: '2026-09-18T09:59:00.000Z',
+          }] } as never
+        }
+        if (text.includes('FROM agents')) return { rows: [{ id: AGENT_ID }] } as never
+        return { rows: [] } as never
+      })
+    }
+    async function rowsFor(query: string) {
+      const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+      stubOneNativeTransactionFetch()
+      mockOneAccountOneIntent()
+      const response = await app.inject({ method: 'GET', url: `/transactions?limit=10&fresh=1${query}`, headers: { authorization: `Bearer ${token}` } })
+      expect(response.statusCode).toBe(200)
+      const body = response.json() as { transactions: Array<Record<string, unknown>> }
+      expectMatchesSpec('GET', '/transactions', body)
+      // The guard is only evidence if it found rows to check.
+      expect(body.transactions.length).toBeGreaterThan(0)
+      return body
+    }
+
+    it('unfiltered: every row is { source: wallet, filter: null }; the explorer row says block, the x402 row says created_at with a null confirmedAt and a null proof status', async () => {
+      const { transactions } = await rowsFor('')
+      expect(transactions).toHaveLength(2)
+      for (const tx of transactions) expect(tx.scope).toEqual({ source: 'wallet', filter: null })
+      const explorer = transactions.find((tx) => tx.source !== 'x402')!
+      const synthesized = transactions.find((tx) => tx.source === 'x402')!
+      expect(explorer.timestampSource).toBe('block')
+      expect(explorer).not.toHaveProperty('confirmedAt')
+      expect(synthesized.timestampSource).toBe('created_at')
+      expect(synthesized.confirmedAt).toBeNull()
+      expect(synthesized.paymentProofStatus).toBeNull()
+      expect(synthesized.paymentFlowStatus).toBe('confirming_merchant')
+    })
+
+    it('agentId narrows: filter agent — the population is still the wallet, never the receipts view', async () => {
+      const { transactions } = await rowsFor(`&agentId=${AGENT_ID}`)
+      expect(transactions).toHaveLength(1)
+      for (const tx of transactions) expect(tx.scope).toEqual({ source: 'wallet', filter: 'agent' })
+    })
+
+    it('accountId narrows: filter account; both: account+agent', async () => {
+      const a = await rowsFor(`&accountId=${ACCOUNT_ID}`)
+      for (const tx of a.transactions) expect(tx.scope).toEqual({ source: 'wallet', filter: 'account' })
+      const b = await rowsFor(`&accountId=${ACCOUNT_ID}&agentId=${AGENT_ID}`)
+      expect(b.transactions).toHaveLength(1)
+      for (const tx of b.transactions) expect(tx.scope).toEqual({ source: 'wallet', filter: 'account+agent' })
+    })
+
+    it('additive: the pre-#3132 row shape (no scope, no timestampSource, no confirmedAt) still validates against the spec', async () => {
+      const body = await rowsFor('')
+      const legacy = {
+        ...body,
+        transactions: body.transactions.map((tx) => {
+          const { scope: _s, timestampSource: _t, confirmedAt: _c, ...rest } = tx
+          return rest
+        }),
+      }
+      expectMatchesSpec('GET', '/transactions', legacy)
+    })
+  })
+
   it('keeps aggregate transactions separate for the same Safe address on different chains', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     stubOneNativeTransactionFetch()
@@ -523,6 +606,7 @@ describe('mergeX402Transactions', () => {
         decimals: 6,
         direction: 'out',
         timestamp: 1778240999,
+        timestampSource: 'block',
         blockNumber: 45725826,
         isError: false,
         tokenAddress: USDC_ADDRESS,
@@ -605,6 +689,7 @@ describe('mergeX402Transactions', () => {
         decimals: 6,
         direction: 'out',
         timestamp: 1778240999,
+        timestampSource: 'block',
         blockNumber: 45725826,
         isError: false,
         tokenAddress: USDC_ADDRESS,
@@ -781,6 +866,7 @@ describe('mergeX402Transactions', () => {
         decimals: 6,
         direction: 'out',
         timestamp: 1778240999,
+        timestampSource: 'block',
         blockNumber: 45725826,
         isError: false,
         tokenAddress: USDC_ADDRESS,
@@ -861,6 +947,7 @@ describe('enrichTransactionsWithAgents', () => {
       decimals: 6,
       direction: 'out',
       timestamp: 1779436199,
+      timestampSource: 'block',
       blockNumber: 45725826,
       isError: false,
       tokenAddress: USDC_ADDRESS,
@@ -1472,6 +1559,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
               hash: UNATTRIBUTED_HASH,
               block_number: 400,
               timestamp: '2026-05-04T00:00:00Z',
+              timestampSource: 'block',
               from: { hash: SAFE_ADDRESS },
               to: { hash: SENDER },
               value: '1000000000000000000',
@@ -1484,6 +1572,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
               hash: AGENT_HASH,
               block_number: 401,
               timestamp: '2026-05-04T01:00:00Z',
+              timestampSource: 'block',
               from: { hash: SAFE_ADDRESS },
               to: { hash: SENDER },
               value: '2000000000000000000',

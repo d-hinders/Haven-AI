@@ -47,7 +47,6 @@ export interface EdgeSigner {
   /** Address derived from the delegate key. */
   readonly delegateAddress: string
   /** Sign an AllowanceModule funding/transfer hash (raw ECDSA, 65 bytes). */
-  signPaymentHash(hash: string): string
   /**
    * Sign a DIRECT delegation-rail payment's EIP-712 typed data (#1254) — the
    * non-x402 counterpart of `signX402FundingTypedData`. The Hybrid account
@@ -238,10 +237,6 @@ export function createEdgeSigner(
 
   return {
     delegateAddress,
-
-    signPaymentHash(hash: string): string {
-      return signAndVerify(hash)
-    },
 
     async signDelegationTypedData(typedData: Record<string, unknown>): Promise<string> {
       const account = privateKeyToAccount(delegateKey as `0x${string}`)

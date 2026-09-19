@@ -10,6 +10,7 @@ import {
 } from '@haven_ai/sdk'
 import { z } from 'zod/v3'
 import { isSettlementChildTypedData } from './settlement-child.js'
+import { HavenBareHashRefusedError } from './bare-hash.js'
 import {
   appendSigningAuditEntry,
   createSigningAuditEntry,
@@ -200,8 +201,8 @@ const SIGN_DESCRIPTION = [
   'bulky ever crosses your context. Fallback: pass typed_data_b64 through UNCHANGED (never re-type',
   'the nested typed_data JSON); the account validates that EIP-712 payload, not payload_hash.',
   'Next: call mcp__haven__haven_submit with signature, then pass x402_binding',
-  'to mcp__haven-signer__haven_x402_sign_header. For plain SafeTransfer payments, just pass payload_hash and',
-  'relay the returned signature via mcp__haven__haven_submit.',
+  'to mcp__haven-signer__haven_x402_sign_header. A bare payload_hash with no payment_id, typed_data',
+  'or x402_expected is REFUSED (BARE_HASH_REFUSED): a hash carries nothing this signer can verify.',
 ].join(' ')
 
 const X402_SIGN_HEADER_DESCRIPTION = [
@@ -506,8 +507,10 @@ export function createToolHandlers(
           // #1254: a DIRECT delegation-rail payment carries typed_data and no
           // x402 context — the account validates the TYPED DATA, and a raw
           // signature over payload_hash is rejected on-chain (AA24, found
-          // live). When typed_data is present it is what gets signed; the
-          // raw-hash path below is the legacy AllowanceModule rail only.
+          // live). When typed_data is present it is what gets signed. There is
+          // no raw-hash path any more (#3169): the AllowanceModule rail it
+          // served is retired, and signing caller-supplied bytes with no
+          // shape to inspect was a blind-signing oracle for the delegate key.
           if (typedData) {
             // #1476: a DELEGATION payload is an authority grant to a third
             // party — the erc7710 settlement child, whose signature lets a
@@ -533,9 +536,9 @@ export function createToolHandlers(
             await auditSigning('haven_sign', payloadHash)
             return { signature }
           }
-          const signature = signer.signPaymentHash(payloadHash)
-          await auditSigning('haven_sign', payloadHash)
-          return { signature }
+          // #3169: bare hash, nothing to verify against — refused, never signed.
+          // Not audited as a signing operation: nothing was signed.
+          throw new HavenBareHashRefusedError()
         }
         await auditSigning('haven_sign', payloadHash)
         return { signature: result.signature, x402_binding: result.x402Binding }
@@ -742,6 +745,17 @@ function normalizeError(err: unknown): ToolFailure {
         nextTool: null,
         nextToolOmittedReason: 'update @haven_ai/signer by re-running the connector, then repeat the same call',
       })),
+    }
+  }
+  if (err instanceof HavenBareHashRefusedError) {
+    // #3169: the bare-hash refusal, structured like the others. Checked BEFORE
+    // the `HavenSigningError` branch below since this class extends it.
+    return {
+      success: false,
+      code: err.code,
+      message: err.message,
+      next_action: err.next_action,
+      ...nextStepWireFields(err.step),
     }
   }
   if (err instanceof HavenSignContextError) {

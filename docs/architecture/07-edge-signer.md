@@ -31,7 +31,7 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # Haven — Edge Signer
@@ -58,8 +58,14 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
 
 1. **Signer core** — framework-agnostic, no network. Loads the delegate key
    from a local secret and exposes these operations:
-   - `signPaymentHash(hash)` → raw ECDSA signature (the AllowanceModule
-     funding/transfer hash). Reuses the SDK's `signHash` + `verifySignature`.
+   - (removed, #3169) `signPaymentHash(hash)` — raw ECDSA over the retired
+     AllowanceModule rail's hash. It was a blind-signing oracle: a digest of an
+     EIP-3009 transfer out of the delegate wallet, or of a MetaMask
+     `Delegation`, signed valid, and the #1476 shape-keyed refusal could not
+     see a hash. `haven_sign` with a bare `payload_hash` now answers the
+     structured `BARE_HASH_REFUSED` refusal (`next_action: stop_and_tell_user`,
+     a typed step naming the inputs the signer CAN verify) — every remaining
+     method verifies before it signs.
    - `signX402FundingHash(hash, expected)` → verifies Haven's signature over the
      expected context, then returns the funding signature plus a process-local
      `x402_binding` that records the authenticated funding-intent and

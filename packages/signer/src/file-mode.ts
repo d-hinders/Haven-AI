@@ -84,20 +84,30 @@ export async function tightenIfFilePermissive(
   platform: NodeJS.Platform = process.platform,
   stats?: Stats,
 ): Promise<TightenOutcome> {
-  const found = await permissiveMode(path, platform, stats)
-  if (found === null) return platform === 'win32' ? 'skipped' : 'owner-only'
-  if (!found.regular) {
+  if (platform === 'win32') return 'skipped'
+  let info: Stats | null = stats ?? null
+  if (!info) {
+    try {
+      info = await lstat(path)
+    } catch {
+      return 'owner-only'
+    }
+  }
+  if (!info.isFile()) {
     // A symlink (or device, or directory) at the sidecar path: chmod would
     // follow it to whatever it points at, and `appendFile` already writes
-    // the audit rows through it. The remedy is to remove the link, not to
-    // chmod its target — and the link's own mode bits mean nothing, so they
-    // are not printed.
+    // the audit rows through it. Judged BEFORE the mode — a link's own mode
+    // bits mean nothing and vary with umask (0755 under 022, 0700 under 077),
+    // so they neither gate this warning nor appear in it. The remedy is to
+    // remove the link, not to chmod its target.
     log(
       `haven-signer: warning: ${kind} at ${path} is not a regular file (a symlink or similar); ` +
         `audit rows are being written through it and it was not tightened. Remove it: rm ${path}`,
     )
     return 'warned'
   }
+  const found = await permissiveMode(path, platform, info)
+  if (found === null) return 'owner-only'
   {
     try {
       await chmod(path, OWNER_ONLY_MODE)

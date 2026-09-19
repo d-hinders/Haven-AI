@@ -110,7 +110,9 @@ describe('signing audit', () => {
         expect(((await stat(target)).mode & 0o777).toString(8)).toBe('644')
         expect(logged).toHaveLength(1)
         expect(logged[0]).toMatch(/not a regular file/)
-        expect(logged[0]).toMatch(/chmod 600/)
+        expect(logged[0]).toMatch(/written through it/)
+        expect(logged[0]).toMatch(new RegExp(`rm ${auditPath}`))
+        expect(logged[0]).not.toMatch(/chmod/)
       } finally {
         await rm(dir, { recursive: true, force: true })
       }

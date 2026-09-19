@@ -21,6 +21,7 @@ covers:
   - packages/connect/src/prune-runtimes.ts
   - packages/connect/src/storage.ts
   - packages/signer/src/credentials.ts
+  - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
 last-verified: "2026-09-19"
@@ -70,7 +71,10 @@ and the `release` skill.
 > coupled through `packages/signer/src/credentials.ts`, where the only change
 > is that `warnIfCredentialFilePermissive` now delegates to a shared
 > `file-mode.ts` helper (same message, same `chmod 600` hint, same Windows
-> carve-out) so the audit sidecar can reuse it. The credential's NAME
+> carve-out, and still `stat` — a symlinked credential path is judged by its
+> target as before; only the sidecar check uses `lstat`) so the audit sidecar
+> can reuse it. `file-mode.ts` is added to this doc's `covers:` because that
+> claim now lives there. The credential's NAME
 > resolution — `account_address` first, the two pre-#2908 names read
 > permanently — is untouched, so the `credentials` check this document describes
 > reports exactly what it did. No channel, version-order or publish behaviour

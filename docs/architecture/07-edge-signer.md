@@ -99,8 +99,10 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    The agent client runs it locally **alongside** the hosted Haven connection.
    On first launch, or when that bound configuration changes, it requires a
    consent acknowledgement tied to the delegate, optional wallet/agent/network
-   metadata, and exposed tool set. Each signing operation appends a local audit
-   row containing context hashes but no key, signature, or merchant header.
+   metadata, and exposed tool set. Each signing operation appends, best-effort
+   (since #3172 a failed audit write is reported on stderr and never fails the
+   call), a local audit row containing context hashes but no key, signature,
+   or merchant header.
 
    **Handshake surface (#1155).** The `initialize` result also states which
    expected-context and sweep-binding versions this signer will verify —

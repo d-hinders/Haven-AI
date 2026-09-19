@@ -67,15 +67,19 @@ export async function appendSigningAuditEntry(
     // cost, and it is already paid): a pre-#3172 0644 sidecar is fixed in
     // place, and if it rotates next, `rename` carries 0600 into `.1` — the
     // history is never left world-readable. Idempotent, so the notice fires
-    // once per permissive file, not once per process (#3172 review).
+    // once per permissive occurrence, not once per process (#3172 review).
     await tightenIfFilePermissive('audit sidecar', path, options.log, options.platform, existing)
     if (existing.size >= rotateAt) {
       // Rotate BEFORE appending so the live file never exceeds the bound by
-      // more than one row. `rename` replaces the previous `.1` atomically. Two
-      // concurrent appends at the bound race here: the loser's ENOENT is
-      // swallowed — a lost rotation is re-evaluated on the next append, and a
-      // signature that has already been produced must never be thrown away
-      // over an advisory log (rows may interleave across the boundary).
+      // more than one row. `rename` replaces the previous `.1` atomically, but
+      // the decision to rotate is not: two signer PROCESSES at the bound can
+      // both pass the size check, and the slower one may rename the faster
+      // one's fresh live file over `.1`, discarding the predecessor
+      // generation. The current entry is never lost (appendFile re-creates
+      // the live file), only older history, and this is an advisory log —
+      // so the loser's ENOENT is swallowed and a produced signature is never
+      // thrown away over it. Two processes on one credential is the #1694
+      // multi-agent shape; the loss needs one of them a full cycle behind.
       await rename(path, `${path}.1`).catch(() => {})
     }
   }

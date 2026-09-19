@@ -173,7 +173,8 @@ export const GOVERNED_PACKAGE_DOCS = [
     // Rest of the README NOT re-verified.
     // #3172: § "Local audit" re-verified and EDITED (sidecar mode 0600, tighten-before-rotate,
     // in-place tighten, 8 MiB rotation to <path>.1, payload_hash bounded to a
-    // 32-byte hash on the schema) against audit.ts, file-mode.ts and tools.ts.
+    // 32-byte hash on the schema, a failed audit write never fails a produced
+    // signature) against audit.ts, file-mode.ts and tools.ts.
     // Nothing else in the README re-verified in this pass.
     'last-verified': '2026-09-19',
   },

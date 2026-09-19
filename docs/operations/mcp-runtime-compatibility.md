@@ -175,8 +175,10 @@ last-verified: "2026-09-19"
 > created owner-only, tightened in place when found permissive, and rotated at
 > 8 MiB; and `payload_hash` / `typed_data_hash` are bounded on the tool
 > schemas to a 32-byte hash (`^0x[0-9a-fA-F]{64}$`, previously `+`). No tool
-> added, renamed or re-shaped — the argument NAMES and the registered tool-name
-> set are untouched — so the consent hash (`packages/signer/src/consent.ts`
+> added or renamed, no argument name added or removed; the one client-visible
+> shape change is the `pattern` on those two string arguments in the advertised
+> `inputSchema` (`tools/list`), which the consent hash does not read, so the
+> consent hash (`packages/signer/src/consent.ts`
 > hashes identity, tool names and surface version) does not move, and the
 > consent text's audit promise is unchanged in wording. Version skew: every
 > value Haven emits for those two fields is a 32-byte hash, so a new signer

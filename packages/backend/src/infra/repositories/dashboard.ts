@@ -66,12 +66,20 @@ export interface PortfolioSnapshotRow {
   snapshot_date: string
   total_usd: string
   total_eur: string
+  /**
+   * NULL on days snapshotted before migration 090 (the column was added
+   * NULLABLE, deliberately without a 0 default): a COALESCE'd zero would read
+   * that absence as a real SEK total and fabricate a -100% day-over-day
+   * change. The dashboard reports "change unavailable" for such days instead.
+   */
+  total_sek: string | null
 }
 
 export interface MonthlySpendRow {
   token_symbol: string
   usd_sum: string | null
   eur_sum: string | null
+  sek_sum: string | null
   fallback_amount: string | null
 }
 
@@ -165,13 +173,13 @@ export async function hasFirstAgentPayment(
 
 // ── Daily portfolio snapshots ────────────────────────────────────────────────
 
-export const FIND_PORTFOLIO_SNAPSHOTS_SQL = `SELECT snapshot_date, total_usd, total_eur
+export const FIND_PORTFOLIO_SNAPSHOTS_SQL = `SELECT snapshot_date, total_usd, total_eur, total_sek
        FROM user_daily_portfolio_snapshots
        WHERE user_id = $1 AND snapshot_date = ANY($2)`
 
 export const INSERT_PORTFOLIO_SNAPSHOT_SQL = `INSERT INTO user_daily_portfolio_snapshots (
-           user_id, snapshot_date, total_usd, total_eur, updated_at
-         ) VALUES ($1, $2, $3, $4, NOW())
+           user_id, snapshot_date, total_usd, total_eur, total_sek, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, NOW())
          ON CONFLICT (user_id, snapshot_date) DO NOTHING`
 
 /** `userId` is REQUIRED — snapshots are per-user. */
@@ -201,9 +209,10 @@ export async function insertPortfolioSnapshot(
   snapshotDate: string,
   totalUsd: number,
   totalEur: number,
+  totalSek: number,
   db: Executor = pool,
 ): Promise<void> {
-  await db.query(INSERT_PORTFOLIO_SNAPSHOT_SQL, [userId, snapshotDate, totalUsd, totalEur])
+  await db.query(INSERT_PORTFOLIO_SNAPSHOT_SQL, [userId, snapshotDate, totalUsd, totalEur, totalSek])
 }
 
 // ── Month-to-date agent spend ────────────────────────────────────────────────
@@ -224,6 +233,7 @@ export async function insertPortfolioSnapshot(
 export const SUM_MONTHLY_PAYMENT_SPEND_SQL = `SELECT token_symbol,
                 COALESCE(SUM(usd_value), 0)::TEXT AS usd_sum,
                 COALESCE(SUM(eur_value), 0)::TEXT AS eur_sum,
+                COALESCE(SUM(sek_value), 0)::TEXT AS sek_sum,
                 COALESCE(
                   SUM(
                     CASE

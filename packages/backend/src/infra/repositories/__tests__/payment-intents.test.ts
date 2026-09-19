@@ -177,17 +177,17 @@ describeDb('payment-intents repository (#1223)', () => {
 
     // Confirm before claim: still pending_signature, must refuse.
     expect(
-      await confirmSubmittedIntent({ txHash: `0x${'1'.repeat(64)}`, intentId: intent.id, usdValue: null, eurValue: null, agentId }),
+      await confirmSubmittedIntent({ txHash: `0x${'1'.repeat(64)}`, intentId: intent.id, usdValue: null, eurValue: null, sekValue: null, agentId }),
     ).toBe(false)
 
     expect(await claimIntentForSubmission('0xsig', intent.id, agentId)).toBe(true)
     expect(
-      await confirmSubmittedIntent({ txHash: `0x${'1'.repeat(64)}`, intentId: intent.id, usdValue: '0.10', eurValue: '0.09', agentId }),
+      await confirmSubmittedIntent({ txHash: `0x${'1'.repeat(64)}`, intentId: intent.id, usdValue: '0.10', eurValue: '0.09', sekValue: '0.95', agentId }),
     ).toBe(true)
 
     // Double-confirm: refused, first tx_hash survives.
     expect(
-      await confirmSubmittedIntent({ txHash: `0x${'2'.repeat(64)}`, intentId: intent.id, usdValue: null, eurValue: null, agentId }),
+      await confirmSubmittedIntent({ txHash: `0x${'2'.repeat(64)}`, intentId: intent.id, usdValue: null, eurValue: null, sekValue: null, agentId }),
     ).toBe(false)
     const row = await findIntentForAgent(intent.id, agentId)
     expect(row!.tx_hash).toBe(`0x${'1'.repeat(64)}`)
@@ -241,7 +241,7 @@ describeDb('payment-intents repository (#1223)', () => {
     // with a past expiry are untouched.
     const confirmed = await insertDelegationIntent(delegationInput(agentId, userId))
     await claimIntentForSubmission('0xsig', confirmed.id, agentId)
-    await confirmSubmittedIntent({ txHash: `0x${'3'.repeat(64)}`, intentId: confirmed.id, usdValue: null, eurValue: null, agentId })
+    await confirmSubmittedIntent({ txHash: `0x${'3'.repeat(64)}`, intentId: confirmed.id, usdValue: null, eurValue: null, sekValue: null, agentId })
     await setExpired(confirmed.id)
     const sweepTarget = await insertDelegationIntent(delegationInput(agentId, userId))
     await setExpired(sweepTarget.id)

@@ -4572,7 +4572,7 @@ export const openapiSpec = {
         operationId: 'getAnalyticsOverview',
         summary: 'One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.',
         description:
-          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one \"based on N payments\" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz`. Delegation-rail accounts only.",
+          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one \"based on N payments\" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. Delegation-rail accounts only.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           {
@@ -4585,8 +4585,9 @@ export const openapiSpec = {
           {
             name: 'currency',
             in: 'query',
-            schema: { type: 'string', enum: ['usd', 'eur'], default: 'usd' },
-            description: 'Display currency — a sum of already-booked values, never re-converted.',
+            schema: { type: 'string', enum: ['usd', 'eur', 'sek'], default: 'usd' },
+            description:
+              'Display currency — a sum of already-booked values, never re-converted. SEK reads the `sek_value` column booked beside usd/eur by the same confirm UPDATE (#3127); days snapshotted before that column existed carry no SEK figure in `balance_by_day` and are omitted rather than zeroed.',
           },
           {
             name: 'tz',
@@ -4615,7 +4616,7 @@ export const openapiSpec = {
                         previous_to: { type: 'string', format: 'date-time' },
                       },
                     },
-                    currency: { type: 'string', enum: ['usd', 'eur'] },
+                    currency: { type: 'string', enum: ['usd', 'eur', 'sek'] },
                     basis: {
                       type: 'object',
                       required: [
@@ -8829,6 +8830,7 @@ export const openapiSpec = {
           formatted: { type: 'string' },
           usdValue: { type: 'number', description: '0 when the price feed failed.' },
           eurValue: { type: 'number' },
+          sekValue: { type: 'number', description: 'Same one price read as usd/eur (#3127 round 2); 0 when the price feed failed.' },
         },
         additionalProperties: false,
       },
@@ -8838,6 +8840,7 @@ export const openapiSpec = {
         properties: {
           totalUsd: { type: 'number' },
           totalEur: { type: 'number' },
+          totalSek: { type: 'number' },
           breakdown: { type: 'array', items: { $ref: '#/components/schemas/PortfolioBreakdown' } },
         },
         additionalProperties: false,
@@ -8929,7 +8932,17 @@ export const openapiSpec = {
           totals: {
             type: 'object',
             required: ['usd', 'eur'],
-            properties: { usd: { type: 'number' }, eur: { type: 'number' } },
+            properties: {
+              usd: { type: 'number' },
+              eur: { type: 'number' },
+              // #3127 round 2: additive optional keys — the display path now
+              // prices the default currency (SEK) beside the historical pair.
+              // Optional, not required, so a pre-round-2 consumer reads the
+              // same response unchanged (same compatibility posture as the
+              // transaction feed's converted triple: additive, nothing to
+              // dual-emit).
+              sek: { type: 'number' },
+            },
             additionalProperties: false,
           },
           change: {
@@ -8939,8 +8952,10 @@ export const openapiSpec = {
               available: { type: 'boolean', description: 'true iff a yesterday snapshot existed to diff against.' },
               usdAmount: { type: 'number' },
               eurAmount: { type: 'number' },
+              sekAmount: { type: ['number', 'null'], description: 'Null when yesterday’s snapshot predates migration 090 (no SEK baseline stored) — the client reports the change as unavailable rather than reading a fabricated swing.' },
               usdPercent: { type: 'number', description: '0 when unavailable or the previous total was 0.' },
               eurPercent: { type: 'number' },
+              sekPercent: { type: 'number', description: '0 when the SEK baseline is missing or the previous total was 0.' },
             },
             additionalProperties: false,
           },
@@ -8951,6 +8966,7 @@ export const openapiSpec = {
               connectedAgents: { type: 'integer', description: "Agents with status 'active' only." },
               monthlyAgentSpendUsd: { type: 'number' },
               monthlyAgentSpendEur: { type: 'number' },
+              monthlyAgentSpendSek: { type: 'number' },
               successfulTransactions: { type: 'integer' },
               activeAccounts: { type: 'integer', description: 'All linked Safes, regardless of activity.' },
             },

@@ -77,8 +77,10 @@ export interface DateRange {
 export interface TotalsSpendRow {
   spent_usd: string
   spent_eur: string
+  spent_sek: string
   spent_previous_usd: string
   spent_previous_eur: string
+  spent_previous_sek: string
   payments_counted: string
 }
 
@@ -93,8 +95,10 @@ export interface TotalsSpendRow {
 export const TOTALS_SPEND_SQL = `SELECT
     COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3 THEN pi.usd_value ELSE 0 END), 0)::text AS spent_usd,
     COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3 THEN pi.eur_value ELSE 0 END), 0)::text AS spent_eur,
+    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3 THEN pi.sek_value ELSE 0 END), 0)::text AS spent_sek,
     COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2 THEN pi.usd_value ELSE 0 END), 0)::text AS spent_previous_usd,
     COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2 THEN pi.eur_value ELSE 0 END), 0)::text AS spent_previous_eur,
+    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2 THEN pi.sek_value ELSE 0 END), 0)::text AS spent_previous_sek,
     COUNT(*) FILTER (WHERE pi.confirmed_at >= $2 AND pi.confirmed_at < $3)::text AS payments_counted
   FROM payment_intents pi
   JOIN agents a ON a.id = pi.agent_id
@@ -121,8 +125,10 @@ export async function sumTotalsSpendForUser(
     result.rows[0] ?? {
       spent_usd: '0',
       spent_eur: '0',
+      spent_sek: '0',
       spent_previous_usd: '0',
       spent_previous_eur: '0',
+      spent_previous_sek: '0',
       payments_counted: '0',
     }
   )
@@ -166,6 +172,7 @@ export interface ByDaySpendRow {
   agent_id: string
   usd: string
   eur: string
+  sek: string
 }
 
 /**
@@ -179,7 +186,8 @@ export const BY_DAY_SPEND_SQL = `SELECT
     date_trunc('day', pi.confirmed_at AT TIME ZONE $2)::date::text AS day,
     pi.agent_id,
     COALESCE(SUM(pi.usd_value), 0)::text AS usd,
-    COALESCE(SUM(pi.eur_value), 0)::text AS eur
+    COALESCE(SUM(pi.eur_value), 0)::text AS eur,
+    COALESCE(SUM(pi.sek_value), 0)::text AS sek
   FROM payment_intents pi
   JOIN agents a ON a.id = pi.agent_id
   ${DELEGATION_RAIL_JOIN}
@@ -208,6 +216,7 @@ export interface PerAgentSpendRow {
   status: string
   spent_usd: string
   spent_eur: string
+  spent_sek: string
   payments: string
   last_payment_at: string | null
 }
@@ -224,6 +233,7 @@ export const PER_AGENT_SPEND_SQL = `SELECT
     a.status,
     COALESCE(SUM(pi.usd_value), 0)::text AS spent_usd,
     COALESCE(SUM(pi.eur_value), 0)::text AS spent_eur,
+    COALESCE(SUM(pi.sek_value), 0)::text AS spent_sek,
     COUNT(pi.id)::text AS payments,
     MAX(pi.confirmed_at) AS last_payment_at
   FROM agents a
@@ -242,6 +252,7 @@ interface PerAgentSpendRawRow {
   status: string
   spent_usd: string
   spent_eur: string
+  spent_sek: string
   payments: string
   /** `timestamptz`, not `::text` — a session-zone cast would silently rebase
    * this off UTC. Formatted to ISO-8601 UTC in application code below. */
@@ -312,6 +323,7 @@ export interface MerchantAggregateRow {
   merchant_key: string
   spent_usd: string
   spent_eur: string
+  spent_sek: string
   payments: string
   agent_ids: string[]
   /** ISO-8601 UTC (`toISOString()`), never a `::text` session-zone cast. */
@@ -323,6 +335,7 @@ export const TOP_MERCHANTS_SQL = `SELECT
     LOWER(COALESCE(pi.merchant_address, pi.x402_merchant_address, pi.to_address)) AS merchant_key,
     COALESCE(SUM(pi.usd_value), 0)::text AS spent_usd,
     COALESCE(SUM(pi.eur_value), 0)::text AS spent_eur,
+    COALESCE(SUM(pi.sek_value), 0)::text AS spent_sek,
     COUNT(*)::text AS payments,
     ARRAY_AGG(DISTINCT pi.agent_id)::text[] AS agent_ids,
     MIN(pi.confirmed_at) AS first_seen,
@@ -342,6 +355,7 @@ interface MerchantAggregateRawRow {
   merchant_key: string
   spent_usd: string
   spent_eur: string
+  spent_sek: string
   payments: string
   agent_ids: string[]
   first_seen: Date
@@ -396,9 +410,15 @@ export interface BalanceDayRow {
   snapshot_date: string
   total_usd: string
   total_eur: string
+  /**
+   * NULL on days snapshotted before migration 090 (the column is NULLABLE,
+   * deliberately without a 0 default). The route passes it through as null —
+   * the client renders "change unavailable" rather than reading a zero.
+   */
+  total_sek: string | null
 }
 
-export const BALANCE_BY_DAY_SQL = `SELECT snapshot_date::text, total_usd::text, total_eur::text
+export const BALANCE_BY_DAY_SQL = `SELECT snapshot_date::text, total_usd::text, total_eur::text, total_sek::text
   FROM user_daily_portfolio_snapshots
   WHERE user_id = $1
     AND snapshot_date >= $2::date
@@ -419,8 +439,10 @@ export async function listBalanceByDayForUser(
 export interface FeesTotalsRow {
   fee_usd: string
   fee_eur: string
+  fee_sek: string
   fee_usd_previous: string
   fee_eur_previous: string
+  fee_sek_previous: string
   fee_rows: string
 }
 
@@ -452,12 +474,18 @@ export const FEES_TOTALS_SQL = `SELECT
     COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3 AND ${AMOUNT_RAW_IS_NUMERIC}
       THEN (pf.fee_amount_atomic::numeric / NULLIF(pi.amount_raw::numeric, 0)) * COALESCE(pi.eur_value, 0)
       ELSE 0 END), 0)::text AS fee_eur,
+    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $2 AND pi.confirmed_at < $3 AND ${AMOUNT_RAW_IS_NUMERIC}
+      THEN (pf.fee_amount_atomic::numeric / NULLIF(pi.amount_raw::numeric, 0)) * COALESCE(pi.sek_value, 0)
+      ELSE 0 END), 0)::text AS fee_sek,
     COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2 AND ${AMOUNT_RAW_IS_NUMERIC}
       THEN (pf.fee_amount_atomic::numeric / NULLIF(pi.amount_raw::numeric, 0)) * COALESCE(pi.usd_value, 0)
       ELSE 0 END), 0)::text AS fee_usd_previous,
     COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2 AND ${AMOUNT_RAW_IS_NUMERIC}
       THEN (pf.fee_amount_atomic::numeric / NULLIF(pi.amount_raw::numeric, 0)) * COALESCE(pi.eur_value, 0)
       ELSE 0 END), 0)::text AS fee_eur_previous,
+    COALESCE(SUM(CASE WHEN pi.confirmed_at >= $4 AND pi.confirmed_at < $2 AND ${AMOUNT_RAW_IS_NUMERIC}
+      THEN (pf.fee_amount_atomic::numeric / NULLIF(pi.amount_raw::numeric, 0)) * COALESCE(pi.sek_value, 0)
+      ELSE 0 END), 0)::text AS fee_sek_previous,
     COUNT(*) FILTER (WHERE pi.confirmed_at >= $2 AND pi.confirmed_at < $3 AND ${AMOUNT_RAW_IS_NUMERIC})::text AS fee_rows
   FROM payment_fees pf
   JOIN payment_intents pi ON pi.id::text = pf.payment_id
@@ -484,8 +512,10 @@ export async function sumFeesTotalsForUser(
     result.rows[0] ?? {
       fee_usd: '0',
       fee_eur: '0',
+      fee_sek: '0',
       fee_usd_previous: '0',
       fee_eur_previous: '0',
+      fee_sek_previous: '0',
       fee_rows: '0',
     }
   )
@@ -688,6 +718,7 @@ export interface RefusalAmountRow {
   refused_count: string
   refused_amount_usd: string
   refused_amount_eur: string
+  refused_amount_sek: string
 }
 
 /**
@@ -701,7 +732,8 @@ export interface RefusalAmountRow {
 export const AGGREGATE_REFUSALS_FOR_USER_SQL = `SELECT
     COUNT(*)::text AS refused_count,
     COALESCE(SUM(pr.usd_value), 0)::text AS refused_amount_usd,
-    COALESCE(SUM(pr.eur_value), 0)::text AS refused_amount_eur
+    COALESCE(SUM(pr.eur_value), 0)::text AS refused_amount_eur,
+    COALESCE(SUM(pr.sek_value), 0)::text AS refused_amount_sek
   FROM payment_refusals pr
   WHERE pr.user_id = $1
     AND pr.created_at >= $2
@@ -718,7 +750,12 @@ export async function aggregateRefusalAmountForUser(
     range.to,
   ])
   return (
-    result.rows[0] ?? { refused_count: '0', refused_amount_usd: '0', refused_amount_eur: '0' }
+    result.rows[0] ?? {
+      refused_count: '0',
+      refused_amount_usd: '0',
+      refused_amount_eur: '0',
+      refused_amount_sek: '0',
+    }
   )
 }
 

@@ -874,7 +874,7 @@ export function createX402PaymentProcessor(
           }
           if (isContractRevert(err)) {
             // The next action comes BEFORE the cause list: the hosted relay
-            // keeps the first 500 bytes of this body (paid-mcp-completion.ts),
+            // keeps the first 500 characters of this body (paid-mcp-completion.ts),
             // and the revert reason is capped so the instruction always fits.
             throw new PaymentError(
               `ERC-7710 delegation redemption reverted at submit: ${revertReason(err)}. Nothing ` +
@@ -1571,11 +1571,11 @@ export function isContractRevert(err: unknown): boolean {
 
 /**
  * The revert's own words, capped so the next-action sentence that follows it
- * stays inside the hosted relay's 500-byte window even for viem's longest
+ * stays inside the hosted relay's 500-character window even for viem's longest
  * `shortMessage` (measured in erc7710.test.ts).
  */
 const REVERT_REASON_MAX = 120
-/** Non-printable characters JSON-escape to six bytes each; flatten them first so the cap holds in bytes. */
+/** Non-printable characters JSON-escape to six characters each; flatten them first so the cap survives JSON.stringify. */
 function clampReason(reason: string): string {
   return reason.replace(/[^\x20-\x7e]/g, ' ').slice(0, REVERT_REASON_MAX)
 }

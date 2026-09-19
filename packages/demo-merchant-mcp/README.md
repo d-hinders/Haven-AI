@@ -266,18 +266,20 @@ settled; re-quote, pay with a fresh authorization), then the likely causes (the
 child's transfer-amount caveat exhausted, the delegator short of the price, the
 child redeemed elsewhere). No `reason_code` rides a decision. Only a PROVEN
 revert takes that branch — viem's `ContractFunctionRevertedError` carrying
-decoded data, an error signature or an "execution reverted" reason, or the
+decoded data, an error signature or an "execution reverted" reason, the
 node's `ExecutionRevertedError` (minus geth's "gas required exceeds
 allowance", which viem files there although it means the merchant's key
-cannot pay for gas); viem wraps every `writeContract` failure in
+cannot pay for gas), or a non-viem client's error message naming a revert or
+an enforcer; viem wraps every `writeContract` failure in
 `ContractFunctionExecutionError`, so the wrapper alone is not proof. Everything
 else the merchant's own settlement key or node can fail with — nonce too low,
 fee cap, "already known", a JSON-RPC rate limit or internal error, an
 unreachable RPC, gas — keeps its fault classification and `reason_code`, the
 same split #1519 drew for the EIP-3009 rail's pre-submit checks. The next
 action is placed first and the revert reason flattened to printable ASCII and
-capped at 120 characters (so 120 bytes after JSON escaping) because the hosted
-server relays the first 500 bytes of this body (`paid-mcp-completion.ts`).
+capped at 120 characters (so the cap survives JSON escaping) because the
+hosted server relays the first 500 characters of this body
+(`packages/mcp-server/src/tools/paid-mcp-completion.ts`).
 
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
 `SETTLEMENT_PRIVATE_KEY` is the gas-funded key that submits USDC

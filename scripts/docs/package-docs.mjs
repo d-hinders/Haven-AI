@@ -348,7 +348,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     doc: 'packages/demo-merchant-mcp/README.md',
     owner: '@d-hinders',
     status: 'current',
-    covers: ['packages/demo-merchant-mcp/src/**'],
+    // #3170: the README states the hosted relay's 500-character window, so a
+    // change to that slice must re-implicate it.
+    covers: ['packages/demo-merchant-mcp/src/**', 'packages/mcp-server/src/tools/paid-mcp-completion.ts'],
     // #2403: the § "Extensions echo" fixture paragraph re-verified and EDITED.
     // It enumerated the echo-rule tests as a fixed list of four; #2401 made it
     // five and #2403 adds more, so the sentence now names the BRANCHES pinned

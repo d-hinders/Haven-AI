@@ -8699,7 +8699,7 @@ export const openapiSpec = {
       },
       ListScope: {
         description:
-          "#3132 (owner decision 3 on #3130): what population a list row came from and what narrowed it, as two values — one value cannot say both. `source: 'wallet'` is the aggregated feed (every account's explorer window plus synthesized confirmed intents; sweeps and funding legs included); `'agent'` is the receipts view (this agent's evidence rows only). `filter` names the query-time narrowing applied on top, or null. `agentId` on the wallet feed NARROWS a wallet-scoped query; it does not make it the receipts view.",
+          "#3132 (owner decision 3 on #3130): what population a list row came from and what narrowed it, as two values — one value cannot say both. `source: 'wallet'` is the aggregated feed (every account's explorer window plus synthesized confirmed intents; sweeps and funding legs included); `'agent'` is the receipts view (this agent's evidence rows only). `filter` names the IDENTITY-axis narrowing applied on top (whose money / which wallet: agent, account, both), or null; token, direction and chain narrowing are deliberately not named here. `agentId=user` counts as agent-axis narrowing and selects outbound rows with NO agent attribution. `agentId` on the wallet feed NARROWS a wallet-scoped query; it does not make it the receipts view.",
         type: 'object',
         required: ['source', 'filter'],
         properties: {

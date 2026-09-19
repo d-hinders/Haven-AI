@@ -178,11 +178,17 @@ request, the `_meta` object — unrelated `_meta` keys, arguments and the id are
 preserved, and any other body is sent byte-for-byte; `PAYMENT-RESPONSE` is
 read first, and when absent the `_meta` settlement is re-encoded as base64 JSON
 so the evidence report's receipt payload goes through the one existing
-decoder — on the hosted completion and on the local `fetch()` retry alike,
-and an SSE-framed answer is collapsed to its result whether or not a session
-was established (a profile merchant on a plain URL answers without one). Only
-a JSON or SSE body is read when a non-402 answer is probed for a challenge;
-any other body is returned untouched, never buffered. Two in-band outcomes are REJECTIONS, never successes, whatever the
+decoder — on the hosted completion and on the local `fetch()` retry alike.
+An SSE-framed paid answer is collapsed to its result whether or not a session
+was established (a profile merchant on a plain URL answers without one): the
+hosted completion always collapses, and `fetch()` collapses the paid retry
+once the merchant has spoken JSON-RPC (a session or a tool-result challenge)
+while a non-402 pass-through that never did is returned as it came. The
+Bazaar handshake signal is read from the tool-result challenge as well as
+from a 402 body. Only a JSON or SSE body is read when a non-402 answer is
+probed for a challenge, and the local paid retry reads a JSON or SSE answer
+once for its tool result; any other body is returned untouched, never
+buffered. Two in-band outcomes are REJECTIONS, never successes, whatever the
 status code: an `isError: true` payment-required result on the paid retry
 (the tool's content was withheld), and a `_meta` settlement with
 `success: false`. A settlement object without a boolean `success` is not a

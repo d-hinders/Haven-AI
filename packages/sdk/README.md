@@ -160,7 +160,9 @@ required tool result quotes like a 402, the paid retry carries the header and
 header first, the `_meta` second. An in-band refusal (an `isError` challenge on
 the paid retry, or `success: false`) is a rejection even under HTTP 200. An
 ordinary tool error, or a successful result that merely resembles a challenge,
-is never paid for.
+is never paid for. The tool-result challenge is read only from a response
+declaring `application/json` or `text/event-stream`; any other content type is
+passed through untouched rather than buffered.
 
 ### Idempotency: what the key guarantees, and what it costs
 

@@ -1747,12 +1747,15 @@ runtime compatibility.
 > header, and it stays a merchant CLAIM relayed verbatim (re-encoded as base64
 > JSON so `protocolReceiptPayload` decodes through the one existing path). An
 > in-band refusal (an `isError` challenge on the paid retry, or
-> `success: false`) is `ok: false` — the hosted rejection message then names
-> HTTP 200, the status the merchant really returned. No tool added, renamed
-> or re-shaped; no argument, schema, strict/permissive split, tool-NAME set,
-> version-skew or consent-hash contract moves; the hosted server is untouched
-> and inherits the behaviour from `@haven_ai/sdk`. Nothing else in this
-> document was re-verified in this pass.
+> `success: false`) is `ok: false` — the hosted refusal is thrown as 402 (no
+> failure object rides an HTTP-200 status) and its message names
+> `HTTP 200, refused in-band`, the status the merchant really returned. No
+> tool added, renamed or re-shaped; no argument, schema, strict/permissive
+> split, tool-NAME set, version-skew or consent-hash contract moves; the
+> hosted server changes in exactly one place, that status mapping in
+> `paid-mcp-completion.ts`, and inherits everything else from
+> `@haven_ai/sdk`. Nothing else in this document was re-verified in this
+> pass.
 
 `haven_prepare_catalog_purchase` (#1306) — the guided catalog-id preflight —
 persists the SAME `mcpCallContext` at quote time (it composes the identical

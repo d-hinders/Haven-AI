@@ -647,6 +647,41 @@ describe('#3155 review — fetch() parity with the hosted completion (B2, S1) an
     expect(JSON.parse(atob(reported.protocolReceiptHeader as string))).toEqual({ transaction: '0xheader' })
   })
 
+  it('doc r2: a tool-result challenge carrying extensions.bazaar on a non-/mcp URL triggers the handshake, and the retry carries the session', async () => {
+    const bazaarUrl = 'https://api.merchant.example/v1'
+    const fetchMock = mockFetch((url, init, method) => {
+      if (url === `${backendUrl}/x402`) return fundingPendingSignature(bazaarUrl)
+      if (url === `${backendUrl}/payments/pay_123/sign`) return fundingConfirmed()
+      if (url !== bazaarUrl) return undefined
+      if (method === 'initialize') return initializeOk('sess-bz')
+      if (method === 'notifications/initialized') return notificationAccepted()
+      const body = JSON.parse(init?.body as string) as { params: { _meta?: Record<string, unknown> } }
+      if (body.params._meta?.[MCP_X402_PAYMENT_META_KEY]) return json(rpcResult(2, { content: [{ type: 'text', text: 'paid' }] }))
+      const challenge = nativeChallenge(bazaarUrl)
+      ;(challenge.structuredContent as Record<string, unknown>).extensions = { bazaar: { info: { input: {} } } }
+      return json(rpcResult(2, challenge))
+    })
+    await newClient().fetch(bazaarUrl, { method: 'POST', body: toolCall(2) })
+    expect(fetchMock.mock.calls.some(isInitializeCall)).toBe(true)
+    const paid = fetchMock.mock.calls.filter((c) => methodOf(c) === 'tools/call').at(-1)!
+    expect(headersOf(paid).get('mcp-session-id')).toBe('sess-bz')
+  })
+
+  it('doc r2: after a tool-result challenge on a plain URL (no session) the paid retry\'s SSE is collapsed to the result', async () => {
+    const plainUrl = 'https://api.merchant.example/paid-tool'
+    mockFetch((url, init, method) => {
+      if (url === `${backendUrl}/x402`) return fundingPendingSignature(plainUrl)
+      if (url === `${backendUrl}/payments/pay_123/sign`) return fundingConfirmed()
+      if (url !== plainUrl || method !== 'tools/call') return undefined
+      const body = JSON.parse(init?.body as string) as { params: { _meta?: Record<string, unknown> } }
+      if (body.params._meta?.[MCP_X402_PAYMENT_META_KEY]) return sseResponse(sse(rpcResult(2, { content: [{ type: 'text', text: 'paid over sse' }] })))
+      return json(rpcResult(2, nativeChallenge(plainUrl)))
+    })
+    const response = await newClient().fetch(plainUrl, { method: 'POST', body: toolCall(2) })
+    expect(response.headers.get('content-type')).toBe('application/json')
+    await expect(response.json()).resolves.toEqual({ content: [{ type: 'text', text: 'paid over sse' }] })
+  })
+
   it('S2: a non-JSON, non-SSE 200 is returned at once with its body untouched — a never-ending stream is not buffered', async () => {
     let pulled = 0
     const stream = new ReadableStream<Uint8Array>({

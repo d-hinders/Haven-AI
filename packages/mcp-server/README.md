@@ -85,6 +85,7 @@ sequenceDiagram
     Agent->>Hosted: haven_pay_mcp_tool { merchant_url, tool_name, arguments, max_amount_human? }
     Hosted->>Merchant: unpaid tools/call probe
     Merchant-->>Hosted: 402 payment_required
+    Note over Merchant,Hosted: or, since #3118, an isError tool result under HTTP 200 (native MCP profile)
     Hosted-->>Agent: payment_id, payload_hash, expires_at, payment_required, x402.expected, merchant context
     Agent->>Signer: haven_sign_x402 { payment_id }
     Signer-->>Agent: signature, payment_header

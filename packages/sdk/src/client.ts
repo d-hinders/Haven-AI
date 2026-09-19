@@ -1294,12 +1294,19 @@ export class HavenClient {
     //    official profile signals the challenge in the tool result, not the
     //    status code, and it is paid and retried exactly like a 402.
     let paymentRequired: X402PaymentRequired
+    // #3118: a tool-result challenge proves the merchant speaks JSON-RPC, so
+    // the paid retry's SSE is collapsed even when no session was established
+    // (a profile merchant on a plain URL answers without one). A non-402
+    // pass-through is still collapsed only under a session: a plain SSE API
+    // that never spoke JSON-RPC must come back untouched.
+    let nativeChallenge = false
     if (response.status !== 402) {
       const toolResultChallenge = await this.merchantTransport.extractToolResultChallenge(response)
       if (!toolResultChallenge) {
         return mcpSessionId ? this.merchantTransport.surfaceResult(response) : response
       }
       paymentRequired = toolResultChallenge
+      nativeChallenge = true
     } else {
       // #1328: the legacy MACHINE-PAYMENT-CHALLENGE / mpp_demo auto-handling is
       // retired — a 402 that isn't standard x402 (including a stray
@@ -1318,7 +1325,10 @@ export class HavenClient {
     // Signal B: a Bazaar `extensions.bazaar` block marks an MCP-discoverable
     // resource even without the `/mcp` convention. Handshake now (if we
     // haven't already) so the paid retry carries the session id.
-    if (!mcpSessionId && (await this.merchantTransport.hasBazaarExtension(response))) {
+    // #3118: on a tool-result challenge the block sits inside the challenge
+    // (`result.structuredContent.extensions.bazaar`), not at the body's top
+    // level, so it is read from the parsed challenge as well.
+    if (!mcpSessionId && (paymentRequired.extensions?.bazaar != null || (await this.merchantTransport.hasBazaarExtension(response)))) {
       mcpSessionId = await this.merchantTransport.initialize(url, init)
       if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
     }
@@ -1343,7 +1353,7 @@ export class HavenClient {
       throw err
     }
     const retryResponse = await this.merchantCompletion.retryRequest(url, requestInit, paymentRequired, receipt)
-    return mcpSessionId ? this.merchantTransport.surfaceResult(retryResponse) : retryResponse
+    return mcpSessionId || nativeChallenge ? this.merchantTransport.surfaceResult(retryResponse) : retryResponse
   }
 
   /**

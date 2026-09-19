@@ -1,13 +1,24 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  AUDIT_ROTATE_BYTES,
   appendSigningAuditEntry,
   createSigningAuditEntry,
   defaultSigningAuditPath,
   hashPayloadForAudit,
+  resetAuditModeChecks,
 } from './audit.js'
+
+const posix = process.platform !== 'win32'
+const entryAt = (when: string) =>
+  createSigningAuditEntry(
+    'haven_sign',
+    `0x${'bb'.repeat(32)}`,
+    { delegateAddress: '0x000000000000000000000000000000000000dEaD' },
+    new Date(when),
+  )
 
 describe('signing audit', () => {
   it('hashes payload objects deterministically', () => {
@@ -62,6 +73,83 @@ describe('signing audit', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  describe('the sidecar is owner-only and bounded (#3172)', () => {
+    beforeEach(() => resetAuditModeChecks())
+
+    it.skipIf(!posix)('creates the sidecar 0600 — the mode the credential beside it has', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'haven-signer-audit-mode-'))
+      const auditPath = join(dir, 'agent.json.signer-audit.jsonl')
+      const logged: string[] = []
+      try {
+        await appendSigningAuditEntry(entryAt('2026-01-02T03:04:05.000Z'), auditPath, { log: (m) => logged.push(m) })
+        expect(((await stat(auditPath)).mode & 0o777).toString(8)).toBe('600')
+        expect(logged).toEqual([])
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it.skipIf(!posix)('tightens a pre-#3172 world-readable sidecar in place and says so once', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'haven-signer-audit-mode-'))
+      const auditPath = join(dir, 'agent.json.signer-audit.jsonl')
+      const logged: string[] = []
+      try {
+        await writeFile(auditPath, `${JSON.stringify(entryAt('2026-01-01T00:00:00.000Z'))}\n`)
+        await chmod(auditPath, 0o644)
+        await appendSigningAuditEntry(entryAt('2026-01-02T03:04:05.000Z'), auditPath, { log: (m) => logged.push(m) })
+        await appendSigningAuditEntry(entryAt('2026-01-02T03:04:06.000Z'), auditPath, { log: (m) => logged.push(m) })
+        expect(((await stat(auditPath)).mode & 0o777).toString(8)).toBe('600')
+        expect(logged).toHaveLength(1)
+        expect(logged[0]).toContain('audit sidecar')
+        expect(logged[0]).toMatch(/0644/)
+        expect(logged[0]).toMatch(/tightened to 0600/)
+        const rows = (await readFile(auditPath, 'utf8')).trim().split('\n')
+        expect(rows).toHaveLength(3)
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('rotates to <path>.1 when the live file reaches the bound, keeping one predecessor', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'haven-signer-audit-rotate-'))
+      const auditPath = join(dir, 'audit.jsonl')
+      try {
+        const first = entryAt('2026-01-02T03:04:05.000Z')
+        await appendSigningAuditEntry(first, auditPath)
+        const size = (await stat(auditPath)).size
+        // Bound == current size: the NEXT append rotates before writing.
+        await appendSigningAuditEntry(entryAt('2026-01-02T03:04:06.000Z'), auditPath, { rotateAtBytes: size })
+        const live = (await readFile(auditPath, 'utf8')).trim().split('\n')
+        const rotated = (await readFile(`${auditPath}.1`, 'utf8')).trim().split('\n')
+        expect(live).toHaveLength(1)
+        expect(JSON.parse(live[0]).timestamp).toBe('2026-01-02T03:04:06.000Z')
+        expect(rotated).toHaveLength(1)
+        expect(JSON.parse(rotated[0])).toEqual(first)
+        // A second rotation REPLACES .1 — two generations, never three.
+        await appendSigningAuditEntry(entryAt('2026-01-02T03:04:07.000Z'), auditPath, { rotateAtBytes: size })
+        const rotated2 = (await readFile(`${auditPath}.1`, 'utf8')).trim().split('\n')
+        expect(JSON.parse(rotated2[0]).timestamp).toBe('2026-01-02T03:04:06.000Z')
+        expect(AUDIT_ROTATE_BYTES).toBe(8 * 1024 * 1024)
+        if (posix) expect(((await stat(auditPath)).mode & 0o777).toString(8)).toBe('600')
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('does not rotate below the bound', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'haven-signer-audit-rotate-'))
+      const auditPath = join(dir, 'audit.jsonl')
+      try {
+        await appendSigningAuditEntry(entryAt('2026-01-02T03:04:05.000Z'), auditPath)
+        await appendSigningAuditEntry(entryAt('2026-01-02T03:04:06.000Z'), auditPath)
+        expect((await readFile(auditPath, 'utf8')).trim().split('\n')).toHaveLength(2)
+        await expect(stat(`${auditPath}.1`)).rejects.toThrow()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
   })
 
   it('defaults to a credential sidecar when credentials are file-backed', () => {

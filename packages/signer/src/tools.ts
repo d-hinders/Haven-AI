@@ -81,7 +81,7 @@ const x402ExpectedShape = {
   payment_id: z.string().min(1),
   payload_hash: z
     .string()
-    .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string'),
+    .regex(/^0x[0-9a-fA-F]{64}$/, 'payload_hash must be a 0x-prefixed 32-byte hex string'),
   resource_url: z.string().url(),
   merchant_to: z.string().min(1),
   amount: z.string().min(1),
@@ -97,7 +97,7 @@ const x402ExpectedShape = {
   // hash when it is present, and refuses to sign typed data when it is absent.
   typed_data_hash: z
     .string()
-    .regex(/^0x[0-9a-fA-F]+$/, 'typed_data_hash must be a 0x-prefixed hex string')
+    .regex(/^0x[0-9a-fA-F]{64}$/, 'typed_data_hash must be a 0x-prefixed 32-byte hex string')
     .optional(),
   // #1690: present on a v3 context. The delegate this quote was created FOR —
   // the signer refuses to sign when it is not its own. Inside the Haven-signed
@@ -139,7 +139,7 @@ export const toolSchemas = {
     // Optional when payment_id is supplied (the fetch carries it).
     payload_hash: z
       .string()
-      .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string')
+      .regex(/^0x[0-9a-fA-F]{64}$/, 'payload_hash must be a 0x-prefixed 32-byte hex string')
       .optional(),
     // Pass x402.expected from hosted haven_pay_x402_quote when this hash funds
     // a standard x402 merchant retry. The signer records it locally and returns
@@ -174,7 +174,7 @@ export const toolSchemas = {
     // Both optional when payment_id is supplied (the fetch carries them).
     payload_hash: z
       .string()
-      .regex(/^0x[0-9a-fA-F]+$/, 'payload_hash must be a 0x-prefixed hex string')
+      .regex(/^0x[0-9a-fA-F]{64}$/, 'payload_hash must be a 0x-prefixed 32-byte hex string')
       .optional(),
     x402_expected: x402ExpectedSchema.optional(),
     // #1355: optional when payment_id is supplied — the signer's context fetch

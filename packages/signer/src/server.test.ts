@@ -278,6 +278,31 @@ describe('haven_sign tool', () => {
     expect(payload.success).toBe(false)
   })
 
+  it('#3172: payload_hash is a 32-byte hash on the schema — caller-controlled hex of any other length is INVALID_INPUT, and never reaches the audit line', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-hash-bound-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const handlers = createToolHandlers(createEdgeSigner(TEST_KEY), {
+        audit: { auditPath, delegateAddress: '0x000000000000000000000000000000000000dEaD' },
+      })
+      // 33 bytes and 31 bytes, both with a valid typed_data beside them so the
+      // ONLY thing wrong is the hash length.
+      for (const bad of [`0x${'ab'.repeat(33)}`, `0x${'ab'.repeat(31)}`, `0x${TEST_KEY.slice(2)}${'00'.repeat(8)}`]) {
+        const payload = (await handlers.haven_sign({ payload_hash: bad, typed_data: DIRECT_USEROP })) as {
+          success: boolean
+          code?: string
+          message?: string
+        }
+        expect(payload.success).toBe(false)
+        expect(payload.code).toBe('INVALID_INPUT')
+        expect(payload.message).toMatch(/32-byte/)
+      }
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('signs the TYPED DATA, not the raw hash, when typed_data is present (#1254)', async () => {
     // The direct delegation-rail case found live during the #908 mainnet
     // canary: the Hybrid account validates EIP-712 typed data, and a raw

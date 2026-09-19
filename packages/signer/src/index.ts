@@ -60,13 +60,23 @@ export {
 } from './consent.js'
 
 export {
+  AUDIT_ROTATE_BYTES,
   appendSigningAuditEntry,
   createSigningAuditEntry,
   defaultSigningAuditPath,
   hashPayloadForAudit,
+  resetAuditModeChecks,
+  type AppendAuditOptions,
   type SigningAuditContext,
   type SigningAuditEntry,
 } from './audit.js'
+export {
+  OWNER_ONLY_MODE,
+  permissiveMode,
+  tightenIfFilePermissive,
+  warnIfFilePermissive,
+  type PermissionLog,
+} from './file-mode.js'
 
 // #3103: the hosted tools this signer hands off to, declared here and pinned to the hosted schemas in the hosted server's suite.
 export { SIGNER_HOSTED_HANDOFF_SHAPES } from './next-step.js'

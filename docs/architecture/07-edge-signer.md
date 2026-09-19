@@ -359,6 +359,10 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
   `<credentials>.signer-ack.json` sidecar.
 - MCP operations append JSONL audit entries next to the credential file or at
   `~/.haven/signer-audit.jsonl`. Entries omit keys, signatures, and headers.
+  Since #3172 the sidecar is created owner-only (`0600`), a permissive one is
+  tightened in place, the file rotates to `<path>.1` at 8 MiB (one predecessor
+  kept), and `payload_hash` is bounded on the schema to a 32-byte hash so no
+  audit field is caller-controlled free text.
 - Connect Agent 2 creates local credential files during pairing. Registration
   sends Haven the setup token, runtime/version, public signing address and
   proof, API-key hash/prefix, and non-secret connector/install metadata. Later

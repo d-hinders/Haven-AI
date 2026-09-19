@@ -19,10 +19,11 @@ covers:
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
   - packages/connect/src/prune-runtimes.ts
+  - packages/connect/src/storage.ts
   - packages/signer/src/credentials.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)

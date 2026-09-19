@@ -71,7 +71,11 @@ permissions require action by the Safe owner outside Haven.
    under the setup prompt issues a one-time credential to save into the
    backend's own secrets. It is marked as a manual credential rather than as a
    configured local runtime, and the owner still signs the budget delegation
-   before the agent can spend.
+   before the agent can spend. Since [#3122](https://github.com/d-hinders/Haven-AI/issues/3122) it also
+   names, before minting anything, every other credential directory that still
+   holds a stored key (with the account it spends from) and any MCP server name
+   it is taking over from another directory's local binding record — a
+   warning, never a refusal.
 4. Registration sends only the setup token, runtime/version metadata, public
    signing address and proof, API-key hash/prefix, the MCP server name the
    connector wired this agent as (`haven`, or `haven-<slug>` — a display label

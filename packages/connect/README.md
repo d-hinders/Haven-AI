@@ -226,7 +226,8 @@ revoked or destroyed — that is the honest state. **`--destroy-key-material`**
 proceeds on every answer, states what it destroyed and that local recovery
 of a stranded balance ends with it. In `--json` the record carries an
 additive `teardown: { status: destroyed | retained | forced, probe, detail,
-remedy? }`.
+remedy? }` and, since #3122, `binding_released` (whether a local
+`mcp-server-binding.json` was removed).
 
 The `claude-code` copy of the key (written by `claude mcp add`, into a config
 the connector does not own) is out of scope for `--unwire`, as it always was:
@@ -278,8 +279,9 @@ long-lived host afterwards, as with any retirement.
 Setup guards the **name slot** (a taken `--name`, the bare pair already wired
 — #2551 refuses or asks) but never the **wallet**: a machine can carry several
 agents with live keys, and until #3122 the "your previous agent(s) still exist
-with their own keys" heads-up was printed 180 lines after the credentials were
-written. Two things changed, both from local files only (no network call is
+with their own keys" heads-up was printed only after the credentials were
+written (that completion heads-up, #1688, is unchanged — this slice ADDS an
+earlier notice). Two things changed, both from local files only (no network call is
 added; the backend is not asked whether any key still authenticates):
 
 - **Before the key is minted or anything is written**, setup names every
@@ -305,10 +307,13 @@ added; the backend is not asked whether any key still authenticates):
   previous backend URL, when — and flags a **DIFFERENT backend** explicitly, because that is the case the backend cannot see and
   the one that silently repoints a saved session; `--json` carries it as
   `server_name_rebound_from: { server_name, agent_id, api_url, bound_at,
-  backend_changed }`. `--unwire` (and a `--replace` retirement) release the
-  record, so a legitimately free name does not warn forever, and `--doctor`
-  reports two records claiming one name as the `mcp_server_name_rebound`
-  advisory (oldest → newest, backend change flagged). The record is written
+  backend_changed }`. `--unwire` releases the record (its `--json` gains
+  `binding_released`), and so does a `--replace` retirement, so a legitimately
+  free name does not warn forever; `--tombstone` leaves it, and `--doctor`
+  ignores a retired directory's record. `--doctor` reports two records
+  claiming one name — among directories that still launch something — as the
+  `mcp_server_name_rebound` advisory (oldest → newest, backend change
+  flagged). The record is written
   after the credentials, best-effort: a directory with credentials and no
   record (a crash in between, or one retired by hand) is not proof the name
   is free — the absence of a warning is not a guarantee, as with

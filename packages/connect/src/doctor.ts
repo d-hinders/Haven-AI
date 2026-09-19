@@ -1279,8 +1279,17 @@ export async function runDoctor(
   // the authority for the same backend; this check does not assert
   // otherwise, and names a backend change explicitly because that is the case
   // the backend cannot see.
+  // A RETIRED directory's record is not a claim (#3154 review): it launches
+  // nothing, so it cannot be what a saved session resolves to, and a
+  // by-the-book reset (--tombstone + delete the key files) leaves the record
+  // behind without releasing it — only --unwire and the --replace retirement
+  // do. Counting it would make every reset produce a false "changed hands".
   const bindings = (
-    await Promise.all(inventory.map(async (entry) => ({ entry, binding: await readMcpServerBinding(entry.directory) })))
+    await Promise.all(
+      inventory
+        .filter((entry) => entry.classification !== 'retired')
+        .map(async (entry) => ({ entry, binding: await readMcpServerBinding(entry.directory) })),
+    )
   ).filter((item): item is { entry: AgentInventoryEntry; binding: NonNullable<typeof item.binding> } => item.binding !== null)
   const byName = new Map<string, typeof bindings>()
   for (const item of bindings) {

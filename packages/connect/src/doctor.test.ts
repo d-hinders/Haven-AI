@@ -2206,3 +2206,20 @@ describe('rebound MCP server names (#3122)', () => {
     expect(report.ok).toBe(true)
   })
 })
+
+describe('rebound MCP server names ignore RETIRED directories (#3154 review)', () => {
+  it('a tombstoned, key-less directory whose binding record survived a by-the-book reset does not make the name "changed hands"', async () => {
+    const { homeDir, dir } = await healthyHome()
+    const { writeMcpServerBinding } = await import('./storage.js')
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    await writeMcpServerBinding(dir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-1', api_url: 'https://api.haven.example', bound_at: '2026-09-18T12:00:00.000Z' })
+    const resetDir = join(homeDir, '.haven', 'agents', 'agent-reset')
+    await mkdir(resetDir, { recursive: true })
+    await writeAgentTombstone({ directory: resetDir, agentId: 'agent-reset', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+    await writeMcpServerBinding(resetDir, { version: 1, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-reset', api_url: 'https://api.haven.example', bound_at: '2026-09-01T00:00:00.000Z' })
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    expect(report.agents.find((a) => a.directory === resetDir)?.classification).toBe('retired')
+    expect(report.checks.find((c) => c.id === 'mcp_server_name_rebound')).toBeUndefined()
+    expect(report.level).toBe('ok')
+  })
+})

@@ -36,7 +36,7 @@ covers:
   - scripts/lint-next-steps.mjs
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # MCP Runtime Compatibility
@@ -2213,8 +2213,8 @@ to call next in structured fields, and those fields are typed end to end
   > bullet above (a retained teardown is the second non-zero-exit case).
   > Nothing else in this document was re-verified in this pass.
 
-  > **Re-verified #3122:** the wallet warning moved BEFORE the first credential
-  > write. Setup now reads every other credential directory's stored key and
+  > **Re-verified #3122:** a wallet warning is now emitted BEFORE the first
+  > credential write. Setup now reads every other credential directory's stored key and
   > account (local files only — no network call is added, and the backend is
   > not asked whether a key still authenticates) and logs `Heads-up (before
   > anything is written): …` naming each agent and the account it spends from,
@@ -2228,10 +2228,14 @@ to call next in structured fields, and those fields are typed end to end
   > flag (`server_name_rebound_from`) — the case the backend's
   > `agents.mcp_server_name` cannot see. That backend column stays the
   > authority for the same backend; the local record is a reporting aid and
-  > every message reading it says "locally recorded". `--unwire` and the
-  > `--replace` retirement release the record (`--json`: `binding_released`);
-  > `--doctor` reports two records claiming one name as the
-  > `mcp_server_name_rebound` advisory (#3121 level), absent otherwise.
+  > every message reading it says "locally recorded". `--unwire` releases the
+  > record (its `--json` record gains `binding_released`), and so does the
+  > `--replace` retirement (the setup outcome carries no such field);
+  > `--tombstone` leaves it, so `--doctor` ignores a RETIRED directory's record
+  > and reports two records claiming one name as the `mcp_server_name_rebound`
+  > advisory (#3121 level) only among directories that still launch something,
+  > absent otherwise. The #1688 completion heads-up is unchanged — #3122 ADDS
+  > the earlier notice, it does not move or remove the later one.
   > Nothing else in this document was re-verified in this pass.
 
   This is local teardown, **not** backend revocation: Connect reports what it

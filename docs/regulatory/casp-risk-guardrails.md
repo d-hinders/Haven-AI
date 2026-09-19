@@ -71,7 +71,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-18"
+last-verified: "2026-09-20"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -990,7 +990,12 @@ here is on neither list unless it is named **doc-only with its reason**:
 client packages the deployed harness never runs, and `packages/sdk/src/**` is
 doc-only apart from `packages/sdk/src/signer.ts`, which is on the runtime list
 because it is spend authority (the harness does build and drive the SDK; the
-rest of it is transport). They stay on this perimeter — the CASP question
+rest of it is transport). Since #3173 `packages/sdk/src/edge-signing.ts` is
+spend authority by the same reasoning — it is the viem-based implementation
+of `addressFromKey` / `signHash` / `verifySignature` the shipped signer
+actually calls, pinned byte-equivalent to `signer.ts` — and is deliberately
+NOT yet on the runtime list: adding it is the same owner decision as any
+widening here, deferred and recorded in PR #3185. They stay on this perimeter — the CASP question
 still applies to what they ship — without a QA-freshness obligation. Widening
 one of them is an owner decision, not a drift fix. The check is scoped to
 package-wide entries; sub-package wildcards such as

@@ -50,7 +50,7 @@ describe('edge-signing (#3173) is byte-equivalent to the ethers implementation',
     expect(verifySignature(HASHES[0], ethersSignHash(KEYS[0], HASHES[0]), address)).toBe(true)
   })
 
-  it('rejects the high-s malleable twin, unprefixed inputs and wrong lengths exactly like ethers', () => {
+  it('rejects the high-s malleable twin, unprefixed inputs and wrong lengths — like ethers where it refuses, stricter where it does not', () => {
     const sig = signHash(KEYS[0], HASHES[0])
     const address = addressFromKey(KEYS[0])
     // s' = N - s with the v byte flipped recovers the same address — ethers refuses it; so do we.

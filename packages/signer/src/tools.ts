@@ -645,13 +645,22 @@ export function createToolHandlers(
   async function auditSigning(tool: SignerToolName, payloadHash: string): Promise<void> {
     if (!options.audit) return
     const { auditPath, ...context } = options.audit
-    await appendSigningAuditEntry(
-      createSigningAuditEntry(tool, payloadHash, {
-        ...context,
-        delegateAddress: signer.delegateAddress,
-      }),
-      auditPath,
-    )
+    try {
+      await appendSigningAuditEntry(
+        createSigningAuditEntry(tool, payloadHash, {
+          ...context,
+          delegateAddress: signer.delegateAddress,
+        }),
+        auditPath,
+      )
+    } catch (err) {
+      // #3172 review: the audit is written AFTER the key has signed. A
+      // filesystem failure here (disk full, read-only, a rotation race) must
+      // not turn a produced signature into a failed tool call — the agent
+      // would re-quote and re-sign for nothing. Say so on stderr instead.
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`haven-signer: warning: audit entry for ${tool} could not be written to ${auditPath}: ${message}\n`)
+    }
   }
 }
 

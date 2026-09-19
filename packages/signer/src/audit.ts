@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { appendFile, mkdir, rename, stat } from 'node:fs/promises'
+import { appendFile, lstat, mkdir, rename } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { OWNER_ONLY_MODE, tightenIfFilePermissive, type PermissionLog } from './file-mode.js'
@@ -23,8 +23,6 @@ export interface AppendAuditOptions {
   platform?: NodeJS.Platform
 }
 
-/** Paths whose mode this process has already checked — one notice per file per process. */
-const modeChecked = new Set<string>()
 
 export interface SigningAuditEntry {
   version: 1
@@ -63,25 +61,27 @@ export async function appendSigningAuditEntry(
 ): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const rotateAt = options.rotateAtBytes ?? AUDIT_ROTATE_BYTES
-  const existing = await stat(path).catch(() => null)
-  if (existing && existing.size >= rotateAt) {
-    // Rotate BEFORE appending so the live file never exceeds the bound by
-    // more than one row. `rename` replaces the previous `.1` atomically.
-    await rename(path, `${path}.1`)
+  const existing = await lstat(path).catch(() => null)
+  if (existing) {
+    // Tighten BEFORE rotating, on every append (the lstat above is the only
+    // cost, and it is already paid): a pre-#3172 0644 sidecar is fixed in
+    // place, and if it rotates next, `rename` carries 0600 into `.1` — the
+    // history is never left world-readable. Idempotent, so the notice fires
+    // once per permissive file, not once per process (#3172 review).
+    await tightenIfFilePermissive('audit sidecar', path, options.log, options.platform, existing)
+    if (existing.size >= rotateAt) {
+      // Rotate BEFORE appending so the live file never exceeds the bound by
+      // more than one row. `rename` replaces the previous `.1` atomically. Two
+      // concurrent appends at the bound race here: the loser's ENOENT is
+      // swallowed — a lost rotation is re-evaluated on the next append, and a
+      // signature that has already been produced must never be thrown away
+      // over an advisory log (rows may interleave across the boundary).
+      await rename(path, `${path}.1`).catch(() => {})
+    }
   }
   // `mode` applies only when the file is created: a new sidecar is owner-only
-  // from its first byte, like the credential it sits beside (#3172). An
-  // existing permissive sidecar keeps its bits here and is tightened below.
+  // from its first byte, like the credential it sits beside (#3172).
   await appendFile(path, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: OWNER_ONLY_MODE })
-  if (!modeChecked.has(path)) {
-    modeChecked.add(path)
-    await tightenIfFilePermissive('audit sidecar', path, options.log, options.platform)
-  }
-}
-
-/** Test seam: forget which sidecars this process has already mode-checked. */
-export function resetAuditModeChecks(): void {
-  modeChecked.clear()
 }
 
 export function createSigningAuditEntry(

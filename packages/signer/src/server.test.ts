@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -298,6 +298,75 @@ describe('haven_sign tool', () => {
         expect(payload.message).toMatch(/32-byte/)
       }
       await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('#3172: the bound holds on haven_sign_x402 and inside x402_expected (payload_hash, typed_data_hash) — all four schema sites', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-hash-bound-x402-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const handlers = createToolHandlers(createEdgeSigner(TEST_KEY), {
+        audit: { auditPath, delegateAddress: '0x000000000000000000000000000000000000dEaD' },
+      })
+      const expected = {
+        payment_id: 'pay_1',
+        payload_hash: `0x${'ab'.repeat(32)}`,
+        resource_url: 'https://merchant.example/resource',
+        merchant_to: '0x000000000000000000000000000000000000Cafe',
+        amount: '1000',
+        asset: '0x0000000000000000000000000000000000000001',
+        network: 'base-sepolia',
+        expires_at: '2026-01-02T03:04:05.000Z',
+      }
+      const cases: Array<Record<string, unknown>> = [
+        // haven_sign_x402 top-level payload_hash
+        { payload_hash: `0x${'ab'.repeat(33)}`, x402_expected: expected, payment_required: { x402Version: 1, accepts: [] } },
+        // x402_expected.payload_hash
+        { payload_hash: `0x${'ab'.repeat(32)}`, x402_expected: { ...expected, payload_hash: `0x${'ab'.repeat(31)}` }, payment_required: { x402Version: 1, accepts: [] } },
+        // x402_expected.typed_data_hash
+        { payload_hash: `0x${'ab'.repeat(32)}`, x402_expected: { ...expected, typed_data_hash: `0x${'cd'.repeat(40)}` }, payment_required: { x402Version: 1, accepts: [] } },
+      ]
+      for (const input of cases) {
+        const payload = (await handlers.haven_sign_x402(input)) as { success: boolean; code?: string; message?: string }
+        expect(payload.success).toBe(false)
+        expect(payload.code).toBe('INVALID_INPUT')
+        expect(payload.message).toMatch(/32-byte/)
+      }
+      // and the same typed_data_hash bound through haven_sign's x402_expected
+      const viaSign = (await handlers.haven_sign({ payload_hash: `0x${'ab'.repeat(32)}`, x402_expected: { ...expected, typed_data_hash: `0x${'cd'.repeat(40)}` } })) as { success: boolean; code?: string }
+      expect(viaSign.success).toBe(false)
+      expect(viaSign.code).toBe('INVALID_INPUT')
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('#3172: an audit write that fails does not turn a produced signature into a failed call', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-audit-unwritable-'))
+    try {
+      // A path UNDER a regular file cannot be created: mkdir/appendFile throw.
+      await writeFile(join(dir, 'blocker'), 'x')
+      const auditPath = join(dir, 'blocker', 'audit.jsonl')
+      const warnings: string[] = []
+      const original = process.stderr.write.bind(process.stderr)
+      process.stderr.write = ((chunk: string | Uint8Array) => {
+        warnings.push(String(chunk))
+        return true
+      }) as typeof process.stderr.write
+      try {
+        const handlers = createToolHandlers(createEdgeSigner(TEST_KEY), {
+          audit: { auditPath, delegateAddress: '0x000000000000000000000000000000000000dEaD' },
+        })
+        const payload = (await handlers.haven_sign({ payload_hash: `0x${'ab'.repeat(32)}`, typed_data: DIRECT_USEROP })) as ToolSuccess<{ signature: string }>
+        expect(payload.success).toBe(true)
+        expect(payload.data.signature).toMatch(/^0x[0-9a-f]+$/)
+      } finally {
+        process.stderr.write = original
+      }
+      expect(warnings.some((w) => w.includes('audit entry for haven_sign could not be written'))).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

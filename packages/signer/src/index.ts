@@ -65,7 +65,6 @@ export {
   createSigningAuditEntry,
   defaultSigningAuditPath,
   hashPayloadForAudit,
-  resetAuditModeChecks,
   type AppendAuditOptions,
   type SigningAuditContext,
   type SigningAuditEntry,
@@ -76,6 +75,8 @@ export {
   tightenIfFilePermissive,
   warnIfFilePermissive,
   type PermissionLog,
+  type PermissiveFile,
+  type TightenOutcome,
 } from './file-mode.js'
 
 // #3103: the hosted tools this signer hands off to, declared here and pinned to the hosted schemas in the hosted server's suite.

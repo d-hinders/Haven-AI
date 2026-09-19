@@ -294,16 +294,23 @@ carries them. They never include the delegate key, the signature, or the x402
 payment header.
 
 Since #3172 the sidecar is owner-only and bounded. It is created `0600` — the
-mode the credential beside it has — and a sidecar an earlier release left
-world-readable is tightened to `0600` in place on the first append of a process,
-with one stderr line saying so (if `chmod` is refused, the line is the same
-`chmod 600` warning the credential gets). When the live file reaches
-`AUDIT_ROTATE_BYTES` (8 MiB, roughly 30 000 rows) it is renamed to
-`<path>.1`, replacing the previous `.1`, and a fresh file starts — two
-generations at most. The `payload_hash` argument itself is bounded on the tool
-schema to a 32-byte hash (`0x` + 64 hex), so the audit field is never
-caller-controlled free text; the two object arguments (`payment_required`,
-`x402_expected`) were already hashed before being written.
+mode the credential beside it is expected to have — and a sidecar found
+readable beyond its owner (every release before #3172 created it `0644`, or an
+operator loosened it later) is tightened to `0600` in place on the next
+append, with one stderr line per occurrence (if the path is not a regular
+file, or `chmod` is refused, the line names the same `chmod 600` remedy the
+credential warning gives and nothing is changed). The check runs before
+rotation, so a legacy file that rotates carries `0600` into `.1`. When the
+live file reaches `AUDIT_ROTATE_BYTES` (8 MiB, roughly 30 000 rows) it is
+renamed to `<path>.1`, replacing the previous `.1`, and a fresh file starts —
+two generations at most. A failed audit write (disk full, read-only, two
+appends racing at the bound) is reported on stderr and never fails the
+signing call that already produced its signature. The
+`payload_hash` argument itself is bounded on the tool schema to a 32-byte hash
+(`0x` + 64 hex), so the audit field is never caller-controlled free text; the
+two object arguments that do reach the file (`payment_required`,
+`authorization`) were already hashed before being written, and
+`x402_expected` is never written to the sidecar.
 
 ## Hot-wallet minimization
 

@@ -15,6 +15,7 @@ import {
   McpMerchantTransport,
 } from './mcp-merchant-transport.js'
 import type { CapturedMerchantResponse } from './mcp-merchant-transport.js'
+import { X402_RETRY_REJECTED_STATUS } from './mcp-merchant-transport.js'
 import { x402PaymentHeaderNamesSent } from './x402.js'
 import { buildExplorerUrl, x402PayerAddress } from './x402-protocol.js'
 import { paymentStateStatusCode } from './payment-state.js'
@@ -138,7 +139,14 @@ export class MerchantCompletion {
       receipt.paymentHeader,
     )
 
-    if (!retryResponse.ok) {
+    // #3118: a profile merchant refuses under HTTP 200 with an `isError: true`
+    // payment-required tool result. That is a rejection after funding exactly
+    // like a non-2xx answer; the thrown status is 402 (what the merchant
+    // said in-band) while the captured `merchant_status` keeps the real 200.
+    const inBandRejection = retryResponse.ok
+      ? await this.merchantTransport.extractToolResultChallenge(retryResponse)
+      : undefined
+    if (!retryResponse.ok || inBandRejection) {
       const merchant = await captureMerchantResponse(retryResponse)
       await this.recordRetryRejected({
         rail: 'x402',
@@ -154,7 +162,7 @@ export class MerchantCompletion {
 
       throw new HavenApiError(
         'x402 retry failed after Haven funded the delegate wallet; reconciliation may be required.',
-        merchant.merchant_status,
+        inBandRejection ? X402_RETRY_REJECTED_STATUS : merchant.merchant_status,
         {
           marker: 'x402_retry_rejected_after_funding',
           payment_id: receipt.paymentId,

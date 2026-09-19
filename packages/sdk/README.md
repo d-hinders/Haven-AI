@@ -147,6 +147,21 @@ if (apiResponse.status === 402) {
 }
 ```
 
+**MCP merchants, both dialects (#3118).** A merchant may serve x402 over MCP
+in Haven's HTTP layering (HTTP 402 with the `PAYMENT-REQUIRED` header or JSON
+body, payment in `PAYMENT-SIGNATURE` / `X-PAYMENT`, settlement in
+`PAYMENT-RESPONSE`) or in the official x402 MCP transport profile (a tool
+result with `isError: true` and the `PaymentRequired` as `structuredContent`,
+payment in `params._meta["x402/payment"]`, settlement in
+`result._meta["x402/payment-response"]`). `fetch()`, `quoteX402()`,
+`quoteMcpX402()` and `completeX402MerchantCall()` handle both: a payment-
+required tool result quotes like a 402, the paid retry carries the header and
+— for a `tools/call` body — the `_meta` object, and settlement is read from the
+header first, the `_meta` second. An in-band refusal (an `isError` challenge on
+the paid retry, or `success: false`) is a rejection even under HTTP 200. An
+ordinary tool error, or a successful result that merely resembles a challenge,
+is never paid for.
+
 ### Idempotency: what the key guarantees, and what it costs
 
 **Omit `idempotencyKey` and the SDK synthesises one** from the merchant's

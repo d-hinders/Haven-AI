@@ -86,7 +86,14 @@ import {
   paymentStateStatusCode,
   throwPaymentStateError,
 } from './payment-state.js'
-import { McpMerchantTransport } from './mcp-merchant-transport.js'
+import {
+  MCP_X402_PAYMENT_RESPONSE_META_KEY,
+  McpMerchantTransport,
+  encodeMcpSettlementReceipt,
+  extractMcpPaymentRequired,
+  mcpSettlementFromToolResult,
+  mcpToolResultOf,
+} from './mcp-merchant-transport.js'
 import { AccountReads } from './account-reads.js'
 import { DelegateSweepApi } from './delegate-sweep.js'
 import {
@@ -987,6 +994,17 @@ export class HavenClient {
     const response = await this.merchantTransport.fetch(url, initialInit)
 
     if (response.status !== 402) {
+      // #3118: a merchant on the official x402 MCP profile answers HTTP 200
+      // with an `isError: true` tool result carrying the challenge. Quote it
+      // like a 402. The transport signal is read exactly as for a 402 (path
+      // or Bazaar); a stateless merchant that answered a bare `tools/call`
+      // with a tool result has shown it needs no session, so nothing is
+      // forced — `quoteMcpX402` still pins its own established session.
+      const toolResultChallenge = await this.merchantTransport.extractToolResultChallenge(response)
+      if (toolResultChallenge) {
+        const mcpTransport = await this.merchantTransport.detect(url, toolResultChallenge, response)
+        return buildX402Quote(toolResultChallenge, request, options.idempotencyKey, mcpTransport)
+      }
       // #2979: best-effort JSON body, so a merchant answering with its own
       // machine-readable refusal (e.g. `503 { error: 'merchant_not_ready' }`)
       // is not reduced to a bare status code — `.clone()` because the caller
@@ -1269,23 +1287,30 @@ export class HavenClient {
     // 1. Make the original request
     const response = await this.merchantTransport.fetch(url, requestInit)
 
-    // 2. Not a 402 — return as-is (collapsing SSE for MCP sessions)
-    if (response.status !== 402) {
-      return mcpSessionId ? this.merchantTransport.surfaceResult(response) : response
-    }
-
-    // #1328: the legacy MACHINE-PAYMENT-CHALLENGE / mpp_demo auto-handling is
-    // retired — a 402 that isn't standard x402 (including a stray
-    // MACHINE-PAYMENT-CHALLENGE header from a pre-retirement caller) is
-    // returned to the agent unmodified rather than auto-paid.
-
-    // 3. Parse x402 payment requirements
+    // 2. Not a 402 — return as-is (collapsing SSE for MCP sessions), unless
+    //    it is a native MCP payment-required tool result (#3118): the
+    //    official profile signals the challenge in the tool result, not the
+    //    status code, and it is paid and retried exactly like a 402.
     let paymentRequired: X402PaymentRequired
-    try {
-      paymentRequired = await parsePaymentRequiredResponse(response)
-    } catch {
-      // Not a standard x402 402 response — return it unchanged.
-      return response
+    if (response.status !== 402) {
+      const toolResultChallenge = await this.merchantTransport.extractToolResultChallenge(response)
+      if (!toolResultChallenge) {
+        return mcpSessionId ? this.merchantTransport.surfaceResult(response) : response
+      }
+      paymentRequired = toolResultChallenge
+    } else {
+      // #1328: the legacy MACHINE-PAYMENT-CHALLENGE / mpp_demo auto-handling is
+      // retired — a 402 that isn't standard x402 (including a stray
+      // MACHINE-PAYMENT-CHALLENGE header from a pre-retirement caller) is
+      // returned to the agent unmodified rather than auto-paid.
+
+      // 3. Parse x402 payment requirements
+      try {
+        paymentRequired = await parsePaymentRequiredResponse(response)
+      } catch {
+        // Not a standard x402 402 response — return it unchanged.
+        return response
+      }
     }
 
     // Signal B: a Bazaar `extensions.bazaar` block marks an MCP-discoverable
@@ -1417,8 +1442,6 @@ export class HavenClient {
 
     const response = await this.merchantTransport.deliverPayment(input.url, requestInit, input.paymentHeader)
     const surfaced = mcpSessionId ? await this.merchantTransport.surfaceResult(response) : response
-    const protocolReceiptHeader = surfaced.headers.get('PAYMENT-RESPONSE') ?? undefined
-    const settlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
 
     const text = await surfaced.text()
     let body: unknown
@@ -1428,12 +1451,33 @@ export class HavenClient {
       body = text
     }
 
+    // #3118: a profile merchant reports settlement in
+    // `result._meta["x402/payment-response"]` and a refusal as an
+    // `isError: true` tool result — both under HTTP 200. The header form is
+    // read first and stays authoritative when present; the `_meta` form is
+    // re-encoded as base64 JSON so the evidence report's receipt payload is
+    // parsed by the one existing decoder, and its `success: false` (or an
+    // in-band payment-required result) is a merchant REJECTION, never a
+    // success: the tool's content was withheld and nothing settled.
+    const toolResult = mcpToolResultOf(body)
+    const inBandChallenge = toolResult ? extractMcpPaymentRequired(toolResult) : undefined
+    const metaSettlement = toolResult ? mcpSettlementFromToolResult(toolResult) : undefined
+    const headerReceipt = surfaced.headers.get('PAYMENT-RESPONSE') ?? undefined
+    const protocolReceiptHeaderName = headerReceipt
+      ? 'PAYMENT-RESPONSE'
+      : metaSettlement
+        ? `_meta.${MCP_X402_PAYMENT_RESPONSE_META_KEY}`
+        : undefined
+    const protocolReceiptHeader = headerReceipt ?? (metaSettlement ? encodeMcpSettlementReceipt(metaSettlement) : undefined)
+    const settlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
+    const merchantAccepted = surfaced.ok && inBandChallenge === undefined && metaSettlement?.success !== false
+
     // #2970: declared here (not inside the `else` below) so it survives to
     // the `return` — `undefined` on the refusal branch and whenever there was
     // no hash to report at all.
     let evidenceOutcome: EvidenceReportOutcome | undefined
 
-    if (!surfaced.ok) {
+    if (!merchantAccepted) {
       // #1508: both evidence surfaces below require a txHash — the backend
       // answers `400 txHash is required` without one, and these calls swallow
       // failures, so an erc7710 row would vanish silently rather than fail
@@ -1500,7 +1544,7 @@ export class HavenClient {
           merchantStatus: surfaced.status,
           paymentProofHeaderName: x402PaymentHeaderNamesSent(input.paymentHeader),
           paymentProofHeader: input.paymentHeader,
-          protocolReceiptHeaderName: protocolReceiptHeader ? 'PAYMENT-RESPONSE' : undefined,
+          protocolReceiptHeaderName,
           protocolReceiptHeader,
         })
       }
@@ -1511,7 +1555,7 @@ export class HavenClient {
 
     return {
       status: surfaced.status,
-      ok: surfaced.ok,
+      ok: merchantAccepted,
       body,
       settlementTxHash: settlement.settlementTxHash ?? undefined,
       evidenceOutcome,

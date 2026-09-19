@@ -1,6 +1,7 @@
 import type { X402McpTransport, X402PaymentRequired } from './types.js'
 import { MerchantTimeoutError } from './types.js'
-import { X402_PAYMENT_HEADER_NAMES, x402PaymentHeaderNamesFor } from './x402.js'
+import { decodeBase64Json, encodeBase64Json } from './base64.js'
+import { X402_PAYMENT_HEADER_NAMES, normalizePaymentRequired, x402PaymentHeaderNamesFor } from './x402.js'
 import { assertSecureX402RetryTarget } from './x402-retry-target.js'
 
 export const DEFAULT_MERCHANT_TIMEOUT = 300_000
@@ -9,6 +10,39 @@ export const MCP_PROTOCOL_VERSION = '2025-06-18'
 export const MCP_ACCEPT = 'application/json, text/event-stream'
 
 const MCP_CLIENT_INFO = { name: 'haven-sdk', version: '1' } as const
+
+/**
+ * #3118: the official x402 MCP transport profile
+ * (x402-foundation/x402 `specs/transports-v2/mcp.md`). A merchant following
+ * it never answers HTTP 402: the challenge is a tool RESULT with
+ * `isError: true` carrying the `PaymentRequired` object as
+ * `structuredContent` (and `JSON.stringify` of it as the text content for
+ * clients without structured-content support); the payment travels back in
+ * the tools/call request's `params._meta["x402/payment"]` as a JSON object
+ * (the same envelope the `PAYMENT-SIGNATURE` header carries base64-encoded);
+ * settlement comes back in `result._meta["x402/payment-response"]`.
+ *
+ * Haven's HTTP-402-over-MCP layering (the Streamable-HTTP status code plus
+ * `PAYMENT-REQUIRED` / `PAYMENT-SIGNATURE` / `PAYMENT-RESPONSE` headers) is a
+ * valid, distinct integration and is retained unchanged; the profile below is
+ * ADDED beside it. Delivery is dual: the header is always sent, and the
+ * `_meta` object is added whenever the caller body is a `tools/call` request,
+ * so a header-reading merchant and a `_meta`-reading merchant both see the
+ * payment and neither has to be told which kind it is.
+ */
+export const MCP_X402_PAYMENT_META_KEY = 'x402/payment'
+export const MCP_X402_PAYMENT_RESPONSE_META_KEY = 'x402/payment-response'
+/** The HTTP status an in-band (HTTP 200, `isError: true`) payment-required refusal is reported as. */
+export const X402_RETRY_REJECTED_STATUS = 402
+
+/** The settlement object a profile merchant returns in `result._meta["x402/payment-response"]`. */
+export interface McpX402SettlementMeta {
+  success: boolean
+  transaction?: string
+  network?: string
+  payer?: string
+  errorReason?: string
+}
 
 export interface CapturedMerchantResponse {
   merchant_status: number
@@ -226,7 +260,24 @@ export class McpMerchantTransport {
       if (send.includes(name)) headers.set(name, paymentHeader)
       else headers.delete(name)
     }
-    return this.fetch(url, { ...init, headers })
+    // #3118: a `tools/call` body additionally carries the payment in
+    // `params._meta["x402/payment"]` (the official MCP profile). Any other
+    // body is sent byte-for-byte as the caller gave it.
+    return this.fetch(url, withMcpPaymentMeta({ ...init, headers }, paymentHeader))
+  }
+
+  /**
+   * #3118: read a native MCP payment-required tool result from a response
+   * WITHOUT consuming it — JSON or SSE framed. `undefined` for anything that
+   * is not an `isError: true` tool result carrying a valid `PaymentRequired`
+   * (structured content first, text fallback second), so an ordinary tool
+   * error, a successful result that merely resembles a challenge, or an
+   * unparseable body is never mistaken for a payment demand.
+   */
+  async extractToolResultChallenge(response: Response): Promise<X402PaymentRequired | undefined> {
+    const message = await this.readMessage(response)
+    const toolResult = mcpToolResultOf(message)
+    return toolResult ? extractMcpPaymentRequired(toolResult) : undefined
   }
 
   private async notifyInitialized(
@@ -255,6 +306,117 @@ export class McpMerchantTransport {
       // The session is established. Notification delivery remains best-effort.
     }
   }
+}
+
+/**
+ * #3118: the tool RESULT inside whatever shape a merchant body arrived in —
+ * a raw JSON-RPC envelope (`{ jsonrpc, id, result }`), or an already-surfaced
+ * result (`surfaceResult` collapses SSE to the bare `result`). `undefined`
+ * when the value is neither.
+ */
+export function mcpToolResultOf(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined
+  if ('jsonrpc' in value) {
+    return isRecord(value.result) ? value.result : undefined
+  }
+  if ('isError' in value || Array.isArray(value.content) || isRecord(value._meta)) return value
+  return undefined
+}
+
+/**
+ * #3118: the `PaymentRequired` a profile merchant put in an `isError: true`
+ * tool result. `structuredContent` is preferred; the first text content item
+ * that parses as JSON is the fallback. Both go through
+ * `normalizePaymentRequired`, so a challenge with no payable `accepts` entry
+ * is not a challenge at all.
+ */
+export function extractMcpPaymentRequired(toolResult: Record<string, unknown>): X402PaymentRequired | undefined {
+  if (toolResult.isError !== true) return undefined
+  if (isRecord(toolResult.structuredContent)) {
+    const parsed = normalizePaymentRequired(toolResult.structuredContent)
+    if (parsed) return parsed
+  }
+  if (Array.isArray(toolResult.content)) {
+    for (const item of toolResult.content) {
+      if (!isRecord(item) || item.type !== 'text' || typeof item.text !== 'string') continue
+      let candidate: unknown
+      try {
+        candidate = JSON.parse(item.text)
+      } catch {
+        continue
+      }
+      const parsed = normalizePaymentRequired(candidate)
+      if (parsed) return parsed
+    }
+  }
+  return undefined
+}
+
+/**
+ * #3118: the settlement object in `result._meta["x402/payment-response"]`,
+ * or `undefined` when the result carries none (or one without a boolean
+ * `success`, which is not a settlement statement the SDK will act on).
+ */
+export function mcpSettlementFromToolResult(toolResult: Record<string, unknown>): McpX402SettlementMeta | undefined {
+  const meta = toolResult._meta
+  if (!isRecord(meta)) return undefined
+  const settlement = meta[MCP_X402_PAYMENT_RESPONSE_META_KEY]
+  if (!isRecord(settlement) || typeof settlement.success !== 'boolean') return undefined
+  return {
+    success: settlement.success,
+    ...(typeof settlement.transaction === 'string' ? { transaction: settlement.transaction } : {}),
+    ...(typeof settlement.network === 'string' ? { network: settlement.network } : {}),
+    ...(typeof settlement.payer === 'string' ? { payer: settlement.payer } : {}),
+    ...(typeof settlement.errorReason === 'string' ? { errorReason: settlement.errorReason } : {}),
+  }
+}
+
+/**
+ * #3118: add `params._meta["x402/payment"]` to a `tools/call` request body.
+ * The value is the decoded payment envelope (the header is base64 JSON of
+ * exactly this object). Unrelated `_meta` keys, `arguments`, the id and the
+ * method are preserved. Any body that is not a string-encoded JSON-RPC
+ * `tools/call` request — form data, a stream, another method, no body — is
+ * returned untouched, as is one whose header does not decode.
+ */
+export function withMcpPaymentMeta(init: RequestInit, paymentHeader: string): RequestInit {
+  if (typeof init.body !== 'string') return init
+  let request: unknown
+  try {
+    request = JSON.parse(init.body)
+  } catch {
+    return init
+  }
+  if (!isRecord(request) || request.method !== 'tools/call' || !isRecord(request.params)) return init
+  let envelope: unknown
+  try {
+    envelope = decodeBase64Json<unknown>(paymentHeader)
+  } catch {
+    return init
+  }
+  if (!isRecord(envelope)) return init
+  const params = request.params
+  const existingMeta = isRecord(params._meta) ? params._meta : {}
+  return {
+    ...init,
+    body: JSON.stringify({
+      ...request,
+      params: { ...params, _meta: { ...existingMeta, [MCP_X402_PAYMENT_META_KEY]: envelope } },
+    }),
+  }
+}
+
+/**
+ * #3118: the `_meta` settlement re-encoded exactly as a `PAYMENT-RESPONSE`
+ * header would carry it (base64 JSON), so the evidence report's receipt
+ * payload goes through the one existing decoder whichever form arrived.
+ */
+export function encodeMcpSettlementReceipt(settlement: McpX402SettlementMeta): string {
+  return encodeBase64Json(settlement)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /** Consume and preserve every diagnostic field of a failed merchant response. */

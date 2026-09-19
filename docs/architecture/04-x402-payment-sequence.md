@@ -159,6 +159,33 @@ Node's default 16 KB header ceiling and turned every erc7710 settlement into
 an HTTP 431. A successful merchant response may include `PAYMENT-RESPONSE`
 evidence.
 
+**Native MCP transport profile (#3118).** A merchant following the official
+x402 MCP transport specification (`x402-foundation/x402`,
+`specs/transports-v2/mcp.md`) never answers HTTP 402. Its challenge is a tool
+RESULT under HTTP 200 with `isError: true`, the `PaymentRequired` object as
+`structuredContent` and `JSON.stringify` of it as the text content; the
+payment travels in the `tools/call` request's
+`params._meta["x402/payment"]` as a JSON object (the same v2 envelope the
+`PAYMENT-SIGNATURE` header carries base64-encoded); settlement comes back in
+`result._meta["x402/payment-response"]` (`{ success, transaction, network,
+payer }`). The SDK reads all three beside the HTTP forms, which are retained
+unchanged: `quoteX402` / `quoteMcpX402` / `fetch()` quote a payment-required
+tool result exactly like a 402 (structured content first, text fallback
+second, both through `normalizePaymentRequired`, so an ordinary tool error or a
+successful result that merely resembles a challenge is never a payment
+demand); the paid retry sends the header AND, when the body is a `tools/call`
+request, the `_meta` object — unrelated `_meta` keys, arguments and the id are
+preserved, and any other body is sent byte-for-byte; `PAYMENT-RESPONSE` is
+read first, and when absent the `_meta` settlement is re-encoded as base64 JSON
+so the evidence report's receipt payload goes through the one existing
+decoder. Two in-band outcomes are REJECTIONS, never successes, whatever the
+status code: an `isError: true` payment-required result on the paid retry
+(the tool's content was withheld), and a `_meta` settlement with
+`success: false`. A settlement object without a boolean `success` is not a
+settlement statement and no transaction is taken from it. Merchants on Haven's
+HTTP-402-over-MCP layering (including the demo merchant) see one change only:
+their `tools/call` body now carries a `_meta` key they may ignore.
+
 `quoteX402()`, `haven_quote_x402`, `haven_quote_mcp_tool`, and
 `haven_quote_catalog_purchase` are read-only. The MCP variants establish the
 merchant session and send an unpaid `tools/call` probe (and may read the public
@@ -574,6 +601,14 @@ If the merchant rejects after funding, hosted MCP returns
 `MERCHANT_REJECTED_AFTER_FUNDING`. The delegate may hold stranded funds; retain
 the payment id and inspect and reconcile the attempt before using
 `haven_sweep_delegate`. Do not silently retry or abandon a confirmed balance.
+Since #3118 a rejection may arrive under HTTP 200: a native-profile merchant
+answers the paid `tools/call` with an `isError: true` payment-required result
+or a `_meta["x402/payment-response"]` of `success: false`, and
+`completeX402MerchantCall` reports `ok: false` for both — the hosted message
+then names HTTP 200, which is the status the merchant really returned. The
+hosted quote (`haven_pay_mcp_tool`, `haven_quote_mcp_tool`) accepts the
+profile's tool-result challenge through the same `quoteMcpX402` path, and the
+settle leg delivers the payment in both the header and `params._meta`.
 
 ## Guided Catalog Purchase Preflight (#1306)
 

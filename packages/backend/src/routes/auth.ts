@@ -6,6 +6,7 @@ import { authRateLimit } from '../middleware/rate-limit.js'
 import { config } from '../config.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import { normalizeViaMarker } from '../domain/handoff-links.js'
+import { DEFAULT_TRANSACTION_CURRENCY } from '../domain/transaction-currency.js'
 import { OWNER_CLI_PURPOSE } from '../middleware/owner-cli.js'
 import {
   DEVICE_CODE_TTL_MS,
@@ -171,7 +172,11 @@ export default async function authRoutes(
         email: user.email,
         wallet_address: null,
         account_address: null,
-        currency_preference: 'USD',
+        // #3127: the row is WRITTEN with this same default (the signup INSERT
+        // now carries `currency_preference`), so the response and the column
+        // agree instead of the response hardcoding one currency while the
+        // column held another.
+        currency_preference: DEFAULT_TRANSACTION_CURRENCY,
         accounts: [],
       },
     })
@@ -215,7 +220,10 @@ export default async function authRoutes(
         email: user.email,
         wallet_address: user.wallet_address,
         account_address: user.account_address,
-        currency_preference: user.currency_preference ?? 'USD',
+        // #3127: the no-preference default is SEK — documented and deliberate
+        // (domain/transaction-currency.ts), the currency the transaction feed
+        // serves — not the inherited 'USD' this line used to answer.
+        currency_preference: user.currency_preference ?? DEFAULT_TRANSACTION_CURRENCY,
         accounts,
       },
     }

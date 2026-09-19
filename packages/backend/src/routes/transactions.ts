@@ -19,6 +19,7 @@ import {
   filterEnrichedTransactions,
   mergeSortDedupeAndEnrich,
   paginateByOffset,
+  resolveTransactionCurrency,
   resolveTransactionFilters,
   transactionsToCsv,
   type ParsedTokenFilter,
@@ -174,12 +175,14 @@ export default async function transactionRoutes(
       }
     }
 
-    const { merged, failedAccountIds, truncated } = await aggregateAccountTransactions(
-      safes,
-      request.log,
-      fresh,
-    )
-    const enriched = await mergeSortDedupeAndEnrich(sub, safes, merged)
+    // #3127: the converted triple on every row is struck in the user's
+    // preferred currency — the setting the product offered and then ignored.
+    // One preference read per request, alongside the account read.
+    const [currency, aggregate] = await Promise.all([
+      resolveTransactionCurrency(sub),
+      aggregateAccountTransactions(safes, request.log, fresh),
+    ])
+    const enriched = await mergeSortDedupeAndEnrich(sub, safes, aggregate.merged, currency)
     const filtered = filterEnrichedTransactions(enriched, {
       agentId: request.query.agentId,
       tokenFilter,
@@ -209,11 +212,11 @@ export default async function transactionRoutes(
       offset,
       limit,
       hasMore,
-      partialFailure: failedAccountIds.length > 0,
-      failedAccountIds: Array.from(new Set(failedAccountIds)),
+      partialFailure: aggregate.failedAccountIds.length > 0,
+      failedAccountIds: Array.from(new Set(aggregate.failedAccountIds)),
       // #2882: the rows above are capped at the explorer window per account,
       // so `total` is the truncated count, not the account's history.
-      truncated,
+      truncated: aggregate.truncated,
     }
   })
 
@@ -331,8 +334,15 @@ export default async function transactionRoutes(
 
     let filtered: Awaited<ReturnType<typeof mergeSortDedupeAndEnrich>> = []
     if (safes.length > 0) {
-      const { merged } = await aggregateAccountTransactions(safes, request.log, fresh)
-      const enriched = await mergeSortDedupeAndEnrich(sub, safes, merged)
+      // #3127: the export reads the preference too — the file's
+      // `converted_currency` column names the currency the user's dashboard
+      // feed converts in. The AMOUNTS stay the fixed-SEK branch (below);
+      // this read names that column, nothing more.
+      const [currency, aggregateResult] = await Promise.all([
+        resolveTransactionCurrency(sub),
+        aggregateAccountTransactions(safes, request.log, fresh),
+      ])
+      const enriched = await mergeSortDedupeAndEnrich(sub, safes, aggregateResult.merged, currency)
       filtered = filterEnrichedTransactions(enriched, {
         agentId: request.query.agentId,
         tokenFilter,
@@ -370,6 +380,15 @@ export default async function transactionRoutes(
         if (contactName) return contactName
         return accountNames.get(accountNameKey(address, addressChainId)) ?? null
       },
+      // #3127: the accounting export stays a FIXED-currency file. Deliberate,
+      // not the default everywhere: the feed was built (epic 026, #2871)
+      // around one reporting currency, the accountants' importers are keyed
+      // on it, and `amount_sek` is the stored book-time column — a
+      // preference-driven amount would re-express a filed figure instead of
+      // reporting one. The user's currency_preference (read above) names the
+      // column so the reader still sees how the file relates to what the
+      // dashboard serves them; the AMOUNT does not follow it.
+      reportingCurrency: 'SEK',
     })
 
     return reply
@@ -460,6 +479,8 @@ export default async function transactionRoutes(
       fresh,
       page,
       limit,
+      // #3127: same converted triple as the multi-account feed.
+      currency: await resolveTransactionCurrency(sub),
     })
 
     return {

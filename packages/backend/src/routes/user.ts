@@ -2,6 +2,11 @@ import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { retiredSafeInflowHandler } from '../middleware/safe-inflow-retired.js'
 import { retiredSafePathHandler } from './user-accounts-retired.js'
+import { DEFAULT_TRANSACTION_CURRENCY } from '../domain/transaction-currency.js'
+import {
+  isTransactionCurrency,
+  TRANSACTION_CURRENCIES,
+} from '../domain/transaction-currency.js'
 import {
   findCurrencyPreference,
   updateCurrencyPreference,
@@ -114,7 +119,11 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
   app.get('/preferences', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    return { currency_preference: (await findCurrencyPreference(sub)) ?? 'USD' }
+    // #3127: the no-preference default is SEK — documented and deliberate
+    // (domain/transaction-currency.ts), the currency the transaction feed
+    // serves. The characterization test pins the fallback SHAPE (null row and
+    // missing row both fall back), not the currency.
+    return { currency_preference: (await findCurrencyPreference(sub)) ?? DEFAULT_TRANSACTION_CURRENCY }
   })
 
   // PUT /user/preferences
@@ -122,8 +131,16 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
     const { currency_preference } = request.body
     const { sub } = request.user as { sub: string }
 
-    if (!currency_preference || !['USD', 'EUR'].includes(currency_preference)) {
-      return reply.code(400).send({ error: 'Invalid currency. Must be USD or EUR.' })
+    // #3127: SEK joins the offered set — it is the currency every converted
+    // transaction amount is struck in by default, so it was the one currency
+    // no user could actually select. The list is the shared
+    // `TRANSACTION_CURRENCIES` from `domain/transaction-currency.ts`, the
+    // same list the transaction path converts against, so the enum and the
+    // served currency cannot drift apart again.
+    if (!isTransactionCurrency(currency_preference)) {
+      return reply.code(400).send({
+        error: `Invalid currency. Must be ${TRANSACTION_CURRENCIES.join(', ')}.`,
+      })
     }
 
     const updated = await updateCurrencyPreference(currency_preference, sub)

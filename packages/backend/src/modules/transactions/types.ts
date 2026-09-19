@@ -5,6 +5,7 @@
  */
 import type { FastifyBaseLogger } from 'fastify'
 import type { TransactionAccountRow } from '../../infra/repositories/transaction-history.js'
+import type { TransactionCurrency } from '../../domain/transaction-currency.js'
 
 export interface Transaction {
   hash: string
@@ -67,6 +68,38 @@ export interface Transaction {
    */
   fxRateSek?: string | null
   fxSource?: string | null
+  /**
+   * The stored book-time rate map (`machine_payment_evidence.fx_rates`,
+   * migration 082) — a rate per supported ledger currency, frozen at
+   * settlement. Present only on the machine-payment rows whose evidence row
+   * has one; absent for raw transfers and pre-082 rows. Feeds the converted
+   * triple below and rides the wire declared (`fxRates` on the spec) for
+   * auditability: `convertedFxRate` names the one rate the served amount was
+   * struck at, the map shows the whole frozen capture. (#3127)
+   */
+  fxRates?: Record<string, number> | null
+  /**
+   * The converted amount in the user's preferred currency, that currency
+   * named as a FIELD, and the rate it was struck at (#3127). Before #3127 the
+   * currency lived only in field names (`amountSek`), so a consumer had to
+   * parse an identifier to know what it was reading, and the user's
+   * `currency_preference` was never consulted.
+   *
+   * Provenance stays auditable: the figure is struck from the SAME stored
+   * book-time capture as `amountSek` — the SEK columns, or the `fx_rates`
+   * map frozen at settlement — never a serve-time price read, so a book-time
+   * figure cannot silently become a fetch-time one.
+   *
+   * Null semantics follow the currency: SEK mirrors `amountSek` exactly
+   * (null for non-machine / unpriced rows). USD/EUR additionally need a
+   * usable rate in the row's `fx_rates` map — pre-082 rows and price-outage
+   * rows yield null there. Null is "not ready to convert", never another
+   * currency. The triple is always present TOGETHER (or null together) so a
+   * consumer can branch on the amount alone.
+   */
+  convertedAmount?: string | null
+  convertedCurrency?: TransactionCurrency
+  convertedFxRate?: string | null
   /**
    * Who initiated the money movement that produced this row — recorded by
    * the backend (#2097), never derived in the frontend.

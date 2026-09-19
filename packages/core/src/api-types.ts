@@ -1007,7 +1007,7 @@ export type paths = {
         get: operations["getUserPreferences"];
         /**
          * Set the display-currency preference.
-         * @description Display only — it changes no balance, no price and no settlement asset.
+         * @description Names the currency a transaction’s converted amount (`convertedAmount`) is struck in. Display only — it changes no balance, no price and no settlement asset.
          */
         put: operations["updateUserPreferences"];
         post?: never;
@@ -4031,6 +4031,17 @@ export type components = {
             amountSek?: string | null;
             fxRateSek?: string | null;
             fxSource?: string | null;
+            convertedAmount?: string | null;
+            /**
+             * @description The currency `convertedAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set. SEK mirrors `amountSek`; USD/EUR are struck from the row’s book-time rate map (`machine_payment_evidence.fx_rates`, migration 082) and are null when no rate was captured there.
+             * @enum {string}
+             */
+            convertedCurrency?: "SEK" | "USD" | "EUR";
+            convertedFxRate?: string | null;
+            /** @description Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row. */
+            fxRates?: {
+                [key: string]: number;
+            } | null;
             accounting?: components["schemas"]["TransactionAccounting"];
         };
         /** @description Accounting-feed state for one transaction (#2870), read from the sync ledger — no live provider call. Present on a row only when the feed is available to the account, the user has a provider connection, and the payment has a sync row; absent otherwise. */
@@ -4106,6 +4117,17 @@ export type components = {
             amountSek?: string | null;
             fxRateSek?: string | null;
             fxSource?: string | null;
+            convertedAmount?: string | null;
+            /**
+             * @description The currency `convertedAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set. SEK mirrors `amountSek`; USD/EUR are struck from the row’s book-time rate map (`machine_payment_evidence.fx_rates`, migration 082) and are null when no rate was captured there.
+             * @enum {string}
+             */
+            convertedCurrency?: "SEK" | "USD" | "EUR";
+            convertedFxRate?: string | null;
+            /** @description Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row. */
+            fxRates?: {
+                [key: string]: number;
+            } | null;
             accounting?: components["schemas"]["TransactionAccounting"];
             chainId: number;
             /** Format: uuid */
@@ -8650,7 +8672,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    currency_preference: "USD" | "EUR";
+                    currency_preference: "SEK" | "USD" | "EUR";
                 };
             };
         };

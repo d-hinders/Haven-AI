@@ -61,6 +61,24 @@ last-verified: "2026-09-19"
 > one per CI edit, so this section does not accumulate a paragraph every time a
 > step is added.
 >
+> **Recent re-verification (#3116):** the signer's merchant-header boundary
+> (`buildX402PaymentHeader`, `packages/signer/src/core.ts`) now refuses an
+> x402 challenge whose entries all advertise a transfer method or payment
+> flow the SDK cannot construct (`extra.assetTransferMethod: 'permit2'`, or
+> an unrecognized `extra.paymentFlow`) — via the same shared
+> `selectStandardPaymentOption` it already selected through, so the local
+> runtime's refusal and the SDK clients' refusal are the one rule, not two.
+> A mixed challenge still signs the supported entry behind the unsupported
+> one, and the explicitly-supported pair (`eip3009` + `authorization`) still
+> signs — the positive controls in `packages/signer/src/core.test.ts` pin
+> both. No tool name, schema, tool-NAME set, consent hash or next-step shape
+> moves: the refusal is the pre-existing `HavenApiError` "No compatible
+> payment option" path, now with a clause naming the capability reason.
+> Skew: none — the behavior change is inside both runtimes' bundled SDK, so
+> they tighten together; an older bundled SDK keeps the old (sign-anyway)
+> behavior, which is the bug this closes. Nothing else in this document was
+> re-verified in this pass.
+>
 > **Recent re-verification (#3128):** `haven_list_receipts` is RE-SHAPED on
 > both runtimes — the one deliberate non-additive change on this surface
 > since #2330. Its schema gains an optional `cursor` (the previous page's

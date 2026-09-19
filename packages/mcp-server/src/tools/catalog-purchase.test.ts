@@ -32,6 +32,7 @@ import {
 import {
   AGENT_RESPONSE,
   PAYMENT_REQUIRED,
+  X402_EXPECTED_AUTH,
   X402_INTENT_RESPONSE,
   clearCalls,
   handlers,
@@ -2024,6 +2025,55 @@ describe('#2054 — erc7710-only merchants', () => {
     ],
   }
 
+  /**
+   * #3116 — unique-amount fixtures for unsupported transfer methods and
+   * payment flows (3100000 / 3200000 atomic: 3.10 / 3.20 USDC, numbers
+   * nothing else in this file carries, so an assertion on them cannot be
+   * satisfied by an inherited fixture value — #2051's lesson).
+   */
+  const PERMIT2_ONLY_ATOMIC = '3100000'
+  const FLOW_ONLY_ATOMIC = '3200000'
+
+  /** A merchant advertising ONLY a permit2 entry — not EIP-3009-constructible. */
+  const PERMIT2_ONLY_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: PERMIT2_ONLY_ATOMIC,
+        maxAmountRequired: PERMIT2_ONLY_ATOMIC,
+        extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'permit2' },
+      },
+    ],
+  }
+
+  /** A merchant whose only entry names an unrecognized paymentFlow. */
+  const FLOW_ONLY_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: FLOW_ONLY_ATOMIC,
+        maxAmountRequired: FLOW_ONLY_ATOMIC,
+        extra: { name: 'USD Coin', version: '2', paymentFlow: 'unrecognized-future-flow' },
+      },
+    ],
+  }
+
+  /** Unsupported-first/supported-second: the plain entry behind must win. */
+  const MIXED_PR = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        amount: PERMIT2_ONLY_ATOMIC,
+        maxAmountRequired: PERMIT2_ONLY_ATOMIC,
+        extra: { name: 'USD Coin', version: '2', assetTransferMethod: 'permit2' },
+      },
+      { ...PAYMENT_REQUIRED.accepts[0] },
+    ],
+  }
+
   const CHILD = {
     payment_id: 'pay_7710_only',
     status: 'pending_signature',
@@ -2032,6 +2082,21 @@ describe('#2054 — erc7710-only merchants', () => {
       signature_scheme: 'eip712_delegation',
       typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
     },
+  }
+
+  /**
+   * #3116 — a 3009-shaped intent response for the hosted prepare/pay tests
+   * that drive the STANDARD (EIP-3009) path: the SDK's `createX402Intent`
+   * refuses any intent without `x402_expected_auth` (client.ts), which the
+   * erc7710 CHILD fixture above never carries.
+   */
+  const CHILD_3009 = {
+    payment_id: 'pay_3116_3009',
+    status: 'pending_signature',
+    expires_at: '2099-01-01T00:00:00.000Z',
+    merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
+    x402_expected_auth: X402_EXPECTED_AUTH,
+    sign_data: { hash: '0x' + '33'.repeat(32) },
   }
 
   function x402Body() {
@@ -2046,6 +2111,7 @@ describe('#2054 — erc7710-only merchants', () => {
       pr: unknown,
       agentRoute: RouteDefinition,
       cap: Record<string, string>,
+      intentBody: unknown = CHILD,
     ) {
       stubFetch({
         'POST /mcp': {
@@ -2053,7 +2119,7 @@ describe('#2054 — erc7710-only merchants', () => {
           responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
         },
         'GET /machine-payments/agent': agentRoute,
-        'POST /x402': { status: 201, body: CHILD },
+        'POST /x402': { status: 201, body: intentBody },
       })
       return handlers().haven_pay_mcp_tool({
         merchant_url: 'http://merchant.test/mcp',
@@ -2147,6 +2213,41 @@ describe('#2054 — erc7710-only merchants', () => {
       expect((res as { message?: string }).message).toContain('No compatible payment option')
       expect(x402Body()).toBeUndefined()
     })
+
+    // ── #3116: unsupported transfer methods and payment flows ──────────────
+    // The hosted pay tool selects through `selectX402SettlementScheme`; a
+    // merchant whose only entries ask for permit2 or an unrecognized
+    // paymentFlow must be refused with the capability as the named reason,
+    // before any /x402 intent is POSTed. A mixed challenge falls back to the
+    // supported entry behind the unsupported one.
+    it('#3116: a permit2-ONLY merchant refuses with the capability as the reason', async () => {
+      const res = await pay(PERMIT2_ONLY_PR, { status: 200, body: DELEGATION_AGENT }, { max_amount_human: '9' })
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect((res as { message?: string }).message).toContain('transfer method or payment')
+      expect((res as { message?: string }).message).toContain("extra.assetTransferMethod: 'permit2'")
+      expect((res as { message?: string }).message).toContain('No payment intent was created and no funds moved')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('#3116: an unrecognized paymentFlow on the only entry refuses the same way', async () => {
+      const res = await pay(FLOW_ONLY_PR, { status: 200, body: DELEGATION_AGENT }, { max_amount_human: '9' })
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect((res as { message?: string }).message).toContain('unrecognized extra.paymentFlow')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('#3116: a mixed challenge skips the permit2 entry and pays the supported one', async () => {
+      const res = ok<Record<string, any>>(
+        await pay(MIXED_PR, { status: 200, body: DELEGATION_AGENT }, { max_amount_human: '9' }, CHILD_3009),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      // The authorize carries the SUPPORTED entry — its maxAmountRequired
+      // (the authorization amount), not the unique permit2-tagged amount.
+      expect(x402Body()?.amount).toBe(PAYMENT_REQUIRED.accepts[0].maxAmountRequired)
+      expect(x402Body()?.amount).not.toBe(PERMIT2_ONLY_ATOMIC)
+    })
   })
 
   describe('haven_prepare_catalog_purchase', () => {
@@ -2175,7 +2276,7 @@ describe('#2054 — erc7710-only merchants', () => {
       pr: unknown,
       agent: Record<string, unknown>,
       cap: Record<string, string>,
-      opts: { remaining?: string; precheckStatus?: number; precheckBody?: Record<string, unknown> } = {},
+      opts: { remaining?: string; precheckStatus?: number; precheckBody?: Record<string, unknown>; intentBody?: unknown } = {},
     ) {
       stubFetch({
         'GET /catalog/cat_1': { status: 200, body: CATALOG_ENTRY },
@@ -2183,7 +2284,7 @@ describe('#2054 — erc7710-only merchants', () => {
           status: 402,
           responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(pr)) },
         },
-        'POST /x402': { status: 201, body: CHILD },
+        'POST /x402': { status: 201, body: opts.intentBody ?? CHILD },
         'GET /machine-payments/agent': { status: 200, body: agent },
         'POST /machine-payments/budget-precheck': {
           status: opts.precheckStatus ?? 200,
@@ -2254,6 +2355,43 @@ describe('#2054 — erc7710-only merchants', () => {
       expect((res as { message?: string }).message).toContain('No compatible payment option')
       expect(x402Body()).toBeUndefined()
     })
+
+    // ── #3116: unsupported transfer methods and payment flows ──────────────
+    // The prepare tool refuses an unsupported-only merchant before the /x402
+    // intent is POSTed; a mixed challenge falls back to the supported entry.
+    it('#3116: a permit2-ONLY merchant refuses before the /x402 intent', async () => {
+      const res = await prepare(PERMIT2_ONLY_PR, DELEGATION_AGENT, { max_amount_human: '9' })
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect((res as { message?: string }).message).toContain("extra.assetTransferMethod: 'permit2'")
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('#3116: an unrecognized paymentFlow on the only entry refuses the same way', async () => {
+      const res = await prepare(FLOW_ONLY_PR, DELEGATION_AGENT, { max_amount_human: '9' })
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect(x402Body()).toBeUndefined()
+    })
+
+    it('#3116 positive control: a plain supported entry still pays — behavior unchanged', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(PAYMENT_REQUIRED, DELEGATION_AGENT, { max_amount_human: '9' }, { intentBody: CHILD_3009 }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(x402Body()?.settlementScheme).toBe('eip3009')
+      // maxAmountRequired is the authorization amount on this entry (#3116 note: unchanged behavior).
+      expect(x402Body()?.amount).toBe(PAYMENT_REQUIRED.accepts[0].maxAmountRequired)
+    })
+
+    it('#3116: a mixed challenge skips the permit2 entry and prepares the supported one', async () => {
+      const res = ok<Record<string, any>>(
+        await prepare(MIXED_PR, DELEGATION_AGENT, { max_amount_human: '9' }, { intentBody: CHILD_3009 }),
+      )
+      expect(res.data.settlement_scheme).toBeUndefined()
+      expect(x402Body()?.amount).toBe(PAYMENT_REQUIRED.accepts[0].maxAmountRequired)
+      expect(x402Body()?.amount).not.toBe(PERMIT2_ONLY_ATOMIC)
+    })
   })
 
   describe('haven_quote_mcp_tool', () => {
@@ -2285,6 +2423,13 @@ describe('#2054 — erc7710-only merchants', () => {
       expect(res.data.erc7710_only).toBeUndefined()
       // Unchanged: the standard entry's own amount, not this suite's.
       expect(res.data.amount_atomic).toBe('1500000')
+    })
+
+    it('#3116: an unsupported-only merchant is refused, never described as payable', async () => {
+      const res = await quoteTool(PERMIT2_ONLY_PR)
+      expect(res.success).toBe(false)
+      expect((res as { message?: string }).message).toContain('No compatible payment option')
+      expect((res as { message?: string }).message).toContain('transfer method or payment')
     })
 
     it('negative control: a merchant with NOTHING settleable is still refused at the quote', async () => {

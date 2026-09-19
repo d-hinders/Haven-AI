@@ -236,6 +236,17 @@ describe('payment result mappers', () => {
   })
 })
 
+describe('list scope survives the receipt mapper (#3132)', () => {
+  it('carries scope when the backend states it, as the two decided values', () => {
+    const receipt = mapPaymentReceipt(rawReceipt({ scope: { source: 'agent', filter: null } }))
+    expect(receipt.scope).toEqual({ source: 'agent', filter: null })
+  })
+
+  it('leaves scope undefined on an older backend that does not send it — never invents one', () => {
+    expect(mapPaymentReceipt(rawReceipt())).not.toHaveProperty('scope')
+  })
+})
+
 describe('raw payment state mapping', () => {
   it('#2262: approved is fail-closed — stop, never a wait instruction', () => {
     // `approved` sat literally between two branches #2101 had already

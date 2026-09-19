@@ -31,6 +31,7 @@ function tx(overrides: Partial<EnrichedTransaction> = {}): EnrichedTransaction {
     decimals: 6,
     direction: 'out',
     timestamp: 1_778_240_999,
+    timestampSource: 'block',
     blockNumber: 45_725_826,
     isError: false,
     chainId: 8453,

@@ -12,7 +12,9 @@ covers:
   - packages/frontend/src/components/analytics/BalanceSection.tsx
   - packages/backend/src/routes/analytics-overview.ts
   - packages/backend/src/infra/repositories/analytics.ts
-last-verified: "2026-09-17"
+  - packages/backend/src/modules/mpp/budget-precheck.ts
+  - packages/backend/src/routes/machine-payments.ts
+last-verified: "2026-09-19"
 ---
 
 # Analytics
@@ -134,13 +136,15 @@ not in the sum.
   migration 086 (14 September 2026). A range reaching before that date simply
   has no refusal rows for the days before it — the page shows an honest empty
   there, and neither it nor the API claims a coverage floor it cannot read.
-  Refusals are recorded with attempts. Two kinds of refusal never reach the
-  ledger, and the page says so rather than letting the count imply them: a
-  price cap your agent's own runtime applies (it declines before asking
-  Haven, so there is no request for a row to describe), and a budget refusal
-  the hosted MCP raises while preparing a purchase, before any payment has
-  been set up. A payment a rate limit holds back is throttling, not a
-  refusal, and it is not counted as one.
+  Refusals are recorded with attempts. One kind of refusal never reaches the
+  ledger, and the page says so rather than letting the count imply it: a
+  price cap. Your agent's own runtime may apply one before asking Haven (no
+  request, so no row), and the hosted prepare step applies the agent's stated
+  cap against the live quote too — that refusal is by policy not written
+  either. A budget refusal the hosted MCP raises while preparing a purchase
+  IS recorded and counted (the hosted prepare step writes its own refusal
+  row for the budget branch, not for the cap branch). A payment a rate limit
+  holds back is throttling, not a refusal, and it is not counted as one.
 - **Sponsored gas.** Haven relays agent payments, and the relay's network fee
   is paid by Haven. The page shows this as a count — "Haven sponsored N
   operations' gas" — of relayed operations on value-bearing chains. It is
@@ -163,9 +167,10 @@ not in the sum.
 - It is not an accounting record. The accounting feed and your accountant own
   the books; Analytics is a spending overview, and its numbers are not
   bookings.
-- It does not show the refusals the ledger never sees — a price cap your
-  agent's own runtime applies, and a budget refusal the hosted MCP raises at
-  prepare. Its count is only ever refusals the ledger recorded.
+- It does not show the refusal the ledger never sees — a price cap your
+  agent's own runtime applies. Its count is only ever refusals the ledger
+  recorded, which since the hosted prepare step gained its writer includes the
+  budget refusals raised there — not the cap refusals raised at the same step.
 
 ## In the demo
 

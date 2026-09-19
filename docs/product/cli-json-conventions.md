@@ -73,6 +73,17 @@ carry `convertedAmount` / `convertedCurrency` / `convertedFxRate` — the amount
 in the user's `currency_preference`, currency as a field — plus the row's
 `fxRates` book-time map; all forward untouched through the pass-through.)
 
+Since #3132 every `activity list` row also carries `scope: { source: 'wallet',
+filter }` — the feed is wallet-scoped, and `--agent` / `--safe` NARROW it
+(`filter: 'agent' | 'account' | 'account+agent' | null`; `--direction` is
+applied client-side after the response and is not part of `scope`) rather than turning it
+into the agent-scoped receipts view the MCP's `haven_list_receipts` returns
+(`{ source: 'agent', filter: null }`). Rows also carry `timestampSource`
+(`'block'` | `'confirmed_at'` | `'created_at'`), naming the column behind
+`timestamp`, and x402-synthesized rows carry the recorded, nullable
+`confirmedAt`; their `paymentProofStatus` is `null` when no evidence row
+exists, never a placeholder.
+
 ## Per command
 
 ### Pass-through — the backend's casing

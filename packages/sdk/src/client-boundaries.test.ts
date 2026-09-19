@@ -564,6 +564,7 @@ describe('HavenClient structural boundary', () => {
       'HavenCatalogMerchant', // #3078
       'HavenCatalogSubmission',
       'HavenClientConfig',
+      'HavenListScope',
       'HavenPaymentReceipt',
       'HavenPaymentReceiptsPage', // #3128
       'MachinePaymentRail',

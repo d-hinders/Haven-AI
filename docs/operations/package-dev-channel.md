@@ -19,10 +19,11 @@ covers:
   - packages/connect/src/runtime.ts
   - packages/connect/src/wiring-collision.ts
   - packages/connect/src/prune-runtimes.ts
+  - packages/connect/src/storage.ts
   - packages/signer/src/credentials.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -117,6 +118,28 @@ and the `release` skill.
 > deliberately NOT bumped — **it already reads 2026-09-17 from an earlier change
 > today**, and a scoped check of one constant is not a re-verification of this
 > document; #1366 rates a rubber stamp worse than a stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
+
+> **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
+> is in this doc's `covers:`. Verified rather than asserted: the constant moved
+> `0.3.0-alpha.0` → `0.4.0-alpha.0`, and the bump's own checks report channel
+> `alpha` agreeing across the source, the built connect bundle and the SDK that
+> bundle resolves. **No channel behaviour changed** — measured over the whole
+> promotion range and over this bump's own diff, neither touches
+> `publish.yml`, `release-channel.mjs`, `release-snapshot-version.mjs` or
+> `release-version-order.mjs`
+> (`git log origin/main..origin/dev -- <those four>` is empty, as is
+> `git diff --name-only` for them here), so the `0.0.0-dev.*` snapshot path and
+> the rule that the two channels cannot cross are untouched. Specific to this
+> release: a MINOR step changes nothing about channel ordering — `0.0.0-` still
+> sorts below every real version, and the `dev` tag observed during this release
+> (`0.0.0-dev.202609190936.6937e31`) sits below `alpha`/`latest` at
+> `0.3.0-alpha.0` exactly as the ordering rule requires. `last-verified`
+> deliberately NOT bumped — **it already reads 2026-09-19 from an earlier change
+> today** (#3122) — and a scoped check of one constant is not a re-verification
+> of this document; #1366 rates a rubber stamp worse than a stale date. Scope:
+> `CONNECTOR_VERSION`, the channel constant's value, and the four
+> channel-machinery files named above.
 
 ## What `@dev` is, and is not
 
@@ -349,7 +372,16 @@ throughout.
    wiring is untouched. Do **not** answer `--replace` on a machine whose
    production wiring you want to keep: it retires that agent's local key files.
    `--doctor` enumerates every agent on the machine regardless of name, so
-   step 5 is unchanged.
+   step 5 is unchanged. Since #3122 the run also says, BEFORE it writes
+   anything, which other directories on the machine still hold a stored key
+   and the account each spends from (a warning, never a refusal), and records
+   the server name it bound in a non-secret `mcp-server-binding.json` beside
+   `last-connect-outcome.json` — so a later run that repoints `haven` at a
+   different backend (the channel switch this page describes) names the
+   previous binding and flags the backend change before the write; the doctor
+   reports two records claiming one name as the `mcp_server_name_rebound`
+   advisory. The backend's own record stays the authority for the same
+   backend; the local one is a reporting aid.
 
 5. **Verify the install.**
 

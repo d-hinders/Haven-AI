@@ -36,8 +36,11 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ethers } from 'ethers'
+import { x402ResourceServer } from '@x402/core/server'
+import type { PaymentPayload, PaymentRequirements } from '@x402/core/types'
 import { HavenClient } from './client.js'
 import {
+  normalizePaymentRequired,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
   X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
 } from './x402.js'
@@ -167,6 +170,37 @@ async function buildHeader(
   }
   return target.fundingLeg.createPaymentHeader(pr, option)
 }
+
+describe('merchant timeout versus signed lifetime (#3117)', () => {
+  it.each([60, 600, 601, 1200])('echoes the parsed %i-second offer for official requirement matching', async (timeout) => {
+    const advertised = { ...accepted, maxTimeoutSeconds: timeout, extra: { ...accepted.extra, merchant: { tiers: ['standard'], revision: 2 } } }
+    const challenge = { ...paymentRequired, accepts: [advertised] }
+    const parsed = normalizePaymentRequired(challenge)!
+    const before = Math.floor(Date.now() / 1000)
+    const header = decodeHeader(await buildHeader(makeHaven(), parsed, parsed.accepts[0]))
+    const after = Math.floor(Date.now() / 1000)
+    expect(header.accepted).toEqual(advertised)
+    const server = new x402ResourceServer()
+    expect(server.findMatchingRequirements([advertised as PaymentRequirements], header as PaymentPayload)).toEqual(advertised)
+    const lifetime = Math.min(timeout, X402_MAX_AUTHORIZATION_WINDOW_SECONDS) + X402_SETTLEMENT_FORWARD_MARGIN_SECONDS
+    expect(Number(header.payload.authorization.validBefore)).toBeGreaterThanOrEqual(before + lifetime)
+    expect(Number(header.payload.authorization.validBefore)).toBeLessThanOrEqual(after + lifetime)
+    // Requirement matching alone does not promise settlement: a 1200-second
+    // requirement still exceeds the retained 900-second signing ceiling.
+    if (timeout === 1200) expect(Number(header.payload.authorization.validBefore)).toBeLessThan(before + timeout)
+  })
+
+  it.each([60, 600, 601, 1200])('bounds the signed lifetime for a raw %i-second offer', async (timeout) => {
+    const option = { ...accepted, maxTimeoutSeconds: timeout }
+    const before = Math.floor(Date.now() / 1000)
+    const header = decodeHeader(await buildHeader(makeHaven(), { ...paymentRequired, accepts: [option] }, option))
+    const after = Math.floor(Date.now() / 1000)
+    const lifetime = Math.min(timeout, X402_MAX_AUTHORIZATION_WINDOW_SECONDS) + X402_SETTLEMENT_FORWARD_MARGIN_SECONDS
+    expect(Number(header.payload.authorization.validBefore)).toBeGreaterThanOrEqual(before + lifetime)
+    expect(Number(header.payload.authorization.validBefore)).toBeLessThanOrEqual(after + lifetime)
+    expect(header.accepted).toEqual(option)
+  })
+})
 
 describe('EIP-3009 authorization fields', () => {
   it('carries exact from/to/value matching the delegate and the accepted option', async () => {

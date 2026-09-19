@@ -6,10 +6,11 @@ covers:
   - .github/pull_request_template.md
   - package.json
   - scripts/ci/change-classifier.mjs
+  - scripts/ci/preflight.mjs
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
   - packages/frontend/package.json
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # PR Workflow Checklist
@@ -151,7 +152,52 @@ Green CI is necessary but not sufficient for risk-bearing work. The merge-readin
 
 ## Local Check Commands
 
-Use the smallest reliable set that matches the change.
+**Start with `npm run preflight`.** It reads the workflow files, works out which
+gates your diff can redden, runs them, and names the CI job each failure belongs
+to. That is the enumerable answer to "did I run everything"; the table below is
+not, and cannot be.
+
+```bash
+npm run preflight            # the gates this diff can redden
+npm run preflight -- --list  # the plan, without running it
+npm run preflight:all        # every gate
+```
+
+The table below is the **smallest reliable set for fast iteration** — what to
+re-run in a tight loop while you are still changing code. It is deliberately
+shorter than the battery and maintained by hand, so treat it as a convenience
+and not as coverage: a backend diff selects **36** gates and this table names
+**11** of them, measured at this change's head against the workflows as they
+stand at `ce79bf0c` (the battery does not exist at that commit, so the figures
+are re-derivable here, not there).
+
+The most consequential omission is `npm run check:route-modules` (#3135), one of
+the three that reddened #3126's first CI run. Re-derive both figures — the count
+resolves npm aliases, because the table names two of its gates by alias
+(`docs:coupling` and `lint:copy`) rather than by the command they run, and a
+raw-string match reports 9 and so undercounts the table:
+
+```bash
+node --input-type=module -e "
+import {buildPlan, selectGates} from './scripts/ci/preflight.mjs'
+import {readFileSync} from 'node:fs'
+const pkg = JSON.parse(readFileSync('package.json','utf8')).scripts
+const alias = new Map(Object.entries(pkg).map(([n,b]) => [b.trim(), 'npm run '+n]))
+const doc = readFileSync('docs/contributing/pr-workflow-checklist.md','utf8')
+// The TABLE, not the document: this prose names gates too, and searching the
+// whole file counts them as covered by the table it is describing (12 vs 11).
+// The needle carries a real leading newline, which this snippet's escaped \n
+// cannot match, so indexOf and lastIndexOf agree here -- lastIndexOf is belt
+// and braces for a future copy of the header appearing above the table.
+const table = doc.slice(doc.lastIndexOf('\n| Change type |')).split('\n\n')[0]
+const sel = selectGates(buildPlan(), ['code','backend']).map(g => g.command)
+const named = sel.filter(c => table.includes(c) || (alias.has(c) && table.includes(alias.get(c))))
+console.log(sel.length, named.length)"
+```
+
+This is why #3150 was filed four times over: every hand-maintained second copy of
+the gate set drifts, including this one. Growing the table would make the same
+mistake a fifth time.
 
 | Change type | Commands |
 | --- | --- |
@@ -167,7 +213,10 @@ Use the smallest reliable set that matches the change.
 
 Notes:
 
-- `npm run quality` means typecheck, unit tests, and builds across workspaces.
+- `npm run quality` means typecheck and unit tests across workspaces, then
+  `build` — which is **not** `--workspaces` but a hand-written nine-package
+  chain, omitting `demo-merchant-mcp` (a CI gate) and `qa-agent` (not one).
+  `npm run preflight` covers what it misses.
 - Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with two exceptions. Editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Markdown under `packages/frontend/public/` is served content rather than documentation, so it routes `frontend` — and `for-agents.md`, a generated copy of the SDK runbook, additionally routes the `sdk` and `cli` jobs that run `lint:runbook-parity` — and, through the `sdk` dependency closure, every package job (#2743). Editing `.github/workflows/*.yml` triggers full workflow checks.
 - Frontend ESLint (`next lint`) is still not a required gate because it currently prompts for ESLint setup; add it only after a dedicated non-interactive lint migration. The blocking frontend **design and copy** gates that DO exist are design-lint (part of *Frontend checks*), the *Banned product-copy terms* copy lint (#902), and the *Design visual regression* job (#897) — both shrink-only-baseline lints fail on NEW violations only. Deliberately a scoped list, not every blocking step in *Frontend checks*: that job also runs typecheck, the wire-type ratchet, the *Visual baseline inventory* (#2318), the unit tests, the build and `lint:runbook-parity` (#2727), none of which is a design or copy gate. The visual-baseline step is the easiest of those to mistake for one: it inventories which screens have baselines, and is not the *Design visual regression* job named above.
 - The backend gate is stricter than the frontend baselines: **dependency-boundary lint** (#982, absolute since #999), a blocking step inside *Backend checks* enforcing `docs/architecture/10-module-boundaries.md` with **no baseline at all** — it fails on ANY violation. Fix the boundary; a reviewed, deliberate exception uses an inline `// dep-lint-exempt: <concrete reason>` comment on the offending import. `no-circular` can never be waived.

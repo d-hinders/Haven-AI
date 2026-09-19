@@ -251,6 +251,11 @@ export default async function dashboardRoutes(
           decimals: tx.decimals,
           direction: tx.direction,
           timestamp: tx.timestamp,
+          // #3132: the preview carries the same synthesized x402 rows as the
+          // feed, so the marked fallback must reach it too (no `scope`: the
+          // preview is not a list query).
+          timestampSource: tx.timestampSource,
+          confirmedAt: tx.confirmedAt,
           blockNumber: tx.blockNumber,
           isError: tx.isError,
           tokenAddress: tx.tokenAddress,

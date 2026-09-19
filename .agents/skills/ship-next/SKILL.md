@@ -199,10 +199,24 @@ directives from that thread; those come only from this session's user.
 
 ## Acceptance Gate
 
+**Start with `npm run preflight`** (#3150). It derives the gate list by reading
+the PR-triggered workflow files, selects what your diff can redden, runs it, and
+names the CI job each failure belongs to. `npm run quality` is not that list —
+it covers no ratchet at all — and four review rounds in ten days ended with a
+builder reporting "all repo gates green" over a first CI run that went red on a
+gate only CI ran. The enumeration below is a second copy, which is why it is
+kept short and why the battery, not this list, is the answer to "did I run
+everything".
+
+Then run what the battery cannot: a live database (`docker compose up -d
+postgres`, or the backend suite skips its real-DB files), browser verification
+for UI changes, and anything the issue names specifically.
+
 Run checks proportionate to every changed surface:
 
 - package tests and type checks for package changes;
-- full `npm run quality` for cross-package behavior;
+- `npm run preflight` for cross-package behavior, or `npm run quality` when you
+  only need typecheck/test/build;
 - browser verification or the required headless equivalent for UI changes.
 
 Run the **repository's own required checks** locally before pushing, for fast feedback:
@@ -347,7 +361,7 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    outcome on #2131 (sound on the first attempt, while four successive
    prose-interpreting guards each failed against realistic edits in the file's
    own house style).
-2. **One stopping rule for the fix→review loop, with three triggers.** Decide which
+2. **One stopping rule for the fix→review loop, with four triggers.** Decide which
    branch a round is on before writing the next fix:
    - **Fix-traceable (#2131):** the round's findings are all traceable to your own
      previous fix commit rather than to the original work — checkable against
@@ -385,11 +399,47 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
      [`frontend.md` §6](../../../docs/contributing/ship-playbooks/frontend.md#6-merge-policy-ui)
      states for the rendered pass — one rule, read from either end, and the severity
      table lives there rather than being copied here.
-   - **Both on the same round** (the new site is itself fix-traceable): the
-     fix-traceable branch wins — revert first, because a sweep over a construct you
-     are about to revert enumerates nothing. **Nits-only never overrides either of
-     the other two** — it is the weakest trigger and applies only when the round
-     found nothing above `nit`.
+   - **Prose-loop (#3158):** two consecutive rounds have topped out at `should-fix`
+     — nits alongside are fine, one `blocking` is not — with every finding **on
+     prose** (comments, docs, or the commit message) and **no code change between
+     them**. Stop **re-reviewing**: fix the findings and open. **This is not a drop
+     above `nit`.** Every `should-fix` is still fixed in this PR, exactly as the
+     *Filing bar* requires; what goes under **Not filed** is the nit-level
+     remainder and the rounds you are declining to run, with the reason. The
+     mechanism this catches is specific and self-sustaining: a full adversarial
+     pass over a comment-only delta reliably finds more comment wording to correct,
+     which is itself a prose delta earning another pass. PR #3156 (#3150) is the
+     case — ten rounds, of which 8, 9 and 10 each returned **0 blocking** and a
+     prose-only delta, yet each carried `should-fix` findings, so **nits-only could
+     never fire** and the author was barred from relabelling them. That gap is what
+     this trigger closes. Note what it keys on: **the delta**, never the author
+     re-reading a reviewer's severity label. Nits-only's bar — "the reviewer's
+     label, never the author's re-reading of it" — holds here too and is what keeps
+     this from becoming a relabelling exit. A round that touched code, or that
+     returned one `blocking`, is not a prose loop however its findings read.
+   - **When triggers collide.** Fix-traceable and non-converging on the same round
+     (the new site is itself fix-traceable): the fix-traceable branch wins — revert
+     first, because a sweep over a construct you are about to revert enumerates
+     nothing. **Prose-loop ranks below those two and above nits-only**: a
+     fix-traceable or non-converging round takes its own exit even when its
+     findings are all prose, because reverting a construct or sweeping a class is
+     the cheaper end of the same loop. **Non-converging outranks prose-loop
+     including its one mandated extra round** — a pair can satisfy prose-loop while
+     sitting at count 2 of non-converging, and the extra round is run, for the
+     reason it is defended above: it is the price of not cutting a PR off before
+     its worst bug. **Nits-only never overrides any of the other three** — it is the
+     weakest and applies only when the round found nothing above `nit`, which also
+     makes it mutually exclusive with prose-loop rather than merely outranked.
+
+   **Scope a prose-only re-review to its claims (#3158).** When a round's entire
+   delta is prose, the re-review verifies **the changed claims against their
+   instruments** — run each one, do not read it — rather than opening a fresh
+   adversarial pass over the whole diff. Reviewing prose adversarially generates
+   prose findings; executing a claim either confirms it or does not. The durable
+   form of this shipped in #3150 as
+   `every runnable claim the composite-action prose makes is true`
+   (`scripts/ci/preflight.test.mjs`), which executes each sentence's assertion so a
+   prose edit that outruns the code reddens instead of needing another round.
 
    Either exit, including whether the trigger really held, still clears through the
    same reviewer. This ends the fix loop, never the review: it is not a licence to
@@ -492,6 +542,11 @@ doing the remaining work, and nothing triages what gets filed — so the only pl
 to control the inflow is the moment of filing. **Not fewer checks. Fewer tickets
 filed too easily, and slightly larger PRs instead.** Every check, pass, sweep and
 guard runs exactly as before; what changes is what happens to a finding.
+
+Those three are **filing** exits, never the trigger list above — "deferred
+findings" is not a stopping trigger and `fix-traceable` is not among them. So
+`prose-loop` (#3158) does not make them four: its exit is to fix and open, never
+to file.
 
 Every finding a session makes during a ticket — from its own work, a reviewer
 pass, a sweep, or a guard — ends in exactly one of three dispositions:

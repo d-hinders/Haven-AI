@@ -13,6 +13,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/account-reads.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/mcp-merchant-transport.ts
   - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
@@ -28,6 +29,8 @@ covers:
   - packages/backend/src/domain/agent-payment-taxonomy.ts
   - packages/backend/src/modules/transactions/csv-export.ts
   - packages/sdk/src/types.ts
+  - packages/sdk/src/payment-mappers.ts
+  - packages/sdk/src/x402.ts
   - packages/sdk/src/tool-descriptions.ts
   - packages/sdk/src/next-step.ts
   - packages/mcp-server/src/server.ts
@@ -36,7 +39,7 @@ covers:
   - scripts/lint-next-steps.mjs
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
-last-verified: "2026-09-18"
+last-verified: "2026-09-19"
 ---
 
 # MCP Runtime Compatibility
@@ -59,6 +62,24 @@ last-verified: "2026-09-18"
 > #2274 shipped a false sentence past a green tick. Kept as one note rather than
 > one per CI edit, so this section does not accumulate a paragraph every time a
 > step is added.
+>
+> **Recent re-verification (#3116):** the signer's merchant-header boundary
+> (`buildX402PaymentHeader`, `packages/signer/src/core.ts`) now refuses an
+> x402 challenge whose entries all advertise a transfer method or payment
+> flow the SDK cannot construct (`extra.assetTransferMethod: 'permit2'`, or
+> an unrecognized `extra.paymentFlow`) — via the same shared
+> `selectStandardPaymentOption` it already selected through, so the local
+> runtime's refusal and the SDK clients' refusal are the one rule, not two.
+> A mixed challenge still signs the supported entry behind the unsupported
+> one, and the explicitly-supported pair (`eip3009` + `authorization`) still
+> signs — the positive controls in `packages/signer/src/core.test.ts` pin
+> both. No tool name, schema, tool-NAME set, consent hash or next-step shape
+> moves: the refusal is the pre-existing `HavenApiError` "No compatible
+> payment option" path, now with a clause naming the capability reason.
+> Skew: none — the behavior change is inside both runtimes' bundled SDK, so
+> they tighten together; an older bundled SDK keeps the old (sign-anyway)
+> behavior, which is the bug this closes. Nothing else in this document was
+> re-verified in this pass.
 >
 > **Recent re-verification (#3128):** `haven_list_receipts` is RE-SHAPED on
 > both runtimes — the one deliberate non-additive change on this surface
@@ -106,6 +127,49 @@ last-verified: "2026-09-18"
 > description change, and the skew-flatness this document asserts holds — the
 > endpoint and the tool that calls it deploy in the same train. Nothing else
 > in this document was re-verified in this pass.
+>
+> **Recent re-verification (#3132):** `haven_list_receipts`'s `selectionGuidance`
+> prose changed on BOTH runtimes (one shared fragment,
+> `packages/sdk/src/tool-descriptions.ts` `listReceipts`): it now says "This
+> agent's payment evidence, not the wallet's transaction history (sweeps,
+> funding legs, other agents)" instead of inviting a transaction-history read,
+> and its `behavior` was re-cut to stay under budget — the exact text is
+> `packages/sdk/src/tool-descriptions.ts` `listReceipts`, and
+> `packages/mcp-server/src/description-size.test.ts` holds it under the #1591
+> budget; the hosted description mean was re-measured under the
+> #1591 budget by `description-size.test.ts`. Each receipt row now carries
+> `scope: { source: 'agent', filter: null }` — additive on the wire
+> (`MachinePaymentReceipt.scope`, optional) and on the SDK type
+> (`HavenPaymentReceipt.scope`, absent on an older backend, never invented), so
+> an older SDK against a newer backend drops the key in `mapPaymentReceipt` and
+> a newer SDK against an older backend sees none; no tool added, renamed or
+> re-shaped, no argument or schema change, and the version-skew and
+> consent-hash contracts do not move (descriptions are not a skew axis — #2330
+> precedent). Nothing else in this document was re-verified in this pass.
+>
+> **Recent re-verification (#3169):** the edge signer's `haven_sign` no longer
+> signs a bare `payload_hash` (no `payment_id`, no `typed_data` /
+> `typed_data_b64`, no `x402_expected`): that arm was raw secp256k1 over caller
+> bytes for the retired AllowanceModule rail, and it now answers the structured
+> `BARE_HASH_REFUSED` refusal (`next_action: stop_and_tell_user`, a typed step
+> with no tool and the reason) — the same envelope shape as the #3001/#3103
+> signer refusals. `haven_sign`'s ARGUMENTS are unchanged (the refusal is on
+> one combination of them), its description text changed to say so, and no
+> tool was added, renamed or re-shaped, so the consent hash (identity + tool
+> names + surface version, `packages/signer/src/consent.ts`) and the
+> version-skew contract do not move; an older signer against the same backend
+> keeps signing the bare hash WHEN A CALLER HANDS IT ONE — no Haven flow emits
+> that shape (the legacy rail answers 410), so the exposure is caller-driven;
+> updating the signer is the remedy, as for any signer defect. The opposite
+> skew — a new signer against a pinned pre-#1254 hosted image that returns
+> `payload_hash` with no `typed_data_b64`, WHEN the agent relays that hash as
+> the only argument — now gets `BARE_HASH_REFUSED` where it previously got a
+> signature the account rejected on-chain anyway (AA24): a behaviour change for
+> a pinned old backend, and the better outcome. With `payment_id` against that
+> same image the answer is unchanged — `HavenSignContextError` with the
+> `typed_data_b64` fallback (`sign-context.ts` refuses a context missing
+> `typed_data`). Nothing
+> else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#3125):** the `haven_list_receipts` description
 > prose changed on BOTH runtimes — it is one shared fragment
@@ -735,6 +799,64 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** the manifest table
+> above is re-pinned by the bump to `0.4.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`; the four numbers were not copied by hand. **Re-read, not
+> rubber-stamped**, and the table's non-version rows still hold: the Node floor
+> is unchanged (`>= 22.0.0`, CI on LTS 24 via `.nvmrc`), and the Codex and
+> Claude Code rows still describe local stdio MCP.
+>
+> **MINOR, and one tool's output contract is why.** `haven_list_receipts` on
+> the local MCP runtime now returns
+> `{ receipts, total, hasMore, nextCursor }` **instead of a bare array**, and
+> takes an optional `cursor` (#3128, via the SDK's new `listReceiptsPage`). For
+> an MCP server package the **tool result shape is the published contract**, so
+> an agent or script that indexed the old array meets an object. Under the 0.x
+> convention that made 0.2.0 and 0.3.0 MINOR, a break takes the minor step.
+>
+> **Record how nearly this was missed**, because the lesson is about the
+> instrument. Commit subjects carried no `!:` marker, and BOTH declaration-level
+> checks — a name-level `.d.ts` diff and a TypeScript-compiler-API pass that
+> recurses three levels into exported members — reported **zero removals across
+> all five packages**. They are correct and they are blind here: a tool's
+> runtime result shape appears in no `.d.ts`. The release's own CHANGELOG is
+> what names it. Treat "the declaration surface lost nothing" as evidence about
+> declarations only, never as evidence that a release carries no break.
+>
+> The SDK is NOT part of this break: `listReceipts(): Promise<HavenPaymentReceipt[]>`
+> is byte-identical to the published `0.3.0-alpha.0` declaration and
+> `listReceiptsPage` is additive. Measured against the published tarballs, the
+> built declarations remove **zero** names across all four affected packages and
+> add **24** (23 `sdk`, 1 `signer`).
+>
+> **What else moved that a skew reader should know.** The typed-next-step
+> surface reaches all three published runtimes at once (epic #3105: `sdk` gains
+> `NextStep` and `createNextStepBuilder`, `signer` gains
+> `SIGNER_HOSTED_HANDOFF_SHAPES`, and the hosted MCP will not compile a bare
+> `nextAction`). These are **outputs**, and nothing validates their presence at
+> runtime, so **a stale signer or local runtime simply emits no typed next
+> step** — the state it was already in before this release. Note this is the
+> fail-open-on-absence direction, which is NOT what the skew table below models:
+> that table is about a stale half refusing input it cannot validate. The sharp
+> edge there is *"An undeclared argument is refused, not stripped (#2312)"* —
+> checked, and it does not bite: `git diff` over `packages/signer/src/tools.ts`
+> across this range shows no `toolSchemas` schema change at all, only a
+> `Record<…>` → `as const satisfies Record<…>` annotation, so no new signer
+> argument exists to be refused.
+>
+> The x402 retry-target guards (`assertSecureX402RetryTarget` and siblings,
+> #3097) and the unsupported-transfer-method refusal (#3116) are additive at the
+> declaration level but **narrow runtime behaviour** in the fail-closed
+> direction — an old caller that relied on the paid retry following a
+> merchant-declared `http://` resource, or on a `permit2` entry being signed as
+> EIP-3009, now gets a typed refusal. Neither was a documented capability.
+>
+> `last-verified` is left as it stands: it **already reads 2026-09-19** from
+> #3116's change earlier today, so there is nothing to bump. This note is a
+> genuine re-read of the manifest table and the skew section rather than a
+> scoped check of one constant — but a date that is already correct does not get
+> re-stamped for the sake of it (#1366).
+
 > **Re-verification (0.3.0-alpha.0 release, 2026-09-17):** this release is a
 > **BREAK**, and the version says so — MINOR under the 0.x convention, the same
 > reason 0.2.0-alpha.0 was. It carries the naming-P5 contraction (#2914 /
@@ -811,10 +933,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.3.0-alpha.0` |
-| `@haven_ai/mcp` | `0.3.0-alpha.0` |
-| `@haven_ai/sdk` | `0.3.0-alpha.0` |
-| `@haven_ai/signer` | `0.3.0-alpha.0` |
+| `@haven_ai/connect` | `0.4.0-alpha.0` |
+| `@haven_ai/mcp` | `0.4.0-alpha.0` |
+| `@haven_ai/sdk` | `0.4.0-alpha.0` |
+| `@haven_ai/signer` | `0.4.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -914,6 +1036,13 @@ environment sets is an operator action this repository cannot observe and does
 not record here.
 
 ## Hosted-runtime connector profiles
+
+The SDK's parsed v2 payment requirements retain the merchant's advertised
+`maxTimeoutSeconds`, floored to an integer, for the `accepted` echo (#3117). SDK and local signer
+still bound the signed authorization lifetime separately; an offer can match
+its echo yet exceed that lifetime at facilitator verification. This changes
+neither tool arguments nor the funding-binding contract. Existing credentials
+and signer/backend combinations require no migration.
 
 For the hosted fast-settle path, the local signer may produce either the
 supported legacy x402 v1 envelope or the current v2 `{ x402Version, resource?,
@@ -1388,7 +1517,14 @@ run that replaced existing wiring (the latter names only the collision set that
 was actually retired — `superseded_agent_ids` is every other directory, named
 agents included, so the boolean is never to be read against it), and
 `error.superseded_agent_ids` / `error.suggested_name` on a `wiring_collision`
-refusal; and since #2528, also additive, `approval.url` — the absolute link to
+refusal; since #3122, also additive, `existing_agents_before_write` (always
+present on a completed run — the other live-keyed directories, named BEFORE the
+first write, with the account each spends from; a subset of
+`superseded_agent_ids`, which also names key-less and tombstoned directories)
+and `server_name_rebound_from`
+(only when the run took a server name over from another directory's local
+`mcp-server-binding.json`, with `backend_changed`); and since #2528, also
+additive, `approval.url` — the absolute link to
 this setup's budget approval, echoed from the register response and present
 only when `approval.required` is true AND the backend is new enough to return
 one, so a consumer must test for the key rather than assume it. The connector
@@ -1761,6 +1897,27 @@ sets status and payment fields, while product/invoice metadata comes from the
 merchant and `settlement_tx_hash` is only an optional merchant PAYMENT-RESPONSE
 receipt reference. Missing values are explicit; it changes neither signing nor
 runtime compatibility.
+
+> **Re-verified #3118:** the SDK under both runtimes now also speaks the
+> official x402 MCP transport profile — a payment-required TOOL RESULT
+> (`isError: true`, `PaymentRequired` as `structuredContent`, JSON text
+> fallback) under HTTP 200 is quoted like a 402 by `quoteX402` /
+> `quoteMcpX402` / `fetch()`; the paid retry adds the decoded envelope as
+> `params._meta["x402/payment"]` beside the unchanged headers whenever the
+> body is a `tools/call` request; `settlement_tx_hash` may now come from
+> `result._meta["x402/payment-response"]` when there is no `PAYMENT-RESPONSE`
+> header, and it stays a merchant CLAIM relayed verbatim (re-encoded as base64
+> JSON so `protocolReceiptPayload` decodes through the one existing path). An
+> in-band refusal (an `isError` challenge on the paid retry, or
+> `success: false`) is `ok: false` — the hosted refusal is thrown as 402 (no
+> failure object rides an HTTP-200 status) and its message names
+> `HTTP 200, refused in-band`, the status the merchant really returned. No
+> tool added, renamed or re-shaped; no argument, schema, strict/permissive
+> split, tool-NAME set, version-skew or consent-hash contract moves; the
+> hosted server changes in exactly one place, that status mapping in
+> `paid-mcp-completion.ts`, and inherits everything else from
+> `@haven_ai/sdk`. Nothing else in this document was re-verified in this
+> pass.
 
 `haven_prepare_catalog_purchase` (#1306) — the guided catalog-id preflight —
 persists the SAME `mcpCallContext` at quote time (it composes the identical
@@ -2243,6 +2400,31 @@ to call next in structured fields, and those fields are typed end to end
   > `--replace` paragraph under the wiring-collision section (now states that
   > `--replace`'s teardown is unconditional and unprobed) and the JSON-envelope
   > bullet above (a retained teardown is the second non-zero-exit case).
+  > Nothing else in this document was re-verified in this pass.
+
+  > **Re-verified #3122:** a wallet warning is now emitted BEFORE the first
+  > credential write. Setup now reads every other credential directory's stored key and
+  > account (local files only — no network call is added, and the backend is
+  > not asked whether a key still authenticates) and logs `Heads-up (before
+  > anything is written): …` naming each agent and the account it spends from,
+  > then proceeds — it warns, it does not refuse (owner decision 1 on #3119);
+  > #2551's name-slot refusal is unchanged. `--json` gains
+  > `existing_agents_before_write` (always present on a completed run). Each
+  > setup writes a non-secret `mcp-server-binding.json` beside
+  > `last-connect-outcome.json` (server name → agent id, backend URL,
+  > bound-at; per credential directory, never machine-wide); a name another
+  > directory's record holds is named before the write with a DIFFERENT-backend
+  > flag (`server_name_rebound_from`) — the case the backend's
+  > `agents.mcp_server_name` cannot see. That backend column stays the
+  > authority for the same backend; the local record is a reporting aid and
+  > every message reading it says "locally recorded". `--unwire` releases the
+  > record (its `--json` record gains `binding_released`), and so does the
+  > `--replace` retirement (the setup outcome carries no such field);
+  > `--tombstone` leaves it, so `--doctor` ignores a RETIRED directory's record
+  > and reports two records claiming one name as the `mcp_server_name_rebound`
+  > advisory (#3121 level), excluding tombstoned (retired) directories only,
+  > absent otherwise. The #1688 completion heads-up is unchanged — #3122 ADDS
+  > the earlier notice, it does not move or remove the later one.
   > Nothing else in this document was re-verified in this pass.
 
   This is local teardown, **not** backend revocation: Connect reports what it

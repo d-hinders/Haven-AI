@@ -8,6 +8,11 @@ alone.
 
 ## Unreleased
 
+- `HavenPaymentReceipt.scope` (#3132): each receipt row states its list scope as two values, `{ source: 'agent', filter: null }` — this agent's evidence rows, no query-time narrowing — so a receipt read is never mistaken for the wallet's transaction history (`GET /transactions`, `{ source: 'wallet', filter }`). Present when the backend states it; absent on an older backend, never invented. `haven_list_receipts`'s selection guidance says the same in words. New type export `HavenListScope`.
+- Native x402 MCP transport profile (#3118): `fetch()`, `quoteX402()`, `quoteMcpX402()` and `completeX402MerchantCall()` now recognise a payment-required TOOL RESULT (`isError: true`, `PaymentRequired` as `structuredContent`, text fallback) answered with HTTP 200 and quote it like a 402; the paid retry adds the payment as `params._meta["x402/payment"]` beside the unchanged `PAYMENT-SIGNATURE` / `X-PAYMENT` headers whenever the body is a `tools/call` request; settlement is read from `result._meta["x402/payment-response"]` when there is no `PAYMENT-RESPONSE` header. An in-band refusal (an `isError` challenge on the paid retry, or `success: false`) is a rejection, never a success. The tool-result challenge is read only from a response declaring `application/json` or `text/event-stream`; any other content type passes through untouched. The helpers live in the internal `mcp-merchant-transport` module (not on the package index); the `HavenClient` facade and the public export list are unchanged.
+
+## 0.4.0-alpha.0 — 2026-09-19
+
 - #3128: `listReceiptsPage({ limit, cursor })` returns `{ receipts, total, hasMore, nextCursor }` (the three page fields are `null` against a backend older than #3128); `listReceipts()` keeps returning the first page's array. `HavenAllowance.remainingDisplay` (derived client-side) and `HavenAgentAllowanceSummary.id` / `.tokenAddress` added, so the compact and detailed allowance reads agree field for field. `haven_list_receipts` on both MCP runtimes accepts `cursor` and returns the page object instead of a bare array.
 
 ## 0.3.0-alpha.0 — 2026-09-17

@@ -93,11 +93,14 @@ const { paymentHeader } = await signer.buildX402PaymentHeader(
 )
 ```
 
-The signer also exposes `signPaymentHash(hash)` (raw ECDSA over a legacy
-AllowanceModule funding/transfer hash) and `signX402FundingHash(hash, expected)`
-for v1 contexts, and `signSweepAuthorization(input)` for the gasless sweep. All
-six are methods on the object `createEdgeSigner` returns, not standalone
-exports.
+The signer also exposes `signX402FundingHash(hash, expected)` for v1 contexts
+and `signSweepAuthorization(input)` for the gasless sweep. All five are methods
+on the object `createEdgeSigner` returns, not standalone exports. There is NO
+raw-hash primitive: `signPaymentHash(hash)` (raw ECDSA over the retired
+AllowanceModule rail's hash) was removed in #3169 — every remaining method
+verifies something before it signs, and `haven_sign` called with a bare
+`payload_hash` answers `BARE_HASH_REFUSED` with a typed next step instead of a
+signature.
 
 ## Orchestration
 

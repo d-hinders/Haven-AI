@@ -12,6 +12,11 @@ import {
   writeConnectOutcomeRecord,
   writeCredentialFiles,
   CONNECT_OUTCOME_FILENAME,
+  writeMcpServerBinding,
+  readMcpServerBinding,
+  clearMcpServerBinding,
+  listMcpServerBindings,
+  MCP_SERVER_BINDING_FILENAME,
 } from './storage.js'
 import { writeFile } from 'node:fs/promises'
 
@@ -305,5 +310,30 @@ describe('readStoredCredentials — account address naming window (#2908)', () =
     const after = await readStoredCredentials(undefined, 'agent-1', baseDir)
     expect(after.accountAddress).toBe(ADDRESS)
     expect(after.accountAddressKey).toBe('account_address')
+  })
+})
+
+describe('mcp-server-binding.json (#3122)', () => {
+  it('writes 0o600, reads back, rejects malformed or foreign shapes as null, clears idempotently, and lists across a root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'haven-binding-'))
+    const a = join(root, 'agent-a')
+    const b = join(root, 'research')
+    await mkdir(a, { recursive: true })
+    await mkdir(b, { recursive: true })
+    const binding = { version: 1 as const, server_name: 'haven', signer_name: 'haven-signer', agent_id: 'agent-a', api_url: 'https://api.haven.example', bound_at: '2026-09-18T00:00:00.000Z' }
+    const path = await writeMcpServerBinding(a, binding)
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+    expect(await readMcpServerBinding(a)).toEqual(binding)
+    await writeFile(join(b, MCP_SERVER_BINDING_FILENAME), '{ not json')
+    expect(await readMcpServerBinding(b)).toBeNull()
+    await writeFile(join(b, MCP_SERVER_BINDING_FILENAME), JSON.stringify({ version: 2, server_name: 'x' }))
+    expect(await readMcpServerBinding(b)).toBeNull()
+    expect(await readMcpServerBinding(join(root, 'nope'))).toBeNull()
+    expect((await listMcpServerBindings(root)).map((e) => e.binding.agent_id)).toEqual(['agent-a'])
+    expect(await listMcpServerBindings(root, a)).toEqual([])
+    expect(await clearMcpServerBinding(a)).toBe(true)
+    expect(await clearMcpServerBinding(a)).toBe(false)
+    expect(await readMcpServerBinding(a)).toBeNull()
+    expect(await listMcpServerBindings(join(root, 'missing-root'))).toEqual([])
   })
 })

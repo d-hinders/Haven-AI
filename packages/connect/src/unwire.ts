@@ -55,7 +55,7 @@ import {
 import { serverNamesFor, type ServerNames } from './server-names.js'
 import { readRuntimeSidecar, type SignerRuntimeSidecar } from './signer-runtime.js'
 import { TOMBSTONE_FILENAME, writeAgentTombstone } from './tombstone.js'
-import { REKEY_PENDING_FILENAME } from './storage.js'
+import { REKEY_PENDING_FILENAME, clearMcpServerBinding } from './storage.js'
 
 export interface UnwireRuntimeOutcome {
   runtime: string
@@ -92,6 +92,8 @@ export interface UnwireOutcome {
   tombstoned: boolean
   runtimes: UnwireRuntimeOutcome[]
   teardown: TeardownOutcome
+  /** #3122: whether a local `mcp-server-binding.json` was removed (false when there was none). */
+  bindingReleased: boolean
 }
 
 export interface UnwireInput {
@@ -295,6 +297,11 @@ export async function unwireAgent(input: UnwireInput): Promise<UnwireOutcome> {
     }
   }
 
+  // ── #3122: release this directory's MCP server-name binding record. ──────
+  // Independent of the key-material decision below: the wiring is gone, so a
+  // legitimately free name must not keep warning the next setup.
+  const bindingReleased = await clearMcpServerBinding(input.directory)
+
   // ── Local teardown of THIS directory's key material (#2169 AC, #3123). ───
   // Unlike --tombstone's touch-nothing retirement, unwire tears the target's
   // local half down: its signer private key and any abandoned re-key are
@@ -316,7 +323,7 @@ export async function unwireAgent(input: UnwireInput): Promise<UnwireOutcome> {
   const teardown = await decideTeardown(identity, input)
   if (teardown.status !== 'retained') await teardownLocalKeyMaterial(input.directory, identity)
 
-  return { directory: input.directory, agentId, slug, tombstoned, runtimes, teardown }
+  return { directory: input.directory, agentId, slug, tombstoned, runtimes, teardown, bindingReleased }
 }
 
 const DESTROY_FLAG = '--destroy-key-material'

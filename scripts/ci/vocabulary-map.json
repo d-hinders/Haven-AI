@@ -51,14 +51,13 @@
       "transaction": {
         "field": "paymentProofStatus",
         "column": "proof_status",
-        "value": "defaulted",
-        "by": "modules/transactions/x402.ts:37 `?? 'payment_confirmed'`",
+        "value": "recorded",
+        "by": "modules/transactions/x402.ts `row.payment_proof_status ?? null` (#3132) \u2014 the same pass-through enrichment.ts always had",
         "alias": "payment_proof_status",
         "aliasedBy": "infra/repositories/transaction-history.ts:228,325 `mpe.proof_status AS payment_proof_status`"
       },
-      "disposition": "blocked-on-fallback",
-      "blockedBy": 3132,
-      "reason": "One column, two values -- and the two names are ALIASES of the same `machine_payment_evidence.proof_status`, not two columns. It arrives through a LEFT JOIN, so with no evidence row the synthesized x402 path reports 'payment_confirmed' for a payment that has no receipt, while enrichment.ts passes the column through unchanged. Converging the NAMES before #3132 fixes the VALUE would hide the defect behind agreement. The substitution is conservative -- it never fabricates a settled state -- which is why this is a reconciliation defect and not a money-safety one."
+      "disposition": "converge-pending",
+      "reason": "One column, two names -- ALIASES of `machine_payment_evidence.proof_status`, arriving through a LEFT JOIN. Until #3132 the synthesized x402 path substituted 'payment_confirmed' when no evidence row existed, so a payment with no receipt reported a proof status it never read while enrichment.ts passed the column through unchanged; both paths now emit the recorded value or null (the lifecycle lands on the same `confirming_merchant` either way, so no flow status moved). The value defect is fixed; the RENAME is #3134's."
     },
     {
       "concept": "merchant address",
@@ -99,15 +98,13 @@
         "note": "ISO 8601, nullable"
       },
       "transaction": {
-        "field": "timestamp",
+        "field": "confirmedAt",
         "column": "confirmed_at",
-        "value": "defaulted",
-        "by": "modules/transactions/x402.ts:54 `confirmed_at ?? created_at`",
-        "note": "unix seconds, never null"
+        "value": "recorded",
+        "note": "ISO 8601, nullable \u2014 added by #3132 on x402-synthesized rows, absent on explorer rows"
       },
-      "disposition": "blocked-on-fallback",
-      "blockedBy": 3132,
-      "reason": "Unit AND fallback differ. Unlike the proof-state substitution this one FABRICATES a date: a payment that never confirmed reports its creation time as its settlement time, in a field the consumer reads as 'when this settled'. Same silent-substitution defect as proof state, opposite in severity."
+      "disposition": "converged",
+      "reason": "Both views now report the RECORDED confirmation time under one name, nullable on both, so they can no longer disagree on whether a payment has one. The transaction row's `timestamp` keeps its `confirmed_at ?? created_at` fallback as a non-null sort key, but the substitution is MARKED by `timestampSource` (`singleSurface.transaction`) rather than hidden -- #3132's pattern for every silent fallback. The one remaining unmarked projection is the CSV export's settled_at column (modules/transactions/csv-export.ts), which serialises the same sort key under a settlement name and carries no mark -- out of #3132's scope (the JSON rows are), recorded here so 'converged' is not read as covering it."
     },
     {
       "concept": "transaction hash",
@@ -213,11 +210,10 @@
         "column": "source",
         "value": "defaulted",
         "alias": "COALESCE(pi.payment_rail, pi.source, 'direct')",
-        "by": "infra/repositories/transaction-history.ts:225 substitutes 'direct'; modules/transactions/x402.ts:69 hardcodes 'x402' on the synthesized row, a second substitution site on the same field"
+        "by": "infra/repositories/transaction-history.ts FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL `COALESCE(pi.payment_rail, pi.source, 'direct')` -- the one substitution site. The `source: 'x402'` on the synthesized row (modules/transactions/x402.ts) is NOT a substitution: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL selects `pi.source = 'x402'`, so the literal restates the query's own predicate (#3132). Asymmetry for #3134 to measure: this site resolves `pi.source` ONLY, while the agent-match query coalesces `payment_rail` first. They cannot disagree on a machine intent today because `insertMachineIntent` (`payment-intents.ts`, `machineIntentInsertSql`) writes ONE `rail` argument into both columns and no runtime path UPDATEs `payment_rail` after (migration 012's one-time backfill fills NULLs on `source = 'x402'` rows only, so it can only converge them); the x402 confirm paths additionally pin `COALESCE(payment_rail, source) = 'x402'` (`x402-authorizations.ts`), though `CONFIRM_SUBMITTED_INTENT_SQL` carries no rail predicate at all -- so the INSERT is the guarantee, not the confirm. A fact to re-measure, not inherit."
       },
-      "disposition": "blocked-on-fallback",
-      "blockedBy": 3132,
-      "reason": "ONE axis. Both sides resolve the same two columns in the same order -- payment_rail then source -- so the receipt's `rail` is the payment PROTOCOL, exactly what the transaction calls `source`. An earlier draft filed them as permanently single-surface, reasoning that #1705 keeps three axes unmerged; that was wrong, because #1705's third axis is the ACCOUNT's execution_rail, which migration 036 states is a different axis from payment_intents.payment_rail. The asymmetry is one-sided and a later draft got it backwards: only the TRANSACTION side substitutes. It defaults to 'direct' in SQL and hardcodes 'x402' on the synthesized row. The receipt side cannot default, because when the coalesce yields a non-protocol rail recordMachinePaymentEvidenceBase returns not_applicable and no evidence row -- and therefore no receipt -- is written at all. (The `rail ?? 'unknown'` in evidence.ts is the FEE LEDGER's quoteFee call and never reaches a receipt.) #3132 owns the transaction-side substitutions before #3134 can rename anything."
+      "disposition": "converge-pending",
+      "reason": "ONE axis. Both sides resolve the same two columns in the same order -- payment_rail then source -- so the receipt's `rail` is the payment PROTOCOL, exactly what the transaction calls `source`. #3132 re-measured the transaction side: the synthesized row's 'x402' is recorded by the query's own predicate, and the only substitution left is the SQL's 'direct' for an intent that names no protocol at all -- a classification of 'not a payment', not a fabricated protocol, and not a value #3132 changes (a `null` there would erase the row's category on every consumer that switches on it). The receipt side cannot default, because a non-protocol rail yields no evidence row and therefore no receipt. Nothing blocks the rename any more; the rename is #3134's."
     }
   ],
   "singleSurface": {
@@ -244,10 +240,11 @@
       "protocolReceiptHeaderName": "x402 protocol wiring.",
       "protocolReceiptPayload": "The merchant's own receipt body.",
       "merchantStatus": "The merchant's HTTP response state, not a chain fact.",
-      "createdAt": "Evidence-row lifecycle. The transaction surface has one time field and #3132 owns its semantics.",
+      "createdAt": "Evidence-row lifecycle. The transaction surface's 'when did this settle' is confirmedAt (paired, #3132) and its sort key is timestamp; neither is the evidence row's own creation time.",
       "updatedAt": "Evidence-row lifecycle.",
       "paymentIntentId": "Conditional key, present only when the raw row carries it. Links evidence to intent; no transfer-level counterpart.",
-      "approvalRequestId": "Conditional key. Approval requests were dropped with the table (#2055); the field survives on the raw shape."
+      "approvalRequestId": "Conditional key. Approval requests were dropped with the table (#2055); the field survives on the raw shape.",
+      "scope": "#3132 per-row list scope `{ source, filter }`. Its counterpart is `scope` on the enriched Transaction schema, not on transactionBaseProperties (the surface this guard reads) -- same key, same ListScope shape, so the pair is converged by construction; recorded here for the same reason `chainId` is."
     },
     "transaction": {
       "type": "native / erc20 / internal -- a transfer classification. Receipts are always payments.",
@@ -267,6 +264,8 @@
       "amountSek": "Book-time SEK value (#463) for the accounting feed.",
       "fxRateSek": "The rate amountSek was struck at (#2871).",
       "fxSource": "Where that rate came from.",
+      "timestamp": "The row's non-null unix-seconds SORT KEY: the block timestamp on explorer rows, `confirmed_at ?? created_at` on x402-synthesized rows. Its counterpart for 'when did this settle' is `confirmedAt` (paired above, #3132); on the JSON rows the fallback is marked by `timestampSource` -- the CSV export's settled_at projection of it is not (see the settled-at reason).",
+      "timestampSource": "#3132: which column produced `timestamp` ('block' | 'confirmed_at' | 'created_at') -- the mark that turns the sort key's fallback from a silent substitution into a stated one. A receipt has no sort-key fallback to mark.",
       "convertedAmount": "#3127: the settled amount in the user's currency_preference -- a DASHBOARD projection computed at enrichment from the row's own book-time capture (the SEK columns, or the fx_rates map), never a serve-time price read. A receipt is the settlement's own record and strikes no preference-driven figure.",
       "convertedCurrency": "#3127: which currency convertedAmount is denominated in -- the user's preference, SEK when none is set. The receipt surface has no preference dimension.",
       "convertedFxRate": "#3127: the token-to-currency rate the converted amount was struck at; null on the SEK path, which already carries fxRateSek. No receipt counterpart for the same reason as convertedAmount.",

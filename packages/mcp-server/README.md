@@ -85,12 +85,13 @@ sequenceDiagram
     Agent->>Hosted: haven_pay_mcp_tool { merchant_url, tool_name, arguments, max_amount_human? }
     Hosted->>Merchant: unpaid tools/call probe
     Merchant-->>Hosted: 402 payment_required
+    Note over Merchant,Hosted: or, since #3118, an isError tool result under HTTP 200 (native MCP profile)
     Hosted-->>Agent: payment_id, payload_hash, expires_at, payment_required, x402.expected, merchant context
     Agent->>Signer: haven_sign_x402 { payment_id }
     Signer-->>Agent: signature, payment_header
     Agent->>Hosted: haven_settle_mcp_tool { payment_id, signature, payment_header, merchant context }
     Hosted->>Hosted: relay funding signature and wait for confirmation
-    Hosted->>Merchant: tools/call with signed payment header (both wire names)
+    Hosted->>Merchant: tools/call with signed payment header (both wire names) and params._meta["x402/payment"]
     Merchant-->>Hosted: tool result
     Hosted->>Hosted: verify the merchant's reported settlement on-chain (fail-closed, #2971)
     Hosted-->>Agent: settled result + evidence/reconciliation status

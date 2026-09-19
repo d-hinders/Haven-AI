@@ -292,6 +292,44 @@ describe('haven_settle_mcp_tool', () => {
     expect(payload.next_arguments).toEqual({})
   })
 
+  it('#3118: an IN-BAND refusal under HTTP 200 (native MCP profile) is thrown as 402 with the message naming the real status (#3155 review S5)', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200,
+      ok: false,
+      body: { isError: true, structuredContent: { x402Version: 2, error: 'Payment required', accepts: [] }, content: [] },
+    })
+    const realStatus = haven.getPaymentStatus.bind(haven)
+    let statusReads = 0
+    vi.spyOn(haven, 'getPaymentStatus').mockImplementation(async (id) => {
+      statusReads += 1
+      return statusReads >= 2 ? ({
+      paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'funded_but_unsettled', phase: 'funded_but_unsettled',
+      nextAction: AgentPaymentNextAction.SweepStrandedFunds, message: 'm', amount: '1.50', token: 'USDC', txHash: null,
+      expiresAt: '2099-01-01T00:00:00.000Z', chainId: 8453, resourceUrl: 'http://merchant.test/mcp', merchantAddress: '0xMerchant', idempotencyKey: 'idem-rejected',
+    } as never) : realStatus(id)
+    })
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      merchant_url: 'http://merchant.test/mcp',
+      tool_name: 'create_text',
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
+    })
+
+    if (payload.success) throw new Error('expected a failure payload')
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
+    // No failure object rides an HTTP-200 status: the in-band refusal is 402,
+    // the same mapping the SDK's local retry uses.
+    expect(payload.statusCode).toBe(402)
+    expect(payload.message).toMatch(/HTTP 200, refused in-band/)
+    expect(payload.suggested_tool).toBe('haven_sweep_delegate')
+  })
+
   /**
    * #2983 (follow-up from #2979's review): on erc7710 there is NO funding
    * leg — the signature IS the settlement child (#1456), delivered straight

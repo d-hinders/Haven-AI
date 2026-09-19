@@ -8,6 +8,10 @@ alone.
 
 ## Unreleased
 
+- **`haven_sign` refuses a bare `payload_hash` (#3169).** Called with no `payment_id`, no `typed_data` / `typed_data_b64` and no `x402_expected`, the tool answered raw secp256k1 over the caller's bytes — a blind-signing oracle for the delegate key (a digest of an EIP-3009 transfer out of the delegate wallet signed valid; a pre-hashed `Delegation` bypassed the #1476 refusal). That arm served only the retired AllowanceModule rail. It now answers the structured `BARE_HASH_REFUSED` refusal (`next_action: stop_and_tell_user`, typed step naming `payment_id` / `typed_data` / `x402_expected`) and audits nothing. `EdgeSigner.signPaymentHash` is removed from the object `createEdgeSigner` returns. No tool added or renamed; the consent surface is unchanged.
+
+## 0.4.0-alpha.0 — 2026-09-19
+
 - **Refusals carry a typed next step (#3103, epic #3105).** `HavenSignContextError`
   and every structured signer refusal now also carry the `next_tool` family:
   a backend refusal of the signing context names the hosted status read

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
 import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
+import { x402ResourceServer } from '@x402/core/server'
 import {
   AuthorizationAlreadyUsedError,
   createX402PaymentProcessor,
@@ -663,5 +664,24 @@ describe('x402 payment verification and settlement', () => {
       expectedAmount: 1_000n,
       paymentRequired: pr,
     })).rejects.toBeInstanceOf(PaymentError)
+  })
+})
+
+// Compare demo-generated offers with the official matcher, rather than relying
+// on the demo's deliberately scheme-specific verification subset (#3117).
+describe('demo requirement conformance fixtures', () => {
+  it.each(['eip3009', 'erc7710'] as const)('requires advertised metadata for %s official matching', (settlementMethod) => {
+    const processor = createX402PaymentProcessor({ submit: vi.fn(), waitForReceipt: vi.fn() }, { erc7710: { delegationManager: TRUSTED_DELEGATION_MANAGER } })
+    const challenge = processor.buildPaymentRequired({
+      merchantAddress: MERCHANT, amountUsdc: 1000n,
+      resource: 'https://merchant.test/mcp', description: 'conformance', settlementMethod,
+    })
+    const accepted = challenge.accepts[0]
+    const server = new x402ResourceServer()
+    const payload: PaymentPayload = { x402Version: 2, accepted, payload: {} }
+    expect(server.findMatchingRequirements(challenge.accepts, payload)).toEqual(accepted)
+    expect(accepted.extra).toMatchObject({ name: 'USD Coin', version: '2' })
+    const stripped = { ...payload, accepted: { ...accepted, extra: { assetTransferMethod: settlementMethod } } }
+    expect(server.findMatchingRequirements(challenge.accepts, stripped)).toBeUndefined()
   })
 })

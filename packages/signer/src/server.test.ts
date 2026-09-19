@@ -25,6 +25,13 @@ const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
 const HASH = '0x' + 'cd'.repeat(32)
+/** #3169: a direct-payment UserOp — the account validating its OWN operation (#1254), the honest vehicle for a haven_sign signature. */
+const DIRECT_USEROP = {
+  domain: { name: 'HybridDeleGator', version: '1', chainId: 84532, verifyingContract: `0x${'11'.repeat(20)}` },
+  types: { PackedUserOperation: [{ name: 'sender', type: 'address' }, { name: 'nonce', type: 'uint256' }] },
+  primaryType: 'PackedUserOperation',
+  message: { sender: `0x${'22'.repeat(20)}`, nonce: 1 },
+}
 const PAYMENT_REQUIRED = {
   x402Version: 1,
   resource: { url: 'https://merchant.test/paid', description: 'paid data' },
@@ -186,12 +193,83 @@ describe('haven_sign tool', () => {
     const signer = createEdgeSigner(TEST_KEY)
     const handlers = createToolHandlers(signer)
 
-    const result = ok<{ signature: string }>(await handlers.haven_sign({ payload_hash: HASH }))
+    // #3169: the vehicle is a direct-payment UserOp (typed data the account
+    // validates) — the bare-hash arm this test once rode is gone.
+    const result = ok<{ signature: string }>(await handlers.haven_sign({ payload_hash: HASH, typed_data: DIRECT_USEROP }))
 
-    expect(verifySignature(HASH, result.data.signature, signer.delegateAddress)).toBe(true)
+    const digest = hashTypedData(DIRECT_USEROP as Parameters<typeof hashTypedData>[0])
+    expect(verifySignature(digest, result.data.signature, signer.delegateAddress)).toBe(true)
     // Custody: the output is only the signature — never the key.
     expect(JSON.stringify(result)).not.toContain(TEST_KEY)
     expect(JSON.stringify(result)).not.toContain(TEST_KEY.slice(2))
+  })
+
+  // #3169: the bare `payload_hash` arm was a blind-signing oracle for the
+  // delegate key — raw secp256k1 over caller bytes with nothing to verify.
+  describe('refuses a bare payload_hash (#3169)', () => {
+    it('is a structured refusal: named code, next_action, a typed step with the reason no tool can fix it', async () => {
+      const handlers = createToolHandlers(createEdgeSigner(TEST_KEY))
+      const payload = await handlers.haven_sign({ payload_hash: HASH })
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('unreachable')
+      expect(payload.code).toBe('BARE_HASH_REFUSED')
+      expect(payload.next_action).toBe('stop_and_tell_user')
+      expect(payload).not.toHaveProperty('next_tool')
+      expect(payload.next_tool_omitted_reason).toMatch(/payment_id/)
+      expect(payload.message).toMatch(/payment_id/)
+      expect(payload.message).toMatch(/typed_data/)
+      expect(JSON.stringify(payload)).not.toContain(TEST_KEY.slice(2))
+    })
+
+    it('the reproduction: an EIP-3009 TransferWithAuthorization digest for the delegate is refused, not signed', async () => {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer)
+      const transfer = {
+        domain: { name: 'USD Coin', version: '2', chainId: 84532, verifyingContract: '0x036CbD53842c5426634e7929541eC2318f3dCF7e' },
+        types: {
+          TransferWithAuthorization: [
+            { name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' },
+            { name: 'validAfter', type: 'uint256' }, { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' },
+          ],
+        },
+        primaryType: 'TransferWithAuthorization',
+        message: { from: signer.delegateAddress, to: '0x00000000000000000000000000000000deadbeef', value: 1000000n, validAfter: 0n, validBefore: 4102444800n, nonce: `0x${'01'.repeat(32)}` },
+      }
+      const digest = hashTypedData(transfer as Parameters<typeof hashTypedData>[0])
+      const payload = await handlers.haven_sign({ payload_hash: digest })
+      expect(payload.success).toBe(false)
+      if (payload.success) throw new Error('unreachable')
+      expect(payload.code).toBe('BARE_HASH_REFUSED')
+      expect(JSON.stringify(payload)).not.toMatch(/"signature"/)
+    })
+
+    it('#1476 parity: a settlement Delegation is refused as typed_data AND as its pre-hashed digest — hashing first buys nothing', async () => {
+      const CHILD = JSON.parse(JSON.stringify(require('../../sdk/src/__fixtures__/settlement-delegation-payload.json')))
+      const handlers = createToolHandlers(createEdgeSigner(TEST_KEY))
+      const asTypedData = await handlers.haven_sign({ payload_hash: HASH, typed_data: CHILD })
+      const digest = hashTypedData(CHILD as Parameters<typeof hashTypedData>[0])
+      const preHashed = await handlers.haven_sign({ payload_hash: digest })
+      expect(asTypedData.success).toBe(false)
+      expect(preHashed.success).toBe(false)
+      expect(JSON.stringify(asTypedData)).toMatch(/Refusing to sign a delegation payload/)
+      if (preHashed.success) throw new Error('unreachable')
+      expect(preHashed.code).toBe('BARE_HASH_REFUSED')
+      expect(JSON.stringify(asTypedData)).not.toMatch(/"signature"/)
+      expect(JSON.stringify(preHashed)).not.toMatch(/"signature"/)
+    })
+
+    it('does not audit a refusal as a signing operation', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'haven-signer-bare-hash-audit-'))
+      const auditPath = join(dir, 'audit.jsonl')
+      try {
+        const signer = createEdgeSigner(TEST_KEY)
+        const handlers = createToolHandlers(signer, { audit: { auditPath, delegateAddress: signer.delegateAddress, accountAddress: '0x000000000000000000000000000000000000Cafe', chainId: 84532 } })
+        await handlers.haven_sign({ payload_hash: HASH })
+        await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
   })
 
   it('rejects a malformed payload_hash without throwing', async () => {
@@ -314,7 +392,9 @@ describe('haven_sign tool', () => {
         },
       })
 
-      const result = ok<{ signature: string }>(await handlers.haven_sign({ payload_hash: HASH }))
+      // #3169: typed-data vehicle (the bare-hash arm is gone); the audit row
+      // still records the payload_hash argument, never the key or signature.
+      const result = ok<{ signature: string }>(await handlers.haven_sign({ payload_hash: HASH, typed_data: DIRECT_USEROP }))
       const rows = (await readFile(auditPath, 'utf8')).trim().split('\n')
       expect(rows).toHaveLength(1)
 

@@ -629,6 +629,16 @@ function deriveReceiptTxHashes(row: {
   return { funding_tx_hash: row.tx_hash, settlement_tx_hash: settlementTxHash }
 }
 
+/**
+ * #3132 (owner decision 3 on #3130): every receipt row states its population
+ * and narrowing as two values. Receipts are AGENT-scoped by the authenticated
+ * principal — evidence rows of this agent only — and `GET /receipts` applies
+ * no query-time narrowing (`limit`/`cursor` page, they do not filter), so the
+ * filter is `null`. The wallet feed's `{ source: 'wallet', filter: 'agent' }`
+ * is a different population narrowed, never this view.
+ */
+export const RECEIPT_LIST_SCOPE = { source: 'agent', filter: null } as const
+
 export function mapEvidence(row: MachinePaymentEvidenceRow) {
   return withParties(
     {

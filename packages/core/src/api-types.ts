@@ -1696,7 +1696,7 @@ export type paths = {
         put?: never;
         /**
          * MONEY PATH: settle a delegation-rail x402 payment with the delegate signature.
-         * @description The delegation rail's settlement step, and the reason the rail has no funding leg: the agent signs the settlement child delegation, Haven assembles the merchant X-PAYMENT header, and the merchant redeems the chain directly from the budget delegation — **money moves account→merchant, never through a delegate hot balance**. Retry the merchant with the returned `payment_header`; it is a signed, single-use, amount-and-merchant-bound authorization, not a key. Refusals are specific on purpose: a payment on the wrong rail is a 409 rather than a confusing 400, and a lost settlement context is a 502 telling you to re-authorize rather than a silent failure. Agent-authenticated and rate-limited on the money-path limiter.
+         * @description The delegation rail's settlement step, and the reason the rail has no funding leg: the agent signs the settlement child delegation, Haven assembles the merchant X-PAYMENT header, and the merchant redeems the chain directly from the budget delegation — **money moves account→merchant, never through a delegate hot balance**. Retry the merchant with the returned `payment_header`; it is a signed, single-use, amount-and-merchant-bound authorization, not a key. Refusals are specific on purpose: a payment on the wrong rail is a 409 rather than a confusing 400; a stored 402 challenge that advertises no unique matching erc7710 option is also a 409 telling you to re-authorize, because that refusal is deterministic and retrying it can never succeed; and a lost settlement context is a 502 telling you to re-authorize rather than a silent failure. Agent-authenticated and rate-limited on the money-path limiter.
          */
         post: operations["settleX402Payment"];
         delete?: never;
@@ -3863,6 +3863,7 @@ export type components = {
             /** Format: date-time */
             updated_at: string;
             parties?: components["schemas"]["Parties"];
+            scope?: components["schemas"]["ListScope"];
         } & {
             [key: string]: unknown;
         };
@@ -3988,6 +3989,16 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
+            /**
+             * @description #3132: which column produced `timestamp` — never a silent substitution. 'block' on explorer-derived rows; on an x402-synthesized row 'confirmed_at' when the intent carries one, else 'created_at' (the intent's creation time, NOT a settlement time). Read `confirmedAt` for the recorded confirmation time.
+             * @enum {string}
+             */
+            timestampSource?: "block" | "confirmed_at" | "created_at";
+            /**
+             * Format: date-time
+             * @description #3132: the recorded confirmation time of an x402-synthesized row, null when the intent has none — the same nullable value `GET /receipts` reports as `confirmed_at`. Absent on explorer-derived rows.
+             */
+            confirmedAt?: string | null;
             /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
             blockNumber: number | null;
             isError: boolean;
@@ -4047,7 +4058,7 @@ export type components = {
             /** @description Failure or skip reason; on a pushed row, a non-fatal note (#498). Null when clean. */
             error: string | null;
         };
-        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
+        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields (since #3132 it does carry the base-shape `timestampSource` / `confirmedAt`). Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
         Transaction: {
             hash: string;
             /** @enum {string} */
@@ -4064,6 +4075,16 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
+            /**
+             * @description #3132: which column produced `timestamp` — never a silent substitution. 'block' on explorer-derived rows; on an x402-synthesized row 'confirmed_at' when the intent carries one, else 'created_at' (the intent's creation time, NOT a settlement time). Read `confirmedAt` for the recorded confirmation time.
+             * @enum {string}
+             */
+            timestampSource?: "block" | "confirmed_at" | "created_at";
+            /**
+             * Format: date-time
+             * @description #3132: the recorded confirmation time of an x402-synthesized row, null when the intent has none — the same nullable value `GET /receipts` reports as `confirmed_at`. Absent on explorer-derived rows.
+             */
+            confirmedAt?: string | null;
             /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
             blockNumber: number | null;
             isError: boolean;
@@ -4116,6 +4137,14 @@ export type components = {
             accountName: string;
             /** Format: uuid */
             agentId?: string;
+            scope?: components["schemas"]["ListScope"];
+        };
+        /** @description #3132 (owner decision 3 on #3130): what population a list row came from and what narrowed it, as two values — one value cannot say both. `source: 'wallet'` is the aggregated feed (every account's explorer window plus synthesized confirmed intents; sweeps and funding legs included); `'agent'` is the receipts view (this agent's evidence rows only). `filter` names the IDENTITY-axis narrowing applied on top (whose money / which wallet: agent, account, both), or null; token, direction and chain narrowing are deliberately not named here. `agentId=user` counts as agent-axis narrowing and selects outbound rows with NO agent attribution. `agentId` on the wallet feed NARROWS a wallet-scoped query; it does not make it the receipts view. */
+        ListScope: {
+            /** @enum {string} */
+            source: "wallet" | "agent";
+            /** @enum {string|null} */
+            filter: "agent" | "account" | "account+agent" | null;
         };
         /** @description Per-account paginated transaction list (`GET /transactions/{accountAddress}`). Items carry no account scope — the account is the path parameter. */
         TransactionsPageResponse: {
@@ -11961,7 +11990,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Not a delegation-rail settlement, or not awaiting a signature. */
+            /** @description Not a delegation-rail settlement, not awaiting a signature, or the stored 402 challenge advertises no unique erc7710 option matching this authorization — re-authorize. */
             409: {
                 headers: {
                     [name: string]: unknown;

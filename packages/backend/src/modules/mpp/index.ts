@@ -38,6 +38,7 @@ export {
   attachEvidenceHandler,
   listReceipts,
   mapEvidence,
+  RECEIPT_LIST_SCOPE,
   recordMachinePaymentEvidenceBase,
   recordMachinePaymentEvidenceBaseById,
   tryRecordMachinePaymentEvidenceBaseById,

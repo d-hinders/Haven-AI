@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: archived
 covers: []  # narrative — no direct code mirror
-last-verified: "2026-09-08"
+last-verified: "2026-09-19"
 ---
 
 # Decision Log
@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-09-19 | The fix→review loop gets a fourth exit: a prose-only round cannot loop forever | #3158, PR #3156 |
 | 2026-09-11 | Accounting connections: self-serve, provider-generic, dev-only; Fortnox hardened | #2858, #2872 |
 | 2026-09-04 | `latest` dist-tag moves onto every release, prereleases included | #2536, #2647 |
 | 2026-09-02 | Haven stops rendering legacy Safe accounts at all | #2413 |
@@ -48,6 +49,63 @@ named where they belong below.
 | 2026-07-12 | Session rail retired outright; AllowanceModule import-only | #834 (AllowanceModule half superseded) |
 | — | Approval-queue history readability waived | #2021, #2055 |
 | — | Historical: POC scope and phased roadmap | — |
+
+---
+
+## 2026-09-19 — a prose-only review round cannot loop forever (#3158)
+
+Owner decision, 2026-09-19, prompted by PR #3156 (#3150) running **ten** review
+rounds. The owner's words: *"10 review rounds is unacceptable. You need to be
+better and work faster."*
+
+Rounds 8, 9 and 10 each returned **0 blocking**, and each delta was made
+entirely of comments, docs and commit-message prose. The session followed the
+existing stopping rule and looped anyway, which is what makes this a rule
+defect rather than one session's misjudgement. Two clauses combined:
+
+- **`nits-only` is the only severity-keyed trigger, and the author may not
+  relabel** ("the reviewer's label, never the author's re-reading of it"). That
+  bar is right — it is what stops a session rationalising its way out — but it
+  means a reviewer emitting `should-fix` indefinitely creates an exit the author
+  cannot take.
+- **`non-converging` resets to zero on "a different class", and the author judges
+  what a class is.** A motivated author always finds a distinction, and the
+  counter never forced an exit across either stretch of #3156 — rounds 1–7 on
+  classifier escapes, rounds 8–10 on prose. That reading of the round history is
+  #3158's diagnosis, taken from the session rather than from the repo: the
+  branch was amended and then squashed, so the merged PR carries two commits and
+  the per-round history is not recoverable from git.
+
+Underneath both: **reviewing prose adversarially generates prose findings.** A
+full pass over a comment-only delta reliably finds more wording to correct,
+which is itself a prose delta earning another pass. That is the engine that
+turned seven rounds into ten.
+
+**The decision.** `ship-next`'s stopping rule gains a fourth trigger,
+**prose-loop**, and a scoping sentence:
+
+- Two consecutive rounds returning only `should-fix` **on prose**, with no
+  `blocking` and no code change between them → fix, open, residue under
+  **Not filed**.
+- A prose-only re-review verifies **the changed claims against their
+  instruments** — run each, do not read it — rather than reopening an
+  adversarial pass over the whole diff.
+
+It keys on **the delta**, never on the author re-reading a severity label, so
+`nits-only`'s bar survives intact. It ranks above `nits-only` and below
+`fix-traceable` and `non-converging`.
+
+**What was deliberately NOT decided: a cap on review rounds.** Rounds 9 and 10
+were *correct* — the session had written a wrong mechanism description three
+times running, and the reviewer caught it each time. A cap would have shipped a
+file whose comments misdescribe its own code, on a PR arguing that a second copy
+always drifts. The loop's shape is the defect, not its existence. The closing
+rule is unchanged: this ends the fix loop, never the review.
+
+The durable half already shipped in #3150 — `preflight.test.mjs`'s
+`every runnable claim the composite-action prose makes is true` executes each
+sentence's assertion, so a prose edit that outruns the code reddens instead of
+needing another round. The rule generalises what that test does.
 
 ---
 

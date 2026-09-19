@@ -840,8 +840,25 @@ export interface RawPaymentParties {
   merchant: string | null
 }
 
+/**
+ * #3132 (owner decision 3 on #3130): what population a list row came from and
+ * what narrowed it, as two values. Receipts are `{ source: 'agent', filter:
+ * null }` — this agent's evidence rows only, no query-time narrowing. The
+ * wallet feed (`GET /transactions`, the CLI's `activity list`) is
+ * `source: 'wallet'` with `filter: 'agent'` when `agentId` narrows it, and it
+ * is a DIFFERENT population (explorer window plus synthesized intents; sweeps
+ * and funding legs included), never this view. A receipt read is not a
+ * transaction-history read.
+ */
+export interface HavenListScope {
+  source: 'wallet' | 'agent'
+  filter: 'agent' | 'account' | 'account+agent' | null
+}
+
 export interface HavenPaymentReceipt {
   id: string
+  /** #3132: present when the backend states it (absent on an older backend). */
+  scope?: HavenListScope
   paymentId: string
   paymentIntentId?: string | null
   approvalRequestId?: string | null
@@ -1788,6 +1805,8 @@ export interface RawHavenAllowanceSummary {
 /** @internal */
 export interface RawHavenPaymentReceipt {
   id: string
+  /** #3132: present on a backend that states list scope per row; absent on older backends. */
+  scope?: { source: 'wallet' | 'agent'; filter: 'agent' | 'account' | 'account+agent' | null }
   payment_id: string
   payment_intent_id?: string | null
   approval_request_id?: string | null

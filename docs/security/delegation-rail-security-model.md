@@ -36,7 +36,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-17"
+last-verified: "2026-09-19"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -980,6 +980,18 @@ hard backstop.
 > its `rails/allowance-module.ts` name). No handler, authority check, signing
 > path, or invariant mapping in either route changes; §2's
 > relayer-free/signer-free scans read unchanged bodies at a new import path.
+
+> **Re-verified #3132:** this diff touched one file in this document's
+> covered-paths list — `routes/transactions.ts` — by adding a per-row
+> `scope: { source: 'wallet', filter }` to the aggregated feed's response
+> after filtering and pagination (the feed is wallet-scoped; `agentId` /
+> `accountId` are named as narrowing). The read is unchanged in what it
+> reads: the same `listBasicAccountsForUser(sub)` ownership scope, the same
+> `agentExistsForUser` check on a foreign `agentId`, the same 400 bodies. No
+> handler gains authority, no write path is added, no signing path or
+> invariant mapping moves; §2's relayer-free/signer-free scans read an
+> unchanged body apart from the response map. Nothing else in this document
+> was re-verified in this pass.
 
 The rail settles x402 two ways, selected per payment (`routes/x402.ts`):
 

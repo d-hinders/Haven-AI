@@ -639,6 +639,15 @@ characters of the 402 body. A failure of the merchant's own settlement key or no
 rate limit, unreachable RPC) is still reported as a merchant-side fault
 carrying its #2979 `reason_code` (`settlement_rpc_unreachable`,
 `settlement_wallet_out_of_gas`, or the generic `merchant_fault`).
+Since #3171 a paid `tools/call` on a session the demo merchant no longer holds
+(expired past `sessionIdleTtlMs`, or forgotten by a redeploy) answers HTTP 404
++ JSON-RPC `-32001` whose `error.data` states the merchant's own guarantee
+(`settled: false`, `next_action: 'reinitialize_then_retry_same_payment_header'`,
+true because the #1578 guard runs before the payment gate), and the SDK's one
+delivery seam — `MerchantCompletion.retryRequest` for the local paid retry and
+`completeX402MerchantCall` for this hosted leg — re-initializes once and
+resends the SAME header on the new session on exactly that shape; a bare
+`-32001` or any other 404 is still a `MERCHANT_REJECTED_AFTER_FUNDING`.
 
 ## Guided Catalog Purchase Preflight (#1306)
 

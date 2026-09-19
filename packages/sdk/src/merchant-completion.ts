@@ -139,10 +139,15 @@ export class MerchantCompletion {
     }
 
     // 5. Retry with a merchant-verifiable x402 EIP-3009 payment header.
-    const retryResponse = await this.merchantTransport.deliverPayment(
+    // #3171: if the merchant's session is gone (expired, or it restarted
+    // between the challenge and this retry) and it SAYS nothing was settled,
+    // re-initialize and resend the same header once instead of reporting a
+    // 404 as a rejection after funding.
+    const retryResponse = await this.merchantTransport.deliverPaymentRecoveringSession(
       url,
       initialInit,
       receipt.paymentHeader,
+      () => this.merchantTransport.initialize(url, initialInit),
     )
 
     // #3118: a profile merchant refuses under HTTP 200 with an `isError: true`

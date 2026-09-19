@@ -100,7 +100,12 @@ export const GOVERNED_PACKAGE_DOCS = [
     // sixth entry, `haven_sweep_delegate`, is deliberately absent from the
     // table — the sweep is native, not a tool schema). Exports, header-name
     // rule, idempotency and resume sections re-read against src/client.ts.
-    'last-verified': '2026-09-15',
+    // #3171: the MCP/SSE paragraph gained the unknown-session recovery rule
+    // (re-initialize once + same header, only on the merchant's stated
+    // settled-nothing guarantee), verified against mcp-merchant-transport.ts
+    // deliverPaymentRecoveringSession and its two callers. Nothing else in
+    // the README re-verified in this pass.
+    'last-verified': '2026-09-19',
   },
   {
     doc: 'packages/signer/README.md',
@@ -382,6 +387,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // revert = payer-side decision; the wrapper-is-not-proof rule) added and
     // verified against x402.ts isContractRevert and its tests; the #2979
     // catalog paragraph re-read, not edited. Nothing else re-verified.
+    // #3171: new § "Sessions: unknown-session 404, idle TTL, and what a
+    // redeploy does" verified against http.ts (SESSION_NOT_FOUND_RECOVERY,
+    // SESSION_NOT_FOUND_MESSAGE, DEFAULT_SESSION_IDLE_TTL_MS, sweepIdleSessions)
+    // and http-session-restart.test.ts. Nothing else re-verified.
     'last-verified': '2026-09-19',
   },
   {

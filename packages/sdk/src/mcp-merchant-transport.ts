@@ -44,6 +44,21 @@ export interface McpX402SettlementMeta {
   errorReason?: string
 }
 
+/**
+ * #3171: the recovery data a merchant attaches to its unknown-session 404
+ * (`-32001`) when it guarantees nothing was settled. Only this exact shape
+ * licenses the SDK to re-initialize and resend the same payment header: the
+ * guarantee is the merchant's, so it must be stated, never inferred from a
+ * bare -32001.
+ */
+export const SESSION_NOT_FOUND_NEXT_ACTION = 'reinitialize_then_retry_same_payment_header'
+
+export interface SessionNotFoundRecovery {
+  reason: string
+  settled: false
+  next_action: typeof SESSION_NOT_FOUND_NEXT_ACTION
+}
+
 export interface CapturedMerchantResponse {
   merchant_status: number
   merchant_status_text: string
@@ -270,6 +285,35 @@ export class McpMerchantTransport {
   }
 
   /**
+   * #3171: deliver the payment; if the merchant answers its unknown-session
+   * 404 WITH the settled-nothing recovery data, re-initialize once and resend
+   * the SAME header on the new session. The merchant's own guarantee (#1578:
+   * the session guard runs before its payment gate) is what makes the resend
+   * safe — a bare -32001, or any other 404, is returned to the caller
+   * untouched (body re-wrapped, since reading it consumed the stream). One
+   * recovery only: a second 404 is the answer.
+   */
+  async deliverPaymentRecoveringSession(
+    url: string,
+    init: RequestInit | undefined,
+    paymentHeader: string,
+    reinitialize: () => Promise<string | undefined>,
+  ): Promise<Response> {
+    const first = await this.deliverPayment(url, init, paymentHeader)
+    if (first.status !== 404) return first
+    let text: string
+    try {
+      text = await first.clone().text()
+    } catch {
+      return first
+    }
+    if (!sessionNotFoundRecovery(text)) return first
+    const sessionId = await reinitialize()
+    if (!sessionId) return first
+    return this.deliverPayment(url, this.withSessionHeaders(init, sessionId), paymentHeader)
+  }
+
+  /**
    * #3118: read a native MCP payment-required tool result from a response
    * WITHOUT consuming it — JSON or SSE framed. `undefined` for anything that
    * is not an `isError: true` tool result carrying a valid `PaymentRequired`
@@ -465,6 +509,30 @@ function parseJsonRpcToolsCall(body: unknown): (Record<string, unknown> & { para
  */
 export function isJsonRpcToolsCallBody(body: unknown): boolean {
   return parseJsonRpcToolsCall(body) !== undefined
+}
+
+/**
+ * #3171: parse a merchant 404 body for the unknown-session recovery data.
+ * `undefined` for anything else — a different code, a missing or
+ * contradicting `data`, a non-JSON body.
+ */
+export function sessionNotFoundRecovery(body: string): SessionNotFoundRecovery | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return undefined
+  }
+  if (!isRecord(parsed) || !isRecord(parsed.error)) return undefined
+  if (parsed.error.code !== -32001) return undefined
+  const data = parsed.error.data
+  if (!isRecord(data)) return undefined
+  if (data.settled !== false || data.next_action !== SESSION_NOT_FOUND_NEXT_ACTION) return undefined
+  return {
+    reason: typeof data.reason === 'string' ? data.reason : 'session_expired',
+    settled: false,
+    next_action: SESSION_NOT_FOUND_NEXT_ACTION,
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

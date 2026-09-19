@@ -1422,8 +1422,17 @@ distinguishes have opposite causes:
   consumed. That response is a session problem, never a payment refusal:
   payment refusals are 402s carrying a reason. The client remedy is to
   re-initialize and retry with the SAME payment header, which then settles
-  exactly once. A bare re-challenge from a lost session should no longer
-  occur; if one appears, it is a regression, not a known mode.
+  exactly once. Since #3171 the 404 says so itself: its message begins
+  "Session not found. Nothing was settled here" and `error.data` carries
+  `{ reason: 'session_expired', settled: false, next_action:
+  'reinitialize_then_retry_same_payment_header' }`; the SDK's paid retry
+  (local `fetch()`/`payX402Quote()` and the hosted
+  `completeX402MerchantCall()` alike) reads that data, re-initializes and
+  resends the same header once, so a run should no longer surface this 404 as
+  `merchant_status=404` after funding. The merchant also sweeps sessions idle
+  longer than 30 minutes (`sessionIdleTtlMs`), which answer the same 404. A
+  bare re-challenge from a lost session should no longer occur; if one
+  appears, it is a regression, not a known mode.
 
   Note this is detected by the challenge's `error` reading the x402 default
   `"Payment required"`, **not** by the key being absent: the `PaymentRequired`

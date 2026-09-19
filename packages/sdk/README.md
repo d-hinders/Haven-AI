@@ -579,6 +579,18 @@ original `tools/call`, setting BOTH `PAYMENT-SIGNATURE` (x402 v2) and `X-PAYMENT
 user intent so fresh merchant quotes or sessions do not become duplicate Haven
 payments.
 
+If the merchant's session is gone by the time the paid retry arrives (it
+expired, or the merchant restarted), a merchant that answers HTTP 404 with
+JSON-RPC `-32001` **and** `error.data = { settled: false, next_action:
+'reinitialize_then_retry_same_payment_header' }` is stating its own guarantee
+that nothing was settled; since #3171 `fetch()`, `payX402Quote()`,
+`resumeX402Payment()` and `completeX402MerchantCall()` act on exactly that
+shape — re-initialize once and resend the SAME payment header on the new
+session. A bare `-32001` without the data, any other 404, a failed
+re-initialize, or a second 404 is returned to you unchanged and, after
+funding, recorded as a rejection as before: the SDK never resends on an
+inference, only on the merchant's stated guarantee.
+
 See [`examples/mcp-x402-sse.ts`](./examples/mcp-x402-sse.ts) for a complete
 MCP flow with initialize, `mcp-session-id`, JSON-RPC `tools/call`, quote
 inspection, saved resume state, and final retry.

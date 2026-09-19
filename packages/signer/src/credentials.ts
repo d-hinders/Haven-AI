@@ -1,4 +1,5 @@
-import { readFile, stat } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
+import { warnIfFilePermissive } from './file-mode.js'
 
 /**
  * The edge signer's own credential requires *only* `delegate_key` — unlike
@@ -226,18 +227,5 @@ export async function warnIfCredentialFilePermissive(
   log: (message: string) => void = (message) => process.stderr.write(`${message}\n`),
   platform: NodeJS.Platform = process.platform,
 ): Promise<void> {
-  if (platform === 'win32') return
-  let mode: number
-  try {
-    mode = (await stat(path)).mode
-  } catch {
-    return
-  }
-  if ((mode & 0o077) !== 0) {
-    const octal = (mode & 0o777).toString(8).padStart(4, '0')
-    log(
-      `haven-signer: warning: credential file at ${path} is readable beyond the owner ` +
-        `(mode ${octal}). Run: chmod 600 ${path}`,
-    )
-  }
+  await warnIfFilePermissive('credential file', path, log, platform)
 }

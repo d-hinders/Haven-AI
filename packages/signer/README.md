@@ -286,12 +286,43 @@ protected storage/runtime config.
 
 ## Local audit
 
-Every MCP signing operation appends a JSONL row locally. File-backed runs write
+Every MCP signing operation appends a JSONL row locally, best-effort (see the
+end of this section). File-backed runs write
 next to the credential as `<credential>.signer-audit.jsonl`; env-only runs use
 `~/.haven/signer-audit.jsonl`. Rows include timestamp, tool, payload hash and
 delegate address, plus the account address and chain id when the credential
 carries them. They never include the delegate key, the signature, or the x402
 payment header.
+
+Since #3172 the sidecar is owner-only and bounded. It is created `0600` — the
+mode the credential beside it is expected to have — and a sidecar found
+readable beyond its owner (every release before #3172 created it with the
+default mode, `0644` under the usual `umask 022`, or an operator loosened it
+later) is tightened to `0600` in place on the next
+append, with one stderr line per occurrence. If `chmod` is refused, the line
+names the same `chmod 600` remedy the credential warning gives. If the path
+is a symlink (or anything but a regular file) nothing is chmod-ed — that
+would hit the target — but note that audit rows are still written through
+the link to its target, so the line says to remove the link (`rm <path>`),
+not to chmod it. The check runs before rotation, so a legacy file that
+rotates carries `0600` into `.1`. When the live file reaches
+`AUDIT_ROTATE_BYTES` (8 MiB, roughly 30 000 rows) it is renamed to
+`<path>.1`, replacing the previous `.1`, and a fresh file starts — two
+generations at most. The rotation decision is not atomic across processes:
+two signer processes on one credential that both hit the bound can leave the
+predecessor generation discarded (the current entry is never lost). A failed
+audit write (disk full, read-only, two appends racing at the bound) is
+reported on stderr and never fails the signing call that already produced
+its signature — so the consent block's
+"appended for every signing operation" is a best-effort promise since #3172,
+kept unchanged in text because editing it moves the consent hash. The
+credential check itself is unchanged in wording and still judges a symlinked
+credential by its target. The
+`payload_hash` argument itself is bounded on the tool schema to a 32-byte hash
+(`0x` + 64 hex), so the audit field is never caller-controlled free text; the
+two object arguments that do reach the file (`payment_required`,
+`authorization`) were already hashed before being written, and
+`x402_expected` is never written to the sidecar.
 
 ## Hot-wallet minimization
 

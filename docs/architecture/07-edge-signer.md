@@ -99,8 +99,10 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    The agent client runs it locally **alongside** the hosted Haven connection.
    On first launch, or when that bound configuration changes, it requires a
    consent acknowledgement tied to the delegate, optional wallet/agent/network
-   metadata, and exposed tool set. Each signing operation appends a local audit
-   row containing context hashes but no key, signature, or merchant header.
+   metadata, and exposed tool set. Each signing operation appends, best-effort
+   (since #3172 a failed audit write is reported on stderr and never fails the
+   call), a local audit row containing context hashes but no key, signature,
+   or merchant header.
 
    **Handshake surface (#1155).** The `initialize` result also states which
    expected-context and sweep-binding versions this signer will verify —
@@ -359,6 +361,13 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
   `<credentials>.signer-ack.json` sidecar.
 - MCP operations append JSONL audit entries next to the credential file or at
   `~/.haven/signer-audit.jsonl`. Entries omit keys, signatures, and headers.
+  Since #3172 the sidecar is created owner-only (`0600`), a permissive one is
+  tightened in place on the next append (before rotation; a symlink is warned
+  about, never chmod-ed through), the file rotates to `<path>.1` at 8 MiB (one
+  predecessor kept), a failed audit write never fails the signing call that
+  already produced its signature, and `payload_hash` / `typed_data_hash` are
+  bounded on the schema to a 32-byte hash so no audit field is
+  caller-controlled free text.
 - Connect Agent 2 creates local credential files during pairing. Registration
   sends Haven the setup token, runtime/version, public signing address and
   proof, API-key hash/prefix, and non-secret connector/install metadata. Later

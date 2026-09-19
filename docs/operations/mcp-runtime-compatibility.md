@@ -14,6 +14,7 @@ covers:
   - packages/sdk/src/account-reads.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/mcp-merchant-transport.ts
+  - packages/sdk/src/merchant-completion.ts
   - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts

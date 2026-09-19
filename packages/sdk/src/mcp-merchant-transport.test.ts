@@ -240,10 +240,12 @@ describe('McpMerchantTransport', () => {
       const transport = new McpMerchantTransport({ fetch })
       const reinitialize = vi.fn(async () => 'session-new')
 
+      // A decodable header, so the MCP profile's `_meta` carrier is applied too.
+      const signedHeader = btoa(JSON.stringify({ x402Version: 1, scheme: 'exact', network: 'eip155:8453', payload: { signature: '0xsig' } }))
       const response = await transport.deliverPaymentRecoveringSession(
         'https://merchant.test/mcp',
         { method: 'POST', body: '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"buy"}}', headers: { 'mcp-session-id': 'session-stale' } },
-        'signed-header',
+        signedHeader,
         reinitialize,
       )
 
@@ -251,15 +253,27 @@ describe('McpMerchantTransport', () => {
       await expect(response.text()).resolves.toBe('goods')
       expect(reinitialize).toHaveBeenCalledTimes(1)
       expect(deliveries).toHaveLength(2)
+      // The resent BODY carries the same tools/call and the profile's _meta payment (N4).
+      const secondBody = JSON.parse(String(fetch.mock.calls[1][1]?.body)) as { params: { name: string; _meta?: Record<string, unknown> } }
+      expect(secondBody.params.name).toBe('buy')
+      expect(secondBody.params._meta?.['x402/payment']).toBeDefined()
       expect(deliveries[0].get('mcp-session-id')).toBe('session-stale')
       expect(deliveries[1].get('mcp-session-id')).toBe('session-new')
       // The SAME header both times — never a fresh authorization.
-      expect(deliveries[0].get('payment-signature')).toBe('signed-header')
-      expect(deliveries[1].get('payment-signature')).toBe('signed-header')
+      expect(deliveries[0].get('payment-signature')).toBe(signedHeader)
+      expect(deliveries[1].get('payment-signature')).toBe(signedHeader)
     })
 
     it('a second 404 is the answer — no third delivery', async () => {
-      const fetch = vi.fn(async () => SESSION_NOT_FOUND_404())
+      let served = 0
+      const fetch = vi.fn(async () => {
+        served += 1
+        // A bounded assertion: a recursive recovery against an always-404
+        // merchant would otherwise starve the event loop and HANG the suite
+        // rather than fail it (#3171 review S2).
+        if (served > 2) throw new Error('recovery must not recurse — a third delivery was attempted')
+        return SESSION_NOT_FOUND_404()
+      })
       const transport = new McpMerchantTransport({ fetch })
       const reinitialize = vi.fn(async () => 'session-new')
       const response = await transport.deliverPaymentRecoveringSession('https://merchant.test/mcp', { method: 'POST' }, 'h', reinitialize)

@@ -261,7 +261,7 @@ async function handle(
   // protocol-invalid, and one client quirk away from charged-with-no-goods.
   // The client's remedy is cheap and standard: re-initialize, then retry the
   // SAME payment header — nothing was settled here, so the retry settles
-  // exactly once (and the #1519/#1551 chain-truth safeguards still cover a
+  // exactly once (and the #1519/#1515 chain-truth safeguards still cover a
   // replay of an already-settled header).
   // #3171: the idle sweep runs before the lookup, so an expired session
   // answers the same 404 a restart does — one refusal shape, one remedy.
@@ -507,7 +507,10 @@ async function sweepIdleSessions(
   for (const [id, session] of sessions) {
     if (session.lastSeenAt < cutoff) {
       sessions.delete(id)
-      await closeSession(session, sessions)
+      // Housekeeping on SOMEONE ELSE's expired session must never fail the
+      // request that happened to trigger it — on the paid retry that would
+      // be a rejection after funding caused by a third party (#3171 review).
+      await closeSession(session, sessions).catch(() => {})
     }
   }
 }

@@ -242,7 +242,12 @@ it; and since #3171 a session idle longer than `sessionIdleTtlMs` (default
 30 minutes, `DEFAULT_SESSION_IDLE_TTL_MS`; `0` disables) is closed and
 forgotten by a lazy sweep on the next request, answering the same 404 — before
 that, every `initialize` from anyone on the internet stayed resident until the
-client happened to close it. One refusal shape, one remedy, for both causes.
+client happened to close it. Keep the TTL longer than the slowest settlement:
+the idle clock is stamped when a request starts, and closing a session cuts
+its open response streams. The sweep is linear in resident sessions and there
+is still no cap on how many an unauthenticated `initialize` burst can mint
+inside one TTL window; a demo merchant accepts that. One refusal shape, one
+remedy, for both causes.
 
 ### `/mcp` settlement-readiness gate (#2979)
 

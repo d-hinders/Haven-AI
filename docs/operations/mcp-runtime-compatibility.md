@@ -719,6 +719,64 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** the manifest table
+> above is re-pinned by the bump to `0.4.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`; the four numbers were not copied by hand. **Re-read, not
+> rubber-stamped**, and the table's non-version rows still hold: the Node floor
+> is unchanged (`>= 22.0.0`, CI on LTS 24 via `.nvmrc`), and the Codex and
+> Claude Code rows still describe local stdio MCP.
+>
+> **MINOR, and one tool's output contract is why.** `haven_list_receipts` on
+> the local MCP runtime now returns
+> `{ receipts, total, hasMore, nextCursor }` **instead of a bare array**, and
+> takes an optional `cursor` (#3128, via the SDK's new `listReceiptsPage`). For
+> an MCP server package the **tool result shape is the published contract**, so
+> an agent or script that indexed the old array meets an object. Under the 0.x
+> convention that made 0.2.0 and 0.3.0 MINOR, a break takes the minor step.
+>
+> **Record how nearly this was missed**, because the lesson is about the
+> instrument. Commit subjects carried no `!:` marker, and BOTH declaration-level
+> checks — a name-level `.d.ts` diff and a TypeScript-compiler-API pass that
+> recurses three levels into exported members — reported **zero removals across
+> all five packages**. They are correct and they are blind here: a tool's
+> runtime result shape appears in no `.d.ts`. The release's own CHANGELOG is
+> what names it. Treat "the declaration surface lost nothing" as evidence about
+> declarations only, never as evidence that a release carries no break.
+>
+> The SDK is NOT part of this break: `listReceipts(): Promise<HavenPaymentReceipt[]>`
+> is byte-identical to the published `0.3.0-alpha.0` declaration and
+> `listReceiptsPage` is additive. Measured against the published tarballs, the
+> built declarations remove **zero** names across all four affected packages and
+> add **24** (23 `sdk`, 1 `signer`).
+>
+> **What else moved that a skew reader should know.** The typed-next-step
+> surface reaches all three published runtimes at once (epic #3105: `sdk` gains
+> `NextStep` and `createNextStepBuilder`, `signer` gains
+> `SIGNER_HOSTED_HANDOFF_SHAPES`, and the hosted MCP will not compile a bare
+> `nextAction`). These are **outputs**, and nothing validates their presence at
+> runtime, so **a stale signer or local runtime simply emits no typed next
+> step** — the state it was already in before this release. Note this is the
+> fail-open-on-absence direction, which is NOT what the skew table below models:
+> that table is about a stale half refusing input it cannot validate. The sharp
+> edge there is *"An undeclared argument is refused, not stripped (#2312)"* —
+> checked, and it does not bite: `git diff` over `packages/signer/src/tools.ts`
+> across this range shows no `toolSchemas` schema change at all, only a
+> `Record<…>` → `as const satisfies Record<…>` annotation, so no new signer
+> argument exists to be refused.
+>
+> The x402 retry-target guards (`assertSecureX402RetryTarget` and siblings,
+> #3097) and the unsupported-transfer-method refusal (#3116) are additive at the
+> declaration level but **narrow runtime behaviour** in the fail-closed
+> direction — an old caller that relied on the paid retry following a
+> merchant-declared `http://` resource, or on a `permit2` entry being signed as
+> EIP-3009, now gets a typed refusal. Neither was a documented capability.
+>
+> `last-verified` is left as it stands: it **already reads 2026-09-19** from
+> #3116's change earlier today, so there is nothing to bump. This note is a
+> genuine re-read of the manifest table and the skew section rather than a
+> scoped check of one constant — but a date that is already correct does not get
+> re-stamped for the sake of it (#1366).
+
 > **Re-verification (0.3.0-alpha.0 release, 2026-09-17):** this release is a
 > **BREAK**, and the version says so — MINOR under the 0.x convention, the same
 > reason 0.2.0-alpha.0 was. It carries the naming-P5 contraction (#2914 /
@@ -795,10 +853,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.3.0-alpha.0` |
-| `@haven_ai/mcp` | `0.3.0-alpha.0` |
-| `@haven_ai/sdk` | `0.3.0-alpha.0` |
-| `@haven_ai/signer` | `0.3.0-alpha.0` |
+| `@haven_ai/connect` | `0.4.0-alpha.0` |
+| `@haven_ai/mcp` | `0.4.0-alpha.0` |
+| `@haven_ai/sdk` | `0.4.0-alpha.0` |
+| `@haven_ai/signer` | `0.4.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

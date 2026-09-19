@@ -36,6 +36,7 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
     ),
     fetchAccountTransactions: vi.fn(),
     mergeX402Transactions: vi.fn(),
+    resolveTransactionCurrency: vi.fn(async () => 'SEK'),
   },
 }))
 
@@ -101,6 +102,7 @@ describe('dashboard routes', () => {
     transactionMocks.compareTransactions.mockClear()
     transactionMocks.enrichedTransactionIdentityKey.mockClear()
     transactionMocks.enrichTransactionsWithAgents.mockClear()
+    transactionMocks.resolveTransactionCurrency.mockClear()
     transactionMocks.fetchAccountTransactions.mockReset()
     transactionMocks.mergeX402Transactions.mockReset()
 

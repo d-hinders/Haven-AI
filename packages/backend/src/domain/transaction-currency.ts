@@ -36,6 +36,17 @@ export type TransactionCurrency = (typeof TRANSACTION_CURRENCIES)[number]
  * currency the CSV export reports fixed, and the accounting feed's own
  * default ledger currency. A user who never touched settings keeps the
  * figures they were getting; now the figure names its currency.
+ *
+ * Migration 091 (owner decision, Philip, 2026-09-19) makes the stored data
+ * agree with this default: every pre-existing `currency_preference='USD'`
+ * row — the literal inherited from `000_initial.ts`'s column default, never
+ * chosen by the user — is set to NULL, so those users are served THIS
+ * default from here on. The stated consequence: a user who explicitly
+ * clicked USD in the old two-option radio silently switches to SEK and can
+ * click USD back in the new three-option radio. An explicit post-round-1
+ * USD choice is indistinguishable from the inherited literal in the data,
+ * so the migration cannot spare them; the stored value after 091 is a
+ * preference or an absence, never an accident.
  */
 export const DEFAULT_TRANSACTION_CURRENCY: TransactionCurrency = 'SEK'
 

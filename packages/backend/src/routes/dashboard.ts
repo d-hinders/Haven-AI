@@ -20,6 +20,7 @@ import {
   enrichTransactionsWithAgents,
   fetchAccountTransactions,
   mergeX402Transactions,
+  resolveTransactionCurrency,
 } from '../modules/transactions/index.js'
 
 const AGENT_PREVIEW_LIMIT = 6
@@ -50,16 +51,34 @@ async function accumulateMonthlySpend(
     eur += Number(row.eur_sum ?? '0')
     sek += Number(row.sek_sum ?? '0')
 
+    // Two INDEPENDENT re-price buckets. `getFiatValuesForTokenAmount` prices
+    // the token amount into all three currencies, but each bucket may only
+    // land its own currency: `sek_sum` already holds every row's booked
+    // `sek_value`, and pricing SEK from the USD/EUR bucket's read is the
+    // double-count the round-3 review measured (21 vs 10.5) — migration 090
+    // backfills rows whose usd/eur are NULL, so the USD/EUR predicate
+    // collects rows SEK has already priced. The row shapes are disjoint
+    // neither way: a row can carry a booked SEK figure and still need the
+    // USD/EUR re-price, or the reverse, so neither bucket may `continue` the
+    // other.
     const fallbackAmount = Number(row.fallback_amount ?? '0')
-    if (fallbackAmount <= 0) continue
+    if (fallbackAmount > 0) {
+      const fallback = await getFiatValuesForTokenAmount(
+        row.token_symbol,
+        fallbackAmount.toString(),
+      )
+      usd += fallback.usd ?? 0
+      eur += fallback.eur ?? 0
+    }
 
-    const fallback = await getFiatValuesForTokenAmount(
-      row.token_symbol,
-      fallbackAmount.toString(),
-    )
-    usd += fallback.usd ?? 0
-    eur += fallback.eur ?? 0
-    sek += fallback.sek ?? 0
+    const fallbackAmountSek = Number(row.fallback_amount_sek ?? '0')
+    if (fallbackAmountSek > 0) {
+      const sekFallback = await getFiatValuesForTokenAmount(
+        row.token_symbol,
+        fallbackAmountSek.toString(),
+      )
+      sek += sekFallback.sek ?? 0
+    }
   }
 
   return { usd, eur, sek }
@@ -188,6 +207,10 @@ export default async function dashboardRoutes(
     const enrichedTransactions = await enrichTransactionsWithAgents(
       sub,
       dedupedTransactions,
+      // The preview names its currency like the feed does (#3127 round-3
+      // review): without the preference, the same payment is SEK here and
+      // USD on /transactions for a USD user.
+      await resolveTransactionCurrency(sub),
     )
 
     const successfulTransactions = dedupedTransactions.filter((tx) => !tx.isError).length
@@ -209,6 +232,10 @@ export default async function dashboardRoutes(
         sekAmount: sekChangeAvailable ? totalSek - previousSek : null,
         usdPercent: changeAvailable ? computePercentChange(totalUsd, previousUsd) : 0,
         eurPercent: changeAvailable ? computePercentChange(totalEur, previousEur) : 0,
+        // sekPercent 0 beside sekAmount null is deliberate: the frontend
+        // branches on the AMOUNT (null = "change unavailable") and never
+        // reads the percentage in that state — the schema wants a number, so
+        // 0 is the inert filler, not a claim the change was zero.
         sekPercent: sekChangeAvailable ? computePercentChange(totalSek, previousSek) : 0,
       },
       metrics: {

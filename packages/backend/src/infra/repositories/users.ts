@@ -112,7 +112,10 @@ export const UPDATE_CURRENCY_PREFERENCE_SQL = `UPDATE users SET currency_prefere
  * `userId` is REQUIRED — tenant scope for the read.
  *
  * `null` covers both "no such user row" and "the column is null"; the route
- * applies the same `'USD'` default to either, exactly as the inline query did.
+ * applies `DEFAULT_TRANSACTION_CURRENCY` to either (`routes/user.ts`) — SEK
+ * since #3127, the documented no-preference default. Migration 091 is what
+ * makes the stored column agree: pre-existing inherited `'USD'` rows are
+ * NULLed so this fallback, not an inherited literal, decides.
  */
 export async function findCurrencyPreference(
   userId: string,

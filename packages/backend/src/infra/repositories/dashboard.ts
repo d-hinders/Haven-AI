@@ -81,6 +81,8 @@ export interface MonthlySpendRow {
   eur_sum: string | null
   sek_sum: string | null
   fallback_amount: string | null
+  /** Rows whose `sek_value` is still NULL — the only shape the caller may re-price into SEK (#3127 round-3 review). */
+  fallback_amount_sek: string | null
 }
 
 // ── Accounts + agents ────────────────────────────────────────────────────────
@@ -226,9 +228,17 @@ export async function insertPortfolioSnapshot(
  * whole reason this directory exists. `accounting-entry.ts` is already waived
  * for exactly that shape.
  *
- * `fallback_amount` sums the token amount for rows with no usable fiat value,
- * so the caller can price them through the fiat lookup instead of silently
- * counting them as zero.
+ * `fallback_amount` sums the token amount for rows with no usable USD/EUR
+ * value, so the caller can price them through the fiat lookup instead of
+ * silently counting them as zero. `fallback_amount_sek` is the SEK twin with
+ * one narrower predicate (#3127 round-3 review): it collects rows whose
+ * `sek_value` is still NULL only. Migration 090 backfills `sek_value` from
+ * the book-time evidence, so a backfilled row is already priced — the USD/EUR
+ * fallback predicate above cannot see `sek_value` and would hand it to the
+ * fiat lookup AGAIN, double-counting every backfilled row (measured 21 where
+ * the truth was 10.5). The row shapes are independent: a row can carry a
+ * booked SEK figure and still need the USD/EUR re-price (and vice versa), so
+ * neither bucket subsumes the other.
  */
 export const SUM_MONTHLY_PAYMENT_SPEND_SQL = `SELECT token_symbol,
                 COALESCE(SUM(usd_value), 0)::TEXT AS usd_sum,
@@ -248,7 +258,18 @@ export const SUM_MONTHLY_PAYMENT_SPEND_SQL = `SELECT token_symbol,
                     END
                   ),
                   0
-                )::TEXT AS fallback_amount
+                )::TEXT AS fallback_amount,
+                COALESCE(
+                  SUM(
+                    CASE
+                      WHEN sek_value IS NULL
+                        AND amount_human::NUMERIC > 0
+                        THEN amount_human::NUMERIC
+                      ELSE 0
+                    END
+                  ),
+                  0
+                )::TEXT AS fallback_amount_sek
          FROM payment_intents
          WHERE user_id = $1
            AND status = 'confirmed'

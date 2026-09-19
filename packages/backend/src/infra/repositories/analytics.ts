@@ -279,8 +279,8 @@ export interface PerAgentTopMerchantRow {
 /**
  * The top merchant per agent, in ONE statement via a window function rather
  * than one query per agent. Ranked on the USD sum regardless of the caller's
- * display currency — the top merchant by USD and by EUR are the same
- * merchant in every case this codebase can produce (both are booked from the
+ * display currency — the top merchant by USD, by EUR and by SEK are the same
+ * merchant in every case this codebase can produce (all are booked from the
  * same spot price at confirmation), so ranking on one currency avoids a
  * second parameter without changing which merchant wins.
  */

@@ -22,7 +22,7 @@ import type { EnrichedTransaction } from './types.js'
  * (#386). It stays in the contract so a column does not appear later and
  * shift every index; the same reservation the frontend export carried.
  *
- * #3127 appends `reporting_currency` / `preference_currency` at the END:
+ * #3127 appends `reporting_currency` / `converted_currency` at the END:
  * the amounts in this file remain a fixed-SEK accounting projection (the
  * deliberate branch — the general feed converts to the user's preference,
  * this file does not), but the figures now name their currency in the file

@@ -645,6 +645,11 @@ export const CONFIRM_MACHINE_INTENT_SQL = `UPDATE payment_intents
          AND status = 'pending_signature'
          AND tx_hash IS NULL
        RETURNING id`
+// Callerless since #1987 — and deliberately NOT migrated to the three-currency
+// booking (#3127): a revival that books only usd/eur would HALF-BOOK the row
+// (NULL `sek_value` beside booked siblings), which the live confirm path
+// refuses. If this statement comes back, it must book `sek_value` from the
+// same fiat read in the same UPDATE, or be deleted instead of revived.
 
 
 export const FAIL_MACHINE_INTENT_SQL = `UPDATE payment_intents

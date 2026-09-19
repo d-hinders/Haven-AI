@@ -149,6 +149,12 @@ export interface PaymentRefusalRow {
   amount_atomic: string
   usd_value: string | null
   eur_value: string | null
+  // `sek_value` is deliberately absent from this READ shape (write-only on
+  // this path): the refusal ledger's analytics read is the EUR/USD pair, and
+  // widening it is its own contract change. Migration 090 adds the column to
+  // the TABLE so refusal booking can mirror payment booking; a revival of
+  // this read that wants SEK must add the column here explicitly, not
+  // discover it half-wired.
   merchant_to: string | null
   resource_url: string | null
   reason: PaymentRefusalReason
@@ -158,6 +164,7 @@ export interface PaymentRefusalRow {
   created_at: string
 }
 
+// Same read-shape boundary as PaymentRefusalRow above: no `sek_value`.
 const REFUSAL_READ_COLUMNS = `
   id, user_id, account_id, agent_id, chain_id, token_symbol, amount_atomic,
   usd_value, eur_value, merchant_to, resource_url, reason, source, detail,

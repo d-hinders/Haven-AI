@@ -79,7 +79,13 @@ export function convertedTransactionAmount(
   if (currency === 'SEK') {
     // The stored columns ARE the SEK answer — same value, same provenance,
     // same four-decimal scale. SEK comes with a rate already on the row
-    // (`fxRateSek`); it is not restated here.
+    // (`fxRateSek`); it is not restated here, so `convertedFxRate` stays
+    // null on this path — DELIBERATE, and unlike the non-SEK branches
+    // below, which return their rate. A consumer wanting the default
+    // currency's rate reads the row's `fxRateSek`, same as the mirrored
+    // `ledgerAmount` surface does; the asymmetry is documented rather than
+    // silently bridged, because restating `fxRateSek` under a second name
+    // would give the same figure two provenance stories.
     return {
       convertedAmount: amountSek ?? null,
       convertedCurrency: 'SEK',

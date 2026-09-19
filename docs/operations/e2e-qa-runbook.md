@@ -21,7 +21,7 @@ covers:
   - packages/backend/src/modules/transactions/__tests__/csv-export.test.ts
   - packages/backend/src/routes/__tests__/transactions-export-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-09-11"
+last-verified: "2026-09-19"
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)

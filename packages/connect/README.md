@@ -109,7 +109,7 @@ report stays `version: 1`; `level` is additive.
 | Level | Meaning | Example |
 | --- | --- | --- |
 | `ok` | Nothing to say. | The installed signer matches the connector's pin. |
-| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered). `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
+| `advisory` | Worth reading; nothing is broken. Exit 0. | `signer_runtime`: the install is intact but behind the pinned version ("intact, but outdated" — both versions named, `--repair` offered); `signer_runtime_unused` (#3123): runtime directories nothing references. `superseded_agents` on a recognised runtime with no config file the connector can read (Claude Code, `other`): a second live key is reported, and the check says why "wired" cannot be verified from this machine. |
 | `failed` | A real failure with one repair action. Exit 1. | A stale or empty runtime directory; a live key in a directory the runtime's config demonstrably does not use. |
 
 What stays blocking is live spend authority: a directory whose stored key
@@ -194,10 +194,74 @@ It tombstone-first (so a stale long-lived host still hears `HAVEN-TOMBSTONE`,
 never a masked `ENOENT`), then removes THAT agent's hosted + signer pair from
 every runtime config it appears in (Hermes YAML, Codex TOML, the Cursor / VS
 Code / Insiders / Claude Desktop JSON configs), plus the Hermes dotenv API-key
-line — bare `MCP_HAVEN_API_KEY` or named `MCP_HAVEN_<SLUG>_API_KEY`. Finally it
-tears down the target directory's local key material (signer key, any abandoned
-re-key, the stored API key) so `--doctor` reports `retired`, not the
-still-spend-capable `superseded`; the #2155 tombstone mirror keeps the record.
+line — bare `MCP_HAVEN_API_KEY` or named `MCP_HAVEN_<SLUG>_API_KEY`. Then it
+decides about the target directory's local key material (signer key, any
+abandoned re-key, the stored API key) — and since #3123 it **asks before it
+destroys**.
+
+#### Teardown refuses before destroying the recovery credential (#3123)
+
+A revoked agent's API key and delegate signature are exactly what the
+sweep-recovery routes still accept — they are the only local means of
+recovering a stranded delegate balance. So after the wiring is removed,
+`--unwire` runs the one read it has (the identity probe, `GET
+/machine-payments/agent` with the stored key — no new network call, no
+backend change) and **refuses to destroy the key material on every answer**:
+
+| Probe | What it means | What `--unwire` does |
+| --- | --- | --- |
+| `ok` | The agent is still active: its key still spends. | Refuses; tells you to revoke on the Haven agent page (connect never revokes), then re-run. |
+| `unauthorized` | The key no longer authenticates on normal routes (revoked, archived, paused, pending approval, rotated, or not a key the backend knows — it does not say which). | Refuses; says plainly that a stranded balance **may** exist and the connector **cannot check**; recover first (`haven_sweep_delegate`, or the agent page). |
+| `network_error` / `bad_response` | Could not verify. | Refuses: unknown is not "safe to delete". Retry. |
+| *(no stored API key + URL)* | Nothing the recovery routes would accept. | Proceeds, unprobed — the pre-#3123 shape. |
+
+The refusal is exit 1 with the wiring already gone; the key stays in the
+0o600 credential file only (the config and Hermes-env copies are scrubbed
+first, so a refusal leaves the key in the credential file and in any config
+this run could not clean — those are reported `✗` above, never silently),
+and `--doctor` keeps reporting the directory as `superseded` until the key is
+revoked or destroyed — that is the honest state. **`--destroy-key-material`**
+proceeds on every answer, states what it destroyed and that local recovery
+of a stranded balance ends with it. In `--json` the record carries an
+additive `teardown: { status: destroyed | retained | forced, probe, detail,
+remedy? }`.
+
+The `claude-code` copy of the key (written by `claude mcp add`, into a config
+the connector does not own) is out of scope for `--unwire`, as it always was:
+remove it with `claude mcp remove haven` / `haven-signer` (or the named
+pair) yourself; `--doctor --runtime claude-code` cannot see it either.
+
+### Pruning signer-runtime directories (`--prune-signer-runtimes`, #3123)
+
+Every pinned version — and, since #2424, every `HAVEN_*_SPEC` override — gets
+its own `~/.haven/signer-runtime/<key>/`, and nothing reclaimed them:
+
+```
+npx @haven_ai/connect@<channel> --prune-signer-runtimes --dry-run
+npx @haven_ai/connect@<channel> --prune-signer-runtimes
+```
+
+It walks the root (so override-keyed `override-<hash>` directories are seen,
+not only manifest versions), **keeps** every directory any credential
+directory names — through its `signer-runtime.json` or through the path its
+wrapper launches — wired, superseded or retired; the prune never decides who
+is live — and the connector's current pin (what
+`--repair` installs), and removes the rest, reporting each with a #3121
+level: kept/removed are `ok`, a dry-run candidate is an `advisory`, a removal
+that failed (a signer process still holding the directory open on a platform
+that refuses the unlink) is `failed` and the only thing that exits 1. On
+POSIX a running signer keeps its open files until it restarts, and since
+only directories no sidecar and no wrapper names go, a configured agent is
+not started against a removed one. The prune trusts those two reference
+sources (the sidecar's `runtime_directory` and the path the wrapper
+launches — so a directory whose sidecar is missing or corrupt but whose
+wrapper is intact keeps its runtime); it reads the default agents root AND
+the parent of an explicit `--credentials-dir`, a union, never either/or. It
+is its own flag — never part of `--repair`, never automatic; `--doctor`
+reports unused directories as an advisory (`signer_runtime_unused`) that
+names this command — names only; sizes come from `--dry-run`, and a kept
+directory is never sized (its row says "not sized"). `--json` emits
+`{ pruned: true, version: 1, root, dry_run, level, removed, reclaimed_bytes, entries[] }`.
 
 An **unnamed** pair (`haven` / `haven-signer`) is shared by every unnamed agent
 and is only removed when this directory's wrapper is the one the config
@@ -387,9 +451,11 @@ already-configured machine behaves as follows (characterized in
   managed Codex/Hermes equivalents) and re-points them at the new agent's
   credentials; unrelated MCP servers and configuration are preserved. Once
   the runtime install has actually completed, each superseded directory is
-  tombstoned and its local key files removed — the same teardown `--unwire`
-  performs — so `--doctor` reads it as `retired` rather than still
-  spend-capable. If the install ends with an error code the retirement is
+  tombstoned and its local key files removed — the unconditional key-material
+  teardown; `--unwire` itself runs that teardown only when its #3123 probe says
+  there is nothing to preserve, and `--replace` deliberately does not probe
+  (the owner has just chosen to overwrite; see the #3119 follow-up) — so
+  `--doctor` reads it as `retired` rather than still spend-capable. If the install ends with an error code the retirement is
   **skipped**, because the old wiring may still be the only working one; the
   outcome's `superseded_agents_retired_locally` says which happened and
   `retired_agent_ids` names exactly the directories it reached. With

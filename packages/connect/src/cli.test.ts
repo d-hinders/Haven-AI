@@ -817,3 +817,114 @@ describe('--doctor verdict levels (#3121)', () => {
     }
   })
 })
+
+/**
+ * #3123 — the CLI surface of the teardown decision and the prune. A retained
+ * teardown is a refusal: the wiring is gone, the key material deliberately is
+ * not, and the exit code says so; `--json` carries `teardown` additively.
+ */
+describe('--unwire teardown outcome and --prune-signer-runtimes (#3123)', () => {
+  function unwireResult(teardown: { status: 'destroyed' | 'retained' | 'forced'; probe: string; detail: string; remedy?: string }) {
+    return {
+      directory: '/home/u/.haven/agents/research', agentId: 'agent-research', slug: 'research', tombstoned: true,
+      runtimes: [{ runtime: 'hermes', label: 'Hermes Agent config', path: '/home/u/.hermes/config.yaml', status: 'removed' as const }],
+      teardown: teardown as never,
+    }
+  }
+
+  it('retained: exit 1, the ✗ key-material line and the remedy are printed, --json carries teardown', async () => {
+    const spy = vi.spyOn(unwireModule, 'unwireAgent').mockResolvedValue(unwireResult({ status: 'retained', probe: 'unauthorized', detail: 'A stranded delegate balance MAY still exist and the connector CANNOT check.', remedy: 'Recover first, then --destroy-key-material.' }))
+    try {
+      const stdout: string[] = []
+      const exitCode = await runCli(['--unwire', '/home/u/.haven/agents/research'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(1)
+      const out = stdout.join('')
+      expect(out).toContain('✗ Key material: retained (probe: unauthorized)')
+      expect(out).toContain('↳ Recover first, then --destroy-key-material.')
+      expect(out).toContain('key material was KEPT')
+      expect(out).not.toContain('key material was removed')
+
+      const json: string[] = []
+      const exitJson = await runCli(['--unwire', '/home/u/.haven/agents/research', '--json'], { stdout: (m) => json.push(m), stderr: () => undefined })
+      expect(exitJson).toBe(1)
+      const record = JSON.parse(json[0])
+      expect(record.unwired).toBe(true)
+      expect(record.teardown).toEqual({ status: 'retained', probe: 'unauthorized', detail: 'A stranded delegate balance MAY still exist and the connector CANNOT check.', remedy: 'Recover first, then --destroy-key-material.' })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('forced under --destroy-key-material: exit 0, the flag reaches unwireAgent, the "!" line and the ended-recovery remedy are printed', async () => {
+    const spy = vi.spyOn(unwireModule, 'unwireAgent').mockResolvedValue(unwireResult({ status: 'forced', probe: 'ok', detail: 'Key material destroyed under --destroy-key-material (probe: ok).', remedy: 'Local recovery of a stranded delegate balance ends with it.' }))
+    try {
+      const stdout: string[] = []
+      const exitCode = await runCli(['--unwire', '/home/u/.haven/agents/research', '--destroy-key-material'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(0)
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ destroyKeyMaterial: true }))
+      const out = stdout.join('')
+      expect(out).toContain('! Key material: forced (probe: ok)')
+      expect(out).toContain('Local recovery of a stranded delegate balance ends')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('destroyed (nothing to preserve): exit 0 and the pre-#3123 verify line', async () => {
+    const spy = vi.spyOn(unwireModule, 'unwireAgent').mockResolvedValue(unwireResult({ status: 'destroyed', probe: 'not_probed', detail: 'No stored API key + API URL to probe with.' }))
+    try {
+      const stdout: string[] = []
+      const exitCode = await runCli(['--unwire', '/home/u/.haven/agents/research'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(0)
+      expect(stdout.join('')).toContain('✓ Key material: destroyed (probe: not_probed)')
+      expect(stdout.join('')).toContain('should report this agent as `retired`')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('--prune-signer-runtimes --json: the report with per-entry levels; exit 0 on advisory (dry run), 1 only on a failed removal', async () => {
+    const pruneModule = await import('./prune-runtimes.js')
+    const spy = vi.spyOn(pruneModule, 'pruneSignerRuntimes').mockResolvedValue({
+      version: 1, root: '/home/u/.haven/signer-runtime', dryRun: true, removed: 0, reclaimedBytes: 0, level: 'advisory',
+      entries: [{ directory: '/home/u/.haven/signer-runtime/override-abc', key: 'override-abc', kind: 'override', bytes: 1048576, referencedBy: [], action: 'would_remove', level: 'advisory', detail: 'would remove' }],
+    })
+    try {
+      const stdout: string[] = []
+      const exitCode = await runCli(['--prune-signer-runtimes', '--dry-run', '--json'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+      expect(exitCode).toBe(0)
+      expect(spy).toHaveBeenCalledWith({ dryRun: true }, expect.anything())
+      const record = JSON.parse(stdout[0])
+      expect(record).toMatchObject({ pruned: true, dry_run: true, level: 'advisory', removed: 0, reclaimed_bytes: 0 })
+      expect(record.entries[0]).toMatchObject({ key: 'override-abc', kind: 'override', action: 'would_remove', level: 'advisory', referenced_by: [] })
+
+      spy.mockResolvedValue({
+        version: 1, root: '/home/u/.haven/signer-runtime', dryRun: false, removed: 0, reclaimedBytes: 0, level: 'failed',
+        entries: [{ directory: '/x', key: '0.0.1', kind: 'version', bytes: 10, referencedBy: [], action: 'failed', level: 'failed', detail: 'removal failed: EBUSY' }],
+      })
+      const prose: string[] = []
+      const exitFailed = await runCli(['--prune-signer-runtimes'], { stdout: (m) => prose.push(m), stderr: () => undefined })
+      expect(exitFailed).toBe(1)
+      expect(prose.join('')).toContain('✗ 0.0.1 (version, 0 MB): removal failed: EBUSY')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('--prune-signer-runtimes emits {pruned:false} with a next action when it throws', async () => {
+    const pruneModule = await import('./prune-runtimes.js')
+    const spy = vi.spyOn(pruneModule, 'pruneSignerRuntimes').mockRejectedValue(new Error('synthetic prune boom'))
+    try {
+      const stdout: string[] = []
+      const stderr: string[] = []
+      const exitCode = await runCli(['--prune-signer-runtimes', '--json'], { stdout: (m) => stdout.push(m), stderr: (m) => stderr.push(m) })
+      expect(exitCode).toBe(1)
+      const record = JSON.parse(stdout[0])
+      expect(record.pruned).toBe(false)
+      expect(record.error.code).toBe('prune_failed')
+      expect(stderr.join('')).toContain('synthetic prune boom')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})

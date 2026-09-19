@@ -25,6 +25,7 @@
  * not a licence to destroy key material the owner may still be mid-flow on.
  */
 
+import { pruneSignerRuntimes } from './prune-runtimes.js'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { connectorRerunCommand } from '@haven_ai/sdk'
 import { homedir } from 'node:os'
@@ -120,6 +121,8 @@ export interface DoctorReport {
 }
 
 export interface DoctorDeps {
+  /** #3123 test seam: the dry-run prune the doctor consults (names only — see the call site). */
+  pruneSignerRuntimes?: typeof pruneSignerRuntimes
   homeDir?: string
   fetch?: typeof fetch
   probeSignerTools?: typeof probeLocalMcpTools
@@ -1327,6 +1330,33 @@ export async function runDoctor(
 
   const signerProcess = primaryChecksById.get('signer_process')
   if (signerProcess) checks.push(signerProcess)
+
+  // ── Unused signer-runtime directories (#3123) — advisory, only when any ─
+  // A dry-run prune: directories under ~/.haven/signer-runtime that no
+  // credential directory's sidecar or wrapper names and that are not the current pin.
+  // Reported here so the doctor's own repair advice can be completed without
+  // hand-editing directories; absent when there is nothing to reclaim, so a
+  // single-agent install reads exactly as before.
+  // `measure: false`: names only. Sizing walks every file under the root —
+  // 287k files, 2.0 GB on disk, on one developer machine: 28 s cold / 34 s
+  // warm in one #3151 reviewer's run, 1059 s cold in the other reviewer's
+  // sandbox (the figure depends on the cache and the box; none is a
+  // contract) — and the doctor is the command a user runs when something is
+  // already broken.
+  const prune = await (deps.pruneSignerRuntimes ?? pruneSignerRuntimes)({ dryRun: true, measure: false }, { homeDir, credentialsDir: input.credentialsDir })
+  const unused = prune.entries.filter((entry) => entry.action === 'would_remove')
+  if (unused.length > 0) {
+    checks.push({
+      id: 'signer_runtime_unused',
+      label: 'Unused signer-runtime directories',
+      level: 'advisory',
+      detail:
+        `${unused.length} signer-runtime director${unused.length === 1 ? 'y' : 'ies'} under ${prune.root} that no credential ` +
+        `directory names: ${unused.map((entry) => entry.key).join(', ')}. ` +
+        'Nothing is broken; they are left over from earlier pins or overrides (sizes: --prune-signer-runtimes --dry-run).',
+      repair: `Run: ${RERUN} --prune-signer-runtimes (add --dry-run to list only).`,
+    })
+  }
 
   // ── Restart still required? (informational, never fails the doctor) ───────
   const restart = restartRequiredForRuntime(input2.runtime, deps.env)

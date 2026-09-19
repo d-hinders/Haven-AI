@@ -24,8 +24,9 @@
  *   (#1695). A `--name` run displaces nothing, so it never collides here;
  *   its one refusal (a taken slug) is `assertServerSlugAvailable`.
  * - **Connect never revokes.** The replace path retires the superseded
- *   directory LOCALLY — tombstone, then the same key-material teardown
- *   `--unwire` performs — and names the agent for the owner to revoke on the
+ *   directory LOCALLY — tombstone, then the unconditional key-material
+ *   teardown (`--unwire` runs it only after its #3123 probe; this path does
+ *   not probe) — and names the agent for the owner to revoke on the
  *   Haven agent page. `POST /agents/:id/revoke` is owner-authenticated; an
  *   agent credential revoking a sibling agent is exactly the "agent editing
  *   its own authority" the re-key routes refuse (#1694).

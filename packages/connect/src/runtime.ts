@@ -710,8 +710,11 @@ async function executeConnect(
   // the new wiring is actually written — an install that ended with an
   // errorCode may have left the old wiring as the only working one, and
   // retiring its key behind that would fail open into "no agent works".
-  // Local retirement = tombstone (#1681) + the same key-material teardown
-  // --unwire performs (#2169), so --doctor reads `retired`, not `superseded`.
+  // Local retirement = tombstone (#1681) + the UNCONDITIONAL key-material
+  // teardown (#2169), so --doctor reads `retired`, not `superseded`. #3123
+  // made --unwire probe before that teardown; this path deliberately does
+  // not — the owner has just consented to overwrite — and whether it should
+  // is the #3119 follow-up, stated, not silently inherited.
   // Nothing is revoked: that stays the owner's action on the Haven agent page.
   let supersededAgentsRetiredLocally: boolean | undefined
   const retiredAgentIds: string[] = []

@@ -315,7 +315,7 @@ describe('Analytics — the populated page', () => {
     // unrecorded class are independent of the ledger floor — an empty ledger
     // does not make the path the page cannot see any more visible (#3055).
     expect(tile.textContent).toMatch(/2 refused payments/)
-    expect(tile.textContent).toMatch(/Price-cap refusals in your agent/)
+    expect(tile.textContent).toMatch(/Price-cap refusals in your agent's runtime are not recorded\./)
     expect(tile.textContent).not.toMatch(/hosted tools/)
   })
 

@@ -4,13 +4,14 @@ status: current
 covers:
   - .github/CODEOWNERS
   - .github/workflows/dev-gate.yml
+  - .github/workflows/pr-ownership-gate.yml
   - .github/ISSUE_TEMPLATE/loop-task.md
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-09-18"
+last-verified: "2026-09-20"
 ---
 
 # Autonomous PR loop
@@ -434,10 +435,14 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      non-gating half of `docs.yml` (#1023) — and do **not** require **Vercel
      Preview Comments**, which isn't a quality gate. **Pending operator step
      (#3179):** add **PR ownership gate** (`.github/workflows/pr-ownership-gate.yml`)
-     as the 16th required context — it fails a PR that would close an issue
-     another session holds. Until the owner adds it, the check runs and
-     reports on every PR but does not block; this list and the table below
-     describe the 15 as applied, not the 16 as intended.
+     to this ruleset's required contexts — it fails a PR that would close an
+     issue another session holds. Because *Haven automerge rules* targets both
+     branches, that makes it the **16th** required context on `dev` and the
+     **20th** on `main`. Until the owner adds it, the check runs and reports on
+     every PR but does not block; this list, the *Effective per branch* table
+     below (15 / 19), `branch-and-release-flow.md` § promotion ("19 … the 15")
+     and `promoting-dev-to-main.md` ("19 … the 15") all describe the counts AS
+     APPLIED — update all four when the step is done.
 
      Two settings on this ruleset changed on 2026-09-07 under
      [#2632](https://github.com/d-hinders/Haven-AI/issues/2632)'s owner step O1/O2,
@@ -544,7 +549,7 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
 
    | | `dev` | `main` |
    |---|---|---|
-   | Required contexts | **15** (all from *Haven automerge rules*) | **19** (those 15 + `gate`, `qa-freshness`, Design visual regression, Frontend browser smoke) |
+   | Required contexts | **15** (all from *Haven automerge rules*; a 16th, **PR ownership gate**, is pending — #3179, see One-time setup) | **19** (those 15 + `gate`, `qa-freshness`, Design visual regression, Frontend browser smoke; 20 once the pending step is applied) |
    | Branch must be up to date | **no** | **yes** |
    | Allowed merge method | **squash only** | **merge commit only** |
 

@@ -91,6 +91,10 @@ Before building, post a one-line `CLAIM` comment on the selected issue:
 reply from `github-actions[bot]` means you do not hold the issue — coordinate in
 #1289 or pick another candidate (#3178).
 
+A pull request that closes an issue someone else holds fails the `PR ownership
+gate` check (#3179) — see AGENTS.md § Cross-session agent coordination for the
+two ways out.
+
 Also post the same `CLAIM` to issue
 [#1289](https://github.com/d-hinders/Haven-AI/issues/1289) when the work touches
 shared surfaces another session could plausibly pick up, including

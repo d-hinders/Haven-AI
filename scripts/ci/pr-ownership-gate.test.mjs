@@ -9,6 +9,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
 import { evaluate, collect, prFromPayload } from './pr-ownership-gate.mjs'
 
 const CLI = fileURLToPath(new URL('./pr-ownership-gate.mjs', import.meta.url))
@@ -93,6 +94,11 @@ describe('the verdict (#3179 acceptance fixtures)', () => {
     assert.match(r.report, /could not read #9999/)
   })
 
+  test('a bot assignee (assignable coding agent) is nobody\'s claim', () => {
+    const r = evaluate({ pr, issues: [{ number: 3015, state: 'open', assignees: ['copilot-swe-agent[bot]'], live: [] }], nowMs: NOW })
+    assert.equal(r.verdict, 'pass')
+  })
+
   test('logins compare case-insensitively', () => {
     const r = evaluate({ pr: { ...pr, author: 'D-Hinders' }, issues: [{ number: 3015, state: 'open', assignees: ['d-hinders'], live: [] }], nowMs: NOW })
     assert.equal(r.verdict, 'pass')
@@ -141,6 +147,25 @@ describe('collect through an injected gh', () => {
     assert.equal(issues[0].live[0].holder, 'AntonioSaaranen')
     assert.equal(issues[0].live[0].claim.htmlUrl, 'https://x/1')
     assert.equal(evaluate({ pr, issues, nowMs: NOW }).verdict, 'fail')
+  })
+
+  test('a claim posted AFTER the author\'s own does not block the author\'s PR (a refused claim is not a claim)', async () => {
+    // #3178 refused Philip's later claim; the gate must not resurrect it.
+    const antonioAt = new Date(NOW - 2 * 3_600_000).toISOString()
+    const philipAt = new Date(NOW - 1 * 3_600_000).toISOString()
+    const { gh } = recorder({
+      closing: [{ number: 4242 }],
+      issue: () => ({ state: 'open', closed_at: null, assignees: [{ login: 'AntonioSaaranen' }] }),
+      comments: (n) => (n === 1289 ? [
+        { user: { login: 'AntonioSaaranen', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #4242 — branch `feat/4242-a`', created_at: antonioAt, html_url: 'https://x/A' },
+        { user: { login: 'PhilipEriksson', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #4242 — branch `feat/4242-p`', created_at: philipAt, html_url: 'https://x/P' },
+      ] : []),
+    })
+    const { issues } = await collect({ gh, repo: 'o/r', prNumber: 1, author: 'AntonioSaaranen', nowMs: NOW })
+    assert.equal(evaluate({ pr: { ...pr, author: 'AntonioSaaranen' }, issues, nowMs: NOW }).verdict, 'pass')
+    // …while Philip's PR on the same issue is blocked by Antonio's older claim.
+    const { issues: theirs } = await collect({ gh, repo: 'o/r', prNumber: 2, author: 'PhilipEriksson', nowMs: NOW })
+    assert.equal(evaluate({ pr: { ...pr, author: 'PhilipEriksson' }, issues: theirs, nowMs: NOW }).verdict, 'fail')
   })
 
   test('a closed candidate is carried but not read for claims', async () => {
@@ -212,5 +237,27 @@ esac
 
   test('missing --event → exit 2', () => {
     assert.throws(() => execFileSync(process.execPath, [CLI], { stdio: 'pipe', env }), (e) => e.status === 2)
+  })
+})
+
+describe('the workflow cannot mask the verdict', () => {
+  const yml = readFileSync(new URL('../../.github/workflows/pr-ownership-gate.yml', import.meta.url), 'utf8')
+
+  test('the judging step runs under bash with pipefail, so `| tee` cannot turn exit 1 green', () => {
+    // Actions' default `run:` shell is `bash -e {0}` WITHOUT pipefail;
+    // `bash -e -c 'false | tee /dev/null'` exits 0. Mutation: drop either line
+    // and this goes red.
+    assert.match(yml, /shell: bash/)
+    assert.match(yml, /set -o pipefail/)
+    assert.match(yml, /node scripts\/ci\/pr-ownership-gate\.mjs --event "\$GITHUB_EVENT_PATH" \| tee -a "\$GITHUB_STEP_SUMMARY"/)
+  })
+
+  test('the judge is the base branch\'s copy: pull_request_target, read-only token, no ref on the checkout', () => {
+    assert.match(yml, /^on:\n  pull_request_target:/m)
+    assert.doesNotMatch(yml, /^on:\n  pull_request:/m)
+    assert.match(yml, /permissions:\n  contents: read\n  issues: read\n  pull-requests: read/)
+    // No `ref:` under the checkout step — the default on pull_request_target is the base.
+    const checkout = yml.slice(yml.indexOf('actions/checkout@v4'), yml.indexOf('actions/setup-node@v4'))
+    assert.doesNotMatch(checkout, /ref:/)
   })
 })

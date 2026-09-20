@@ -2,15 +2,18 @@
 //
 // ## The incident this closes
 //
-// #3015, 2026-09-15: Daniel claimed the issue on its own thread at 12:50Z (the
+// #3015, 2026-09-15 (every time read from the issue's timeline, #1289 and PR
+// #3022): Daniel claimed the issue on its own thread at 12:50:01Z (the
 // projection assigned him); Antonio's checker missed that claim and posted a
-// second one on #1289 at 13:03Z (the projection added him too); Daniel released
-// at 13:29Z and merged PR #3022 — `Closes #3015` — at 13:41Z while Antonio was
-// still the assignee and his claim stood. Nobody talked. The claim protocol had
-// no gate on the builder side: nothing between a pushed branch and a merged PR
-// asked "does the issue this PR closes belong to you?" This check asks, and
-// while the answer is "no" the PR cannot merge — which is 38 minutes of the
-// conversation that never happened.
+// second one on #1289 at 13:03:08Z (the projection added him too); Daniel
+// opened PR #3022 — `Closes #3015` — at 13:28:09Z, released the issue fifty
+// seconds later (RELEASE 13:28:59Z, unassigned 13:29:13Z) and merged at
+// 13:41:14Z while Antonio was still the assignee and his claim stood. Nobody
+// talked. The claim protocol had no gate on the builder side: nothing between a
+// pushed branch and a merged PR asked "does the issue this PR closes belong to
+// you?" This check asks — at `opened`, when the first claimant had not yet
+// released — and while the answer is "no" the PR cannot merge: 38 minutes from
+// Antonio's claim to that merge, the conversation that never happened.
 //
 // ## The rule
 //
@@ -28,6 +31,16 @@
 // The failure text gives the two ways out: coordinate in #1289 for a handover
 // (the holder posts `🔓 RELEASE`), or drop the closing keyword and use `Refs`.
 //
+// The author's OWN claim time is passed to the shared holder rule, so a claim
+// posted later than the author's — the one #3178 refuses — does not block the
+// author's PR: a refused claim is not a claim here either. Bot assignees do not
+// count (an assignable coding agent is nobody's claim).
+//
+// Time of check vs time of use: the check re-runs on open, edit, push and
+// ready-for-review. An issue claimed by somebody else AFTER the last run can
+// merge on a stale green tick — the PR author was there first, which is the
+// protocol's own answer; stated so nobody reads the tick as a live lock.
+//
 // ## Fail closed
 //
 // A required check that cannot read the issues it must judge FAILS, with the
@@ -42,7 +55,7 @@
 // PR that closed it — or its holder released it first.
 
 import { fetchCandidates } from './release-on-merge.mjs'
-import { fetchClaimState, liveHolders, ageText, branchOf, sameLogin, CHANNEL_ISSUE } from './claim-collision.mjs'
+import { fetchClaimState, liveHolders, holderClaim, ageText, branchOf, sameLogin, CHANNEL_ISSUE } from './claim-collision.mjs'
 
 /**
  * Pure verdict.
@@ -68,7 +81,8 @@ export function evaluate({ pr, issues, nowMs = Date.now(), channelIssue = CHANNE
       continue
     }
     if (issue.isPullRequest || String(issue.state).toLowerCase() !== 'open') continue
-    const foreignAssignees = (issue.assignees ?? []).filter((a) => a && !sameLogin(a, pr.author))
+    // A bot assignee (a coding agent GitHub lets you assign) is nobody's claim.
+    const foreignAssignees = (issue.assignees ?? []).filter((a) => a && !sameLogin(a, pr.author) && !/\[bot\]$/i.test(a))
     const holders = (issue.live ?? [])
       .filter((h) => !sameLogin(h.holder, pr.author))
       .map((h) => ({
@@ -125,7 +139,11 @@ export async function collect({ gh, repo, prNumber, author, nowMs = Date.now(), 
       continue
     }
     const { assignees, comments } = await fetchClaimState({ gh, repo, issue: c.number, channelIssue })
-    const { live } = liveHolders({ issue: c.number, claimant: author, assignees, comments, nowMs, channelIssue })
+    // The author's own claim time: a claim posted after it does not block
+    // (older wins — the rule #3178's reply already applies).
+    const own = holderClaim({ holder: author, issue: c.number, comments, channelIssue })
+    const claimedAt = own.claim && !own.releasedAfter ? own.claim.createdAt : null
+    const { live } = liveHolders({ issue: c.number, claimant: author, assignees, comments, claimedAt, nowMs, channelIssue })
     issues.push({ number: c.number, state: 'open', assignees, live })
   }
   return { issues }

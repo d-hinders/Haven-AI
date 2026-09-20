@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+- `haven_list_receipts` rows gain `source`, `paymentProofStatus`, `x402ResourceUrl` and `x402MerchantAddress` (#3134, via `@haven_ai/sdk`'s `mapPaymentReceipt`) beside the deprecated `rail`, `proofStatus`, `resourceUrl`, `merchantAddress`, which stay for one full release (removal condition in the SDK CHANGELOG entry). No tool, argument, schema or description changed on this package; the change is carried by the SDK dependency.
+
 ## 0.4.0-alpha.0 — 2026-09-19
 
 - #3128: `haven_list_receipts` accepts `cursor` and returns `{ receipts, total, hasMore, nextCursor }` instead of a bare array (via the SDK's `listReceiptsPage`).

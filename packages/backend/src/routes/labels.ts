@@ -8,7 +8,7 @@
  *
  * Born ENFORCED (#3028): every route's request schema is enforced through the
  * request-validation plugin (`enforcedModules` in `src/index.ts`), so the
- * handlers carry no `typeof` ladders — a shape-refused body never reaches
+ * handlers carry no type-guard ladders — a shape-refused body never reaches
  * them. What remains is the semantic guard the spec does not express:
  * names blank after trimming, and the 64-character cap (the column width the
  * DB enforces; a clean 400 here beats Postgres's 22001 as a 500).
@@ -29,6 +29,7 @@ import {
   findLabelForUser,
   listLabelsForUser,
   updateLabel,
+  type AgentLabelRow,
 } from '../infra/repositories/agent-labels.js'
 
 /** The spec's own caps, restated for the handlers (the plugin refuses the rest). */
@@ -36,7 +37,7 @@ export const LABEL_NAME_MAX = 64
 
 /** Postgres 23505 — unique_violation, the collision the rename path can hit. */
 function isUniqueViolation(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: string }).code === '23505'
+  return (err as { code?: string } | null)?.code === '23505'
 }
 
 export default async function labelRoutes(app: FastifyInstance): Promise<void> {
@@ -96,7 +97,7 @@ export default async function labelRoutes(app: FastifyInstance): Promise<void> {
       // The unique index fires on lower(name): renaming onto a name another
       // of the user's labels holds is a 409, not a 500. Only labels this
       // user owns can collide (the WHERE clause above).
-      let updated: Awaited<ReturnType<typeof updateLabel>>
+      let updated: AgentLabelRow | null
       try {
         updated = await updateLabel(id, sub, {
           name: name === undefined ? undefined : name.trim().toLowerCase(),

@@ -886,6 +886,12 @@ export const FIXTURE_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '250.000000', reset_period_min: 10080,
     }],
+    // #3167: labels ride on every agent read — the showcase agent carries two,
+    // so the /agents screenshot photographs chips and the "+N" overflow rule.
+    labels: [
+      { id: 'lbl-research', name: 'prod', color: 'brand', created_at: '2026-09-01T09:00:00.000Z' },
+      { id: 'lbl-x402', name: 'x402', color: 'success', created_at: '2026-09-01T09:05:00.000Z' },
+    ],
   },
   {
     id: 'agent-retired', name: 'Data-feed agent',
@@ -915,6 +921,8 @@ export const FIXTURE_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '500.000000', reset_period_min: 1440,
     }],
+    // #3167: the paused agent is unlabelled — the empty state photographs too.
+    labels: [],
   },
 ]
 

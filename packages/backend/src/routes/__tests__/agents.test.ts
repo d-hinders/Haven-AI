@@ -73,28 +73,34 @@ describe('agent routes', () => {
 
     // #2020: a non-delegator_hybrid agent gets `allowances: []` with NO
     // second query against `agent_allowances` — the mirror is retired with
-    // the Safe rail. The agent row plus the #3167 labels ride-along read is
-    // the whole query budget now; a leftover third one would go unconsumed
-    // if the handler regressed into reading it.
-    mockQuery
-      .mockResolvedValueOnce({
-      rows: [{
-        id: AGENT_UUID,
-        name: 'Research Agent',
-        description: null,
-        delegate_address: '0x1111111111111111111111111111111111111111',
-        account_id: SAFE_UUID,
-        account_address: '0x2222222222222222222222222222222222222222',
-        account_name: 'Main wallet',
-        account_chain_id: 8453,
-        api_key_prefix: 'sk_agent_abc',
-        status: 'active',
-        created_at: '2026-05-25T12:00:00.000Z',
-        mcp_last_seen_at: null,
-      }],
-      })
-      // #3167: the labels ride-along on the same GET (empty for this agent).
-      .mockResolvedValueOnce({ rows: [] })
+    // the Safe rail. Content-dispatched (#1227 posture): the agent-row read
+    // and the #3167 labels ride-along are the whole query budget, and ANY
+    // other query (an agent_allowances read would be one) fails loudly.
+    mockQuery.mockImplementation(async (sql: string) => {
+      const s = String(sql)
+      if (/FROM agents/.test(s)) {
+        return {
+          rows: [{
+            id: AGENT_UUID,
+            name: 'Research Agent',
+            description: null,
+            delegate_address: '0x1111111111111111111111111111111111111111',
+            account_id: SAFE_UUID,
+            account_address: '0x2222222222222222222222222222222222222222',
+            account_name: 'Main wallet',
+            account_chain_id: 8453,
+            api_key_prefix: 'sk_agent_abc',
+            status: 'active',
+            created_at: '2026-05-25T12:00:00.000Z',
+            mcp_last_seen_at: null,
+          }],
+        }
+      }
+      if (/FROM agent_label_assignments/.test(s)) {
+        return { rows: [] }
+      }
+      throw new Error(`unexpected query on the by-id GET: ${s}`)
+    })
 
     const response = await app.inject({
       method: 'GET',

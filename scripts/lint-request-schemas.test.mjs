@@ -222,8 +222,14 @@ describe('index.ts readers', () => {
       'utf8',
     )
     // Exact FILE keys — the same strings the baseline uses. If this ever
-    // reads a prefix again, the gate and the plugin have split.
-    assert.deepEqual(enforcedModulesFromIndex(real), ['routes/contacts.ts', 'routes/merchants.ts'])
+    // reads a prefix again, the gate and the plugin have split. #3167 adds
+    // two born-enforced label modules (epic #3028's forward direction).
+    assert.deepEqual(enforcedModulesFromIndex(real), [
+      'routes/contacts.ts',
+      'routes/merchants.ts',
+      'routes/labels.ts',
+      'routes/agent-labels.ts',
+    ])
   })
 })
 

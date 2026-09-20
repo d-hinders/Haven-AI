@@ -66,6 +66,7 @@ import {
   WalletIdentityBlock,
   LabelChip,
   LabelChipRow,
+  LabelOptionRow,
 } from '@/components/haven'
 
 /**
@@ -827,6 +828,20 @@ export default function DesignSystemPage() {
                 { id: 'l4', name: 'test-agents', color: 'neutral', created_at: '2026-01-01T00:00:00Z' },
                 { id: 'l5', name: 'recurring', color: 'neutral', created_at: '2026-01-01T00:00:00Z' },
               ]} />
+            </div>
+            <div className="mt-4" data-testid="ds-label-option-row">
+              <p className="mb-2 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+                <code className="rounded bg-[var(--v2-surface)] px-1">LabelOptionRow</code> is the
+                picker line the tag editor and the label manager render — the shared{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">Checkbox</code> owns the row,
+                the chip rides in as its label node, so a picker row reads exactly like the chip
+                the agent will carry.
+              </p>
+              <LabelOptionRow
+                label={{ id: 'l1', name: 'prod', color: 'brand', created_at: '2026-01-01T00:00:00Z' }}
+                checked
+                onToggle={() => {}}
+              />
             </div>
           </Card>
 

@@ -39,23 +39,22 @@ function agentFixture(overrides: Partial<Agent> = {}): Agent {
   } as Agent
 }
 
-function renderCard(agent: Agent, { canUseWalletActions = true } = {}) {
+function renderCard(agent: Agent, { busyAction = null }: { busyAction?: import('@/hooks/useAgentPanelState').AgentBusyAction } = {}) {
   const onRestore = vi.fn()
+  const onViewDetails = vi.fn()
   const { container } = render(
     <AgentCard
       agent={agent}
-      onViewDetails={vi.fn()}
-      onEdit={vi.fn()}
+      onViewDetails={onViewDetails}
       onPause={vi.fn()}
       onResume={vi.fn()}
       onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
       onArchive={vi.fn().mockResolvedValue(undefined)}
       onRestore={onRestore}
-      busyAction={null}
-      canUseWalletActions={canUseWalletActions}
+      busyAction={busyAction}
     />,
   )
-  return { onRestore, container }
+  return { onRestore, onViewDetails, container }
 }
 
 /**
@@ -234,10 +233,13 @@ describe('AgentCard paused notice copy (#2230)', () => {
 })
 
 describe('AgentCard action-row matrix (#1402)', () => {
-  it('active delegation agent: Remove shown, Safe Revoke hidden', () => {
+  // #3168: the first action is "Details" on every operational card — the
+  // Edit/Details fork is gone, so the old "Edit <name>" button no longer
+  // renders anywhere on the card.
+  it('active delegation agent: Details first, Remove shown, Safe Revoke hidden', () => {
     renderCard(agentFixture())
     const actions = [
-      screen.getByRole('button', { name: 'Edit Research agent' }),
+      screen.getByRole('button', { name: 'Open details for Research agent' }),
       screen.getByRole('button', { name: 'Pause Research agent' }),
       screen.getByRole('button', { name: 'Remove Research agent' }),
     ]
@@ -246,7 +248,29 @@ describe('AgentCard action-row matrix (#1402)', () => {
       expect(action.className).toContain('min-h-11')
       expect(action.className).toContain('min-w-11')
     }
+    expect(screen.queryByRole('button', { name: 'Edit Research agent' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).toBeNull()
+  })
+
+  /**
+   * #3168: "Details" navigates via onViewDetails — the same handler the
+   * `canUseWalletActions === false` branch always used — and navigation is
+   * disabled while a card action is in flight, so the user cannot leave
+   * mid-action. The hook half (router.push) is asserted in
+   * `useAgentPanelState.test.tsx`.
+   */
+  it('Details navigates to the agent detail page (#3168)', () => {
+    const { onViewDetails } = renderCard(agentFixture())
+    const details = screen.getByRole('button', { name: 'Open details for Research agent' })
+    fireEvent.click(details)
+    expect(onViewDetails).toHaveBeenCalledTimes(1)
+    expect(onViewDetails).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent-1' }))
+  })
+
+  it('Details is disabled while an action is in flight (#3168 busy state)', () => {
+    renderCard(agentFixture(), { busyAction: 'pause' })
+    const details = screen.getByRole('button', { name: 'Open details for Research agent' })
+    expect(details).toBeDisabled()
   })
 
   it('keeps the live delegation budget row and does not render the historical meter', () => {

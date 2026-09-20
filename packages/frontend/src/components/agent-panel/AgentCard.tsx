@@ -23,19 +23,16 @@ const DANGER_ACTION_BUTTON_CLASS =
 export function AgentCard({
   agent,
   onViewDetails,
-  onEdit,
   onPause,
   onResume,
   onRevokeCredential,
   onArchive,
   onRestore,
   busyAction,
-  canUseWalletActions,
   chainId = DEFAULT_CHAIN_ID,
 }: {
   agent: Agent
   onViewDetails: (agent: Agent) => void
-  onEdit: (agent: Agent) => void
   onPause: (agent: Agent) => void
   onResume: (agent: Agent) => void
   /** RemoveAgentDialog step 2: plain POST /agents/:id/revoke, throws on failure. */
@@ -44,7 +41,6 @@ export function AgentCard({
   onArchive: (agent: Agent) => Promise<void>
   onRestore: (agent: Agent) => void
   busyAction: AgentBusyAction
-  canUseWalletActions: boolean
   chainId?: number
 }) {
   const [pauseModalOpen, setPauseModalOpen] = useState(false)
@@ -336,25 +332,21 @@ export function AgentCard({
       <div className="flex items-center gap-2 pt-3 pb-1 border-t border-[var(--v2-border)]">
         {isOperational && (
           <>
-            {canUseWalletActions ? (
-              <button
-                onClick={() => onEdit(agent)}
-                disabled={isBusy}
-                aria-label={`Edit ${agent.name}`}
-                className={ACTION_BUTTON_CLASS}
-              >
-                Edit
-              </button>
-            ) : (
-              <button
-                onClick={openDetails}
-                disabled={isBusy}
-                aria-label={`Open details for ${agent.name}`}
-                className={ACTION_BUTTON_CLASS}
-              >
-                Details
-              </button>
-            )}
+            {/* #3168: "Details" is the first action on EVERY operational card.
+                The Edit/Details fork (canUseWalletActions) is gone: Edit used
+                to open a name/description modal on the list, but name and
+                description are editable on the detail page (its kebab menu →
+                "Edit agent"), and budgets — the reason to reach for "Edit" —
+                live only on the detail page. One label, one destination, and
+                no dead affordance left on the card. */}
+            <button
+              onClick={openDetails}
+              disabled={isBusy}
+              aria-label={`Open details for ${agent.name}`}
+              className={ACTION_BUTTON_CLASS}
+            >
+              Details
+            </button>
             <span className="text-[var(--v2-border-strong)]">|</span>
             {isActive ? (
                   <button

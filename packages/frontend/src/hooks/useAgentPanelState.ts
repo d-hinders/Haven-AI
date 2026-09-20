@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents, type Agent } from '@/hooks/useAgents'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -15,6 +16,7 @@ export type AgentBusyAction = 'pause' | 'resume' | 'archive' | 'restore' | null
  */
 export function useAgentPanelState() {
   const { activeAccount } = useAuth()
+  const router = useRouter()
   const accountAddress = activeAccount?.account_address ?? null
   const chainId = activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
   const {
@@ -33,7 +35,6 @@ export function useAgentPanelState() {
   const [firstAgentSetup, setFirstAgentSetup] = useState(false)
   const [finalizingAgent, setFinalizingAgent] = useState(false)
   const [finalizeTimedOut, setFinalizeTimedOut] = useState(false)
-  const [editAgent, setEditAgent] = useState<Agent | null>(null)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<AgentBusyAction>(null)
   const [showRemovedAgents, setShowRemovedAgents] = useState(false)
@@ -110,37 +111,21 @@ export function useAgentPanelState() {
     return () => window.clearTimeout(timeout)
   }, [toastMessage])
 
-  const agentUsesActiveAccount = useCallback(
-    (agent: Agent): boolean => {
-      if (agent.account_id) return agent.account_id === activeAccount?.id
-      if (agent.account_address) {
-        const agentChainId = agent.account_chain_id ?? DEFAULT_CHAIN_ID
-        return Boolean(
-          accountAddress &&
-            agent.account_address.toLowerCase() === accountAddress.toLowerCase() &&
-            agentChainId === chainId,
-        )
-      }
-      return true
-    },
-    [activeAccount?.id, chainId, accountAddress],
-  )
-
+  /**
+   * #3168: the card's first action navigates to the agent detail page — the
+   * surface where the agent's budgets and spending controls live, and which
+   * also hosts name/description editing (the detail page's kebab → "Edit
+   * agent" modal). What used to be the Edit/Details fork is now this one
+   * navigation for every operational card: Edit opened a name/description
+   * modal on the list, and nothing about the card needed it once the detail
+   * page is the destination. A client-side router push, not a full-page
+   * assignment, so the authenticated shell does not remount.
+   * `useAgentPanelState` is only mounted inside the app router's tree, so
+   * `useRouter` is always defined here.
+   */
   function handleViewDetails(agent: Agent) {
-    window.location.href = `/agents/${agent.id}`
+    router.push(`/agents/${agent.id}`)
   }
-
-  function handleEdit(agent: Agent) {
-    if (!agentUsesActiveAccount(agent)) {
-      handleViewDetails(agent)
-      return
-    }
-    setEditAgent(agent)
-  }
-
-  useEffect(() => {
-    if (editAgent && !agentUsesActiveAccount(editAgent)) setEditAgent(null)
-  }, [agentUsesActiveAccount, editAgent])
 
   async function handlePause(agent: Agent) {
     setBusyAgentId(agent.id)
@@ -202,11 +187,6 @@ export function useAgentPanelState() {
     void pollForNewAgent(lastPollDelegateRef.current)
   }
 
-  function handleAgentEdited() {
-    void refetch()
-    setEditAgent(null)
-  }
-
   return {
     accountAddress,
     chainId,
@@ -216,7 +196,6 @@ export function useAgentPanelState() {
     error,
     visibleAgents,
     removedAgents,
-    agentUsesActiveAccount,
     connectAgentOpen,
     setConnectAgentOpen,
     firstAgentSetup,
@@ -224,10 +203,6 @@ export function useAgentPanelState() {
     finalizingAgent,
     finalizeTimedOut,
     retryFinalizePoll,
-    editAgent,
-    setEditAgent,
-    handleEdit,
-    handleAgentEdited,
     busyAgentId,
     busyAction,
     handleViewDetails,

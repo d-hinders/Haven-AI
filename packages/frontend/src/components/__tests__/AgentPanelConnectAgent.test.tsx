@@ -27,6 +27,10 @@ vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
 }))
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+}))
+
 vi.mock('@/components/ConnectAgentModal', () => ({
   default: ({ open, starterAllowance }: { open: boolean; starterAllowance?: boolean }) =>
     open ? (

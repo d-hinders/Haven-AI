@@ -174,14 +174,19 @@ export function AgentCard({
               #3167: the labels this agent carries — max three visible, then a
               "+N" counter (`LabelChipRow`). Under the identity block, beside
               nothing: a label is categorisation, not status, so it must not
-              read as the header's warning/danger pill. The row renders nothing
-              for an unlabelled agent, so an unlabelled list is pixel-identical
-              to before. Edit via the card's Edit modal; the full set is
-              visible there and in the label manager.
+              read as the header's warning/danger pill. The wrapper is
+              rendered only when labels exist (#3197): `LabelChipRow` returns
+              null for an empty list, but this div's `mt-1.5` would still
+              render and every unlabelled card gained a ~6px gap under the
+              description. Same guard as the detail page's label row
+              (`AgentDetailClient`). Edit via the card's Edit modal; the full
+              set is visible there and in the label manager.
             */}
-            <div className="mt-1.5">
-              <LabelChipRow labels={agent.labels} />
-            </div>
+            {agent.labels.length > 0 && (
+              <div className="mt-1.5">
+                <LabelChipRow labels={agent.labels} />
+              </div>
+            )}
           </div>
           <p
             /* #2325: the information-priority half of the narrow-card fix.

@@ -34,7 +34,7 @@ covers:
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-09-17"
+last-verified: "2026-09-19"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -354,7 +354,11 @@ undeclared. `TransactionBase` and `Transaction` are now two flat object schemas
 sharing one TypeScript object (`transactionBaseProperties` /
 `transactionBaseRequired` in `openapi/spec.ts`) instead of composing via `$ref`
 + `allOf` — same DRY source, but each closes truthfully, and both routes now
-assert their full payload. Other `allOf` shapes remain: `CreateAgentResponse`
+assert their full payload. (#3127 re-proved the mechanism end-to-end: the new
+`convertedAmount`/`convertedCurrency`/`convertedFxRate`/`fxRates` fields were
+contract-tested the same way — emitted on the feed and asserted against the
+closed schema, so an undeclared key would fail `expectMatchesSpec`.) Other
+`allOf` shapes remain: `CreateAgentResponse`
 (over an open inline `Agent`, on an asserted route — the hiding case),
 `X402SignablePayment`, `AgentConnectionAllowance` and
 `AgentPaymentStatus.mpp` (over closed `$ref`s, not on asserted routes — the

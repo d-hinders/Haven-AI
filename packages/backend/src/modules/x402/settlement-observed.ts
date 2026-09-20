@@ -249,11 +249,13 @@ export async function observeErc7710Settlement(
     }
   }
 
-  // Parity with the 3009 confirm in `routes/payments.ts`: stamp spot USD/EUR
-  // alongside the hash. Best-effort by construction — `getFiatValuesForTokenAmount`
-  // returns nulls on a pricing outage rather than throwing, and book-time SEK
-  // (the value the Fortnox feed actually uses) is captured separately and
-  // frozen by `recordMachinePaymentEvidenceBase`.
+  // Parity with the 3009 confirm in `routes/payments.ts`: stamp spot
+  // USD/EUR/SEK alongside the hash. Best-effort by construction —
+  // `getFiatValuesForTokenAmount` returns nulls on a pricing outage rather
+  // than throwing. (The evidence row's book-time SEK — the value the Fortnox
+  // feed actually files against — is still captured separately and frozen by
+  // `recordMachinePaymentEvidenceBase`; this column serves the analytics
+  // display path, and one price read feeds both.)
   const fiat = await getFiatValuesForTokenAmount(intent.token_symbol, intent.amount_human)
 
   const confirmed = await confirmObservedSettlement(
@@ -263,6 +265,7 @@ export async function observeErc7710Settlement(
       agentId: intent.agent_id,
       usdValue: fiat.usd,
       eurValue: fiat.eur,
+      sekValue: fiat.sek,
       windowSeconds: AMBIGUITY_WINDOW_SECONDS,
       // #2094: only a settlement the pinned DelegationManager itself bound to
       // THIS intent's child may narrow the ambiguity guard past look-alikes.

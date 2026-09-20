@@ -60,6 +60,7 @@ export interface RecordRefusalInput {
   amountAtomic: string
   usdValue: number | null
   eurValue: number | null
+  sekValue: number | null
   merchantTo?: string | null
   resourceUrl?: string | null
   reason: PaymentRefusalReason
@@ -92,10 +93,10 @@ const RECORD_REFUSAL_SQL = `
   ), inserted AS (
     INSERT INTO payment_refusals (
       user_id, account_id, agent_id, chain_id, token_symbol,
-      amount_atomic, usd_value, eur_value, merchant_to, resource_url,
+      amount_atomic, usd_value, eur_value, sek_value, merchant_to, resource_url,
       reason, source, detail
     )
-    SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $11, $10, $13, $14
+    SELECT $1, $2, $3, $4, $5, $6, $7, $8, $15, $9, $11, $10, $13, $14
      WHERE NOT EXISTS (SELECT 1 FROM existing)
     RETURNING id, attempts
   )
@@ -127,6 +128,10 @@ export async function recordPaymentRefusal(
       String(REFUSAL_DEDUPE_WINDOW_SECONDS),
       input.source,
       input.detail ? JSON.stringify(input.detail) : null,
+      // $15 — APPENDED, not interleaved: $1..$14 keep their exact slots (the
+      // statement's existing positional map is untouched), sek_value reads the
+      // new tail bind.
+      input.sekValue,
     ],
   )
   const row = result.rows[0]
@@ -144,6 +149,12 @@ export interface PaymentRefusalRow {
   amount_atomic: string
   usd_value: string | null
   eur_value: string | null
+  // `sek_value` is deliberately absent from this READ shape (write-only on
+  // this path): the refusal ledger's analytics read is the EUR/USD pair, and
+  // widening it is its own contract change. Migration 090 adds the column to
+  // the TABLE so refusal booking can mirror payment booking; a revival of
+  // this read that wants SEK must add the column here explicitly, not
+  // discover it half-wired.
   merchant_to: string | null
   resource_url: string | null
   reason: PaymentRefusalReason
@@ -153,6 +164,7 @@ export interface PaymentRefusalRow {
   created_at: string
 }
 
+// Same read-shape boundary as PaymentRefusalRow above: no `sek_value`.
 const REFUSAL_READ_COLUMNS = `
   id, user_id, account_id, agent_id, chain_id, token_symbol, amount_atomic,
   usd_value, eur_value, merchant_to, resource_url, reason, source, detail,

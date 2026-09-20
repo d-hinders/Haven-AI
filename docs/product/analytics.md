@@ -28,7 +28,7 @@ page deliberately does not do, so a reader can tell an honest zero from a
 missing number.
 
 The page renders from one endpoint, `GET /analytics/overview`
-(`range=7d|30d|90d`, `currency=usd|eur`, `tz=<IANA zone>`), so every tile on
+(`range=7d|30d|90d`, `currency=usd|eur|sek`, `tz=<IANA zone>`), so every tile on
 the page describes the same range, the same currency and the same set of
 payments — one loading state, one "based on N payments" basis. The endpoint
 (#2946), the page shell (#2947), the chart primitives (#2948) and their wiring
@@ -101,6 +101,10 @@ somewhere that shows something else.
 **Balance over time.** The total value of the tokens in your Haven account,
 as Haven's daily snapshots recorded it at each day's end, in the display
 currency. This is a record of what was held, not a live portfolio valuation.
+Under the SEK display currency, days snapshotted before the SEK column
+existed (migration 090) are omitted from the series rather than drawn as
+zero — the page distinguishes a day with no SEK figure from a day that was
+actually worth nothing.
 
 ## Which payments count, and why
 
@@ -121,9 +125,13 @@ not in the sum.
 
 - **Currency basis.** Figures are shown in the currency preference from
   Settings. Values are booked at confirmation and never re-converted at
-  display time: the EUR page and the USD page are two sums over two booked
+  display time: the EUR, USD and SEK pages are three sums over three booked
   columns, not one sum and an exchange rate. A payment's booked value does
-  not move after confirmation.
+  not move after confirmation. Under the SEK display currency, a payment
+  whose book-time SEK value could not be captured or backfilled is counted
+  in the payment basis but contributes nothing to the SEK sums — the page's
+  basis line can therefore exceed what the SEK figures sum to, and that is
+  the honest reading, not a defect.
 - **Day buckets.** Days are bucketed server-side in the time zone the page
   sends (the browser's zone, validated as a real IANA zone; `UTC` on any
   failure to send one), so a payment at 00:30 Stockholm time lands in the

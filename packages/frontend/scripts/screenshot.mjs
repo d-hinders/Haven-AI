@@ -745,7 +745,12 @@ export const FIXTURE_USER = {
   // produce. The harness caught this itself ("a fixture-shape gap or a real
   // client bug"), which is what that check is for.
   accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'delegator_hybrid' }],
-  currency_preference: 'USD',
+  // #3127 (finding 8): 'SEK' — the served default (migration 091) and the
+  // no-preference fallback the dashboard renders. Every screenshot this
+  // harness takes is therefore a SEK render; the figures below serve real
+  // SEK values so the captures photograph the currency the product serves,
+  // not a USD render wearing a SEK label.
+  currency_preference: 'SEK',
   created_at: '2026-05-01T10:00:00.000Z',
 }
 
@@ -914,10 +919,12 @@ export const FIXTURE_AGENTS = [
 ]
 
 const FIXTURE_PORTFOLIO = {
-  totalUsd: 12_640.55, totalEur: 11_690.21,
+  // #3127 (finding 8): SEK joins the priced totals — ~10.76 SEK/USD — with
+  // the token rows' `sekValue` summing to it.
+  totalUsd: 12_640.55, totalEur: 11_690.21, totalSek: 136_050.75,
   breakdown: [
-    { symbol: 'USDC', balance: '11890550000', formatted: '11,890.55', usdValue: 11_890.55, eurValue: 10_996.57 },
-    { symbol: 'ETH', balance: '250000000000000000', formatted: '0.25', usdValue: 750.0, eurValue: 693.64 },
+    { symbol: 'USDC', balance: '11890550000', formatted: '11,890.55', usdValue: 11_890.55, eurValue: 10_996.57, sekValue: 127_970.41 },
+    { symbol: 'ETH', balance: '250000000000000000', formatted: '0.25', usdValue: 750.0, eurValue: 693.64, sekValue: 8_080.34 },
   ],
 }
 const FIXTURE_BALANCES = {
@@ -927,9 +934,12 @@ const FIXTURE_BALANCES = {
   ],
 }
 export const FIXTURE_OVERVIEW = {
-  totals: { usd: 12_640.55, eur: 11_690.21 },
-  change: { available: true, usdAmount: 214.3, eurAmount: 198.2, usdPercent: 1.7, eurPercent: 1.7 },
-  metrics: { connectedAgents: 2, monthlyAgentSpendUsd: 482.5, monthlyAgentSpendEur: 446.3, successfulTransactions: 37, activeAccounts: 1 },
+  // #3127 (finding 8): the SEK figures the served default renders. ~10.76
+  // SEK/USD, and `sekAmount`/`sekPercent` a real post-backfill swing so the
+  // hero's change line renders in every capture this harness takes.
+  totals: { usd: 12_640.55, eur: 11_690.21, sek: 136_050.75 },
+  change: { available: true, usdAmount: 214.3, eurAmount: 198.2, usdPercent: 1.7, eurPercent: 1.7, sekAmount: 2_285.4, sekPercent: 1.7 },
+  metrics: { connectedAgents: 2, monthlyAgentSpendUsd: 482.5, monthlyAgentSpendEur: 446.3, monthlyAgentSpendSek: 5_192.5, successfulTransactions: 37, activeAccounts: 1 },
   // #2120: 0, not 1. `routes/dashboard.ts:84` hardcodes `actionableApprovals
   // = 0` (and mirrors it into `pendingApprovals`) — the queue died with the
   // AllowanceModule rail and `approval_requests` is dropped. Both fields
@@ -5041,6 +5051,54 @@ export const SCENARIOS = {
         // the retry action C's spec calls for (one error state with retry).
         await page.getByText(/could not load|try again/i).first().waitFor({ timeout: 15_000 })
       })
+    },
+  },
+
+  // #3127 (finding 8): the SEK default renders end to end. The harness's
+  // own session above is now the SEK user, so this scenario photographs the
+  // three fiat surfaces the finding names, in the currency the served
+  // default puts on them, for the design-reviewer pass.
+  'currency-preference-sek': {
+    description:
+      '#3127 finding 8: the SEK no-preference default (migration 091) rendering on the three fiat surfaces — the /dashboard hero with its SEK total and change line, the Settings → Preferences card with the kr SEK radio active, and the account detail page priced in SEK',
+    async run({ page, vp, shoot }) {
+      // ── /dashboard: the hero is a SEK hero ────────────────────────────────
+      // `sv-SE` renders `136\u00a0050,75\u00a0kr` (NBSP group + decimal
+      // separators); getByText normalizes the node side, so the needles are
+      // plain-space and the exact bytes are not re-pinned here — the unit
+      // suite owns the byte-level voice.
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('Total balance').waitFor({ timeout: 20_000 })
+      await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
+      // The change line renders the SEK swing, not the quiet caption. The
+      // percent keeps `formatPercent`'s plain `toFixed` decimal point — the
+      // same mixed voice the unit test and the visual spec pin. `\s` rather
+      // than literal spaces: sv-SE's separators are NBSPs and a regex is
+      // tested against the node's raw text (string needles normalize, this
+      // does not).
+      await page.getByText(/2\s*285,40\s*kr\s*\(\+1\.70%\)\s*today/).first().waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'dashboard')
+
+      // ── Settings → Preferences: the kr SEK radio active ──────────────────
+      await page.goto(`${BASE_URL}/settings`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const preferences = page.locator('section', { has: page.getByRole('heading', { name: 'Preferences', exact: true }) })
+      await preferences.waitFor({ timeout: 20_000 })
+      const sekRadio = preferences.getByRole('radio', { name: 'kr SEK' })
+      await sekRadio.waitFor({ timeout: 20_000 })
+      const checked = await sekRadio.getAttribute('aria-checked')
+      if (checked !== 'true') {
+        throw new Error(`currency-preference-sek: the Settings radio reads aria-checked=${checked} — the session is not the SEK user`)
+      }
+      await shoot(preferences, 'settings-preferences')
+
+      // ── /accounts/<id>: the account priced in SEK ────────────────────────
+      await page.goto(`${BASE_URL}/accounts/safe-fixture`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('Value (SEK)').waitFor({ timeout: 20_000 })
+      await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'account-detail')
     },
   },
 }

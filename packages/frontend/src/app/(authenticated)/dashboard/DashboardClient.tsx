@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowLeftRight, Bot, ChevronRight, DollarSign, ShieldCheck, Wallet } from 'lucide-react'
+import { ArrowLeftRight, Bot, ChevronRight, Coins, ShieldCheck, Wallet } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
@@ -17,7 +17,7 @@ import { useAccountFunding } from '@/hooks/useAccountFunding'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { RESET_PERIODS } from '@/lib/budget-period'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
-import { timeAgo } from '@/lib/format'
+import { formatFiat, timeAgo } from '@/lib/format'
 import {
   transactionMovement,
   transactionStatus,
@@ -47,17 +47,12 @@ import { TransactionActivityRow } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
 
-function formatCurrency(value: number, currency: 'USD' | 'EUR'): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)
-}
-
-function formatCompactCurrency(value: number, currency: 'USD' | 'EUR'): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
+// #3127 (finding 6): the per-currency formatting itself lives in ONE place —
+// `lib/format.ts`'s `formatFiat`, shared with /accounts and /accounts/[id].
+// These two wrappers keep only what is dashboard-specific: the compact
+// notation for the metric tiles, and the signed change line.
+function formatCompactCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
+  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US', {
     style: 'currency',
     currency,
     notation: Math.abs(value) >= 1000 ? 'compact' : 'standard',
@@ -65,9 +60,9 @@ function formatCompactCurrency(value: number, currency: 'USD' | 'EUR'): string {
   }).format(value)
 }
 
-function formatSignedCurrency(value: number, currency: 'USD' | 'EUR'): string {
+function formatSignedCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
   const sign = value > 0 ? '+' : value < 0 ? '-' : ''
-  return `${sign}${formatCurrency(Math.abs(value), currency)}`
+  return `${sign}${formatFiat(Math.abs(value), currency)}`
 }
 
 function formatPercent(value: number): string {
@@ -209,6 +204,7 @@ function DashboardHero({
   totalFiat,
   currency,
   changeAvailable,
+  sekChangeUnavailable,
   changeAmount,
   changePercent,
   hasAccounts,
@@ -224,8 +220,10 @@ function DashboardHero({
   loading: boolean
   unavailable: boolean
   totalFiat: number
-  currency: 'USD' | 'EUR'
+  currency: 'USD' | 'EUR' | 'SEK'
   changeAvailable: boolean
+  /** True when the SEK baseline for yesterday predates migration 090 — no swing may be claimed. */
+  sekChangeUnavailable: boolean
   changeAmount: number
   changePercent: number
   hasAccounts: boolean
@@ -275,7 +273,7 @@ function DashboardHero({
             </p>
           ) : (
             <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular sm:text-5xl">
-              {formatCurrency(animatedTotal, currency)}
+              {formatFiat(animatedTotal, currency)}
             </p>
           )}
           {/*
@@ -295,7 +293,7 @@ function DashboardHero({
               />
               Watching for incoming deposits…
             </p>
-          ) : changeAvailable ? (
+          ) : changeAvailable && !sekChangeUnavailable ? (
             <p className={`mt-3 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
               {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent)}) today
             </p>
@@ -426,8 +424,15 @@ function AgentMarkIcon() {
 }
 
 function SpendIcon() {
+  // #3127 (finding 7): the mark over "Monthly agent spend" was `DollarSign`.
+  // With SEK the no-preference default, that tile read `$` over `482,50 kr`
+  // for every new signup — a currency glyph has a currency opinion, and the
+  // figure beside it now carries a different one. The tile describes AGENT
+  // SPEND, not a currency, so the mark is currency-neutral: coins, the same
+  // family the sidebar/nav icons come from. `SpendIcon` itself keeps its name
+  // and call site so the MetricCard contract is untouched.
   return (
-    <Icon icon={DollarSign} className="w-full h-full" />
+    <Icon icon={Coins} className="w-full h-full" />
   )
 }
 
@@ -845,12 +850,33 @@ export default function DashboardClient() {
     { enabled: sendModalDataEnabled, chainId: selectedActionSafe?.chain_id },
   )
 
-  const totalFiat = currency === 'EUR' ? (overview?.totals.eur ?? 0) : (overview?.totals.usd ?? 0)
-  const changeAmount = currency === 'EUR' ? (overview?.change.eurAmount ?? 0) : (overview?.change.usdAmount ?? 0)
-  const changePercent = currency === 'EUR' ? (overview?.change.eurPercent ?? 0) : (overview?.change.usdPercent ?? 0)
+  // SEK (#3127): the display side now honours the served default end to end.
+  // totals.sek / metrics.monthlyAgentSpendSek are optional on the wire and
+  // default to 0 exactly as the USD/EUR figures do while the overview loads;
+  // change.sekAmount is `null` when yesterday's snapshot predates migration
+  // 090 — no SEK baseline was stored — and the hero then reports the change
+  // as unavailable rather than reading the null as a zero swing.
+  const totalFiat = currency === 'EUR'
+    ? (overview?.totals.eur ?? 0)
+    : currency === 'SEK'
+      ? (overview?.totals.sek ?? 0)
+      : (overview?.totals.usd ?? 0)
+  const sekChangeUnavailable = currency === 'SEK' && overview?.change.sekAmount == null
+  const changeAmount = currency === 'EUR'
+    ? (overview?.change.eurAmount ?? 0)
+    : currency === 'SEK'
+      ? (overview?.change.sekAmount ?? 0)
+      : (overview?.change.usdAmount ?? 0)
+  const changePercent = currency === 'EUR'
+    ? (overview?.change.eurPercent ?? 0)
+    : currency === 'SEK'
+      ? (overview?.change.sekPercent ?? 0)
+      : (overview?.change.usdPercent ?? 0)
   const monthlySpend = currency === 'EUR'
     ? (overview?.metrics.monthlyAgentSpendEur ?? 0)
-    : (overview?.metrics.monthlyAgentSpendUsd ?? 0)
+    : currency === 'SEK'
+      ? (overview?.metrics.monthlyAgentSpendSek ?? 0)
+      : (overview?.metrics.monthlyAgentSpendUsd ?? 0)
   const overviewUnavailable = Boolean(overviewError && !overview)
   const hasAttention = Boolean(overviewError)
   // Render the guide whenever the user has at least one Safe and either:
@@ -927,6 +953,7 @@ export default function DashboardClient() {
       totalFiat={totalFiat}
       currency={currency}
       changeAvailable={Boolean(overview?.change.available)}
+      sekChangeUnavailable={sekChangeUnavailable}
       changeAmount={changeAmount}
       changePercent={changePercent}
       hasAccounts={safes.length > 0}

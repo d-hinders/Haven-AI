@@ -247,9 +247,10 @@ describe('the workflow cannot mask the verdict', () => {
     // Actions' default `run:` shell is `bash -e {0}` WITHOUT pipefail;
     // `bash -e -c 'false | tee /dev/null'` exits 0. Mutation: drop either line
     // and this goes red.
-    assert.match(yml, /shell: bash/)
-    assert.match(yml, /set -o pipefail/)
-    assert.match(yml, /node scripts\/ci\/pr-ownership-gate\.mjs --event "\$GITHUB_EVENT_PATH" \| tee -a "\$GITHUB_STEP_SUMMARY"/)
+    // Anchored on the STEP, not the file: the header comment also says
+    // "set -o pipefail", so a file-wide match could not fail (it did not, once).
+    const step = yml.slice(yml.indexOf('- name: Judge the issues'))
+    assert.match(step, /\n\s+shell: bash\n\s+run: \|\n\s+set -o pipefail\n\s+node scripts\/ci\/pr-ownership-gate\.mjs --event "\$GITHUB_EVENT_PATH" \| tee -a "\$GITHUB_STEP_SUMMARY"\n/)
   })
 
   test('the judge is the base branch\'s copy: pull_request_target, read-only token, no ref on the checkout', () => {

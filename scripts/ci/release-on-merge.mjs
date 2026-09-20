@@ -50,9 +50,12 @@
 // 83 pairs, 81 inside the window, every one of them +1 s or +2 s — GitHub
 // stamps the close one to two seconds AFTER the merge, never before, so the
 // window opens exactly at the merge. The only two outliers are the two cases
-// the bounds exist for: #3068 → #3055 at +2.5 days (that merge did not close
-// it; #3163 did, at +2 s) and #3009 → #2966 at −2.6 h (closed before the merge,
-// merely mentioned). The five minutes cover a slow close event, and the upper
+// the bounds exist for: #3068 → #3055 at +2.5 days (that merge DID close it,
+// at +1 s; a person reopened it two days later and #3163's merge re-closed it
+// seconds later — GitHub reports only the LATEST closed_at, so a re-closed pair reads
+// as an outlier in any later snapshot, which is why the count is 81 of 83 and
+// not 83 of 83) and #3009 → #2966 at −2.6 h (closed before the merge, merely
+// mentioned). The five minutes cover a slow close event, and the upper
 // bound is what excludes an issue re-closed by hand hours or days later — it
 // cannot tell a hand close INSIDE the window apart. "Referenced and closed now"
 // is not enough — measured during review of this very PR (#3187), whose body

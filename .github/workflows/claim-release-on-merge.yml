@@ -26,7 +26,8 @@ name: Release the claim on merge
 # A candidate that is a pull request is skipped. A merge into a non-default
 # branch releases nothing at all — GitHub closes nothing there — so a
 # `dev → main` promotion (thirty `Closes #` commit lines) never spams #1289.
-# Idempotent: a re-run never posts the same release twice.
+# Idempotent whenever the thread can be read; an unreadable read fails open to
+# one duplicate line, never to a missed release.
 #
 # ## Why a bot release
 #

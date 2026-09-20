@@ -105,8 +105,9 @@ describe('released only when GitHub closed it BY THIS MERGE', () => {
   })
 
   test('the window opens AT the merge: closed_at a moment before merged_at is not this merge', () => {
-    // Measured on eight real pairs: GitHub stamps the close 1–3 s AFTER the
-    // merge, never before. An issue a person closed 49 s earlier is theirs.
+    // Measured 2026-09-20 on 83 pairs over the last 100 merges into dev (see
+    // the module header): GitHub stamps the close +1…+2 s AFTER the merge,
+    // never before. An issue a person closed 49 s earlier is theirs.
     const r = decide({ pr: mergedPr, closingIssues: [{ number: 3134, assignees: [], state: 'closed', closedAt: '2026-09-20T01:25:40Z' }] })
     assert.deepEqual(r.releases, [])
     assert.match(r.skipped[0].reason, /outside this merge's window/)

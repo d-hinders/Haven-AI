@@ -2,7 +2,8 @@ name: Claim to assignee
 
 # Keeps GitHub's assignee field in step with the claim protocol in AGENTS.md
 # § Cross-session agent coordination. A `🔒 CLAIM #n` comment assigns its author
-# to #n; a `🔓 RELEASE #n` unassigns them.
+# to #n; a `🔓 RELEASE #n` unassigns them (the merge-time release, #3177, is
+# posted and applied by `claim-release-on-merge.yml` itself — see below).
 #
 # ## Why the field is a projection and not the protocol
 #
@@ -14,7 +15,7 @@ name: Claim to assignee
 # express that, because both issues were correctly owned.
 #
 # What the field adds is cheapness. It is one queryable value that every GitHub
-# view and every tool can read without parsing a 1,200-comment thread. The
+# view and every tool can read without parsing a ~1,400-comment thread. The
 # morning report got #2947 wrong on 2026-09-15 precisely because reading
 # ownership properly took three API calls that nobody had told it to make.
 #
@@ -34,6 +35,19 @@ name: Claim to assignee
 # — to themselves only, on an issue they claimed in the open. Acceptable for
 # this repo's membership, and stated so it is a decision rather than an
 # oversight.
+#
+# ## The merge-time release does not pass through here (#3177)
+#
+# `claim-release-on-merge.yml` posts `🔓 RELEASE` as `github-actions[bot]` when
+# a PR that closes the issue merges, and unassigns everyone on the issue
+# ITSELF (`scripts/ci/release-on-merge.mjs`). That comment never re-enters this
+# workflow: a comment posted with `GITHUB_TOKEN` does not trigger
+# `issue_comment` (GitHub's non-recursion rule), and the Bot gate below keeps
+# every bot out regardless. The parser still carries a `--author-type Bot`
+# grammar — a bot may only release, and only in a line naming its PR — so that
+# if this gate is ever opened to an App-token poster the narrowing is already
+# the contract; today nothing depends on it, and the author type is passed
+# with `User` as the default so an empty field never widens the grammar.
 #
 # Never fails the build: a comment that parses to nothing is the common case,
 # and an API refusal is logged, not raised. This workflow only ever adds or
@@ -83,13 +97,14 @@ jobs:
           # text from a public repository's comment box.
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          COMMENT_AUTHOR_TYPE: ${{ github.event.comment.user.type }}
           ON_ISSUE: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
           printf '%s' "$COMMENT_BODY" > comment.txt
-          node scripts/ci/claim-assignee.mjs --body comment.txt --on-issue "$ON_ISSUE" > actions.txt
+          node scripts/ci/claim-assignee.mjs --body comment.txt --on-issue "$ON_ISSUE" --author-type "${COMMENT_AUTHOR_TYPE:-User}" > actions.txt
 
           if [ ! -s actions.txt ]; then
             echo "No claim or release in this comment — nothing to do."

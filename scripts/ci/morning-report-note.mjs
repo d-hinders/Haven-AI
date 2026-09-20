@@ -85,7 +85,11 @@ export const TOPIC_OVERLAP = 0.5
  * A forged `🔓 RELEASE` there is not cosmetic: AGENTS.md says an unreleased
  * claim blocks another session for a day, so a fake release is exactly what
  * makes two sessions build the same issue, and a fake `🔒 CLAIM` makes a
- * session skip work nobody is doing. Raw HTML is refused for the same reason
+ * session skip work nobody is doing. (One bot release IS legitimate — the
+ * merge-time `🔓 RELEASE` that `claim-release-on-merge.yml` posts, #3177 — but
+ * it is grounded in a merge event, not in text a contributor wrote; a report
+ * assembled from titles has no such ground, so it stays refused here.) Raw
+ * HTML is refused for the same reason
  * in a different shape — an unclosed `<details>` swallows the provenance
  * footer, hiding the one line that says this is not a human speaking.
  *
@@ -94,7 +98,7 @@ export const TOPIC_OVERLAP = 0.5
  */
 export const FORBIDDEN = [
   { re: /(?:^|\s)🔒\s*CLAIM/u, why: 'contains a CLAIM marker — only a session may claim work' },
-  { re: /(?:^|\s)🔓\s*RELEASE/u, why: 'contains a RELEASE marker — only a session may release its own claim' },
+  { re: /(?:^|\s)🔓\s*RELEASE/u, why: 'contains a RELEASE marker — only a session, or the merge-time workflow (#3177), may release a claim' },
   { re: /<!--/, why: 'contains an HTML comment — could hide content or poison dedupe' },
   { re: /<\s*\/?\s*[a-z][a-z0-9]*(?:\s|\/?>)/i, why: 'contains raw HTML' },
 ]

@@ -5,7 +5,11 @@ covers:
   - .github/workflows/publish.yml
   - .github/workflows/morning-report-note.yml
   - .github/workflows/claim-assignee.yml
+  - .github/workflows/claim-release-on-merge.yml
+  - scripts/ci/release-on-merge.mjs
   - scripts/ci/claim-assignee.mjs
+  - scripts/ci/morning-report-note.mjs
+  - scripts/ci/operator-verify-close-guard.mjs
   - scripts/ci/preflight.mjs
   - scripts/ci/preflight-gates.json
   - scripts/ci/preflight.test.mjs
@@ -13,7 +17,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-09-19"
+last-verified: "2026-09-20"
 ---
 
 # Haven Codex Instructions
@@ -219,9 +223,9 @@ More than one agent session works this repo (different users, different machines
 
 **Claim before you build:** comment `🔒 CLAIM #<issue> — branch <name> — touches: <files/areas> — <session owner>` on the issue itself; ALSO post it to #1289 when the work touches shared surfaces (`packages/mcp-server/src/tools*` — the facade and everything under `tools/`, since #2807–#2809 split the hosted surface across several files — demo-merchant-mcp, migrations, release trains, `db-mock-baseline.json`, contract docs).
 
-**Release what you drop:** when the PR opens, or when you abandon the work, comment `🔓 RELEASE #<issue> — <landed as PR #N | abandoned: reason>`. An unreleased claim blocks the other session for a day.
+**Release what you drop:** when you abandon the work, or when the PR closes the issue only in operator-verify mode (`Refs #N`), comment `🔓 RELEASE #<issue> — <landed as PR #N | abandoned: reason>`. An unreleased claim blocks the other session for a day. **The release on a merged PR is automatic** (#3177): `.github/workflows/claim-release-on-merge.yml` runs `scripts/ci/release-on-merge.mjs`, which posts `🔓 RELEASE #n — landed as PR #N …` as `github-actions[bot]` on every issue the merge closed, unassigns everyone still on it, and repeats the line on #1289 if a claim for that issue is anywhere in the channel. "Closed" means closed BY THAT MERGE: the candidates are GitHub's linked references (the first 50) PLUS the closing keywords in the title and commit messages (GitHub's list misses commit-message keywords — PR #2314 proved it; a pull-request number is skipped), and each is released only if GitHub reports it closed within five minutes after the merge time — an already-closed issue the PR merely mentioned, or one a person reopened and re-closed later, is left alone; a merge into a non-default branch (a promotion) releases nothing. A PR closed without merging releases nothing — that claim is still live. Posting your own release as well is harmless; forgetting it no longer strands the issue on a merged PR.
 
-**The assignee field is an automated projection of your claim**, not a second thing to maintain. `.github/workflows/claim-assignee.yml` watches issue comments: a `🔒 CLAIM #n` line assigns its author to #n, a `🔓 RELEASE #n` line unassigns them. You do not set it by hand, and nothing breaks if it is wrong — the claim comment is still the record.
+**The assignee field is an automated projection of your claim**, not a second thing to maintain. `.github/workflows/claim-assignee.yml` watches issue comments: a `🔒 CLAIM #n` line assigns its author to #n, a `🔓 RELEASE #n` line unassigns them. Bot comments never reach it (a `GITHUB_TOKEN` comment does not trigger `issue_comment`, and the gate excludes bots besides) — the merge-time release does its own unassign. You do not set it by hand, and nothing breaks if it is wrong — the claim comment is still the record.
 
 Two consequences worth knowing. The projection reads only the LEADING run of issue numbers on a marker line, so `🔒 CLAIM #2044 — … the Red Line #4 suite` claims #2044 and not #4; put the issues you are claiming immediately after the keyword and everything else after. And a claim quoted inside a bullet or mid-sentence is deliberately ignored, so you can report someone else's claim in an FYI without stealing it.
 

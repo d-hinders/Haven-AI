@@ -12,26 +12,27 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from './claim-assignee.mjs'
+import { CHANNEL_ISSUE } from './coordination-channel.mjs'
 import { decideClaim, holderClaim, branchOf, ageText, mentionsIssue, sameLogin, fetchClaimState, applyClaim, LIVE_CLAIM_MS, TRUSTED_ASSOCIATIONS } from './claim-collision.mjs'
 
 const CLI = fileURLToPath(new URL('./claim-assignee.mjs', import.meta.url))
 
-const on1289 = (body) => parse({ body, onIssue: 1289 })
+const onChannel = (body) => parse({ body, onIssue: CHANNEL_ISSUE })
 
 describe('claims, as actually written', () => {
   test('the current canonical form', () => {
-    const r = on1289('🔒 CLAIM #2947 — branch `feat/2947-analytics-page-shell` — touches: packages/frontend/…')
+    const r = onChannel('🔒 CLAIM #2947 — branch `feat/2947-analytics-page-shell` — touches: packages/frontend/…')
     assert.deepEqual(r.claim, [2947])
     assert.deepEqual(r.release, [])
   })
 
   test('parenthesised subject after the number', () => {
-    const r = on1289('🔒 CLAIM #2988 (demo merchant: invoice counter seed collision after restart; scan B8) — branch `fix/2988-invoice-seed`')
+    const r = onChannel('🔒 CLAIM #2988 (demo merchant: invoice counter seed collision after restart; scan B8) — branch `fix/2988-invoice-seed`')
     assert.deepEqual(r.claim, [2988])
   })
 
@@ -39,19 +40,19 @@ describe('claims, as actually written', () => {
     // Real: an owner directive to finish a whole epic in one session. The four
     // numbers before the parenthesis are the claim; #1408 is the epic they
     // belong to, mentioned as context, and must not be assigned.
-    const r = on1289('🔒 CLAIM #1404 + #1411 + #1418 + #1393 (hela resten av connect-epicen #1408)')
+    const r = onChannel('🔒 CLAIM #1404 + #1411 + #1418 + #1393 (hela resten av connect-epicen #1408)')
     assert.deepEqual(r.claim, [1404, 1411, 1418, 1393])
   })
 
   test('a number cited in the DESCRIPTION is not claimed', () => {
     // Real, and the bug the corpus replay caught: this line claimed #4 as well
     // as #2044, because 'Red Line #4' is prose about the work.
-    const r = on1289('🔒 CLAIM #2044 — branch `chore/2044-vacuous-red-line-4-spies` — removing the three unfalsifiable spies from the Red Line #4 regulatory suite.')
+    const r = onChannel('🔒 CLAIM #2044 — branch `chore/2044-vacuous-red-line-4-spies` — removing the three unfalsifiable spies from the Red Line #4 regulatory suite.')
     assert.deepEqual(r.claim, [2044])
   })
 
   test('the historical bold form with the number after the session name', () => {
-    const r = on1289("**CLAIM** (Antonio's session): #1348 — reduce avoidable round trips in guided catalog purchases")
+    const r = onChannel("**CLAIM** (Antonio's session): #1348 — reduce avoidable round trips in guided catalog purchases")
     assert.deepEqual(r.claim, [1348])
   })
 
@@ -61,13 +62,13 @@ describe('claims, as actually written', () => {
   })
 
   test('a bare claim on the coordination thread assigns nothing', () => {
-    // #1289 is the channel, not work. Falling back to it would assign the
+    // The channel (`CHANNEL_ISSUE`) is where claims are posted, not work. Falling back to it would assign the
     // standing thread to whoever posted.
-    assert.deepEqual(on1289('🔒 CLAIM — branch `feat/x`').claim, [])
+    assert.deepEqual(onChannel('🔒 CLAIM — branch `feat/x`').claim, [])
   })
 
   test('the coordination thread is never assigned even when named', () => {
-    assert.deepEqual(on1289('🔒 CLAIM #1289 — housekeeping').claim, [])
+    assert.deepEqual(onChannel(`🔒 CLAIM #${CHANNEL_ISSUE} — housekeeping`).claim, [])
   })
 })
 
@@ -78,10 +79,22 @@ describe('releases, matched generously because a stale assignee misleads', () =>
     ['plain Released', 'Released: #2988 (scan finding B8) via PR #2990 → dev `a1e6aaa2`.', 2988],
     ['historical bold form', "**RELEASE** (Antonio's session): #1328 shipped — PR #1339 merged", 1328],
     ['number first, keyword later', '#2680 (epic #2678 slice 2): **RELEASE** — PR #2754 opened', 2680],
+    // `↩️ WITHDRAWN` is a release (#3182). The three shapes are verbatim from the
+    // channel (2026-08-27, 2026-09-15 ×2); before #3182 none of them unassigned.
+    ['withdrawn, number after the word', "↩️ WITHDRAWN #3005 — my claim at 12:51Z collided with @PhilipEriksson's at 11:35Z (same issue, same branch name).", 3005],
+    ['withdrawn, superseded by a PR', "↩️ WITHDRAWN #3015 — superseded by @d-hinders's PR #3022 (merged 13:41Z, closes #3015, no claim posted here; my claim stood from 13:03Z).", 3015],
+    ['withdrawn with a warning sign, number after RELEASE', '⚠️ WITHDRAWN — RELEASE #2117 (PR #2134) closed as superseded by #2135 (merged `a0fffaf0`).', 2117],
+    ['padlock release that says withdrawn mid-line', '🔓 RELEASE #2780 — claim **WITHDRAWN AS SUPERSEDED** (duplicate claim, nothing built).', 2780],
+    // The reason prose after the number may say "release(d)"; the number is
+    // still read after WITHDRAWN (review of #3182 measured these three as []).
+    ['withdrawn, reason says released', '↩️ WITHDRAWN #3005 — Philip already released this one', 3005],
+    ['withdrawn, superseded and released the branch', '↩️ WITHDRAWN #3005 — superseded by PR #3010, released the branch', 3005],
+    ['withdrawn, holder will release later', '↩️ WITHDRAWN #3005 — collided with @philip; he will release when done', 3005],
+    ['withdrawn without the presentation selector', '↩ WITHDRAWN #3005 — same marker, plain arrow', 3005],
   ]
   for (const [name, body, expected] of cases) {
     test(name, () => {
-      const r = on1289(body)
+      const r = onChannel(body)
       // deepEqual, not includes: two of these lines name the PR that carried
       // the work, and the whole point of dropping `PR #n` is that the PR number
       // must NOT also be released. `includes` would pass either way.
@@ -89,6 +102,78 @@ describe('releases, matched generously because a stale assignee misleads', () =>
       assert.deepEqual(r.claim, [], 'a release must not also claim')
     })
   }
+
+  test('a withdrawal posted on its own issue may omit the number, like 🔓 (#3182)', () => {
+    assert.deepEqual(parse({ body: '↩️ WITHDRAWN — collided with Philip, standing down', onIssue: 3005 }), { claim: [], release: [3005] })
+    assert.deepEqual(parse({ body: '↩ WITHDRAWN — standing down (plain arrow)', onIssue: 3005 }), { claim: [], release: [3005] })
+  })
+
+  test('a line that leads with the issue and then says WITHDRAWN is not a marker (deliberate; RELEASE has that arm)', () => {
+    assert.deepEqual(onChannel('#3005 — WITHDRAWN, collided'), { claim: [], release: [] })
+  })
+
+  test('the word withdrawn mid-sentence is prose, not a marker', () => {
+    // Mutation: widen `withdrawnLine` to /withdrawn\b/i anywhere on the line →
+    // the number after the colon reads as a release and this goes red.
+    assert.deepEqual(onChannel("Note: Philip's claim was withdrawn: #3005 is free again."), { claim: [], release: [] })
+    assert.deepEqual(onChannel('The claim was withdrawn yesterday, see #3005 above.'), { claim: [], release: [] })
+  })
+
+  test('a withdrawal ends the hold in the collision rule too (#3182)', () => {
+    // Philip claims, then withdraws; Antonio's later claim must be accepted, not
+    // refused as a second claim on a live hold. Mutation: drop `withdrawnLine`
+    // from `releaseLine` → refuse.
+    const t0 = Date.parse('2026-09-15T11:35:36Z')
+    const comments = [
+      { author: 'PhilipEriksson', body: '🔒 CLAIM #3005 — branch `feat/3005-x`', createdAt: '2026-09-15T11:35:36Z', onIssue: CHANNEL_ISSUE, authorAssociation: 'COLLABORATOR' },
+      { author: 'PhilipEriksson', body: '↩️ WITHDRAWN #3005 — duplicate of an earlier branch', createdAt: '2026-09-15T12:00:00Z', onIssue: CHANNEL_ISSUE, authorAssociation: 'COLLABORATOR' },
+    ]
+    const d = decideClaim({ issue: 3005, claimant: 'AntonioSaaranen', state: 'open', assignees: [], comments, postedOn: CHANNEL_ISSUE, claimedAt: '2026-09-15T12:51:40Z', nowMs: t0 + 90 * 60_000 })
+    assert.equal(d.action, 'accept', JSON.stringify(d))
+  })
+})
+
+describe('the channel number is single-sourced (#3182)', () => {
+  const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8')
+
+  test('every coordination module re-exports the one constant', async () => {
+    const [{ CHANNEL_ISSUE: c1 }, { CHANNEL_ISSUE: c2 }] = await Promise.all([import('./claim-collision.mjs'), import('./release-on-merge.mjs')])
+    assert.equal(c1, CHANNEL_ISSUE)
+    assert.equal(c2, CHANNEL_ISSUE)
+    // Mutation: put `export const CHANNEL_ISSUE = 1289` back in either → red.
+    for (const f of ['./claim-collision.mjs', './release-on-merge.mjs', './pr-ownership-gate.mjs', './claim-assignee.mjs']) {
+      assert.doesNotMatch(read(f), /CHANNEL_ISSUE\s*=\s*\d/, `${f} defines its own channel number`)
+    }
+  })
+
+  test('the morning-report note defaults to the same issue', () => {
+    const yml = read('../../.github/workflows/morning-report-note.yml')
+    const m = yml.match(/\n\s+issue:\n(?:.*\n){1,4}?\s+default: '(\d+)'/)
+    assert.ok(m, 'no default for the issue input')
+    assert.equal(Number(m[1]), CHANNEL_ISSUE)
+  })
+
+  test('the shared-surface list is written once, in AGENTS.md (#3182 acceptance)', () => {
+    const files = ['../../AGENTS.md', '../../.agents/skills/ship-next/SKILL.md', '../../.github/workflows/claim-assignee.yml', './claim-assignee.mjs']
+    const hits = files.filter((f) => read(f).includes('packages/mcp-server/src/tools*'))
+    assert.deepEqual(hits, ['../../AGENTS.md'])
+  })
+
+  test('the protocol docs name a retired channel only where they call it the predecessor or history', async () => {
+    // The first cut of this test matched the URL form only and stayed green
+    // over five bare `#1289` live-rule sentences (review of #3182). Bare
+    // mentions are the ones agents read, so every LINE that carries one must
+    // also say what it is. Mutation: put `coordinate in #1289` back → red.
+    const { RETIRED_CHANNEL_ISSUES } = await import('./coordination-channel.mjs')
+    for (const old of RETIRED_CHANNEL_ISSUES) {
+      for (const f of ['../../AGENTS.md', '../../.agents/skills/ship-next/SKILL.md']) {
+        const offenders = read(f)
+          .split('\n')
+          .filter((l) => new RegExp(`(?:#|issues/)${old}\\b`).test(l) && !/predecessor|history/i.test(l))
+        assert.deepEqual(offenders, [], `${f} names the retired channel #${old} as if it were live`)
+      }
+    }
+  })
 })
 
 describe('reported claims must not be stolen', () => {
@@ -103,18 +188,18 @@ describe('reported claims must not be stolen', () => {
   ].join('\n')
 
   test('neither quoted claim is taken as a claim', () => {
-    const r = on1289(FYI)
+    const r = onChannel(FYI)
     assert.deepEqual(r.claim, [], 'a claim reported inside a bullet is not a claim being made')
     assert.deepEqual(r.release, [])
   })
 
   test('a claim quoted inside prose is not a claim', () => {
-    const r = on1289('For context, PhilipEriksson posted 🔒 CLAIM #2947 yesterday morning.')
+    const r = onChannel('For context, PhilipEriksson posted 🔒 CLAIM #2947 yesterday morning.')
     assert.deepEqual(r.claim, [])
   })
 
   test('but a real claim on the next line still registers', () => {
-    const r = on1289(`${FYI}\n🔒 CLAIM #2999 — branch \`feat/2999-x\` — touches: packages/core/`)
+    const r = onChannel(`${FYI}\n🔒 CLAIM #2999 — branch \`feat/2999-x\` — touches: packages/core/`)
     assert.deepEqual(r.claim, [2999])
   })
 })
@@ -126,33 +211,33 @@ describe('a quoted claim is reported, never made', () => {
   // removes only the owner, stranding the quoter on the issue with nothing in
   // the thread to explain it.
   test('a quote-reply of a claim assigns nobody', () => {
-    const r = on1289('> 🔒 CLAIM #2970 — branch `feat/2970-settled-verified`\n\nThanks, standing down.')
+    const r = onChannel('> 🔒 CLAIM #2970 — branch `feat/2970-settled-verified`\n\nThanks, standing down.')
     assert.deepEqual(r.claim, [])
     assert.deepEqual(r.release, [])
   })
 
   test('a nested quote too', () => {
-    assert.deepEqual(on1289('>> 🔒 CLAIM #2970').claim, [])
+    assert.deepEqual(onChannel('>> 🔒 CLAIM #2970').claim, [])
   })
 
   test('a quoted RELEASE is ignored as well', () => {
-    assert.deepEqual(on1289('> 🔓 RELEASE #2968 — landed').release, [])
+    assert.deepEqual(onChannel('> 🔓 RELEASE #2968 — landed').release, [])
   })
 
   test('an unquoted claim below a quoted one still registers', () => {
-    const r = on1289('> 🔒 CLAIM #2970 — theirs\n\n🔒 CLAIM #2999 — branch `feat/2999-x`')
+    const r = onChannel('> 🔒 CLAIM #2970 — theirs\n\n🔒 CLAIM #2999 — branch `feat/2999-x`')
     assert.deepEqual(r.claim, [2999])
   })
 })
 
 describe('a marker inside a code fence is documentation, not a claim', () => {
   test('fenced claim assigns nobody', () => {
-    const r = on1289('The format is:\n```\n🔒 CLAIM #2947 — branch `feat/x` — touches: …\n```\nPost that on the issue.')
+    const r = onChannel('The format is:\n```\n🔒 CLAIM #2947 — branch `feat/x` — touches: …\n```\nPost that on the issue.')
     assert.deepEqual(r.claim, [])
   })
 
   test('a real claim after the fence closes still registers', () => {
-    const r = on1289('Example:\n```\n🔒 CLAIM #1111 — sample\n```\n🔒 CLAIM #2947 — branch `feat/real`')
+    const r = onChannel('Example:\n```\n🔒 CLAIM #1111 — sample\n```\n🔒 CLAIM #2947 — branch `feat/real`')
     assert.deepEqual(r.claim, [2947])
   })
 })
@@ -201,17 +286,17 @@ describe('CLI contract the workflow depends on', () => {
       '🔓 RELEASE #2945; rm -rf /',
       '🔒 CLAIM #2999 `$(whoami)`',
     ].join('\n')
-    for (const line of run(hostile, 1289).split('\n').filter(Boolean)) {
+    for (const line of run(hostile, CHANNEL_ISSUE).split('\n').filter(Boolean)) {
       assert.match(line, /^(claim|release)=\d{1,6}$/, `unsafe CLI line: ${JSON.stringify(line)}`)
     }
   })
 
   test('a comment with nothing to do prints nothing', () => {
-    assert.equal(run('LGTM, nice work.', 1289), '')
+    assert.equal(run('LGTM, nice work.', CHANNEL_ISSUE), '')
   })
 
   test('output ends with a newline so the shell read loop sees the last line', () => {
-    const out = run('🔒 CLAIM #2947 — branch x', 1289)
+    const out = run('🔒 CLAIM #2947 — branch x', CHANNEL_ISSUE)
     assert.equal(out, 'claim=2947\n')
   })
 
@@ -228,7 +313,7 @@ describe('CLI contract the workflow depends on', () => {
 
 describe('mixed and ambiguous comments', () => {
   test('a comment that releases one issue and claims another does both', () => {
-    const r = on1289('🔓 RELEASE #2945 — landed as PR #2955\n🔒 CLAIM #2947 — branch `feat/2947-shell`')
+    const r = onChannel('🔓 RELEASE #2945 — landed as PR #2955\n🔒 CLAIM #2947 — branch `feat/2947-shell`')
     assert.deepEqual(r.release, [2945])
     assert.deepEqual(r.claim, [2947])
   })
@@ -236,7 +321,7 @@ describe('mixed and ambiguous comments', () => {
   test('an issue on BOTH sides resolves to release — the safe direction', () => {
     // Unassigning something still in flight costs a re-read of the thread.
     // Leaving a finished issue assigned misleads every reader and every tool.
-    const r = on1289('🔒 CLAIM #2947 — restating\n🔓 RELEASE #2947 — actually landed as PR #3000')
+    const r = onChannel('🔒 CLAIM #2947 — restating\n🔓 RELEASE #2947 — actually landed as PR #3000')
     assert.deepEqual(r.claim, [])
     assert.deepEqual(r.release, [2947])
   })
@@ -247,7 +332,7 @@ describe('mixed and ambiguous comments', () => {
     // nothing is extracted — and that is the right outcome. The note says it is
     // not a release, and the original CLAIM already assigned the issue, so
     // acting on it could only duplicate an assignment that already holds.
-    const r = on1289('🔒 claim LIVE — #2949 (Cortana ledger note, not a release)')
+    const r = onChannel('🔒 claim LIVE — #2949 (Cortana ledger note, not a release)')
     assert.deepEqual(r.release, [], 'a note that says it is not a release must not release')
     assert.deepEqual(r.claim, [])
   })
@@ -264,7 +349,7 @@ describe('comments that say nothing about claims', () => {
   ]
   for (const body of quiet) {
     test(`no-op: ${JSON.stringify(body.slice(0, 44))}`, () => {
-      const r = on1289(body)
+      const r = onChannel(body)
       assert.deepEqual(r.claim, [])
       assert.deepEqual(r.release, [])
     })
@@ -279,17 +364,17 @@ describe('comments that say nothing about claims', () => {
 
 describe('reference extraction', () => {
   test('a number is taken only from the line that carries the marker', () => {
-    const r = on1289('🔒 CLAIM #2947 — branch feat/2947\nUnrelated prose mentioning #9999.')
+    const r = onChannel('🔒 CLAIM #2947 — branch feat/2947\nUnrelated prose mentioning #9999.')
     assert.deepEqual(r.claim, [2947])
   })
 
   test('duplicates on one line collapse', () => {
-    assert.deepEqual(on1289('🔒 CLAIM #2947 — see #2947 for detail').claim, [2947])
+    assert.deepEqual(onChannel('🔒 CLAIM #2947 — see #2947 for detail').claim, [2947])
   })
 
   test('a long digit run is not a reference', () => {
     // Timestamps and card ids appear in these comments constantly.
-    assert.deepEqual(on1289('🔒 CLAIM #12345678 — card t_8f39877c').claim, [])
+    assert.deepEqual(onChannel('🔒 CLAIM #12345678 — card t_8f39877c').claim, [])
   })
 })
 
@@ -301,8 +386,8 @@ describe('a bot author is honoured for one shape only: the merge-time release (#
     assert.deepEqual(bot(autoRelease), { claim: [], release: [3134] })
   })
 
-  test('honoured on the channel too, releasing the issue named, never #1289', () => {
-    assert.deepEqual(bot(autoRelease, 1289), { claim: [], release: [3134] })
+  test('honoured on the channel too, releasing the issue named, never the channel', () => {
+    assert.deepEqual(bot(autoRelease, CHANNEL_ISSUE), { claim: [], release: [3134] })
   })
 
   test('a bot CLAIM is ignored — a bot owns no work', () => {
@@ -341,16 +426,16 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
   // measured ones (`gh api --paginate repos/…/issues/1289/comments`); the
   // branch name is abbreviated here (the real one was ci/3005-core-qa-agent-jobs).
   const NOW = Date.parse('2026-09-15T12:51:40Z')
-  const holderClaimLine = { author: 'PhilipEriksson', body: '🔒 CLAIM #3005 — branch `feat/3005-x` — touches: packages/backend/…', createdAt: '2026-09-15T11:35:36Z', onIssue: 1289, authorAssociation: 'COLLABORATOR' }
-  const base = { issue: 3005, claimant: 'AntonioSaaranen', state: 'open', assignees: ['PhilipEriksson'], postedOn: 1289, nowMs: NOW }
+  const holderClaimLine = { author: 'PhilipEriksson', body: '🔒 CLAIM #3005 — branch `feat/3005-x` — touches: packages/backend/…', createdAt: '2026-09-15T11:35:36Z', onIssue: CHANNEL_ISSUE, authorAssociation: 'COLLABORATOR' }
+  const base = { issue: 3005, claimant: 'AntonioSaaranen', state: 'open', assignees: ['PhilipEriksson'], postedOn: CHANNEL_ISSUE, nowMs: NOW }
 
   test('second claim within 24 h → refused with a reply naming the holder, the age, the branch, and that nothing was recorded', () => {
     const d = decideClaim({ ...base, comments: [holderClaimLine] })
     assert.equal(d.action, 'refuse')
     assert.equal(d.assign, undefined)
-    assert.equal(d.reply.issue, 1289)
+    assert.equal(d.reply.issue, CHANNEL_ISSUE)
     assert.match(d.reply.body, /^⚠️ Already claimed: issue 3005 is held by @PhilipEriksson\./)
-    assert.match(d.reply.body, /claimed it 76 min ago on #1289 \(branch `feat\/3005-x`\)/)
+    assert.ok(d.reply.body.includes(`claimed it 76 min ago on #${CHANNEL_ISSUE} (branch \`feat/3005-x\`)`), d.reply.body)
     assert.match(d.reply.body, /This claim by @AntonioSaaranen was not recorded/)
   })
 
@@ -383,14 +468,14 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
   })
 
   test('released claim → accepted (the holder said they dropped it, even if the projection missed it)', () => {
-    const release = { author: 'PhilipEriksson', body: '🔓 RELEASE #3005 — abandoned: picking #3010 instead', createdAt: '2026-09-15T12:30:00Z', onIssue: 1289 }
+    const release = { author: 'PhilipEriksson', body: '🔓 RELEASE #3005 — abandoned: picking #3010 instead', createdAt: '2026-09-15T12:30:00Z', onIssue: CHANNEL_ISSUE }
     const d = decideClaim({ ...base, comments: [holderClaimLine, release] })
     assert.equal(d.action, 'accept')
     assert.equal(d.assign, 'AntonioSaaranen')
   })
 
   test('a release BEFORE the claim does not count as releasing it', () => {
-    const earlier = { author: 'PhilipEriksson', body: '🔓 RELEASE #3005 — abandoned', createdAt: '2026-09-15T10:00:00Z', onIssue: 1289 }
+    const earlier = { author: 'PhilipEriksson', body: '🔓 RELEASE #3005 — abandoned', createdAt: '2026-09-15T10:00:00Z', onIssue: CHANNEL_ISSUE }
     assert.equal(decideClaim({ ...base, comments: [earlier, holderClaimLine] }).action, 'refuse')
   })
 
@@ -423,7 +508,7 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
     const refuse = decideClaim({ ...base, comments: [holderClaimLine] }).reply.body
     const takeover = decideClaim({ ...base, comments: [{ ...holderClaimLine, createdAt: '2026-09-12T13:00:00Z' }] }).reply.body
     for (const body of [refuse, takeover]) {
-      assert.deepEqual(parse({ body, onIssue: 1289 }), { claim: [], release: [] })
+      assert.deepEqual(parse({ body, onIssue: CHANNEL_ISSUE }), { claim: [], release: [] })
       assert.deepEqual(parse({ body, onIssue: 3005 }), { claim: [], release: [] })
       assert.deepEqual(parse({ body, onIssue: 3005, authorType: 'Bot' }), { claim: [], release: [] })
       for (const line of body.split('\n')) assert.doesNotMatch(line, /^\s*(🔒|🔓|#\d)/)
@@ -441,7 +526,7 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
 
   test('holderClaim picks the NEWEST claim and only a release after it counts', () => {
     const c1 = { ...holderClaimLine, createdAt: '2026-09-14T09:00:00Z' }
-    const r = { author: 'PhilipEriksson', body: '🔓 RELEASE #3005 — abandoned', createdAt: '2026-09-14T10:00:00Z', onIssue: 1289 }
+    const r = { author: 'PhilipEriksson', body: '🔓 RELEASE #3005 — abandoned', createdAt: '2026-09-14T10:00:00Z', onIssue: CHANNEL_ISSUE }
     const c2 = { ...holderClaimLine, createdAt: '2026-09-15T11:44:00Z' }
     const h = holderClaim({ holder: 'PhilipEriksson', issue: 3005, comments: [c2, r, c1] })
     assert.equal(h.claim.createdAt, c2.createdAt)
@@ -457,7 +542,7 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
   })
 
   test('S1 guard: a drive-by claim by a NON-collaborator on the public channel makes no holder', () => {
-    // #1289 is public. Without this, anyone could post `🔒 CLAIM #N` there and
+    // The channel is public. Without this, anyone could post `🔒 CLAIM #N` there and
     // get every real claim of #N refused.
     const driveBy = { ...holderClaimLine, author: 'stranger', authorAssociation: 'NONE' }
     assert.equal(decideClaim({ ...base, assignees: [], comments: [driveBy] }).action, 'accept')
@@ -495,7 +580,7 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
     assert.equal(mentionsIssue('see #30050', 3005), false)
     assert.equal(mentionsIssue('https://example.com/x/#3005', 3005), false)
     const old = { ...holderClaimLine, createdAt: '2026-09-12T12:51:40Z' }
-    const quotedRecent = { author: 'PhilipEriksson', body: '> someone wrote about #3005', createdAt: '2026-09-15T10:51:40Z', onIssue: 1289 }
+    const quotedRecent = { author: 'PhilipEriksson', body: '> someone wrote about #3005', createdAt: '2026-09-15T10:51:40Z', onIssue: CHANNEL_ISSUE }
     assert.equal(decideClaim({ ...base, comments: [old, quotedRecent] }).action, 'takeover')
   })
 
@@ -503,10 +588,10 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
     // Both runs see each other's comment ~20 s after their triggers. Antonio
     // claimed at 12:00:00, Philip at 12:00:05: Antonio's run must accept,
     // Philip's must refuse and name Antonio.
-    const antonio = { author: 'AntonioSaaranen', body: '🔒 CLAIM #3200 — branch `feat/3200-a`', createdAt: '2026-09-20T12:00:00Z', onIssue: 1289, authorAssociation: 'COLLABORATOR' }
-    const philip = { author: 'PhilipEriksson', body: '🔒 CLAIM #3200 — branch `feat/3200-p`', createdAt: '2026-09-20T12:00:05Z', onIssue: 1289, authorAssociation: 'COLLABORATOR' }
+    const antonio = { author: 'AntonioSaaranen', body: '🔒 CLAIM #3200 — branch `feat/3200-a`', createdAt: '2026-09-20T12:00:00Z', onIssue: CHANNEL_ISSUE, authorAssociation: 'COLLABORATOR' }
+    const philip = { author: 'PhilipEriksson', body: '🔒 CLAIM #3200 — branch `feat/3200-p`', createdAt: '2026-09-20T12:00:05Z', onIssue: CHANNEL_ISSUE, authorAssociation: 'COLLABORATOR' }
     const now = Date.parse('2026-09-20T12:00:30Z')
-    const common = { issue: 3200, state: 'open', assignees: [], comments: [antonio, philip], postedOn: 1289, nowMs: now }
+    const common = { issue: 3200, state: 'open', assignees: [], comments: [antonio, philip], postedOn: CHANNEL_ISSUE, nowMs: now }
     const a = decideClaim({ ...common, claimant: 'AntonioSaaranen', claimedAt: antonio.createdAt })
     const p = decideClaim({ ...common, claimant: 'PhilipEriksson', claimedAt: philip.createdAt })
     assert.equal(a.action, 'accept')
@@ -523,14 +608,14 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
   })
 
   test('the tie-break uses the holder\'s FIRST claim in force: a re-claim or channel copy does not make them "newer"', () => {
-    // Antonio claimed at 12:00:00 (issue) and mirrored to #1289 at 12:00:20;
+    // Antonio claimed at 12:00:00 (issue) and mirrored to the channel at 12:00:20;
     // Philip claimed at 12:00:05. Antonio's hold began first and must win even
     // though his NEWEST claim is later than Philip's.
     const a1 = { author: 'AntonioSaaranen', body: '🔒 CLAIM #3200 — branch `feat/3200-a`', createdAt: '2026-09-20T12:00:00Z', onIssue: 3200, authorAssociation: 'COLLABORATOR' }
-    const a2 = { ...a1, createdAt: '2026-09-20T12:00:20Z', onIssue: 1289 }
-    const p = { author: 'PhilipEriksson', body: '🔒 CLAIM #3200 — branch `feat/3200-p`', createdAt: '2026-09-20T12:00:05Z', onIssue: 1289, authorAssociation: 'COLLABORATOR' }
+    const a2 = { ...a1, createdAt: '2026-09-20T12:00:20Z', onIssue: CHANNEL_ISSUE }
+    const p = { author: 'PhilipEriksson', body: '🔒 CLAIM #3200 — branch `feat/3200-p`', createdAt: '2026-09-20T12:00:05Z', onIssue: CHANNEL_ISSUE, authorAssociation: 'COLLABORATOR' }
     const now = Date.parse('2026-09-20T12:01:00Z')
-    const common = { issue: 3200, state: 'open', assignees: [], comments: [a1, p, a2], postedOn: 1289, nowMs: now }
+    const common = { issue: 3200, state: 'open', assignees: [], comments: [a1, p, a2], postedOn: CHANNEL_ISSUE, nowMs: now }
     assert.equal(decideClaim({ ...common, claimant: 'PhilipEriksson', claimedAt: p.createdAt }).action, 'refuse')
     assert.equal(decideClaim({ ...common, claimant: 'AntonioSaaranen', claimedAt: a2.createdAt }).action, 'refuse', 'the incoming copy is later than Philip — but see the gate, which passes the hold start')
     // The refusal reply ages Antonio's HOLD (12:00:00, on the issue), not his
@@ -551,11 +636,11 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
     const recentOnIssue = { author: 'PhilipEriksson', body: 'review round 3 pushed', createdAt: '2026-09-15T10:51:40Z', onIssue: 3005 }
     const d = decideClaim({ ...base, comments: [old, recentOnIssue] })
     assert.equal(d.action, 'refuse')
-    assert.match(d.reply.body, /claimed it 3 d ago on #1289 .* last active on it 2 h ago/)
+    assert.match(d.reply.body, new RegExp(`claimed it 3 d ago on #${CHANNEL_ISSUE} .* last active on it 2 h ago`))
     // …a recent comment on the CHANNEL counts only if it names the issue.
-    const recentOnChannelNaming = { author: 'PhilipEriksson', body: '📣 FYI — #3005 waits on CODEOWNERS', createdAt: '2026-09-15T10:51:40Z', onIssue: 1289 }
+    const recentOnChannelNaming = { author: 'PhilipEriksson', body: '📣 FYI — #3005 waits on CODEOWNERS', createdAt: '2026-09-15T10:51:40Z', onIssue: CHANNEL_ISSUE }
     assert.equal(decideClaim({ ...base, comments: [old, recentOnChannelNaming] }).action, 'refuse')
-    const recentOnChannelOther = { author: 'PhilipEriksson', body: '🔒 CLAIM #3010 — branch `x/y`', createdAt: '2026-09-15T10:51:40Z', onIssue: 1289 }
+    const recentOnChannelOther = { author: 'PhilipEriksson', body: '🔒 CLAIM #3010 — branch `x/y`', createdAt: '2026-09-15T10:51:40Z', onIssue: CHANNEL_ISSUE }
     assert.equal(decideClaim({ ...base, comments: [old, recentOnChannelOther] }).action, 'takeover')
   })
 
@@ -593,12 +678,12 @@ describe('collision fetch and apply through an injected gh (#3178)', () => {
   test('fetchClaimState reads the issue, its comments and the channel, tagging where each comment was posted', async () => {
     const { gh, calls } = recorder({
       issue: { state: 'open', assignees: [{ login: 'AntonioSaaranen' }] },
-      comments: (n) => (n === 1289 ? [{ user: { login: 'AntonioSaaranen' }, author_association: 'OWNER', body: '🔒 CLAIM #3005 — x', created_at: '2026-09-15T11:44:00Z' }] : [{ user: { login: 'd-hinders' }, body: 'hi', created_at: '2026-09-15T09:00:00Z' }]),
+      comments: (n) => (n === CHANNEL_ISSUE ? [{ user: { login: 'AntonioSaaranen' }, author_association: 'OWNER', body: '🔒 CLAIM #3005 — x', created_at: '2026-09-15T11:44:00Z' }] : [{ user: { login: 'd-hinders' }, body: 'hi', created_at: '2026-09-15T09:00:00Z' }]),
     })
     const r = await fetchClaimState({ gh, repo: 'o/r', issue: 3005 })
     assert.equal(r.state, 'open')
     assert.deepEqual(r.assignees, ['AntonioSaaranen'])
-    assert.deepEqual(r.comments.map((c) => [c.author, c.onIssue, c.authorAssociation, c.authorType]), [['d-hinders', 3005, 'NONE', 'User'], ['AntonioSaaranen', 1289, 'OWNER', 'User']])
+    assert.deepEqual(r.comments.map((c) => [c.author, c.onIssue, c.authorAssociation, c.authorType]), [['d-hinders', 3005, 'NONE', 'User'], ['AntonioSaaranen', CHANNEL_ISSUE, 'OWNER', 'User']])
     assert.equal(calls.filter((c) => c.args.includes('--paginate')).length, 2)
   })
 
@@ -610,10 +695,10 @@ describe('collision fetch and apply through an injected gh (#3178)', () => {
   })
 
   test('applyClaim: refuse posts the reply via stdin and touches no assignee', async () => {
-    const d = { action: 'refuse', reply: { issue: 1289, body: '⚠️ Already claimed: …' } }
+    const d = { action: 'refuse', reply: { issue: CHANNEL_ISSUE, body: '⚠️ Already claimed: …' } }
     const { gh, calls } = recorder()
     const done = await applyClaim(d, { gh, repo: 'o/r', issue: 3005, log: () => {} })
-    assert.deepEqual(calls.map((c) => c.args.slice(0, 3)), [['issue', 'comment', '1289']])
+    assert.deepEqual(calls.map((c) => c.args.slice(0, 3)), [['issue', 'comment', String(CHANNEL_ISSUE)]])
     assert.equal(calls[0].input, '⚠️ Already claimed: …')
     assert.deepEqual(done.map((x) => x.kind), ['reply'])
   })
@@ -648,7 +733,7 @@ describe('claim-collision CLI end to end, with a stub gh on PATH (#3178)', () =>
   writeFileSync(ghStub, `#!/bin/sh
 case "$*" in
   *"issues/3005/comments"*) echo '[[]]' ;;
-  *"issues/1289/comments"*) echo '[[{"user":{"login":"PhilipEriksson"},"author_association":"COLLABORATOR","body":"🔒 CLAIM #3005 — branch \`feat/3005-x\`","created_at":"${recent}"}]]' ;;
+  *"issues/${CHANNEL_ISSUE}/comments"*) echo '[[{"user":{"login":"PhilipEriksson"},"author_association":"COLLABORATOR","body":"🔒 CLAIM #3005 — branch \`feat/3005-x\`","created_at":"${recent}"}]]' ;;
   *"issues/3005"*) echo '{"state":"open","assignees":[{"login":"PhilipEriksson"}]}' ;;
   *) echo "$*" >> "${dir}/writes.txt"; cat >/dev/null; echo '' ;;
 esac
@@ -661,21 +746,21 @@ esac
 
   test('dry run prints exactly one JSON line and writes nothing', () => {
     const before = writesNow().length
-    const out = execFileSync(process.execPath, [CLI2, '--issue', '3005', '--claimant', 'AntonioSaaranen', '--posted-on', '1289'], { encoding: 'utf8', env })
+    const out = execFileSync(process.execPath, [CLI2, '--issue', '3005', '--claimant', 'AntonioSaaranen', '--posted-on', String(CHANNEL_ISSUE)], { encoding: 'utf8', env })
     const lines = out.trim().split('\n').filter((l) => l.startsWith('{'))
     assert.equal(lines.length, 1)
     const d = JSON.parse(lines[0])
     assert.equal(d.action, 'refuse')
     assert.equal(d.issue, 3005)
-    assert.equal(d.reply.issue, 1289)
+    assert.equal(d.reply.issue, CHANNEL_ISSUE)
     // Order-independent: the write count is unchanged by a dry run.
     assert.equal(writesNow().length, before)
   })
 
   test('--apply posts the reply through gh (stdin body) and touches no assignee', () => {
     const before = writesNow().length
-    execFileSync(process.execPath, [CLI2, '--issue', '3005', '--claimant', 'AntonioSaaranen', '--posted-on', '1289', '--apply'], { encoding: 'utf8', env })
-    assert.deepEqual(writesNow().slice(before), ['issue comment 1289 --repo o/r -F -'])
+    execFileSync(process.execPath, [CLI2, '--issue', '3005', '--claimant', 'AntonioSaaranen', '--posted-on', String(CHANNEL_ISSUE), '--apply'], { encoding: 'utf8', env })
+    assert.deepEqual(writesNow().slice(before), [`issue comment ${CHANNEL_ISSUE} --repo o/r -F -`])
   })
 
   test('a failed read (no gh on PATH) logs, prints no JSON, exits 0', () => {

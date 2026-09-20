@@ -1,10 +1,12 @@
 name: Claim to assignee
 
 # Keeps GitHub's assignee field in step with the claim protocol in AGENTS.md
-# § Cross-session agent coordination. A `🔒 CLAIM #n` comment assigns its author
+# § Cross-session agent coordination — the ONLY canonical text of the protocol
+# (#3182); this header explains this workflow's design and restates no rule of
+# it. A `🔒 CLAIM #n` comment assigns its author
 # to #n — unless another session holds a live claim on it, in which case it is
 # refused with a reply, or a stale one, which is taken over (#3178, below); a
-# `🔓 RELEASE #n` unassigns them (the
+# `🔓 RELEASE #n` (or `↩️ WITHDRAWN #n`, #3182) unassigns them (the
 # merge-time release, #3177, is posted and applied by
 # `claim-release-on-merge.yml` itself — see below).
 #
@@ -92,11 +94,11 @@ permissions:
   issues: write # assign/unassign, and the one collision reply (#3178)
 
 # No `concurrency` group, deliberately. Keying on the commented-on issue would
-# not serialise what matters — most claims are posted on #1289 ABOUT another
-# issue, so a claim of #2947 from #1289 and a release of #2947 posted on #2947
+# not serialise what matters — most claims are posted on the channel ABOUT
+# another issue, so a claim of #2947 from the channel and a release of #2947 posted on #2947
 # land in different groups anyway. Worse, a group makes this less safe at 15+
 # fires a day: GitHub cancels a PENDING run when a newer one queues, so a burst
-# on #1289 can drop the middle one, and a dropped 🔓 RELEASE is a permanently
+# on the channel can drop the middle one, and a dropped 🔓 RELEASE is a permanently
 # stale assignee. Both operations are idempotent and scoped to the comment
 # author, so running them in parallel is safe.
 

@@ -4,7 +4,7 @@ name: Release the claim on merge
 # agent coordination) at the one moment the repository KNOWS the work landed:
 # when a pull request merges. For every issue the PR closed it comments
 # `🔓 RELEASE #N — landed as PR #<pr> …` on the issue, unassigns everyone still
-# assigned there, and repeats the line on #1289 if a claim for that issue is
+# assigned there, and repeats the line on the coordination channel if a claim for that issue is
 # anywhere in that thread. Decision logic, fetch and every write live in
 # `scripts/ci/release-on-merge.mjs`, under `node --test` (#3177).
 #
@@ -25,7 +25,7 @@ name: Release the claim on merge
 # alone an issue the merge closed but a person reopened and re-closed later.
 # A candidate that is a pull request is skipped. A merge into a non-default
 # branch releases nothing at all — GitHub closes nothing there — so a
-# `dev → main` promotion (thirty `Closes #` commit lines) never spams #1289.
+# `dev → main` promotion (thirty `Closes #` commit lines) never spams the channel.
 # Idempotent whenever the thread can be read; an unreadable read fails open to
 # one duplicate line, never to a missed release.
 #
@@ -48,7 +48,7 @@ name: Release the claim on merge
 #   the claim is still live (tested; the merged filter is the whole safety).
 # - `Refs #N` (operator-verify mode) is neither a keyword nor a linked
 #   reference, so an issue held open for a human step keeps its claim.
-# - It never touches #1289's assignees, never closes or labels anything, and
+# - It never touches the channel's assignees, never closes or labels anything, and
 #   never fails the build: a failed read or a refused write is logged, exit 0.
 #
 # ## Trust boundary

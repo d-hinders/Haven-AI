@@ -11,6 +11,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { decide, apply, fetchInputs, fetchCandidates, fetchChannel, prFromPayload, AUTO_RELEASE_MARK, CLOSE_WINDOW_MS } from './release-on-merge.mjs'
 import { parse } from './claim-assignee.mjs'
+import { CHANNEL_ISSUE } from './coordination-channel.mjs'
 
 const CLI = fileURLToPath(new URL('./release-on-merge.mjs', import.meta.url))
 
@@ -68,7 +69,7 @@ describe('what a merge releases', () => {
   })
 
   test('the coordination thread itself is never released, even if GitHub lists it', () => {
-    const r = decide({ pr: mergedPr, closingIssues: [closedByMerge(1289), closedByMerge(3134)] })
+    const r = decide({ pr: mergedPr, closingIssues: [closedByMerge(CHANNEL_ISSUE), closedByMerge(3134)] })
     assert.deepEqual(r.releases.map((x) => x.issue), [3134])
   })
 
@@ -97,7 +98,7 @@ describe('released only when GitHub closed it BY THIS MERGE', () => {
   test('an issue closed BEFORE this merge — merely mentioned — is skipped (the #3187 self-test)', () => {
     // PR #3187's own body prose linked #2268, closed 2026-09-02 by a person.
     // GitHub's merge is a no-op on it; releasing it would post a false line on
-    // the issue and on #1289.
+    // the issue and on the channel (#1289 at the time).
     const r = decide({ pr: mergedPr, closingIssues: [{ number: 2268, assignees: ['d-hinders'], state: 'closed', closedAt: '2026-09-02T10:13:48Z' }, closedByMerge(3177)] })
     assert.deepEqual(r.releases.map((x) => x.issue), [3177])
     assert.equal(r.skipped[0].issue, 2268)
@@ -163,7 +164,7 @@ describe('released only when GitHub closed it BY THIS MERGE', () => {
 describe('the channel copy is posted only where the claim was', () => {
   const claimOnChannel = '🔒 CLAIM #3134 — epic #3130 slice 4/4 — branch `feat/3134-vocabulary-converge` — Antonio'
 
-  test('a claim on #1289 earns the channel its release', () => {
+  test('a claim on the channel earns the channel its release', () => {
     const r = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134)], channelBodies: ['📣 FYI — promotion tonight', claimOnChannel] })
     assert.ok(r.channel)
     assert.match(r.channel.body, /^🔓 RELEASE #3134 — landed as PR #3186/)
@@ -239,7 +240,7 @@ describe('fetch and apply through an injected gh', () => {
       }
       if (args[0] === 'api' && args.includes('--paginate')) {
         const url = args[args.length - 1]
-        if (/\/issues\/1289\/comments/.test(url)) return JSON.stringify(answers.channelPages ?? [[]])
+        if (new RegExp(`/issues/${CHANNEL_ISSUE}/comments`).test(url)) return JSON.stringify(answers.channelPages ?? [[]])
         return JSON.stringify(answers.existingComments?.(Number(url.match(/issues\/(\d+)\//)[1])) ?? [[]])
       }
       if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(args[1])) {
@@ -324,7 +325,7 @@ describe('fetch and apply through an injected gh', () => {
       ['issue', 'comment', '3134'],
       ['issue', 'edit', '3134'],
       ['issue', 'edit', '3134'],
-      ['issue', 'comment', '1289'],
+      ['issue', 'comment', String(CHANNEL_ISSUE)],
     ])
     // Body through stdin, never argv.
     assert.ok(writes[0].args.includes('-F') && writes[0].args.includes('-') && writes[0].input.startsWith('🔓 RELEASE #3134'))
@@ -337,7 +338,7 @@ describe('fetch and apply through an injected gh', () => {
     const decision = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134)] })
     const { gh, calls } = recorder()
     await apply(decision, { gh, repo: 'o/r', prNumber: 3186, log: () => {} })
-    assert.ok(!calls.some((c) => c.args[0] === 'issue' && c.args[2] === '1289'))
+    assert.ok(!calls.some((c) => c.args[0] === 'issue' && c.args[2] === String(CHANNEL_ISSUE)))
   })
 
   test('a refused write is logged and the rest still happens — never a thrown build failure', async () => {
@@ -352,13 +353,13 @@ describe('fetch and apply through an injected gh', () => {
   test('a re-run posts no second release on a thread that already carries this merge\'s — but still unassigns', async () => {
     const decision = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134, ['PhilipEriksson'])], channelBodies: ['🔒 CLAIM #3134 — x'] })
     const posted = `🔓 RELEASE #3134 — landed as PR #3186 (\`a29d5469\`, into \`dev\`) — ${AUTO_RELEASE_MARK}; nothing to release by hand.`
-    const { gh, calls } = recorder({ existingComments: (n) => [[{ body: n === 1289 ? 'unrelated' : posted }]] })
+    const { gh, calls } = recorder({ existingComments: (n) => [[{ body: n === CHANNEL_ISSUE ? 'unrelated' : posted }]] })
     const logs = []
     const done = await apply(decision, { gh, repo: 'o/r', prNumber: 3186, log: (m) => logs.push(m) })
     const writes = calls.filter((c) => c.args[0] === 'issue').map((c) => c.args.slice(0, 3))
     // No comment on #3134 (already there); unassigns proceed; the channel copy
-    // IS posted because #1289 does not carry it yet.
-    assert.deepEqual(writes, [['issue', 'edit', '3134'], ['issue', 'edit', '3134'], ['issue', 'comment', '1289']])
+    // IS posted because the channel does not carry it yet.
+    assert.deepEqual(writes, [['issue', 'edit', '3134'], ['issue', 'edit', '3134'], ['issue', 'comment', String(CHANNEL_ISSUE)]])
     assert.ok(logs.some((l) => /already carries this merge's release/.test(l)))
     assert.deepEqual(done.map((d) => d.kind), ['unassign', 'unassign', 'channel'])
   })
@@ -372,7 +373,7 @@ describe('fetch and apply through an injected gh', () => {
     const logs = []
     await apply(decision, { gh, repo: 'o/r', prNumber: 3186, log: (m) => logs.push(m) })
     const writes = calls.filter((c) => c.args[0] === 'issue').map((c) => c.args.slice(0, 3))
-    assert.deepEqual(writes, [['issue', 'comment', '3134'], ['issue', 'edit', '3134'], ['issue', 'comment', '1289']])
+    assert.deepEqual(writes, [['issue', 'comment', '3134'], ['issue', 'edit', '3134'], ['issue', 'comment', String(CHANNEL_ISSUE)]])
     assert.ok(!logs.some((l) => /already carries/.test(l)))
   })
 
@@ -380,13 +381,13 @@ describe('fetch and apply through an injected gh', () => {
     const decision = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134)], channelBodies: ['🔒 CLAIM #3134 — x'] })
     const { gh, calls } = recorder()
     await apply(decision, { gh, repo: 'o/r', prNumber: 3186, channelBodies: ['🔒 CLAIM #3134 — x'], log: () => {} })
-    assert.ok(!calls.some((c) => c.args.includes('--paginate') && /issues\/1289\//.test(c.args[c.args.length - 1])), 'no channel re-read')
-    assert.ok(calls.some((c) => c.args[0] === 'issue' && c.args[2] === '1289'), 'channel copy posted')
+    assert.ok(!calls.some((c) => c.args.includes('--paginate') && new RegExp(`issues/${CHANNEL_ISSUE}/`).test(c.args[c.args.length - 1])), 'no channel re-read')
+    assert.ok(calls.some((c) => c.args[0] === 'issue' && c.args[2] === String(CHANNEL_ISSUE)), 'channel copy posted')
     // …and when the pre-fetched bodies already carry it, nothing is posted there.
     const { gh: gh2, calls: calls2 } = recorder()
     const posted = `🔓 RELEASE #3134 — landed as PR #3186 (\`a29d5469\`, into \`dev\`) — ${AUTO_RELEASE_MARK}; nothing to release by hand.`
     await apply(decision, { gh: gh2, repo: 'o/r', prNumber: 3186, channelBodies: [posted], log: () => {} })
-    assert.ok(!calls2.some((c) => c.args[0] === 'issue' && c.args[2] === '1289'))
+    assert.ok(!calls2.some((c) => c.args[0] === 'issue' && c.args[2] === String(CHANNEL_ISSUE)))
   })
 
   test('a release for a DIFFERENT PR on the same issue does not count as already posted', async () => {

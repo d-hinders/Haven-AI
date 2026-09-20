@@ -3,7 +3,8 @@
 //
 // ## Why a projection and not a replacement
 //
-// AGENTS.md § Cross-session agent coordination is the protocol, and the claim
+// AGENTS.md § Cross-session agent coordination is the protocol — its only
+// canonical text (#3182); nothing below restates a rule of it — and the claim
 // comment stays authoritative because it carries what an assignee cannot: the
 // branch (which exists long before a PR) and `touches:` (file-level, which is
 // how a collision between two DIFFERENT issues gets caught — see the
@@ -39,6 +40,8 @@
 // work — to Philip, on the strength of Philip reporting it. Requiring the
 // marker to start its line (after list bullets and bold) excludes reported
 // claims and keeps the ones actually being made.
+
+import { CHANNEL_ISSUE } from './coordination-channel.mjs'
 
 /**
  * Strip decoration so `- **RELEASE** …`, `**Released:** …` and
@@ -124,14 +127,33 @@ function claimLine(line) {
 /**
  * Does this line announce a release? Generous, per the asymmetry above: the
  * open padlock, or the word leading the line, or an issue reference leading a
- * line that goes on to say RELEASE — `#2680 (…): **RELEASE** — PR #2754`.
+ * line that goes on to say RELEASE — `#2680 (…): **RELEASE** — PR #2754` — or
+ * a withdrawal (`withdrawnLine`, #3182). The ref-leading arm is reserved for
+ * the word RELEASE, which the corpus uses that way; `#3005 — WITHDRAWN,
+ * collided` is deliberately not a release (WITHDRAWN has no such use).
  */
 function releaseLine(line) {
   const t = undecorate(line)
   if (/^🔓/.test(t)) return true
   if (/^releas(e|ed)\b/i.test(t)) return true
   if (/^#\d{1,6}\b/.test(t) && /\breleas(e|ed)\b/i.test(t)) return true
+  if (withdrawnLine(t)) return true
   return false
+}
+
+/**
+ * `↩️ WITHDRAWN #N — <why>` is a release (#3182): the writer gives up a claim
+ * they should not have made — a collision, a duplicate — and says why. Before
+ * this line the marker was in use (three times on the channel by 2026-09-15)
+ * but unparsed, so a withdrawn claim kept its assignee until someone also
+ * posted `🔓 RELEASE`. The word may carry any leading emoji (`↩️`, the
+ * historical `⚠️ WITHDRAWN — RELEASE #2117`) or none; a line that merely
+ * contains the word mid-sentence ("claim WITHDRAWN AS SUPERSEDED" after a
+ * `🔓 RELEASE`) is already a release by the padlock and is not matched here.
+ * Takes the UNDECORATED line.
+ */
+function withdrawnLine(t) {
+  return /^[^\w#\s]{0,4}\s*withdrawn\b/i.test(t)
 }
 
 /**
@@ -152,14 +174,14 @@ export function botReleaseLine(line) {
  * @param {object} o
  * @param {string} o.body               the comment text
  * @param {number|null} [o.onIssue]     the issue the comment was posted on
- * @param {number} [o.channelIssue]     the standing coordination thread (#1289)
+ * @param {number} [o.channelIssue]     the standing coordination channel (`coordination-channel.mjs`)
  * @param {string} [o.authorType]       GitHub's `user.type`; 'Bot' narrows the
  *                                      grammar to the merge-time release only
  * @returns {{claim: number[], release: number[]}} issue numbers, disjoint —
  *          a number that both claims and releases in one comment counts as a
  *          release, since that is the safe direction.
  */
-export function parse({ body, onIssue = null, channelIssue = 1289, authorType = 'User' }) {
+export function parse({ body, onIssue = null, channelIssue = CHANNEL_ISSUE, authorType = 'User' }) {
   const claim = []
   const release = []
   const fromBot = authorType === 'Bot'
@@ -188,7 +210,20 @@ export function parse({ body, onIssue = null, channelIssue = 1289, authorType = 
     const clean = undecorate(line)
     const leadsWithRef = /^#\d{1,6}\b/.test(clean)
     const keyword = leadsWithRef ? null : isRelease ? /releas(e|ed)\b:?/i : /claim\b/i
-    let refs = refsOn(clean, keyword)
+    let refs
+    if (!leadsWithRef && isRelease && withdrawnLine(clean)) {
+      // A withdrawal puts its number after the word (`↩️ WITHDRAWN #3005 — …`).
+      // Only when nothing follows the word is the number looked for after
+      // RELEASE (the historical `⚠️ WITHDRAWN — RELEASE #2117`). The order
+      // matters: the reason prose after the number routinely says "released"
+      // ("… Philip already released this one"), and searching after that word
+      // first would find nothing and leave the stale assignee in place —
+      // measured in review of #3182.
+      refs = refsOn(clean, /withdrawn\b:?/i)
+      if (refs.length === 0) refs = refsOn(clean, keyword)
+    } else {
+      refs = refsOn(clean, keyword)
+    }
 
     // A marker made ON its own issue may not restate the number:
     // "🔒 CLAIM — branch feat/x — touches: …" posted on #2947.
@@ -200,7 +235,8 @@ export function parse({ body, onIssue = null, channelIssue = 1289, authorType = 
     // live claim. That is the exact failure this module exists to avoid, and it
     // would fire on the owner, whose claim it erases. An explicit 🔓 is a
     // deliberate use of the protocol and keeps the fallback.
-    const mayFallBack = !fromBot && (isClaim || /^\s*🔓/.test(undecorate(line)))
+    // `↩` with or without the U+FE0F presentation selector, as keyboards differ.
+    const mayFallBack = !fromBot && (isClaim || /^\s*(?:🔓|↩\uFE0F?)/.test(undecorate(line)))
     if (refs.length === 0 && mayFallBack && onIssue && onIssue !== channelIssue) refs = [onIssue]
 
     for (const n of refs) {

@@ -78,6 +78,8 @@ export default function AgentPanel() {
     setResumeDismissed(true)
     try {
       // Drop only `setup`; the list toolbar's filter parameters (#3165) stay.
+      // `null` state on purpose — see `useAgentListFilters` for why passing
+      // `window.history.state` through would stop Next syncing the URL.
       const url = new URL(window.location.href)
       url.searchParams.delete('setup')
       window.history.replaceState(null, '', `${url.pathname}${url.search}`)

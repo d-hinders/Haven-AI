@@ -35,10 +35,13 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('@/components/ConnectAgentModal', () => ({
-  default: ({ open, starterAllowance }: { open: boolean; starterAllowance?: boolean }) =>
+  default: ({ open, starterAllowance, onClose }: { open: boolean; starterAllowance?: boolean; onClose?: () => void }) =>
     open ? (
       <div role="dialog">
         Connect Agent Modal{starterAllowance ? ' (starter allowance)' : ''}
+        <button type="button" onClick={onClose}>
+          Close connect modal
+        </button>
       </div>
     ) : null,
 }))
@@ -82,6 +85,18 @@ describe('AgentPanel Connect Agent entry', () => {
     expect(screen.getByText('Connect Agent Modal (starter allowance)')).toBeInTheDocument()
     // the param is consumed so refresh/back doesn't re-trigger the hand-off
     expect(window.location.search).toBe('')
+
+    window.history.replaceState(null, '', '/')
+  })
+
+  it('closing a resumed ?setup=<id> hand-off drops only `setup` — the list filters stay (#3165)', () => {
+    window.history.replaceState(null, '', '/agents?q=research&setup=2f1c0f7e-6f1d-4c7e-9a8f-1234567890ab&status=active')
+
+    render(<AgentPanel />)
+    fireEvent.click(screen.getByRole('button', { name: 'Close connect modal' }))
+
+    // Mutation: put the old `replaceState(null, '', '/agents')` back → red.
+    expect(window.location.search).toBe('?q=research&status=active')
 
     window.history.replaceState(null, '', '/')
   })

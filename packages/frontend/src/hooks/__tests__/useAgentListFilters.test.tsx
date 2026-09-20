@@ -61,6 +61,17 @@ describe('useAgentListFilters', () => {
     expect(result.current.state.q).toBe('ab')
   })
 
+  it('writes pass a null state so Next treats them as external and re-syncs useSearchParams', () => {
+    // On an app-router page `history.state` is `{ __NA: true, … }`; Next's
+    // patched `replaceState` skips the sync for any state carrying `__NA`.
+    // Mutation: pass `window.history.state` through → red.
+    vi.spyOn(window.history, 'state', 'get').mockReturnValue({ __NA: true })
+    const { result } = renderHook(() => useAgentListFilters(AGENTS))
+    act(() => result.current.setState({ ...result.current.state, q: 'a' }))
+    expect(mockReplace).toHaveBeenCalledTimes(1)
+    expect(mockReplace.mock.calls[0][0]).toBeNull()
+  })
+
   it('a URL change from outside (back/forward) re-seeds the state', () => {
     const { result, rerender } = renderHook(() => useAgentListFilters(AGENTS))
     expect(result.current.active).toBe(false)

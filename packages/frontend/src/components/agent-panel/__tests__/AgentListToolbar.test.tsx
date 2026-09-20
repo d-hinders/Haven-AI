@@ -92,9 +92,13 @@ describe('AgentListToolbar', () => {
     fireEvent.click(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('group', { name: 'Status' })).toBeInTheDocument()
+    screen.getByRole('button', { name: /Paused/ }).focus()
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('group', { name: 'Status' })).toBeNull()
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    // Focus returns to the trigger, never to <body> (mutation: drop the
+    // `.focus()` in closeToTrigger → red).
+    expect(document.activeElement).toBe(trigger)
   })
 
   it('reset is offered only while a filter is active, and calls onReset', () => {

@@ -73,9 +73,17 @@ export function AgentListToolbar({
 }: AgentListToolbarProps) {
   const [open, setOpen] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
-  const close = useCallback(() => setOpen(null), [])
+  const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  // Escape unmounts the panel with focus inside it; without this a keyboard
+  // user lands on <body> and a screen reader hears nothing (#3165 review).
+  const closeToTrigger = useCallback(() => {
+    setOpen((current) => {
+      if (current) triggerRefs.current[current]?.focus()
+      return null
+    })
+  }, [])
 
-  useEscapeToClose(open !== null, close)
+  useEscapeToClose(open !== null, closeToTrigger)
 
   useEffect(() => {
     function handleClick(event: MouseEvent) {
@@ -120,7 +128,8 @@ export function AgentListToolbar({
                   type="button"
                   aria-label="Clear search"
                   onClick={() => onChange({ ...state, q: '' })}
-                  className={`rounded p-1 text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] ${FOCUS_RING}`}
+                  // 44px on a phone, 24px (the WCAG 2.5.8 floor) on desktop.
+                  className={`flex min-h-11 min-w-11 items-center justify-center rounded text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] sm:min-h-6 sm:min-w-6 ${FOCUS_RING}`}
                 >
                   <Icon icon={X} className="h-3.5 w-3.5" />
                 </button>
@@ -137,6 +146,9 @@ export function AgentListToolbar({
             <div key={facet.id} className="static sm:relative">
               <button
                 type="button"
+                ref={(el) => {
+                  triggerRefs.current[facet.id] = el
+                }}
                 className={triggerClasses(selected.length > 0)}
                 aria-expanded={isOpen}
                 aria-controls={isOpen ? panelId : undefined}
@@ -146,7 +158,7 @@ export function AgentListToolbar({
                 <span>{facetSummary(facet)}</span>
                 <Icon
                   icon={ChevronDown}
-                  className={`h-3.5 w-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                  className={`h-3.5 w-3.5 motion-safe:transition-transform ${isOpen ? 'rotate-180' : ''}`}
                 />
               </button>
               {isOpen && (

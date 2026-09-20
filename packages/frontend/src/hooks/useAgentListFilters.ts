@@ -38,8 +38,9 @@ export interface UseAgentListFiltersReturn {
  * write can commit after a later one, at which point a "the URL changed under
  * us" re-seed would hand the input a stale value (measured in review of
  * #3165: write `q=a`, write `q=ab`, commit `q=a` → the field reads `a`).
- * `replaceState` is synchronous and Next syncs `useSearchParams` from it, so
- * the URL never lags the state. A back/forward navigation that changes the
+ * `replaceState` is synchronous and Next syncs `useSearchParams` from a native
+ * call made with a `null` state (see the call site), so the URL never lags
+ * the state. A back/forward navigation that changes the
  * query still re-seeds the state. Other query parameters on the page are
  * preserved by `writeFilterState`.
  *
@@ -77,7 +78,14 @@ export function useAgentListFilters(
       if (nextSearch === search) return
       lastWritten.current = nextSearch
       try {
-        window.history.replaceState(window.history.state, '', nextSearch ? `${pathname}?${nextSearch}` : pathname)
+        // `null`, never `window.history.state`: Next's app router patches
+        // `replaceState` and treats a state object carrying its own `__NA`
+        // marker as an INTERNAL write that must not re-sync `useSearchParams`
+        // (`next/dist/client/components/app-router.js`, the `data.__NA` branch).
+        // `history.state` on this page IS that object, so passing it through
+        // left the URL stale after every clear (measured in review of #3165).
+        // With `null` Next re-attaches its internals and dispatches the sync.
+        window.history.replaceState(null, '', nextSearch ? `${pathname}?${nextSearch}` : pathname)
       } catch {
         // A URL that stays in step is a convenience, never worth a thrown render.
       }

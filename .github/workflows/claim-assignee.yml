@@ -35,6 +35,16 @@ name: Claim to assignee
 # this repo's membership, and stated so it is a decision rather than an
 # oversight.
 #
+# ## One bot, one shape (#3177)
+#
+# `claim-release-on-merge.yml` posts the `🔓 RELEASE` as `github-actions[bot]`
+# when a PR that closes the issue merges. That comment re-enters here, so the
+# Bot gate admits exactly that account, and the parser (`--author-type Bot`)
+# admits exactly one shape from it: a release that names its PR. A bot CLAIM is
+# still ignored (a bot owns no work), and since a bot cannot be "the claimant",
+# a bot release unassigns EVERY assignee on the issue — none is live once the
+# issue closed by merge.
+#
 # Never fails the build: a comment that parses to nothing is the common case,
 # and an API refusal is logged, not raised. This workflow only ever adds or
 # removes an assignee — it never comments, closes, labels or edits a body.
@@ -66,8 +76,13 @@ jobs:
     if: >-
       github.repository == 'd-hinders/Haven-AI' &&
       !github.event.issue.pull_request &&
-      github.event.comment.user.type != 'Bot' &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      (
+        (
+          github.event.comment.user.type != 'Bot' &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+        ) ||
+        github.event.comment.user.login == 'github-actions[bot]'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -83,13 +98,14 @@ jobs:
           # text from a public repository's comment box.
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          COMMENT_AUTHOR_TYPE: ${{ github.event.comment.user.type }}
           ON_ISSUE: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
           printf '%s' "$COMMENT_BODY" > comment.txt
-          node scripts/ci/claim-assignee.mjs --body comment.txt --on-issue "$ON_ISSUE" > actions.txt
+          node scripts/ci/claim-assignee.mjs --body comment.txt --on-issue "$ON_ISSUE" --author-type "$COMMENT_AUTHOR_TYPE" > actions.txt
 
           if [ ! -s actions.txt ]; then
             echo "No claim or release in this comment — nothing to do."
@@ -128,6 +144,21 @@ jobs:
                 fi
                 ;;
               release)
+                if [ "$COMMENT_AUTHOR_TYPE" = "Bot" ]; then
+                  # The merge-time release (#3177): the bot is nobody's claim,
+                  # so clear every assignee — the issue closed by merge and no
+                  # claim on it is live.
+                  gh api "repos/$REPO/issues/$number" --jq '.assignees[].login' </dev/null 2>/dev/null | while read -r login; do
+                    [ -n "$login" ] || continue
+                    if gh issue edit "$number" --repo "$REPO" --remove-assignee "$login" </dev/null >/dev/null 2>&1; then
+                      echo "  unassigned #$number from @$login (merge-time release)"
+                      echo "- unassigned **#$number** from @$login (merge-time release)" >> "$GITHUB_STEP_SUMMARY"
+                    else
+                      echo "  could not unassign @$login from #$number (skipped)"
+                    fi
+                  done
+                  continue
+                fi
                 if gh issue edit "$number" --repo "$REPO" --remove-assignee "$COMMENT_AUTHOR" </dev/null >/dev/null 2>&1; then
                   echo "  unassigned #$number from @$COMMENT_AUTHOR"
                   echo "- unassigned **#$number** from @$COMMENT_AUTHOR" >> "$GITHUB_STEP_SUMMARY"

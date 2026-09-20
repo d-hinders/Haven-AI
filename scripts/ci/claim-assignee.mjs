@@ -133,19 +133,34 @@ function releaseLine(line) {
 }
 
 /**
+ * The one shape of bot comment the projection honours (#3177): the merge-time
+ * release posted by `claim-release-on-merge.yml`, which always names the PR
+ * that landed the work. A bot cannot claim — it owns no work — and a bot
+ * release that names no PR is not the workflow's, so both are ignored. Human
+ * comments are unaffected: this predicate is consulted only for `authorType
+ * === 'Bot'`.
+ */
+export function botReleaseLine(line) {
+  return releaseLine(line) && /\bPR\s*#\d{1,6}\b/i.test(undecorate(line))
+}
+
+/**
  * Parse one comment.
  *
  * @param {object} o
  * @param {string} o.body               the comment text
  * @param {number|null} [o.onIssue]     the issue the comment was posted on
  * @param {number} [o.channelIssue]     the standing coordination thread (#1289)
+ * @param {string} [o.authorType]       GitHub's `user.type`; 'Bot' narrows the
+ *                                      grammar to the merge-time release only
  * @returns {{claim: number[], release: number[]}} issue numbers, disjoint —
  *          a number that both claims and releases in one comment counts as a
  *          release, since that is the safe direction.
  */
-export function parse({ body, onIssue = null, channelIssue = 1289 }) {
+export function parse({ body, onIssue = null, channelIssue = 1289, authorType = 'User' }) {
   const claim = []
   const release = []
+  const fromBot = authorType === 'Bot'
 
   let inFence = false
 
@@ -159,8 +174,11 @@ export function parse({ body, onIssue = null, channelIssue = 1289 }) {
     }
     if (inFence || isQuoted(line)) continue
 
-    const isClaim = claimLine(line)
-    const isRelease = releaseLine(line)
+    // A bot may only release, and only in the merge-time shape. The bare-issue
+    // fallback below is also closed to it: a bot line that names no issue says
+    // nothing the projection should act on.
+    const isClaim = fromBot ? false : claimLine(line)
+    const isRelease = fromBot ? botReleaseLine(line) : releaseLine(line)
     if (!isClaim && !isRelease) continue
 
     // Release lines may lead with the issue (`#2680 (…): RELEASE — PR #2754`),
@@ -180,7 +198,7 @@ export function parse({ body, onIssue = null, channelIssue = 1289 }) {
     // live claim. That is the exact failure this module exists to avoid, and it
     // would fire on the owner, whose claim it erases. An explicit 🔓 is a
     // deliberate use of the protocol and keeps the fallback.
-    const mayFallBack = isClaim || /^\s*🔓/.test(undecorate(line))
+    const mayFallBack = !fromBot && (isClaim || /^\s*🔓/.test(undecorate(line)))
     if (refs.length === 0 && mayFallBack && onIssue && onIssue !== channelIssue) refs = [onIssue]
 
     for (const n of refs) {
@@ -205,7 +223,7 @@ export function parse({ body, onIssue = null, channelIssue = 1289 }) {
 // Exit 0 always when the input is readable: a comment that says nothing about
 // claims is the common case, not an error.
 //
-//   node scripts/ci/claim-assignee.mjs --body comment.txt [--on-issue 2947]
+//   node scripts/ci/claim-assignee.mjs --body comment.txt [--on-issue 2947] [--author-type Bot]
 // ---------------------------------------------------------------------------
 
 const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`
@@ -225,7 +243,8 @@ if (isMain) {
 
   const onIssueRaw = arg('on-issue')
   const onIssue = onIssueRaw && /^\d+$/.test(onIssueRaw) ? Number(onIssueRaw) : null
-  const { claim, release } = parse({ body: readFileSync(bodyPath, 'utf8'), onIssue })
+  const authorType = arg('author-type', 'User')
+  const { claim, release } = parse({ body: readFileSync(bodyPath, 'utf8'), onIssue, authorType })
 
   const lines = [...claim.map((n) => `claim=${n}`), ...release.map((n) => `release=${n}`)]
   process.stdout.write(lines.length ? `${lines.join('\n')}\n` : '')

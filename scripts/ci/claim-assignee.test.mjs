@@ -290,3 +290,44 @@ describe('reference extraction', () => {
     assert.deepEqual(on1289('🔒 CLAIM #12345678 — card t_8f39877c').claim, [])
   })
 })
+
+describe('a bot author is honoured for one shape only: the merge-time release (#3177)', () => {
+  const bot = (body, onIssue = 3134) => parse({ body, onIssue, authorType: 'Bot' })
+  const autoRelease = '🔓 RELEASE #3134 — landed as PR #3186 (squash `a29d5469`, into `dev`) — posted automatically on merge (#3177); nothing to release by hand.'
+
+  test('the merge-time release names its PR and is honoured', () => {
+    assert.deepEqual(bot(autoRelease), { claim: [], release: [3134] })
+  })
+
+  test('honoured on the channel too, releasing the issue named, never #1289', () => {
+    assert.deepEqual(bot(autoRelease, 1289), { claim: [], release: [3134] })
+  })
+
+  test('a bot CLAIM is ignored — a bot owns no work', () => {
+    assert.deepEqual(bot('🔒 CLAIM #3134 — branch `feat/x` — touches: everything'), { claim: [], release: [] })
+  })
+
+  test('a bot RELEASE that names no PR is not the workflow\'s and is ignored', () => {
+    assert.deepEqual(bot('🔓 RELEASE #3134 — done'), { claim: [], release: [] })
+    assert.deepEqual(bot('Released: #3134'), { claim: [], release: [] })
+  })
+
+  test('the bare-issue fallback is closed to bots', () => {
+    // A human `🔓` with no number releases the issue it was posted on; a bot
+    // line with no number says nothing.
+    assert.deepEqual(bot('🔓 RELEASE — landed as PR #3186'), { claim: [], release: [] })
+  })
+
+  test('a human comment with the same text is unchanged by the flag', () => {
+    assert.deepEqual(parse({ body: autoRelease, onIssue: 3134, authorType: 'User' }), { claim: [], release: [3134] })
+    assert.deepEqual(parse({ body: '🔒 CLAIM #3134 — x', onIssue: 3134 }), { claim: [3134], release: [] })
+  })
+
+  test('the CLI accepts --author-type and narrows the same way', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'claim-bot-'))
+    const p = path.join(dir, 'c.txt')
+    writeFileSync(p, '🔒 CLAIM #3134 — x\n🔓 RELEASE #3135 — landed as PR #9\n')
+    const out = execFileSync(process.execPath, [CLI, '--body', p, '--on-issue', '3134', '--author-type', 'Bot'], { encoding: 'utf8' })
+    assert.equal(out, 'release=3135\n')
+  })
+})

@@ -1,0 +1,66 @@
+name: Release the claim on merge
+
+# Posts the `🔓 RELEASE` the claim protocol asks for (AGENTS.md § Cross-session
+# agent coordination) at the one moment the repository KNOWS the work landed:
+# when a pull request merges. For every issue the PR closes — GitHub's own
+# `closingIssuesReferences`, the grammar it honours for `Closes #N` — it
+# comments `🔓 RELEASE #N — landed as PR #<pr> …` on the issue, unassigns
+# everyone still assigned there, and repeats the line on #1289 only if the
+# claim was posted there too. Decision logic and tests:
+# `scripts/ci/release-on-merge.mjs` (#3177).
+#
+# ## Why a bot release, and why the projection now honours it
+#
+# The protocol asked the author to release "every place you claimed" after the
+# PR opened — the moment attention had already moved on. Measured 2026-09-19:
+# 60 issue numbers claimed on #1289 with no matching RELEASE, 58 of them on
+# issues that closed via a PR. The default token cannot post as the PR author,
+# so the release is posted as `github-actions[bot]`, and `claim-assignee.yml`
+# accepts a Bot comment for exactly this one shape — a release that names its
+# PR — while still ignoring any bot CLAIM.
+#
+# ## What it will not do
+#
+# - A PR closed WITHOUT merging releases nothing: the work did not land and
+#   the claim is still live (tested; the merged filter is the whole safety).
+# - `Refs #N` (operator-verify mode) is not a closing reference, so an issue
+#   held open for a human step keeps its claim.
+# - It never touches #1289's assignees, never closes or labels anything, and
+#   never fails the build: an API refusal is logged.
+#
+# ## Trust boundary
+#
+# `pull_request` (not `pull_request_target`): a fork's PR runs with a read-only
+# token and every write below is refused and logged. Inputs reach the script
+# as files, never argv — two of them carry public comment text.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  issues: write        # comment + unassign
+  pull-requests: read  # closingIssuesReferences
+
+jobs:
+  release:
+    name: Post the release for every issue this merge closed
+    if: >-
+      github.repository == 'd-hinders/Haven-AI' &&
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Decide and apply
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        # The event payload is read from the file GitHub provides, never
+        # interpolated: it carries the PR body, which is public text. Fetch,
+        # decision and every write live in the script, under `node --test`.
+        run: node scripts/ci/release-on-merge.mjs --event "$GITHUB_EVENT_PATH" --apply

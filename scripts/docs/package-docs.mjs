@@ -65,7 +65,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     doc: 'packages/sdk/README.md',
     owner: '@d-hinders',
     status: 'current',
-    covers: ['packages/sdk/src/**'],
+    covers: ['packages/sdk/src/**', 'packages/sdk/package.json', 'packages/sdk/tsup.config.ts'],
     // #2341: re-verified and EDITED (every merchant-retry header instruction,
     // six sites). #2330 made them all say "both names" — correct then, and
     // wrong on erc7710 the moment #2341 scoped the send by scheme. This is the
@@ -105,13 +105,15 @@ export const GOVERNED_PACKAGE_DOCS = [
     // settled-nothing guarantee), verified against mcp-merchant-transport.ts
     // deliverPaymentRecoveringSession and its two callers. Nothing else in
     // the README re-verified in this pass.
-    'last-verified': '2026-09-19',
+    // #3173: § Install gained the two-entry paragraph (`@haven_ai/sdk/edge`),
+    // verified against package.json exports, tsup.config.ts and edge.ts.
+    'last-verified': '2026-09-20',
   },
   {
     doc: 'packages/signer/README.md',
     owner: '@d-hinders',
     status: 'current',
-    covers: ['packages/signer/src/**'],
+    covers: ['packages/signer/src/**', 'packages/sdk/src/edge.ts', 'packages/sdk/src/edge-imports.test.ts'],
     // #2515: EDITED, scope = the one connector command example. `@alpha` became
     // `<channel>`, with the sentence beside it still naming `@alpha` as what
     // production hands out. Same reason as the connect README: this file ships in
@@ -181,7 +183,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // 32-byte hash on the schema, a failed audit write never fails a produced
     // signature) against audit.ts, file-mode.ts and tools.ts.
     // Nothing else in the README re-verified in this pass.
-    'last-verified': '2026-09-19',
+    // #3173: new § "Startup, CLI options and the consent screen" verified
+    // against cli-args.ts, consent.ts, server.ts, core.ts (lazy x402) and the
+    // measured numbers in the PR; nothing else re-verified.
+    'last-verified': '2026-09-20',
   },
   {
     doc: 'packages/mcp/README.md',

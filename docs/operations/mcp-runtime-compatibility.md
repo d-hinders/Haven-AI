@@ -15,6 +15,10 @@ covers:
   - packages/sdk/src/client.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-completion.ts
+  - packages/sdk/src/edge.ts
+  - packages/sdk/package.json
+  - packages/sdk/tsup.config.ts
+  - scripts/release-bump.mjs
   - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
@@ -35,6 +39,7 @@ covers:
   - packages/sdk/src/tool-descriptions.ts
   - packages/sdk/src/next-step.ts
   - packages/mcp-server/src/server.ts
+  - packages/mcp-server/src/http.ts
   - packages/mcp-server/src/next-step-signer-parity.test.ts
   - packages/mcp-server/src/test-support/next-step-fixtures.ts
   - scripts/lint-next-steps.mjs
@@ -148,6 +153,27 @@ last-verified: "2026-09-19"
 > consent-hash contracts do not move (descriptions are not a skew axis — #2330
 > precedent). Nothing else in this document was re-verified in this pass.
 >
+> **Recent re-verification (#3134):** each `haven_list_receipts` row on BOTH
+> runtimes gains four keys — `source`, `paymentProofStatus`,
+> `x402ResourceUrl`, `x402MerchantAddress` — carrying exactly the values the
+> row already reports as `rail`, `proofStatus`, `resourceUrl` and
+> `merchantAddress`; the old four stay for one full release as deprecated
+> twins (removal condition on `mapPaymentReceipt`: all three release clocks —
+> sdk `latest`, mcp `latest`, the hosted deploy's `serverInfo.version` on
+> `initialize` — read at or past the release naming the twins, against the
+> registry and the live handshake, never a green promotion). Additive
+> on the SDK type only; the receipts WIRE is unchanged, so an older SDK against
+> a newer backend and a newer SDK against an older backend both see exactly
+> what they saw before. Neither runtime reshapes receipt rows (hosted
+> `state-direct-recovery.ts` and local `tools.ts` pass `listReceiptsPage`
+> through), no tool added, renamed or re-shaped, no argument or schema change,
+> no description change (the #1591 budget is untouched at 2 bytes headroom),
+> and the version-skew and consent-hash contracts do not move. `last-verified`
+> is not re-stamped: this block is the scope, and the third clock's instrument
+> needs an agent key (`Authorization: Bearer`, `http.ts`) — the handshake is
+> authenticated, unlike the two `npm view` reads. Nothing else in this document
+> was re-verified in this pass.
+>
 > **Recent re-verification (#3169):** the edge signer's `haven_sign` no longer
 > signs a bare `payload_hash` (no `payment_id`, no `typed_data` /
 > `typed_data_b64`, no `x402_expected`): that arm was raw secp256k1 over caller
@@ -188,6 +214,22 @@ last-verified: "2026-09-19"
 > direction. Neither skew moves money differently. `last-verified` is not
 > re-stamped: it already reads 2026-09-19. Nothing else in this document was
 > re-verified in this pass.
+>
+> **Recent re-verification (#3173):** the edge signer now imports
+> `@haven_ai/sdk/edge` (a new, ethers-free SDK entry) instead of the barrel and
+> lazy-loads `x402/schemes`; its CLI refuses unknown options and its consent
+> block/refusal name the connector doctor. No tool added, renamed or re-shaped
+> on either runtime — arguments, schemas, descriptions and the registered
+> tool-name set are untouched — so the consent hash and the version-skew
+> contract do not move. One NEW coupling to state: a signer at or above this
+> version resolves `@haven_ai/sdk/edge`, which does not exist on an SDK below
+> this version; the signer pins its SDK exactly (`release-bump.mjs` re-pins),
+> and the connector installs the pinned pair, so a mixed pair cannot arise
+> through the supported install path — a hand-installed older SDK beside a new
+> signer fails at import with `ERR_PACKAGE_PATH_NOT_EXPORTED` ("Package subpath
+> './edge' is not defined by \"exports\""), before any key is read.
+> `last-verified` is not re-stamped: this block is the scope. Nothing else in
+> this document was re-verified in this pass.
 >
 > **Recent re-verification (#3172):** the edge signer's audit sidecar is now
 > created owner-only, tightened in place when found permissive, and rotated at
@@ -2195,6 +2237,11 @@ to call next in structured fields, and those fields are typed end to end
   message names your version and how to upgrade. Upgrade Node and rerun setup.
   If setup succeeded but the signer now refuses to start, the runtime launching
   it is on an older Node than the shell you upgraded.
+- **Signer exits at import with `ERR_PACKAGE_PATH_NOT_EXPORTED` (`Package
+  subpath './edge' is not defined by "exports"`, #3173):** a hand-installed
+  `@haven_ai/sdk` older than the signer's exact pin sits beside a signer that
+  imports `@haven_ai/sdk/edge`. No key is read on this path. Re-run the
+  connector command to reinstall the pinned pair.
 - **Local MCP runtime install failed:** rerun the connector command. It will reuse
   local credentials and install the pinned runtime into `~/.haven/mcp-runtime`,
   falling back from the user's default npm cache to `~/.haven/npm-cache` if the

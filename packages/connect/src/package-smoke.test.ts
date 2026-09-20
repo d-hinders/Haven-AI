@@ -474,8 +474,14 @@ describeSmoke('published package smoke', () => {
     const signerTarball = await npmPack(packageDir('signer'), packDir, cacheDir)
     await extractPackageTarball(sdkTarball, join(nodeModules, '@haven_ai', 'sdk'))
     await extractPackageTarball(signerTarball, join(nodeModules, '@haven_ai', 'signer'))
-    // The signer pulls in the SDK, which imports ethers at module load.
-    for (const dependency of ['@modelcontextprotocol', 'ethers', 'viem', 'x402', 'zod']) {
+    // #3173: the signer pulls in the SDK's `/edge` entry, which imports viem
+    // and @noble/curves at module load; nothing on this `--help` launch path
+    // resolves ethers or x402. ethers stays linked for install fidelity — a
+    // real `npm i @haven_ai/signer` installs it because the SDK barrel declares
+    // it — so this list is NOT a barrel-import control (the signer's own
+    // sdk-edge-import.test.ts is). x402 is the signer's own dependency, loaded
+    // lazily on the merchant-header leg.
+    for (const dependency of ['@modelcontextprotocol', '@noble', 'ethers', 'viem', 'x402', 'zod']) {
       await linkWorkspaceDependency(nodeModules, dependency)
     }
 

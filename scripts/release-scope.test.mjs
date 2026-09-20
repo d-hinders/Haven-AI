@@ -123,6 +123,45 @@ function runScope({ base = {}, changes = {}, remove = [], args = [], mutate = nu
 
 const shippedFiles = (stdout) => JSON.parse(stdout).shipped.files.map((f) => f.file)
 
+// --- #3173: an `exports` subpath is an entry too ------------------------------
+
+const exportsPkg = pkg('@fix/alpha', {
+  exports: {
+    '.': { import: './dist/index.js', require: './dist/index.cjs' },
+    './edge': { import: './dist/edge.js', require: './dist/edge.cjs' },
+  },
+})
+
+test('a dist missing the bundle an exports subpath resolves is refused (#3173)', () => {
+  const r = runScope({
+    base: { 'packages/alpha/package.json': exportsPkg },
+    changes: { 'packages/alpha/src/index.ts': 'export const a = 2\n' },
+  })
+  assert.notEqual(r.status, 0)
+  assert.match(r.out, /none for edge/)
+})
+
+test('the same dist WITH the subpath bundle passes', () => {
+  const r = runScope({
+    base: {
+      'packages/alpha/package.json': exportsPkg,
+      'packages/alpha/dist/edge.js': 'bundle\n',
+      'packages/alpha/dist/edge.js.map': sourcemap(['../src/index.ts']),
+    },
+    changes: { 'packages/alpha/src/index.ts': 'export const a = 2\n' },
+  })
+  assert.equal(r.status, 0, r.out)
+})
+
+test('the exports walk is load-bearing: without it the missing subpath bundle is silently accepted', () => {
+  const r = runScope({
+    base: { 'packages/alpha/package.json': exportsPkg },
+    changes: { 'packages/alpha/src/index.ts': 'export const a = 2\n' },
+    mutate: (src) => src.replace(', ...exportLeaves(manifest.exports)', ''),
+  })
+  assert.equal(r.status, 0, 'mutated script should not notice the missing edge bundle')
+})
+
 // --- error 1: the omission that lost packages/cli/README.md ------------------
 
 test('a README change is counted as shipped', () => {

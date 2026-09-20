@@ -17,7 +17,7 @@
     "`disposition` is about the NAMES. Two entries marked `converged` still record a",
     "referent difference in their reason (`payment id` widens to sweep ids;",
     "`token address` is normalised on one surface only). That second axis is",
-    "deliberately not counted -- the open number tracks the renames #3134 owes and the value defects #3132 does, not every",
+    "deliberately not counted -- the open number tracks the renames and value defects the epic's slices owe, not every",
     "way two fields can disagree -- but a reader must not take `converged` as",
     "'identical'."
   ],
@@ -44,7 +44,7 @@
     {
       "concept": "proof state",
       "receipt": {
-        "field": "proofStatus",
+        "field": "paymentProofStatus",
         "column": "proof_status",
         "value": "recorded"
       },
@@ -56,13 +56,13 @@
         "alias": "payment_proof_status",
         "aliasedBy": "infra/repositories/transaction-history.ts:228,325 `mpe.proof_status AS payment_proof_status`"
       },
-      "disposition": "converge-pending",
-      "reason": "One column, two names -- ALIASES of `machine_payment_evidence.proof_status`, arriving through a LEFT JOIN. Until #3132 the synthesized x402 path substituted 'payment_confirmed' when no evidence row existed, so a payment with no receipt reported a proof status it never read while enrichment.ts passed the column through unchanged; both paths now emit the recorded value or null (the lifecycle lands on the same `confirming_merchant` either way, so no flow status moved). The value defect is fixed; the RENAME is #3134's."
+      "disposition": "converged",
+      "reason": "CONVERGED by #3134 on the transaction's name: `proofStatus` on a wallet-history row is ambiguous (proof of what?) while `paymentProofStatus` is unambiguous on both surfaces, and the transactions wire is frozen so the SDK-side name moved. Same column, same recorded-or-null value on both paths since #3132 (the value fix that gated this rename). The old receipt key is a deprecated twin -- see singleSurface.receipt.proofStatus."
     },
     {
       "concept": "merchant address",
       "receipt": {
-        "field": "merchantAddress",
+        "field": "x402MerchantAddress",
         "column": "merchant_address",
         "value": "recorded"
       },
@@ -71,13 +71,13 @@
         "column": "x402_merchant_address",
         "value": "recorded"
       },
-      "disposition": "converge-pending",
-      "reason": "Same concept, two names, both recorded. Unaffected by the #3132 fallback work, so #3134 may converge it independently."
+      "disposition": "converged",
+      "reason": "CONVERGED by #3134 on the transaction's name: `x402MerchantAddress` carries the protocol provenance `merchantAddress` drops, the transactions wire is frozen, and a receipt is always a protocol payment so the prefix is true there too. Old receipt key deprecated as a twin -- see singleSurface.receipt.merchantAddress."
     },
     {
       "concept": "resource url",
       "receipt": {
-        "field": "resourceUrl",
+        "field": "x402ResourceUrl",
         "column": "resource_url",
         "value": "recorded"
       },
@@ -86,8 +86,8 @@
         "column": "x402_resource_url",
         "value": "recorded"
       },
-      "disposition": "converge-pending",
-      "reason": "Same concept, two names, both recorded. As above, not gated on #3132."
+      "disposition": "converged",
+      "reason": "CONVERGED by #3134 on the transaction's name: `x402ResourceUrl` names the protocol the resource was paid under, exactly as the merchant pair does; same argument, same survivor rule. Old receipt key deprecated as a twin -- see singleSurface.receipt.resourceUrl."
     },
     {
       "concept": "settled at",
@@ -200,7 +200,7 @@
     {
       "concept": "payment rail / source",
       "receipt": {
-        "field": "rail",
+        "field": "source",
         "column": "rail",
         "value": "recorded",
         "derivedFrom": "`payment_rail ?? source` at evidence-write time (modules/mpp/evidence.ts:173), stored on machine_payment_evidence.rail"
@@ -210,10 +210,10 @@
         "column": "source",
         "value": "defaulted",
         "alias": "COALESCE(pi.payment_rail, pi.source, 'direct')",
-        "by": "infra/repositories/transaction-history.ts FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL `COALESCE(pi.payment_rail, pi.source, 'direct')` -- the one substitution site. The `source: 'x402'` on the synthesized row (modules/transactions/x402.ts) is NOT a substitution: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL selects `pi.source = 'x402'`, so the literal restates the query's own predicate (#3132). Asymmetry for #3134 to measure: this site resolves `pi.source` ONLY, while the agent-match query coalesces `payment_rail` first. They cannot disagree on a machine intent today because `insertMachineIntent` (`payment-intents.ts`, `machineIntentInsertSql`) writes ONE `rail` argument into both columns and no runtime path UPDATEs `payment_rail` after (migration 012's one-time backfill fills NULLs on `source = 'x402'` rows only, so it can only converge them); the x402 confirm paths additionally pin `COALESCE(payment_rail, source) = 'x402'` (`x402-authorizations.ts`), though `CONFIRM_SUBMITTED_INTENT_SQL` carries no rail predicate at all -- so the INSERT is the guarantee, not the confirm. A fact to re-measure, not inherit."
+        "by": "infra/repositories/transaction-history.ts FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL `COALESCE(pi.payment_rail, pi.source, 'direct')` -- the one substitution site on THIS surface (the agent-activity read model, infra/repositories/agent-activity.ts, repeats the same expression twice for the dashboard feed, which is outside the transaction surface this map censuses). The `source: 'x402'` on the synthesized row (modules/transactions/x402.ts) is NOT a substitution: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL selects `pi.source = 'x402'`, so the literal restates the query's own predicate (#3132). Asymmetry, re-measured at convergence and unchanged: this site resolves `pi.source` ONLY, while the agent-match query coalesces `payment_rail` first. They cannot disagree on a machine intent today because `insertMachineIntent` (`payment-intents.ts`, `machineIntentInsertSql`) writes ONE `rail` argument into both columns and no runtime path UPDATEs `payment_rail` after (migration 012's one-time backfill fills NULLs on `source = 'x402'` rows only, so it can only converge them); the x402 confirm paths additionally pin `COALESCE(payment_rail, source) = 'x402'` (`x402-authorizations.ts`), though `CONFIRM_SUBMITTED_INTENT_SQL` carries no rail predicate at all -- so the INSERT is the guarantee, not the confirm. A fact to re-measure, not inherit."
       },
-      "disposition": "converge-pending",
-      "reason": "ONE axis. Both sides resolve the same two columns in the same order -- payment_rail then source -- so the receipt's `rail` is the payment PROTOCOL, exactly what the transaction calls `source`. #3132 re-measured the transaction side: the synthesized row's 'x402' is recorded by the query's own predicate, and the only substitution left is the SQL's 'direct' for an intent that names no protocol at all -- a classification of 'not a payment', not a fabricated protocol, and not a value #3132 changes (a `null` there would erase the row's category on every consumer that switches on it). The receipt side cannot default, because a non-protocol rail yields no evidence row and therefore no receipt. Nothing blocks the rename any more; the rename is #3134's."
+      "disposition": "converged",
+      "reason": "CONVERGED by #3134 on the transaction's name: both sides resolve payment_rail then source (one axis, measured by #3131/#3132), the transactions wire is frozen, and `source` beside a nested `scope.source` is exactly the pair every transaction row already carries -- so the receipt mirrors it rather than inventing a third spelling. `rail` was the better word for a protocol in isolation; the survivor rule (transaction name, wire frozen) decides. Old receipt key deprecated as a twin -- see singleSurface.receipt.rail. The transaction side's 'direct' substitution for a non-protocol intent is unchanged and still recorded here as `defaulted`."
     }
   ],
   "singleSurface": {
@@ -222,7 +222,8 @@
       "with the reason there will never be one. Without this list the guard's first",
       "run would report 37 unpaired FIELDS (19 + 18, exactly) rather than the real",
       "divergences, and a guard that cries wolf on its first run teaches people to",
-      "ignore it (#3131)."
+      "ignore it (#3131).",
+      "One legitimate occupant DOES have a counterpart: a deprecated twin during a dual-emit window (#3134's four receipt rows). It sits here so the guard's field census stays complete while the twin ships; its reason carries the removal condition and the row leaves with the twin."
     ],
     "receipt": {
       "id": "The evidence row's own identifier. A transaction row is not a database row.",
@@ -244,7 +245,11 @@
       "updatedAt": "Evidence-row lifecycle.",
       "paymentIntentId": "Conditional key, present only when the raw row carries it. Links evidence to intent; no transfer-level counterpart.",
       "approvalRequestId": "Conditional key. Approval requests were dropped with the table (#2055); the field survives on the raw shape.",
-      "scope": "#3132 per-row list scope `{ source, filter }`. Its counterpart is `scope` on the enriched Transaction schema, not on transactionBaseProperties (the surface this guard reads) -- same key, same ListScope shape, so the pair is converged by construction; recorded here for the same reason `chainId` is."
+      "scope": "#3132 per-row list scope `{ source, filter }`. Its counterpart is `scope` on the enriched Transaction schema, not on transactionBaseProperties (the surface this guard reads) -- same key, same ListScope shape, so the pair is converged by construction; recorded here for the same reason `chainId` is.",
+      "proofStatus": "Deprecated twin kept for ONE full release (#3134 dual-emit). Removal condition, restated from mapPaymentReceipt (the comment there is the contract): delete when `npm view @haven_ai/sdk dist-tags` and `npm view @haven_ai/mcp dist-tags` both read a `latest` at or above the release whose CHANGELOG names the twins AND the hosted mcp-server deploy reports a `serverInfo.version` on MCP `initialize` (`HOSTED_SERVER_VERSION`, `packages/mcp-server/src/server.ts`) at or past the release that shipped them -- read against the registry and the live server's `initialize` handshake, never inferred from a green promotion. Then this row goes too.",
+      "merchantAddress": "Deprecated twin kept for ONE full release (#3134 dual-emit). Removal condition, restated from mapPaymentReceipt (the comment there is the contract): delete when `npm view @haven_ai/sdk dist-tags` and `npm view @haven_ai/mcp dist-tags` both read a `latest` at or above the release whose CHANGELOG names the twins AND the hosted mcp-server deploy reports a `serverInfo.version` on MCP `initialize` (`HOSTED_SERVER_VERSION`, `packages/mcp-server/src/server.ts`) at or past the release that shipped them -- read against the registry and the live server's `initialize` handshake, never inferred from a green promotion. Then this row goes too.",
+      "resourceUrl": "Deprecated twin kept for ONE full release (#3134 dual-emit). Removal condition, restated from mapPaymentReceipt (the comment there is the contract): delete when `npm view @haven_ai/sdk dist-tags` and `npm view @haven_ai/mcp dist-tags` both read a `latest` at or above the release whose CHANGELOG names the twins AND the hosted mcp-server deploy reports a `serverInfo.version` on MCP `initialize` (`HOSTED_SERVER_VERSION`, `packages/mcp-server/src/server.ts`) at or past the release that shipped them -- read against the registry and the live server's `initialize` handshake, never inferred from a green promotion. Then this row goes too.",
+      "rail": "Deprecated twin kept for ONE full release (#3134 dual-emit). Removal condition, restated from mapPaymentReceipt (the comment there is the contract): delete when `npm view @haven_ai/sdk dist-tags` and `npm view @haven_ai/mcp dist-tags` both read a `latest` at or above the release whose CHANGELOG names the twins AND the hosted mcp-server deploy reports a `serverInfo.version` on MCP `initialize` (`HOSTED_SERVER_VERSION`, `packages/mcp-server/src/server.ts`) at or past the release that shipped them -- read against the registry and the live server's `initialize` handshake, never inferred from a green promotion. Then this row goes too."
     },
     "transaction": {
       "type": "native / erc20 / internal -- a transfer classification. Receipts are always payments.",

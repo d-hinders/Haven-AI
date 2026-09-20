@@ -16,8 +16,8 @@
  */
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { AgentPaymentNextAction, HavenSigningError } from '@haven_ai/sdk'
-import type { NextStep } from '@haven_ai/sdk'
+import { AgentPaymentNextAction, HavenSigningError } from '@haven_ai/sdk/edge'
+import type { NextStep } from '@haven_ai/sdk/edge'
 import { nextStepWireFields, signerRefusalStep } from './next-step.js'
 
 export interface HavenIdentity {

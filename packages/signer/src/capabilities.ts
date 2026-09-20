@@ -1,4 +1,4 @@
-import { connectorRerunCommand } from '@haven_ai/sdk'
+import { connectorRerunCommand } from '@haven_ai/sdk/edge'
 import {
   SUPPORTED_SWEEP_BINDING_VERSIONS,
   SUPPORTED_X402_EXPECTED_VERSIONS,

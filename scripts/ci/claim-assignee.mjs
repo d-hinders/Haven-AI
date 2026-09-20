@@ -24,7 +24,8 @@
 //     no field at all.
 //
 // So a claim must be unambiguous, while anything that reads like a release is
-// taken as one.
+// taken as one — for human comments. A bot's comment is narrowed to the one
+// merge-time shape (#3177, `botReleaseLine`); see that function.
 //
 // ## Why the marker must begin its line
 //
@@ -55,8 +56,9 @@ function undecorate(line) {
  * GitHub's "Quote reply" button produces `> 🔒 CLAIM #2970 …`, so this is the
  * DEFAULT way one session repeats another's claim. Treating it as a claim would
  * assign the quoter — and because assignment ADDS, the real owner's later
- * RELEASE removes only the real owner, leaving the quoter on the issue forever
- * with nothing in the thread to explain it.
+ * RELEASE removes only the real owner, leaving the quoter on the issue — with
+ * nothing in the thread to explain it — until the merge-time release (#3177)
+ * clears every assignee.
  */
 function isQuoted(line) {
   return /^\s*>/.test(line)

@@ -2,37 +2,56 @@ name: Release the claim on merge
 
 # Posts the `🔓 RELEASE` the claim protocol asks for (AGENTS.md § Cross-session
 # agent coordination) at the one moment the repository KNOWS the work landed:
-# when a pull request merges. For every issue the PR closes — GitHub's own
-# `closingIssuesReferences`, the grammar it honours for `Closes #N` — it
-# comments `🔓 RELEASE #N — landed as PR #<pr> …` on the issue, unassigns
-# everyone still assigned there, and repeats the line on #1289 only if the
-# claim was posted there too. Decision logic and tests:
-# `scripts/ci/release-on-merge.mjs` (#3177).
+# when a pull request merges. For every issue the PR closed it comments
+# `🔓 RELEASE #N — landed as PR #<pr> …` on the issue, unassigns everyone still
+# assigned there, and repeats the line on #1289 only if a claim for that issue
+# was posted there. Decision logic, fetch and every write live in
+# `scripts/ci/release-on-merge.mjs`, under `node --test` (#3177).
 #
-# ## Why a bot release, and why the projection now honours it
+# ## Which issues "the PR closed"
+#
+# GitHub's `closingIssuesReferences` carries only the references linked from
+# the PR BODY (measured on PR #2314: `Closes #2268` in a commit message closed
+# #2268 and is absent from that list). So the script also scans the title and
+# every commit message with the closing-keyword grammar the operator-verify
+# close guard maintains, and releases a scan-found issue only if GitHub reports
+# it CLOSED now — one still open is logged and left alone. The scan runs only
+# for a merge into the default branch: GitHub closes nothing on a merge into
+# any other branch, so a `dev → main` promotion (thirty `Closes #` commit
+# lines) releases nothing and never spams #1289.
+#
+# ## Why a bot release
 #
 # The protocol asked the author to release "every place you claimed" after the
-# PR opened — the moment attention had already moved on. Measured 2026-09-19:
-# 60 issue numbers claimed on #1289 with no matching RELEASE, 58 of them on
-# issues that closed via a PR. The default token cannot post as the PR author,
-# so the release is posted as `github-actions[bot]`, and `claim-assignee.yml`
-# accepts a Bot comment for exactly this one shape — a release that names its
-# PR — while still ignoring any bot CLAIM.
+# PR opened — the moment attention had already moved on. Measured 2026-09-19
+# on #1289 with a plain regex: 60 issue numbers claimed with no matching
+# RELEASE, 58 on issues that had closed via a PR (the projection's own parser
+# counts 33 — the method halves the number, not the shape). The default token
+# cannot post as the PR author, so the release is posted as
+# `github-actions[bot]`; the unassign is done here directly. The bot's comment
+# does NOT re-enter `claim-assignee.yml`: a comment posted with `GITHUB_TOKEN`
+# never triggers an `issue_comment` run (GitHub's non-recursion rule — the
+# morning report's eleven bot comments produced zero projection runs).
 #
 # ## What it will not do
 #
 # - A PR closed WITHOUT merging releases nothing: the work did not land and
 #   the claim is still live (tested; the merged filter is the whole safety).
-# - `Refs #N` (operator-verify mode) is not a closing reference, so an issue
-#   held open for a human step keeps its claim.
+# - `Refs #N` (operator-verify mode) is neither a keyword nor a linked
+#   reference, so an issue held open for a human step keeps its claim.
 # - It never touches #1289's assignees, never closes or labels anything, and
-#   never fails the build: an API refusal is logged.
+#   never fails the build: a failed read or a refused write is logged, exit 0.
 #
 # ## Trust boundary
 #
 # `pull_request` (not `pull_request_target`): a fork's PR runs with a read-only
-# token and every write below is refused and logged. Inputs reach the script
-# as files, never argv — two of them carry public comment text.
+# token and every write is refused and logged. The event is read from the file
+# GitHub provides; comment bodies go to `gh` on stdin, never argv. The checkout
+# is pinned to the BASE branch — the head branch is deleted on merge, and the
+# script that runs is then the base's copy, not the PR's.
+#
+# First proof: this workflow's first run is the merge of the PR that adds it.
+# Watch that run (`gh run list --workflow claim-release-on-merge.yml`).
 
 on:
   pull_request:
@@ -52,6 +71,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The head branch is deleted on merge; the base is durable, and its
+          # copy of the script is the one that should run after a merge.
+          ref: ${{ github.event.pull_request.base.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
@@ -62,5 +85,6 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         # The event payload is read from the file GitHub provides, never
         # interpolated: it carries the PR body, which is public text. Fetch,
-        # decision and every write live in the script, under `node --test`.
+        # decision and every write live in the script, under `node --test`;
+        # a failed read is logged and the step exits 0.
         run: node scripts/ci/release-on-merge.mjs --event "$GITHUB_EVENT_PATH" --apply

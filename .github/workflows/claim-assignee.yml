@@ -2,7 +2,8 @@ name: Claim to assignee
 
 # Keeps GitHub's assignee field in step with the claim protocol in AGENTS.md
 # § Cross-session agent coordination. A `🔒 CLAIM #n` comment assigns its author
-# to #n; a `🔓 RELEASE #n` unassigns them.
+# to #n; a `🔓 RELEASE #n` unassigns them (the merge-time release, #3177, is
+# posted and applied by `claim-release-on-merge.yml` itself — see below).
 #
 # ## Why the field is a projection and not the protocol
 #
@@ -14,7 +15,7 @@ name: Claim to assignee
 # express that, because both issues were correctly owned.
 #
 # What the field adds is cheapness. It is one queryable value that every GitHub
-# view and every tool can read without parsing a 1,200-comment thread. The
+# view and every tool can read without parsing a 1,400-comment thread. The
 # morning report got #2947 wrong on 2026-09-15 precisely because reading
 # ownership properly took three API calls that nobody had told it to make.
 #
@@ -35,15 +36,18 @@ name: Claim to assignee
 # this repo's membership, and stated so it is a decision rather than an
 # oversight.
 #
-# ## One bot, one shape (#3177)
+# ## The merge-time release does not pass through here (#3177)
 #
-# `claim-release-on-merge.yml` posts the `🔓 RELEASE` as `github-actions[bot]`
-# when a PR that closes the issue merges. That comment re-enters here, so the
-# Bot gate admits exactly that account, and the parser (`--author-type Bot`)
-# admits exactly one shape from it: a release that names its PR. A bot CLAIM is
-# still ignored (a bot owns no work), and since a bot cannot be "the claimant",
-# a bot release unassigns EVERY assignee on the issue — none is live once the
-# issue closed by merge.
+# `claim-release-on-merge.yml` posts `🔓 RELEASE` as `github-actions[bot]` when
+# a PR that closes the issue merges, and unassigns everyone on the issue
+# ITSELF (`scripts/ci/release-on-merge.mjs`). That comment never re-enters this
+# workflow: a comment posted with `GITHUB_TOKEN` does not trigger
+# `issue_comment` (GitHub's non-recursion rule), and the Bot gate below keeps
+# every bot out regardless. The parser still carries a `--author-type Bot`
+# grammar — a bot may only release, and only in a line naming its PR — so that
+# if this gate is ever opened to an App-token poster the narrowing is already
+# the contract; today nothing depends on it, and the author type is passed
+# with `User` as the default so an empty field never widens the grammar.
 #
 # Never fails the build: a comment that parses to nothing is the common case,
 # and an API refusal is logged, not raised. This workflow only ever adds or
@@ -76,13 +80,8 @@ jobs:
     if: >-
       github.repository == 'd-hinders/Haven-AI' &&
       !github.event.issue.pull_request &&
-      (
-        (
-          github.event.comment.user.type != 'Bot' &&
-          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
-        ) ||
-        github.event.comment.user.login == 'github-actions[bot]'
-      )
+      github.event.comment.user.type != 'Bot' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -105,7 +104,7 @@ jobs:
           set -euo pipefail
 
           printf '%s' "$COMMENT_BODY" > comment.txt
-          node scripts/ci/claim-assignee.mjs --body comment.txt --on-issue "$ON_ISSUE" --author-type "$COMMENT_AUTHOR_TYPE" > actions.txt
+          node scripts/ci/claim-assignee.mjs --body comment.txt --on-issue "$ON_ISSUE" --author-type "${COMMENT_AUTHOR_TYPE:-User}" > actions.txt
 
           if [ ! -s actions.txt ]; then
             echo "No claim or release in this comment — nothing to do."
@@ -144,21 +143,6 @@ jobs:
                 fi
                 ;;
               release)
-                if [ "$COMMENT_AUTHOR_TYPE" = "Bot" ]; then
-                  # The merge-time release (#3177): the bot is nobody's claim,
-                  # so clear every assignee — the issue closed by merge and no
-                  # claim on it is live.
-                  gh api "repos/$REPO/issues/$number" --jq '.assignees[].login' </dev/null 2>/dev/null | while read -r login; do
-                    [ -n "$login" ] || continue
-                    if gh issue edit "$number" --repo "$REPO" --remove-assignee "$login" </dev/null >/dev/null 2>&1; then
-                      echo "  unassigned #$number from @$login (merge-time release)"
-                      echo "- unassigned **#$number** from @$login (merge-time release)" >> "$GITHUB_STEP_SUMMARY"
-                    else
-                      echo "  could not unassign @$login from #$number (skipped)"
-                    fi
-                  done
-                  continue
-                fi
                 if gh issue edit "$number" --repo "$REPO" --remove-assignee "$COMMENT_AUTHOR" </dev/null >/dev/null 2>&1; then
                   echo "  unassigned #$number from @$COMMENT_AUTHOR"
                   echo "- unassigned **#$number** from @$COMMENT_AUTHOR" >> "$GITHUB_STEP_SUMMARY"

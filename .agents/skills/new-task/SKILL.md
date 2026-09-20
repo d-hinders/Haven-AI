@@ -52,7 +52,7 @@ Turn a freeform request into a loop-ready GitHub issue without implementing it.
    the full five-check bar is stated once, in ship-next, and applies to every
    filed defect whatever route files it.
 7. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
-8. Apply every inferred `area:*` label and `money-path` when applicable. **Leave the issue unassigned** unless the requester asks to own it — both issue templates ship `assignees: []`, and a queue of unassigned issues is what the loop expects to read. Assignment records ownership; a `🔒 CLAIM` comment, never an assignee, records that someone is building right now.
+8. Apply every inferred `area:*` label and `money-path` when applicable. **Leave the issue unassigned** unless the requester asks to own it — both issue templates ship `assignees: []`, and a queue of unassigned issues is what the loop expects to read. Assignment records ownership; a `🔒 CLAIM` comment, never an assignee, records that someone is building right now. A PR that closes the issue clears every assignee on merge (#3177), so an assignee used for tracking does not survive the close.
 9. Return the issue link and applied labels.
 
 ## Epics

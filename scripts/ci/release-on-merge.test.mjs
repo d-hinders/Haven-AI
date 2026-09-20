@@ -23,16 +23,16 @@ describe('the merged filter is the whole safety of this workflow', () => {
     // claim is still live, and releasing it would hand the issue to whoever
     // reads next.
     const r = decide({ pr: { ...mergedPr, merged: false }, closingIssues: [{ number: 3134, assignees: ['AntonioSaaranen'] }] })
-    assert.deepEqual(r, { releases: [], channel: null })
+    assert.deepEqual(r, { releases: [], channel: null, skipped: [] })
   })
 
   test('a missing merged flag is treated as unmerged, never as merged', () => {
     const { merged, ...noFlag } = mergedPr
-    assert.deepEqual(decide({ pr: noFlag, closingIssues: [{ number: 3134 }] }), { releases: [], channel: null })
+    assert.deepEqual(decide({ pr: noFlag, closingIssues: [{ number: 3134 }] }), { releases: [], channel: null, skipped: [] })
   })
 
   test('a PR that closes no issue does nothing', () => {
-    assert.deepEqual(decide({ pr: mergedPr, closingIssues: [] }), { releases: [], channel: null })
+    assert.deepEqual(decide({ pr: mergedPr, closingIssues: [] }), { releases: [], channel: null, skipped: [] })
   })
 })
 
@@ -45,7 +45,10 @@ describe('what a merge releases', () => {
     assert.equal(r.releases.length, 2)
     const [a, b] = r.releases
     assert.equal(a.issue, 3134)
-    assert.match(a.body, /^🔓 RELEASE #3134 — landed as PR #3186 \(squash `a29d5469`, into `dev`\)/)
+    // No merge-method word: a promotion into main merges with a merge commit,
+    // and the event does not say which method was used.
+    assert.match(a.body, /^🔓 RELEASE #3134 — landed as PR #3186 \(`a29d5469`, into `dev`\)/)
+    assert.doesNotMatch(a.body, /squash|merge commit/)
     assert.ok(a.body.includes(AUTO_RELEASE_MARK))
     // The PR author is unassigned even when the projection never assigned them,
     // and a second session's stale assignee goes too: no claim on a closed
@@ -74,6 +77,29 @@ describe('what a merge releases', () => {
   test('a non-hex merge sha or missing base degrades the parenthesis, not the release', () => {
     const [r] = decide({ pr: { ...mergedPr, mergeCommit: null, base: null }, closingIssues: [{ number: 3134 }] }).releases
     assert.match(r.body, /^🔓 RELEASE #3134 — landed as PR #3186 — /)
+  })
+})
+
+describe('an issue GitHub did not close is left alone', () => {
+  test('a scan-found issue still open is skipped with a reason, not released', () => {
+    // The commit said `Closes #3140` inside a code span, or the merge did not
+    // reach the default branch: GitHub left it open, so its claim is live.
+    const r = decide({ pr: mergedPr, closingIssues: [{ number: 3134 }, { number: 3140, assignees: ['PhilipEriksson'], state: 'open' }] })
+    assert.deepEqual(r.releases.map((x) => x.issue), [3134])
+    assert.equal(r.skipped.length, 1)
+    assert.equal(r.skipped[0].issue, 3140)
+    assert.match(r.skipped[0].reason, /still open/)
+  })
+
+  test('a scan-found issue GitHub closed is released like a linked one', () => {
+    const r = decide({ pr: mergedPr, closingIssues: [{ number: 3140, assignees: [], state: 'closed' }] })
+    assert.deepEqual(r.releases.map((x) => x.issue), [3140])
+    assert.deepEqual(r.skipped, [])
+  })
+
+  test('a bot PR author (dependabot) is never in the unassign list', () => {
+    const [r] = decide({ pr: { ...mergedPr, author: 'dependabot[bot]', authorType: 'Bot' }, closingIssues: [{ number: 3134, assignees: ['AntonioSaaranen'] }] }).releases
+    assert.deepEqual(r.unassign, ['AntonioSaaranen'])
   })
 })
 
@@ -131,7 +157,7 @@ describe('CLI contract the workflow depends on', () => {
 
   test('an unmerged event payload prints the empty decision', () => {
     const out = execFileSync(process.execPath, [CLI, '--pr', write('pr2.json', { ...event, merged: false }), '--closing', write('c2.json', closing)], { encoding: 'utf8' })
-    assert.deepEqual(JSON.parse(out), { releases: [], channel: null })
+    assert.deepEqual(JSON.parse(out), { releases: [], channel: null, skipped: [] })
   })
 
   test('missing inputs exit 2', () => {
@@ -144,11 +170,20 @@ describe('fetch and apply through an injected gh', () => {
     const calls = []
     const gh = async (args, opts = {}) => {
       calls.push({ args, input: opts.input ?? null })
-      const key = args.slice(0, 2).join(' ')
-      if (key === 'api graphql') return JSON.stringify(answers.closing ?? [])
-      if (key === 'api' || args[0] === 'api') {
-        if (/\/comments\?/.test(args[1])) return JSON.stringify(answers.page?.(args[1]) ?? [])
-        return String(answers.total ?? 0)
+      if (args[0] === 'api' && args[1] === 'graphql') {
+        const query = args.find((a) => a.startsWith('query=')) ?? ''
+        if (/closingIssuesReferences/.test(query)) return JSON.stringify({ title: answers.title ?? 't', closingIssuesReferences: { nodes: answers.closing ?? [] } })
+        if (/commits\(/.test(query)) {
+          const pages = answers.commitPages ?? [[]]
+          const idx = args.includes('-F') && args.some((a) => a.startsWith('cursor=')) ? Number(args.find((a) => a.startsWith('cursor=')).slice(7)) : 0
+          const page = pages[idx] ?? []
+          return JSON.stringify({ nodes: page.map((m) => ({ commit: { oid: 'abc', message: m } })), pageInfo: { hasNextPage: idx + 1 < pages.length, endCursor: String(idx + 1) } })
+        }
+      }
+      if (args[0] === 'api' && args.includes('--paginate')) return JSON.stringify(answers.channelPages ?? [[]])
+      if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(args[1])) {
+        const n = Number(args[1].split('/').pop())
+        return JSON.stringify(answers.issue?.(n) ?? { state: 'closed', assignees: [] })
       }
       if (answers.refuse?.(args)) throw new Error('HTTP 403')
       return ''
@@ -156,31 +191,46 @@ describe('fetch and apply through an injected gh', () => {
     return { gh, calls }
   }
 
-  test('fetchInputs reads GitHub\'s closing references and the channel\'s last two pages', async () => {
+  test('fetchInputs reads GitHub\'s linked references, the commit/title scan, and the WHOLE channel', async () => {
     const { gh, calls } = recorder({
       closing: [{ number: 3134, assignees: { nodes: [{ login: 'AntonioSaaranen' }] } }],
-      total: 1380,
-      page: (url) => (url.endsWith('page=13') ? [{ body: 'older' }] : [{ body: '🔒 CLAIM #3134 — x' }]),
+      title: 'fix: x (Closes #3140)',
+      commitPages: [['feat: a\n\nCloses #3134'], ['chore: b\n\nfixes #3141']],
+      issue: (n) => (n === 3141 ? { state: 'open', assignees: [{ login: 'PhilipEriksson' }] } : { state: 'closed', assignees: [] }),
+      channelPages: [[{ body: 'older' }], [{ body: '🔒 CLAIM #3134 — x' }]],
     })
-    const r = await fetchInputs({ gh, repo: 'd-hinders/Haven-AI', prNumber: 3186 })
-    assert.deepEqual(r.closingIssues, [{ number: 3134, assignees: ['AntonioSaaranen'] }])
+    const r = await fetchInputs({ gh, repo: 'd-hinders/Haven-AI', prNumber: 3186, scanCommits: true })
+    // Linked reference first (no state), then the scan's finds with GitHub's state.
+    assert.deepEqual(r.closingIssues, [
+      { number: 3134, assignees: ['AntonioSaaranen'] },
+      { number: 3140, assignees: [], state: 'closed' },
+      { number: 3141, assignees: ['PhilipEriksson'], state: 'open' },
+    ])
     assert.deepEqual(r.channelBodies, ['older', '🔒 CLAIM #3134 — x'])
-    const pages = calls.map((c) => c.args[1]).filter((a) => /comments\?/.test(a))
-    assert.deepEqual(pages, ['repos/d-hinders/Haven-AI/issues/1289/comments?per_page=100&page=13', 'repos/d-hinders/Haven-AI/issues/1289/comments?per_page=100&page=14'])
-    assert.equal(calls[0].args[0], 'api')
-    assert.equal(calls[0].args[1], 'graphql')
+    const paginate = calls.filter((c) => c.args.includes('--paginate'))
+    assert.equal(paginate.length, 1)
+    assert.ok(paginate[0].args.includes('--slurp'))
+    // Two commit pages were walked.
+    assert.equal(calls.filter((c) => (c.args.find((a) => a.startsWith('query=')) ?? '').includes('commits(')).length, 2)
   })
 
-  test('a channel with fewer than 100 comments reads one page', async () => {
-    const { gh, calls } = recorder({ total: 7 })
-    await fetchInputs({ gh, repo: 'o/r', prNumber: 1 })
-    assert.deepEqual(calls.map((c) => c.args[1]).filter((a) => /comments\?/.test(a)), ['repos/o/r/issues/1289/comments?per_page=100&page=1'])
+  test('without scanCommits (a merge into a non-default branch) only GitHub\'s list is read', async () => {
+    const { gh, calls } = recorder({ closing: [], commitPages: [['Closes #1']] })
+    const r = await fetchInputs({ gh, repo: 'o/r', prNumber: 1, scanCommits: false })
+    assert.deepEqual(r.closingIssues, [])
+    assert.ok(!calls.some((c) => (c.args.find((a) => a.startsWith('query=')) ?? '').includes('commits(')))
   })
 
-  test('apply comments via stdin, unassigns each login, and posts the channel copy', async () => {
-    const decision = decide({ pr: mergedPr, closingIssues: [{ number: 3134, assignees: ['PhilipEriksson'] }], channelBodies: ['🔒 CLAIM #3134 — x'] })
+  test('a GraphQL read that returns nothing on stdout is a thrown read, not a silent empty decision', async () => {
+    const gh = async () => ''
+    await assert.rejects(fetchInputs({ gh, repo: 'o/r', prNumber: 1, scanCommits: false }), /closing references: gh returned no output/)
+  })
+
+  test('apply comments via stdin, unassigns each login, logs skips, and posts the channel copy', async () => {
+    const decision = decide({ pr: mergedPr, closingIssues: [{ number: 3134, assignees: ['PhilipEriksson'] }, { number: 3141, state: 'open' }], channelBodies: ['🔒 CLAIM #3134 — x'] })
     const { gh, calls } = recorder()
-    const done = await apply(decision, { gh, repo: 'd-hinders/Haven-AI', log: () => {} })
+    const logs = []
+    const done = await apply(decision, { gh, repo: 'd-hinders/Haven-AI', log: (m) => logs.push(m) })
     assert.deepEqual(calls.map((c) => c.args.slice(0, 3)), [
       ['issue', 'comment', '3134'],
       ['issue', 'edit', '3134'],
@@ -191,6 +241,7 @@ describe('fetch and apply through an injected gh', () => {
     assert.ok(calls[0].args.includes('-F') && calls[0].args.includes('-') && calls[0].input.startsWith('🔓 RELEASE #3134'))
     assert.deepEqual(calls.slice(1, 3).map((c) => c.args[c.args.indexOf('--remove-assignee') + 1]), ['PhilipEriksson', 'AntonioSaaranen'])
     assert.deepEqual(done.map((d) => d.kind), ['comment', 'unassign', 'unassign', 'channel'])
+    assert.ok(logs.some((l) => /left #3141 alone/.test(l)))
   })
 
   test('no channel copy when the decision has none', async () => {
@@ -209,17 +260,32 @@ describe('fetch and apply through an injected gh', () => {
     assert.ok(logs.some((l) => /could not comment on #3134/.test(l)))
   })
 
-  test('prFromPayload reads the event\'s pull_request shape', () => {
-    assert.deepEqual(prFromPayload({ number: 3186, merged: true, merge_commit_sha: 'a29d', user: { login: 'A' }, base: { ref: 'dev' } }), { number: 3186, merged: true, author: 'A', mergeCommit: 'a29d', base: 'dev' })
+  test('prFromPayload reads the event\'s pull_request shape, including author type and default branch', () => {
+    assert.deepEqual(
+      prFromPayload({ number: 3186, merged: true, merge_commit_sha: 'a29d', user: { login: 'A', type: 'User' }, base: { ref: 'dev', repo: { default_branch: 'dev' } } }),
+      { number: 3186, merged: true, author: 'A', authorType: 'User', mergeCommit: 'a29d', base: 'dev', defaultBranch: 'dev' },
+    )
     assert.equal(prFromPayload({}).merged, false)
   })
 
+  const eventDir = mkdtempSync(path.join(tmpdir(), 'release-on-merge-ev-'))
+  const eventFile = (name, pull_request) => {
+    const p = path.join(eventDir, name)
+    writeFileSync(p, JSON.stringify({ action: 'closed', pull_request }))
+    return p
+  }
+
   test('--event on an unmerged payload prints the empty decision without touching gh', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'release-on-merge-ev-'))
-    const p = path.join(dir, 'event.json')
-    writeFileSync(p, JSON.stringify({ action: 'closed', pull_request: { number: 5, merged: false, user: { login: 'x' } } }))
     // PATH emptied: any gh call would fail loudly instead of reaching GitHub.
-    const out = execFileSync(process.execPath, [CLI, '--event', p, '--apply'], { encoding: 'utf8', env: { ...process.env, PATH: '' } })
-    assert.deepEqual(JSON.parse(out), { releases: [], channel: null })
+    const out = execFileSync(process.execPath, [CLI, '--event', eventFile('unmerged.json', { number: 5, merged: false, user: { login: 'x' } }), '--apply'], { encoding: 'utf8', env: { ...process.env, PATH: '' } })
+    assert.deepEqual(JSON.parse(out), { releases: [], channel: null, skipped: [] })
+  })
+
+  test('--event on a MERGED payload whose reads fail exits 0 with an empty decision and a logged reason — never a red run', () => {
+    // PATH emptied: `gh` cannot be spawned, so fetchInputs throws; the CLI must
+    // log and exit 0 (the workflow promises never to fail the build).
+    const out = execFileSync(process.execPath, [CLI, '--event', eventFile('merged.json', { number: 5, merged: true, user: { login: 'x', type: 'User' }, base: { ref: 'dev', repo: { default_branch: 'dev' } } }), '--apply'], { encoding: 'utf8', env: { ...process.env, PATH: '' } })
+    assert.match(out, /could not read this merge's closing references/)
+    assert.deepEqual(JSON.parse(out.trim().split('\n').pop()), { releases: [], channel: null, skipped: [] })
   })
 })

@@ -93,10 +93,12 @@ concurrent work), demo-merchant-mcp, migrations, release trains,
 `db-mock-baseline.json`, or contract docs.
 
 The release is automatic on merge (#3177): `claim-release-on-merge.yml` posts
-`🔓 RELEASE` on every issue the merged PR closes and unassigns; it repeats the
-line on #1289 only where the claim was posted there. Release by hand only when
-you abandon the work, or when the PR keeps the issue open in operator-verify
-mode (`Refs #N`) — then every place you claimed:
+`🔓 RELEASE` on every issue the merged PR closed (GitHub's linked references
+plus the closing keywords in title and commits, released only if GitHub closed
+it) and unassigns everyone; it repeats the line on #1289 when a claim for that
+issue is in the channel. Release by hand only when you abandon the work, or
+when the PR keeps the issue open in operator-verify mode (`Refs #N`) — then
+every place you claimed:
 
 ```text
 🔓 RELEASE #<issue> — <landed as PR #N | abandoned: reason>

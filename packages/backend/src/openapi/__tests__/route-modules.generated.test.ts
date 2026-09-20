@@ -49,6 +49,8 @@ describe('route-modules.generated.ts (#3135)', () => {
         'routes/agent-delegations.ts',
         'routes/agent-rekey.ts',
         'routes/agent-passports.ts',
+        // #3167: the label assignment route shares the /agents mount too.
+        'routes/agent-labels.ts',
       ]),
     )
   })

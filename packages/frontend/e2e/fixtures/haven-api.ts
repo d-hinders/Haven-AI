@@ -94,6 +94,9 @@ export const testAgent = {
   // and since #2459 there is no opt-down shape left to disagree with.
   account_type: 'delegator_hybrid',
   created_at: '2026-05-02T10:00:00.000Z',
+  // #3167: labels ride on every agent read. The e2e default agent carries
+  // none — the label UI's own e2e coverage labels it explicitly.
+  labels: [],
   // #2264: the DERIVED delegation-budget projection, which is what fills this
   // array on the live rail (`rails/delegation-budget-view.ts`): 250 USDC per
   // 30 days, `allowance_amount` HUMAN-formatted and `reset_period_min` in

@@ -36,7 +36,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-19"
+last-verified: "2026-09-20"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -1198,3 +1198,15 @@ wearing the costume of a protection). A user code is 8 characters over a
 30-symbol alphabet — about 39 bits — inside a ten-minute window, which is not
 searchable even entirely unthrottled. A reader should not come away thinking
 the tier is load-bearing here; it bounds row creation, not guessing.
+
+> **Re-verified #3167 (2026-09-20):** the covered file this diff touches is
+> `routes/agents.ts` — it gains only the `labels[]` read-along on its list,
+> by-id, and PUT responses (joined from the new per-user label tables) and no
+> authority decision moves: delegation lifecycle, budget derivation, rekey and
+> revoke handling are byte-identical, and the new label data access lives in a
+> dedicated repository module that nothing in the delegation, budget, or
+> enforcement path imports (its header states that boundary; the issue's own
+> hard guard demands it). A label is a name and a colour; it carries no grant,
+> no caveat, and no key. Perimeter unchanged for this model — the CASP shard
+> `docs/regulatory/casp-changelog/2026-09-20-3167.md` carries the full
+> analysis.

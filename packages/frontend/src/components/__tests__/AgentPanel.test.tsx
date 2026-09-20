@@ -15,6 +15,9 @@ vi.mock('@/hooks/useAgents', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockRouterPush, replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  // #3165: the list toolbar mirrors its state to the URL.
+  usePathname: () => '/agents',
+  useSearchParams: () => new URLSearchParams(),
 }))
 
 vi.mock('../ConnectAgentModal', () => ({
@@ -26,6 +29,7 @@ vi.mock('../ConfirmDialog', () => ({
 }))
 
 import AgentPanel from '../AgentPanel'
+import { MCP_NOT_RECORDED_NOTE } from '../agent-panel/McpServerName'
 
 const SAFE = {
   id: 'safe-1',
@@ -49,6 +53,7 @@ function agent(overrides: Record<string, unknown> = {}) {
     status: 'active',
     created_at: '2026-05-01T00:00:00Z',
     allowances: [],
+    labels: [],
     ...overrides,
   }
 }
@@ -167,5 +172,57 @@ describe('AgentPanel rail affordances', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('Old agent')).toBeVisible()
     expect(controlled).not.toHaveAttribute('hidden')
+  })
+})
+
+describe('AgentPanel list toolbar (#3165)', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue({ activeAccount: SAFE, activeChainId: SAFE.chain_id })
+  })
+
+  it('renders the toolbar above a non-empty list and filters the cards through it', () => {
+    setAgents([agent({ id: 'a1', name: 'Alpha', status: 'active' }), agent({ id: 'a2', name: 'Bravo', status: 'paused' })])
+    render(<AgentPanel />)
+    expect(screen.getByTestId('agent-list-toolbar')).toBeInTheDocument()
+    expect(screen.getByText('Alpha')).toBeInTheDocument()
+    expect(screen.getByText('Bravo')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: /Search agents/ }), { target: { value: 'brav' } })
+    expect(screen.queryByText('Alpha')).toBeNull()
+    expect(screen.getByText('Bravo')).toBeInTheDocument()
+    expect(screen.getByTestId('agent-list-count')).toHaveTextContent('1 of 2 agents shown')
+  })
+
+  it('a zero-result filter shows the reset affordance and never hides the toolbar', () => {
+    setAgents([agent({ id: 'a1', name: 'Alpha' })])
+    render(<AgentPanel />)
+    fireEvent.change(screen.getByRole('textbox', { name: /Search agents/ }), { target: { value: 'zzz' } })
+    expect(screen.getByText('No agents match these filters')).toBeInTheDocument()
+    // The toolbar must survive the zero state (mutation: gate it on the
+    // filtered length → this line goes red), and exactly ONE reset is
+    // offered — the EmptyState's; the bar's steps back.
+    expect(screen.getByTestId('agent-list-toolbar')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Clear filters' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(screen.getByText('Alpha')).toBeInTheDocument()
+  })
+
+  it('the MCP "not recorded" note follows the filtered list, not every visible agent', () => {
+    setAgents([
+      agent({ id: 'a1', name: 'Alpha', mcp_server_name: null, mcp_last_seen_at: '2026-09-01T00:00:00Z' }),
+      agent({ id: 'a2', name: 'Bravo', mcp_server_name: 'claude-desktop' }),
+    ])
+    render(<AgentPanel />)
+    expect(screen.getByText(MCP_NOT_RECORDED_NOTE)).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: /Search agents/ }), { target: { value: 'bravo' } })
+    // Alpha (the unrecorded one) is filtered out, so the note explaining its
+    // label has nothing on the page to explain. Mutation: gate the predicate
+    // on `visibleAgents` again → red.
+    expect(screen.queryByText(MCP_NOT_RECORDED_NOTE)).toBeNull()
+  })
+
+  it('no toolbar on an empty list — the empty state owns that screen', () => {
+    setAgents([])
+    render(<AgentPanel />)
+    expect(screen.queryByTestId('agent-list-toolbar')).toBeNull()
   })
 })

@@ -2,6 +2,7 @@
 
 import { McpServerName } from './McpServerName'
 import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanner'
+import { LabelChipRow } from '@/components/haven/LabelChip'
 import { useState } from 'react'
 import { type Agent } from '@/hooks/useAgents'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -168,6 +169,23 @@ export function AgentCard({
               <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">
                 {agent.description}
               </p>
+            )}
+            {/*
+              #3167: the labels this agent carries — max three visible, then a
+              "+N" counter (`LabelChipRow`). Under the identity block, beside
+              nothing: a label is categorisation, not status, so it must not
+              read as the header's warning/danger pill. The wrapper is
+              rendered only when labels exist (#3197): `LabelChipRow` returns
+              null for an empty list, but this div's `mt-1.5` would still
+              render and every unlabelled card gained a ~6px gap under the
+              description. Same guard as the detail page's label row
+              (`AgentDetailClient`). Edit via the card's Edit modal; the full
+              set is visible there and in the label manager.
+            */}
+            {agent.labels.length > 0 && (
+              <div className="mt-1.5">
+                <LabelChipRow labels={agent.labels} />
+              </div>
             )}
           </div>
           <p

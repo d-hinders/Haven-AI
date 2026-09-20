@@ -35,6 +35,7 @@ function agentFixture(overrides: Partial<Agent> = {}): Agent {
     account_type: 'delegator_hybrid',
     created_at: '2026-05-01T00:00:00Z',
     allowances: [],
+    labels: [],
     ...overrides,
   } as Agent
 }
@@ -330,5 +331,43 @@ describe('AgentCard action-row matrix (#1402)', () => {
     expect(screen.queryByTestId('remove-agent-dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Remove Research agent' }))
     expect(screen.getByTestId('remove-agent-dialog')).toBeTruthy()
+  })
+})
+
+/**
+ * #3197: the labels wrapper must not render for an unlabelled agent.
+ *
+ * The #3167 card wrapped `LabelChipRow` in an unconditional `mt-1.5` div.
+ * The row returns null when the list is empty, but the wrapper did not — its
+ * margin stayed in the DOM and every unlabelled card gained a ~6px gap under
+ * the description, which is exactly what the old comment claimed could not
+ * happen. The guard is the one the detail page's label row already uses
+ * (`AgentDetailClient`), asserted here structurally: the wrapper's absence,
+ * not its margin — jsdom resolves no stylesheet, so the pixel claim is
+ * measured where it can be, by the regenerated `agents-list-mobile.png`
+ * baseline (its fixture agent is unlabelled).
+ */
+describe('AgentCard label chips (#3167, #3197)', () => {
+  it('renders no labels wrapper and no mt-1.5 box for an unlabelled agent', () => {
+    const { container } = renderCard(agentFixture())
+    expect(screen.queryByTestId('agent-label-chips')).toBeNull()
+    expect(container.querySelector('div.mt-1\\.5')).toBeNull()
+  })
+
+  it('keeps the spaced wrapper when the agent carries labels', () => {
+    renderCard(
+      agentFixture({
+        labels: [
+          {
+            id: 'label-1',
+            name: 'finance',
+            color: 'debit',
+            created_at: '2026-05-01T00:00:00Z',
+          },
+        ],
+      }),
+    )
+    expect(screen.getByTestId('agent-label-chips')).toBeTruthy()
+    expect(screen.getByText('finance')).toBeTruthy()
   })
 })

@@ -64,6 +64,7 @@ afterAll(() => {
 })
 
 import accountingWebhookRoutes from '../accounting-webhooks.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import { resetAccountingWebhookCountersForTests } from '../../modules/accounting/ops-signals.js'
 import { decryptSecrets, encryptSecrets } from '../../infra/secrets.js'
 import type { AccountedWebhookSubscriptionSecret } from '../../modules/accounting/accounted-webhooks.js'
@@ -85,6 +86,7 @@ function signedHeader(raw: string, secret: string, tSeconds?: number): string {
 function row(overrides?: Record<string, unknown>) {
   const { ciphertext, keyVersion } = encryptSecrets({ apiKey: 'gnubok_sk_test_k', webhooks: TRIPLES } as unknown as Record<string, unknown>)
   return {
+    user_id: 'user_1',
     webhook_token: TOKEN,
     secrets_ciphertext: ciphertext,
     secrets_key_version: keyVersion,
@@ -169,6 +171,9 @@ describe('POST /accounting/webhooks/accounted/:token — the answer matrix', () 
       processed: true,
     })
     expect(arg.payload).toEqual({ id: 'je_default', voucher_number: 'V1' })
+    // S1 (PR #3196 review): the ledger row carries WHOSE delivery it was —
+    // the connection the capability token resolved.
+    expect(arg.userId).toBe('user_1')
     expect(countedNames()).toEqual(['received', 'processed'])
   })
 
@@ -271,7 +276,10 @@ describe('POST /accounting/webhooks/accounted/:token — the answer matrix', () 
     const res = await post(d.payload, d.headers)
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ counted: 'confirmed_document_uploaded' })
-    expect(syncRepo.confirmAccountedDocumentDelivery).toHaveBeenCalledWith('doc_9')
+    // S1 (PR #3196 review): the confirmation is scoped to the connection's
+    // own ledger — the route passes the row's user, never a bare document id
+    // (which is only unique WITHIN a user's sync rows).
+    expect(syncRepo.confirmAccountedDocumentDelivery).toHaveBeenCalledWith('user_1', 'doc_9')
     expect(countedNames()).toEqual(['received', 'confirmed', 'processed'])
   })
 
@@ -293,6 +301,17 @@ describe('POST /accounting/webhooks/accounted/:token — the answer matrix', () 
     const d = delivery({ deliveryId: 'evt_nosecret' })
     const res = await post(d.payload, d.headers)
     expect(res.statusCode).toBe(400)
+  })
+
+  it('a POST with no Content-Type is a probe, not a crash: 400 bad_signature, never a 500 (PR #3196 review)', async () => {
+    // Fastify's parser never runs without a Content-Type, so `request.body`
+    // is undefined — the guard answers 400 and counts it instead of handing
+    // `undefined` to the HMAC (a 500 the provider would retry forever).
+    connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
+    const res = await app!.inject({ method: 'POST', url: `${BASE}/${TOKEN}` })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ status: 'bad-signature', reason: 'malformed_header' })
+    expect(countedNames()).toEqual(['bad_signature'])
   })
 })
 
@@ -455,6 +474,54 @@ describe('the raw-body parser is route-scoped', () => {
     expect([200, 400, 404, 415]).toContain(res.statusCode)
     expect(res.statusCode).not.toBe(410)
     expect(res.statusCode >= 300 && res.statusCode < 400).toBe(false)
+  })
+})
+
+describe('the shadow-mode validation plugin must not corrupt the raw body (B1, PR #3196 review)', () => {
+  /**
+   * The wiring that would have gone red on the B1 head: the ROOT-SCOPE
+   * request-validation plugin (as `index.ts` installs it, default shadow),
+   * THEN the webhook route. The bare-`Fastify()` mounts above never ran the
+   * plugin, which is exactly why all of them stayed green while every
+   * production delivery was refused.
+   *
+   * The bug, for the record: shadow's `preValidation` snapshot hook claimed
+   * Buffers were excluded but only checked `typeof body === 'object'` — a
+   * Buffer IS an object, `structuredClone(Buffer)` yields a plain
+   * `Uint8Array`, and restoring it over `request.body` replaced the raw
+   * bytes with `"123,34,…"`. The route then hashed the comma digits and
+   * every CORRECTLY signed delivery was refused 400 `bad_signature`.
+   */
+  let shadowApp: FastifyInstance
+
+  beforeAll(async () => {
+    shadowApp = Fastify({ logger: false })
+    installRequestValidation(shadowApp, { mode: 'shadow' })
+    await shadowApp.register(accountingWebhookRoutes)
+  })
+
+  afterAll(async () => {
+    await shadowApp?.close()
+  })
+
+  it('a correctly signed delivery → 200 with the plugin installed in shadow mode ahead of the route', async () => {
+    connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
+    deliveriesRepo.recordWebhookDelivery.mockResolvedValue({ inserted: true })
+    const body = JSON.stringify({ id: 'evt_b1', type: 'journal_entry.committed', data: { object: { id: 'je_b1' } } })
+    const headers = {
+      'content-type': 'application/json',
+      'x-gnubok-signature': signedHeader(body, SECRET),
+      'x-gnubok-event': 'journal_entry.committed',
+      'x-gnubok-delivery': 'evt_b1',
+    }
+    const res = await shadowApp.inject({ method: 'POST', url: `${BASE}/${TOKEN}`, payload: body, headers })
+    // On the broken head this was 400: the HMAC ran over the mangled
+    // snapshot, not the bytes the provider signed.
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ status: 'ok', counted: 'processed_journal_entry_committed', deliveryId: 'evt_b1' })
+    // The stored payload was parsed from the CLIENT's bytes — proof the
+    // body the handler saw is the body the signature covered.
+    expect(deliveriesRepo.recordWebhookDelivery).toHaveBeenCalledWith(expect.objectContaining({ payload: { id: 'je_b1' } }))
   })
 })
 

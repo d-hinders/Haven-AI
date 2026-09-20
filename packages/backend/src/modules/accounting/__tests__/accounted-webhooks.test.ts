@@ -387,55 +387,55 @@ describe('processAccountedWebhook (#3019 item 4) — per-type counting', () => {
   })
 
   it('journal_entry.committed counts as its own type (the payload is stored by the route)', async () => {
-    await expect(processAccountedWebhook({ eventType: 'journal_entry.committed', object: { id: 'je_1' } })).resolves.toBe(
+    await expect(processAccountedWebhook({ userId: 'user_1', eventType: 'journal_entry.committed', object: { id: 'je_1' } })).resolves.toBe(
       'processed_journal_entry_committed',
     )
   })
 
   it('period.locked counts only', async () => {
-    await expect(processAccountedWebhook({ eventType: 'period.locked', object: null })).resolves.toBe('processed_period_locked')
+    await expect(processAccountedWebhook({ userId: 'user_1', eventType: 'period.locked', object: null })).resolves.toBe('processed_period_locked')
   })
 
   it('document.uploaded matching a pushed sync row confirms the delivery', async () => {
     syncRepoMocks.confirmAccountedDocumentDelivery.mockResolvedValue(true)
     await expect(
-      processAccountedWebhook({ eventType: 'document.uploaded', object: { document_id: 'doc_1' } }),
+      processAccountedWebhook({ userId: 'user_1', eventType: 'document.uploaded', object: { document_id: 'doc_1' } }),
     ).resolves.toBe('confirmed_document_uploaded')
-    expect(syncRepoMocks.confirmAccountedDocumentDelivery).toHaveBeenCalledWith('doc_1')
+    expect(syncRepoMocks.confirmAccountedDocumentDelivery).toHaveBeenCalledWith('user_1', 'doc_1')
   })
 
   it('document.uploaded with no matching sync row (or a read failure) falls back to the plain processed count', async () => {
     syncRepoMocks.confirmAccountedDocumentDelivery.mockResolvedValue(false)
     await expect(
-      processAccountedWebhook({ eventType: 'document.uploaded', object: { document_id: 'doc_2' } }),
+      processAccountedWebhook({ userId: 'user_1', eventType: 'document.uploaded', object: { document_id: 'doc_2' } }),
     ).resolves.toBe('processed_document_uploaded')
     syncRepoMocks.confirmAccountedDocumentDelivery.mockRejectedValue(new Error('db down'))
     await expect(
-      processAccountedWebhook({ eventType: 'document.uploaded', object: { document_id: 'doc_3' } }),
+      processAccountedWebhook({ userId: 'user_1', eventType: 'document.uploaded', object: { document_id: 'doc_3' } }),
     ).resolves.toBe('processed_document_uploaded')
   })
 
   it('the document id is found wherever the payload names it — or not at all', async () => {
     syncRepoMocks.confirmAccountedDocumentDelivery.mockResolvedValue(true)
-    await expect(processAccountedWebhook({ eventType: 'document.uploaded', object: { id: 'doc_a' } })).resolves.toBe(
+    await expect(processAccountedWebhook({ userId: 'user_1', eventType: 'document.uploaded', object: { id: 'doc_a' } })).resolves.toBe(
       'confirmed_document_uploaded',
     )
-    await expect(processAccountedWebhook({ eventType: 'document.uploaded', object: { document: { id: 'doc_b' } } })).resolves.toBe(
+    await expect(processAccountedWebhook({ userId: 'user_1', eventType: 'document.uploaded', object: { document: { id: 'doc_b' } } })).resolves.toBe(
       'confirmed_document_uploaded',
     )
     syncRepoMocks.confirmAccountedDocumentDelivery.mockClear()
-    await expect(processAccountedWebhook({ eventType: 'document.uploaded', object: { other: 'x' } })).resolves.toBe(
+    await expect(processAccountedWebhook({ userId: 'user_1', eventType: 'document.uploaded', object: { other: 'x' } })).resolves.toBe(
       'processed_document_uploaded',
     )
-    await expect(processAccountedWebhook({ eventType: 'document.uploaded', object: null })).resolves.toBe(
+    await expect(processAccountedWebhook({ userId: 'user_1', eventType: 'document.uploaded', object: null })).resolves.toBe(
       'processed_document_uploaded',
     )
     expect(syncRepoMocks.confirmAccountedDocumentDelivery).not.toHaveBeenCalled()
   })
 
   it('unknown types — including the provider webhook.test probe — count as unknown', async () => {
-    await expect(processAccountedWebhook({ eventType: 'webhook.test', object: null })).resolves.toBe('unknown_type')
-    await expect(processAccountedWebhook({ eventType: 'something.future', object: null })).resolves.toBe('unknown_type')
+    await expect(processAccountedWebhook({ userId: 'user_1', eventType: 'webhook.test', object: null })).resolves.toBe('unknown_type')
+    await expect(processAccountedWebhook({ userId: 'user_1', eventType: 'something.future', object: null })).resolves.toBe('unknown_type')
     expect(syncRepoMocks.confirmAccountedDocumentDelivery).not.toHaveBeenCalled()
   })
 })

@@ -218,18 +218,22 @@ export async function connectProviderWithApiKey(
 /**
  * The registration adapter the flow calls: decrypts nothing (the flow hands
  * the plaintext secrets), builds the callback origin from the deployment's
- * stated public URL, and returns the triples to store. Failures propagate —
- * the flow flags the connection `needs_attention`.
+ * stated public URL (`webhookApiOrigin` throws `NoPublicApiOriginError` when
+ * none is configured — the flow flags the connection `needs_attention`,
+ * S5), and returns the triples to store. Failures propagate — the flow
+ * flags the connection `needs_attention`.
  */
 async function registerAccountedWebhooksAdapter(reg: {
   secrets: { apiKey: string }
   companyId: string
   token: string
+  /** The public origin the callback URL is built on (S5: the FLOW resolves it). */
+  apiOrigin: string
 }): Promise<AccountedWebhookSubscriptionSecret[]> {
   return registerAccountedWebhooks({
     apiKey: reg.secrets.apiKey,
     companyId: reg.companyId,
-    apiOrigin: webhookApiOrigin(),
+    apiOrigin: reg.apiOrigin,
     token: reg.token,
     fetchImpl: fetch,
   })

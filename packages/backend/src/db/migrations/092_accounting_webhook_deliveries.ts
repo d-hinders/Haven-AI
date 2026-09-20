@@ -29,9 +29,28 @@ import type { PoolClient } from 'pg'
  *    <token>`), so the secret lookup is direct and the route never guesses
  *    the company from the payload. The token is 32 random bytes base64url
  *    (256 bits — stated for the reviewer trap list's identifier-entropy
- *    item; unguessable, unlike a UUID). It is a TEXT column with a
- *    uniqueness check in the application layer (the lookup is by provider +
- *    token), because the capability is per (provider, token), not per table.
+ *    item; unguessable, unlike a UUID). It is a TEXT column whose uniqueness
+ *    is a DB FACT: a PARTIAL unique index (PR #3196 review) over the rows
+ *    that carry one — `WHERE webhook_token IS NOT NULL`, since every
+ *    non-Accounted row and every disconnected row has none. (The lookup is
+ *    still by provider + token in the application layer; the index turns
+ *    "the capability is unique" from a convention into a constraint.)
+ *
+ * 3. PR #3196 review additions, in the same migration (093 is reserved for
+ *    #3167 — never renumbered):
+ *
+ *    - `accounting_webhook_deliveries.user_id` — nullable: the connection
+ *      row the capability token resolved. Without it the ledger cannot
+ *      answer "whose deliveries are these" without joining through a token
+ *      that a reconnect RETIRES — cheap to add while the table is born,
+ *      expensive to backfill once real deliveries exist (S1).
+ *
+ *    - `accounting_feed_syncs.delivery_confirmed_at` — the provider-webhook
+ *      confirmation timestamp on a pushed row (S2). The confirmation used to
+ *      ride `error`, which is the feed's FAILURE vocabulary: the page
+ *      renders `s.error ?? rowIdentity.document(id)`, so a confirmed row
+ *      lost its document id the moment the confirmation landed. A real
+ *      column keeps `error` an error and the confirmation queryable.
  *
  * Schema-only: no rows exist anywhere (the feature ships dark behind
  * `HAVEN_ACCOUNTING_ENABLED` and only dev connects Accounted), so there is
@@ -46,6 +65,7 @@ export async function up(client: PoolClient): Promise<void> {
       id           BIGSERIAL PRIMARY KEY,
       provider     TEXT NOT NULL,
       delivery_id  TEXT NOT NULL,
+      user_id      TEXT,
       event_type   TEXT,
       api_version  TEXT,
       request_id   TEXT,
@@ -62,6 +82,16 @@ export async function up(client: PoolClient): Promise<void> {
     ALTER TABLE accounting_connections
       ADD COLUMN IF NOT EXISTS webhook_token TEXT;
 
+    -- The capability is unique among the rows that carry one: a PARTIAL
+    -- unique index, since webhook_token is NULL on every non-Accounted
+    -- row (and a disconnected row) and a plain UNIQUE would silently allow
+    -- only ONE such row per table (PR #3196 review). AFTER the ADD COLUMN:
+    -- on a database that does not have the column yet, the index would
+    -- otherwise reference it before it exists.
+    CREATE UNIQUE INDEX IF NOT EXISTS accounting_connections_webhook_token_key
+      ON accounting_connections (webhook_token)
+      WHERE webhook_token IS NOT NULL;
+
     -- #3019: the webhook half can fail independently of the feed (the key
     -- validates, the subscriptions do not). The state is user-resolvable
     -- (reconnect), so it joins the needs-attention family; the type's union
@@ -70,11 +100,18 @@ export async function up(client: PoolClient): Promise<void> {
     ALTER TABLE accounting_connections
       ADD CONSTRAINT accounting_connections_status_check
         CHECK (status IN ('connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'needs_attention', 'disconnected'));
+
+    -- S2 (PR #3196 review): the provider-webhook confirmation gets a real
+    -- column instead of riding the failure error field.
+    ALTER TABLE accounting_feed_syncs
+      ADD COLUMN IF NOT EXISTS delivery_confirmed_at TIMESTAMPTZ;
   `)
 }
 
 export async function down(client: PoolClient): Promise<void> {
   await client.query(`
+    ALTER TABLE accounting_feed_syncs DROP COLUMN IF EXISTS delivery_confirmed_at;
+    DROP INDEX IF EXISTS accounting_connections_webhook_token_key;
     ALTER TABLE accounting_connections DROP CONSTRAINT IF EXISTS accounting_connections_status_check;
     ALTER TABLE accounting_connections
       ADD CONSTRAINT accounting_connections_status_check

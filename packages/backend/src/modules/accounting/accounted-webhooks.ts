@@ -17,7 +17,7 @@
  * ## The secrets blob widens
  *
  * `ApiKeySecrets` carries the three `(subscription_id, event_type, secret)`
- * triples as `webhookSubscriptions`, next to `apiKey`. Everything is
+ * triples as `webhooks`, next to `apiKey`. Everything is
  * encrypted together with the key (`infra/secrets.ts`); no secret is ever
  * logged or echoed.
  *
@@ -297,15 +297,19 @@ export function redactAccountedWebhookObject(object: Record<string, unknown>): R
 
 /**
  * The per-type processing AFTER the dedupe row is written. Returns the
- * counter name the route reports. The document-upload confirmation reads the
- * sync ledger for a row whose `external_ref` carries the payload's document
- * id; a read failure is swallowed into the generic `processed` count — the
- * confirmation is an optimisation over the recorded delivery, never a
- * correctness gate (the row and the counter are the durable facts).
+ * counter name the route reports. The document match reads the sync ledger
+ * for ONE USER's row whose `external_ref` carries the payload's document id
+ * (`userId` comes from the connection row the capability token resolved —
+ * the scoping keeps the confirmation write inside that user's ledger, PR
+ * #3196 review S1); a read failure is swallowed into the generic `processed`
+ * count — the confirmation is an optimisation over the recorded delivery,
+ * never a correctness gate (the row and the counter are the durable facts).
  */
 export async function processAccountedWebhook(input: {
   eventType: string | null
   object: Record<string, unknown> | null
+  /** The connection row's owner — scopes the document confirmation. */
+  userId: string
 }): Promise<string> {
   if (input.eventType === 'journal_entry.committed') {
     // Stored on the deliveries row by the route (payload), counted here. The
@@ -319,7 +323,7 @@ export async function processAccountedWebhook(input: {
     if (documentId) {
       try {
         const { confirmAccountedDocumentDelivery } = await import('../../infra/repositories/accounting-feed-syncs.js')
-        const confirmed = await confirmAccountedDocumentDelivery(documentId)
+        const confirmed = await confirmAccountedDocumentDelivery(input.userId, documentId)
         if (confirmed) return 'confirmed_document_uploaded'
       } catch {
         // Fall through to the plain processed count.

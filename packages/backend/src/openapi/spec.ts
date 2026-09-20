@@ -680,8 +680,8 @@ const accountingConnection = {
     authKind: { type: 'string', enum: ['oauth2', 'api_key'] },
     status: {
       type: 'string',
-      enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
-      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider\'s required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.',
+      enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'needs_attention', 'disconnected'],
+      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider\'s required scopes, or by a push whose create call was refused for scope (#2865). `needs_attention` (#3019) is the webhook half failing independently of the feed — the key validates and pushes work, but the subscriptions could not be created (a `webhook subscription failed` registration) or the deployment states no public API origin (`no public API origin configured`); a reconnect after fixing the deployment state resolves it. A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.',
     },
     statusReason: { type: ['string', 'null'] },
     isActiveDestination: { type: 'boolean', description: 'Exactly one connection per user is where settled payments go.' },
@@ -3414,7 +3414,7 @@ export const openapiSpec = {
                         displayName: { type: 'string' },
                         status: {
                           type: 'string',
-                          enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
+                          enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'needs_attention', 'disconnected'],
                         },
                         companyName: { type: ['string', 'null'] },
                         lastPushAt: { type: ['string', 'null'], format: 'date-time' },
@@ -7315,20 +7315,43 @@ export const openapiSpec = {
           accounting: {
             type: 'object',
             description:
-              'Accounting-feed on-call counters (#2872), deployment-wide, read live from two aggregate ' +
-              'queries. `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the ' +
+              'Accounting-feed on-call counters (#2872, widened by #3019). `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the ' +
               'attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: ' +
-              'connections in `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — only the ' +
-              "user's re-consent resolves them. Thresholds: docs/operations/accounting-feed.md. " +
-              'The counters are the one database read on this payload: when the queries throw, both ' +
-              'are `null` and `unavailable` is `true` while the in-memory siblings still answer.',
-            required: ['exhaustedSyncs', 'connectionsNeedingAttention'],
+              'connections in `needs_reauthorisation`, `scope_missing`, `revoked_at_provider` or `needs_attention` — only the ' +
+              "user's re-consent (or, for `needs_attention`, a reconnect after the deployment fix) resolves them. `webhookCounters`: " +
+              'the Accounted webhook receiver\u2019s nine per-answer-class counters (received / bad_signature / stale / unknown_token / duplicate / ' +
+              'processed / feature_off / unknown_type / confirmed) — IN-PROCESS, process-lifetime, reset on restart; the durable facts are the ' +
+              '`accounting_webhook_deliveries` rows, not these. Thresholds: docs/operations/accounting-feed.md. ' +
+              'The two integer counters are the one database read on this payload: when the queries throw, both ' +
+              'are `null` (and `webhookCounters` with them) and `unavailable` is `true` while the in-memory siblings still answer.',
+            required: ['exhaustedSyncs', 'connectionsNeedingAttention', 'webhookCounters'],
             properties: {
               exhaustedSyncs: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
               connectionsNeedingAttention: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+              webhookCounters: {
+                anyOf: [
+                  {
+                    type: 'object',
+                    required: ['received', 'bad_signature', 'stale', 'unknown_token', 'duplicate', 'processed', 'feature_off', 'unknown_type', 'confirmed'],
+                    properties: {
+                      received: { type: 'integer', minimum: 0 },
+                      bad_signature: { type: 'integer', minimum: 0 },
+                      stale: { type: 'integer', minimum: 0 },
+                      unknown_token: { type: 'integer', minimum: 0 },
+                      duplicate: { type: 'integer', minimum: 0 },
+                      processed: { type: 'integer', minimum: 0 },
+                      feature_off: { type: 'integer', minimum: 0 },
+                      unknown_type: { type: 'integer', minimum: 0 },
+                      confirmed: { type: 'integer', minimum: 0 },
+                    },
+                    additionalProperties: false,
+                  },
+                  { type: 'null' },
+                ],
+              },
               unavailable: {
                 type: 'boolean',
-                description: 'Present and `true` only when the counters could not be read; the two integers are then `null`.',
+                description: 'Present and `true` only when the counters could not be read; the two integers and `webhookCounters` are then `null`.',
               },
             },
             additionalProperties: false,

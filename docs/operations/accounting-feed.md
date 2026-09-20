@@ -36,7 +36,7 @@ covers:
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/ConnectionSettings.tsx
   - packages/frontend/src/components/accounting/BackfillDialog.tsx
-last-verified: "2026-09-18"
+last-verified: "2026-09-20"
 ---
 
 # Accounting feed — operations runbook
@@ -272,7 +272,7 @@ lands on `connect=error&reason=feature_off` instead of a bare 404, with the
 | session + feature gate | `POST /accounting/connections/:provider/connect-url` | consent URL for a live OAuth2 provider: signed, purpose-scoped, provider-bound, single-use `state` (10 min). Also the **re-consent** path — issued for an existing row whatever its status. 404 (#2918) when not hosted or the flag is off, ahead of the unknown-provider 404 |
 | public (signed `state`) | `GET /accounting/connections/:provider/callback` | authenticated by the `state` (its `jti` is consumed before the code exchange, and before the feature check — see below). Reads the company (`getCompanyInfo`), refuses a ledger outside the supported currencies before storing anything, UPSERTs the row: on an existing row it replaces secrets, `granted_scope`, `status → connected`, and keeps `settings`, `feed_from`, the active flag and the sync history. A grant narrower than `requiredScopes` is stored as `scope_missing`. Redirects to `/accounting?provider=…&connect=…`. NOT gated the same way as the other connection routes (#2918): a consent already in flight when the flag is flipped off redirects `connect=error&reason=feature_off` — never a bare 404 — with the state still consumed, so it cannot be replayed once the flag comes back on |
 | session + feature gate | `POST /accounting/connections/:provider/api-key` | validate a key at the provider, store encrypted (no live `api_key` provider today → 409); a ledger outside the supported currencies → 409 `UNSUPPORTED_BASE_CURRENCY`. 404 (#2918) when not hosted or the flag is off |
-| session + feature gate | `DELETE /accounting/connections/:provider` | disconnect: revoke at the provider first when the descriptor declares `revoke` (Fortnox does), then secrets cleared, row kept as `disconnected`, active flag dropped; a failed revoke still disconnects locally (one `warn` line, error NAME only: `accounting provider revoke failed on disconnect`). 404 (#2918) when not hosted or the flag is off |
+| session + feature gate | `DELETE /accounting/connections/:provider` | disconnect: revoke at the provider first when the descriptor declares `revoke` (Fortnox does), then secrets cleared, row kept as `disconnected`, active flag dropped; a failed revoke still disconnects locally (one `warn` line, error NAME only: `accounting provider revoke failed on disconnect`). For an Accounted connection (#3019) it also deletes the three webhook subscriptions at the provider, best effort — a provider outage never blocks the disconnect (subscriptions left behind are removed by hand; see *When the sandbox shows a subscription `dead'*). 404 (#2918) when not hosted or the flag is off |
 | session + feature gate | `POST /accounting/connections/:provider/activate` | make it the destination; stamps **`feed_from = now`** in the same transaction. 404 (#2918) when not hosted or the flag is off |
 | session + feature gate | `POST /accounting/connections/:provider/backfill` | `{ since }`: moves `feed_from` **earlier only** (400 `SINCE_INVALID` / `SINCE_NOT_EARLIER`, 409 `NOT_ACTIVE`), records `settings.backfill`, runs one bounded sync; answers `{ feedFrom, fed }`. 404 (#2918) when not hosted or the flag is off |
 | session + feature gate | `PATCH /accounting/connections/:provider/settings` | exactly `suggested_account` and `auto_feed`; anything else 400 `INVALID_SETTING` naming `key`; a SQL-side JSONB merge. 404 (#2918) when not hosted or the flag is off |
@@ -281,6 +281,7 @@ lands on `connect=error&reason=feature_off` instead of a bare 404, with the
 | session + `requireAccountingFeed` (entitlement) | `GET /accounting/feed/verify/:paymentId` | live read-back through the active connection's connector: `registered` / `booked` (+ voucher) / `cancelled` / `missing` |
 | session + `requireAccountingFeed` (entitlement) | `POST /accounting/feed/reopen/:paymentId` | verification-gated reopen: flips `pushed → failed` ONLY when the provider confirms the record is gone; 409 otherwise, 409 `previous_company` for a row pushed under a previous company |
 | session | `POST /accounting/fortnox/push` | LEGACY asserting voucher push (`accounting/legacy/`); 410 unless `HAVEN_LEGACY_BOOKKEEPING_ENABLED` |
+| public (capability URL) | `POST /accounting/webhooks/accounted/:token` | the Accounted provider's callback (#3019) — the ONE route in this table authenticated by neither a session nor an entitlement: the per-connection capability token in the path plus the HMAC signature (`X-Gnubok-Signature`, raw body, 5-minute timestamp window) are the credentials. **200 `feature_off` when the flag is off** (after the signature verdict — unlike every other row here, which 404s), 200 for `webhook.test`, unknown types, duplicates and success; 400 on a bad/malformed signature or stale timestamp; 404 on an unknown token; never 410, never a 3xx (the provider auto-disables on both). Rate-limited 600/min per IP; body capped at 256 KB |
 
 "feature gate" above is `requireAccountingFeature` (#2918): `config.hosted &&
 config.accountingEnabled`, no entitlement check. "`requireAccountingFeed`
@@ -301,7 +302,7 @@ which is what `missingScopes` on the API reads.
 | `needs_reauthorisation` | the token endpoint refused the refresh with a verdict on the GRANT: `invalid_grant`; a 400/403 with no readable code; or a 400/403 carrying any code that is NOT one of the client-side ones (`isGrantRefusal`, `oauth-flow.ts`). NOT on 401 / `invalid_client` and the other client-side codes — those are Haven's credentials — and not on 429 / 408 / 5xx / network, which leave the row untouched with the refresh token unconsumed | still the destination; every payment is recorded `skipped` with `connection needs_reauthorisation: <reason>`; nothing is refreshed, nothing pushed; the sweep leaves its rows alone | the user's **Reconnect** (the same connect-url + callback on the same row); then the skipped rows are re-claimed by the sweep or Sync now |
 | `scope_missing` | (1) at the callback, the echoed scope string is short of `requiredScopes`; (2) at connect, the company read was refused for scope; (3) PRE-push, the create call itself was refused for scope — the sync row is `skipped` (`scope refused before the invoice was created: …`), nothing exists at the provider; (4) POST-push, the attachment step was refused — the sync row stays **`pushed`** with the note, never re-pushed | no destination: no new rows, `syncUser` feeds nothing, the sweep's `c.status = 'connected'` leaves its rows alone | **Reconnect**; the callback UPDATEs the row and keeps settings, floor, flag and history. If it comes straight back `scope_missing`: the provider app registration lacks that scope (Fortnox: the developer-portal permissions must include every entry of `FORTNOX_SCOPE`) |
 | `revoked_at_provider` | reserved for a provider that reports a revocation to Haven (Fortnox has a consent-revoked webhook; Haven does not receive it). **No code path sets it today**; a revocation inside Fortnox surfaces as `needs_reauthorisation` at the next refresh | as `needs_reauthorisation` | Reconnect |
-| `needs_attention` (#3019) | Accounted only: the WEBHOOK half of a connect failed — the three event subscriptions could not be created at the provider (`webhook subscription failed — …` in `status_reason`). The key validated and the feed works; the push confirmations do not arrive | **Reconnect** (paste the key again): connect re-issues the capability token and re-runs the registration |
+| `needs_attention` (#3019) | Accounted only: the WEBHOOK half of a connect failed — the three event subscriptions could not be created at the provider (`webhook subscription failed — …` in `status_reason`), or the deployment states no public API origin (`no public API origin configured` — nothing was registered; fail-closed, PR #3196 review). The key validated and the feed works; the push confirmations do not arrive | still the destination; the feed keeps feeding — only the push confirmations are missing | **Reconnect** (paste the key again): connect re-issues the capability token and re-runs the registration; for the missing-origin reason, state `HAVEN_API_URL` on the backend deployment first |
 | `disconnected` | the user's Disconnect; secrets NULL, `secrets_key_version = 0`, flag dropped, `status_reason = user disconnected [(grant revoked at provider)]` | nothing; history kept | **Connect** (the same row is reused; settings survive) |
 
 A `connected` row with a non-empty `missingScopes` is a grant that predates a
@@ -510,7 +511,7 @@ goes through `setOpsEventSink`, which `index.ts` points at the same logger
 |---|---|---|---|
 | `accounting.sweep.run` | `info` when `considered > 0`, else `debug` | once per sweep tick | `considered`, `pushed`, `failed`, `deferred`, `exhausted`, `skipped`, `connections`, `rateLimited` |
 | `accounting.sync.exhausted` | `warn` | the sweep wrote a row's terminal reason (only when the guarded write took) | `userId`, `provider`, `paymentId`, `attempts` (8), `reason` (the last provider message) |
-| `accounting.connection.needs_attention` | `warn` | a connection was written `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — every write site goes through `flagConnectionStatus` (`ops-signals.ts`) | `userId`, `provider`, `status`, `reasonPrefix` (the head of the row's `status_reason` before its ` — ` separator — `missing scopes: a, b`, or `refresh refused: <OAuth error code>` — capped at 120 characters), `missingScopes` (the parsed list; empty unless the prefix names scopes). The line never carries the connector's free-text detail: on the `scope_missing` paths the row's full `status_reason` embeds the provider's message and the refused request path (a supplier-lookup refusal includes the recipient's name), so read that from the row, not the log. Never token material |
+| `accounting.connection.needs_attention` | `warn` | a connection was written `needs_reauthorisation`, `scope_missing`, `revoked_at_provider` or `needs_attention` — every write site goes through `flagConnectionStatus` (`ops-signals.ts`) | `userId`, `provider`, `status`, `reasonPrefix` (the head of the row's `status_reason` before its ` — ` separator — `missing scopes: a, b`, `refresh refused: <OAuth error code>`, `webhook subscription failed`, or `no public API origin configured` — capped at 120 characters), `missingScopes` (the parsed list; empty unless the prefix names scopes). The line never carries the connector's free-text detail: on the `scope_missing` paths the row's full `status_reason` embeds the provider's message and the refused request path (a supplier-lookup refusal includes the recipient's name), so read that from the row, not the log. Never token material |
 | `accounting.sweep.failed` | `warn`, always logged | the sweep's tick threw outside a run — leader election or the query layer, not a push (`Accounting retry sweep failed`) | `err` |
 
 `accounting_company_switch` (`info`, JSON on `console`) is the #2864
@@ -526,10 +527,13 @@ only after the token passes), under `accounting`:
 | `connectionsNeedingAttention` | `COUNT(*) FROM accounting_connections WHERE status IN ('needs_reauthorisation', 'scope_missing', 'revoked_at_provider', 'needs_attention')` (`COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL` over `NEEDS_ATTENTION_STATUSES`) | connections only a reconnect resolves; `disconnected` is the user's choice and is not counted |
 | `webhookCounters` (#3019) | in-process (`getAccountingWebhookCounters()`), reset on restart | the Accounted webhook receiver's per-answer-class counts: `received`, `bad_signature`, `stale`, `unknown_token`, `duplicate`, `processed`, `feature_off`, `unknown_type`, `confirmed`. The durable facts are the `accounting_webhook_deliveries` rows — read those, not these, for "what did we receive" |
 
-Both are read live, one aggregate each, no per-user data on the wire. When
-the queries throw, both fields are `null` and `unavailable: true` is added —
-the route answers 200 with the in-memory fields intact rather than 500ing
-the whole payload (review on #2905).
+`exhaustedSyncs` and `connectionsNeedingAttention` are read live, one
+aggregate query each, no per-user data on the wire; `webhookCounters` is the
+third field and is IN-PROCESS (no query at all — process-lifetime, reset on
+restart). When the queries throw, both integer fields and `webhookCounters`
+are `null` and `unavailable: true` is added — the route answers 200 with the
+in-memory fields intact rather than 500ing the whole payload (review on
+#2905).
 
 **Alert thresholds** (dev today; the numbers are the first honest ones, not
 tuned ones — a handful of connections exist):
@@ -751,10 +755,11 @@ SEK is the inference, not a provider-stated fact (#2877's supported list still
 guards any future provider that does expose a currency).
 
 **Scopes.** `requiredScopes` is empty per the api_key contract (there is no
-grant to compare against). The key must carry `companies:read` +
-`documents:write`; that requirement lives in the paste-UI copy and the product
-doc, because no scope-introspection endpoint exists and `dry_run` is
-unsupported on document upload — a short key connects fine and surfaces as
+grant to compare against). The key must carry `companies:read`,
+`documents:write` and — since #3019 — `webhooks:manage` (connect creates the
+three event subscriptions); that requirement lives in the paste-UI copy and
+the product doc, because no scope-introspection endpoint exists and `dry_run`
+is unsupported on document upload — a short key connects fine and surfaces as
 `scope_missing` at the first push (#2865 path).
 
 **The connector in slice 1.** `AccountedConnector.getCompanyInfo` is the only
@@ -799,18 +804,29 @@ harness's `capabilities` (attachments/verify false) and
 `declares.baseCurrency: false` skip — by name, with printed reasons — cases
 3/6, case 4's booking halves, and cases 7/7c/7d. Case 4b (foreign /
 no_invoice_ref) and 6b (pre-push scope refusal) still run. The skip
-decisions are pinned by `connector-conformance-skips.test.ts`, and
-`accounted-outbound-allowlist.test.ts` pins the outbound surface to exactly
-`GET /api/v1/companies` + `POST .../documents` over the recorded request
-log (`/download`, `journal-entries`, `supplier-invoices`, `link` never
-appear).
+skip decisions are pinned by `connector-conformance-skips.test.ts`, and
+`accounted-outbound-allowlist.test.ts` pins the connector's outbound surface
+to exactly `GET /api/v1/companies` + `POST .../documents` over the recorded
+request log (`/download`, `journal-entries`, `supplier-invoices`, `link`
+never appear). That pin covers the CONNECTOR only — since #3019 the module
+also calls the webhook API (`/webhooks` CRUD) at connect/disconnect through
+`registerAccountedWebhooks` / `deleteAccountedWebhooks`, which the allowlist
+test deliberately does not count: its scope is what `AccountedConnector`
+itself may reach, not what the webhook registration calls.
 
 **Live hosts.** `https://app.accounted.se` (the OpenAPI `servers` entry);
 `app.gnubok.se` serves the same deployment as an alternative host, not a
 redirect target. Keys are created AND revoked at `/settings/api`; the sandbox
 test key is simulation-only — writes answer 403 `TEST_KEY_WRITE_BLOCKED`, so
 end-to-end document delivery can only be proven with a live key (#3018's
-probe).
+probe). The same block applies to the WEBHOOK probe (below): registration
+creates three subscriptions and `POST /webhooks/{id}/test` dispatches — both
+writes — so the probe step needs a key that can write on the target company.
+On the sandbox that means a key the sandbox company treats as live-capable
+(the `TEST_KEY_WRITE_BLOCKED` prefix `gnubok_sk_test_` is exactly what the
+block keys on); when the sandbox refuses writes, the probe runs against a
+company whose key is not prefix-blocked. Which kind of key the probe needs is
+a property of the TARGET company's key policy, not of the probe itself.
 
 ## Provider notes: Accounted webhooks (#3019, slice 3)
 
@@ -823,6 +839,24 @@ at the connection's capability URL
 random bytes base64url (256 bits), generated fresh at every connect and stored
 on the connection row (`accounting_connections.webhook_token`); the URL is the
 route's first credential, the HMAC its second.
+
+**The callback origin is the deployment's own `HAVEN_API_URL`** (or
+`PUBLIC_API_URL`). There is NO localhost fallback: with neither variable set,
+`webhookApiOrigin()` throws and the connect flow flags the row
+`needs_attention` with `no public API origin configured` instead of
+registering a callback no provider could reach (PR #3196 review). The webhook
+half of this runbook therefore requires `HAVEN_API_URL` on the backend
+deployment (see `docs/operations/dev-environment.md`).
+
+**A reconnect tears down the previous three subscriptions first.** The old
+row's encrypted secrets blob was the only record of the previous
+`(subscription_id, event_type, secret)` triples — `upsertConnection`
+overwrites it — so the flow deletes the old subscriptions at the provider
+BEFORE storing the new blob (best effort, same contract as disconnect; PR
+#3196 review). A reconnect that skipped the teardown used to orphan three
+provider-side subscriptions dispatching to a retired token; if you find such
+orphans on a connection that predates this fix, remove them by hand (the
+recovery path below lists them).
 
 **The answer matrix, and why it must not change.** 400 on a bad signature,
 a malformed signature header, or a timestamp older than 5 minutes; 404 on an

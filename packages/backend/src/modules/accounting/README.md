@@ -135,8 +135,9 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      generic flows and the orchestrator already do; a connector normally
      never writes a status at all (it reports `connectionStatus` on its
      result). The wrapper is what emits `accounting.connection.needs_attention`
-     for `needs_reauthorisation` / `scope_missing` / `revoked_at_provider`,
-     and the `/health/ops` counter counts the same three states — a write
+     for `needs_reauthorisation` / `scope_missing` / `revoked_at_provider` /
+     `needs_attention`, and the `/health/ops` counter counts the same four
+     states — a write
      that bypasses it is a state on-call cannot see.
    - **Retries are the sweep's, not yours (#2866).** A thrown error or a
      `failed` result lands in the ledger and `retry-sweep.ts` re-feeds the

@@ -38,8 +38,9 @@ const { companyInfoMocks } = vi.hoisted(() => ({
 }))
 vi.mock('../company-info.js', () => companyInfoMocks)
 
-const { registerSpy, flagSpy } = vi.hoisted(() => ({
+const { registerSpy, deleteSpy, flagSpy } = vi.hoisted(() => ({
   registerSpy: vi.fn(),
+  deleteSpy: vi.fn(),
   flagSpy: vi.fn(),
 }))
 vi.mock('../ops-signals.js', () => ({ flagConnectionStatus: flagSpy }))
@@ -50,18 +51,28 @@ vi.mock('../accounted-webhooks.js', () => ({
     }
   },
   registerAccountedWebhooks: registerSpy,
+  // S3 (PR #3196 review) imports the teardown for the reconnect path; its
+  // provider-HTTP contract is `accounted-webhooks.test.ts`'s subject.
+  deleteAccountedWebhooks: deleteSpy,
 }))
 
 beforeAll(() => {
   process.env.HAVEN_SECRETS_KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=' // 32 bytes, base64
+  // S5 (PR #3196 review): `webhookApiOrigin()` no longer falls back to
+  // localhost — without a stated origin the flow flags the row instead of
+  // registering. These tests exercise the REGISTRATION half, so the origin
+  // is stated for the whole file; the no-origin behaviour has its own case
+  // below.
+  process.env.HAVEN_API_URL = 'https://api.example.test'
 })
 afterAll(() => {
   delete process.env.HAVEN_SECRETS_KEY
+  delete process.env.HAVEN_API_URL
 })
 
 import { connectWithApiKey } from '../api-key-flow.js'
 import { AccountedWebhookRegistrationError } from '../accounted-webhooks.js'
-import { decryptSecrets } from '../../../infra/secrets.js'
+import { decryptSecrets, encryptSecrets } from '../../../infra/secrets.js'
 import type { AccountingConnectionRow } from '../../../infra/repositories/accounting-connections.js'
 import type { AccountingProvider, ProviderCompanyInfo } from '../provider.js'
 import type { AccountingConnector } from '../connector.js'
@@ -161,12 +172,14 @@ describe('connectWithApiKey #3019 — the webhook half of connect', () => {
 
     // The order the issue demands: row → token → registration → secrets.
     expect(calls).toEqual(['upsert', 'token', 'register', 're-encrypt'])
-    // The registration got the PLAINTEXT key and the same token that was set.
+    // The registration got the PLAINTEXT key, the same token that was set,
+    // and the public origin the callback URL is built on (S5).
     expect(registerSpy).toHaveBeenCalledTimes(1)
-    const reg = registerSpy.mock.calls[0][0] as { secrets: { apiKey: string }; companyId: string; token: string }
+    const reg = registerSpy.mock.calls[0][0] as { secrets: { apiKey: string }; companyId: string; token: string; apiOrigin: string }
     expect(reg.secrets.apiKey).toBe('gnubok_sk_test_k')
     expect(reg.companyId).toBe('comp_1')
     expect(reg.token).toBe(repoMocks.newWebhookToken())
+    expect(reg.apiOrigin).toBe('https://api.example.test')
     expect(repoMocks.setWebhookToken).toHaveBeenCalledWith('user_1', 'accounted', reg.token)
 
     // The final secrets blob carries BOTH the key and the three triples.
@@ -182,6 +195,65 @@ describe('connectWithApiKey #3019 — the webhook half of connect', () => {
     repoMocks.getConnection.mockResolvedValue(row({ webhook_token: 'old-token' }))
     await connectWithApiKey({ provider: PROVIDER, connector: CONNECTOR, userId: 'user_1', apiKey: 'gnubok_sk_test_k', webhooks: { register: registerSpy } })
     expect(repoMocks.setWebhookToken).toHaveBeenCalledWith('user_1', 'accounted', 'tok_' + 'x'.repeat(43))
+  })
+
+  it('a reconnect deletes the previous three subscriptions BEFORE the secrets blob is overwritten (S3)', async () => {
+    // The old row carries the only record of the previous triples — its
+    // encrypted secrets blob. `upsertConnection` below would overwrite it.
+    const oldBlob = encryptSecrets({ apiKey: 'gnubok_sk_old', webhooks: TRIPLES } as unknown as Record<string, unknown>)
+    repoMocks.getConnection.mockResolvedValue(
+      row({ webhook_token: 'old-token', secrets_ciphertext: oldBlob.ciphertext, secrets_key_version: oldBlob.keyVersion }),
+    )
+    const calls: string[] = []
+    repoMocks.upsertConnection.mockImplementation(async () => {
+      calls.push('upsert')
+      return row()
+    })
+    deleteSpy.mockImplementation(async () => {
+      calls.push('delete')
+      return { deleted: 3, failed: 0 }
+    })
+
+    await connectWithApiKey({ provider: PROVIDER, connector: CONNECTOR, userId: 'user_1', apiKey: 'gnubok_sk_test_k', webhooks: { register: registerSpy } })
+
+    // Teardown runs while the old secrets are still in hand — before the
+    // overwrite that would lose them.
+    expect(calls).toEqual(['delete', 'upsert'])
+    expect(deleteSpy).toHaveBeenCalledTimes(1)
+    const del = deleteSpy.mock.calls[0][0] as { apiKey: string; companyId: string; subscriptions: AccountedWebhookSubscriptionSecret[] }
+    expect(del.apiKey).toBe('gnubok_sk_old')
+    expect(del.companyId).toBe('comp_1')
+    expect(del.subscriptions).toEqual(TRIPLES)
+  })
+
+  it('a first connect never tears anything down (S3 is a reconnect-only step)', async () => {
+    repoMocks.getConnection.mockResolvedValue(null)
+    await connectWithApiKey({ provider: PROVIDER, connector: CONNECTOR, userId: 'user_1', apiKey: 'gnubok_sk_test_k', webhooks: { register: registerSpy } })
+    expect(deleteSpy).not.toHaveBeenCalled()
+  })
+
+  it('no public API origin configured → the row is flagged needs_attention and NOTHING is registered (S5)', async () => {
+    delete process.env.HAVEN_API_URL
+    delete process.env.PUBLIC_API_URL
+    try {
+      const saved = await connectWithApiKey({ provider: PROVIDER, connector: CONNECTOR, userId: 'user_1', apiKey: 'gnubok_sk_test_k', webhooks: { register: registerSpy } })
+      // The row stays stored and connected — the feed half works; the flag
+      // names the one thing the deployment must state.
+      expect(saved.status).toBe('connected')
+      expect(flagSpy).toHaveBeenCalledTimes(1)
+      const [userId, providerId, status, reason] = flagSpy.mock.calls[0] as [string, string, string, string]
+      expect(userId).toBe('user_1')
+      expect(providerId).toBe('accounted')
+      expect(status).toBe('needs_attention')
+      expect(reason).toBe('no public API origin configured')
+      // Fail closed: no token issued, no callback registered, no triples stored.
+      expect(repoMocks.setWebhookToken).not.toHaveBeenCalled()
+      expect(registerSpy).not.toHaveBeenCalled()
+      expect(repoMocks.updateSecrets).not.toHaveBeenCalled()
+      expect(deleteSpy).not.toHaveBeenCalled()
+    } finally {
+      process.env.HAVEN_API_URL = 'https://api.example.test'
+    }
   })
   it('a registration failure leaves the row connected but flags needs_attention with the reason — never half-subscribed and never a thrown connect', async () => {
     // The real failure shape: the registration wrapper throws

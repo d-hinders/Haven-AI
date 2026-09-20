@@ -464,33 +464,40 @@ export async function countExhaustedSyncs(db: Executor = pool): Promise<number> 
 // A `document.uploaded` webhook names the document id the provider stored.
 // When it matches a pushed sync row's `external_ref`
 // (`accounted:document:<id>`), the row is delivery-confirmed by the PROVIDER
-// — independent evidence on top of the sha256 proof the upload ran. The flag
-// rides `error` (this slice has no dedicated column and must not add one:
-// #3019 stores confirmations in the deliveries table, the sync-row note is
-// the observable trace), appended read-modify-free as a fixed phrase.
+// — independent evidence on top of the sha256 proof the upload ran. The
+// confirmation is stamped in its OWN column (`delivery_confirmed_at`, a PR
+// #3196 review fix): `error` belongs to the feed's failure vocabulary (the
+// page renders `s.error ?? rowIdentity...`, so a note written there HIDES
+// the document id on a confirmed pushed row), and the confirmation is a
+// fact about the delivery, not an error.
 
 export const ACCOUNTED_DELIVERY_CONFIRMED_NOTE = 'delivery confirmed by provider webhook'
 
 export const CONFIRM_ACCOUNTED_DOCUMENT_SQL = `UPDATE accounting_feed_syncs
-     SET error = CASE
-           WHEN error IS NULL THEN $3
-           WHEN error LIKE '%' || $3 || '%' THEN error
-           ELSE error || ' — ' || $3
-         END,
-         updated_at = NOW()
+     SET delivery_confirmed_at = NOW(), updated_at = NOW()
      WHERE provider = $1
+       AND user_id = $3
        AND status = 'pushed'
        AND external_ref = $2
      RETURNING id`
 
+/**
+ * Confirm the pushed sync row whose `external_ref` names `documentId`, FOR
+ * ONE USER. `userId` is NOT optional by design (PR #3196 review, S1):
+ * `external_ref` is only unique within a user's ledger, and the webhook
+ * route resolves the connection row before it knows the document — the
+ * caller passes that row's `user_id`, so the write can never cross
+ * connections. Returns whether a row was confirmed.
+ */
 export async function confirmAccountedDocumentDelivery(
+  userId: string,
   documentId: string,
   db: Executor = pool,
 ): Promise<boolean> {
   const result = await db.query(CONFIRM_ACCOUNTED_DOCUMENT_SQL, [
     'accounted',
     `accounted:document:${documentId}`,
-    ACCOUNTED_DELIVERY_CONFIRMED_NOTE,
+    userId,
   ])
   return (result.rowCount ?? 0) > 0
 }

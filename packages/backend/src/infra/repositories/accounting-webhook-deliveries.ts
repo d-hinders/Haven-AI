@@ -15,7 +15,6 @@
  * (the probe's raw material, #3019 item 5); every other event type counts
  * without storing a body. Convention: `../accounting/README.md`.
  */
-
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
 
@@ -24,6 +23,8 @@ export interface AccountingWebhookDeliveryRow {
   id: number
   provider: string
   delivery_id: string
+  /** The connection row the capability token resolved — null on legacy rows. */
+  user_id: string | null
   event_type: string | null
   api_version: string | null
   request_id: string | null
@@ -41,8 +42,8 @@ export interface AccountingWebhookDeliveryRow {
  * caller then answers 200 WITHOUT processing again.
  */
 export const INSERT_WEBHOOK_DELIVERY_SQL = `INSERT INTO accounting_webhook_deliveries
-     (provider, delivery_id, event_type, api_version, request_id, payload, processed_at)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+     (provider, delivery_id, user_id, event_type, api_version, request_id, payload, processed_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
      ON CONFLICT (provider, delivery_id) DO NOTHING
      RETURNING id`
 
@@ -50,6 +51,8 @@ export async function recordWebhookDelivery(
   input: {
     provider: string
     deliveryId: string
+    /** The connection row's owner (S1, PR #3196 review); null when unknown. */
+    userId: string | null
     eventType: string | null
     apiVersion: string | null
     requestId: string | null
@@ -63,6 +66,7 @@ export async function recordWebhookDelivery(
   const r = await db.query<{ id: number }>(INSERT_WEBHOOK_DELIVERY_SQL, [
     input.provider,
     input.deliveryId,
+    input.userId,
     input.eventType,
     input.apiVersion,
     input.requestId,
@@ -75,8 +79,12 @@ export async function recordWebhookDelivery(
 export const COUNT_WEBHOOK_DELIVERIES_SQL = `SELECT COUNT(*)::int AS n
      FROM accounting_webhook_deliveries WHERE provider = $1`
 
-/** The dedupe row count for a provider — the `/health/ops` webhook counter's input. */
-export async function countWebhookDeliveries(provider: string, db: Executor = pool): Promise<number> {
-  const r = await db.query<{ n: number }>(COUNT_WEBHOOK_DELIVERIES_SQL, [provider])
-  return r.rows[0]?.n ?? 0
-}
+/**
+ * The dedupe row count for a provider, as SQL — the runbook's recovery
+ * verification ("the counters above move, and a retry lands a new row") and
+ * the real-DB migration test read the TABLE, not a TS helper, so the
+ * function the first cut exported is GONE (PR #3196 review: exported and
+ * unused — the `/health/ops` webhook input is the in-process counters in
+ * `ops-signals.ts`, not this query). The SQL stays exported for those
+ * readers.
+ */

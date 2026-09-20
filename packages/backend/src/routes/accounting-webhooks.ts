@@ -80,10 +80,14 @@ export const WEBHOOK_RATE_LIMIT = { max: 600, timeWindow: '1 minute' } as const
 
 export default async function accountingWebhookRoutes(app: FastifyInstance): Promise<void> {
   // Route-scoped raw-body capture — THIS instance only (the plugin's
-  // encapsulated context), never the root scope.
+  // encapsulated context), never the root scope. The bodyLimit is THIS
+  // route's own 256 KB (PR #3196 review): a webhook envelope is a few KB,
+  // Fastify's 1 MiB default invites bodies no envelope ever needs, and a
+  // smaller ceiling fails FAST (413) instead of after the provider's
+  // uploader sent megabytes into a handler that would store 16 KB at most.
   app.addContentTypeParser<Buffer>(
     'application/json',
-    { parseAs: 'buffer' },
+    { parseAs: 'buffer', bodyLimit: 256 * 1024 },
     (_req: FastifyRequest, body: Buffer, done: (err: Error | null, parsed?: Buffer) => void) => {
       done(null, body)
     },
@@ -92,9 +96,17 @@ export default async function accountingWebhookRoutes(app: FastifyInstance): Pro
   const handler = async (request: FastifyRequest, reply: FastifyReply) => {
     const params = request.params as Record<string, string>
     const token = params['token']
-    const context = readAccountedWebhookContext({ headers: request.headers, rawBody: request.body as Buffer })
+    // No Content-Type at all: Fastify's parser never runs, `request.body` is
+    // undefined, and handing that to the HMAC below would 500 on
+    // `Buffer.toString` of nothing (PR #3196 review). A bodyless POST is a
+    // probe, not a delivery — answer the provider's retry loop with 400 and
+    // count it, never a 500.
+    if (!Buffer.isBuffer(request.body)) {
+      incrementAccountingWebhookCounter('bad_signature')
+      return reply.code(400).send({ status: 'bad-signature', reason: 'malformed_header' })
+    }
+    const context = readAccountedWebhookContext({ headers: request.headers, rawBody: request.body })
     incrementAccountingWebhookCounter('received')
-
     // ── 1. The capability token: the only lookup the URL affords. ──────────
     const row = await getConnectionByWebhookToken(token)
     if (!row) {
@@ -120,7 +132,7 @@ export default async function accountingWebhookRoutes(app: FastifyInstance): Pro
       : triples
     let verdict: SignatureVerdict = { ok: false, reason: 'malformed_header' }
     for (const triple of candidates) {
-      verdict = verifyAccountedSignature({ rawBody: request.body as Buffer, header: context.signatureHeader, secret: triple.secret, nowMs: Date.now() })
+      verdict = verifyAccountedSignature({ rawBody: request.body, header: context.signatureHeader, secret: triple.secret, nowMs: Date.now() })
       if (verdict.ok) break
     }
     if (!verdict.ok) {
@@ -147,11 +159,13 @@ export default async function accountingWebhookRoutes(app: FastifyInstance): Pro
     // ── 4. The durable dedupe: the row is written BEFORE the 2xx. ──────────
     // The provider stops retrying once it sees 2xx, so nothing may be
     // deferred past the answer — processing is inline and `processed_at` is
-    // stamped in the same statement as the insert.
+    // stamped in the same statement as the insert. `row.user_id` rides along
+    // (S1, PR #3196 review): the ledger carries WHOSE delivery it was.
     const stored = prepareStoredPayload(eventType, context.envelope)
     const { inserted } = await recordWebhookDelivery({
       provider: 'accounted',
       deliveryId,
+      userId: row.user_id,
       eventType,
       apiVersion: context.apiVersion,
       requestId: context.requestId,
@@ -166,8 +180,9 @@ export default async function accountingWebhookRoutes(app: FastifyInstance): Pro
     // ── 5. Inline processing — cheap, counted, no sync-row state change. ───
     // The document match runs on the RAW object (a `document.uploaded` object
     // is matched, not stored — the payload column carries only the redacted
-    // `journal_entry.committed` object).
-    const counted = await processAccountedWebhook({ eventType, object: stored ?? context.rawObject })
+    // `journal_entry.committed` object). `row.user_id` scopes the write to
+    // the connection's own ledger (S1).
+    const counted = await processAccountedWebhook({ eventType, object: stored ?? context.rawObject, userId: row.user_id })
     if (counted === 'confirmed_document_uploaded') incrementAccountingWebhookCounter('confirmed')
     if (counted === 'unknown_type') incrementAccountingWebhookCounter('unknown_type')
     incrementAccountingWebhookCounter('processed')

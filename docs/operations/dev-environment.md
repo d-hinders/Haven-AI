@@ -402,6 +402,17 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > signing secrets (same blob, same key) — the *Secrets at rest* section of
   > `docs/operations/accounting-feed.md` is the reference, not this file.
 
+  > **Re-verified #3019 round 2 (PR #3196 review):** the webhook half now
+  > requires `HAVEN_API_URL` (or `PUBLIC_API_URL`) on the BACKEND deployment.
+  > The old `http://localhost:<port>` fallback is gone: with no stated origin
+  > the connect flow refuses to register any subscription and flags the
+  > connection `needs_attention` (`no public API origin configured`) instead
+  > of writing a callback URL the provider could never reach. Dev backends
+  > that exercise the webhook half must state the origin explicitly (the
+  > Railway dev backend already does); a tunnel URL works, a loopback URL
+  > does not — the provider refuses to dispatch to private/loopback addresses
+  > by policy.
+
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 
 The dev demo-merchant advertises **EIP-3009 only** by default. The experimental

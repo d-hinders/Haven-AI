@@ -4,7 +4,7 @@
  * One provider on the Settings → Accounting card (#2868, epic #2858).
  *
  * A row per provider from `GET /accounting/providers`, joined with the
- * caller's connection for it (if any). The five connection states render
+ * caller's connection for it (if any). The six connection states render
  * distinctly and each carries the ONE action that resolves it:
  *
  *   status                 chip                 primary action   secondary
@@ -15,6 +15,7 @@
  *   needs_reauthorisation    Sign-in expired    Reconnect        Disconnect
  *   scope_missing            Needs more access  Reconnect        Disconnect
  *   revoked_at_provider      Access revoked     Reconnect        Disconnect
+ *   needs_attention          Needs attention    Reconnect        Disconnect
  *
  * Reconnect IS Connect on the wire (#2865: the same connect-url + callback
  * on an existing row restores `connected` and keeps settings, `feedFrom`
@@ -23,7 +24,10 @@
  * the array may be empty (a scope refusal the provider did not name), and
  * that case gets the unnamed sentence rather than "()". The identifiers are
  * shown as human labels (`companyinformation` → "company information") where
- * the catalog has one, raw otherwise.
+ * the catalog has one, raw otherwise. `needs_attention` (#3019) is the
+ * webhook half failing independently of the feed — the reconnect that
+ * resolves it is the api_key modal for Accounted, so `primaryActionFor`
+ * answers `reconnect` for it like the other attention states.
  *
  * No row and `disconnected` share a chip and an action but not a sentence:
  * a first visit gets the one that guides the action ("Connect to feed…"),
@@ -66,6 +70,7 @@ export function primaryActionFor(status: AccountingConnectionStatus | null): Con
     case 'needs_reauthorisation':
     case 'scope_missing':
     case 'revoked_at_provider':
+    case 'needs_attention':
       return 'reconnect'
     case 'disconnected':
     case null:
@@ -78,6 +83,7 @@ const CHIP_TONE: Record<AccountingConnectionStatus, StatusTone> = {
   needs_reauthorisation: 'warning',
   scope_missing: 'warning',
   revoked_at_provider: 'danger',
+  needs_attention: 'warning',
   disconnected: 'neutral',
 }
 
@@ -172,6 +178,9 @@ export function ConnectionRow({
     }
     case 'revoked_at_provider':
       detail = copy.detail.revoked(name)
+      break
+    case 'needs_attention':
+      detail = copy.detail.needsAttention(name)
       break
     case 'disconnected':
       if (!provider.configured) detail = copy.notConfigured

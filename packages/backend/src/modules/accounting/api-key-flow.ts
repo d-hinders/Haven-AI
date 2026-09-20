@@ -11,12 +11,18 @@
  * (`MultiCompanyKeyError`) before anything is stored.
  *
  * #3019 widens the flow with the webhook registration step: for the one
- * provider that asks for it (`provider.webhooks` — Accounted), the stored
- * connection also carries the three event subscriptions and the capability
- * URL token. The registration runs AFTER the row is stored (the callbacks
- * must name a token the row already answers) and all-or-nothing: a partial
- * registration deletes what it created and the connection is flagged
- * `needs_attention` rather than left half-subscribed.
+ * provider that asks for it — Accounted, wired in `connections.ts`'s
+ * `registerAccountedWebhooksAdapter` (the descriptor is hard-coded there,
+ * not a `provider.webhooks` field) — the stored connection also carries the
+ * three event subscriptions and the capability URL token. The registration
+ * runs AFTER the row is stored (the callbacks must name a token the row
+ * already answers) and all-or-nothing: a partial registration deletes what
+ * it created and the connection is flagged `needs_attention` rather than
+ * left half-subscribed. A RECONNECT deletes the previous three
+ * subscriptions first (PR #3196 review, S3): `upsertConnection` overwrites
+ * the secrets blob, which was the only record of the old triples, so
+ * without an explicit teardown the provider keeps three orphaned
+ * subscriptions dispatching to a retired callback token.
  */
 
 import {
@@ -35,18 +41,33 @@ import { ProviderError, assertSupportedBaseCurrency, type AccountingProvider, ty
 import { flagConnectionStatus } from './ops-signals.js'
 import {
   AccountedWebhookRegistrationError,
+  deleteAccountedWebhooks,
   registerAccountedWebhooks,
   type AccountedWebhookSubscriptionSecret,
 } from './accounted-webhooks.js'
 
-/** The API origin the callback URL is built on — stated per deployment (#2530). */
+/**
+ * The API origin the callback URL is built on — stated per deployment (#2530).
+ *
+ * FAIL CLOSED (PR #3196 review, S5): with no stated origin there is no
+ * public URL the provider could reach, and the old `http://localhost:…`
+ * fallback REGISTERED an unroutable callback at the provider while the
+ * connection read `connected` — the subscription then dies at the provider
+ * after enough failed dispatches, silently. Throwing here lets the connect
+ * flow flag the row `needs_attention` with the reason instead of ever
+ * registering a callback Haven knows cannot work.
+ */
+export class NoPublicApiOriginError extends Error {
+  readonly name = 'NoPublicApiOriginError'
+  constructor() {
+    super('no public API origin configured — set HAVEN_API_URL (or PUBLIC_API_URL) on this deployment, then reconnect')
+  }
+}
+
 export function webhookApiOrigin(): string {
   const env = process.env.HAVEN_API_URL ?? process.env.PUBLIC_API_URL
   if (env && env.trim() !== '') return env.trim().replace(/\/+$/, '')
-  // No stated origin: derive from the deployment's own frontend URL config —
-  // the same fallback family `apiBaseUrl` uses minus the request headers,
-  // which a connect-time flow has none of.
-  return `http://localhost:${process.env.PORT ?? 3001}`
+  throw new NoPublicApiOriginError()
 }
 
 /** What the secrets blob carries for an api_key provider. */
@@ -62,8 +83,14 @@ export interface ApiKeySecrets {
 
 /** The per-provider webhook-registration descriptor. `register` is Accounted-only today. */
 export interface ProviderWebhookRegistration {
-  /** Create the subscriptions and return the triples to store (all-or-nothing). */
-  register(input: { secrets: ApiKeySecrets; companyId: string; token: string }): Promise<AccountedWebhookSubscriptionSecret[]>
+  /**
+   * Create the subscriptions and return the triples to store (all-or-nothing).
+   * `apiOrigin` is the public callback origin, resolved BY THE FLOW via
+   * `webhookApiOrigin()` (S5) — it throws `NoPublicApiOriginError` when the
+   * deployment states none, and the flow flags the connection instead of
+   * registering an unroutable callback.
+   */
+  register(input: { secrets: ApiKeySecrets; companyId: string; token: string; apiOrigin: string }): Promise<AccountedWebhookSubscriptionSecret[]>
 }
 
 export class InvalidApiKeyError extends Error {
@@ -105,7 +132,7 @@ export async function connectWithApiKey(input: {
   apiKey: string
   /** #3019: the webhook registration for this provider, when it has one. */
   webhooks?: {
-    register: (reg: { secrets: ApiKeySecrets; companyId: string; token: string }) => Promise<AccountedWebhookSubscriptionSecret[]>
+    register: (reg: { secrets: ApiKeySecrets; companyId: string; token: string; apiOrigin: string }) => Promise<AccountedWebhookSubscriptionSecret[]>
   }
   /** #3019: test seam — the provider HTTP double the registration uses. */
   fetchImpl?: typeof fetch
@@ -126,6 +153,31 @@ export async function connectWithApiKey(input: {
 
   const { ciphertext, keyVersion } = encryptSecrets(secrets as unknown as Record<string, unknown>)
   const existed = await getConnection(input.userId, input.provider.id)
+  // S3 (PR #3196 review): on a reconnect, the OLD row's secrets blob is the
+  // only record of the previous three (subscription_id, event_type, secret)
+  // triples — `upsertConnection` below overwrites it. Delete those
+  // subscriptions BEFORE the overwrite, while the secrets are still in
+  // hand. Best effort by the disconnect contract: a provider outage must
+  // not block a reconnect (the runbook's dead-subscription section covers
+  // subscriptions left behind).
+  if (existed && input.webhooks && input.provider.id === 'accounted' && existed.secrets_ciphertext && existed.external_company_id) {
+    try {
+      const previous = decryptSecrets<{ apiKey?: string; webhooks?: AccountedWebhookSubscriptionSecret[] }>(
+        existed.secrets_ciphertext,
+        existed.secrets_key_version,
+      )
+      if (previous.apiKey && previous.webhooks && previous.webhooks.length > 0) {
+        await deleteAccountedWebhooks({
+          apiKey: previous.apiKey,
+          companyId: existed.external_company_id,
+          subscriptions: previous.webhooks,
+          fetchImpl: input.fetchImpl ?? fetch,
+        })
+      }
+    } catch {
+      // Best effort by contract.
+    }
+  }
   const saved = await upsertConnection(input.userId, {
     provider: input.provider.id,
     authKind: 'api_key',
@@ -146,6 +198,22 @@ export async function connectWithApiKey(input: {
   // exists (the URL must resolve to a row from the first delivery) and the
   // secrets re-encrypted to carry the triples.
   if (input.webhooks && info.externalCompanyId) {
+    // S5 (PR #3196 review): no public origin means the callback URL can
+    // only ever be unroutable — register nothing, re-issue nothing, flag
+    // the row. The token stays the previous one when there is one (its
+    // subscriptions were torn down above); the message is the exact flag
+    // reason the runbook greps for.
+    let apiOrigin: string
+    try {
+      apiOrigin = webhookApiOrigin()
+    } catch (err) {
+      const reason = err instanceof NoPublicApiOriginError
+        ? 'no public API origin configured'
+        : `no public API origin configured — ${err instanceof Error ? err.name : 'Error'}`
+      await flagConnectionStatus(input.userId, input.provider.id, 'needs_attention', reason)
+      const updated = await getConnection(input.userId, input.provider.id)
+      return applyCompanyInfo({ provider: input.provider, userId: input.userId, existed, saved: updated ?? row, info })
+    }
     const token = newWebhookToken()
     await setWebhookToken(input.userId, input.provider.id, token)
     try {
@@ -153,6 +221,7 @@ export async function connectWithApiKey(input: {
         secrets,
         companyId: info.externalCompanyId,
         token,
+        apiOrigin,
       })
       const { ciphertext: withWebhooks, keyVersion: wv } = encryptSecrets({
         ...secrets,

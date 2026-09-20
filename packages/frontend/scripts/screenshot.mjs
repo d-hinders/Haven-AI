@@ -3099,9 +3099,10 @@ export const SCENARIOS = {
       await accountedActions.getByRole('button', { name: 'Connect', exact: true }).click()
       const apiKeyDialog = page.getByTestId('api-key-connect-modal')
       await apiKeyDialog.getByRole('heading', { name: 'Connect Accounted with an API key' }).waitFor({ timeout: 15_000 })
-      // The steps are the evidence: where the keys page is, the two scopes
-      // verbatim, the revoke note.
-      await apiKeyDialog.getByText(/Tick exactly companies:read, documents:write\./).waitFor({ timeout: 15_000 })
+      // The steps are the evidence: where the keys page is, the three scopes
+      // verbatim (#3019 added webhooks:manage — connect creates the three
+      // event subscriptions), the revoke note.
+      await apiKeyDialog.getByText(/Tick exactly companies:read, documents:write, webhooks:manage\./).waitFor({ timeout: 15_000 })
       await apiKeyDialog.getByText(/revoke the key in your Accounted dashboard/).waitFor({ timeout: 15_000 })
       await apiKeyDialog.locator('input[type="password"]').waitFor({ timeout: 15_000 })
       await card.scrollIntoViewIfNeeded()

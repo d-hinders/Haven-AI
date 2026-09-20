@@ -42,6 +42,7 @@ const TONE: Record<NonNullable<AccountingFeedStatus['destination']>['status'], S
   needs_reauthorisation: 'warning',
   scope_missing: 'warning',
   revoked_at_provider: 'danger',
+  needs_attention: 'warning',
   disconnected: 'neutral',
 }
 
@@ -100,6 +101,10 @@ export function FeedSummary({ status }: { status: AccountingFeedStatus }) {
     case 'revoked_at_provider':
       chip = settingsCopy.status.revoked_at_provider
       line = settingsCopy.detail.revoked(provider)
+      break
+    case 'needs_attention':
+      chip = settingsCopy.status.needs_attention
+      line = settingsCopy.detail.needsAttention(provider)
       break
     case 'disconnected':
     default:

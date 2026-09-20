@@ -21,7 +21,7 @@ covers:
   - packages/frontend/src/components/accounting/ApiKeyConnectModal.tsx
   - packages/frontend/src/hooks/useAccounting.ts
   - packages/frontend/src/hooks/useAccountingFeed.ts
-last-verified: "2026-09-16"
+last-verified: "2026-09-20"
 ---
 
 # Accounting connections
@@ -149,7 +149,7 @@ Two Accounted specifics worth knowing:
 - **`documents:write` cannot be checked at connect.** Accounted offers no way
   to ask a key what it may write, so a key that is missing that scope passes
   connection and is refused at the first delivery. The row then reads *Needs
-  more access*, and the fix is a new key with both scopes.
+  more access*, and the fix is a new key with all three scopes.
 - **Revocation happens in Accounted, not in Haven.** Disconnecting here
   deletes the stored key and stops the feed. The key itself keeps working
   until you revoke it under `app.accounted.se/settings/api`.

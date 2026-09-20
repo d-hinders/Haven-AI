@@ -6,6 +6,8 @@ covers:
   - packages/mcp-server/src/**
   - packages/sdk/src/next-step.ts
   - packages/sdk/src/types.ts
+  - packages/sdk/src/payment-mappers.ts
+  - scripts/ci/vocabulary-map.json
   - scripts/lint-next-steps.mjs
   - packages/connect/src/**
   - packages/signer/src/**
@@ -127,7 +129,7 @@ is frozen, the receipts wire stays snake_case, nothing moves in the backend).
 The old receipt names are deprecated twins for one full release; the removal
 condition — all three release clocks (`@haven_ai/sdk` `latest`, `@haven_ai/mcp`
 `latest`, the hosted mcp-server deploy) read at or past the release that
-names the twins, against the registry — is written on the mapper and repeated
+names the twins, against the registry and the deploy — is written on the mapper and repeated
 on each twin's row in #3131's vocabulary map (declared beside the guard;
 [`cli-json-conventions.md`](../product/cli-json-conventions.md) covers it),
 whose open count is now 0. Three pairs stay divergent on purpose — `txHash`/`hash`,

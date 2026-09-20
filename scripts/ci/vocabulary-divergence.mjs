@@ -904,13 +904,13 @@ export function audit({ receipt, transaction, map }) {
  *
  * `converge-pending` is deliberately not spelled `converged`. They are one
  * letter apart and opposite: `converged` means the two surfaces already share
- * a name, `converge-pending` means #3134 still has to make them. Counting the
+ * a name, `converge-pending` means the rename has not been made yet. Counting the
  * second as done printed "2 still open" while four pairs differed.
  */
 export const DISPOSITIONS = {
   'converged': { open: false, why: 'already one name on both surfaces' },
   'permanently-divergent': { open: false, why: 'different concepts; must never converge' },
-  'converge-pending': { open: true, why: 'same concept, two names — #3134 still owes the rename' },
+  'converge-pending': { open: true, why: 'same concept, two names — the rename has not been made' },
   'blocked-on-fallback': { open: true, why: 'cannot converge until the value defect is fixed' },
   'undecided': { open: true, why: 'nobody has decided yet' },
 }
@@ -1228,7 +1228,7 @@ async function main() {
     for (const v of grew) console.error(`  ${v.file} [${v.key}]: baseline ${v.allowed}, now ${v.count}`)
     console.error(
       '\nA new pair may be declared, but not left open. Resolve it, or record why it is\n' +
-        'blocked and on what — an open entry is a debt #3134 has to burn down.',
+        'blocked and on what — an open entry is a debt someone has to burn down.',
     )
   }
 

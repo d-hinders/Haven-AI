@@ -1,7 +1,23 @@
 name: Morning report note
 
 # Posts a single heads-up from the weekday morning report onto an issue —
-# normally #1289, the standing agent coordination thread.
+# by default the standing agent coordination channel (#3193; the number is
+# the `default:` of the `issue` input below, and `scripts/ci/
+# coordination-channel.mjs` is the constant the other coordination workflows
+# import — keep the two equal).
+#
+# ## Where the note lands (decided 2026-09-20, #3182)
+#
+# From 2026-09-11 to 2026-09-18 the routine dispatched with `issue=2879`, a
+# scratch trial target, while its judgement was being watched; AGENTS.md said
+# the notes land on the channel, and the channel had zero bot notes. The trial
+# window has passed and the judgement held up (eleven notes, dedupe proven on
+# a reworded restatement — see morning-report-note.test.mjs), so the target IS
+# the channel. The routine is a scheduled cloud job outside this repository:
+# it must drop its explicit `issue` input (or pass the channel's number) for
+# this default to take effect — an operator step for the routine's owner. Until
+# it does, the notes keep landing on #2879, which stays open for that reason
+# and is closed once the routine has moved.
 #
 # ## Why a workflow instead of the routine commenting directly
 #
@@ -51,9 +67,9 @@ on:
   workflow_dispatch:
     inputs:
       issue:
-        description: 'Issue number to comment on (default 1289, the agent coordination thread)'
+        description: 'Issue number to comment on (default 3193, the agent coordination channel)'
         required: false
-        default: '1289'
+        default: '3193'
       body:
         description: 'The heads-up. One or two sentences. Empty means nothing worth saying — the job will skip.'
         required: true

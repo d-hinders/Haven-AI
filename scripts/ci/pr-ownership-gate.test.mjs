@@ -11,6 +11,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { evaluate, collect, prFromPayload } from './pr-ownership-gate.mjs'
+import { CHANNEL_ISSUE } from './coordination-channel.mjs'
 
 const CLI = fileURLToPath(new URL('./pr-ownership-gate.mjs', import.meta.url))
 
@@ -18,14 +19,14 @@ const CLI = fileURLToPath(new URL('./pr-ownership-gate.mjs', import.meta.url))
 // (13:28Z) would close #3015.
 const NOW = Date.parse('2026-09-15T13:28:09Z')
 const pr = { number: 3022, author: 'd-hinders', draft: false, base: 'dev', defaultBranch: 'dev' }
-const antonio = { holder: 'AntonioSaaranen', claim: { createdAt: '2026-09-15T13:03:08Z', body: '🔒 CLAIM #3015 — branch `fix/3015-boolean-env-flags` — touches: config.ts', onIssue: 1289, htmlUrl: 'https://github.com/d-hinders/Haven-AI/issues/1289#issuecomment-1' }, lastActivityAt: '2026-09-15T13:03:08Z' }
+const antonio = { holder: 'AntonioSaaranen', claim: { createdAt: '2026-09-15T13:03:08Z', body: '🔒 CLAIM #3015 — branch `fix/3015-boolean-env-flags` — touches: config.ts', onIssue: CHANNEL_ISSUE, htmlUrl: 'https://github.com/d-hinders/Haven-AI/issues/1289#issuecomment-1' }, lastActivityAt: '2026-09-15T13:03:08Z' }
 
 describe('the verdict (#3179 acceptance fixtures)', () => {
   test('claimed by other → fail, naming the holder, the age, the branch, the link and both ways out', () => {
     const r = evaluate({ pr, issues: [{ number: 3015, state: 'open', assignees: ['AntonioSaaranen'], live: [antonio] }], nowMs: NOW })
     assert.equal(r.verdict, 'fail')
     assert.match(r.report, /^❌ PR ownership gate: this pull request would close an issue held by someone else\./)
-    assert.match(r.report, /- #3015: @AntonioSaaranen claimed it 25 min ago on #1289 \(branch `fix\/3015-boolean-env-flags`\) — https:\/\/github\.com\/.*issuecomment-1\./)
+    assert.match(r.report, new RegExp(`- #3015: @AntonioSaaranen claimed it 25 min ago on #${CHANNEL_ISSUE} \\(branch \`fix/3015-boolean-env-flags\`\\) — https://github\\.com/.*issuecomment-1\\.`))
     assert.match(r.report, /holder posts `🔓 RELEASE #<issue>`/)
     assert.match(r.report, /change `Closes #<issue>` to `Refs #<issue>`/)
     assert.deepEqual(r.findings.map((f) => f.issue), [3015])
@@ -75,7 +76,7 @@ describe('the verdict (#3179 acceptance fixtures)', () => {
     // proves the clause is absent when it should be.
     const later = { ...antonio, lastActivityAt: '2026-09-15T13:20:00Z' } // 17 min after the claim
     const r = evaluate({ pr, issues: [{ number: 3015, state: 'open', assignees: [], live: [later] }], nowMs: NOW })
-    assert.match(r.report, /claimed it 25 min ago on #1289 \(branch `fix\/3015-boolean-env-flags`\), last active on it 8 min ago/)
+    assert.ok(r.report.includes(`claimed it 25 min ago on #${CHANNEL_ISSUE} (branch \`fix/3015-boolean-env-flags\`), last active on it 8 min ago`), r.report)
   })
 
   test('a live holder who is not assigned still counts (the #3178 holder rule)', () => {
@@ -146,7 +147,7 @@ describe('collect through an injected gh', () => {
     const { gh } = recorder({
       closing: [{ number: 3015 }],
       issue: () => ({ state: 'open', closed_at: null, assignees: [{ login: 'AntonioSaaranen' }] }),
-      comments: (n) => (n === 1289 ? [{ user: { login: 'AntonioSaaranen', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #3015 — branch `fix/3015-x`', created_at: new Date(NOW - 25 * 60_000).toISOString(), html_url: 'https://x/1' }] : []),
+      comments: (n) => (n === CHANNEL_ISSUE ? [{ user: { login: 'AntonioSaaranen', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #3015 — branch `fix/3015-x`', created_at: new Date(NOW - 25 * 60_000).toISOString(), html_url: 'https://x/1' }] : []),
     })
     const { issues } = await collect({ gh, repo: 'o/r', prNumber: 3022, author: 'd-hinders', nowMs: NOW })
     assert.equal(issues.length, 1)
@@ -164,7 +165,7 @@ describe('collect through an injected gh', () => {
     const { gh } = recorder({
       closing: [{ number: 4242 }],
       issue: () => ({ state: 'open', closed_at: null, assignees: [{ login: 'AntonioSaaranen' }] }),
-      comments: (n) => (n === 1289 ? [
+      comments: (n) => (n === CHANNEL_ISSUE ? [
         { user: { login: 'AntonioSaaranen', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #4242 — branch `feat/4242-a`', created_at: antonioAt, html_url: 'https://x/A' },
         { user: { login: 'PhilipEriksson', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #4242 — branch `feat/4242-p`', created_at: philipAt, html_url: 'https://x/P' },
       ] : []),
@@ -183,7 +184,7 @@ describe('collect through an injected gh', () => {
     const { gh } = recorder({
       closing: [{ number: 4242 }],
       issue: () => ({ state: 'open', closed_at: null, assignees: [{ login: 'AntonioSaaranen' }] }),
-      comments: (n) => (n === 1289
+      comments: (n) => (n === CHANNEL_ISSUE
         ? [{ user: { login: 'PhilipEriksson', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #4242 — branch `feat/4242-p`', created_at: t1, html_url: 'https://x/P' },
            { user: { login: 'AntonioSaaranen', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #4242 — branch `feat/4242-a`', created_at: t2, html_url: 'https://x/A2' }]
         : [{ user: { login: 'AntonioSaaranen', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #4242 — branch `feat/4242-a`', created_at: t0, html_url: 'https://x/A1' }]),
@@ -224,7 +225,7 @@ case "$*" in
   *"closingIssuesReferences"*) echo '{"title":"t","closingIssuesReferences":{"nodes":[{"number":3015}]}}' ;;
   *"commits("*) echo '{"nodes":[],"pageInfo":{"hasNextPage":false}}' ;;
   *"issues/3015/comments"*) echo '[[]]' ;;
-  *"issues/1289/comments"*) echo '[[{"user":{"login":"AntonioSaaranen","type":"User"},"author_association":"COLLABORATOR","body":"🔒 CLAIM #3015 — branch \`fix/3015-x\`","created_at":"${recent}","html_url":"https://x/1"}]]' ;;
+  *"issues/${CHANNEL_ISSUE}/comments"*) echo '[[{"user":{"login":"AntonioSaaranen","type":"User"},"author_association":"COLLABORATOR","body":"🔒 CLAIM #3015 — branch \`fix/3015-x\`","created_at":"${recent}","html_url":"https://x/1"}]]' ;;
   *"issues/3015"*) echo '{"state":"open","closed_at":null,"assignees":[{"login":"AntonioSaaranen"}]}' ;;
   *) echo '' ;;
 esac
@@ -249,7 +250,7 @@ esac
     const r = run(eventFile('foreign.json', base))
     assert.equal(r.status, 1)
     assert.match(r.out, /would close an issue held by someone else/)
-    assert.match(r.out, /@AntonioSaaranen claimed it 25 min ago on #1289/)
+    assert.ok(r.out.includes(`@AntonioSaaranen claimed it 25 min ago on #${CHANNEL_ISSUE}`), r.out)
   })
 
   test('author holds it → exit 0', () => {

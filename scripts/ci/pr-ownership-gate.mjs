@@ -28,7 +28,7 @@
 // `ready_for_review`). A PR into a non-default branch passes (GitHub closes
 // nothing there). A closed candidate is skipped.
 //
-// The failure text gives the two ways out: coordinate in #1289 for a handover
+// The failure text gives the two ways out: coordinate on the channel for a handover
 // (the holder posts `🔓 RELEASE`), or drop the closing keyword and use `Refs`.
 //
 // The author's OWN hold start is passed to the shared holder rule, so a claim

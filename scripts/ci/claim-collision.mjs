@@ -13,7 +13,7 @@
 // ## The rule, as AGENTS.md § Cross-session agent coordination states it
 //
 // A live claim — the holder's last comment about it less than 24 hours ago, no
-// `🔓 RELEASE` since — means: pick something else, or coordinate in #1289
+// `🔓 RELEASE` since — means: pick something else, or coordinate on the channel
 // first. This module makes the projection enforce that rule at the moment a
 // second claim arrives, with staleness measured as the section below defines
 // it, and the three outcomes the issue asked for:
@@ -42,7 +42,7 @@
 // old shell said so itself: "the author is not assignable on this repo"), whose
 // claim would otherwise never be seen by anyone. The comments are already in
 // hand, so the check reads them. Only a COLLABORATOR's comment, and only a
-// PERSON's, can make a holder: #1289 is public, and a drive-by `🔒 CLAIM #N`
+// PERSON's, can make a holder: the channel is public, and a drive-by `🔒 CLAIM #N`
 // there — or a bot quoting the format — must not be able to get every real
 // claim of #N refused. The REST comment carries `author_association` and
 // `user.type`; the same OWNER/MEMBER/COLLABORATOR set the workflow's own
@@ -87,14 +87,15 @@
 //
 // ## Why the whole channel is read
 //
-// Most claims are posted on #1289 ABOUT the issue, so "does @X hold a live
+// Most claims are posted on the channel ABOUT the issue, so "does @X hold a live
 // claim on #N" cannot be answered from the issue thread alone. The channel is
 // read in full (~14 REST pages today) because staleness needs the old claim,
 // not just the recent ones.
 
 import { parse } from './claim-assignee.mjs'
+import { CHANNEL_ISSUE } from './coordination-channel.mjs'
 
-export const CHANNEL_ISSUE = 1289
+export { CHANNEL_ISSUE }
 /** AGENTS.md: "An unreleased claim blocks the other session for a day." */
 export const LIVE_CLAIM_MS = 24 * 60 * 60_000
 /** The same set `claim-assignee.yml`'s trigger gate admits. */

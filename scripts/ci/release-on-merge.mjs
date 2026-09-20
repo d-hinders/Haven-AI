@@ -1,7 +1,8 @@
 // Decides what `.github/workflows/claim-release-on-merge.yml` posts when a
 // pull request merges: a `🔓 RELEASE` on every issue the PR closes, an
 // unassign of everyone still assigned there, and — only when the claim was
-// also posted on the coordination channel — the same line on #1289.
+// also posted on the coordination channel — the same line there
+// (`CHANNEL_ISSUE`, from `coordination-channel.mjs`).
 //
 // ## Why a machine posts the release (#3177)
 //
@@ -62,7 +63,7 @@
 // prose at the time linked #2268 (closed 2026-09-02 by a person, unrelated):
 // GitHub's merge is a silent no-op on an already-closed issue, and releasing
 // it would have manufactured exactly the stale reading this exists to delete,
-// on the issue and on #1289. The same rule drops a quoted keyword in commit
+// on the issue and on the channel. The same rule drops a quoted keyword in commit
 // prose (this repo's history has one citing another PR's closing line for
 // #1496), a cross-repo reference whose digits the grammar keeps (a keyword
 // aimed at other/repo#42 would read as our #42 — GitHub honours the qualifier
@@ -75,7 +76,7 @@
 //
 // Nothing is released at all for a merge into a non-default branch: GitHub
 // closes nothing there, so a `dev → main` promotion (thirty `Closes #` commit
-// lines) never releases and never spams #1289. `Refs #N` (operator-verify
+// lines) never releases and never spams the channel. `Refs #N` (operator-verify
 // mode) is neither a keyword nor a linked reference, so an issue kept open for
 // a human step keeps its claim.
 //
@@ -89,7 +90,7 @@
 //
 // ## The channel copy
 //
-// Posted to #1289 only if a CLAIM for that issue is anywhere in the channel,
+// Posted to the channel only if a CLAIM for that issue is anywhere in the channel,
 // read with the SAME parser the projection uses, so a quoted or fenced claim
 // does not count and the leading-run rule applies. Without the gate every
 // merge would add a line to a ~1,400-comment thread for claims that were only
@@ -98,9 +99,10 @@
 // merges today still gets its channel copy.
 
 import { parse } from './claim-assignee.mjs'
+import { CHANNEL_ISSUE } from './coordination-channel.mjs'
 import { parseClosingRefs, commitsFromGraphQL } from './operator-verify-close-guard.mjs'
 
-export const CHANNEL_ISSUE = 1289
+export { CHANNEL_ISSUE }
 export const AUTO_RELEASE_MARK = 'posted automatically on merge (#3177)'
 /**
  * How long after `merged_at` a close still counts as this merge's. Measured

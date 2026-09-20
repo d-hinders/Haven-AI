@@ -133,6 +133,34 @@ describeDb('label routes (#3167)', () => {
     expectMatchesSpec('GET', '/labels', list.json())
   })
 
+  it('POST on an existing name without a colour keeps the existing colour (#3200)', async () => {
+    const userId = await seedUser()
+    const first = await createLabel(userId, { name: 'prod', color: 'brand' })
+    expect(first.status).toBe(201)
+    expect(first.body.color).toBe('brand')
+
+    // The editor's inline-create sends only a name: the fold onto the
+    // existing row must not sweep 'brand' to the default.
+    const fold = await createLabel(userId, { name: 'PROD' })
+    expect(fold.status).toBe(201)
+    expect(fold.body).toMatchObject({ name: 'prod', color: 'brand' })
+
+    const list = await app.inject({ method: 'GET', url: '/labels', ...auth(userId) })
+    const labels = (list.json() as { labels: { name: string; color: string }[] }).labels
+    expect(labels).toHaveLength(1)
+    expect(labels[0]).toMatchObject({ name: 'prod', color: 'brand' })
+
+    // An EXPLICIT colour still recolours — the "or set" half of create-or-set.
+    const recolour = await createLabel(userId, { name: 'prod', color: 'debit' })
+    expect(recolour.status).toBe(201)
+    expect(recolour.body.color).toBe('debit')
+
+    // And a genuinely NEW row without a colour still takes the default.
+    const fresh = await createLabel(userId, { name: 'staging' })
+    expect(fresh.status).toBe(201)
+    expect(fresh.body.color).toBe('neutral')
+  })
+
   it('refuses a blank name and an unknown color with 400', async () => {
     const userId = await seedUser()
     const blank = await createLabel(userId, { name: '   ' })
@@ -265,6 +293,36 @@ describeDb('label routes (#3167)', () => {
       [agentId],
     )
     expect(labels.rows[0].count).toBe('0')
+  })
+
+  it('duplicate label ids collapse instead of 404ing (#3200)', async () => {
+    const userId = await seedUser()
+    const agentId = await seedAgent(userId)
+    const one = await createLabel(userId, { name: 'prod', color: 'brand' })
+    const two = await createLabel(userId, { name: 'finance', color: 'debit' })
+    const oneId = one.body.id as string
+    const twoId = two.body.id as string
+
+    // The spec promises "duplicates collapsed": a repeated id is one label,
+    // not a count mismatch that reads as a missing one.
+    const duped = await app.inject({
+      method: 'PUT', url: `/agents/${agentId}/labels`, ...auth(userId),
+      payload: { label_ids: [oneId, oneId, twoId] },
+    })
+    expect(duped.statusCode).toBe(200)
+    const labels = (duped.json() as { labels: { name: string }[] }).labels
+    expect(labels.map((l) => l.name)).toEqual(['finance', 'prod'])
+    expectMatchesSpec('PUT', '/agents/{id}/labels', duped.json())
+
+    // All-same array collapses to the single label, not an empty set.
+    const same = await app.inject({
+      method: 'PUT', url: `/agents/${agentId}/labels`, ...auth(userId),
+      payload: { label_ids: [oneId, oneId, oneId] },
+    })
+    expect(same.statusCode).toBe(200)
+    expect((same.json() as { labels: { name: string }[] }).labels.map((l) => l.name)).toEqual([
+      'prod',
+    ])
   })
 
   it('another user cannot label MY agent and I cannot read their labels', async () => {

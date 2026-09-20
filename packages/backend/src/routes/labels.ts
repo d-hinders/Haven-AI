@@ -19,6 +19,12 @@
  * in. Case is display-case: "Prod" stored as "prod" renders as the user
  * typed it only if they typed it lowercase — the rule the issue chose is one
  * name per user, so the stored form is canonical.
+ *
+ * Create-vs-existing colour (#3200): POST on a name the user already has
+ * folds onto that row, and an OMITTED colour leaves the existing colour
+ * alone — the editor's inline-create sends only a name, so without this
+ * guard every quiet fold would sweep the label to neutral. An explicit
+ * colour still recolours (that is the "or set" half of create-or-set).
  */
 import { FastifyInstance } from 'fastify'
 import { LABEL_COLORS, DEFAULT_LABEL_COLOR, isLabelColor } from '@haven_ai/core'
@@ -49,7 +55,7 @@ export default async function labelRoutes(app: FastifyInstance): Promise<void> {
     return { labels: await listLabelsForUser(sub) }
   })
 
-  // POST /labels — create (or set) one label
+  // POST /labels — create one label (or fold onto the same-named one)
   app.post<{ Body: { name: string; color?: string } }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { name, color } = request.body
@@ -60,12 +66,16 @@ export default async function labelRoutes(app: FastifyInstance): Promise<void> {
     if (trimmed.length === 0) {
       return reply.code(400).send({ error: 'Label name cannot be empty' })
     }
-    const labelColor = color ?? DEFAULT_LABEL_COLOR
-    if (!isLabelColor(labelColor)) {
+    if (color !== undefined && !isLabelColor(color)) {
       return reply.code(400).send({ error: 'Unknown label color' })
     }
 
-    const label = await createLabel(sub, trimmed.toLowerCase(), labelColor)
+    // Omitted colour: a NEW row takes the palette default, but a row that
+    // already exists keeps its colour (#3200) — the fold must not recolour
+    // what the caller never named. Only an explicit colour recolours.
+    const explicitColor = color !== undefined
+    const labelColor = explicitColor ? color : DEFAULT_LABEL_COLOR
+    const label = await createLabel(sub, trimmed.toLowerCase(), labelColor, explicitColor)
     return reply.code(201).send(label)
   })
 

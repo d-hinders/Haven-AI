@@ -167,8 +167,11 @@ last-verified: "2026-09-19"
 > `state-direct-recovery.ts` and local `tools.ts` pass `listReceiptsPage`
 > through), no tool added, renamed or re-shaped, no argument or schema change,
 > no description change (the #1591 budget is untouched at 2 bytes headroom),
-> and the version-skew and consent-hash contracts do not move. Nothing else in
-> this document was re-verified in this pass.
+> and the version-skew and consent-hash contracts do not move. `last-verified`
+> is not re-stamped: this block is the scope, and the third clock's instrument
+> needs an agent key (`Authorization: Bearer`, `http.ts`) — the handshake is
+> authenticated, unlike the two `npm view` reads. Nothing else in this document
+> was re-verified in this pass.
 >
 > **Recent re-verification (#3169):** the edge signer's `haven_sign` no longer
 > signs a bare `payload_hash` (no `payment_id`, no `typed_data` /

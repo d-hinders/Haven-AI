@@ -118,8 +118,10 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
  * hosted mcp-server deploy reports a `serverInfo.version` on MCP `initialize`
  * (`HOSTED_SERVER_VERSION` in `packages/mcp-server/src/server.ts`) at or past
  * the release that shipped them — each read against the registry / the live
- * server's handshake, never inferred from a green promotion (a promotion can
- * be half green; mcp-server is not on npm). Until then this comment is the
+ * server's handshake (which needs an agent API key: the hosted `initialize`
+ * is behind `Authorization: Bearer`, and `/healthz` carries no version),
+ * never inferred from a green promotion (a promotion can be half green;
+ * mcp-server is not on npm). Until then this comment is the
  * contract, and the guard's `singleSurface.receipt` rows are what keep the
  * twins from reading as undeclared divergence.
  */

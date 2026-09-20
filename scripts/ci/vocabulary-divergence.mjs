@@ -160,7 +160,7 @@ export function readBlock(source, needle) {
 export function scanReceiptSurface(source) {
   // Over a STRIPPED copy. A field commented out rather than deleted still read
   // as live, so the `stale` direction went silent — and `stale` is what fires
-  // when #3134 converges a pair and someone forgets to remove its row. The
+  // when a pair converges and someone forgets to remove its row. The
   // conditional-tail pattern below matches at ANY indentation, so a commented
   // `receipt.x = raw.y` was caught by it too. These two scanners were the ones
   // the stripper never reached, while this file's stated reason for stripping —
@@ -814,8 +814,8 @@ export function declaredKeys(keysProse) {
  *
  * `undeclared` — a field on a surface with no entry: the guard's whole point.
  * `stale`      — an entry naming a field that is no longer on its surface:
- *                the other direction, and the one that matters after #3134
- *                converges a pair and someone forgets to remove its row.
+ *                the other direction, and the one that matters after a pair
+ *                converges and someone forgets to remove its row.
  */
 /**
  * The CSV headers the map declares, against the ones the code builds — ORDER
@@ -1019,7 +1019,7 @@ export function validateMap(map) {
  * The shrink-only number: pairs whose divergence is recorded but NOT yet
  * resolved. "Different on purpose" (`permanently-divergent`) and "already one
  * name" (`converged`) are decisions and do not count; `blocked-on-fallback`
- * and anything explicitly `undecided` do, so #3132/#3134 burn them down and
+ * and anything explicitly `undecided` do, so the epic's slices burn them down and
  * nobody can add a new one.
  *
  * Counted globally rather than per-file: both surfaces contribute to one

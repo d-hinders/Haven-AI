@@ -283,7 +283,7 @@ describe('receipt vocabulary converges on the transaction names (#3134)', () => 
     }
   })
 
-  it('does not rename the wire — the raw receipt keys are the backend contract', () => {
+  it('the mapper reads the snake_case wire keys and never the camel twins (fixture-level; the wire itself is pinned by check:api-types)', () => {
     const raw = rawReceipt()
     expect(Object.keys(raw)).toEqual(expect.arrayContaining([
       'rail', 'proof_status', 'resource_url', 'merchant_address',

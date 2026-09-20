@@ -863,7 +863,8 @@ export interface HavenPaymentReceipt {
   paymentIntentId?: string | null
   approvalRequestId?: string | null
   /**
-   * #3134: the payment protocol this receipt settled on (`x402`), under the
+   * #3134: the payment protocol this receipt settled on — one of the
+   * evidence-eligible rails (`x402`, `mpp_demo`, `mpp_crypto`, `spt`) — under the
    * name the transactions feed uses for the same concept. Distinct from
    * `scope.source`, which names the LIST population (#3132) — the transaction
    * row carries the same two. Same name, narrower domain: never `'direct'`

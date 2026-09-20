@@ -95,8 +95,8 @@ concurrent work), demo-merchant-mcp, migrations, release trains,
 The release is automatic on merge (#3177): `claim-release-on-merge.yml` posts
 `🔓 RELEASE` on every issue the merged PR closed (GitHub's linked references
 plus the closing keywords in title and commits, released only if GitHub closed
-it) and unassigns everyone; it repeats the line on #1289 when a claim for that
-issue is in the channel. Release by hand only when you abandon the work, or
+it by that merge) and unassigns everyone; it repeats the line on #1289 when a
+claim for that issue is anywhere in the channel. Release by hand only when you abandon the work, or
 when the PR keeps the issue open in operator-verify mode (`Refs #N`) — then
 every place you claimed:
 

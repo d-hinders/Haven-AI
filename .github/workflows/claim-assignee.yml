@@ -15,7 +15,7 @@ name: Claim to assignee
 # express that, because both issues were correctly owned.
 #
 # What the field adds is cheapness. It is one queryable value that every GitHub
-# view and every tool can read without parsing a 1,400-comment thread. The
+# view and every tool can read without parsing a ~1,400-comment thread. The
 # morning report got #2947 wrong on 2026-09-15 precisely because reading
 # ownership properly took three API calls that nobody had told it to make.
 #

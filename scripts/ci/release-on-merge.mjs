@@ -34,20 +34,32 @@
 //
 // ## Which issues a PR closes
 //
-// Two sources, because GitHub's `closingIssuesReferences` (GraphQL) carries
-// only the references it linked from the PR BODY — measured on PR #2314, where
-// `Closes #2268` sat in a commit message, closed #2268 on merge, and is absent
-// from that list. So: GitHub's list, plus the closing keywords in the title and
-// every commit message, read with the grammar `operator-verify-close-guard.mjs`
-// already maintains for the same reason (`parseClosingRefs`). The commit/title
-// scan runs only when the PR merges into the DEFAULT branch: GitHub closes
-// nothing on a merge into any other branch, so a `dev → main` promotion never
-// releases (its thirty `Closes #` commit lines would otherwise spam #1289).
-// Every issue found by the scan alone is checked against GitHub — it is
-// released only if it IS closed now; one GitHub did not close is logged and
-// left alone, so the workflow never un-claims an issue that is still open.
-// `Refs #N` (operator-verify mode) is neither a keyword nor a linked
-// reference, so an issue kept open for a human step keeps its claim.
+// Candidates come from two sources, because GitHub's `closingIssuesReferences`
+// (GraphQL) carries only the references it linked from the PR BODY — measured
+// on PR #2314, where a closing keyword for #2268 sat in a commit message,
+// closed that issue on merge, and is absent from that list. So: GitHub's list,
+// plus the closing keywords in the title and every commit message (paginated,
+// up to 500 — a longer list is refused, never read in part), with the grammar `operator-verify-close-guard.mjs` already maintains for the same
+// reason (`parseClosingRefs`).
+//
+// A candidate is RELEASED only if GitHub closed it BY THIS MERGE: the issue is
+// read back and must be `closed` with `closed_at` at or after the PR's
+// `merged_at`. "Referenced and closed now" is not enough — measured on this
+// very PR (#3187), whose body prose linked #2268 (closed 2026-09-02 by a
+// person, unrelated): GitHub's merge is a silent no-op on an already-closed
+// issue, and releasing it would have manufactured exactly the stale reading
+// this exists to delete, on the issue and on #1289. The same rule drops a
+// quoted keyword in commit prose (`(PR #1497, \`Closes #1496\`)` exists in
+// this repo's history) and a cross-repo reference whose digits the grammar
+// keeps (`Fixes other/repo#42` would read as our #42 — GitHub honours the
+// qualifier and closes nothing). An issue GitHub did not close is listed under
+// `skipped` with the reason, never released.
+//
+// Nothing is released at all for a merge into a non-default branch: GitHub
+// closes nothing there, so a `dev → main` promotion (thirty `Closes #` commit
+// lines) never releases and never spams #1289. `Refs #N` (operator-verify
+// mode) is neither a keyword nor a linked reference, so an issue kept open for
+// a human step keeps its claim.
 //
 // ## Who is unassigned
 //
@@ -59,26 +71,29 @@
 //
 // ## The channel copy
 //
-// Posted to #1289 only if a CLAIM for that issue is found in the channel's
-// recent comments, read with the SAME parser the projection uses, so a quoted
-// or fenced claim does not count and the leading-run rule applies. Without the
-// gate every merge would add a line to a 1,400-comment thread for claims that
-// were only ever made on the issue. "Recent" is the last two REST pages —
-// ≤200 comments, about a week at current volume — so a branch older than that
-// gets no channel copy even if its claim was there; the issue release still is.
+// Posted to #1289 only if a CLAIM for that issue is anywhere in the channel,
+// read with the SAME parser the projection uses, so a quoted or fenced claim
+// does not count and the leading-run rule applies. Without the gate every
+// merge would add a line to a ~1,400-comment thread for claims that were only
+// ever made on the issue. The WHOLE thread is read (every REST page, ~14
+// calls today), not a window: a claim posted weeks ago for a branch that
+// merges today still gets its channel copy.
 
 import { parse } from './claim-assignee.mjs'
 import { parseClosingRefs, commitsFromGraphQL } from './operator-verify-close-guard.mjs'
 
 export const CHANNEL_ISSUE = 1289
 export const AUTO_RELEASE_MARK = 'posted automatically on merge (#3177)'
+/** `closed_at` may be stamped a moment before `merged_at`; two minutes covers it. */
+export const CLOSE_TOLERANCE_MS = 2 * 60_000
 
 /**
  * @param {object} o
- * @param {{number:number, merged:boolean, author:string, authorType?:string, mergeCommit?:string|null, base?:string|null}} o.pr
- * @param {{number:number, assignees?:string[], state?:string}[]} o.closingIssues
- *        GitHub's linked references (no `state`) plus scan-found issues (with
- *        the `state` GitHub reports for them now)
+ * @param {{number:number, merged:boolean, mergedAt?:string|null, author:string, authorType?:string, mergeCommit?:string|null, base?:string|null, defaultBranch?:string|null}} o.pr
+ * @param {{number:number, assignees?:string[], state?:string, closedAt?:string|null, unreadable?:boolean}[]} o.closingIssues
+ *        every candidate (linked or scanned), each READ BACK from GitHub:
+ *        `state`, `closedAt` and current assignees; `unreadable` when that
+ *        read failed (a number that is not an issue here)
  * @param {string[]} [o.channelBodies]   comment bodies on the channel issue
  * @param {number} [o.channelIssue]
  * @returns {{releases: {issue:number, body:string, unassign:string[]}[], channel: {body:string}|null, skipped: {issue:number, reason:string}[]}}
@@ -87,6 +102,9 @@ export function decide({ pr, closingIssues, channelBodies = [], channelIssue = C
   const none = { releases: [], channel: null, skipped: [] }
   if (!pr || pr.merged !== true) return none
   if (!Number.isInteger(pr.number) || pr.number <= 0) return none
+  // GitHub closes nothing on a merge into a non-default branch (a promotion).
+  if (pr.defaultBranch && pr.base !== pr.defaultBranch) return none
+  const mergedAtMs = Date.parse(pr.mergedAt ?? '')
 
   const sha = typeof pr.mergeCommit === 'string' && /^[0-9a-f]{7,40}$/i.test(pr.mergeCommit)
     ? pr.mergeCommit.slice(0, 8)
@@ -105,11 +123,26 @@ export function decide({ pr, closingIssues, channelBodies = [], channelIssue = C
     const n = Number(issue?.number)
     if (!Number.isInteger(n) || n <= 0 || n === channelIssue) continue
     if (releases.some((r) => r.issue === n) || skipped.some((r) => r.issue === n)) continue
-    if (issue.state !== undefined && String(issue.state).toLowerCase() !== 'closed') {
-      // Named by a commit keyword but GitHub did not close it (the keyword sat
-      // in a code span, or the merge did not reach the default branch). Its
-      // claim is live; say so and leave it.
+    if (issue.unreadable) {
+      skipped.push({ issue: n, reason: 'could not be read (not an issue in this repository, or a transient error) — nothing released for it' })
+      continue
+    }
+    if (issue.state === undefined || issue.closedAt === undefined) {
+      skipped.push({ issue: n, reason: 'no state read back from GitHub — nothing released for it' })
+      continue
+    }
+    if (String(issue.state).toLowerCase() !== 'closed') {
+      // Named by a keyword but GitHub did not close it (the keyword sat in a
+      // code span, or the reference was to another repository). Its claim is
+      // live; say so and leave it.
       skipped.push({ issue: n, reason: `still ${issue.state} — GitHub did not close it on this merge; release by hand if you claimed it` })
+      continue
+    }
+    const closedAtMs = Date.parse(issue.closedAt ?? '')
+    if (!Number.isFinite(mergedAtMs) || !Number.isFinite(closedAtMs) || closedAtMs < mergedAtMs - CLOSE_TOLERANCE_MS) {
+      // Closed, but not by this merge: an already-closed issue this PR merely
+      // mentioned. GitHub's merge was a no-op on it; so is this.
+      skipped.push({ issue: n, reason: `closed ${issue.closedAt ?? 'at an unknown time'}, before this merge (${pr.mergedAt ?? 'unknown'}) — not closed by it, nothing released` })
       continue
     }
     const unassign = [...new Set([...(issue.assignees ?? []), author].filter((s) => typeof s === 'string' && s.length > 0))]
@@ -150,7 +183,10 @@ export function ghRunner() {
   }
 }
 
-const CLOSING_QUERY = 'query($owner:String!,$name:String!,$number:Int!){ repository(owner:$owner,name:$name){ pullRequest(number:$number){ title closingIssuesReferences(first:50){ nodes{ number assignees(first:20){ nodes{ login } } } } } } }'
+// `first:50` is a hard cap on linked references; a PR linking more than fifty
+// issues is not a shape this repository produces (the scan below still sees
+// every commit), stated so the truncation is a decision and not a surprise.
+const CLOSING_QUERY = 'query($owner:String!,$name:String!,$number:Int!){ repository(owner:$owner,name:$name){ pullRequest(number:$number){ title closingIssuesReferences(first:50){ nodes{ number } } } } }'
 const COMMITS_QUERY = 'query($owner:String!,$name:String!,$number:Int!,$cursor:String){ repository(owner:$owner,name:$name){ pullRequest(number:$number){ commits(first:100,after:$cursor){ nodes{ commit{ oid message } } pageInfo{ hasNextPage endCursor } } } } }'
 
 /**
@@ -166,49 +202,65 @@ function parseJsonStrict(text, what) {
 }
 
 /**
- * The reads the decision needs. Throws on a failed read — the CLI turns that
- * into a logged, exit-0 "nothing released", never a red run.
+ * The reads the decision needs. A failed read of the PR itself or the channel
+ * throws — the CLI turns that into a logged, exit-0 "nothing released", never
+ * a red run. A failed read of ONE candidate issue marks that candidate
+ * `unreadable` and the rest proceed: a commit saying `fixes #9999` for a
+ * number that is not an issue here must not cancel the release of the issue
+ * the PR actually closed.
  *
  * @param {object} o
  * @param {(args:string[], opts?:object)=>Promise<string>} o.gh
  * @param {string} o.repo             owner/name
  * @param {number} o.prNumber
- * @param {boolean} o.scanCommits     true when the PR merged into the default branch
  * @param {number} [o.channelIssue]
  */
-export async function fetchInputs({ gh, repo, prNumber, scanCommits, channelIssue = CHANNEL_ISSUE }) {
+export async function fetchInputs({ gh, repo, prNumber, channelIssue = CHANNEL_ISSUE }) {
   const [owner, name] = repo.split('/')
   const vars = ['-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${prNumber}`]
 
   const linked = parseJsonStrict(await gh(['api', 'graphql', ...vars, '-f', `query=${CLOSING_QUERY}`, '--jq', '.data.repository.pullRequest']), 'closing references')
-  const closingIssues = (linked?.closingIssuesReferences?.nodes ?? []).map((node) => ({
-    number: Number(node.number),
-    assignees: (node.assignees?.nodes ?? []).map((a) => a.login),
-  }))
-
-  if (scanCommits) {
-    // Title + every commit message, the grammar the close guard maintains.
-    const texts = [linked?.title ?? '']
-    let cursor = null
-    for (let page = 0; page < 5; page += 1) {
-      const args = ['api', 'graphql', ...vars, '-f', `query=${COMMITS_QUERY}`, '--jq', '.data.repository.pullRequest.commits']
-      if (cursor) args.push('-F', `cursor=${cursor}`)
-      const connection = parseJsonStrict(await gh(args), 'commit messages')
-      for (const c of commitsFromGraphQL(connection)) texts.push(c.message)
-      if (!connection?.pageInfo?.hasNextPage) break
-      cursor = connection.pageInfo.endCursor
+  // Candidate numbers, in order: GitHub's linked references first, then the
+  // title and every commit message through the close guard's grammar.
+  const candidates = []
+  for (const node of linked?.closingIssuesReferences?.nodes ?? []) {
+    const n = Number(node.number)
+    if (Number.isInteger(n) && !candidates.includes(n)) candidates.push(n)
+  }
+  const texts = [linked?.title ?? '']
+  let cursor = null
+  let exhausted = false
+  for (let page = 0; page < 5; page += 1) {
+    const args = ['api', 'graphql', ...vars, '-f', `query=${COMMITS_QUERY}`, '--jq', '.data.repository.pullRequest.commits']
+    if (cursor) args.push('-F', `cursor=${cursor}`)
+    const connection = parseJsonStrict(await gh(args), 'commit messages')
+    for (const c of commitsFromGraphQL(connection)) texts.push(c.message)
+    if (!connection?.pageInfo?.hasNextPage) {
+      exhausted = true
+      break
     }
-    for (const text of texts) {
-      for (const n of parseClosingRefs(text)) {
-        if (closingIssues.some((i) => i.number === n)) continue
-        // Found by the scan alone: ask GitHub whether it actually closed it.
-        const issue = parseJsonStrict(await gh(['api', `repos/${repo}/issues/${n}`]), `issue #${n}`)
-        closingIssues.push({
-          number: n,
-          assignees: (issue?.assignees ?? []).map((a) => a.login),
-          state: issue?.state ?? 'unknown',
-        })
-      }
+    cursor = connection.pageInfo.endCursor
+  }
+  // Fail CLOSED rather than read a prefix of the commit list — the close
+  // guard's rule for the same loop (500 is well above GitHub's 250 cap).
+  if (!exhausted) throw new Error('more than 500 commits on this pull request; refusing to read a partial list')
+  for (const text of texts) {
+    for (const n of parseClosingRefs(text)) if (!candidates.includes(n)) candidates.push(n)
+  }
+
+  // Read EVERY candidate back: state, when it closed, who is assigned now.
+  const closingIssues = []
+  for (const n of candidates) {
+    try {
+      const issue = parseJsonStrict(await gh(['api', `repos/${repo}/issues/${n}`]), `issue #${n}`)
+      closingIssues.push({
+        number: n,
+        assignees: (issue?.assignees ?? []).map((a) => a.login),
+        state: issue?.state ?? 'unknown',
+        closedAt: issue?.closed_at ?? null,
+      })
+    } catch {
+      closingIssues.push({ number: n, assignees: [], unreadable: true })
     }
   }
 
@@ -265,6 +317,7 @@ export function prFromPayload(ev) {
   return {
     number: Number(ev?.number),
     merged: ev?.merged === true,
+    mergedAt: ev?.merged_at ?? null,
     author: ev?.user?.login ?? '',
     authorType: ev?.user?.type ?? 'User',
     mergeCommit: ev?.merge_commit_sha ?? null,
@@ -284,7 +337,7 @@ export function prFromPayload(ev) {
 //   Offline:   node scripts/ci/release-on-merge.mjs --pr pr.json --closing closing.json [--channel channel.json]
 //
 // pr.json      : a `pull_request` object (event payload or REST)
-// closing.json : GraphQL `closingIssuesReferences.nodes`
+// closing.json : candidates as read back — [{ number, state, closed_at, assignees: [{ login }] }]
 // channel.json : REST issue comments — [{ body }]
 // ---------------------------------------------------------------------------
 
@@ -324,29 +377,30 @@ if (isMain) {
   let closingIssues
   let channelBodies
   if (eventPath) {
-    const ev = readJson(eventPath)
-    pr = prFromPayload(ev.pull_request ?? ev)
-    if (pr.merged !== true) {
-      // Decide before fetching: an unmerged close never reads anything.
-      process.stdout.write(`${JSON.stringify(decide({ pr, closingIssues: [] }))}\n`)
-      process.exit(0)
-    }
     try {
-      ;({ closingIssues, channelBodies } = await fetchInputs({
-        gh: ghRunner(), repo, prNumber: pr.number,
-        scanCommits: pr.defaultBranch !== null && pr.base === pr.defaultBranch,
-      }))
+      const ev = readJson(eventPath)
+      pr = prFromPayload(ev.pull_request ?? ev)
+      if (pr.merged !== true || (pr.defaultBranch && pr.base !== pr.defaultBranch)) {
+        // Decide before fetching: an unmerged close, or a merge into a
+        // non-default branch, never reads anything.
+        process.stdout.write(`${JSON.stringify(decide({ pr, closingIssues: [] }))}\n`)
+        process.exit(0)
+      }
+      ;({ closingIssues, channelBodies } = await fetchInputs({ gh: ghRunner(), repo, prNumber: pr.number }))
     } catch (e) {
-      console.log(`could not read this merge's closing references or the channel — nothing released (release by hand if you claimed): ${e?.message ?? e}`)
+      console.log(`could not read this merge's event, closing references or the channel — nothing released (release by hand if you claimed): ${e?.message ?? e}`)
       process.stdout.write(`${JSON.stringify({ releases: [], channel: null, skipped: [] })}\n`)
       process.exit(0)
     }
   } else {
+    // Offline shape: each candidate as the workflow would have read it back —
+    // { number, state, closed_at, assignees: [{ login }] }.
     pr = prFromPayload(readJson(prPath))
     closingIssues = (readJson(closingPath) ?? []).map((node) => ({
       number: Number(node.number),
-      assignees: (node.assignees?.nodes ?? []).map((a) => a.login),
+      assignees: (node.assignees?.nodes ?? node.assignees ?? []).map((a) => (typeof a === 'string' ? a : a.login)),
       ...(node.state !== undefined ? { state: node.state } : {}),
+      ...(node.closed_at !== undefined ? { closedAt: node.closed_at } : {}),
     }))
     const channelPath = arg('channel')
     channelBodies = channelPath ? (readJson(channelPath) ?? []).map((c) => String(c.body ?? '')) : []

@@ -4,21 +4,24 @@ name: Release the claim on merge
 # agent coordination) at the one moment the repository KNOWS the work landed:
 # when a pull request merges. For every issue the PR closed it comments
 # `🔓 RELEASE #N — landed as PR #<pr> …` on the issue, unassigns everyone still
-# assigned there, and repeats the line on #1289 only if a claim for that issue
-# was posted there. Decision logic, fetch and every write live in
+# assigned there, and repeats the line on #1289 if a claim for that issue is
+# anywhere in that thread. Decision logic, fetch and every write live in
 # `scripts/ci/release-on-merge.mjs`, under `node --test` (#3177).
 #
 # ## Which issues "the PR closed"
 #
-# GitHub's `closingIssuesReferences` carries only the references linked from
-# the PR BODY (measured on PR #2314: `Closes #2268` in a commit message closed
-# #2268 and is absent from that list). So the script also scans the title and
-# every commit message with the closing-keyword grammar the operator-verify
-# close guard maintains, and releases a scan-found issue only if GitHub reports
-# it CLOSED now — one still open is logged and left alone. The scan runs only
-# for a merge into the default branch: GitHub closes nothing on a merge into
-# any other branch, so a `dev → main` promotion (thirty `Closes #` commit
-# lines) releases nothing and never spams #1289.
+# Candidates are GitHub's `closingIssuesReferences` — which carries only the
+# references linked from the PR BODY (measured on PR #2314: a closing keyword
+# for #2268 in a commit message closed that issue and is absent from the list)
+# — plus the closing keywords in the title and every commit message (up to
+# 500), read with the grammar the operator-verify close guard maintains. Every
+# candidate is then read back from GitHub and released ONLY if it is closed
+# with `closed_at` at or after this PR's `merged_at` — closed BY THIS MERGE.
+# "Referenced and closed some time ago" releases nothing: this PR's own body
+# links #2268 (closed 2026-09-02 by a person), and GitHub's merge is a no-op on
+# it. A merge into a non-default branch releases nothing at all — GitHub
+# closes nothing there — so a `dev → main` promotion (thirty `Closes #` commit
+# lines) never spams #1289.
 #
 # ## Why a bot release
 #

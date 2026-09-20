@@ -283,7 +283,7 @@ describe('receipt vocabulary converges on the transaction names (#3134)', () => 
     }
   })
 
-  it('the mapper reads the snake_case wire keys and never the camel twins (fixture-level; the wire itself is pinned by check:api-types)', () => {
+  it('the mapper reads the snake_case wire keys and never the camel twins (fixture-level; the wire keys themselves are pinned by the receipt schema in backend openapi/spec.ts and its spec.test.ts)', () => {
     const raw = rawReceipt()
     expect(Object.keys(raw)).toEqual(expect.arrayContaining([
       'rail', 'proof_status', 'resource_url', 'merchant_address',

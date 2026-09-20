@@ -27,6 +27,8 @@ covers:
   - packages/frontend/src/components/agent-panel/AgentListToolbar.tsx
   - packages/frontend/src/hooks/useAgentListFilters.ts
   - packages/frontend/src/lib/agent-list-filters.ts
+  - packages/frontend/src/hooks/useAgentPanelState.ts
+  - packages/backend/src/routes/agents.ts
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/hooks/useTransactionsFeed.ts
   - packages/connect/src/**

@@ -38,7 +38,9 @@
  * and the `Table` primitive's only product consumer at scale. Neither had a
  * pixel of coverage.
  *
- * **`/agents` and `/agents/agent-research` are covered from #2733.** The 2026-09-07
+ * **`/agents` and `/agents/agent-research` are covered from #2733**, plus the
+ * URL-seeded filtered list `agents-list-filtered` (#3165); all three ship
+ * MOBILE-only by decision. The 2026-09-07
  * `still-loading` failure that kept the detail route out of this gate probed a
  * phantom fixture id — one that existed only inside two scenario payloads and
  * one unit test, never served by any fixture; the seeded fixture agents were

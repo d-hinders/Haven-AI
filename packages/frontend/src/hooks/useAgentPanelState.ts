@@ -35,6 +35,10 @@ export function useAgentPanelState() {
   const [firstAgentSetup, setFirstAgentSetup] = useState(false)
   const [finalizingAgent, setFinalizingAgent] = useState(false)
   const [finalizeTimedOut, setFinalizeTimedOut] = useState(false)
+  // #3167: the label vocabulary manager (rename, recolour, delete) — opened
+  // from the agents panel header. Edit itself lives on the agent detail page
+  // (#3168), not here.
+  const [labelsManagerOpen, setLabelsManagerOpen] = useState(false)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<AgentBusyAction>(null)
   const [showRemovedAgents, setShowRemovedAgents] = useState(false)
@@ -187,6 +191,13 @@ export function useAgentPanelState() {
     void pollForNewAgent(lastPollDelegateRef.current)
   }
 
+  // #3167: anything that changes the label vocabulary (create, rename,
+  // recolour, delete) re-reads the agents list, because every card renders
+  // the labels its agents carry.
+  function handleAgentEdited() {
+    void refetch()
+  }
+
   return {
     accountAddress,
     chainId,
@@ -203,6 +214,10 @@ export function useAgentPanelState() {
     finalizingAgent,
     finalizeTimedOut,
     retryFinalizePoll,
+    // #3167: label vocabulary management on the agents panel.
+    handleAgentEdited,
+    labelsManagerOpen,
+    setLabelsManagerOpen,
     busyAgentId,
     busyAction,
     handleViewDetails,

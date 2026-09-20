@@ -105,6 +105,10 @@ export const SCAN_FILES = [
   // moved them out of the scanned tree; the copy is as user-facing as it was.
   'packages/frontend/src/lib/agent-pause-copy.ts',
   'packages/frontend/src/lib/stranded-funds-copy.ts',
+  // #3167: the label UI's shared sentences — the manager's delete confirm,
+  // the editor's helper lines. Extracted from the modals the same way #2195
+  // extracted the pause/stranded copy, so the same gate must read it.
+  'packages/frontend/src/lib/label-copy.ts',
   // Credential-row labels ("Passkey · added {date}", "Passkey N") rendered by
   // WalletButton.tsx and AccountSignersCard.tsx. copy-guidelines.md § "Name
   // credentials 'passkey'" (#1679) specifies this string by name (#2333).

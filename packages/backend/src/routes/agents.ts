@@ -38,6 +38,7 @@ import {
   rotateAgentApiKey,
   updateAgentProfile,
 } from '../infra/repositories/agents.js'
+import { listLabelsForAgents } from '../infra/repositories/agent-labels.js'
 
 /**
  * #2914 (naming epic #2906 phase 5, the contraction): an agent carries the
@@ -106,12 +107,18 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       .map((a) => a.id)
     const derivedByAgent = await deriveDelegationAllowances(delegationAgentIds)
 
+    // #3167: labels ride along on the same read — one round trip for the
+    // cards and the #3165 filter facet. DISPLAY ONLY; never read by the
+    // delegation, budget, or enforcement path.
+    const labelsByAgent = await listLabelsForAgents(agentRows.map((a) => a.id))
+
     const agents = agentRows.map((agent) => ({
       ...agent,
       allowances:
         agent.account_type === 'delegator_hybrid'
           ? (derivedByAgent.get(agent.id) ?? [])
           : [],
+      labels: labelsByAgent.get(agent.id) ?? [],
     }))
 
     return { agents }
@@ -131,13 +138,15 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     if (agent.account_type === 'delegator_hybrid') {
       // Live budget = the active delegations, not an onboarding mirror (#1090).
       const derived = await deriveDelegationAllowances([id])
-      return { ...agent, allowances: derived.get(id) ?? [] }
+      const labels = (await listLabelsForAgents([id])).get(id) ?? []
+      return { ...agent, allowances: derived.get(id) ?? [], labels }
     }
 
     // Legacy rail retired (#1440/#2020): no allowance config to show.
     return {
       ...agent,
       allowances: [],
+      labels: (await listLabelsForAgents([id])).get(id) ?? [],
     }
   })
 
@@ -303,6 +312,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         // Always empty since #2020 — kept for response-shape compatibility;
         // budgets arrive later as delegation grants.
         allowances: [],
+        // A brand-new agent carries no labels yet (#3167).
+        labels: [],
         passport_requested: passportChainId != null,
       })
     } catch (err) {
@@ -345,6 +356,9 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       return {
         ...updated,
         allowances,
+        // #3167: the identity edit modal also edits labels, so the response
+        // carries them for a re-render without a second call.
+        labels: (await listLabelsForAgents([id])).get(id) ?? [],
       }
     },
   )

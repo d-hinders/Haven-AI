@@ -1,6 +1,6 @@
 'use client'
 
-import { ChevronRight, CircleAlert, Clock, LoaderCircle, Plus } from 'lucide-react'
+import { ChevronRight, CircleAlert, Clock, LoaderCircle, Plus, Tag } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
@@ -9,6 +9,7 @@ import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import { useAgentListFilters } from '@/hooks/useAgentListFilters'
 import { AgentListToolbar } from './agent-panel/AgentListToolbar'
 import ConnectAgentModal from './ConnectAgentModal'
+import LabelsManagerModal from './LabelsManagerModal'
 import { AgentCard } from './agent-panel/AgentCard'
 import { MCP_NOT_RECORDED_NOTE, hasUnrecordedMcpServerName } from './agent-panel/McpServerName'
 import { BotIcon } from './agent-panel/agent-display'
@@ -130,6 +131,10 @@ export default function AgentPanel() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button onClick={() => panel.setLabelsManagerOpen(true)} size="sm" variant="tertiary">
+            <Icon icon={Tag} className="h-3.5 w-3.5" />
+            Labels
+          </Button>
           <Button onClick={() => panel.setConnectAgentOpen(true)} size="sm">
             <Icon icon={Plus} className="h-3.5 w-3.5" />
             Connect agent
@@ -409,6 +414,13 @@ export default function AgentPanel() {
         accountId={panel.activeAccountId}
         onSetupUpdated={panel.handleSetupUpdated}
         resumeSetupId={activeResumeSetupId}
+      />
+
+      {/* Manage labels (#3167): the vocabulary — rename, recolour, delete. */}
+      <LabelsManagerModal
+        open={panel.labelsManagerOpen}
+        onClose={() => panel.setLabelsManagerOpen(false)}
+        onLabelsChanged={panel.handleAgentEdited}
       />
     </div>
   )

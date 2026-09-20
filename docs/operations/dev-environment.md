@@ -13,7 +13,7 @@ covers:
   - packages/backend/src/openapi/route-modules.generated.ts
   - packages/backend/scripts/generate-route-modules.ts
   - packages/backend/src/index.ts
-last-verified: "2026-09-18"
+last-verified: "2026-09-20"
 ---
 
 # Dev environment
@@ -521,3 +521,14 @@ and `prod` are production; any other value is the deployment's own name.
 
 If you need an env var changed or a secret rotated in the dev projects, ping the
 project owner — collaborators have Viewer access, not env-var write access.
+
+> **Re-verified #3167 (2026-09-20):** this diff's two new route files
+> (`routes/labels.ts`, `routes/agent-labels.ts`) are born ENFORCED —
+> `enforcedModules` in `index.ts` grew by exactly those two entries, the
+> generated map (`route-modules.generated.ts`) was regenerated in the same
+> commit, and both modules carry spec request bodies the plugin can enforce.
+> The shadow/enforce semantics this document describes are unchanged; the
+> rollout moved in its own forward direction (new modules start enforced,
+> shadow residue only shrinks — `lint:request-schemas` stays green with no
+> baseline bump). Nothing else in this file's coverage was touched; the note
+> and the `last-verified` date are the only edits.

@@ -5,7 +5,10 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { Icon } from '@/components/ui/Icon'
 import { api } from '@/lib/api'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { useLabels } from '@/hooks/useLabels'
 import type { Agent } from '@/hooks/useAgents'
+import { LabelOptionRow, LabelChip } from '@/components/haven/LabelChip'
+import { LABEL_EDITOR_NOTE } from '@/lib/label-copy'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Textarea } from './ui/Textarea'
@@ -14,9 +17,16 @@ import { useFocusTrap } from '@/hooks/useFocusTrap'
 type Step = 'form' | 'review' | 'saving' | 'done'
 
 /**
- * Edit the readable agent identity only. Budget changes are rail-specific and
- * live in the delegation budget card; legacy Safe accounts have no Haven
- * authority-management path.
+ * Edit the readable agent identity and its labels. Budget changes are
+ * rail-specific and live in the delegation budget card; legacy Safe accounts
+ * have no Haven authority-management path.
+ *
+ * #3167: labels ride in the same review+save flow as the identity fields —
+ * the editor fetches the user's vocabulary on open, the checkbox list starts
+ * from the agent's current set, and save is one PUT replacing the whole set
+ * (the API's unit of intent). Tag-only saves are allowed: `canReview` no
+ * longer requires a name/description change, only that SOMETHING changed.
+ * A label that does not exist yet can be created inline while tagging.
  */
 export default function EditAgentModal({
   open,
@@ -36,12 +46,62 @@ export default function EditAgentModal({
   const [agentDescription, setAgentDescription] = useState(agent.description ?? '')
   const [error, setError] = useState<string | null>(null)
 
+  // ── Labels (#3167) ─────────────────────────────────────────────────────────
+  // The vocabulary is fetched when the modal opens; the checked set starts
+  // from the agent's current labels and changes only here, so the review
+  // step can show the exact diff the save will make.
+  const { labels: vocabulary, fetchLabels, createLabel, putAgentLabels } = useLabels()
+  const [labelsReady, setLabelsReady] = useState(false)
+  const [checkedLabelIds, setCheckedLabelIds] = useState<string[]>(
+    agent.labels.map((l) => l.id),
+  )
+  const [newLabelName, setNewLabelName] = useState('')
+  const [newLabelError, setNewLabelError] = useState<string | null>(null)
+  const checkedSet = new Set(checkedLabelIds)
+
+  const toggleLabel = useCallback((id: string) => {
+    setCheckedLabelIds((prev) =>
+      prev.includes(id) ? prev.filter((l) => l !== id) : [...prev, id],
+    )
+  }, [])
+
+  // Stable-id create: the inline create POSTs on Enter/Add, selects the
+  // result, and clears the field. The API folds a duplicate name into the
+  // existing label (re-colouring it), so this cannot create a second "prod".
+  const addNewLabel = useCallback(async () => {
+    const name = newLabelName.trim().toLowerCase()
+    if (!name) return
+    const existing = vocabulary.find((l) => l.name.toLowerCase() === name)
+    if (existing) {
+      setCheckedLabelIds((prev) => (prev.includes(existing.id) ? prev : [...prev, existing.id]))
+      setNewLabelName('')
+      return
+    }
+    try {
+      const label = await createLabel(name)
+      setCheckedLabelIds((prev) => [...prev, label.id])
+      setNewLabelName('')
+      setNewLabelError(null)
+    } catch {
+      setNewLabelError('This label could not be created.')
+    }
+  }, [createLabel, newLabelName, vocabulary])
+
+  useEffect(() => {
+    if (!open) return
+    setLabelsReady(false)
+    void fetchLabels().then(() => setLabelsReady(true))
+  }, [open, fetchLabels])
+
   const resetForm = useCallback(() => {
     setStep('form')
     setAgentName(agent.name)
     setAgentDescription(agent.description ?? '')
     setError(null)
-  }, [agent.description, agent.name])
+    setCheckedLabelIds(agent.labels.map((l) => l.id))
+    setNewLabelName('')
+    setNewLabelError(null)
+  }, [agent.description, agent.labels, agent.name])
 
   useEffect(() => {
     if (open) resetForm()
@@ -59,17 +119,25 @@ export default function EditAgentModal({
   const trimmedDescription = agentDescription.trim()
   const detailsChanged =
     trimmedName !== agent.name || trimmedDescription !== (agent.description ?? '')
-  const canReview = trimmedName.length > 0 && detailsChanged
+  const labelsChanged =
+    checkedLabelIds.length !== agent.labels.length ||
+    agent.labels.some((l) => !checkedSet.has(l.id))
+  const canReview = (trimmedName.length > 0 && detailsChanged) || labelsChanged
 
   async function saveDetails() {
     if (!canReview) return
     setStep('saving')
     setError(null)
     try {
-      await api.put(`/agents/${agent.id}`, {
-        name: trimmedName,
-        description: trimmedDescription,
-      })
+      if (detailsChanged) {
+        await api.put(`/agents/${agent.id}`, {
+          name: trimmedName,
+          description: trimmedDescription,
+        })
+      }
+      if (labelsChanged) {
+        await putAgentLabels(agent.id, checkedLabelIds)
+      }
       setStep('done')
       onUpdated()
     } catch (err) {
@@ -98,7 +166,7 @@ export default function EditAgentModal({
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-5">
           <div>
             <h2 className="text-lg font-semibold text-[var(--v2-ink)]">Edit agent</h2>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">Update the name and description shown in Haven.</p>
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">Update the name, description and labels shown in Haven.</p>
           </div>
           <button
             type="button"
@@ -137,8 +205,62 @@ export default function EditAgentModal({
                   rows={3}
                 />
               </div>
+              {/*
+                #3167: the label editor — checkbox list over the user's whole
+                vocabulary, inline create below it. Checking a box is NOT a
+                save: every tag change lands through the review step's one
+                PUT, the same review+save path the name and description take.
+              */}
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-[var(--v2-ink-3)]">Labels</p>
+                {labelsReady && vocabulary.length === 0 ? (
+                  <p className="text-xs text-[var(--v2-ink-3)]">
+                    No labels yet. Add one below to start organising your agents.
+                  </p>
+                ) : (
+                  <div className="space-y-1" data-testid="label-editor-list">
+                    {vocabulary.map((label) => (
+                      <LabelOptionRow
+                        key={label.id}
+                        label={label}
+                        checked={checkedSet.has(label.id)}
+                        onToggle={() => toggleLabel(label.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+                <div className="mt-2 flex gap-2">
+                  <Input
+                    id="edit-agent-new-label"
+                    value={newLabelName}
+                    onChange={(event) => setNewLabelName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        void addNewLabel()
+                      }
+                    }}
+                    placeholder="New label name"
+                    aria-label="New label name"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="tertiary"
+                    size="sm"
+                    onClick={() => void addNewLabel()}
+                    disabled={newLabelName.trim().length === 0}
+                  >
+                    Add
+                  </Button>
+                </div>
+                {newLabelError ? (
+                  <p role="alert" className="mt-1 text-xs text-[var(--v2-danger)]">{newLabelError}</p>
+                ) : null}
+                <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{LABEL_EDITOR_NOTE}</p>
+              </div>
               {!canReview ? (
-                <p className="text-xs text-[var(--v2-ink-3)]">Edit the name or description to continue.</p>
+                <p className="text-xs text-[var(--v2-ink-3)]">Edit the name, description or labels to continue.</p>
               ) : null}
               <div className="flex gap-3">
                 <Button variant="ghost" onClick={handleClose} className="flex-1">Cancel</Button>
@@ -159,6 +281,23 @@ export default function EditAgentModal({
                 <div>
                   <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Description</p>
                   <p className="text-sm text-[var(--v2-ink-2)]">{trimmedDescription || 'No description'}</p>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Labels</p>
+                  {labelsChanged ? (
+                    <div className="flex flex-wrap items-center gap-1" data-testid="review-label-chips">
+                      {vocabulary
+                        .filter((l) => checkedSet.has(l.id))
+                        .map((l) => (
+                          <LabelChip key={l.id} label={l} />
+                        ))}
+                      {checkedLabelIds.length === 0 ? (
+                        <span className="text-sm text-[var(--v2-ink-2)]">No labels</span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-[var(--v2-ink-2)]">Unchanged</p>
+                  )}
                 </div>
               </div>
               <div className="flex gap-3">
@@ -198,7 +337,7 @@ export default function EditAgentModal({
                   <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
                 </div>
                 <p className="text-sm font-medium text-[var(--v2-ink)]">Agent updated</p>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Name and description saved</p>
+                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Details and labels saved</p>
               </div>
               <Button variant="ghost" onClick={handleClose} className="w-full">Done</Button>
             </div>

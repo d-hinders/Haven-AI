@@ -45,7 +45,7 @@ covers:
   - scripts/lint-next-steps.mjs
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
-last-verified: "2026-09-19"
+last-verified: "2026-09-20"
 ---
 
 # MCP Runtime Compatibility
@@ -2704,3 +2704,14 @@ to call next in structured fields, and those fields are typed end to end
 > change). The hosted server's suite pins the signer's declared shapes to the
 > hosted schemas. Scope of this note: those fields. Nothing else in this
 > document was re-verified.
+
+> **Re-verified #3167 (2026-09-20):** the covered file this diff touches is
+> `packages/backend/src/routes/agents.ts` — the agent rows the MCP server
+> lists now carry an extra read-only `labels[]` field (the #3167 tag
+> vocabulary). The wire contract the MCP server depends on did not move: no
+> existing field changed shape or name, no request the server sends gained a
+> required member (the only new write route, `PUT /agents/:id/labels`, is a
+> dashboard surface no MCP client calls), and an extra response field is the
+> additive case every consumer ignores. Version-skew and consent-hash
+> contracts are untouched. Scope of this note: the `labels[]` addition on the
+> agent rows. Nothing else in this document was re-verified.

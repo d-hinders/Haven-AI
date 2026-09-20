@@ -9,7 +9,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { decide, apply, fetchInputs, prFromPayload, AUTO_RELEASE_MARK } from './release-on-merge.mjs'
+import { decide, apply, fetchInputs, fetchCandidates, fetchChannel, prFromPayload, AUTO_RELEASE_MARK, CLOSE_WINDOW_MS } from './release-on-merge.mjs'
 import { parse } from './claim-assignee.mjs'
 
 const CLI = fileURLToPath(new URL('./release-on-merge.mjs', import.meta.url))
@@ -91,7 +91,7 @@ describe('released only when GitHub closed it BY THIS MERGE', () => {
     assert.deepEqual(r.releases.map((x) => x.issue), [3134])
     assert.equal(r.skipped.length, 1)
     assert.equal(r.skipped[0].issue, 3140)
-    assert.match(r.skipped[0].reason, /still open/)
+    assert.match(r.skipped[0].reason, /reports it open now/)
   })
 
   test('an issue closed BEFORE this merge — merely mentioned — is skipped (the #3187 self-test)', () => {
@@ -101,12 +101,39 @@ describe('released only when GitHub closed it BY THIS MERGE', () => {
     const r = decide({ pr: mergedPr, closingIssues: [{ number: 2268, assignees: ['d-hinders'], state: 'closed', closedAt: '2026-09-02T10:13:48Z' }, closedByMerge(3177)] })
     assert.deepEqual(r.releases.map((x) => x.issue), [3177])
     assert.equal(r.skipped[0].issue, 2268)
-    assert.match(r.skipped[0].reason, /before this merge/)
+    assert.match(r.skipped[0].reason, /outside this merge's window/)
   })
 
-  test('closed_at a moment before merged_at is still this merge (tolerance)', () => {
+  test('the window opens AT the merge: closed_at a moment before merged_at is not this merge', () => {
+    // Measured on eight real pairs: GitHub stamps the close 1–3 s AFTER the
+    // merge, never before. An issue a person closed 49 s earlier is theirs.
     const r = decide({ pr: mergedPr, closingIssues: [{ number: 3134, assignees: [], state: 'closed', closedAt: '2026-09-20T01:25:40Z' }] })
+    assert.deepEqual(r.releases, [])
+    assert.match(r.skipped[0].reason, /outside this merge's window/)
+  })
+
+  test('the window is bounded above: re-closed by hand later is not this merge (the #2314 → #2268 reopen)', () => {
+    // #2314 merged 19:03:57; the merge closed #2268 at +1 s; a person reopened
+    // it at +13 min and closed it by hand two days later. That later close is
+    // what `closed_at` reports, and it must not read as this merge's.
+    const later = new Date(Date.parse(MERGED_AT) + CLOSE_WINDOW_MS + 1000).toISOString()
+    const r = decide({ pr: mergedPr, closingIssues: [{ number: 2268, assignees: [], state: 'closed', closedAt: later }] })
+    assert.deepEqual(r.releases, [])
+    assert.match(r.skipped[0].reason, /outside this merge's window/)
+    // …while a slow close event four minutes after the merge is still this merge.
+    const slow = new Date(Date.parse(MERGED_AT) + 4 * 60_000).toISOString()
+    assert.deepEqual(decide({ pr: mergedPr, closingIssues: [{ number: 3134, assignees: [], state: 'closed', closedAt: slow }] }).releases.map((x) => x.issue), [3134])
+  })
+
+  test('a candidate that is a pull request is skipped — the issues API answers for PRs too', () => {
+    const r = decide({ pr: mergedPr, closingIssues: [{ ...closedByMerge(3186), isPullRequest: true }, closedByMerge(3134)] })
     assert.deepEqual(r.releases.map((x) => x.issue), [3134])
+    assert.match(r.skipped[0].reason, /is a pull request/)
+  })
+
+  test('reopened since the merge reads as open and is left alone, with a reason that admits both causes', () => {
+    const r = decide({ pr: mergedPr, closingIssues: [{ number: 3134, assignees: [], state: 'open', closedAt: null }] })
+    assert.match(r.skipped[0].reason, /not closed by this merge, or reopened since/)
   })
 
   test('a candidate with no read-back state is skipped, never released on trust', () => {
@@ -209,7 +236,11 @@ describe('fetch and apply through an injected gh', () => {
           return JSON.stringify({ nodes: page.map((m) => ({ commit: { oid: 'abc', message: m } })), pageInfo: { hasNextPage: idx + 1 < pages.length, endCursor: String(idx + 1) } })
         }
       }
-      if (args[0] === 'api' && args.includes('--paginate')) return JSON.stringify(answers.channelPages ?? [[]])
+      if (args[0] === 'api' && args.includes('--paginate')) {
+        const url = args[args.length - 1]
+        if (/\/issues\/1289\/comments/.test(url)) return JSON.stringify(answers.channelPages ?? [[]])
+        return JSON.stringify(answers.existingComments?.(Number(url.match(/issues\/(\d+)\//)[1])) ?? [[]])
+      }
       if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(args[1])) {
         const n = Number(args[1].split('/').pop())
         return JSON.stringify(answers.issue?.(n) ?? { state: 'closed', closed_at: '2026-09-20T01:26:30Z', assignees: [] })
@@ -246,10 +277,23 @@ describe('fetch and apply through an injected gh', () => {
     assert.equal(calls.filter((c) => (c.args.find((a) => a.startsWith('query=')) ?? '').includes('commits(')).length, 2)
   })
 
-  test('one unreadable candidate (fixes #9999 for a number that is not an issue here) does not cancel the others', async () => {
+  test('fetchCandidates flags a pull-request number; fetchChannel is a separate read', async () => {
+    const { gh, calls } = recorder({
+      closing: [{ number: 3186 }],
+      issue: (n) => (n === 3186 ? { state: 'closed', closed_at: '2026-09-20T01:26:29Z', assignees: [], pull_request: { url: 'x' } } : { state: 'closed', closed_at: '2026-09-20T01:26:30Z', assignees: [] }),
+    })
+    const { closingIssues } = await fetchCandidates({ gh, repo: 'o/r', prNumber: 1 })
+    assert.deepEqual(closingIssues, [{ number: 3186, assignees: [], state: 'closed', closedAt: '2026-09-20T01:26:29Z', isPullRequest: true }])
+    assert.ok(!calls.some((c) => c.args.includes('--paginate')), 'no channel read yet')
+    const { channelBodies } = await fetchChannel({ gh, repo: 'o/r' })
+    assert.deepEqual(channelBodies, [])
+    assert.equal(calls.filter((c) => c.args.includes('--paginate')).length, 1)
+  })
+
+  test('one unreadable candidate (a keyword for a number that is not an issue here) does not cancel the others', async () => {
     const { gh } = recorder({
       closing: [{ number: 3134 }],
-      commitPages: [['chore\n\nfixes #9999']],
+      commitPages: [['chore\n\n' + 'fixes' + ' #9999']],
       issue: (n) => { if (n === 9999) throw new Error('HTTP 404'); return { state: 'closed', closed_at: '2026-09-20T01:26:30Z', assignees: [] } },
     })
     const r = await fetchInputs({ gh, repo: 'o/r', prNumber: 1 })
@@ -273,16 +317,17 @@ describe('fetch and apply through an injected gh', () => {
     const decision = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134, ['PhilipEriksson']), { number: 3141, state: 'open', closedAt: null }], channelBodies: ['🔒 CLAIM #3134 — x'] })
     const { gh, calls } = recorder()
     const logs = []
-    const done = await apply(decision, { gh, repo: 'd-hinders/Haven-AI', log: (m) => logs.push(m) })
-    assert.deepEqual(calls.map((c) => c.args.slice(0, 3)), [
+    const done = await apply(decision, { gh, repo: 'd-hinders/Haven-AI', prNumber: 3186, log: (m) => logs.push(m) })
+    const writes = calls.filter((c) => c.args[0] === 'issue')
+    assert.deepEqual(writes.map((c) => c.args.slice(0, 3)), [
       ['issue', 'comment', '3134'],
       ['issue', 'edit', '3134'],
       ['issue', 'edit', '3134'],
       ['issue', 'comment', '1289'],
     ])
     // Body through stdin, never argv.
-    assert.ok(calls[0].args.includes('-F') && calls[0].args.includes('-') && calls[0].input.startsWith('🔓 RELEASE #3134'))
-    assert.deepEqual(calls.slice(1, 3).map((c) => c.args[c.args.indexOf('--remove-assignee') + 1]), ['PhilipEriksson', 'AntonioSaaranen'])
+    assert.ok(writes[0].args.includes('-F') && writes[0].args.includes('-') && writes[0].input.startsWith('🔓 RELEASE #3134'))
+    assert.deepEqual(writes.slice(1, 3).map((c) => c.args[c.args.indexOf('--remove-assignee') + 1]), ['PhilipEriksson', 'AntonioSaaranen'])
     assert.deepEqual(done.map((d) => d.kind), ['comment', 'unassign', 'unassign', 'channel'])
     assert.ok(logs.some((l) => /left #3141 alone/.test(l)))
   })
@@ -290,17 +335,39 @@ describe('fetch and apply through an injected gh', () => {
   test('no channel copy when the decision has none', async () => {
     const decision = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134)] })
     const { gh, calls } = recorder()
-    await apply(decision, { gh, repo: 'o/r', log: () => {} })
-    assert.ok(!calls.some((c) => c.args[2] === '1289'))
+    await apply(decision, { gh, repo: 'o/r', prNumber: 3186, log: () => {} })
+    assert.ok(!calls.some((c) => c.args[0] === 'issue' && c.args[2] === '1289'))
   })
 
   test('a refused write is logged and the rest still happens — never a thrown build failure', async () => {
     const decision = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134), closedByMerge(3135)] })
     const logs = []
     const { gh } = recorder({ refuse: (args) => args[2] === '3134' })
-    const done = await apply(decision, { gh, repo: 'o/r', log: (m) => logs.push(m) })
+    const done = await apply(decision, { gh, repo: 'o/r', prNumber: 3186, log: (m) => logs.push(m) })
     assert.deepEqual(done.map((d) => `${d.kind}:${d.issue}`), ['comment:3135', 'unassign:3135'])
     assert.ok(logs.some((l) => /could not comment on #3134/.test(l)))
+  })
+
+  test('a re-run posts no second release on a thread that already carries this merge\'s — but still unassigns', async () => {
+    const decision = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134, ['PhilipEriksson'])], channelBodies: ['🔒 CLAIM #3134 — x'] })
+    const posted = `🔓 RELEASE #3134 — landed as PR #3186 (\`a29d5469\`, into \`dev\`) — ${AUTO_RELEASE_MARK}; nothing to release by hand.`
+    const { gh, calls } = recorder({ existingComments: (n) => [[{ body: n === 1289 ? 'unrelated' : posted }]] })
+    const logs = []
+    const done = await apply(decision, { gh, repo: 'o/r', prNumber: 3186, log: (m) => logs.push(m) })
+    const writes = calls.filter((c) => c.args[0] === 'issue').map((c) => c.args.slice(0, 3))
+    // No comment on #3134 (already there); unassigns proceed; the channel copy
+    // IS posted because #1289 does not carry it yet.
+    assert.deepEqual(writes, [['issue', 'edit', '3134'], ['issue', 'edit', '3134'], ['issue', 'comment', '1289']])
+    assert.ok(logs.some((l) => /already carries this merge's release/.test(l)))
+    assert.deepEqual(done.map((d) => d.kind), ['unassign', 'unassign', 'channel'])
+  })
+
+  test('a release for a DIFFERENT PR on the same issue does not count as already posted', async () => {
+    const decision = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134)] })
+    const other = `🔓 RELEASE #3134 — landed as PR #99 — ${AUTO_RELEASE_MARK}; nothing to release by hand.`
+    const { gh, calls } = recorder({ existingComments: () => [[{ body: other }]] })
+    await apply(decision, { gh, repo: 'o/r', prNumber: 3186, log: () => {} })
+    assert.ok(calls.some((c) => c.args[0] === 'issue' && c.args[1] === 'comment' && c.args[2] === '3134'))
   })
 
   test('prFromPayload reads the event\'s pull_request shape, including author type and default branch', () => {

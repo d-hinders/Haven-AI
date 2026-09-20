@@ -38,22 +38,31 @@
 // (GraphQL) carries only the references it linked from the PR BODY — measured
 // on PR #2314, where a closing keyword for #2268 sat in a commit message,
 // closed that issue on merge, and is absent from that list. So: GitHub's list,
-// plus the closing keywords in the title and every commit message (paginated,
-// up to 500 — a longer list is refused, never read in part), with the grammar `operator-verify-close-guard.mjs` already maintains for the same
+// (first 50) plus the closing keywords in the title and every commit message
+// (paginated, up to 500 — a longer list is refused, never read in part), with the grammar `operator-verify-close-guard.mjs` already maintains for the same
 // reason (`parseClosingRefs`).
 //
 // A candidate is RELEASED only if GitHub closed it BY THIS MERGE: the issue is
-// read back and must be `closed` with `closed_at` at or after the PR's
-// `merged_at`. "Referenced and closed now" is not enough — measured on this
-// very PR (#3187), whose body prose linked #2268 (closed 2026-09-02 by a
-// person, unrelated): GitHub's merge is a silent no-op on an already-closed
-// issue, and releasing it would have manufactured exactly the stale reading
-// this exists to delete, on the issue and on #1289. The same rule drops a
-// quoted keyword in commit prose (`(PR #1497, \`Closes #1496\`)` exists in
-// this repo's history) and a cross-repo reference whose digits the grammar
-// keeps (`Fixes other/repo#42` would read as our #42 — GitHub honours the
-// qualifier and closes nothing). An issue GitHub did not close is listed under
-// `skipped` with the reason, never released.
+// read back and must be `closed` with `closed_at` in the window
+// [`merged_at`, `merged_at` + 5 min]. Measured on eight merge→close pairs
+// (#3186/#3134, #2314/#2276, #3175/#3170, …): GitHub stamps the close one to
+// three seconds AFTER the merge, never before, so the window opens exactly at
+// the merge; the five minutes cover a slow close event, and the upper bound is
+// what excludes an issue re-closed by hand later. "Referenced and closed now"
+// is not enough — measured during review of this very PR (#3187), whose body
+// prose at the time linked #2268 (closed 2026-09-02 by a person, unrelated):
+// GitHub's merge is a silent no-op on an already-closed issue, and releasing
+// it would have manufactured exactly the stale reading this exists to delete,
+// on the issue and on #1289. The same rule drops a quoted keyword in commit
+// prose (this repo's history has one citing another PR's closing line for
+// #1496), a cross-repo reference whose digits the grammar keeps (a keyword
+// aimed at other/repo#42 would read as our #42 — GitHub honours the qualifier
+// and closes nothing), and the #2314 → #2268 case itself: the merge closed
+// #2268 at +1 s, a person REOPENED it at +13 min and closed it by hand two days
+// later, so its `closed_at` is outside the window and it is left alone — the
+// human's reopen is honoured, not overwritten. A candidate that is a PULL
+// REQUEST (the issues API answers for those too) is skipped. An issue GitHub
+// did not close is listed under `skipped` with the reason, never released.
 //
 // Nothing is released at all for a merge into a non-default branch: GitHub
 // closes nothing there, so a `dev → main` promotion (thirty `Closes #` commit
@@ -84,16 +93,20 @@ import { parseClosingRefs, commitsFromGraphQL } from './operator-verify-close-gu
 
 export const CHANNEL_ISSUE = 1289
 export const AUTO_RELEASE_MARK = 'posted automatically on merge (#3177)'
-/** `closed_at` may be stamped a moment before `merged_at`; two minutes covers it. */
-export const CLOSE_TOLERANCE_MS = 2 * 60_000
+/**
+ * How long after `merged_at` a close still counts as this merge's. Measured
+ * +1…+3 s on eight real pairs; five minutes covers a slow close event without
+ * admitting an issue re-closed by hand later the same day.
+ */
+export const CLOSE_WINDOW_MS = 5 * 60_000
 
 /**
  * @param {object} o
  * @param {{number:number, merged:boolean, mergedAt?:string|null, author:string, authorType?:string, mergeCommit?:string|null, base?:string|null, defaultBranch?:string|null}} o.pr
- * @param {{number:number, assignees?:string[], state?:string, closedAt?:string|null, unreadable?:boolean}[]} o.closingIssues
+ * @param {{number:number, assignees?:string[], state?:string, closedAt?:string|null, unreadable?:boolean, isPullRequest?:boolean}[]} o.closingIssues
  *        every candidate (linked or scanned), each READ BACK from GitHub:
- *        `state`, `closedAt` and current assignees; `unreadable` when that
- *        read failed (a number that is not an issue here)
+ *        `state`, `closedAt`, current assignees, whether the number is a pull
+ *        request; `unreadable` when that read failed (not an issue here)
  * @param {string[]} [o.channelBodies]   comment bodies on the channel issue
  * @param {number} [o.channelIssue]
  * @returns {{releases: {issue:number, body:string, unassign:string[]}[], channel: {body:string}|null, skipped: {issue:number, reason:string}[]}}
@@ -127,22 +140,27 @@ export function decide({ pr, closingIssues, channelBodies = [], channelIssue = C
       skipped.push({ issue: n, reason: 'could not be read (not an issue in this repository, or a transient error) — nothing released for it' })
       continue
     }
+    if (issue.isPullRequest) {
+      skipped.push({ issue: n, reason: 'is a pull request, not an issue — the claim protocol has nothing to release there' })
+      continue
+    }
     if (issue.state === undefined || issue.closedAt === undefined) {
       skipped.push({ issue: n, reason: 'no state read back from GitHub — nothing released for it' })
       continue
     }
     if (String(issue.state).toLowerCase() !== 'closed') {
-      // Named by a keyword but GitHub did not close it (the keyword sat in a
-      // code span, or the reference was to another repository). Its claim is
-      // live; say so and leave it.
-      skipped.push({ issue: n, reason: `still ${issue.state} — GitHub did not close it on this merge; release by hand if you claimed it` })
+      // GitHub reports it open now: the keyword sat in a code span, pointed at
+      // another repository, or a person reopened it since the merge. Either
+      // way its claim is live; say so and leave it.
+      skipped.push({ issue: n, reason: `GitHub reports it ${issue.state} now — not closed by this merge, or reopened since; release by hand if you claimed it` })
       continue
     }
     const closedAtMs = Date.parse(issue.closedAt ?? '')
-    if (!Number.isFinite(mergedAtMs) || !Number.isFinite(closedAtMs) || closedAtMs < mergedAtMs - CLOSE_TOLERANCE_MS) {
+    if (!Number.isFinite(mergedAtMs) || !Number.isFinite(closedAtMs) || closedAtMs < mergedAtMs || closedAtMs > mergedAtMs + CLOSE_WINDOW_MS) {
       // Closed, but not by this merge: an already-closed issue this PR merely
-      // mentioned. GitHub's merge was a no-op on it; so is this.
-      skipped.push({ issue: n, reason: `closed ${issue.closedAt ?? 'at an unknown time'}, before this merge (${pr.mergedAt ?? 'unknown'}) — not closed by it, nothing released` })
+      // mentioned, or one re-closed by hand later. GitHub's merge was a no-op
+      // on it; so is this.
+      skipped.push({ issue: n, reason: `closed ${issue.closedAt ?? 'at an unknown time'}, outside this merge's window (${pr.mergedAt ?? 'unknown'} + 5 min) — not closed by it, nothing released` })
       continue
     }
     const unassign = [...new Set([...(issue.assignees ?? []), author].filter((s) => typeof s === 'string' && s.length > 0))]
@@ -202,20 +220,18 @@ function parseJsonStrict(text, what) {
 }
 
 /**
- * The reads the decision needs. A failed read of the PR itself or the channel
- * throws — the CLI turns that into a logged, exit-0 "nothing released", never
- * a red run. A failed read of ONE candidate issue marks that candidate
- * `unreadable` and the rest proceed: a commit saying `fixes #9999` for a
- * number that is not an issue here must not cancel the release of the issue
- * the PR actually closed.
+ * The candidate reads. A failed read of the PR itself throws — the CLI turns
+ * that into a logged, exit-0 "nothing released", never a red run. A failed
+ * read of ONE candidate issue marks that candidate `unreadable` and the rest
+ * proceed: a commit citing a `fixes` keyword for a number that is not an issue
+ * here must not cancel the release of the issue the PR actually closed.
  *
  * @param {object} o
  * @param {(args:string[], opts?:object)=>Promise<string>} o.gh
  * @param {string} o.repo             owner/name
  * @param {number} o.prNumber
- * @param {number} [o.channelIssue]
  */
-export async function fetchInputs({ gh, repo, prNumber, channelIssue = CHANNEL_ISSUE }) {
+export async function fetchCandidates({ gh, repo, prNumber }) {
   const [owner, name] = repo.split('/')
   const vars = ['-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${prNumber}`]
 
@@ -258,37 +274,78 @@ export async function fetchInputs({ gh, repo, prNumber, channelIssue = CHANNEL_I
         assignees: (issue?.assignees ?? []).map((a) => a.login),
         state: issue?.state ?? 'unknown',
         closedAt: issue?.closed_at ?? null,
+        ...(issue?.pull_request ? { isPullRequest: true } : {}),
       })
     } catch {
       closingIssues.push({ number: n, assignees: [], unreadable: true })
     }
   }
+  return { closingIssues }
+}
 
-  // The whole channel, not a window: a claim posted weeks ago for a branch
-  // that merges today still gets its channel copy. ~14 calls at today's size.
+/**
+ * The whole channel, not a window: a claim posted weeks ago for a branch that
+ * merges today still gets its channel copy. ~14 calls at today's size — read
+ * only once the decision has something to release.
+ */
+export async function fetchChannel({ gh, repo, channelIssue = CHANNEL_ISSUE }) {
   const pages = parseJsonStrict(await gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${channelIssue}/comments?per_page=100`]), 'channel comments') ?? []
   const channelBodies = []
   for (const page of Array.isArray(pages) ? pages : []) {
     for (const c of Array.isArray(page) ? page : []) channelBodies.push(String(c.body ?? ''))
   }
+  return { channelBodies }
+}
+
+/** Compatibility wrapper: both reads. */
+export async function fetchInputs({ gh, repo, prNumber, channelIssue = CHANNEL_ISSUE }) {
+  const { closingIssues } = await fetchCandidates({ gh, repo, prNumber })
+  const { channelBodies } = await fetchChannel({ gh, repo, channelIssue })
   return { closingIssues, channelBodies }
+}
+
+/**
+ * Has this merge's release already been posted on that thread? A re-run of the
+ * workflow (`gh run rerun`) must not post it twice. Read failures answer
+ * "no", so a transient error degrades to one duplicate line, never to a
+ * missed release.
+ */
+async function alreadyReleased({ gh, repo, issue, prNumber }) {
+  try {
+    const pages = parseJsonStrict(await gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments?per_page=100`]), 'existing comments') ?? []
+    for (const page of Array.isArray(pages) ? pages : []) {
+      for (const c of Array.isArray(page) ? page : []) {
+        const body = String(c.body ?? '')
+        if (body.includes(AUTO_RELEASE_MARK) && new RegExp(`landed as PR #${prNumber}\\b`).test(body)) return true
+      }
+    }
+  } catch {
+    // fall through
+  }
+  return false
 }
 
 /**
  * Apply a decision. Every write is attempted independently and a refusal is
  * logged, never thrown — the workflow must not fail the build over a comment.
- * Bodies go through stdin (`-F -`), never argv.
+ * Bodies go through stdin (`-F -`), never argv. Idempotent: a thread that
+ * already carries this merge's release gets no second comment (the unassign
+ * is naturally idempotent).
  */
-export async function apply(decision, { gh, repo, channelIssue = CHANNEL_ISSUE, log = console.log }) {
+export async function apply(decision, { gh, repo, prNumber, channelIssue = CHANNEL_ISSUE, log = console.log }) {
   const done = []
   for (const s of decision.skipped ?? []) log(`  left #${s.issue} alone: ${s.reason}`)
   for (const rel of decision.releases) {
-    try {
-      await gh(['issue', 'comment', String(rel.issue), '--repo', repo, '-F', '-'], { input: rel.body })
-      log(`  released #${rel.issue}`)
-      done.push({ kind: 'comment', issue: rel.issue })
-    } catch (e) {
-      log(`  could not comment on #${rel.issue} (skipped): ${e?.message ?? e}`)
+    if (await alreadyReleased({ gh, repo, issue: rel.issue, prNumber })) {
+      log(`  #${rel.issue} already carries this merge's release — not posting twice`)
+    } else {
+      try {
+        await gh(['issue', 'comment', String(rel.issue), '--repo', repo, '-F', '-'], { input: rel.body })
+        log(`  released #${rel.issue}`)
+        done.push({ kind: 'comment', issue: rel.issue })
+      } catch (e) {
+        log(`  could not comment on #${rel.issue} (skipped): ${e?.message ?? e}`)
+      }
     }
     for (const login of rel.unassign) {
       try {
@@ -301,6 +358,10 @@ export async function apply(decision, { gh, repo, channelIssue = CHANNEL_ISSUE, 
     }
   }
   if (decision.channel) {
+    if (await alreadyReleased({ gh, repo, issue: channelIssue, prNumber })) {
+      log(`  #${channelIssue} already carries this merge's release — not posting twice`)
+      return done
+    }
     try {
       await gh(['issue', 'comment', String(channelIssue), '--repo', repo, '-F', '-'], { input: decision.channel.body })
       log(`  released on the channel (#${channelIssue})`)
@@ -386,7 +447,18 @@ if (isMain) {
         process.stdout.write(`${JSON.stringify(decide({ pr, closingIssues: [] }))}\n`)
         process.exit(0)
       }
-      ;({ closingIssues, channelBodies } = await fetchInputs({ gh: ghRunner(), repo, prNumber: pr.number }))
+      const gh = ghRunner()
+      ;({ closingIssues } = await fetchCandidates({ gh, repo, prNumber: pr.number }))
+      // The channel (~14 calls) is read only when there is something to release.
+      const first = decide({ pr, closingIssues })
+      channelBodies = first.releases.length ? (await fetchChannel({ gh, repo })).channelBodies : []
+      const decision = decide({ pr, closingIssues, channelBodies })
+      process.stdout.write(`${JSON.stringify(decision)}\n`)
+      if (has('apply')) {
+        if (decision.releases.length === 0 && decision.skipped.length === 0) console.log('This merge closed no issue — nothing to release.')
+        else await apply(decision, { gh, repo, prNumber: pr.number })
+      }
+      process.exit(0)
     } catch (e) {
       console.log(`could not read this merge's event, closing references or the channel — nothing released (release by hand if you claimed): ${e?.message ?? e}`)
       process.stdout.write(`${JSON.stringify({ releases: [], channel: null, skipped: [] })}\n`)
@@ -401,15 +473,12 @@ if (isMain) {
       assignees: (node.assignees?.nodes ?? node.assignees ?? []).map((a) => (typeof a === 'string' ? a : a.login)),
       ...(node.state !== undefined ? { state: node.state } : {}),
       ...(node.closed_at !== undefined ? { closedAt: node.closed_at } : {}),
+      ...(node.pull_request ? { isPullRequest: true } : {}),
     }))
     const channelPath = arg('channel')
     channelBodies = channelPath ? (readJson(channelPath) ?? []).map((c) => String(c.body ?? '')) : []
   }
 
-  const decision = decide({ pr, closingIssues, channelBodies })
-  process.stdout.write(`${JSON.stringify(decision)}\n`)
-  if (has('apply')) {
-    if (decision.releases.length === 0 && decision.skipped.length === 0) console.log('This merge closed no issue — nothing to release.')
-    else await apply(decision, { gh: ghRunner(), repo })
-  }
+  // Offline path (tests, dry runs): decide only, never apply.
+  process.stdout.write(`${JSON.stringify(decide({ pr, closingIssues, channelBodies }))}\n`)
 }

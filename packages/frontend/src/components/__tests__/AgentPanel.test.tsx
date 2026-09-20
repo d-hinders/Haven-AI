@@ -15,6 +15,9 @@ vi.mock('@/hooks/useAgents', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockRouterPush, replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  // #3165: the list toolbar mirrors its state to the URL.
+  usePathname: () => '/agents',
+  useSearchParams: () => new URLSearchParams(),
 }))
 
 vi.mock('../ConnectAgentModal', () => ({
@@ -167,5 +170,39 @@ describe('AgentPanel rail affordances', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('Old agent')).toBeVisible()
     expect(controlled).not.toHaveAttribute('hidden')
+  })
+})
+
+describe('AgentPanel list toolbar (#3165)', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue({ activeAccount: SAFE, activeChainId: SAFE.chain_id })
+  })
+
+  it('renders the toolbar above a non-empty list and filters the cards through it', () => {
+    setAgents([agent({ id: 'a1', name: 'Alpha', status: 'active' }), agent({ id: 'a2', name: 'Bravo', status: 'paused' })])
+    render(<AgentPanel />)
+    expect(screen.getByTestId('agent-list-toolbar')).toBeInTheDocument()
+    expect(screen.getByText('Alpha')).toBeInTheDocument()
+    expect(screen.getByText('Bravo')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search agents' }), { target: { value: 'brav' } })
+    expect(screen.queryByText('Alpha')).toBeNull()
+    expect(screen.getByText('Bravo')).toBeInTheDocument()
+    expect(screen.getByTestId('agent-list-count')).toHaveTextContent('1 of 2 agents shown')
+  })
+
+  it('a zero-result filter shows the reset affordance and never hides the toolbar', () => {
+    setAgents([agent({ id: 'a1', name: 'Alpha' })])
+    render(<AgentPanel />)
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search agents' }), { target: { value: 'zzz' } })
+    expect(screen.getByText('No agents match these filters')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Clear filters' }).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clear filters' })[0])
+    expect(screen.getByText('Alpha')).toBeInTheDocument()
+  })
+
+  it('no toolbar on an empty list — the empty state owns that screen', () => {
+    setAgents([])
+    render(<AgentPanel />)
+    expect(screen.queryByTestId('agent-list-toolbar')).toBeNull()
   })
 })

@@ -418,6 +418,15 @@ const ROUTES: ProductRoute[] = [
     anchor: (page: Page) => page.getByRole('heading', { name: 'Agents', exact: true }),
   },
   {
+    // #3165: the list toolbar with a search term and a status facet applied,
+    // read from the URL — the shareable-view contract in one frame.
+    path: '/agents?q=research&status=active',
+    slug: 'agents-list-filtered',
+    minChars: 200,
+    viewports: ['mobile'],
+    anchor: (page: Page) => page.getByTestId('agent-list-count'),
+  },
+  {
     path: '/agents/agent-research',
     slug: 'agent-detail-research',
     minChars: 700,

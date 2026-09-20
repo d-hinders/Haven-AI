@@ -23,6 +23,10 @@ covers:
   - packages/frontend/src/components/analytics/RangeControl.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
+  - packages/frontend/src/components/AgentPanel.tsx
+  - packages/frontend/src/components/agent-panel/AgentListToolbar.tsx
+  - packages/frontend/src/hooks/useAgentListFilters.ts
+  - packages/frontend/src/lib/agent-list-filters.ts
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/hooks/useTransactionsFeed.ts
   - packages/connect/src/**
@@ -30,7 +34,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-09-16"
+last-verified: "2026-09-20"
 ---
 
 # Haven Screen Recipes
@@ -370,6 +374,24 @@ Money and risk clarity:
 - Include externally verifiable transaction links after execution, not before they exist.
 
 </details>
+
+## Agent List
+
+Use for `/agents`: every managed agent as a card, with the list controls above it (#3165).
+
+Structure:
+1. Header with the count and the primary action (Connect agent).
+2. Toolbar: free-text search (name, description, delegate address), one dropdown per facet, a sort select, and a count line — `12 of 27 agents shown` while a filter is on, `27 agents` at rest, with `Clear filters` beside it only while something is filtered.
+3. The card grid, filtered and sorted by the toolbar.
+4. Zero-result state inside the list area (`No agents match these filters`) with the same reset action; the toolbar stays visible so the user can see what they filtered on.
+5. Removed agents stay behind their own toggle and are never in the filtered set.
+
+Rules:
+- Filter state lives in the URL (`?q=…&status=active,paused&budget=none&sort=seen`), so a view is shareable and survives reload; `?setup=` and other parameters on the page are preserved. Unknown values in a pasted link are dropped, never applied silently.
+- A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode), so the labels facet (#3167) and the organization facet (#3164) plug in without a toolbar change. Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts.
+- The budget facet offers only what `GET /agents` can prove from `allowances`: recurring, one-time, none. Exhausted, near-limit and pending-signature need a server field and are not offered, because an option that can never match reads as "no agent is near its limit".
+- Sort keys: name, recently seen (`mcp_last_seen_at`, never-seen last), newest, largest budget (largest single allowance in its own token units — the row carries no price, so this is deliberately unit-blind).
+- Filtering is client-side over the loaded list; the API is unpaginated, so this holds until an account has enough agents for `GET /agents` itself to need paging.
 
 ## Agent Activity
 

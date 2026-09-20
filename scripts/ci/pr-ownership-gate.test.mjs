@@ -274,7 +274,7 @@ describe('the workflow cannot mask the verdict', () => {
     assert.match(yml, /concurrency:\n  group: pr-ownership-gate-\$\{\{ github\.event\.pull_request\.number \}\}\n  cancel-in-progress: true/)
     assert.doesNotMatch(yml, /^on:\n  pull_request:/m)
     assert.match(yml, /permissions:\n  contents: read\n  issues: read\n  pull-requests: read/)
-    // No `ref:` under the checkout step — the default on pull_request_target is the base.
+    // No `ref:` under the checkout step — the default on pull_request_target is the DEFAULT branch.
     const checkout = yml.slice(yml.indexOf('actions/checkout@v4'), yml.indexOf('actions/setup-node@v4'))
     assert.doesNotMatch(checkout, /ref:/)
   })

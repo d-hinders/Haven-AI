@@ -89,14 +89,17 @@ export function evaluate({ pr, issues, nowMs = Date.now(), channelIssue = CHANNE
     const foreignAssignees = (issue.assignees ?? []).filter((a) => a && !sameLogin(a, pr.author) && !/\[bot\]$/i.test(a))
     const holders = (issue.live ?? [])
       .filter((h) => !sameLogin(h.holder, pr.author))
-      .map((h) => ({
-        login: h.holder,
-        claimedAt: h.claim?.createdAt ?? null,
-        lastActivityAt: h.lastActivityAt ?? null,
-        url: h.claim?.htmlUrl ?? null,
-        branch: branchOf(h.claim?.body),
-        where: h.claim?.onIssue === channelIssue ? `#${channelIssue}` : `#${issue.number}`,
-      }))
+      .map((h) => {
+        const since = h.firstClaim ?? h.claim // the hold's start, not the newest re-claim
+        return {
+          login: h.holder,
+          claimedAt: since?.createdAt ?? null,
+          lastActivityAt: h.lastActivityAt ?? null,
+          url: since?.htmlUrl ?? null,
+          branch: branchOf(h.claim?.body),
+          where: since?.onIssue === channelIssue ? `#${channelIssue}` : `#${issue.number}`,
+        }
+      })
     if (foreignAssignees.length === 0 && holders.length === 0) continue
     findings.push({ issue: issue.number, assignees: foreignAssignees, holders })
   }

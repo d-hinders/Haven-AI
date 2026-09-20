@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - docs/product/**
+  - .github/workflows/ci.yml
   - packages/frontend/scripts/design-system-coupling.mjs
   - packages/frontend/playwright.config.ts
   - packages/frontend/e2e/support/visual-mode.ts

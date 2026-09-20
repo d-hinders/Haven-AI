@@ -442,7 +442,7 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      every PR but does not block; this list, the *Effective per branch* table
      below (15 / 19), `branch-and-release-flow.md` § Promotion to production ("19 … the 15")
      and `promoting-dev-to-main.md` ("19 … the 15") all describe the counts AS
-     APPLIED — update all four when the step is done. One caveat GitHub documents for `pull_request_target`, which this workflow uses so the default branch's copy judges: it does not fire for PRs from branches whose names look like a commit SHA; once required, such a PR would have no check run at all and could not merge — a different failure than red. No branch here is named that way.
+     APPLIED — update all four when the step is done. The workflow uses `pull_request_target` so the default branch's copy of the script judges (it therefore cannot run on the PR that adds it); once the context is required, a PR for which the workflow does not run at all would have no check run and could not merge — a different failure than red, worth knowing when reading a stuck PR.
 
      Two settings on this ruleset changed on 2026-09-07 under
      [#2632](https://github.com/d-hinders/Haven-AI/issues/2632)'s owner step O1/O2,

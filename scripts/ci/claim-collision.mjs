@@ -58,9 +58,13 @@
 // thread ~20 s after their trigger). Without a tie-break both would be refused
 // and nobody assigned — and each reply would name the LATER claimant as the
 // holder. So the incoming claim's own timestamp is passed in, and a holder
-// whose claim is NEWER than the incoming one does not block it: the older
-// claim wins, the newer run is the one refused. Equal timestamps (same second)
-// fall to the lexically smaller login, so the two runs still agree.
+// whose HOLD BEGAN after the incoming claim does not block it: the older hold
+// wins, the newer run is the one refused. A hold begins at the holder's FIRST
+// claim in force (their first claim after their last RELEASE), so their own
+// re-claim or channel copy does not make them "newer" — measured on the
+// #3015 shape, a session routinely holds two claim timestamps. Equal
+// timestamps (same second) fall to the lexically smaller login, so the two
+// runs still agree.
 //
 // ## Staleness is measured from the holder's last ACTIVITY, not the claim
 //
@@ -186,8 +190,9 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
  * the two enforce ONE holder rule: a holder is a collaborator and a person
  * who posted a claim of the issue (assigned or not), or a current assignee;
  * a claim is live while the holder's last comment about the issue is < 24 h
- * old and no RELEASE by them followed it; a holder whose claim is newer than
- * `claimedAt` does not count against it (older claim wins).
+ * old and no RELEASE by them followed it; a holder whose hold began (first
+ * claim in force) after `claimedAt` does not count against it (older hold
+ * wins).
  *
  * @returns {{others: string[], live: {holder:string, claim:object, ageMs:number, lastActivityAt:string|null}[], stale: object[]}}
  */
@@ -231,8 +236,8 @@ export function liveHolders({ issue, claimant, assignees, comments, claimedAt = 
     const ageMs = nowMs - Date.parse(lastActivityAt ?? claim.createdAt)
     // Unreadable timestamps count as LIVE: refusing is the direction that
     // cannot mislead; a takeover on an unknown age would.
-    if (!Number.isFinite(ageMs) || ageMs < LIVE_CLAIM_MS) live.push({ holder, claim, ageMs, lastActivityAt })
-    else stale.push({ holder, claim, ageMs, lastActivityAt })
+    if (!Number.isFinite(ageMs) || ageMs < LIVE_CLAIM_MS) live.push({ holder, claim, firstClaim, ageMs, lastActivityAt })
+    else stale.push({ holder, claim, firstClaim, ageMs, lastActivityAt })
   }
   return { others, live, stale }
 }
@@ -251,7 +256,7 @@ export function liveHolders({ issue, claimant, assignees, comments, claimedAt = 
  *        posted and with GitHub's `author_association` for the author
  * @param {number} o.postedOn        the issue the incoming claim was posted on
  * @param {string|null} [o.claimedAt] the incoming claim comment's created_at —
- *        a holder whose claim is newer than this does not block (older wins)
+ *        a holder whose hold began after this does not block (older hold wins)
  * @param {number} [o.nowMs]
  * @param {number} [o.channelIssue]
  * @returns {{action:'skip'|'accept'|'refuse'|'takeover', assign?:string, unassign?:string[], reply?:{issue:number, body:string}, reason:string}}
@@ -262,11 +267,12 @@ export function decideClaim({ issue, claimant, state, assignees, comments, poste
   if (others.length === 0) return { action: 'accept', issue, assign: claimant, reason: 'nobody else holds it' }
 
   if (live.length > 0) {
-    const lines = live.map(({ holder, claim, lastActivityAt }) => {
+    const lines = live.map(({ holder, claim, firstClaim, lastActivityAt }) => {
+      const since = firstClaim ?? claim // the hold's start, not the newest re-claim
       const branch = branchOf(claim.body)
-      const where = claim.onIssue === channelIssue ? `on #${channelIssue}` : 'on this issue'
-      const active = lastActivityAt && lastActivityAt !== claim.createdAt ? `, last active on it ${ageText(lastActivityAt, nowMs)}` : ''
-      return `@${holder} claimed it ${ageText(claim.createdAt, nowMs)} ${where}${branch ? ` (branch \`${branch}\`)` : ''}${active} and has not released it.`
+      const where = since.onIssue === channelIssue ? `on #${channelIssue}` : 'on this issue'
+      const active = lastActivityAt && lastActivityAt !== since.createdAt ? `, last active on it ${ageText(lastActivityAt, nowMs)}` : ''
+      return `@${holder} claimed it ${ageText(since.createdAt, nowMs)} ${where}${branch ? ` (branch \`${branch}\`)` : ''}${active} and has not released it.`
     })
     const body = [
       `⚠️ Already claimed: issue ${issue} is held by ${live.map((l) => `@${l.holder}`).join(' and ')}. ${lines.join(' ')}`,

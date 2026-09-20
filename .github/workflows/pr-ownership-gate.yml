@@ -6,8 +6,8 @@ name: PR ownership gate
 # merge-time release (#3177) uses — the check fails if the issue is open and
 # somebody other than the PR author is its assignee or holds a live claim on it
 # under the #3178 holder rule (a collaborator's claim comment, last activity
-# < 24 h, no RELEASE since; a claim posted AFTER the author's own does not
-# count — a refused claim is not a claim). It names them, links the claim, and
+# < 24 h, no RELEASE since; a hold that began after the author's own — their
+# first claim in force — does not count: a refused claim is not a claim). It names them, links the claim, and
 # gives the two ways out: a handover in #1289 (the holder posts `🔓 RELEASE`),
 # or `Refs` instead of `Closes`. Decision logic and tests:
 # `scripts/ci/pr-ownership-gate.mjs`.

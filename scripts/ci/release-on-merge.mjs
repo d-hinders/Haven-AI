@@ -433,7 +433,11 @@ const isMain = (() => {
   }
 })()
 
-if (isMain) {
+// Wrapped in a function so the branches can `return` (top-level `return` is a
+// SyntaxError in an ES module) and so the process ends by itself — never
+// `process.exit(0)` after a stdout write, which drops the buffered document
+// when stdout is a pipe.
+if (isMain) await (async () => {
   const { readFileSync } = await import('node:fs')
   const arg = (name, fallback = null) => {
     const i = process.argv.indexOf(`--${name}`)
@@ -463,7 +467,8 @@ if (isMain) {
         // Decide before fetching: an unmerged close, or a merge into a
         // non-default branch, never reads anything.
         process.stdout.write(`${JSON.stringify(decide({ pr, closingIssues: [] }))}\n`)
-        process.exit(0)
+        printed = true
+        return
       }
       const gh = ghRunner()
       ;({ closingIssues } = await fetchCandidates({ gh, repo, prNumber: pr.number }))
@@ -477,13 +482,13 @@ if (isMain) {
         if (decision.releases.length === 0 && decision.skipped.length === 0) console.log('This merge closed no issue — nothing to release.')
         else await apply(decision, { gh, repo, prNumber: pr.number, channelBodies })
       }
-      process.exit(0)
+      return
     } catch (e) {
       console.log(`could not read this merge's event, closing references or the channel — nothing released (release by hand if you claimed): ${e?.message ?? e}`)
       // One JSON document per run: if the decision was already printed, the
       // failure happened while applying it and is in the log above.
       if (!printed) process.stdout.write(`${JSON.stringify({ releases: [], channel: null, skipped: [] })}\n`)
-      process.exit(0)
+      return
     }
   } else {
     // Offline shape: each candidate as the workflow would have read it back —
@@ -502,4 +507,4 @@ if (isMain) {
 
   // Offline path (tests, dry runs): decide only, never apply.
   process.stdout.write(`${JSON.stringify(decide({ pr, closingIssues, channelBodies }))}\n`)
-}
+})()

@@ -175,7 +175,7 @@ export async function updateLabel(
 
 /**
  * Delete a label. Returns whether a row was removed; assignments go with it
- * by CASCADE (migration 090) and the agents rows are untouched — the
+ * by CASCADE (migration 093) and the agents rows are untouched — the
  * acceptance criterion "deleting a label never deletes or alters agents".
  */
 export async function deleteLabel(labelId: string, userId: string): Promise<boolean> {
@@ -189,7 +189,7 @@ export async function deleteLabel(labelId: string, userId: string): Promise<bool
  * concurrently fails the write rather than inserting a row the FK would
  * reject anyway — but with a clearer 404 than a raw 23503.
  *
- * The pair PK (migration 090) makes double-tagging structurally impossible,
+ * The pair PK (migration 093) makes double-tagging structurally impossible,
  * so the insert is `ON CONFLICT DO NOTHING` and idempotent under retry.
  */
 export async function replaceAgentLabels(

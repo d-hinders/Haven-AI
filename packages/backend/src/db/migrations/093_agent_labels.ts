@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg'
 
 /**
- * 090 — agent labels (#3167): free-form tags on agents, editable afterwards,
+ * 093 — agent labels (#3167): free-form tags on agents, editable afterwards,
  * many per agent, ad-hoc. The companion of organizations (#3164): an
  * organization is one structural folder per agent; a label is a flat
  * categorization ("prod", "experimental", "finance") and an agent carries as
@@ -45,7 +45,7 @@ import type { PoolClient } from 'pg'
  * from `rails/` or the payment pre-checks, that is the design violation the
  * issue names, not an extension of it.
  */
-export const version = '090_agent_labels'
+export const version = '093_agent_labels'
 
 export async function up(client: PoolClient): Promise<void> {
   await client.query(`

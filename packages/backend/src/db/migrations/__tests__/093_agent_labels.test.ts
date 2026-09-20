@@ -1,5 +1,5 @@
 /**
- * Real-Postgres proof for migration 090 — agent labels (#3167). No mocks —
+ * Real-Postgres proof for migration 093 — agent labels (#3167). No mocks —
  * #1219's rule.
  *
  * Pins the issue's acceptance criteria at the schema level: the label
@@ -18,7 +18,7 @@ import {
   resetDb,
   withMigrationReverted,
 } from '../../../infra/__tests__/helpers/db-harness.js'
-import { down, up, version } from '../090_agent_labels.js'
+import { down, up, version } from '../093_agent_labels.js'
 
 async function runUp(): Promise<void> {
   const client = await db.connect()
@@ -66,7 +66,7 @@ async function insertLabel(userId: string, name: string, color = 'neutral'): Pro
   return rows[0].id
 }
 
-describeDb('migration 090_agent_labels', () => {
+describeDb('migration 093_agent_labels', () => {
   beforeAll(async () => {
     await initDbHarness()
   })
@@ -78,7 +78,7 @@ describeDb('migration 090_agent_labels', () => {
   })
 
   it('names itself', () => {
-    expect(version).toBe('090_agent_labels')
+    expect(version).toBe('093_agent_labels')
   })
 
   it('creates both tables and down() drops them', async () => {

@@ -123,7 +123,8 @@ describe('decide', () => {
 })
 
 describe('refusals that protect the coordination thread', () => {
-  // #1289 is where every session checks claim state before building. A note is
+  // The channel is where every session checks claim state before building
+  // (#1289 when this was written, #3193 since #3182). A note is
   // machine-written from repository text a contributor can influence, and it
   // posts under a bot account — so a note that can forge a coordination
   // directive is a note that can make two sessions build the same issue, or

@@ -98,7 +98,7 @@ describe('released only when GitHub closed it BY THIS MERGE', () => {
   test('an issue closed BEFORE this merge — merely mentioned — is skipped (the #3187 self-test)', () => {
     // PR #3187's own body prose linked #2268, closed 2026-09-02 by a person.
     // GitHub's merge is a no-op on it; releasing it would post a false line on
-    // the issue and on #1289.
+    // the issue and on the channel (#1289 at the time).
     const r = decide({ pr: mergedPr, closingIssues: [{ number: 2268, assignees: ['d-hinders'], state: 'closed', closedAt: '2026-09-02T10:13:48Z' }, closedByMerge(3177)] })
     assert.deepEqual(r.releases.map((x) => x.issue), [3177])
     assert.equal(r.skipped[0].issue, 2268)
@@ -358,7 +358,7 @@ describe('fetch and apply through an injected gh', () => {
     const done = await apply(decision, { gh, repo: 'o/r', prNumber: 3186, log: (m) => logs.push(m) })
     const writes = calls.filter((c) => c.args[0] === 'issue').map((c) => c.args.slice(0, 3))
     // No comment on #3134 (already there); unassigns proceed; the channel copy
-    // IS posted because #1289 does not carry it yet.
+    // IS posted because the channel does not carry it yet.
     assert.deepEqual(writes, [['issue', 'edit', '3134'], ['issue', 'edit', '3134'], ['issue', 'comment', String(CHANNEL_ISSUE)]])
     assert.ok(logs.some((l) => /already carries this merge's release/.test(l)))
     assert.deepEqual(done.map((d) => d.kind), ['unassign', 'unassign', 'channel'])

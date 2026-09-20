@@ -127,7 +127,10 @@ function claimLine(line) {
 /**
  * Does this line announce a release? Generous, per the asymmetry above: the
  * open padlock, or the word leading the line, or an issue reference leading a
- * line that goes on to say RELEASE — `#2680 (…): **RELEASE** — PR #2754`.
+ * line that goes on to say RELEASE — `#2680 (…): **RELEASE** — PR #2754` — or
+ * a withdrawal (`withdrawnLine`, #3182). The ref-leading arm is reserved for
+ * the word RELEASE, which the corpus uses that way; `#3005 — WITHDRAWN,
+ * collided` is deliberately not a release (WITHDRAWN has no such use).
  */
 function releaseLine(line) {
   const t = undecorate(line)
@@ -221,10 +224,6 @@ export function parse({ body, onIssue = null, channelIssue = CHANNEL_ISSUE, auth
     } else {
       refs = refsOn(clean, keyword)
     }
-    // A line that LEADS with the issue and goes on to say WITHDRAWN (`#3005 —
-    // WITHDRAWN, collided`) is deliberately not a release: `releaseLine`'s
-    // ref-leading arm is reserved for the word RELEASE, which the corpus uses
-    // that way (`#2680 (…): RELEASE — PR #2754`); WITHDRAWN has no such use.
 
     // A marker made ON its own issue may not restate the number:
     // "🔒 CLAIM — branch feat/x — touches: …" posted on #2947.

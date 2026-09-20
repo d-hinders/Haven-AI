@@ -59,7 +59,8 @@ export const FIND_LABEL_FOR_USER_SQL = `
 export const INSERT_LABEL_SQL = `
   INSERT INTO agent_labels (user_id, name, color)
   VALUES ($1, $2, $3)
-  ON CONFLICT (user_id, lower(name)) DO UPDATE SET color = EXCLUDED.color
+  ON CONFLICT (user_id, lower(name)) DO UPDATE
+  SET color = CASE WHEN $4 THEN EXCLUDED.color ELSE agent_labels.color END
   RETURNING id, name, color, created_at`
 
 export const UPDATE_LABEL_SQL = `
@@ -145,17 +146,27 @@ export async function countOwnedLabels(
 
 /**
  * Create a label; name is normalized (trimmed, lowercased) by the CALLER —
- * the route owns input shape, this module owns storage. The ON CONFLICT
- * makes create idempotent for the same name and re-colours an existing label
- * rather than 500-ing on the unique constraint: "create or set" is what the
- * editor's inline-create actually wants.
+ * the route owns input shape, this module owns storage. When the name
+ * already exists (the unique index on lower(name)), the row is reused, not
+ * 500-ed on: "create or set" is what the editor's inline-create actually
+ * wants. `recolorOnConflict` decides what the reused row's colour becomes —
+ * the route passes true only when the request carried an explicit colour
+ * (#3200): an omitted colour must not sweep the existing one to the default.
+ * A genuinely NEW row always takes `color` (the caller already resolved the
+ * default for that case).
  */
 export async function createLabel(
   userId: string,
   name: string,
   color: string,
+  recolorOnConflict: boolean,
 ): Promise<AgentLabelRow> {
-  const { rows } = await pool.query<AgentLabelRow>(INSERT_LABEL_SQL, [userId, name, color])
+  const { rows } = await pool.query<AgentLabelRow>(INSERT_LABEL_SQL, [
+    userId,
+    name,
+    color,
+    recolorOnConflict,
+  ])
   return rows[0]
 }
 
@@ -197,15 +208,21 @@ export async function replaceAgentLabels(
   userId: string,
   labelIds: string[],
 ): Promise<void> {
+  // Duplicates collapse (#3200): the spec promises it ("duplicates collapsed")
+  // and the count check demands it — countOwnedLabels counts DISTINCT owned
+  // rows, so [a, a] compared un-deduped reads as a missing label and 404s.
+  // The pair PK makes the inserts idempotent anyway; the dedupe makes the
+  // whole write honest about the set it means.
+  const uniqueLabelIds = [...new Set(labelIds)]
   await withTransaction(pool, async (client) => {
-    if (labelIds.length > 0) {
-      const owned = await countOwnedLabels(client, userId, labelIds)
-      if (owned !== labelIds.length) {
+    if (uniqueLabelIds.length > 0) {
+      const owned = await countOwnedLabels(client, userId, uniqueLabelIds)
+      if (owned !== uniqueLabelIds.length) {
         throw new LabelNotFoundError('One of the labels was not found')
       }
     }
     await client.query(REPLACE_LABELS_FOR_AGENT_SQL, [agentId])
-    for (const labelId of labelIds) {
+    for (const labelId of uniqueLabelIds) {
       await client.query(INSERT_LABEL_ASSIGNMENT_SQL, [agentId, labelId])
     }
   })

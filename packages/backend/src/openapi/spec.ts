@@ -1741,7 +1741,7 @@ export const openapiSpec = {
         operationId: 'replaceAgentLabels',
         summary: "Replace an agent's labels with the given set.",
         description:
-          'Full replacement: the agent ends up carrying exactly the labels named, in any order, duplicates collapsed. Labels are the user\'s own display tags; deleting a label elsewhere removes it from every agent without touching the agents themselves. The response carries the agent\'s labels as they now are, so a client re-renders without a second call.',
+          'Full replacement: the agent ends up carrying exactly the labels named, in any order, duplicates collapsed. Labels are the user\'s own display tags; deleting a label elsewhere removes it from every agent without touching the agents themselves. The response carries the agent\'s labels as they now are, so a client re-renders without a second call. Repeating an id is accepted and collapses to one (#3200) — the set is what the label_ids array names distinctly, and a duplicated id is not a missing label.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
@@ -1791,9 +1791,9 @@ export const openapiSpec = {
       post: {
         tags: ['Agents'],
         operationId: 'createLabel',
-        summary: 'Create a label (or reset an existing one of the same name).',
+        summary: 'Create a label (or re-use one of the same name).',
         description:
-          "Names are one per user on the lowercased name: creating \"Prod\" when \"prod\" exists re-uses that label (updating its colour) rather than failing. Omitted colour defaults to the palette's neutral entry.",
+          "Names are one per user on the lowercased name: creating \"Prod\" when \"prod\" exists re-uses that label rather than failing. An omitted colour keeps the existing label's colour (#3200) — the fold onto an existing row recolours only when the request explicitly names a colour; a genuinely new label takes the palette's neutral entry.",
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,

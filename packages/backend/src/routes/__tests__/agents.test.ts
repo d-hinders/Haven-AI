@@ -73,9 +73,11 @@ describe('agent routes', () => {
 
     // #2020: a non-delegator_hybrid agent gets `allowances: []` with NO
     // second query against `agent_allowances` — the mirror is retired with
-    // the Safe rail. A single mocked call is enough; a leftover second one
-    // would go unconsumed if the handler regressed into reading it.
-    mockQuery.mockResolvedValueOnce({
+    // the Safe rail. The agent row plus the #3167 labels ride-along read is
+    // the whole query budget now; a leftover third one would go unconsumed
+    // if the handler regressed into reading it.
+    mockQuery
+      .mockResolvedValueOnce({
       rows: [{
         id: AGENT_UUID,
         name: 'Research Agent',
@@ -90,7 +92,9 @@ describe('agent routes', () => {
         created_at: '2026-05-25T12:00:00.000Z',
         mcp_last_seen_at: null,
       }],
-    })
+      })
+      // #3167: the labels ride-along on the same GET (empty for this agent).
+      .mockResolvedValueOnce({ rows: [] })
 
     const response = await app.inject({
       method: 'GET',
@@ -110,8 +114,9 @@ describe('agent routes', () => {
     // 'Needs setup' and links to the page where the budget grant activates.
     expect(String(mockQuery.mock.calls[0][0])).not.toContain("pending_approval")
     expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', AGENT_UUID])
-    // Only the single agent-row query — no `agent_allowances` read (#2020).
-    expect(mockQuery).toHaveBeenCalledTimes(1)
+    // The agent-row read plus the labels ride-along — still no
+    // `agent_allowances` read (#2020).
+    expect(mockQuery).toHaveBeenCalledTimes(2)
     // The populated shape is where drift would actually show.
     expectMatchesSpec('GET', '/agents/{id}', response.json())
 

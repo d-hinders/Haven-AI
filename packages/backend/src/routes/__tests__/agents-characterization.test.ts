@@ -333,16 +333,19 @@ describe('PUT /agents/:id', () => {
   // rail, and PUT never queries `agent_allowances` any more.
   it('updates name/description and returns [] allowances for a non-delegation agent — no agent_allowances read', async () => {
     const app = await makeApp()
-    mockQuery.mockResolvedValueOnce({
+    mockQuery
+      .mockResolvedValueOnce({
       rows: [{
         id: 'agent-1', name: 'Renamed', description: 'new desc',
         delegate_address: VALID_DELEGATE, account_id: 'safe-1',
         account_address: '0x2222222222222222222222222222222222222222',
         account_name: 'Main', account_chain_id: 8453, account_type: null,
-        api_key_prefix: 'sk_agent_abcd', status: 'active',
+        api_key_prefix: '***', status: 'active',
         created_at: '2026-08-05T00:00:00.000Z', mcp_last_seen_at: null,
       }],
-    })
+      })
+      // #3167: the PUT response carries the labels ride-along (empty here).
+      .mockResolvedValueOnce({ rows: [] })
 
     const res = await app.inject({
       method: 'PUT',
@@ -353,8 +356,9 @@ describe('PUT /agents/:id', () => {
     expect(res.json()).toMatchObject({ id: 'agent-1', name: 'Renamed', allowances: [] })
     // Trimmed inputs, tenant-scoped params, in this exact order.
     expect(mockQuery.mock.calls[0][1]).toEqual(['agent-1', 'user-1', 'Renamed', 'new desc'])
-    // Only the UPDATE ran — no second query for a legacy/non-delegation agent.
-    expect(mockQuery).toHaveBeenCalledTimes(1)
+    // The UPDATE plus the #3167 labels ride-along — still no
+    // `agent_allowances` read for a legacy/non-delegation agent (#2020).
+    expect(mockQuery).toHaveBeenCalledTimes(2)
     await app.close()
   })
 

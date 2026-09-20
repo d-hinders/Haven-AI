@@ -6793,7 +6793,7 @@ export const openapiSpec = {
         operationId: 'listMerchants',
         summary: 'List the marketplace\'s merchants.',
         description:
-          'The sell side of the catalog (#3078, epic #3077): every live merchant with at least one non-delisted offer on a chain this deployment lists (HAVEN_MARKETPLACE_CHAIN_IDS, else HAVEN_DEPLOY_CHAIN_IDS, else every chain) or a verified self-submitted offer, ordered real merchants first, then test merchants. Readable without a credential, like `GET /catalog`. `coming_soon` prospects appear only for an authenticated dashboard user when HAVEN_MARKETPLACE_PROSPECTS is on and no mainnet chain is listed. Read-only; nothing here creates payments or signatures.',
+          'The sell side of the catalog (#3078, epic #3077): every live merchant with at least one non-delisted offer on a chain this deployment lists (HAVEN_MARKETPLACE_CHAIN_IDS, else HAVEN_DEPLOY_CHAIN_IDS, else every chain) or a verified self-submitted offer, ordered real merchants first, then test merchants. Readable without a credential, like `GET /catalog`. `coming_soon` prospects appear only for an authenticated dashboard user when HAVEN_MARKETPLACE_PROSPECTS is on and HAVEN_MARKETPLACE_CHAIN_IDS itself names a testnet chain (epic #3077 decision 14; the HAVEN_DEPLOY_CHAIN_IDS fallback never counts, so prod, whose list is 8453, cannot show them). Read-only; nothing here creates payments or signatures.',
         security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
         responses: {
           '200': {
@@ -7013,7 +7013,7 @@ export const openapiSpec = {
             type: 'string',
             enum: ['live', 'coming_soon'],
             description:
-              '`coming_soon` is a prospect Haven is talking to — shown only to an authenticated dashboard user on a deployment that lists no mainnet chain and has HAVEN_MARKETPLACE_PROSPECTS on; never an agreement, never payable, never in an agent read or the credential-less shape.',
+              '`coming_soon` is a prospect Haven is talking to — shown only to an authenticated dashboard user on a deployment whose HAVEN_MARKETPLACE_CHAIN_IDS itself names a testnet chain and has HAVEN_MARKETPLACE_PROSPECTS on (epic #3077 decision 14); never an agreement, never payable, never in an agent read or the credential-less shape.',
           },
           is_test_merchant: { type: 'boolean' },
           offer_count: {

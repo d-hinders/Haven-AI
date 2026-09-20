@@ -8,7 +8,7 @@
  *    catalog shape for the former and the full shape for the latter;
  *  - an agent sees ITS OWN chain, whatever the marketplace lists;
  *  - prospects are listed only to a dashboard user, only with the flag on,
- *    only on a testnet-only list — and their page is a 404 to everyone else;
+ *    only when the explicit list names a testnet — and their page is a 404 to everyone else;
  *  - every 200 matches the spec, and a slug the spec rejects is a 404.
  */
 import Fastify, { FastifyError, FastifyInstance } from 'fastify'
@@ -248,7 +248,7 @@ describeDb('merchants routes (#3078)', () => {
     expect(pub.json().entries[0]).not.toHaveProperty('resource_url')
   })
 
-  it('shows prospects only to a dashboard user with the flag on and a testnet-only list; 404 for everyone else (decision 12)', async () => {
+  it('shows prospects only to a dashboard user with the flag on and an explicit testnet in the list; 404 for everyone else (decision 12)', async () => {
     setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [84532], deployChainIds: [] })
     const dash = await app.inject({ method: 'GET', url: '/merchants', headers: dashboardHeaders() })
     expect(slugsOf(dash.json())).toContain('berget-ai')
@@ -276,7 +276,7 @@ describeDb('merchants routes (#3078)', () => {
     expect(slugsOf((await app.inject({ method: 'GET', url: '/merchants', headers: dashboardHeaders() })).json())).not.toContain('berget-ai')
     expect((await app.inject({ method: 'GET', url: '/merchants/berget-ai', headers: dashboardHeaders() })).statusCode).toBe(404)
 
-    // Flag on but a mainnet listed (a copied env on prod): still gone.
+    // Flag on but a mainnet-only list (a copied flag on prod): still gone.
     setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [8453] })
     expect(slugsOf((await app.inject({ method: 'GET', url: '/merchants', headers: dashboardHeaders() })).json())).not.toContain('berget-ai')
     expect((await app.inject({ method: 'GET', url: '/merchants/berget-ai', headers: dashboardHeaders() })).statusCode).toBe(404)
@@ -295,7 +295,7 @@ describeDb('merchants routes (#3078)', () => {
   })
 
 
-  it('the real 089 seeds (Berget AI, Redpine): 404 with the flag off, listed with zero offers on a testnet-only list, omitted on a mainnet list (#3080)', async () => {
+  it('the real 089 seeds (Berget AI, Redpine): 404 with the flag off, listed with zero offers when the list names a testnet, omitted on a mainnet list (#3080)', async () => {
     await insertRealProspects()
 
     // Flag off entirely: both 404, neither listed, even for a dashboard user.
@@ -308,7 +308,7 @@ describeDb('merchants routes (#3078)', () => {
     expect((await app.inject({ method: 'GET', url: '/merchants/berget-ai', headers: dashboardHeaders() })).statusCode).toBe(404)
     expect((await app.inject({ method: 'GET', url: '/merchants/redpine', headers: dashboardHeaders() })).statusCode).toBe(404)
 
-    // Flag on, testnet-only list, dashboard user: both listed, zero offers, coming_soon.
+    // Flag on, list names a testnet, dashboard user: both listed, zero offers, coming_soon.
     setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [84532], deployChainIds: [] })
     const dash = await app.inject({ method: 'GET', url: '/merchants', headers: dashboardHeaders() })
     expectMatchesSpec('GET', '/merchants', dash.json())
@@ -335,14 +335,27 @@ describeDb('merchants routes (#3078)', () => {
     expect(page.json().offers).toEqual([])
     expectMatchesSpec('GET', '/merchants/{slug}', page.json())
 
-    // Flag on but HAVEN_MARKETPLACE_CHAIN_IDS=8453 (mainnet listed): omitted
-    // for everyone, including the dashboard user.
+    // Flag on but HAVEN_MARKETPLACE_CHAIN_IDS=8453 (mainnet-only, no explicit
+    // testnet): omitted for everyone, including the dashboard user.
     setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [8453], deployChainIds: [] })
     const prodDash = await app.inject({ method: 'GET', url: '/merchants', headers: dashboardHeaders() })
     expect(slugsOf(prodDash.json())).not.toContain('berget-ai')
     expect(slugsOf(prodDash.json())).not.toContain('redpine')
     expect((await app.inject({ method: 'GET', url: '/merchants/berget-ai', headers: dashboardHeaders() })).statusCode).toBe(404)
     expect((await app.inject({ method: 'GET', url: '/merchants/redpine', headers: dashboardHeaders() })).statusCode).toBe(404)
+  })
+
+  it("decision 14: on dev's standing list (84532,8453) the prospects and a mainnet merchant sit on one grid", async () => {
+    await insertRealProspects()
+    setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [84532, 8453], deployChainIds: [] })
+    const dash = await app.inject({ method: 'GET', url: '/merchants', headers: dashboardHeaders() })
+    expect(slugsOf(dash.json())).toEqual(expect.arrayContaining(['berget-ai', 'redpine', 'base-only', 'both-chains']))
+    expectMatchesSpec('GET', '/merchants', dash.json())
+    // The other two halves of decision 12 still hold on that list.
+    expect(slugsOf((await app.inject({ method: 'GET', url: '/merchants' })).json())).not.toContain('berget-ai')
+    await seedAgent(84532)
+    const agentHeaders = { authorization: `Bearer ${AGENT_KEY}` }
+    expect(slugsOf((await app.inject({ method: 'GET', url: '/merchants', headers: agentHeaders })).json())).not.toContain('berget-ai')
   })
 
   it('the real 089 seeds are invisible to a credential-less reader and to an agent even with the flag on (decision 12)', async () => {

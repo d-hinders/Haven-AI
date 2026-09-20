@@ -362,6 +362,32 @@ describe('fetch and apply through an injected gh', () => {
     assert.deepEqual(done.map((d) => d.kind), ['unassign', 'unassign', 'channel'])
   })
 
+  test('an unreadable release thread answers "not yet posted" — the comment is still issued (fail OPEN)', async () => {
+    // A transient 5xx on the idempotency read must cost at most one duplicate
+    // line, never a silently suppressed release. Mutation: `catch { return
+    // true }` turns this red.
+    const decision = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134)], channelBodies: ['🔒 CLAIM #3134 — x'] })
+    const { gh, calls } = recorder({ existingComments: () => { throw new Error('HTTP 502') } })
+    const logs = []
+    await apply(decision, { gh, repo: 'o/r', prNumber: 3186, log: (m) => logs.push(m) })
+    const writes = calls.filter((c) => c.args[0] === 'issue').map((c) => c.args.slice(0, 3))
+    assert.deepEqual(writes, [['issue', 'comment', '3134'], ['issue', 'edit', '3134'], ['issue', 'comment', '1289']])
+    assert.ok(!logs.some((l) => /already carries/.test(l)))
+  })
+
+  test('the channel bodies fetched for the decision are reused for its idempotency check — no second read', async () => {
+    const decision = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134)], channelBodies: ['🔒 CLAIM #3134 — x'] })
+    const { gh, calls } = recorder()
+    await apply(decision, { gh, repo: 'o/r', prNumber: 3186, channelBodies: ['🔒 CLAIM #3134 — x'], log: () => {} })
+    assert.ok(!calls.some((c) => c.args.includes('--paginate') && /issues\/1289\//.test(c.args[c.args.length - 1])), 'no channel re-read')
+    assert.ok(calls.some((c) => c.args[0] === 'issue' && c.args[2] === '1289'), 'channel copy posted')
+    // …and when the pre-fetched bodies already carry it, nothing is posted there.
+    const { gh: gh2, calls: calls2 } = recorder()
+    const posted = `🔓 RELEASE #3134 — landed as PR #3186 (\`a29d5469\`, into \`dev\`) — ${AUTO_RELEASE_MARK}; nothing to release by hand.`
+    await apply(decision, { gh: gh2, repo: 'o/r', prNumber: 3186, channelBodies: [posted], log: () => {} })
+    assert.ok(!calls2.some((c) => c.args[0] === 'issue' && c.args[2] === '1289'))
+  })
+
   test('a release for a DIFFERENT PR on the same issue does not count as already posted', async () => {
     const decision = decide({ pr: mergedPr, closingIssues: [closedByMerge(3134)] })
     const other = `🔓 RELEASE #3134 — landed as PR #99 — ${AUTO_RELEASE_MARK}; nothing to release by hand.`

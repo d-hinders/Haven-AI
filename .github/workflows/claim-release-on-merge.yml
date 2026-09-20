@@ -17,8 +17,9 @@ name: Release the claim on merge
 # (up to 500), read with the grammar the operator-verify close guard maintains.
 # Every candidate is then read back from GitHub and released ONLY if it is
 # closed with `closed_at` in [`merged_at`, `merged_at` + 5 min] — closed BY
-# THIS MERGE (GitHub stamps the close 1–3 s after the merge; measured on eight
-# pairs). "Referenced and closed some time ago" releases nothing: during
+# THIS MERGE (GitHub stamps the close 1–2 s after the merge; measured 2026-09-20
+# on 83 merge→close pairs over the last 100 merges into dev, the two outliers
+# being exactly a pre-closed mention and a re-close 2.5 days later). "Referenced and closed some time ago" releases nothing: during
 # review, this PR's body at the time linked #2268 (closed 2026-09-02 by a
 # person, unrelated) and the rule left it alone; the upper bound also leaves
 # alone an issue the merge closed but a person reopened and re-closed later.

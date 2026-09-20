@@ -44,11 +44,17 @@
 //
 // A candidate is RELEASED only if GitHub closed it BY THIS MERGE: the issue is
 // read back and must be `closed` with `closed_at` in the window
-// [`merged_at`, `merged_at` + 5 min]. Measured on eight merge→close pairs
-// (#3186/#3134, #2314/#2276, #3175/#3170, …): GitHub stamps the close one to
-// three seconds AFTER the merge, never before, so the window opens exactly at
-// the merge; the five minutes cover a slow close event, and the upper bound is
-// what excludes an issue re-closed by hand later. "Referenced and closed now"
+// [`merged_at`, `merged_at` + 5 min]. Measured 2026-09-20 over the last 100
+// merged PRs into `dev` (GraphQL `pullRequests(states:MERGED, baseRefName:
+// "dev")` × `closingIssuesReferences { closedAt }`, gap = closedAt − mergedAt):
+// 83 pairs, 81 inside the window, every one of them +1 s or +2 s — GitHub
+// stamps the close one to two seconds AFTER the merge, never before, so the
+// window opens exactly at the merge. The only two outliers are the two cases
+// the bounds exist for: #3068 → #3055 at +2.5 days (that merge did not close
+// it; #3163 did, at +2 s) and #3009 → #2966 at −2.6 h (closed before the merge,
+// merely mentioned). The five minutes cover a slow close event, and the upper
+// bound is what excludes an issue re-closed by hand hours or days later — it
+// cannot tell a hand close INSIDE the window apart. "Referenced and closed now"
 // is not enough — measured during review of this very PR (#3187), whose body
 // prose at the time linked #2268 (closed 2026-09-02 by a person, unrelated):
 // GitHub's merge is a silent no-op on an already-closed issue, and releasing
@@ -95,8 +101,13 @@ export const CHANNEL_ISSUE = 1289
 export const AUTO_RELEASE_MARK = 'posted automatically on merge (#3177)'
 /**
  * How long after `merged_at` a close still counts as this merge's. Measured
- * +1…+3 s on eight real pairs; five minutes covers a slow close event without
- * admitting an issue re-closed by hand later the same day.
+ * +1…+2 s on every legitimate pair (see the header); five minutes covers a
+ * slow close event. It does NOT distinguish a hand close inside those five
+ * minutes (PR #2364 → #2361 was closed by hand at +109 s, and that one had in
+ * fact landed) — the bound exists to exclude a re-close hours or days later
+ * (#2314 → #2268). It is not a retry budget either: the script reads each
+ * candidate once, ~30 s after the merge; a close that lands later than that
+ * read is skipped as "open now", never released late.
  */
 export const CLOSE_WINDOW_MS = 5 * 60_000
 
@@ -310,17 +321,20 @@ export async function fetchInputs({ gh, repo, prNumber, channelIssue = CHANNEL_I
  * "no", so a transient error degrades to one duplicate line, never to a
  * missed release.
  */
-async function alreadyReleased({ gh, repo, issue, prNumber }) {
+async function alreadyReleased({ gh, repo, issue, prNumber, bodies = null }) {
+  const carries = (body) => body.includes(AUTO_RELEASE_MARK) && new RegExp(`landed as PR #${prNumber}\\b`).test(body)
+  // The channel's bodies were fetched for the decision moments ago — no
+  // second 14-page read for the same thread.
+  if (Array.isArray(bodies)) return bodies.some((b) => carries(String(b ?? '')))
   try {
     const pages = parseJsonStrict(await gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments?per_page=100`]), 'existing comments') ?? []
     for (const page of Array.isArray(pages) ? pages : []) {
-      for (const c of Array.isArray(page) ? page : []) {
-        const body = String(c.body ?? '')
-        if (body.includes(AUTO_RELEASE_MARK) && new RegExp(`landed as PR #${prNumber}\\b`).test(body)) return true
-      }
+      for (const c of Array.isArray(page) ? page : []) if (carries(String(c.body ?? ''))) return true
     }
   } catch {
-    // fall through
+    // Fail OPEN: an unreadable thread answers "not yet posted". One duplicate
+    // line on a transient error is the cheap failure; a silently suppressed
+    // release is the expensive one (tested with a recorder that throws here).
   }
   return false
 }
@@ -332,7 +346,7 @@ async function alreadyReleased({ gh, repo, issue, prNumber }) {
  * already carries this merge's release gets no second comment (the unassign
  * is naturally idempotent).
  */
-export async function apply(decision, { gh, repo, prNumber, channelIssue = CHANNEL_ISSUE, log = console.log }) {
+export async function apply(decision, { gh, repo, prNumber, channelIssue = CHANNEL_ISSUE, channelBodies = null, log = console.log }) {
   const done = []
   for (const s of decision.skipped ?? []) log(`  left #${s.issue} alone: ${s.reason}`)
   for (const rel of decision.releases) {
@@ -358,7 +372,7 @@ export async function apply(decision, { gh, repo, prNumber, channelIssue = CHANN
     }
   }
   if (decision.channel) {
-    if (await alreadyReleased({ gh, repo, issue: channelIssue, prNumber })) {
+    if (await alreadyReleased({ gh, repo, issue: channelIssue, prNumber, bodies: channelBodies })) {
       log(`  #${channelIssue} already carries this merge's release — not posting twice`)
       return done
     }
@@ -438,6 +452,7 @@ if (isMain) {
   let closingIssues
   let channelBodies
   if (eventPath) {
+    let printed = false
     try {
       const ev = readJson(eventPath)
       pr = prFromPayload(ev.pull_request ?? ev)
@@ -454,14 +469,17 @@ if (isMain) {
       channelBodies = first.releases.length ? (await fetchChannel({ gh, repo })).channelBodies : []
       const decision = decide({ pr, closingIssues, channelBodies })
       process.stdout.write(`${JSON.stringify(decision)}\n`)
+      printed = true
       if (has('apply')) {
         if (decision.releases.length === 0 && decision.skipped.length === 0) console.log('This merge closed no issue — nothing to release.')
-        else await apply(decision, { gh, repo, prNumber: pr.number })
+        else await apply(decision, { gh, repo, prNumber: pr.number, channelBodies })
       }
       process.exit(0)
     } catch (e) {
       console.log(`could not read this merge's event, closing references or the channel — nothing released (release by hand if you claimed): ${e?.message ?? e}`)
-      process.stdout.write(`${JSON.stringify({ releases: [], channel: null, skipped: [] })}\n`)
+      // One JSON document per run: if the decision was already printed, the
+      // failure happened while applying it and is in the log above.
+      if (!printed) process.stdout.write(`${JSON.stringify({ releases: [], channel: null, skipped: [] })}\n`)
       process.exit(0)
     }
   } else {

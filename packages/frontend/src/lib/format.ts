@@ -25,6 +25,29 @@ export function truncate(addr: string): string {
 export { isAddress as isValidAddress } from '@haven_ai/core'
 
 /**
+ * The ONE fiat formatter, shared by the dashboard, /accounts and
+ * /accounts/[id] (#3127 review, finding 6). Each surface used to carry its
+ * own inline copy of the currency ternary, and the copies drifted: /accounts
+ * rendered `kr13,000.50` while the dashboard one click away rendered
+ * `13 000,50 kr` for the same figure. One formatter, one output per currency.
+ *
+ * Locale per currency — the currency's own voice, the same rule that puts
+ * EUR in de-DE:
+ *  - USD → en-US, symbol prefix: `$1,234.56`
+ *  - EUR → de-DE, symbol suffix: `1.100,00 €`
+ *  - SEK → sv-SE, symbol suffix: `13 000,50 kr` (sv-SE styles `currency`
+ *    without `currencyDisplay: 'name'` as a suffix `kr`, NBSP-separated)
+ */
+export function formatFiat(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
+  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+/**
  * Humanised "x minutes ago" relative time. For the absolute value, pair
  * the result with `title={new Date(iso).toLocaleString()}` on the element.
  *

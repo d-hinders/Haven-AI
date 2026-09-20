@@ -103,10 +103,16 @@ describe('AccountsOverviewClient — active account (#629)', () => {
   /**
    * #3127: a SEK preference must show SEK figures read from the portfolio
    * hook's `totalSek` / `sekValue` — the pre-#3127 card had no SEK branch and
-   * served the USD figure. The card's compact formatter is symbol-PREFIXED
-   * ("kr") with the platform's digit grouping, deliberately unlike the
-   * sv-SE voices the dashboard and analytics tiles use; what matters here is
-   * that the NUMBER is the SEK one and the USD/EUR figures stay off the card.
+   * served the USD figure.
+   *
+   * Review round 2, finding 6: this test USED to pin the card's own prefix
+   * formatter (`kr13,000.50`) as "deliberately unlike" the dashboard — the
+   * pin that licensed a USD-style total wearing a SEK label one click from
+   * the surface that does it right. The divergence is gone: all three fiat
+   * surfaces now render through the ONE shared `lib/format.ts` `formatFiat`,
+   * so this card renders the same sv-SE suffix voice as `/dashboard` and
+   * `/accounts/[id]` — `13 000,50 kr`, NBSP included — and this test pins
+   * that unified output instead.
    */
   it('renders SEK figures from the portfolio hook when the preference is SEK', () => {
     mockUsePreferences.mockReturnValue({ currency: 'SEK' })
@@ -122,10 +128,19 @@ describe('AccountsOverviewClient — active account (#629)', () => {
     render(<AccountsOverviewClient />)
 
     const activeCard = screen.getByLabelText('Base account')
-    expect(within(activeCard).getByText('kr13,000.50')).toBeInTheDocument()
-    expect(within(activeCard).getByText('kr9.40')).toBeInTheDocument()
+    // getByText needles are PLAIN-SPACE: RTL's normalizer collapses the
+    // sv-SE NBSPs on the node side but not in the needle. The exact NBSP
+    // bytes are pinned separately below via textContent.
+    expect(within(activeCard).getByText('13 000,50 kr')).toBeInTheDocument()
+    expect(within(activeCard).getByText('9,40 kr')).toBeInTheDocument()
+    // Byte-exact pin: the unified formatter's output is NBSP-separated
+    // (`13\u00a0000,50\u00a0kr`), not a plain-space lookalike.
+    const totals = within(activeCard).getAllByText(/kr$/).map((el) => el.textContent)
+    expect(totals).toContain('13\u00a0000,50\u00a0kr')
+    expect(totals).toContain('9,40\u00a0kr')
+    // The USD/EUR figures stay off the card.
     expect(within(activeCard).queryByText('$1,234.56')).toBeNull()
-    expect(within(activeCard).queryByText('€1,100.00')).toBeNull()
+    expect(within(activeCard).queryByText('1.100,00 €')).toBeNull()
   })
 })
 

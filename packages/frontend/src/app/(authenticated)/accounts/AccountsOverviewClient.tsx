@@ -10,7 +10,7 @@ import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import NetworkPill from '@/components/NetworkPill'
-import { timeAgo } from '@/lib/format'
+import { formatFiat, timeAgo } from '@/lib/format'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -29,16 +29,6 @@ import { truncateAddress } from '@/components/haven'
 // #2374 dropped the card's unlabelled star. Shared legacy Safe COMPONENTS
 // elsewhere are deletion slice #1989's scope, not this one's.
 // ── Per-Safe card (handles its own portfolio fetch) ────────────────
-
-function formatFiat(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
-  const symbol = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : 'kr'
-  if (value === 0) return `${symbol}0.00`
-  if (value < 0.01) return `< ${symbol}0.01`
-  return `${symbol}${value.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`
-}
 
 interface SafeCardProps {
   safe: SmartAccount

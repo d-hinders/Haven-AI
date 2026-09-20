@@ -210,6 +210,27 @@ describe('DashboardClient', () => {
   })
 
   /**
+   * #3127 review round 2, finding 7: the "Monthly agent spend" mark must not
+   * be a currency glyph. It was lucide's `DollarSign`, which under the SEK
+   * no-preference default painted `$` over `482,50 kr` on every new signup.
+   * The tile describes spend, not a currency, so the mark is
+   * currency-neutral (`Coins`) — pinned by the generated class the Icon
+   * primitive stamps per lucide glyph, exactly the headless equivalent the
+   * AGENTS.md closeout asks for when browser verification is skipped.
+   */
+  it('renders a currency-neutral mark on the Monthly agent spend tile (no $ glyph)', () => {
+    render(<DashboardClient />)
+
+    const label = screen.getByText('Monthly agent spend')
+    const card = label.closest('div.group') ?? label.closest('[class*="group"]')!
+    const icon = card.querySelector('span[aria-hidden="true"] svg')
+    expect(icon).not.toBeNull()
+    // The coins glyph, not the dollar one.
+    expect(icon!.getAttribute('class')).toContain('lucide-coins')
+    expect(icon!.getAttribute('class')).not.toContain('lucide-dollar-sign')
+  })
+
+  /**
    * #3127 direction A: SEK is a first-class display currency on the
    * dashboard. Every figure comes from the SEK keys the overview route
    * serves — the pre-#3127 frontend had no SEK branch at all, so a SEK user

@@ -37,22 +37,16 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { ExternalDetailsLink } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { getExplorerUrl, getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { truncate } from '@/lib/format'
+// #3127 (finding 6): the shared formatter — this page's inline copy was the
+// third drift site that let /accounts render `kr13,000.50` while this page
+// rendered `13 000,50 kr` for the same figure.
+import { formatFiat, truncate } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { formatAgentLastActivity } from '@/lib/agent-last-seen'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
-
-function formatFiatValue(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-  }).format(value)
-}
-
 
 function formatResetPeriod(minutes: number): string {
   if (minutes === 1440) return 'per day'
@@ -153,7 +147,7 @@ export default function AccountDetailClient() {
   // never a USD value relabelled "kr".
   const totalFiat = currency === 'EUR' ? totalEur : currency === 'SEK' ? totalSek : totalUsd
   const chain = getChainConfig(chainId)
-  const formattedTotal = formatFiatValue(totalFiat, currency)
+  const formattedTotal = formatFiat(totalFiat, currency)
   const balanceUnavailable = Boolean(portfolioError || balancesError)
   const [renameOpen, setRenameOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
@@ -403,7 +397,7 @@ export default function AccountDetailClient() {
                       {item.formatted}
                     </span>
                     <span className="text-sm text-[var(--v2-ink)] text-right v2-tabular">
-                      {formatFiatValue(fiatValue ?? 0, currency)}
+                      {formatFiat(fiatValue ?? 0, currency)}
                     </span>
                   </div>
                 )

@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowLeftRight, Bot, ChevronRight, DollarSign, ShieldCheck, Wallet } from 'lucide-react'
+import { ArrowLeftRight, Bot, ChevronRight, Coins, ShieldCheck, Wallet } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
@@ -17,7 +17,7 @@ import { useAccountFunding } from '@/hooks/useAccountFunding'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { RESET_PERIODS } from '@/lib/budget-period'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
-import { timeAgo } from '@/lib/format'
+import { formatFiat, timeAgo } from '@/lib/format'
 import {
   transactionMovement,
   transactionStatus,
@@ -47,15 +47,10 @@ import { TransactionActivityRow } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
 
-function formatCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)
-}
-
+// #3127 (finding 6): the per-currency formatting itself lives in ONE place —
+// `lib/format.ts`'s `formatFiat`, shared with /accounts and /accounts/[id].
+// These two wrappers keep only what is dashboard-specific: the compact
+// notation for the metric tiles, and the signed change line.
 function formatCompactCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
   return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US', {
     style: 'currency',
@@ -67,7 +62,7 @@ function formatCompactCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): 
 
 function formatSignedCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
   const sign = value > 0 ? '+' : value < 0 ? '-' : ''
-  return `${sign}${formatCurrency(Math.abs(value), currency)}`
+  return `${sign}${formatFiat(Math.abs(value), currency)}`
 }
 
 function formatPercent(value: number): string {
@@ -278,7 +273,7 @@ function DashboardHero({
             </p>
           ) : (
             <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular sm:text-5xl">
-              {formatCurrency(animatedTotal, currency)}
+              {formatFiat(animatedTotal, currency)}
             </p>
           )}
           {/*
@@ -429,8 +424,15 @@ function AgentMarkIcon() {
 }
 
 function SpendIcon() {
+  // #3127 (finding 7): the mark over "Monthly agent spend" was `DollarSign`.
+  // With SEK the no-preference default, that tile read `$` over `482,50 kr`
+  // for every new signup — a currency glyph has a currency opinion, and the
+  // figure beside it now carries a different one. The tile describes AGENT
+  // SPEND, not a currency, so the mark is currency-neutral: coins, the same
+  // family the sidebar/nav icons come from. `SpendIcon` itself keeps its name
+  // and call site so the MetricCard contract is untouched.
   return (
-    <Icon icon={DollarSign} className="w-full h-full" />
+    <Icon icon={Coins} className="w-full h-full" />
   )
 }
 

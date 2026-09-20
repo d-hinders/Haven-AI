@@ -39,6 +39,7 @@ covers:
   - packages/sdk/src/tool-descriptions.ts
   - packages/sdk/src/next-step.ts
   - packages/mcp-server/src/server.ts
+  - packages/mcp-server/src/http.ts
   - packages/mcp-server/src/next-step-signer-parity.test.ts
   - packages/mcp-server/src/test-support/next-step-fixtures.ts
   - scripts/lint-next-steps.mjs
@@ -151,6 +152,27 @@ last-verified: "2026-09-19"
 > re-shaped, no argument or schema change, and the version-skew and
 > consent-hash contracts do not move (descriptions are not a skew axis — #2330
 > precedent). Nothing else in this document was re-verified in this pass.
+>
+> **Recent re-verification (#3134):** each `haven_list_receipts` row on BOTH
+> runtimes gains four keys — `source`, `paymentProofStatus`,
+> `x402ResourceUrl`, `x402MerchantAddress` — carrying exactly the values the
+> row already reports as `rail`, `proofStatus`, `resourceUrl` and
+> `merchantAddress`; the old four stay for one full release as deprecated
+> twins (removal condition on `mapPaymentReceipt`: all three release clocks —
+> sdk `latest`, mcp `latest`, the hosted deploy's `serverInfo.version` on
+> `initialize` — read at or past the release naming the twins, against the
+> registry and the live handshake, never a green promotion). Additive
+> on the SDK type only; the receipts WIRE is unchanged, so an older SDK against
+> a newer backend and a newer SDK against an older backend both see exactly
+> what they saw before. Neither runtime reshapes receipt rows (hosted
+> `state-direct-recovery.ts` and local `tools.ts` pass `listReceiptsPage`
+> through), no tool added, renamed or re-shaped, no argument or schema change,
+> no description change (the #1591 budget is untouched at 2 bytes headroom),
+> and the version-skew and consent-hash contracts do not move. `last-verified`
+> is not re-stamped: this block is the scope, and the third clock's instrument
+> needs an agent key (`Authorization: Bearer`, `http.ts`) — the handshake is
+> authenticated, unlike the two `npm view` reads. Nothing else in this document
+> was re-verified in this pass.
 >
 > **Recent re-verification (#3169):** the edge signer's `haven_sign` no longer
 > signs a bare `payload_hash` (no `payment_id`, no `typed_data` /

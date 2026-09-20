@@ -450,14 +450,21 @@ describe('agent info helpers', () => {
     await expect(haven.listReceipts({ limit: 10 })).resolves.toEqual([{
       id: 'receipt-1',
       paymentId: 'payment-1',
+      // #3134: the transaction feed's names, with the old receipt names kept
+      // as deprecated twins for one full release (removal condition on
+      // mapPaymentReceipt). This is an exact-shape assertion on purpose.
+      source: 'x402',
       rail: 'x402',
+      paymentProofStatus: 'payment_confirmed',
       proofStatus: 'payment_confirmed',
       txHash: `0x${'ab'.repeat(32)}`,
       // #2998: additive, default to null when the wire response omits them.
       fundingTxHash: null,
       settlementTxHash: null,
       chainId: 8453,
+      x402ResourceUrl: 'https://paid.example/data',
       resourceUrl: 'https://paid.example/data',
+      x402MerchantAddress: '0xMerchant',
       merchantAddress: '0xMerchant',
       payerAddress: '0xSafe',
       settlementAddress: '0xMerchant',

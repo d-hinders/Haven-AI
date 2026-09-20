@@ -8,7 +8,8 @@ covers:
   - packages/backend/src/openapi/spec.ts
   - scripts/ci/vocabulary-map.json
   - scripts/ci/vocabulary-divergence.mjs
-last-verified: "2026-09-19"
+  - packages/sdk/src/payment-mappers.ts
+last-verified: "2026-09-20"
 ---
 
 # CLI `--json` conventions
@@ -90,10 +91,11 @@ exists, never a placeholder.
 | `wallets list` | snake | `account_address`, `chain_id`, `is_default` |
 | `activity list` | camel | `accountAddress`, `chainId`, `tokenSymbol` |
 
-The two differ because the two **backend** surfaces differ. That divergence is
-the subject of epic
-[#3130](https://github.com/d-hinders/Haven-AI/issues/3130); this page only
-records that the CLI faithfully reproduces it.
+The two differ because the two **backend** surfaces differ. That divergence
+was the subject of epic
+[#3130](https://github.com/d-hinders/Haven-AI/issues/3130), whose decision 2
+left the CLI's casing split as it is; this page only records that the CLI
+faithfully reproduces it.
 
 ### Envelopes — the CLI's own shape
 
@@ -212,7 +214,12 @@ become top-level `--json` keys, which is why `format` and `rows` are censused.
 
 The **pass-through** rows above are a different kind of entry. Their casing is
 the backend's, so there is nothing in the CLI for a guard to hold — they are
-recorded so the split is legible, not enforced. (The map files the CSV headers
+recorded so the split is legible, not enforced. (Since #3134 the transaction
+names the CLI passes through — `source`, `paymentProofStatus`,
+`x402MerchantAddress`, `x402ResourceUrl` — are also what the SDK's receipt
+mapper emits, so an agent reading a payment through `activity list` and
+through `haven_list_receipts` sees one spelling; the map's `concepts` entries
+record that as `converged`.) (The map files the CSV headers
 in that same section, because they are not an envelope either; they are the one
 entry there that *is* enforced, and the section says so.)
 

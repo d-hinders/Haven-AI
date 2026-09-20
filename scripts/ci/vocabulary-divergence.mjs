@@ -160,7 +160,7 @@ export function readBlock(source, needle) {
 export function scanReceiptSurface(source) {
   // Over a STRIPPED copy. A field commented out rather than deleted still read
   // as live, so the `stale` direction went silent — and `stale` is what fires
-  // when #3134 converges a pair and someone forgets to remove its row. The
+  // when a pair converges and someone forgets to remove its row. The
   // conditional-tail pattern below matches at ANY indentation, so a commented
   // `receipt.x = raw.y` was caught by it too. These two scanners were the ones
   // the stripper never reached, while this file's stated reason for stripping —
@@ -814,8 +814,8 @@ export function declaredKeys(keysProse) {
  *
  * `undeclared` — a field on a surface with no entry: the guard's whole point.
  * `stale`      — an entry naming a field that is no longer on its surface:
- *                the other direction, and the one that matters after #3134
- *                converges a pair and someone forgets to remove its row.
+ *                the other direction, and the one that matters after a pair
+ *                converges and someone forgets to remove its row.
  */
 /**
  * The CSV headers the map declares, against the ones the code builds — ORDER
@@ -904,13 +904,13 @@ export function audit({ receipt, transaction, map }) {
  *
  * `converge-pending` is deliberately not spelled `converged`. They are one
  * letter apart and opposite: `converged` means the two surfaces already share
- * a name, `converge-pending` means #3134 still has to make them. Counting the
+ * a name, `converge-pending` means the rename has not been made yet. Counting the
  * second as done printed "2 still open" while four pairs differed.
  */
 export const DISPOSITIONS = {
   'converged': { open: false, why: 'already one name on both surfaces' },
   'permanently-divergent': { open: false, why: 'different concepts; must never converge' },
-  'converge-pending': { open: true, why: 'same concept, two names — #3134 still owes the rename' },
+  'converge-pending': { open: true, why: 'same concept, two names — the rename has not been made' },
   'blocked-on-fallback': { open: true, why: 'cannot converge until the value defect is fixed' },
   'undecided': { open: true, why: 'nobody has decided yet' },
 }
@@ -1019,7 +1019,7 @@ export function validateMap(map) {
  * The shrink-only number: pairs whose divergence is recorded but NOT yet
  * resolved. "Different on purpose" (`permanently-divergent`) and "already one
  * name" (`converged`) are decisions and do not count; `blocked-on-fallback`
- * and anything explicitly `undecided` do, so #3132/#3134 burn them down and
+ * and anything explicitly `undecided` do, so the epic's slices burn them down and
  * nobody can add a new one.
  *
  * Counted globally rather than per-file: both surfaces contribute to one
@@ -1033,7 +1033,8 @@ export function openCounts(map) {
 const REMEDY =
   'Add the field to scripts/ci/vocabulary-map.json — either as one side of a\n' +
   'concepts[] pair with a disposition and a written reason, or under\n' +
-  'singleSurface.<surface> with the reason it will never have a counterpart.\n' +
+  'singleSurface.<surface> with the reason it will never have a counterpart\n' +
+  '(or, for a deprecated twin in a dual-emit window, its removal condition).\n' +
   '"Different on purpose" is a legitimate entry; "nobody decided" is not.'
 
 function readSurfaces() {
@@ -1228,7 +1229,7 @@ async function main() {
     for (const v of grew) console.error(`  ${v.file} [${v.key}]: baseline ${v.allowed}, now ${v.count}`)
     console.error(
       '\nA new pair may be declared, but not left open. Resolve it, or record why it is\n' +
-        'blocked and on what — an open entry is a debt #3134 has to burn down.',
+        'blocked and on what — an open entry is a debt someone has to burn down.',
     )
   }
 

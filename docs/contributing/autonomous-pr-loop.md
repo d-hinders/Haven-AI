@@ -432,7 +432,12 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      contexts: the context list above is unchanged. Do **not**
      require **Docs links & style (advisory)** — it is the deliberately
      non-gating half of `docs.yml` (#1023) — and do **not** require **Vercel
-     Preview Comments**, which isn't a quality gate.
+     Preview Comments**, which isn't a quality gate. **Pending operator step
+     (#3179):** add **PR ownership gate** (`.github/workflows/pr-ownership-gate.yml`)
+     as the 16th required context — it fails a PR that would close an issue
+     another session holds. Until the owner adds it, the check runs and
+     reports on every PR but does not block; this list and the table below
+     describe the 15 as applied, not the 16 as intended.
 
      Two settings on this ruleset changed on 2026-09-07 under
      [#2632](https://github.com/d-hinders/Haven-AI/issues/2632)'s owner step O1/O2,

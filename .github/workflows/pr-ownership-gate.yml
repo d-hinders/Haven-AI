@@ -1,0 +1,67 @@
+name: PR ownership gate
+
+# A pull request that would close an issue somebody else holds cannot merge
+# (#3179). For every issue the PR closes — GitHub's linked references plus the
+# closing keywords in the title and commit messages, the same candidate set the
+# merge-time release (#3177) uses — the check fails if the issue is open and
+# somebody other than the PR author is its assignee or holds a live claim on it
+# under the #3178 holder rule (a collaborator's claim comment, last activity
+# < 24 h, no RELEASE since). It names them, links the claim, and gives the two
+# ways out: a handover in #1289 (the holder posts `🔓 RELEASE`), or `Refs`
+# instead of `Closes`. Decision logic and tests: `scripts/ci/pr-ownership-gate.mjs`.
+#
+# ## The incident
+#
+# #3015, 2026-09-15: two claims (12:50Z on the issue, 13:03Z on #1289), a PR
+# opened at 13:28Z by the first claimant after releasing, merged at 13:41Z while
+# the second claimant was still assigned — nobody talked. Nothing between a
+# pushed branch and a merged PR asked whose issue it was.
+#
+# ## What passes
+#
+# - No assignee and no live claim, or the assignee/holder IS the author.
+# - A DRAFT PR (not a merge candidate) — the check re-runs on `ready_for_review`.
+# - A PR into a non-default branch (GitHub closes nothing there).
+# - Closed candidates are skipped.
+#
+# ## Fail closed
+#
+# A required check that cannot read the issues it must judge FAILS, with the
+# error in the log (the operator-verify close guard's precedent). Re-run the job
+# after a transient error. A fork's PR runs with a read-only token, which is all
+# this check needs — it writes nothing.
+#
+# ## Operator step (owner)
+#
+# Making this a REQUIRED context on `dev` is a ruleset change, not a workflow
+# change: add "PR ownership gate" to the *Haven automerge rules* required status
+# checks. Until then the check reports but does not block. The ruleset inventory
+# in docs/contributing/autonomous-pr-loop.md records the state.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  ownership:
+    name: PR ownership gate
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: Judge the issues this pull request would close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        # The event payload is read from the file GitHub provides (it carries
+        # the PR body, public text) — never interpolated. Exit 1 fails the check.
+        run: node scripts/ci/pr-ownership-gate.mjs --event "$GITHUB_EVENT_PATH" | tee -a "$GITHUB_STEP_SUMMARY"

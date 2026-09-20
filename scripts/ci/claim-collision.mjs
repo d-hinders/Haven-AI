@@ -177,26 +177,17 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
 }
 
 /**
- * Decide what a `🔒 CLAIM #issue` by `claimant` does.
+ * Who, other than `claimant`, holds `issue` — and is their claim live or stale?
+ * Shared by the collision reply (#3178) and the PR ownership gate (#3179), so
+ * the two enforce ONE holder rule: a holder is a collaborator and a person
+ * who posted a claim of the issue (assigned or not), or a current assignee;
+ * a claim is live while the holder's last comment about the issue is < 24 h
+ * old and no RELEASE by them followed it; a holder whose claim is newer than
+ * `claimedAt` does not count against it (older claim wins).
  *
- * @param {object} o
- * @param {number} o.issue
- * @param {string} o.claimant
- * @param {string} o.state           the issue's state as GitHub reports it
- * @param {string[]} o.assignees     current assignees (a projection — holders
- *        are found from the comments, the field only adds candidates)
- * @param {{author:string, body:string, createdAt:string, onIssue?:number, authorAssociation?:string}[]} o.comments
- *        the issue's comments plus the channel's, tagged with where each was
- *        posted and with GitHub's `author_association` for the author
- * @param {number} o.postedOn        the issue the incoming claim was posted on
- * @param {string|null} [o.claimedAt] the incoming claim comment's created_at —
- *        a holder whose claim is newer than this does not block (older wins)
- * @param {number} [o.nowMs]
- * @param {number} [o.channelIssue]
- * @returns {{action:'skip'|'accept'|'refuse'|'takeover', assign?:string, unassign?:string[], reply?:{issue:number, body:string}, reason:string}}
+ * @returns {{others: string[], live: {holder:string, claim:object, ageMs:number, lastActivityAt:string|null}[], stale: object[]}}
  */
-export function decideClaim({ issue, claimant, state, assignees, comments, postedOn, claimedAt = null, nowMs = Date.now(), channelIssue = CHANNEL_ISSUE }) {
-  if (String(state).toLowerCase() !== 'open') return { action: 'skip', issue, reason: `issue is ${state}` }
+export function liveHolders({ issue, claimant, assignees, comments, claimedAt = null, nowMs = Date.now(), channelIssue = CHANNEL_ISSUE }) {
   // Candidates: every collaborator (person, not bot) who posted a claim of this
   // issue, plus whoever the field currently names — minus the claimant.
   const claimants = new Map() // lower-cased login → login as written
@@ -217,7 +208,6 @@ export function decideClaim({ issue, claimant, state, assignees, comments, poste
     seen.add(a.toLowerCase())
     others.push(a)
   }
-  if (others.length === 0) return { action: 'accept', issue, assign: claimant, reason: 'nobody else holds it' }
 
   const live = []
   const stale = []
@@ -238,6 +228,32 @@ export function decideClaim({ issue, claimant, state, assignees, comments, poste
     if (!Number.isFinite(ageMs) || ageMs < LIVE_CLAIM_MS) live.push({ holder, claim, ageMs, lastActivityAt })
     else stale.push({ holder, claim, ageMs, lastActivityAt })
   }
+  return { others, live, stale }
+}
+
+/**
+ * Decide what a `🔒 CLAIM #issue` by `claimant` does.
+ *
+ * @param {object} o
+ * @param {number} o.issue
+ * @param {string} o.claimant
+ * @param {string} o.state           the issue's state as GitHub reports it
+ * @param {string[]} o.assignees     current assignees (a projection — holders
+ *        are found from the comments, the field only adds candidates)
+ * @param {{author:string, body:string, createdAt:string, onIssue?:number, authorAssociation?:string}[]} o.comments
+ *        the issue's comments plus the channel's, tagged with where each was
+ *        posted and with GitHub's `author_association` for the author
+ * @param {number} o.postedOn        the issue the incoming claim was posted on
+ * @param {string|null} [o.claimedAt] the incoming claim comment's created_at —
+ *        a holder whose claim is newer than this does not block (older wins)
+ * @param {number} [o.nowMs]
+ * @param {number} [o.channelIssue]
+ * @returns {{action:'skip'|'accept'|'refuse'|'takeover', assign?:string, unassign?:string[], reply?:{issue:number, body:string}, reason:string}}
+ */
+export function decideClaim({ issue, claimant, state, assignees, comments, postedOn, claimedAt = null, nowMs = Date.now(), channelIssue = CHANNEL_ISSUE }) {
+  if (String(state).toLowerCase() !== 'open') return { action: 'skip', issue, reason: `issue is ${state}` }
+  const { others, live, stale } = liveHolders({ issue, claimant, assignees, comments, claimedAt, nowMs, channelIssue })
+  if (others.length === 0) return { action: 'accept', issue, assign: claimant, reason: 'nobody else holds it' }
 
   if (live.length > 0) {
     const lines = live.map(({ holder, claim, lastActivityAt }) => {
@@ -294,7 +310,7 @@ async function readComments({ gh, repo, issue }) {
   const out = []
   for (const page of Array.isArray(pages) ? pages : []) {
     for (const c of Array.isArray(page) ? page : []) {
-      out.push({ author: c.user?.login ?? '', body: String(c.body ?? ''), createdAt: c.created_at, onIssue: issue, authorAssociation: c.author_association ?? 'NONE', authorType: c.user?.type ?? 'User' })
+      out.push({ author: c.user?.login ?? '', body: String(c.body ?? ''), createdAt: c.created_at, onIssue: issue, authorAssociation: c.author_association ?? 'NONE', authorType: c.user?.type ?? 'User', htmlUrl: c.html_url ?? null })
     }
   }
   return out

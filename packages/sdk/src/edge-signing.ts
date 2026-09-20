@@ -24,10 +24,12 @@ const HALF_N = BigInt('0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F4
 
 /**
  * Stricter than ethers, never looser: the lowercase `0x` prefix and the exact
- * byte length are required. Ethers accepts an unprefixed private key, an
- * uppercase `0X` prefix on a signature and the 64-byte EIP-2098 compact form;
- * all three are refused here — the divergences are pinned in
- * `edge-signing.test.ts`, every well-formed input is byte-equivalent.
+ * byte length are required. Ethers accepts an uppercase `0X` prefix on a
+ * signature and the 64-byte EIP-2098 compact form, and is inconsistent on a
+ * private key (`Wallet` accepts unprefixed and refuses `0X`; `SigningKey` does
+ * the reverse); every such form is refused here — the divergences are pinned
+ * in `edge-signing.test.ts` with ethers control assertions, and every
+ * well-formed input is byte-equivalent.
  */
 function hexBytes(value: string, bytes: number, what: string): string {
   if (!/^0x[0-9a-fA-F]+$/.test(value) || value.length !== 2 + bytes * 2) {

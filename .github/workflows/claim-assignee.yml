@@ -60,12 +60,17 @@ name: Claim to assignee
 # holds a LIVE claim (its last comment about the issue < 24 h ago, no RELEASE
 # since — the rule AGENTS.md states), the claim is refused and a reply says who
 # holds it, how old the claim is, when they were last active on it if they have
-# commented since, and where to coordinate; a STALE claim (no activity for 24 h, unreleased) is taken over
+# commented since, and where to coordinate; a STALE claim (no activity for 24 h,
+# unreleased) is taken over
 # — holder unassigned, claimant assigned, reply says so; everything else
 # (nobody else, same author, released, or an assignee with no claim comment) is
 # accepted as before. Holders are found from the CLAIM COMMENTS (issue thread +
 # the whole channel), not from the assignee field, so two claims seconds apart
-# and a non-assignable author are both caught. The reply is the only kind of
+# and a non-assignable author are both caught (a dead heat is resolved by age:
+# the older claim wins, the newer run is the one refused) — and only a collaborator's, and a
+# person's (`author_association` in this gate's set, `user.type` not `Bot`), so
+# a drive-by claim on the public channel cannot refuse real ones. The reply is
+# the only kind of
 # comment this workflow writes, and it is shaped so the parser reads no marker
 # from it. The `node` call is guarded like every `gh` call: a failure leaves the
 # field alone and the loop continues to the next number.
@@ -120,6 +125,7 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
           COMMENT_AUTHOR_TYPE: ${{ github.event.comment.user.type }}
+          COMMENT_CREATED_AT: ${{ github.event.comment.created_at }}
           ON_ISSUE: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
         run: |
@@ -152,7 +158,7 @@ jobs:
                 # claim. It never exits non-zero once its arguments parse; a
                 # failed read leaves the field alone — the claim comment is
                 # still the record.
-                node scripts/ci/claim-collision.mjs --issue "$number" --claimant "$COMMENT_AUTHOR" --posted-on "$ON_ISSUE" --apply </dev/null 2>&1 | tee -a collision.log \
+                node scripts/ci/claim-collision.mjs --issue "$number" --claimant "$COMMENT_AUTHOR" --posted-on "$ON_ISSUE" --claimed-at "${COMMENT_CREATED_AT:-}" --apply </dev/null 2>&1 | tee -a collision.log \
                   || echo "  claim #$number not projected (skipped)"
                 ;;
               release)

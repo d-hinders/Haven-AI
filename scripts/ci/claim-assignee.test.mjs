@@ -499,6 +499,29 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
     assert.equal(decideClaim({ ...base, comments: [old, quotedRecent] }).action, 'takeover')
   })
 
+  test('dead heat: a holder whose claim is NEWER than the incoming one does not block it — the older claim wins', () => {
+    // Both runs see each other's comment ~20 s after their triggers. Antonio
+    // claimed at 12:00:00, Philip at 12:00:05: Antonio's run must accept,
+    // Philip's must refuse and name Antonio.
+    const antonio = { author: 'AntonioSaaranen', body: '🔒 CLAIM #3200 — branch `feat/3200-a`', createdAt: '2026-09-20T12:00:00Z', onIssue: 1289, authorAssociation: 'COLLABORATOR' }
+    const philip = { author: 'PhilipEriksson', body: '🔒 CLAIM #3200 — branch `feat/3200-p`', createdAt: '2026-09-20T12:00:05Z', onIssue: 1289, authorAssociation: 'COLLABORATOR' }
+    const now = Date.parse('2026-09-20T12:00:30Z')
+    const common = { issue: 3200, state: 'open', assignees: [], comments: [antonio, philip], postedOn: 1289, nowMs: now }
+    const a = decideClaim({ ...common, claimant: 'AntonioSaaranen', claimedAt: antonio.createdAt })
+    const p = decideClaim({ ...common, claimant: 'PhilipEriksson', claimedAt: philip.createdAt })
+    assert.equal(a.action, 'accept')
+    assert.equal(p.action, 'refuse')
+    assert.match(p.reply.body, /held by @AntonioSaaranen/)
+    // Same second: the lexically smaller login wins, so both runs agree.
+    const tie = { ...philip, createdAt: antonio.createdAt }
+    const a2 = decideClaim({ ...common, comments: [antonio, tie], claimant: 'AntonioSaaranen', claimedAt: antonio.createdAt })
+    const p2 = decideClaim({ ...common, comments: [antonio, tie], claimant: 'PhilipEriksson', claimedAt: tie.createdAt })
+    assert.equal(a2.action, 'accept')
+    assert.equal(p2.action, 'refuse')
+    // Without the incoming timestamp (older callers), nothing changes: refuse.
+    assert.equal(decideClaim({ ...common, claimant: 'AntonioSaaranen' }).action, 'refuse')
+  })
+
   test('S2: staleness is measured from the holder\'s LAST ACTIVITY about the issue, not the claim', () => {
     // Claimed 3 days ago, but commented on the issue thread 2 h ago: live.
     const old = { ...holderClaimLine, createdAt: '2026-09-12T12:51:40Z' }

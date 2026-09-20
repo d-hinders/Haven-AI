@@ -41,12 +41,26 @@
 // field and both would accept), and an author GitHub refuses to assign (the
 // old shell said so itself: "the author is not assignable on this repo"), whose
 // claim would otherwise never be seen by anyone. The comments are already in
-// hand, so the check reads them. Only a COLLABORATOR's comment can make a
-// holder: #1289 is public, and a drive-by `🔒 CLAIM #N` there must not be able
-// to get every real claim of #N refused. The REST comment carries
-// `author_association`; the same OWNER/MEMBER/COLLABORATOR set the workflow's
-// own trigger gate uses is applied to holders. Assignees need no such check —
-// GitHub only assigns users it would let the gate through.
+// hand, so the check reads them. Only a COLLABORATOR's comment, and only a
+// PERSON's, can make a holder: #1289 is public, and a drive-by `🔒 CLAIM #N`
+// there — or a bot quoting the format — must not be able to get every real
+// claim of #N refused. The REST comment carries `author_association` and
+// `user.type`; the same OWNER/MEMBER/COLLABORATOR set the workflow's own
+// trigger gate uses is applied to holders, and `Bot` authors are dropped.
+// Assignees need no such check — GitHub only assigns users it would let the
+// gate through. Residual: `author_association` is computed when GitHub renders
+// the comment, not frozen at posting time, so a FORMER collaborator's old claim
+// stops counting once they leave — the under-blocking direction, accepted.
+//
+// ## A dead heat is resolved by age, not by who ran first
+//
+// Two claims seconds apart each see the other's comment (both runs read the
+// thread ~20 s after their trigger). Without a tie-break both would be refused
+// and nobody assigned — and each reply would name the LATER claimant as the
+// holder. So the incoming claim's own timestamp is passed in, and a holder
+// whose claim is NEWER than the incoming one does not block it: the older
+// claim wins, the newer run is the one refused. Equal timestamps (same second)
+// fall to the lexically smaller login, so the two runs still agree.
 //
 // ## Staleness is measured from the holder's last ACTIVITY, not the claim
 //
@@ -175,11 +189,13 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
  *        the issue's comments plus the channel's, tagged with where each was
  *        posted and with GitHub's `author_association` for the author
  * @param {number} o.postedOn        the issue the incoming claim was posted on
+ * @param {string|null} [o.claimedAt] the incoming claim comment's created_at —
+ *        a holder whose claim is newer than this does not block (older wins)
  * @param {number} [o.nowMs]
  * @param {number} [o.channelIssue]
  * @returns {{action:'skip'|'accept'|'refuse'|'takeover', assign?:string, unassign?:string[], reply?:{issue:number, body:string}, reason:string}}
  */
-export function decideClaim({ issue, claimant, state, assignees, comments, postedOn, nowMs = Date.now(), channelIssue = CHANNEL_ISSUE }) {
+export function decideClaim({ issue, claimant, state, assignees, comments, postedOn, claimedAt = null, nowMs = Date.now(), channelIssue = CHANNEL_ISSUE }) {
   if (String(state).toLowerCase() !== 'open') return { action: 'skip', issue, reason: `issue is ${state}` }
   // Candidates: everyone who ever posted a claim of this issue, plus whoever
   // the field currently names — minus the claimant.
@@ -208,6 +224,14 @@ export function decideClaim({ issue, claimant, state, assignees, comments, poste
   for (const holder of others) {
     const { claim, releasedAfter, lastActivityAt } = holderClaim({ holder, issue, comments, channelIssue })
     if (!claim || releasedAfter) continue // tracking assignee, or released: not a claim in force
+    // Dead heat: a holder whose claim is NEWER than the incoming one does not
+    // block it — the older claim wins. Same second → smaller login wins.
+    const mineMs = Date.parse(claimedAt ?? '')
+    const theirsMs = Date.parse(claim.createdAt ?? '')
+    if (Number.isFinite(mineMs) && Number.isFinite(theirsMs)) {
+      if (theirsMs > mineMs) continue
+      if (theirsMs === mineMs && String(holder).toLowerCase() > String(claimant).toLowerCase()) continue
+    }
     const ageMs = nowMs - Date.parse(lastActivityAt ?? claim.createdAt)
     // Unreadable timestamps count as LIVE: refusing is the direction that
     // cannot mislead; a takeover on an unknown age would.
@@ -323,7 +347,7 @@ export async function applyClaim(decision, { gh, repo, issue, log = console.log 
 // ---------------------------------------------------------------------------
 // CLI — one claim number per invocation, called from claim-assignee.yml.
 //
-//   node scripts/ci/claim-collision.mjs --issue N --claimant LOGIN --posted-on M [--apply]
+//   node scripts/ci/claim-collision.mjs --issue N --claimant LOGIN --posted-on M [--claimed-at ISO] [--apply]
 //
 // Exit 0 always once the arguments parse; a failed read logs and does nothing.
 // The process ends by itself — never `process.exit(0)` after a stdout write:
@@ -351,6 +375,7 @@ if (isMain) {
   const issue = Number(arg('issue'))
   const claimant = arg('claimant') ?? ''
   const postedOn = Number(arg('posted-on') ?? issue)
+  const claimedAt = arg('claimed-at')
   if (!Number.isInteger(issue) || issue <= 0 || !/^[A-Za-z0-9-]+(\[bot\])?$/.test(claimant)) {
     console.error('usage: claim-collision.mjs --issue N --claimant LOGIN [--posted-on M] [--apply]')
     process.exit(2)
@@ -359,7 +384,7 @@ if (isMain) {
   try {
     const gh = ghRunner()
     const { state, assignees, comments } = await fetchClaimState({ gh, repo, issue })
-    const decision = decideClaim({ issue, claimant, state, assignees, comments, postedOn })
+    const decision = decideClaim({ issue, claimant, state, assignees, comments, postedOn, claimedAt })
     process.stdout.write(`${JSON.stringify(decision)}\n`)
     if (has('apply') && decision.action !== 'skip') await applyClaim(decision, { gh, repo, issue })
     else if (decision.action === 'skip') console.log(`  skip claim #${issue} — ${decision.reason}`)

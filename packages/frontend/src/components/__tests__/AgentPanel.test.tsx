@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.hoisted(() => vi.fn())
 const mockUseAgents = vi.hoisted(() => vi.fn())
+const mockRouterPush = vi.hoisted(() => vi.fn())
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
@@ -12,11 +13,11 @@ vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
 }))
 
-vi.mock('../ConnectAgentModal', () => ({
-  default: () => null,
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockRouterPush, replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
 }))
 
-vi.mock('../EditAgentModal', () => ({
+vi.mock('../ConnectAgentModal', () => ({
   default: () => null,
 }))
 
@@ -70,6 +71,27 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockUseAuth.mockReturnValue({ activeAccount: SAFE })
   setAgents([])
+})
+
+describe('AgentPanel agent detail navigation (#3168)', () => {
+  it('routes the card Details action to /agents/{id} through the Next router', () => {
+    setAgents([agent({ id: 'agent-9' })])
+
+    render(<AgentPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open details for Research agent' }))
+    expect(mockRouterPush).toHaveBeenCalledTimes(1)
+    expect(mockRouterPush).toHaveBeenCalledWith('/agents/agent-9')
+  })
+
+  it('leaves no Edit modal affordance on the list — the detail page owns name and description editing', () => {
+    setAgents([agent()])
+
+    render(<AgentPanel />)
+
+    expect(screen.queryByRole('button', { name: 'Edit Research agent' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Open details for Research agent' })).toBeInTheDocument()
+  })
 })
 
 describe('AgentPanel rail affordances', () => {

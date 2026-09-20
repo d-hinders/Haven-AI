@@ -7,7 +7,6 @@ import { useAuth } from '@/context/AuthContext'
 import { setupIdFromSearch } from '@/lib/discovery'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import ConnectAgentModal from './ConnectAgentModal'
-import EditAgentModal from './EditAgentModal'
 import { AgentCard } from './agent-panel/AgentCard'
 import { MCP_NOT_RECORDED_NOTE, hasUnrecordedMcpServerName } from './agent-panel/McpServerName'
 import { BotIcon } from './agent-panel/agent-display'
@@ -295,7 +294,6 @@ export default function AgentPanel() {
           {visibleAgents.length > 0 && (
             <div className="grid items-start gap-4 lg:grid-cols-2">
               {visibleAgents.map((agent) => {
-                const usesActiveAccount = panel.agentUsesActiveAccount(agent)
                 const agentChainId = agent.account_chain_id ?? chainId
 
                 return (
@@ -303,14 +301,12 @@ export default function AgentPanel() {
                     key={agent.id}
                     agent={agent}
                     onViewDetails={panel.handleViewDetails}
-                    onEdit={panel.handleEdit}
                     onPause={panel.handlePause}
                     onResume={panel.handleResume}
                     onRevokeCredential={panel.revokeAgentCredential}
                     onArchive={panel.handleArchive}
                     onRestore={panel.handleRestore}
                     busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
-                    canUseWalletActions={usesActiveAccount}
                     chainId={agentChainId}
                   />
                 )
@@ -351,14 +347,12 @@ export default function AgentPanel() {
                 key={agent.id}
                 agent={agent}
                 onViewDetails={panel.handleViewDetails}
-                onEdit={panel.handleEdit}
                 onPause={panel.handlePause}
                 onResume={panel.handleResume}
                 onRevokeCredential={panel.revokeAgentCredential}
                 onArchive={panel.handleArchive}
                 onRestore={panel.handleRestore}
                 busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
-                canUseWalletActions={panel.agentUsesActiveAccount(agent)}
                 chainId={agent.account_chain_id ?? chainId}
               />
             ))}
@@ -376,16 +370,6 @@ export default function AgentPanel() {
         onSetupUpdated={panel.handleSetupUpdated}
         resumeSetupId={activeResumeSetupId}
       />
-
-      {/* Edit agent modal */}
-      {panel.editAgent && panel.agentUsesActiveAccount(panel.editAgent) && (
-        <EditAgentModal
-          open={!!panel.editAgent}
-          onClose={() => panel.setEditAgent(null)}
-          agent={panel.editAgent}
-          onUpdated={panel.handleAgentEdited}
-        />
-      )}
     </div>
   )
 }

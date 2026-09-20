@@ -1,14 +1,14 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mockReplace = vi.hoisted(() => vi.fn())
 const mockSearch = vi.hoisted(() => ({ value: '' }))
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: mockReplace, push: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => '/agents',
   useSearchParams: () => new URLSearchParams(mockSearch.value),
 }))
+
+const mockReplace = vi.fn()
 
 import type { Agent } from '@/hooks/useAgents'
 import { useAgentListFilters } from '../useAgentListFilters'
@@ -19,8 +19,11 @@ const AGENTS = [agent('b', 'paused'), agent('a', 'active')]
 
 describe('useAgentListFilters', () => {
   beforeEach(() => {
-    mockReplace.mockClear()
+    mockReplace.mockReset()
     mockSearch.value = ''
+    // `history.replaceState`, not the router: synchronous, so an earlier
+    // write can never commit after a later one (see the hook's docstring).
+    vi.spyOn(window.history, 'replaceState').mockImplementation((...args) => mockReplace(...args))
   })
 
   it('seeds from the URL on first render and preserves other params on write', () => {
@@ -30,7 +33,7 @@ describe('useAgentListFilters', () => {
     expect(result.current.filtered.map((a) => a.id)).toEqual(['b'])
     act(() => result.current.setState({ ...result.current.state, q: 'a' }))
     // Existing keys keep their position (URLSearchParams.set), new keys append.
-    expect(mockReplace).toHaveBeenCalledWith('/agents?setup=first&status=paused&q=a', { scroll: false })
+    expect(mockReplace.mock.calls.map((c) => c[2])).toEqual(['/agents?setup=first&status=paused&q=a'])
   })
 
   it('a write that changes nothing in the URL does not navigate', () => {
@@ -45,7 +48,17 @@ describe('useAgentListFilters', () => {
     expect(result.current.active).toBe(true)
     act(() => result.current.reset())
     expect(result.current.state).toEqual({ q: '', facets: {}, sort: 'seen' })
-    expect(mockReplace).toHaveBeenCalledWith('/agents?sort=seen', { scroll: false })
+    expect(mockReplace.mock.calls.map((c) => c[2])).toEqual(['/agents?sort=seen'])
+  })
+
+  it('writes are synchronous: a later write is never overtaken by an earlier one (#3165 review)', () => {
+    // With `router.replace` the two commits below could land in either order;
+    // with `replaceState` the URL is already `q=ab` when the first call returns.
+    const { result } = renderHook(() => useAgentListFilters(AGENTS))
+    act(() => result.current.setState({ ...result.current.state, q: 'a' }))
+    act(() => result.current.setState({ ...result.current.state, q: 'ab' }))
+    expect(mockReplace.mock.calls.map((c) => c[2])).toEqual(['/agents?q=a', '/agents?q=ab'])
+    expect(result.current.state.q).toBe('ab')
   })
 
   it('a URL change from outside (back/forward) re-seeds the state', () => {

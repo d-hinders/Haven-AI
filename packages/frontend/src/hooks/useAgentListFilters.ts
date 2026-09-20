@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import type { Agent } from '@/hooks/useAgents'
 import {
   BUILT_IN_FACETS,
@@ -31,20 +31,27 @@ export interface UseAgentListFiltersReturn {
  * `?setup=` hand-off on the same page and `TransactionsClient`'s
  * `useSearchParams` seeding).
  *
- * The URL is the source of truth on first render and the mirror afterwards:
- * state changes call `router.replace` (no history entry per keystroke), and
- * a back/forward navigation that changes the query re-seeds the state. Other
- * query parameters on the page are preserved by `writeFilterState`.
+ * The URL is the source of truth on first render and the mirror afterwards.
+ * Writes go through `window.history.replaceState` — the same call this page
+ * already uses to tidy `?setup=` — not `router.replace`: the router's replace
+ * is an async transition, and with one navigation per keystroke an EARLIER
+ * write can commit after a later one, at which point a "the URL changed under
+ * us" re-seed would hand the input a stale value (measured in review of
+ * #3165: write `q=a`, write `q=ab`, commit `q=a` → the field reads `a`).
+ * `replaceState` is synchronous and Next syncs `useSearchParams` from it, so
+ * the URL never lags the state. A back/forward navigation that changes the
+ * query still re-seeds the state. Other query parameters on the page are
+ * preserved by `writeFilterState`.
  *
- * `facets` is the extension point: pass `[...BUILT_IN_FACETS, labelsFacet]`
- * and the toolbar, the URL codec and the counts all pick it up. The hook does
- * not know what a label is.
+ * `facets` is the extension point: pass a MEMOIZED `[...BUILT_IN_FACETS,
+ * labelsFacet]` (a module constant, or `useMemo`) and the toolbar, the URL
+ * codec and the counts all pick it up — an inline spread would re-run the
+ * memos on every render. The hook does not know what a label is.
  */
 export function useAgentListFilters(
   agents: Agent[],
   facets: AgentFacet[] = BUILT_IN_FACETS,
 ): UseAgentListFiltersReturn {
-  const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const search = searchParams?.toString() ?? ''
@@ -69,9 +76,13 @@ export function useAgentListFilters(
       const nextSearch = params.toString()
       if (nextSearch === search) return
       lastWritten.current = nextSearch
-      router.replace(nextSearch ? `${pathname}?${nextSearch}` : pathname, { scroll: false })
+      try {
+        window.history.replaceState(window.history.state, '', nextSearch ? `${pathname}?${nextSearch}` : pathname)
+      } catch {
+        // A URL that stays in step is a convenience, never worth a thrown render.
+      }
     },
-    [search, facets, pathname, router],
+    [search, facets, pathname],
   )
 
   const reset = useCallback(

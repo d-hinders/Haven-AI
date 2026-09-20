@@ -77,7 +77,10 @@ export default function AgentPanel() {
     // app router to render a panel that does not navigate.
     setResumeDismissed(true)
     try {
-      window.history.replaceState(null, '', '/agents')
+      // Drop only `setup`; the list toolbar's filter parameters (#3165) stay.
+      const url = new URL(window.location.href)
+      url.searchParams.delete('setup')
+      window.history.replaceState(null, '', `${url.pathname}${url.search}`)
     } catch {
       // A URL that stays tidy is not worth a thrown render.
     }
@@ -298,10 +301,12 @@ export default function AgentPanel() {
             Haven holds: removed agents are collapsed behind a toggle, so
             counting them while they are hidden would put a note above the list
             explaining a label that is nowhere on the page. Expanding Removed
-            reveals both together, which is the honest pairing.
+            reveals both together, which is the honest pairing. The same rule
+            makes it the FILTERED list (#3165), not every visible agent: a
+            filter that hides the only `not recorded` card hides the note.
           */}
           {hasUnrecordedMcpServerName([
-            ...visibleAgents,
+            ...listFilters.filtered,
             ...(panel.showRemovedAgents ? removedAgents : []),
           ]) && (
             <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">

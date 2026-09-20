@@ -84,6 +84,10 @@ describe('sort', () => {
   })
   it('seen: most recent first, never-seen last, ties by name', () => {
     expect([...ALL].sort(compareAgents('seen')).map((a) => a.name)).toEqual(['Bravo', 'Alpha', 'charlie'])
+    // Two never-seen agents tie on time and fall back to the name (mutation:
+    // drop the `localeCompare` tie-break → order becomes insertion order → red).
+    const tie = [agent({ id: 'z', name: 'Zed' }), agent({ id: 'y', name: 'Yan' })]
+    expect(tie.sort(compareAgents('seen')).map((a) => a.name)).toEqual(['Yan', 'Zed'])
   })
   it('created: newest first', () => {
     expect([...ALL].sort(compareAgents('created')).map((a) => a.name)).toEqual(['charlie', 'Alpha', 'Bravo'])

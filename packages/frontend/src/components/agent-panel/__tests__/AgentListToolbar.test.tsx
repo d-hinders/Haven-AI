@@ -30,16 +30,16 @@ function renderBar(state: AgentListFilterState = EMPTY_FILTER_STATE, overrides: 
 describe('AgentListToolbar', () => {
   it('typing in the search emits the new query', () => {
     const { onChange } = renderBar()
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search agents' }), { target: { value: 'inv' } })
+    fireEvent.change(screen.getByRole('textbox', { name: /Search agents/ }), { target: { value: 'inv' } })
     expect(onChange).toHaveBeenCalledWith({ ...EMPTY_FILTER_STATE, q: 'inv' })
   })
 
   it('a facet option toggles into the selection and shows its count', () => {
     const { onChange } = renderBar()
     fireEvent.click(screen.getByRole('button', { name: /Status:/ }))
-    const option = screen.getByRole('option', { name: /Paused/ })
+    const option = screen.getByRole('button', { name: /Paused/, pressed: false })
     expect(option).toHaveTextContent('1')
-    fireEvent.click(screen.getByRole('button', { name: /Paused/ }))
+    fireEvent.click(option)
     expect(onChange).toHaveBeenCalledWith({ ...EMPTY_FILTER_STATE, facets: { status: ['paused'] } })
   })
 
@@ -47,7 +47,7 @@ describe('AgentListToolbar', () => {
     const state = { ...EMPTY_FILTER_STATE, facets: { status: ['paused', 'active'] } }
     const { onChange } = renderBar(state, { active: true, shown: 2 })
     fireEvent.click(screen.getByRole('button', { name: /Status:\s*2 selected/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Paused/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Paused/, pressed: true }))
     expect(onChange).toHaveBeenCalledWith({ ...state, facets: { status: ['active'] } })
   })
 
@@ -57,10 +57,44 @@ describe('AgentListToolbar', () => {
     expect(onChange).toHaveBeenCalledWith({ ...EMPTY_FILTER_STATE, sort: 'seen' })
   })
 
-  it('count summary: "N agents" at rest, "M of N agents shown" and a reset when filtering', () => {
+  it('no count line and no reset at rest — the header chip already carries the count', () => {
     renderBar()
-    expect(screen.getByTestId('agent-list-count')).toHaveTextContent('3 agents')
+    expect(screen.queryByTestId('agent-list-count')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+  })
+
+  it('singular noun for one agent', () => {
+    renderBar({ ...EMPTY_FILTER_STATE, q: 'x' }, { active: true, shown: 1, total: 1 })
+    expect(screen.getByTestId('agent-list-count')).toHaveTextContent('1 of 1 agent shown')
+  })
+
+  it('in the zero state the bar steps back: count stays, its reset does not (the EmptyState owns it)', () => {
+    renderBar({ ...EMPTY_FILTER_STATE, q: 'x' }, { active: true, shown: 0 })
+    expect(screen.getByTestId('agent-list-count')).toHaveTextContent('0 of 3 agents shown')
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+  })
+
+  it('the search field offers a clear button only while it has text', () => {
+    const { onChange } = renderBar({ ...EMPTY_FILTER_STATE, q: 'inv' }, { active: true, shown: 1 })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+    expect(onChange).toHaveBeenCalledWith({ ...EMPTY_FILTER_STATE, q: '' })
+  })
+
+  it('no clear-search button while the field is empty', () => {
+    renderBar()
+    expect(screen.queryByRole('button', { name: 'Clear search' })).toBeNull()
+  })
+
+  it('Escape closes an open facet panel; the trigger reports its state', () => {
+    renderBar()
+    const trigger = screen.getByRole('button', { name: /Status:/ })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(trigger)
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('group', { name: 'Status' })).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('group', { name: 'Status' })).toBeNull()
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('reset is offered only while a filter is active, and calls onReset', () => {
@@ -74,6 +108,6 @@ describe('AgentListToolbar', () => {
     const labels = { id: 'label', label: 'Label', match: 'any' as const, options: [{ value: 'prod', label: 'prod' }], predicate: () => true }
     renderBar(EMPTY_FILTER_STATE, { facets: [...BUILT_IN_FACETS, labels], counts: { ...counts, label: { prod: 4 } } })
     fireEvent.click(screen.getByRole('button', { name: /Label:/ }))
-    expect(screen.getByRole('option', { name: /prod/ })).toHaveTextContent('4')
+    expect(screen.getByRole('button', { name: /prod/, pressed: false })).toHaveTextContent('4')
   })
 })

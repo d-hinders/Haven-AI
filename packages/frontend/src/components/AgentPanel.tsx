@@ -6,6 +6,8 @@ import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { setupIdFromSearch } from '@/lib/discovery'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
+import { useAgentListFilters } from '@/hooks/useAgentListFilters'
+import { AgentListToolbar } from './agent-panel/AgentListToolbar'
 import ConnectAgentModal from './ConnectAgentModal'
 import { AgentCard } from './agent-panel/AgentCard'
 import { MCP_NOT_RECORDED_NOTE, hasUnrecordedMcpServerName } from './agent-panel/McpServerName'
@@ -37,6 +39,10 @@ export default function AgentPanel() {
     finalizeTimedOut,
     refetchAgents,
   } = panel
+
+  // #3165: search / facets / sort over the managed list, state in the URL.
+  // Reads `visibleAgents` only; removed agents stay behind their own toggle.
+  const listFilters = useAgentListFilters(visibleAgents)
 
   /**
    * `/agents?setup=<id>` — the budget-approval hand-off link (#2522).
@@ -71,7 +77,12 @@ export default function AgentPanel() {
     // app router to render a panel that does not navigate.
     setResumeDismissed(true)
     try {
-      window.history.replaceState(null, '', '/agents')
+      // Drop only `setup`; the list toolbar's filter parameters (#3165) stay.
+      // `null` state on purpose — see `useAgentListFilters` for why passing
+      // `window.history.state` through would stop Next syncing the URL.
+      const url = new URL(window.location.href)
+      url.searchParams.delete('setup')
+      window.history.replaceState(null, '', `${url.pathname}${url.search}`)
     } catch {
       // A URL that stays tidy is not worth a thrown render.
     }
@@ -125,6 +136,19 @@ export default function AgentPanel() {
           </Button>
         </div>
       </div>
+
+      {visibleAgents.length > 0 && (
+        <AgentListToolbar
+          state={listFilters.state}
+          onChange={listFilters.setState}
+          onReset={listFilters.reset}
+          facets={listFilters.facets}
+          counts={listFilters.counts}
+          shown={listFilters.filtered.length}
+          total={visibleAgents.length}
+          active={listFilters.active}
+        />
+      )}
 
       {agentsError && agents.length > 0 ? (
         <div
@@ -279,10 +303,12 @@ export default function AgentPanel() {
             Haven holds: removed agents are collapsed behind a toggle, so
             counting them while they are hidden would put a note above the list
             explaining a label that is nowhere on the page. Expanding Removed
-            reveals both together, which is the honest pairing.
+            reveals both together, which is the honest pairing. The same rule
+            makes it the FILTERED list (#3165), not every visible agent: a
+            filter that hides the only `not recorded` card hides the note.
           */}
           {hasUnrecordedMcpServerName([
-            ...visibleAgents,
+            ...listFilters.filtered,
             ...(panel.showRemovedAgents ? removedAgents : []),
           ]) && (
             <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
@@ -291,9 +317,23 @@ export default function AgentPanel() {
           )}
 
           {/* Managed agents */}
-          {visibleAgents.length > 0 && (
+          {visibleAgents.length > 0 && listFilters.filtered.length === 0 && (
+            <EmptyState
+              size="compact"
+              tone="neutral"
+              title="No agents match these filters"
+              body="Widen the search or clear a filter to see your agents again."
+              action={
+                <Button size="sm" variant="tertiary" onClick={listFilters.reset}>
+                  Clear filters
+                </Button>
+              }
+            />
+          )}
+
+          {listFilters.filtered.length > 0 && (
             <div className="grid items-start gap-4 lg:grid-cols-2">
-              {visibleAgents.map((agent) => {
+              {listFilters.filtered.map((agent) => {
                 const agentChainId = agent.account_chain_id ?? chainId
 
                 return (

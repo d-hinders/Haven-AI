@@ -83,13 +83,16 @@ const VIEWPORT = { width: 390, height: 844 }
  * assertion that exercises `<main>`'s bottom padding as geometry, and on a
  * route whose content fits there is nothing near the bottom to find, so the
  * check passes having proved nothing. Measured, not assumed — `/dashboard`
- * overflows, `/agents` and `/transactions` do not, because the fixture seeds
- * two agents and a handful of transactions. So `/dashboard` carries the
- * geometry and all three carry the padding readback.
+ * overflows; `/transactions` does not, because the fixture seeds a handful of
+ * transactions; `/agents` did not until #3165 put the list toolbar (search,
+ * two facets, sort, count line) above the fixture's cards, which is exactly
+ * the "day the fixture grows" case below — promoted to carrying the geometry
+ * rather than left proving less than the table claims. So `/dashboard` and
+ * `/agents` carry the geometry and all three carry the padding readback.
  */
 const ROUTES = [
   { path: '/dashboard', overflows: true },
-  { path: '/agents', overflows: false },
+  { path: '/agents', overflows: true },
   { path: '/transactions', overflows: false },
 ] as const
 

@@ -1732,6 +1732,146 @@ export const openapiSpec = {
         },
       },
     },
+    // ── Agent labels (#3167) ────────────────────────────────────────────────
+    // Display/categorization ONLY: nothing in the delegation, budget, or
+    // on-chain enforcement path may read agent labels.
+    '/agents/{id}/labels': {
+      put: {
+        tags: ['Agents'],
+        operationId: 'replaceAgentLabels',
+        summary: "Replace an agent's labels with the given set.",
+        description:
+          'Full replacement: the agent ends up carrying exactly the labels named, in any order, duplicates collapsed. Labels are the user\'s own display tags; deleting a label elsewhere removes it from every agent without touching the agents themselves. The response carries the agent\'s labels as they now are, so a client re-renders without a second call.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ReplaceAgentLabelsRequest' },
+            },
+          },
+        },
+        responses: {
+          '400': errorResponse,
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '200': {
+            description: 'The agent\'s labels after the replacement.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentLabelsResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    // ── Label vocabulary (#3167) ────────────────────────────────────────────
+    '/labels': {
+      get: {
+        tags: ['Agents'],
+        operationId: 'listLabels',
+        summary: "List the signed-in user's labels.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The label vocabulary, name-sorted.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/LabelListResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      post: {
+        tags: ['Agents'],
+        operationId: 'createLabel',
+        summary: 'Create a label (or reset an existing one of the same name).',
+        description:
+          "Names are one per user on the lowercased name: creating \"Prod\" when \"prod\" exists re-uses that label (updating its colour) rather than failing. Omitted colour defaults to the palette's neutral entry.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateLabelRequest' },
+            },
+          },
+        },
+        responses: {
+          '400': errorResponse,
+          '201': {
+            description: 'The label as it now exists.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Label' },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/labels/{id}': {
+      put: {
+        tags: ['Agents'],
+        operationId: 'updateLabel',
+        summary: 'Rename and/or recolor a label.',
+        description:
+          "Agents carrying the label follow it — a rename changes the name everywhere it renders, never which agents carry it. A rename onto a name another of the user's labels already holds is a 409.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/LabelId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateLabelRequest' },
+            },
+          },
+        },
+        responses: {
+          '400': errorResponse,
+          '200': {
+            description: 'The label as it now is.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Label' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Agents'],
+        operationId: 'deleteLabel',
+        summary: 'Delete a label.',
+        description:
+          'Removes the label and its assignments (every agent loses the tag). Agents are never deleted or altered by this — only the label and the join rows go.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/LabelId' }],
+        responses: {
+          '400': errorResponse,
+          '200': {
+            description: 'Deleted. The agents that carried it keep everything else.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SuccessResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     // ── Delegation lifecycle (#828, documented by #1446) ────────────────────
     // DESCRIPTIVE ONLY: these shapes document what the routes already return.
     // Spend authority lives in the signed delegation's on-chain caveat
@@ -6737,6 +6877,12 @@ export const openapiSpec = {
         required: true,
         schema: uuid,
       },
+      LabelId: {
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: uuid,
+      },
       PaymentId: {
         name: 'id',
         in: 'path',
@@ -7279,6 +7425,78 @@ export const openapiSpec = {
         properties: { success: { type: 'boolean' } },
         additionalProperties: false,
       },
+      /**
+       * Agent label (#3167). A tag in the user's own vocabulary, carried by
+       * zero or more agents. DISPLAY/CATEGORIZATION ONLY — nothing in the
+       * delegation, budget, or on-chain enforcement path may read it.
+       * `color` is one of the shared palette's names (core's
+       * `LABEL_COLORS`), never raw CSS: the frontend maps each name onto the
+       * v2 token pair it belongs to, so chips follow the active theme.
+       */
+      Label: {
+        type: 'object',
+        required: ['id', 'name', 'color', 'created_at'],
+        properties: {
+          id: uuid,
+          /**
+           * The label's name, lowercased (one name per user on lower(name);
+           * "Prod" and "prod" are the same label). Max 64 characters.
+           */
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          color: { type: 'string', enum: ['neutral', 'brand', 'success', 'debit'] },
+          created_at: isoDateTime,
+        },
+      },
+      LabelListResponse: {
+        type: 'object',
+        required: ['labels'],
+        properties: {
+          labels: { type: 'array', items: { $ref: '#/components/schemas/Label' } },
+        },
+        additionalProperties: false,
+      },
+      CreateLabelRequest: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          color: { type: 'string', enum: ['neutral', 'brand', 'success', 'debit'] },
+        },
+        additionalProperties: false,
+      },
+      UpdateLabelRequest: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          color: { type: 'string', enum: ['neutral', 'brand', 'success', 'debit'] },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * FULL REPLACEMENT is the mutation: the agent ends up carrying exactly
+       * this set. An empty array clears the agent's labels — that is the
+       * editor's "remove every chip", not a refused no-op.
+       */
+      ReplaceAgentLabelsRequest: {
+        type: 'object',
+        required: ['label_ids'],
+        properties: {
+          label_ids: {
+            type: 'array',
+            items: uuid,
+            maxItems: 32,
+          },
+        },
+        additionalProperties: false,
+      },
+      AgentLabelsResponse: {
+        type: 'object',
+        required: ['labels'],
+        properties: {
+          labels: { type: 'array', items: { $ref: '#/components/schemas/Label' } },
+        },
+        additionalProperties: false,
+      },
       AgentConnectionSetupState: {
         type: 'string',
         enum: [
@@ -7747,7 +7965,7 @@ export const openapiSpec = {
         required: [
           'id', 'name', 'delegate_address',
           'account_id', 'account_address', 'account_name', 'account_chain_id',
-          'api_key_prefix', 'status', 'created_at', 'allowances',
+          'api_key_prefix', 'status', 'created_at', 'allowances', 'labels',
         ],
         properties: {
           id: uuid,
@@ -7770,6 +7988,15 @@ export const openapiSpec = {
            */
           archived_at: { anyOf: [isoDateTime, { type: 'null' }] },
           allowances: { type: 'array', items: { $ref: '#/components/schemas/AgentAllowance' } },
+          /**
+           * #3167: the labels this agent carries, name-sorted. Derived per
+           * read (joined from agent_label_assignments), so it is never stale
+           * and needs no second round trip. DISPLAY ONLY — categorization
+           * for the list surface and the #3165 filter facet; nothing in the
+           * delegation, budget, or on-chain enforcement path may read it.
+           * Always present (an unlabelled agent carries `[]`).
+           */
+          labels: { type: 'array', items: { $ref: '#/components/schemas/Label' } },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
           /**

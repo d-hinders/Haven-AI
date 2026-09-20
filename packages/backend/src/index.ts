@@ -26,6 +26,8 @@ import transactionRoutes from './routes/transactions.js'
 import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
 import agentRoutes from './routes/agents.js'
+import labelRoutes from './routes/labels.js'
+import agentLabelRoutes from './routes/agent-labels.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
 import agentDelegationRoutes from './routes/agent-delegations.js'
 import agentRekeyRoutes from './routes/agent-rekey.js'
@@ -117,7 +119,8 @@ app.setErrorHandler(httpErrorHandler)
 // (spiked: an encapsulated plugin's onRoute sees no later routes).
 installRequestValidation(app, {
   mode: config.requestValidationMode,
-  enforcedModules: ['routes/contacts.ts', 'routes/merchants.ts'],
+  // #3167: the label routes are born ENFORCED — new modules never enter shadow.
+  enforcedModules: ['routes/contacts.ts', 'routes/merchants.ts', 'routes/labels.ts', 'routes/agent-labels.ts'],
 })
 
 // --- Process-level error handlers ---
@@ -283,6 +286,12 @@ await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
 await app.register(agentRekeyRoutes, { prefix: '/agents' })
 await app.register(agentPassportRoutes, { prefix: '/agents' })
+// #3167: label assignment rides the /agents prefix as its own route FILE —
+// the request-validation rollout keys enforcedModules on the file.
+await app.register(agentLabelRoutes, { prefix: '/agents' })
+// The label vocabulary itself — GET/POST /labels, PUT/DELETE /labels/:id
+// (#3167). Same prefix rule: one route file, one enforcedModules entry.
+await app.register(labelRoutes, { prefix: '/labels' })
 // Public and unauthenticated (#974): the caller is a merchant deciding whether
 // to serve an agent, and it has no Haven account. Registered separately from
 // the dashboard-authed passport routes so the auth hook cannot be assumed.

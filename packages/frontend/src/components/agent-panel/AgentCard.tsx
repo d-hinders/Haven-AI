@@ -2,6 +2,7 @@
 
 import { McpServerName } from './McpServerName'
 import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanner'
+import { LabelChipRow } from '@/components/haven/LabelChip'
 import { useState } from 'react'
 import { type Agent } from '@/hooks/useAgents'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -169,6 +170,18 @@ export function AgentCard({
                 {agent.description}
               </p>
             )}
+            {/*
+              #3167: the labels this agent carries — max three visible, then a
+              "+N" counter (`LabelChipRow`). Under the identity block, beside
+              nothing: a label is categorisation, not status, so it must not
+              read as the header's warning/danger pill. The row renders nothing
+              for an unlabelled agent, so an unlabelled list is pixel-identical
+              to before. Edit via the card's Edit modal; the full set is
+              visible there and in the label manager.
+            */}
+            <div className="mt-1.5">
+              <LabelChipRow labels={agent.labels} />
+            </div>
           </div>
           <p
             /* #2325: the information-priority half of the narrow-card fix.

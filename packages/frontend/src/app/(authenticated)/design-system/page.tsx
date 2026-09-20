@@ -64,6 +64,8 @@ import {
   TransactionActivityRow,
   TransactionMovement,
   WalletIdentityBlock,
+  LabelChip,
+  LabelChipRow,
 } from '@/components/haven'
 
 /**
@@ -784,12 +786,47 @@ export default function DesignSystemPage() {
               told goes in a <code className="rounded bg-[var(--v2-surface)] px-1">role=&quot;alert&quot;</code> or{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">role=&quot;status&quot;</code> node instead.
             </p>
-            <div className="mt-5 flex flex-wrap items-center gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
               <StatusBadge tone="success">Received</StatusBadge>
               <StatusBadge tone="warning">Needs attention</StatusBadge>
               <StatusBadge tone="danger">Failed</StatusBadge>
               <StatusBadge tone="brand">Connected</StatusBadge>
               <StatusBadge>Draft</StatusBadge>
+            </div>
+          </Card>
+
+          <Card hover={false} className="p-5" data-testid="ds-label-chips">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Agent label chips</h3>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              <code className="rounded bg-[var(--v2-surface)] px-1">LabelChip</code> is the pill
+              an agent renders for each label the user has given it (#3167) —{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">LabelChipRow</code> caps the
+              row at three chips and folds the rest into a +N counter. Colours are the four
+              palette names the label API accepts, each mapped to a v2 soft-tint pair so the
+              chips flip with dark mode like every other tinted surface. A label is
+              categorisation the user owns: it never borrows the warning or danger tints,
+              and it never reads as a status.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {(
+                [
+                  { id: 'l1', name: 'prod', color: 'brand', created_at: '2026-01-01T00:00:00Z' },
+                  { id: 'l2', name: 'finance', color: 'debit', created_at: '2026-01-01T00:00:00Z' },
+                  { id: 'l3', name: 'experimental', color: 'success', created_at: '2026-01-01T00:00:00Z' },
+                  { id: 'l4', name: 'test-agents', color: 'neutral', created_at: '2026-01-01T00:00:00Z' },
+                ] as const
+              ).map((l) => (
+                <LabelChip key={l.id} label={l} />
+              ))}
+            </div>
+            <div className="mt-3" data-testid="ds-label-chip-row">
+              <LabelChipRow labels={[
+                { id: 'l1', name: 'prod', color: 'brand', created_at: '2026-01-01T00:00:00Z' },
+                { id: 'l2', name: 'finance', color: 'debit', created_at: '2026-01-01T00:00:00Z' },
+                { id: 'l3', name: 'experimental', color: 'success', created_at: '2026-01-01T00:00:00Z' },
+                { id: 'l4', name: 'test-agents', color: 'neutral', created_at: '2026-01-01T00:00:00Z' },
+                { id: 'l5', name: 'recurring', color: 'neutral', created_at: '2026-01-01T00:00:00Z' },
+              ]} />
             </div>
           </Card>
 

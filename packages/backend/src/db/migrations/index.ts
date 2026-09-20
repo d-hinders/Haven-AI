@@ -90,6 +90,7 @@ import * as merchants from './088_merchants.js'
 import * as marketplaceProspects from './089_marketplace_prospects.js'
 import * as displayCurrencySek from './090_display_currency_sek.js'
 import * as userCurrencyPreferenceSekDefault from './091_user_currency_preference_sek_default.js'
+import * as agentLabels from './090_agent_labels.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -239,4 +240,5 @@ export const migrations: Migration[] = [
   marketplaceProspects,
   displayCurrencySek,
   userCurrencyPreferenceSekDefault,
+  agentLabels,
 ]

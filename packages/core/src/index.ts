@@ -55,3 +55,12 @@ export {
   type MachinePaymentAttentionReason,
   type MachinePaymentLifecycle,
 } from './machine-payment-lifecycle.js'
+
+// Agent label palette (#3167) — the one colour list the label API validates
+// and the dashboard renders. Pure data; see the module header.
+export {
+  LABEL_COLORS,
+  DEFAULT_LABEL_COLOR,
+  isLabelColor,
+  type LabelColor,
+} from './label-colors.js'

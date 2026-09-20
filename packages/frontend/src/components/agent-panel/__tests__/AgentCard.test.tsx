@@ -35,6 +35,7 @@ function agentFixture(overrides: Partial<Agent> = {}): Agent {
     account_type: 'delegator_hybrid',
     created_at: '2026-05-01T00:00:00Z',
     allowances: [],
+    labels: [],
     ...overrides,
   } as Agent
 }

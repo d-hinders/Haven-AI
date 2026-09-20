@@ -158,9 +158,9 @@ last-verified: "2026-09-19"
 > row already reports as `rail`, `proofStatus`, `resourceUrl` and
 > `merchantAddress`; the old four stay for one full release as deprecated
 > twins (removal condition on `mapPaymentReceipt`: all three release clocks —
-> sdk `latest`, mcp `latest`, the hosted deploy — read at or past the release
-> naming the twins, against the registry and the deploy, never a green
-> promotion). Additive
+> sdk `latest`, mcp `latest`, the hosted deploy's `serverInfo.version` on
+> `initialize` — read at or past the release naming the twins, against the
+> registry and the live handshake, never a green promotion). Additive
 > on the SDK type only; the receipts WIRE is unchanged, so an older SDK against
 > a newer backend and a newer SDK against an older backend both see exactly
 > what they saw before. Neither runtime reshapes receipt rows (hosted

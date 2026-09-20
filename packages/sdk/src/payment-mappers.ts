@@ -115,9 +115,11 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
  * have moved past the release whose CHANGELOG names these twins:
  * `npm view @haven_ai/sdk dist-tags` reads a `latest` at or above it,
  * `npm view @haven_ai/mcp dist-tags` reads a `latest` at or above it, and the
- * hosted mcp-server deploy is at or past the commit that shipped them —
- * each read against the registry / the deploy, never inferred from a green
- * promotion (a promotion can be half green). Until then this comment is the
+ * hosted mcp-server deploy reports a `serverInfo.version` on MCP `initialize`
+ * (`HOSTED_SERVER_VERSION` in `packages/mcp-server/src/server.ts`) at or past
+ * the release that shipped them — each read against the registry / the live
+ * server's handshake, never inferred from a green promotion (a promotion can
+ * be half green; mcp-server is not on npm). Until then this comment is the
  * contract, and the guard's `singleSurface.receipt` rows are what keep the
  * twins from reading as undeclared divergence.
  */

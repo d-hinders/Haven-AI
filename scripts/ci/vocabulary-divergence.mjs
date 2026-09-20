@@ -1033,7 +1033,8 @@ export function openCounts(map) {
 const REMEDY =
   'Add the field to scripts/ci/vocabulary-map.json — either as one side of a\n' +
   'concepts[] pair with a disposition and a written reason, or under\n' +
-  'singleSurface.<surface> with the reason it will never have a counterpart.\n' +
+  'singleSurface.<surface> with the reason it will never have a counterpart\n' +
+  '(or, for a deprecated twin in a dual-emit window, its removal condition).\n' +
   '"Different on purpose" is a legitimate entry; "nobody decided" is not.'
 
 function readSurfaces() {

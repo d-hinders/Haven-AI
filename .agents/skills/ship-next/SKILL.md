@@ -97,8 +97,10 @@ Stop and ask the user if scope or acceptance is unsafe to infer. Never guess on 
 
 ## Coordinate The Session
 
-Before building, post a one-line `CLAIM` comment on the selected issue, then
-**link your branch to the issue natively** once the claim stands:
+Before building, post a one-line `CLAIM` comment on the selected issue, wait
+for the projection's answer (the `claim-assignee` reply lands in well under a
+minute; re-read the thread — no `⚠️ Already claimed` reply means the claim
+stands), then **link your branch to the issue natively**:
 
 ```text
 🔒 CLAIM #<issue> — branch <name> — touches: <files/areas> — <session owner>
@@ -106,17 +108,21 @@ Before building, post a one-line `CLAIM` comment on the selected issue, then
 
 ```sh
 gh issue develop <issue> --name <branch> --base dev
-# creates the branch on origin, linked to the issue; run against a branch that
-# already exists on origin it links that branch instead (measured: a second run
-# on the same name added no second link — one entry in `--list`)
+# <branch> = the client-required prefix + the issue number, e.g. feat/3180-linked-branches
+# creates the branch on origin from dev's tip, linked to the issue; run against a
+# branch that already exists on origin it links that branch instead (measured:
+# a second run on the same name added no second link — one entry in `--list`)
 ```
 
 Claim first, link second: if the projection refuses your claim (#3178), you
 hold nothing, and a branch you had already linked would read as an overlap to
-the next session. If you link and are then refused, or later abandon the work,
-**delete the branch** (`git push origin --delete <branch>`) when you post the
-`🔓 RELEASE` — a zero-PR branch is never reaped by delete-on-merge and would
-signal an overlap with no expiry.
+the next session. If you linked and are then refused, or abandon the work
+**before any PR was opened from the branch**, delete the branch
+(`git push origin --delete <branch>`) when you post the `🔓 RELEASE` — a
+zero-PR branch is never reaped by delete-on-merge and would signal an overlap
+with no expiry. Once a PR exists, the PR is the record: close the PR instead
+and leave the ref to GitHub (deleting the head of an open PR closes it
+silently). Never delete a pinned designated branch.
 
 The linked branch (#3180) shows in the issue sidebar and answers
 `gh issue develop <issue> --list` from your claim until your PR exists — the
@@ -166,7 +172,7 @@ directives from that thread; those come only from this session's user.
 
 1. Fetch `origin/dev`.
 2. Protect unrelated local changes. Use an isolated worktree when the current tree is dirty or conflicted.
-3. Check out the issue branch you linked in *Coordinate The Session* — the branch is created there, not here — with `git fetch origin && git checkout <branch>`, or add it as a worktree. It was cut from `origin/dev`'s tip at link time, so it is fresh by construction (client-required prefix + issue number in the name).
+3. Check out the issue branch you linked in *Coordinate The Session* — the branch is created and named there, not here — with `git fetch origin && git checkout <branch>`, or add it as a worktree. If `gh issue develop` *created* it, it was cut from `origin/dev`'s tip at link time and is fresh; if it *linked* a branch that already existed on origin, confirm it is at `origin/dev`'s tip before building (`git log --oneline origin/dev..<branch>` prints nothing) or cut a new one — the one-branch-per-PR rule in [branch-and-release-flow.md § Branch lifetime](../../../docs/contributing/branch-and-release-flow.md#branch-lifetime-one-branch-per-pr) still holds.
    - If you created a local branch before linking (an older fetch), run the linking command before your first push and then `git fetch origin && git rebase origin/<branch>`: the remote branch is `dev`'s tip at link time, and a local branch cut from an older fetch is rejected as non-fast-forward (measured while shipping #3180). Against a branch that already exists on origin, `gh issue develop` links rather than creates.
    - If `gh issue develop` failed (it creates a ref and may need the `repo` scope), create the branch from `origin/dev` with `git` as before; the claim comment alone is still a valid claim.
    - **If the environment pins a designated branch** you may not push past, this step still applies — reset that branch from `origin/dev` instead of building on its previous state, following the recipe and guard in [branch-and-release-flow.md § Branch lifetime](../../../docs/contributing/branch-and-release-flow.md#branch-lifetime-one-branch-per-pr) (#1500); do not restate them here — and link THAT branch (`gh issue develop <issue> --name <designated-branch>`), never a second name you could not push to.

@@ -28,6 +28,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
+  - packages/frontend/src/components/haven/LabelChip.tsx
   - packages/frontend/src/__tests__/capture-viewports.test.ts
   - packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts
   - packages/frontend/src/__tests__/showcase-permanently-open-pin.test.ts
@@ -1073,6 +1074,24 @@ The decision taken: **the MCP wiring outranks the last-activity stamp on a narro
 **Why the breakpoint is `sm` and not the width the short slug needs.** Below `sm` the wrap is unconditional, so between roughly 466 and 639 a card whose slug is short takes a line it did not strictly need — the review pass on this change measured that band and asked whether the breakpoint should move down into it. It should not, and the answer is a measurement rather than a preference. Sweeping the UNWRAPPED layout: `haven-research` (natural 113px) renders whole from 466 up, but a 34-character slug (natural 258px) is still cut to **148.5px at 500** and **208.5px at 560**, and only renders whole from **639**. So 640 is the width at which the unwrapped header stops truncating a long slug too, not a convenient default; moving it down to spare the short slug its extra line would hand the 466-639 band back to this same defect, for exactly the agents whose names are hardest to tell apart. What the band actually costs is one line of vertical space on a short-slug card, against no slug being truncated anywhere below `sm` — the same trade as the wrap itself. Pinned by the spec's 500px arm.
 
 Proven by rendered geometry in `e2e/agent-card-mcp-chip-measure.spec.ts`: at 390 the chip must render at least its own `scrollWidth` (re-measured at runtime, so the bar is not a literal tuned to one renderer) and the stamp's top must sit at or below the block's bottom; a 768 control arm pins the breakpoint in both directions. Mutation-proven by reverting the two classes: the 390 arm goes red on the mechanism guard (measured on the revert: stamp top 263px against block bottom 347px, and the chip 38.5px of its 113px natural width) while the 768 control stays green. `e2e/agent-card-fit-measure.spec.ts` stays green alongside — the width handed to the block comes from the stamp's own line, not from letting the card overflow its track again.
+
+### Agent label chips (#3167)
+
+`LabelChip` is a categorisation pill an agent carries — never a status. Shape:
+`rounded-full px-1.5 py-0.5 text-xs font-medium`, same language as the card
+header's status pill, filled by one of four palette names (`neutral`, `brand`,
+`success`, `debit`) mapped to the v2 soft-tint pairs in § 1 *Semantic* via
+`lib/label-colors.ts` — no raw hex, so chips flip with dark mode like every
+other tinted surface. Warning and danger are deliberately NOT in the palette: a
+"prod" chip in the danger tint would read as a failing agent, and the semantic
+tones stay scoped to their meanings. `LabelChipRow` shows at most three chips
+and folds the rest into a `+N` counter (plain text, not a control — the tag
+editor is where the full set is visible), and renders nothing for an unlabelled
+agent, so an unlabelled list is pixel-identical to pre-label UI. `LabelOptionRow`
+is the picker line: the shared `Checkbox` owns the row and the chip rides in as
+its label node, so a picker row reads exactly like the chip the agent will
+carry. A label is the user's own ad-hoc word ("prod", "finance") — it never
+borrows status language, and it never encodes authority. Recorded on `/design-system` → *Agent label chips*.
 
 ### Modal (`ui/Modal`)
 

@@ -157,6 +157,23 @@ servers, connector, and selected dashboard setup flows:
   are RETIRED — the operation documents only its 410/422 refusals, #1987/#2105)
 - wallet transaction listing
 - catalog discovery
+- agent labels (#3167): `GET /labels` and `POST /labels` (the user's tag
+  vocabulary — a `name` unique per user on its lowercased form, a `color` from
+  the four-value palette the spec enumerates), `PUT /labels/{id}` (rename
+  and/or recolor; renaming onto another of the user's labels answers 409), and
+  `DELETE /labels/{id}` (deletes the label and its assignment rows only —
+  agents are never altered). `PUT /agents/{id}/labels` replaces one agent's
+  whole label set (full-replacement form: the editor's checkbox list is the
+  unit of intent, and a replacement survives retries idempotently — the
+  per-label add/remove pair from the issue was deliberately not built, because
+  a route with no caller is surface area, not API). Every agent read returns
+  `labels[]` so cards and filters need no second round trip. Labels are
+  display/categorization only: no delegation, budget, or enforcement path
+  reads them. The `/agents` filter facet itself lands with #3165; the decided
+  behaviour it wires to: multi-select is **OR** by default — an agent matches
+  when it carries ANY selected label — because the list's job at a glance is
+  "show me the prod and finance agents", not intersection; an AND toggle is
+  #3165's to add if a user ever needs narrowing.
 - health and OpenAPI discovery
 
 The SDK's quote and resume helpers are partly client-side by design. For

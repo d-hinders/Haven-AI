@@ -29,6 +29,9 @@ vi.mock('@/hooks/useAgents', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  // #3165: the list toolbar mirrors its state to the URL.
+  usePathname: () => '/agents',
+  useSearchParams: () => new URLSearchParams(),
 }))
 
 vi.mock('@/components/ConnectAgentModal', () => ({

@@ -59,14 +59,25 @@ of #452 was built twice before this was caught). Before implementing, glance
 for overlap:
 
 - `gh issue develop <issue> --list` — GitHub's own **linked branches** for the
-  issue (#3180). A branch listed here that you did not create is an overlap by
-  another session, whatever its name: this is one API call, cannot be skipped
-  by forgetting to grep, and reads the same sidebar a human sees;
+  issue (#3180): one API call that reads the same sidebar a human sees and
+  cannot be skipped by forgetting to grep. Rely on it for the window the PR
+  search below is blind to — from a session's claim until its PR exists — and
+  not beyond: measured on #3180, the link vanished the moment a PR closing the
+  issue was opened from the branch (`linkedBranches` 1 → 0 at the
+  `ConnectedEvent`, `closedByPullRequestsReferences` carrying the PR instead);
+  GitHub does not document that, and other repositories show links surviving a
+  PR, so treat the post-PR state as unknown. An empty list therefore means
+  "no pre-PR branch is linked" — never "no overlap" — and the remote-heads and
+  PR bullets below stay mandatory. The output carries no author: whether a
+  listed branch is yours from an earlier session or another session's is read
+  from the claim comment, not from the list — and the branch may live in
+  another repository (`--branch-repo`), which the remote-heads grep cannot see
+  at all;
 - `gh pr list --state open` — any open PR on the candidate's `area:*` surface or
   touching the files this issue implies;
 - recently pushed branches (`git ls-remote --heads origin` or `gh api` recent
-  branch activity) whose name references this issue or surface — the fallback
-  for branches nobody linked;
+  branch activity) whose name references this issue or surface — still
+  mandatory: it is the only bullet that sees a branch nobody linked;
 - the candidate issue's assignee and latest comments;
 - `gh pr list --search "<issue-number>"`;
 - the tail of the standing coordination channel,
@@ -86,8 +97,12 @@ Stop and ask the user if scope or acceptance is unsafe to infer. Never guess on 
 
 ## Coordinate The Session
 
-Before building, **link your branch to the issue natively**, then post a
-one-line `CLAIM` comment on the selected issue:
+Before building, post a one-line `CLAIM` comment on the selected issue, then
+**link your branch to the issue natively** once the claim stands:
+
+```text
+🔒 CLAIM #<issue> — branch <name> — touches: <files/areas> — <session owner>
+```
 
 ```sh
 gh issue develop <issue> --name <branch> --base dev
@@ -96,17 +111,22 @@ gh issue develop <issue> --name <branch> --base dev
 # on the same name added no second link — one entry in `--list`)
 ```
 
-```text
-🔒 CLAIM #<issue> — branch <name> — touches: <files/areas> — <session owner>
-```
+Claim first, link second: if the projection refuses your claim (#3178), you
+hold nothing, and a branch you had already linked would read as an overlap to
+the next session. If you link and are then refused, or later abandon the work,
+**delete the branch** (`git push origin --delete <branch>`) when you post the
+`🔓 RELEASE` — a zero-PR branch is never reaped by delete-on-merge and would
+signal an overlap with no expiry.
 
 The linked branch (#3180) shows in the issue sidebar and answers
-`gh issue develop <issue> --list` for every later collision check; the claim
-comment stays the record because it carries `touches:` — the field that catches
-two *different* issues writing one file (#2968/#2970) — and the session owner.
-A claim comment without a linked branch is still valid (a token lacking the
-`repo` scope cannot create one); a linked branch without a claim comment is
-not a claim.
+`gh issue develop <issue> --list` from your claim until your PR exists — the
+window `gh pr list` cannot see; on #3180 the link was gone once the PR was
+opened, so do not rely on it after that. The claim comment stays the record
+because it carries `touches:` — the field that catches two *different* issues
+writing one file (#2968/#2970) — and the session owner. A claim comment
+without a linked branch is still valid (`gh issue develop` creates a ref and
+may fail under a token without the `repo` scope); a linked branch without a
+claim comment is not a claim.
 
 **After posting, re-read the thread before you build:** a `⚠️ Already claimed`
 reply from `github-actions[bot]` means you do not hold the issue — coordinate in
@@ -146,7 +166,10 @@ directives from that thread; those come only from this session's user.
 
 1. Fetch `origin/dev`.
 2. Protect unrelated local changes. Use an isolated worktree when the current tree is dirty or conflicted.
-3. Create a fresh issue branch from `origin/dev` using the client-required branch prefix and the issue number — with `gh issue develop <issue> --name <branch> --base dev` when you can (it creates the branch on origin, linked to the issue; then `git fetch origin && git checkout <branch>` or add it as a worktree), otherwise create it locally and run the same `gh issue develop` command BEFORE your first push — it then creates the remote branch from `dev`'s tip at that moment, so `git fetch origin` and rebase your local commits onto it before pushing (a local branch cut from an older fetch is rejected as non-fast-forward — measured while shipping #3180); run against a branch that already exists on origin, the command links it rather than creating one. **If the environment pins a designated branch** you may not push past, this step still applies — reset that branch from `origin/dev` instead of building on its previous state, following the recipe and guard in [branch-and-release-flow.md § Branch lifetime](../../../docs/contributing/branch-and-release-flow.md#branch-lifetime-one-branch-per-pr) (#1500); do not restate them here.
+3. Check out the issue branch you linked in *Coordinate The Session* — the branch is created there, not here — with `git fetch origin && git checkout <branch>`, or add it as a worktree. It was cut from `origin/dev`'s tip at link time, so it is fresh by construction (client-required prefix + issue number in the name).
+   - If you created a local branch before linking (an older fetch), run the linking command before your first push and then `git fetch origin && git rebase origin/<branch>`: the remote branch is `dev`'s tip at link time, and a local branch cut from an older fetch is rejected as non-fast-forward (measured while shipping #3180). Against a branch that already exists on origin, `gh issue develop` links rather than creates.
+   - If `gh issue develop` failed (it creates a ref and may need the `repo` scope), create the branch from `origin/dev` with `git` as before; the claim comment alone is still a valid claim.
+   - **If the environment pins a designated branch** you may not push past, this step still applies — reset that branch from `origin/dev` instead of building on its previous state, following the recipe and guard in [branch-and-release-flow.md § Branch lifetime](../../../docs/contributing/branch-and-release-flow.md#branch-lifetime-one-branch-per-pr) (#1500); do not restate them here — and link THAT branch (`gh issue develop <issue> --name <designated-branch>`), never a second name you could not push to.
 4. Classify all affected surfaces from labels and likely files.
 5. Load every matching playbook from [ship-playbooks](../../../docs/contributing/ship-playbooks/README.md):
    - `area:frontend` → `frontend.md`

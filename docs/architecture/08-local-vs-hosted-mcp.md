@@ -128,8 +128,9 @@ The old receipt names are deprecated twins for one full release; the removal
 condition — all three release clocks (`@haven_ai/sdk` `latest`, `@haven_ai/mcp`
 `latest`, the hosted mcp-server deploy) read at or past the release that
 names the twins, against the registry — is written on the mapper and repeated
-on each twin's row in `scripts/ci/vocabulary-map.json`, whose open count is
-now 0. Three pairs stay divergent on purpose — `txHash`/`hash`,
+on each twin's row in #3131's vocabulary map (declared beside the guard;
+[`cli-json-conventions.md`](../product/cli-json-conventions.md) covers it),
+whose open count is now 0. Three pairs stay divergent on purpose — `txHash`/`hash`,
 `amountRaw`/`value`, `amount`/`valueFormatted` — with their reasons in the same
 map; a new undeclared pair fails `lint:vocabulary`.
 

@@ -13,11 +13,14 @@ export interface PortfolioBreakdownItem {
   formatted: string
   usdValue: number
   eurValue: number
+  /** Same one price read as usd/eur — the display default currency (#3127 round 2). */
+  sekValue: number
 }
 
 export interface Portfolio {
   totalUsd: number
   totalEur: number
+  totalSek: number
   breakdown: PortfolioBreakdownItem[]
 }
 
@@ -60,6 +63,7 @@ export async function fetchPortfolioForAccount(
       formatted: nativeFormatted,
       usdValue: nativeNum * (prices[nativeToken.symbol]?.usd ?? 0),
       eurValue: nativeNum * (prices[nativeToken.symbol]?.eur ?? 0),
+      sekValue: nativeNum * (prices[nativeToken.symbol]?.sek ?? 0),
     })
 
     for (let i = 0; i < erc20Tokens.length; i++) {
@@ -74,12 +78,14 @@ export async function fetchPortfolioForAccount(
         formatted,
         usdValue: num * (prices[token.symbol]?.usd ?? 0),
         eurValue: num * (prices[token.symbol]?.eur ?? 0),
+        sekValue: num * (prices[token.symbol]?.sek ?? 0),
       })
     }
 
     const totalUsd = breakdown.reduce((sum, item) => sum + item.usdValue, 0)
     const totalEur = breakdown.reduce((sum, item) => sum + item.eurValue, 0)
+    const totalSek = breakdown.reduce((sum, item) => sum + item.sekValue, 0)
 
-    return { totalUsd, totalEur, breakdown }
+    return { totalUsd, totalEur, totalSek, breakdown }
   })
 }

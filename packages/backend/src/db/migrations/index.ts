@@ -88,6 +88,8 @@ import * as paymentRefusals from './086_payment_refusals.js'
 import * as paymentRefusalsSourceHosted from './087_payment_refusals_source_hosted.js'
 import * as merchants from './088_merchants.js'
 import * as marketplaceProspects from './089_marketplace_prospects.js'
+import * as displayCurrencySek from './090_display_currency_sek.js'
+import * as userCurrencyPreferenceSekDefault from './091_user_currency_preference_sek_default.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -235,4 +237,6 @@ export const migrations: Migration[] = [
   paymentRefusalsSourceHosted,
   merchants,
   marketplaceProspects,
+  displayCurrencySek,
+  userCurrencyPreferenceSekDefault,
 ]

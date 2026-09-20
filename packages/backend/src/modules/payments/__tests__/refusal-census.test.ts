@@ -95,8 +95,8 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
   'src/routes/payments.ts': [
     { line: 438, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
     { line: 462, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
-    { line: 753, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 780, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
+    { line: 754, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 781, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
   ],
 }
 
@@ -132,7 +132,7 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
   ],
   'src/routes/payments.ts': [
     {
-      line: 780,
+      line: 781,
       reason: 'on-chain execution failed after claim — bundler/chain failure booked on the intent row by failSubmittedIntent, not a policy refusal',
     },
   ],

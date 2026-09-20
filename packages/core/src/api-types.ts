@@ -1007,7 +1007,7 @@ export type paths = {
         get: operations["getUserPreferences"];
         /**
          * Set the display-currency preference.
-         * @description Display only — it changes no balance, no price and no settlement asset.
+         * @description Names the currency a transaction’s converted amount (`convertedAmount`) is struck in. Display only — it changes no balance, no price and no settlement asset.
          */
         put: operations["updateUserPreferences"];
         post?: never;
@@ -1654,7 +1654,7 @@ export type paths = {
         };
         /**
          * One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.
-         * @description Everything the `/analytics` page renders in one round trip, so the page has one loading state and one "based on N payments" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz`. Delegation-rail accounts only.
+         * @description Everything the `/analytics` page renders in one round trip, so the page has one loading state and one "based on N payments" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. The same honesty applies to the SEK SUMS under `currency=sek` (#3127, round-3 review): the totals, per-agent, top-merchant and fees figures sum `sek_value`, which is NULL for a confirmed row whose book-time SEK could not be captured or backfilled — those rows are still counted in `basis.payments_counted` but contribute nothing to any SEK sum, so a SEK total can sit below the basis it is computed over. USD and EUR are unaffected (their booking predates the capture gate). Delegation-rail accounts only.
          */
         get: operations["getAnalyticsOverview"];
         put?: never;
@@ -4031,6 +4031,17 @@ export type components = {
             amountSek?: string | null;
             fxRateSek?: string | null;
             fxSource?: string | null;
+            convertedAmount?: string | null;
+            /**
+             * @description The currency `convertedAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set. SEK mirrors `amountSek`; USD/EUR are struck from the row’s book-time rate map (`machine_payment_evidence.fx_rates`, migration 082) and are null when no rate was captured there.
+             * @enum {string}
+             */
+            convertedCurrency?: "SEK" | "USD" | "EUR";
+            convertedFxRate?: string | null;
+            /** @description Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row. */
+            fxRates?: {
+                [key: string]: number;
+            } | null;
             accounting?: components["schemas"]["TransactionAccounting"];
         };
         /** @description Accounting-feed state for one transaction (#2870), read from the sync ledger — no live provider call. Present on a row only when the feed is available to the account, the user has a provider connection, and the payment has a sync row; absent otherwise. */
@@ -4106,6 +4117,17 @@ export type components = {
             amountSek?: string | null;
             fxRateSek?: string | null;
             fxSource?: string | null;
+            convertedAmount?: string | null;
+            /**
+             * @description The currency `convertedAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set. SEK mirrors `amountSek`; USD/EUR are struck from the row’s book-time rate map (`machine_payment_evidence.fx_rates`, migration 082) and are null when no rate was captured there.
+             * @enum {string}
+             */
+            convertedCurrency?: "SEK" | "USD" | "EUR";
+            convertedFxRate?: string | null;
+            /** @description Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row. */
+            fxRates?: {
+                [key: string]: number;
+            } | null;
             accounting?: components["schemas"]["TransactionAccounting"];
             chainId: number;
             /** Format: uuid */
@@ -4191,10 +4213,13 @@ export type components = {
             /** @description 0 when the price feed failed. */
             usdValue: number;
             eurValue: number;
+            /** @description Same one price read as usd/eur (#3127 round 2); 0 when the price feed failed. */
+            sekValue?: number;
         };
         PortfolioResponse: {
             totalUsd: number;
             totalEur: number;
+            totalSek?: number;
             breakdown: components["schemas"]["PortfolioBreakdown"][];
         };
         TransactionFilterOptionsResponse: {
@@ -4249,21 +4274,27 @@ export type components = {
             totals: {
                 usd: number;
                 eur: number;
+                sek?: number;
             };
             change: {
                 /** @description true iff a yesterday snapshot existed to diff against. */
                 available: boolean;
                 usdAmount: number;
                 eurAmount: number;
+                /** @description Null when yesterday’s snapshot predates migration 090 (no SEK baseline stored) — the client reports the change as unavailable rather than reading a fabricated swing. */
+                sekAmount?: number | null;
                 /** @description 0 when unavailable or the previous total was 0. */
                 usdPercent: number;
                 eurPercent: number;
+                /** @description 0 when the SEK baseline is missing or the previous total was 0. */
+                sekPercent?: number;
             };
             metrics: {
                 /** @description Agents with status 'active' only. */
                 connectedAgents: number;
                 monthlyAgentSpendUsd: number;
                 monthlyAgentSpendEur: number;
+                monthlyAgentSpendSek?: number;
                 successfulTransactions: number;
                 /** @description All linked Safes, regardless of activity. */
                 activeAccounts: number;
@@ -8650,7 +8681,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    currency_preference: "USD" | "EUR";
+                    currency_preference: "SEK" | "USD" | "EUR";
                 };
             };
         };
@@ -11688,8 +11719,8 @@ export interface operations {
             query: {
                 /** @description Window length ending now. */
                 range: "7d" | "30d" | "90d";
-                /** @description Display currency — a sum of already-booked values, never re-converted. */
-                currency?: "usd" | "eur";
+                /** @description Display currency — a sum of already-booked values, never re-converted. SEK reads the `sek_value` column booked beside usd/eur by the same confirm UPDATE (#3127); days snapshotted before that column existed carry no SEK figure in `balance_by_day` and are omitted rather than zeroed. */
+                currency?: "usd" | "eur" | "sek";
                 /** @description IANA time zone used to bucket `by_day`. Defaults to UTC; an unrecognized zone is a 400. */
                 tz?: string;
             };
@@ -11719,7 +11750,7 @@ export interface operations {
                             previous_to: string;
                         };
                         /** @enum {string} */
-                        currency: "usd" | "eur";
+                        currency: "usd" | "eur" | "sek";
                         basis: {
                             /** @description CONFIRMED payments summed into `totals.spent`. */
                             payments_counted: number;

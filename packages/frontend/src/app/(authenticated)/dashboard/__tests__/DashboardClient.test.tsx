@@ -140,18 +140,21 @@ function mockBaseState() {
   })
   mockUseDashboardOverview.mockReturnValue({
     data: {
-      totals: { usd: 1234.56, eur: 1100 },
+      totals: { usd: 1234.56, eur: 1100, sek: 13000.5 },
       change: {
         available: true,
         usdAmount: 12.34,
         eurAmount: 11,
+        sekAmount: null,
         usdPercent: 1.23,
         eurPercent: 1,
+        sekPercent: 0,
       },
       metrics: {
         connectedAgents: 1,
         monthlyAgentSpendUsd: 42,
         monthlyAgentSpendEur: 38,
+        monthlyAgentSpendSek: 440,
         successfulTransactions: 4,
         activeAccounts: 1,
       },
@@ -207,6 +210,112 @@ describe('DashboardClient', () => {
   })
 
   /**
+   * #3127 review round 2, finding 7: the "Monthly agent spend" mark must not
+   * be a currency glyph. It was lucide's `DollarSign`, which under the SEK
+   * no-preference default painted `$` over `482,50 kr` on every new signup.
+   * The tile describes spend, not a currency, so the mark is
+   * currency-neutral (`Coins`) — pinned by the generated class the Icon
+   * primitive stamps per lucide glyph, exactly the headless equivalent the
+   * AGENTS.md closeout asks for when browser verification is skipped.
+   */
+  it('renders a currency-neutral mark on the Monthly agent spend tile (no $ glyph)', () => {
+    render(<DashboardClient />)
+
+    const label = screen.getByText('Monthly agent spend')
+    const card = label.closest('div.group') ?? label.closest('[class*="group"]')!
+    const icon = card.querySelector('span[aria-hidden="true"] svg')
+    expect(icon).not.toBeNull()
+    // The coins glyph, not the dollar one.
+    expect(icon!.getAttribute('class')).toContain('lucide-coins')
+    expect(icon!.getAttribute('class')).not.toContain('lucide-dollar-sign')
+  })
+
+  /**
+   * #3127 direction A: SEK is a first-class display currency on the
+   * dashboard. Every figure comes from the SEK keys the overview route
+   * serves — the pre-#3127 frontend had no SEK branch at all, so a SEK user
+   * got `totals.usd` run through a SEK-labelled formatter. The exact strings
+   * are this repo's Node (v24, full ICU, pinned via .nvmrc) output for
+   * sv-SE, read off the real formatter rather than guessed: NBSP group
+   * separators, decimal comma, the symbol suffix behind an NBSP.
+   */
+  describe('SEK display currency (#3127)', () => {
+    function mockSekOverview(overrides: { sekAmount?: number | null; sekPercent?: number } = {}) {
+      mockUsePreferences.mockReturnValue({ currency: 'SEK' })
+      mockUseDashboardOverview.mockReturnValue({
+        data: {
+          totals: { usd: 1234.56, eur: 1100, sek: 13000.5 },
+          change: {
+            available: true,
+            usdAmount: 12.34,
+            eurAmount: 11,
+            usdPercent: 1.23,
+            eurPercent: 1,
+            sekAmount: null,
+            sekPercent: 0,
+            ...overrides,
+          },
+          metrics: {
+            connectedAgents: 1,
+            monthlyAgentSpendUsd: 42,
+            monthlyAgentSpendEur: 38,
+            monthlyAgentSpendSek: 440,
+            successfulTransactions: 4,
+            activeAccounts: 1,
+          },
+          actionableApprovals: 0,
+          pendingApprovals: 0,
+          onboardingProgress: {
+            hasFirstAgentPayment: true,
+          },
+          agents: [],
+          transactions: [],
+        },
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+    }
+
+    it('renders the SEK total, its change line, and the monthly spend from the SEK keys', () => {
+      mockSekOverview({ sekAmount: 130, sekPercent: 1 })
+      render(<DashboardClient />)
+
+      // The needles are written in the post-normalization form: getByText
+      // collapses the sv-SE NBSPs to plain spaces on the node side. The exact
+      // NBSP/decimal-comma voice is pinned byte-for-byte on the formatter in
+      // `lib/__tests__/analytics-format.test.ts`; the accounts card's compact
+      // voice is pinned in AccountsOverviewClient.test.tsx.
+      expect(screen.getByText('13 000,50 kr')).toBeInTheDocument()
+      expect(screen.getByText('+130,00 kr (+1.00%) today')).toBeInTheDocument()
+      expect(screen.getByText('440,00 kr')).toBeInTheDocument()
+      // The USD total must not leak onto a SEK hero under any label.
+      expect(screen.queryByText('$1,234.56')).toBeNull()
+    })
+
+    it('reports the change as unavailable while the SEK baseline predates migration 090', () => {
+      // `sekAmount: null` is what the wire sends when yesterday's snapshot has
+      // no SEK total to diff against. Reading the null as 0 would paint a
+      // flat-day swing the data does not support, so the hero falls to the
+      // quiet caption instead — the same treatment a missing change value
+      // already gets.
+      mockSekOverview({ sekAmount: null })
+      render(<DashboardClient />)
+
+      expect(screen.getByText('13 000,50 kr')).toBeInTheDocument()
+      expect(screen.queryByText(/today/)).toBeNull()
+      expect(screen.getByText('Across all linked Haven accounts.')).toBeInTheDocument()
+    })
+
+    it('keeps the USD hero for a USD preference', () => {
+      render(<DashboardClient />)
+
+      expect(screen.getByText('$1,234.56')).toBeInTheDocument()
+      expect(screen.queryByText(/kr/)).toBeNull()
+    })
+  })
+
+  /**
    * #1989 (epic #1440): the dashboard's two legacy-Safe spend/approval
    * affordances are GONE — the hero's Send button (it opened `SendModal`, which
    * is deleted with the rail) and the "Needs attention" approvals row with its
@@ -244,18 +353,21 @@ describe('DashboardClient', () => {
     })
     mockUseDashboardOverview.mockReturnValue({
       data: {
-        totals: { usd: 1234.56, eur: 1100 },
+        totals: { usd: 1234.56, eur: 1100, sek: 13000.5 },
         change: {
           available: true,
           usdAmount: 12.34,
           eurAmount: 11,
+          sekAmount: null,
           usdPercent: 1.23,
           eurPercent: 1,
+          sekPercent: 0,
         },
         metrics: {
           connectedAgents: 1,
           monthlyAgentSpendUsd: 42,
           monthlyAgentSpendEur: 38,
+          monthlyAgentSpendSek: 440,
           successfulTransactions: 4,
           activeAccounts: 1,
         },
@@ -328,18 +440,21 @@ describe('DashboardClient', () => {
     window.localStorage.setItem('haven-onboarding-complete-dismissed:user-1', '1')
     mockUseDashboardOverview.mockReturnValue({
       data: {
-        totals: { usd: 1234.56, eur: 1100 },
+        totals: { usd: 1234.56, eur: 1100, sek: 13000.5 },
         change: {
           available: true,
           usdAmount: 12.34,
           eurAmount: 11,
+          sekAmount: null,
           usdPercent: 1.23,
           eurPercent: 1,
+          sekPercent: 0,
         },
         metrics: {
           connectedAgents: 1,
           monthlyAgentSpendUsd: 42,
           monthlyAgentSpendEur: 38,
+          monthlyAgentSpendSek: 440,
           successfulTransactions: 4,
           activeAccounts: 1,
         },

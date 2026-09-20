@@ -205,6 +205,32 @@ describe('SettingsClient', () => {
   })
 
   /**
+   * #3127: SEK joins the currency radio. It is the currency the backend
+   * already served and defaulted to, and the one no user could previously
+   * select — a new signup whose `currency_preference` is 'SEK' must find the
+   * option on the page AND see it as the active one, not a dead control.
+   */
+  describe('Preferred currency (#3127)', () => {
+    it('offers SEK beside USD and EUR, with the served default active', () => {
+      mockUsePreferences.mockReturnValue({ currency: 'SEK', setCurrency: vi.fn(), saving: false })
+      renderSettings()
+
+      const currency = screen.getByRole('radiogroup', { name: 'Preferred currency' })
+      expect(within(currency).getByRole('radio', { name: '$ USD' })).toHaveAttribute('aria-checked', 'false')
+      expect(within(currency).getByRole('radio', { name: '€ EUR' })).toHaveAttribute('aria-checked', 'false')
+      expect(within(currency).getByRole('radio', { name: 'kr SEK' })).toHaveAttribute('aria-checked', 'true')
+    })
+
+    it('keeps USD active when the preference is USD', () => {
+      renderSettings()
+
+      const currency = screen.getByRole('radiogroup', { name: 'Preferred currency' })
+      expect(within(currency).getByRole('radio', { name: '$ USD' })).toHaveAttribute('aria-checked', 'true')
+      expect(within(currency).getByRole('radio', { name: 'kr SEK' })).toHaveAttribute('aria-checked', 'false')
+    })
+  })
+
+  /**
    * #2868 (epic #2858): the Accounting connections card lives in Settings —
    * owner decision 2026-09-11. Pinned here at the page, not only in the
    * card's own suite, so the section cannot silently drop out of the list.

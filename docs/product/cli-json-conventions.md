@@ -69,7 +69,10 @@ every key the backend sends, including several that appear in no interface —
 
 So: to know what `activity list --json` can contain, read the `Transaction`
 schema, not `interface Txn`. Scripting against the interface will miss fields
-that are already being emitted.
+that are already being emitted. (#3127 continues the pattern: rows now also
+carry `convertedAmount` / `convertedCurrency` / `convertedFxRate` — the amount
+in the user's `currency_preference`, currency as a field — plus the row's
+`fxRates` book-time map; all forward untouched through the pass-through.)
 
 Since #3132 every `activity list` row also carries `scope: { source: 'wallet',
 filter }` — the feed is wallet-scoped, and `--agent` / `--safe` NARROW it

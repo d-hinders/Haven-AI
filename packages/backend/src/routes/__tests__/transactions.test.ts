@@ -1725,6 +1725,7 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
               amount_sek: '0.21',
               fx_rate_sek: '10.5000',
               fx_source: 'riksbank',
+              fx_rates: { SEK: 10.5, USD: 1.02, EUR: 0.93 },
               payment_reconciliation_event_type: null,
               confirmed_at: '2026-05-08T11:50:10Z',
               created_at: '2026-05-08T11:49:55Z',
@@ -1762,6 +1763,13 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
       isError: false,
       paymentFlowStatus: 'paid',
       source: 'x402',
+      // #3127: this user has no preference row, so the served default is SEK
+      // (documented, deliberate — domain/transaction-currency.ts). The
+      // converted triple names the currency as a FIELD; SEK mirrors
+      // `amountSek` exactly and the rate is the row's own `fxRateSek` fact.
+      convertedAmount: '0.21',
+      convertedCurrency: 'SEK',
+      convertedFxRate: null,
     })
     expect(typeof tx.timestamp).toBe('number')
     expect(tx.timestamp).toBeGreaterThan(0)
@@ -1770,6 +1778,80 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
     // is the assertion that keeps them declared on the spec — removing either
     // property from `transactionBaseProperties` fails here with
     // "must NOT have additional properties".
+    expectMatchesSpec('GET', '/transactions', response.json())
+  })
+
+  it('strikes the converted triple in the user’s preferred currency (#3127)', async () => {
+    const token = signToken({ sub: 'csv-user', email: 'csv@example.com' })
+    stubEmptyTransactionFetch()
+    vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
+      const text = String(sql)
+      if (text.includes('FROM smart_accounts')) {
+        return {
+          rows: [{ id: '11111111-2222-4333-8444-555555555501', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+        } as never
+      }
+      if (text.includes('FROM payment_intents pi') && text.includes('JOIN agents a')) {
+        return {
+          rows: [
+            {
+              id: 'payment-csv',
+              tx_hash: TX_HASH,
+              agent_id: '11111111-2222-4333-8444-555555555502',
+              agent_name: 'Research assistant',
+              account_id: '11111111-2222-4333-8444-555555555501',
+              account_address: SAFE_ADDRESS,
+              account_name: 'Main wallet',
+              chain_id: 8453,
+              token_symbol: 'USDC',
+              token_address: USDC_ADDRESS,
+              to_address: '0x1111111111111111111111111111111111111111',
+              amount_raw: '20000',
+              amount_human: '0.02',
+              x402_merchant_address: '0x2222222222222222222222222222222222222222',
+              x402_resource_url: 'https://api.example.com/data',
+              payment_proof_status: 'protocol_receipt_attached',
+              amount_sek: '0.21',
+              fx_rate_sek: '10.5000',
+              fx_source: 'riksbank',
+              fx_rates: { SEK: 10.5, USD: 1.02, EUR: 0.93 },
+              payment_reconciliation_event_type: null,
+              confirmed_at: '2026-05-08T11:50:10Z',
+              created_at: '2026-05-08T11:49:55Z',
+            },
+          ],
+        } as never
+      }
+      // #3127: the preference read rides every feed request. EUR → the
+      // triple is struck in EUR from the row's own book-time rate map —
+      // 0.02 USDC × 0.93 = 0.0186, the same arithmetic (and scale) as the
+      // accounting feed's `ledgerAmount`, never a serve-time price read.
+      if (text.includes('SELECT currency_preference FROM users')) {
+        return { rows: [{ currency_preference: 'EUR' }] } as never
+      }
+      return { rows: [] } as never
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/transactions?fresh=1',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const [tx] = response.json().transactions
+    expect(tx).toMatchObject({
+      // The SEK-named originals are untouched — dual-emit-free additive change.
+      amountSek: '0.21',
+      fxRateSek: '10.5000',
+      fxSource: 'riksbank',
+      convertedAmount: '0.0186',
+      convertedCurrency: 'EUR',
+      convertedFxRate: '0.9300',
+    })
+    // The new fields are DECLARED, not just emitted: additionalProperties is
+    // false on the transaction schemas, so an undeclared key fails here with
+    // "must NOT have additional properties" (#2885 precedent).
     expectMatchesSpec('GET', '/transactions', response.json())
   })
 })

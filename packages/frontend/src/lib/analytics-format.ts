@@ -18,8 +18,17 @@ import type { AnalyticsDelegationBudget } from '@/types/analytics'
  * strings on the same token — a ratio, not a currency conversion.
  */
 
-/** `usePreferences().currency` — the display currency the Settings surface owns. */
-export type AnalyticsCurrency = 'USD' | 'EUR'
+/** The display currency the Settings surface owns (`usePreferences().currency`). */
+export type AnalyticsCurrency = 'USD' | 'EUR' | 'SEK'
+
+/**
+ * The wire voice for each display currency. SEK renders in sv-SE — the
+ * currency's own locale, the same rule that puts EUR in de-DE — so a krona
+ * figure reads "1 234,56 kr", not a USD figure wearing a SEK symbol (#3127).
+ */
+export function analyticsCurrencyLocale(currency: AnalyticsCurrency): string {
+  return currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US'
+}
 
 /**
  * Booked fiat for display, in the display currency.
@@ -32,7 +41,7 @@ export type AnalyticsCurrency = 'USD' | 'EUR'
  * stays exactly what the endpoint sent.
  */
 export function formatAnalyticsAmount(amount: string, currency: AnalyticsCurrency): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
+  return new Intl.NumberFormat(analyticsCurrencyLocale(currency), {
     style: 'currency',
     currency,
     minimumFractionDigits: 2,
@@ -42,7 +51,7 @@ export function formatAnalyticsAmount(amount: string, currency: AnalyticsCurrenc
 
 /** Same figure, compacted for narrow columns (`$1.2K`); thresholds are Intl's. */
 export function formatAnalyticsAmountCompact(amount: string, currency: AnalyticsCurrency): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
+  return new Intl.NumberFormat(analyticsCurrencyLocale(currency), {
     style: 'currency',
     currency,
     notation: 'compact',
@@ -229,7 +238,7 @@ export function formatAnalyticsDay(dayIso: string): string {
  * into numbers anywhere else.
  */
 export function formatAnalyticsValue(value: number, currency: AnalyticsCurrency): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
+  return new Intl.NumberFormat(analyticsCurrencyLocale(currency), {
     style: 'currency',
     currency,
     minimumFractionDigits: 2,
@@ -244,7 +253,7 @@ export function formatAnalyticsValue(value: number, currency: AnalyticsCurrency)
  * design review). Values are the scale's own round ticks, never a figure.
  */
 export function formatAnalyticsTick(value: number, currency: AnalyticsCurrency): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
+  return new Intl.NumberFormat(analyticsCurrencyLocale(currency), {
     style: 'currency',
     currency,
     minimumFractionDigits: 0,

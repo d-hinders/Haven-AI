@@ -61,6 +61,21 @@ export const testUser = {
   created_at: '2026-05-01T10:00:00.000Z',
 }
 
+/**
+ * The SEK user (#3127, finding 8): the served DEFAULT, and the state every
+ * new signup lands in (migration 091 made the column default 'SEK' and
+ * migrated the inherited 'USD' rows to NULL). The shared `testUser` stays
+ * 'USD' — every existing spec and baseline is pinned to its render — while
+ * `serveSekUser` (below) overlays `/auth/me` with this row for the specs
+ * that photograph the SEK render. Same id, account, token; ONLY the
+ * currency preference differs, so the two sessions photograph the same
+ * product at one setting.
+ */
+export const testUserSek = {
+  ...testUser,
+  currency_preference: 'SEK',
+} as const
+
 export const testAgent = {
   id: 'agent-e2e',
   name: 'Research agent',
@@ -154,6 +169,11 @@ export const dashboardOverview = {
   totals: {
     usd: 1250,
     eur: 1138,
+    // #3127 (finding 8): the SEK figures the served default renders. The
+    // dashboard reads `totals.sek ?? 0`; without this key a SEK user's
+    // baseline photographed `0,00 kr`. ~10.76 SEK/USD, the same story the
+    // USD/EUR pair tells (1250 → 1138 EUR).
+    sek: 13450,
   },
   change: {
     available: true,
@@ -161,11 +181,21 @@ export const dashboardOverview = {
     eurAmount: 23,
     usdPercent: 2.04,
     eurPercent: 2.01,
+    // #3127 (finding 8): a real SEK swing, so the hero's change line renders
+    // and the baseline photographs it. NOT the pre-migration-090 `null` —
+    // that unavailable state has its own characterization coverage in
+    // `DashboardClient.test.tsx`; the baseline here pins the ordinary
+    // post-backfill render.
+    sekAmount: 30,
+    sekPercent: 0.2,
   },
   metrics: {
     connectedAgents: 1,
     monthlyAgentSpendUsd: 12.5,
     monthlyAgentSpendEur: 11.38,
+    // #3127 (finding 8): the "Monthly agent spend" tile reads
+    // `monthlyAgentSpendSek ?? 0` under the served default.
+    monthlyAgentSpendSek: 133,
     successfulTransactions: 3,
     activeAccounts: 1,
   },
@@ -563,6 +593,11 @@ export async function mockHavenApi(page: Page) {
       await fulfillJson(route, {
         totalUsd: 1250,
         totalEur: 1138,
+        // #3127 (finding 8): the portfolio hook reads `totalSek ?? 0`, and
+        // /accounts + /accounts/[id] price their cards from it under the
+        // served default. One token worth the whole portfolio, so the row's
+        // `sekValue` IS the total — the same identity the USD/EUR pair has.
+        totalSek: 13450,
         breakdown: [
           {
             symbol: 'USDC',
@@ -570,6 +605,7 @@ export async function mockHavenApi(page: Page) {
             formatted: '1250',
             usdValue: 1250,
             eurValue: 1138,
+            sekValue: 13450,
           },
         ],
       })
@@ -748,6 +784,31 @@ export async function mockHavenApi(page: Page) {
     }
 
     await fulfillUnmockedRoute(route, method, path)
+  })
+}
+
+/**
+ * Overlay `/auth/me` (and only it) with the SEK user (#3127, finding 8).
+ *
+ * The fixture's login/signup handlers always answer `testUser`
+ * (`currency_preference: 'USD'`), so every existing spec and baseline
+ * photographs the USD render. SEK is the SERVED DEFAULT (migration 091), and
+ * nothing rendered it — the green visual-regression and browser-smoke ticks
+ * were statements about the unchanged USD session. Registering this AFTER
+ * `mockHavenApi` (later routes win) answers `GET /auth/me` with
+ * `testUserSek` — same id, same account, only the currency preference
+ * differs — so a spec can photograph the SEK render of the same product.
+ * Everything else falls through to the shared fixture untouched.
+ */
+export async function serveSekUser(page: Page) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() === 'GET' && path === '/auth/me') {
+      await fulfillJson(route, testUserSek)
+      return
+    }
+    await route.fallback()
   })
 }
 

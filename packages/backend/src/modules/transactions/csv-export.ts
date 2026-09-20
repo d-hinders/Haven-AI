@@ -22,6 +22,12 @@ import type { EnrichedTransaction } from './types.js'
  * (#386). It stays in the contract so a column does not appear later and
  * shift every index; the same reservation the frontend export carried.
  *
+ * #3127 appends `reporting_currency` / `converted_currency` at the END:
+ * the amounts in this file remain a fixed-SEK accounting projection (the
+ * deliberate branch — the general feed converts to the user's preference,
+ * this file does not), but the figures now name their currency in the file
+ * itself. Appended, not inserted, so every pre-#3127 index stays stable.
+ *
  * Deliberately absent: the `accounting_provider` / `accounting_status` /
  * `accounting_external_ref` columns #2871 also lists. They are projections of
  * `accounting_connections`, which #2860 creates — there is nothing to read
@@ -51,6 +57,14 @@ export const TRANSACTION_CSV_COLUMNS = [
   // in place, precisely so this removal would shift columns ONCE instead of
   // twice — an importer keyed on column INDEX sees that shift now.
   'account_address',
+  // #3127: appended at the END, per the rule above. The file stays a
+  // fixed-reporting-currency accounting artifact — `amount_sek` is the
+  // stored book-time column and its indices are untouched — but the file now
+  // SAYS which currency its figures are in (`reporting_currency`), and which
+  // currency the user's dashboard feed converts in (`converted_currency`),
+  // instead of both living in a header nobody can read.
+  'reporting_currency',
+  'converted_currency',
 ] as const
 
 export type TransactionCsvColumn = (typeof TRANSACTION_CSV_COLUMNS)[number]
@@ -62,6 +76,16 @@ export interface TransactionCsvLookups {
    * resolution so the file and the on-screen rows agree.
    */
   resolveName: (address: string, chainId: number) => string | null
+  /**
+   * The currency the file reports its converted figures in (#3127). Fixed
+   * SEK on the export route — the accounting semantics this file exists for
+   * — carried as an explicit input so the FILE, not each call site's
+   * silence, owns the statement. The contract's `converted_currency`
+   * column is filled from each row's own `convertedCurrency`, so the file
+   * also records what the user's dashboard feed converts in without the
+   * amounts here following it.
+   */
+  reportingCurrency: string
 }
 
 function rowType(tx: EnrichedTransaction): string {
@@ -111,6 +135,11 @@ export function transactionCsvRow(
     // export stays unambiguous for an accountant reading it cold.
     initiator: tx.initiatedBy ?? '',
     account_address: tx.accountAddress,
+    // #3127: the file reports in fixed SEK (see the route); the user's
+    // effective feed currency rides along from the row's own converted
+    // triple — metadata, not a conversion.
+    reporting_currency: lookups.reportingCurrency,
+    converted_currency: tx.convertedCurrency ?? '',
   }
 }
 

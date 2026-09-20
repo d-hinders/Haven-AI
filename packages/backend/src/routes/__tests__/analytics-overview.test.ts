@@ -90,10 +90,12 @@ function emptyFixtures(userId: string) {
     spent_eur: '9.00',
     spent_previous_usd: '5.00',
     spent_previous_eur: '4.50',
+    spent_sek: '95.00',
+    spent_previous_sek: '47.50',
     payments_counted: '1',
   })
   mockCountUnsettledSubmittedForUser.mockResolvedValue(0)
-  mockListByDaySpendForUser.mockResolvedValue([{ day: '2030-06-01', agent_id: AGENT_UUID, usd: '10.00', eur: '9.00' }])
+  mockListByDaySpendForUser.mockResolvedValue([{ day: '2030-06-01', agent_id: AGENT_UUID, usd: '10.00', eur: '9.00', sek: '95.00' }])
   mockListPerAgentSpendForUser.mockResolvedValue([
     {
       agent_id: AGENT_UUID,
@@ -101,6 +103,7 @@ function emptyFixtures(userId: string) {
       status: 'active',
       spent_usd: '10.00',
       spent_eur: '9.00',
+      spent_sek: '95.00',
       payments: '1',
       last_payment_at: '2030-06-01T12:00:00.000Z',
     },
@@ -111,8 +114,10 @@ function emptyFixtures(userId: string) {
   mockSumFeesTotalsForUser.mockResolvedValue({
     fee_usd: '0',
     fee_eur: '0',
+    fee_sek: '0',
     fee_usd_previous: '0',
     fee_eur_previous: '0',
+    fee_sek_previous: '0',
     fee_rows: '0',
   })
   mockListGasEventsByChainForUser.mockResolvedValue([])
@@ -124,6 +129,7 @@ function emptyFixtures(userId: string) {
     refused_count: '0',
     refused_amount_usd: '0',
     refused_amount_eur: '0',
+    refused_amount_sek: '0',
   })
   mockListRefusalsByDayForUser.mockResolvedValue([])
   mockFirstRefusalDayForUser.mockResolvedValue(null)
@@ -152,6 +158,7 @@ function fullFixtures(userId: string) {
       merchant_key: MERCHANT_ADDRESS,
       spent_usd: '10.00',
       spent_eur: '9.00',
+      spent_sek: '95.00',
       payments: '1',
       agent_ids: [AGENT_UUID],
       first_seen: '2030-06-01T12:00:00.000Z',
@@ -159,7 +166,7 @@ function fullFixtures(userId: string) {
     },
   ])
   mockListBalanceByDayForUser.mockResolvedValue([
-    { snapshot_date: '2030-06-01', total_usd: '100.00', total_eur: '90.00' },
+    { snapshot_date: '2030-06-01', total_usd: '100.00', total_eur: '90.00', total_sek: '950.00' },
   ])
   mockListActiveDelegationsForUser.mockResolvedValue([
     {
@@ -225,8 +232,52 @@ describe('GET /analytics/overview', () => {
   })
 
   it('400s on an unrecognized currency', async () => {
-    const res = await call('/analytics/overview?range=30d&currency=sek', token)
+    const res = await call('/analytics/overview?range=30d&currency=gbp', token)
     expect(res.statusCode).toBe(400)
+  })
+
+  it('accepts sek as a display currency (#3127 round 2)', async () => {
+    const res = await call('/analytics/overview?range=30d&currency=sek', token)
+    expect(res.statusCode).toBe(200)
+    expect(res.json().currency).toBe('sek')
+  })
+
+  it('currency=sek reads the booked sek_value columns for every money figure, never re-converted from usd (#3127 round 2)', async () => {
+    const res = await call('/analytics/overview?range=30d&currency=sek&tz=UTC', token)
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.currency).toBe('sek')
+    // Every figure below is a DISTINCT booked sek_value column — none is the
+    // usd figure relabeled (the defect #3127 was filed for).
+    expect(body.totals.spent).toBe('95.00')
+    expect(body.totals.spent_previous).toBe('47.50')
+    expect(body.totals.refused_amount).toBe('0')
+    expect(body.by_day[0].spent_by_agent[AGENT_UUID]).toBe('95.00')
+    // agents[].spent is a booked-value STRING like every other money field here
+    // (only the share denominator runs through Number()).
+    expect(body.agents[0].spent).toBe('95.00')
+  })
+
+  it('currency=sek omits balance_by_day days whose total_sek predates migration 090 (NULL) rather than charting a fabricated 0', async () => {
+    mockListBalanceByDayForUser.mockResolvedValue([
+      // Pre-090 day: no SEK figure stored. Zeroing it would fabricate a swing.
+      { snapshot_date: '2030-05-30', total_usd: '100.00', total_eur: '90.00', total_sek: null },
+      // Post-090 day: the booked SEK figure.
+      { snapshot_date: '2030-06-01', total_usd: '110.00', total_eur: '99.00', total_sek: '1045.00' },
+    ])
+    const res = await call('/analytics/overview?range=30d&currency=sek&tz=UTC', token)
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.balance_by_day).toEqual([{ date: '2030-06-01', value: '1045.00' }])
+
+    // The same days under usd/eur keep BOTH days — the nullable column only
+    // affects the SEK series.
+    const usdRes = await call('/analytics/overview?range=30d&currency=usd&tz=UTC', token)
+    expect(usdRes.statusCode).toBe(200)
+    expect(usdRes.json().balance_by_day).toEqual([
+      { date: '2030-05-30', value: '100.00' },
+      { date: '2030-06-01', value: '110.00' },
+    ])
   })
 
   it('400s on an unrecognized IANA time zone', async () => {
@@ -310,6 +361,7 @@ describe('GET /analytics/overview', () => {
     mockAggregateRefusalAmountForUser.mockResolvedValue({
       refused_count: '2',
       refused_amount_usd: '15.50',
+      refused_amount_sek: '147.00',
       refused_amount_eur: '14.00',
     })
     const res = await call('/analytics/overview?range=30d&currency=usd', token)

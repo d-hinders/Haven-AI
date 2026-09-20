@@ -61,7 +61,7 @@ export interface User {
    * session payloads and with its follow-up everywhere else.
    */
   accounts: SmartAccount[]
-  currency_preference?: 'USD' | 'EUR'
+  currency_preference?: 'USD' | 'EUR' | 'SEK'
   created_at?: string
 }
 

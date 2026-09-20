@@ -1,9 +1,20 @@
 import { getTokenPrice } from './prices.js'
 import { type LedgerCurrency, SUPPORTED_LEDGER_CURRENCIES } from '../domain/ledger-currency.js'
 
+/**
+ * The fiat triple the settled-payment confirm books, one value per supported
+ * ledger currency. #3127 round 2 widens this from the historical {usd, eur}
+ * pair with `sek`: the display currency's no-preference default is SEK, and a
+ * dashboard that can only price USD/EUR turns a SEK preference into USD
+ * numbers under a SEK label. Same price read as before (`getTokenPrice`
+ * quotes every ledger currency in one cached call), so adding the third
+ * value costs no extra fetch and the three cannot disagree about WHEN they
+ * were taken.
+ */
 export interface FiatValues {
   usd: number | null
   eur: number | null
+  sek: number | null
 }
 
 export async function getFiatValuesForTokenAmount(
@@ -12,7 +23,7 @@ export async function getFiatValuesForTokenAmount(
 ): Promise<FiatValues> {
   const amount = Number(amountHuman)
   if (!Number.isFinite(amount) || amount <= 0) {
-    return { usd: 0, eur: 0 }
+    return { usd: 0, eur: 0, sek: 0 }
   }
 
   try {
@@ -20,9 +31,10 @@ export async function getFiatValuesForTokenAmount(
     return {
       usd: amount * price.usd,
       eur: amount * price.eur,
+      sek: amount * price.sek,
     }
   } catch {
-    return { usd: null, eur: null }
+    return { usd: null, eur: null, sek: null }
   }
 }
 

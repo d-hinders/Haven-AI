@@ -215,6 +215,7 @@ async function writeRefusal(input: RefusalLedgerInput): Promise<void> {
     amountAtomic: input.amountAtomic,
     usdValue: fiat.usd,
     eurValue: fiat.eur,
+    sekValue: fiat.sek,
     merchantTo: input.merchantTo ?? null,
     resourceUrl: input.resourceUrl ?? null,
     reason: input.reason,

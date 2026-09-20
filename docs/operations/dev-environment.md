@@ -252,8 +252,10 @@ Isolation rules that are non-negotiable for a payments product:
   dashboard and credential-less reads only — an agent's `GET /catalog` sees
   its own chain regardless. `HAVEN_MARKETPLACE_PROSPECTS=true` (strict
   boolean) lists the `coming_soon` merchants of #3080 to authenticated
-  dashboard users on dev only; the route refuses to list them when any
-  mainnet chain is listed, so a copied env cannot publish them on prod.
+  dashboard users; it is set on dev standing (decision 14, 2026-09-20 — the
+  prospects sit beside the mainnet merchants) and never on prod. The route
+  lists them only when `HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet,
+  so a copied flag cannot publish them on prod, whose list is `8453`.
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A

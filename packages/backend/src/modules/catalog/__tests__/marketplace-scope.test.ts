@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FastifyRequest } from 'fastify'
 import { config } from '../../../config.js'
-import { isMainnetChain, marketplaceChainIds, marketplaceListsMainnet, prospectsVisibleTo } from '../marketplace-scope.js'
+import { isMainnetChain, marketplaceChainIds, marketplaceListsMainnet, marketplaceListsTestnetExplicitly, prospectsVisibleTo } from '../marketplace-scope.js'
 
 const original = {
   marketplaceChainIds: config.marketplaceChainIds,
@@ -59,7 +59,7 @@ describe('isMainnetChain / marketplaceListsMainnet', () => {
 })
 
 describe('prospectsVisibleTo', () => {
-  it('shows prospects only to a dashboard user, with the flag on, on a testnet-only list', () => {
+  it('shows prospects only to a dashboard user, with the flag on, when the explicit list names a testnet', () => {
     setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [84532], deployChainIds: [] })
     expect(prospectsVisibleTo(request({ user: { sub: 'u1' } }))).toBe(true)
     // Not to an agent — even one a middleware also left a `user` on (no
@@ -75,12 +75,30 @@ describe('prospectsVisibleTo', () => {
     expect(prospectsVisibleTo(request({ user: { sub: 'u1' } }))).toBe(false)
   })
 
-  it('hides prospects when a mainnet chain is listed — a copied env cannot publish them on prod', () => {
+  it('shows prospects BESIDE the mainnet merchants — dev lists 84532,8453 standing (decision 14)', () => {
+    // Decision 11 (mainnet merchants on dev) and decision 9 (prospects on dev)
+    // no longer exclude each other. Mutation: gate on "no mainnet listed"
+    // again → this goes red.
+    setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [84532, 8453], deployChainIds: [] })
+    expect(marketplaceListsMainnet()).toBe(true)
+    expect(marketplaceListsTestnetExplicitly()).toBe(true)
+    expect(prospectsVisibleTo(request({ user: { sub: 'u1' } }))).toBe(true)
+    expect(prospectsVisibleTo(request({ user: { sub: 'u1' }, agent: { id: 'a1', chain_id: 84532 } }))).toBe(false)
+    expect(prospectsVisibleTo(request())).toBe(false)
+  })
+
+  it('hides prospects on a mainnet-only explicit list — prod lists 8453, so a copied flag cannot publish them', () => {
     setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [8453], deployChainIds: [] })
     expect(prospectsVisibleTo(request({ user: { sub: 'u1' } }))).toBe(false)
+  })
+
+  it('the fallback list never opens the door: prod deploys 8453,84532, so an UNSET marketplace list must not count', () => {
+    // Mutation: read `marketplaceChainIds()` (fallback included) instead of
+    // the explicit config in `marketplaceListsTestnetExplicitly` → red.
     setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [], deployChainIds: [8453, 84532] })
+    expect(marketplaceListsTestnetExplicitly()).toBe(false)
     expect(prospectsVisibleTo(request({ user: { sub: 'u1' } }))).toBe(false)
-    // Both unset lists every chain, mainnet included.
+    // Both unset ("every chain") is not an explicit testnet either.
     setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [], deployChainIds: [] })
     expect(prospectsVisibleTo(request({ user: { sub: 'u1' } }))).toBe(false)
   })

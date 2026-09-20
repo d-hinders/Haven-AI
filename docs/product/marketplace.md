@@ -21,7 +21,7 @@ covers:
   - packages/frontend/src/lib/marketplace.ts
   - packages/frontend/src/hooks/useCatalog.ts
   - packages/frontend/src/components/CatalogSubmitModal.tsx
-last-verified: "2026-09-17"
+last-verified: "2026-09-20"
 ---
 
 # Marketplace
@@ -136,25 +136,31 @@ become the prospect: the slug collides and the submission founds `berget-ai-2`
 instead, leaving the prospect untouched.
 
 It is listed **only** to an authenticated dashboard user, **only** when
-`HAVEN_MARKETPLACE_PROSPECTS=true`, and **only** when the marketplace lists no
-mainnet chain — the second line of defence: a prod env copied from dev with
-the flag left on cannot publish them, because prod lists `8453`.
-`GET /merchants/{slug}` answers **404, never 403**, to anyone who may not see
-a prospect, so the URL does not confirm the row exists.
+`HAVEN_MARKETPLACE_PROSPECTS=true`, and **only** when
+`HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet chain — the second line
+of defence (decision 14, 2026-09-20): prod's own list is `8453`, so a prod env
+with the flag copied over cannot publish them; and a prod list that DID name
+`84532` would already be leaking testnet merchants to dashboard users, a
+misconfiguration that shows on the grid before it shows a prospect. The
+fallback to `HAVEN_DEPLOY_CHAIN_IDS` does not count (prod deploys
+`8453,84532`), and neither does "every chain". Until decision 14 the gate was
+the inverse — "no mainnet listed" — which made prospects and the mainnet
+merchants of decision 11 mutually exclusive on dev; the owner wants both
+standing. `GET /merchants/{slug}` answers **404, never 403**, to anyone who
+may not see a prospect, so the URL does not confirm the row exists.
 
-### Turning the flag on for a meeting (dev only)
+### Standing state on dev (decision 14)
 
-1. On the **dev** deployment only — never prod, which never sets this —
-   set `HAVEN_MARKETPLACE_PROSPECTS=true` and confirm
-   `HAVEN_MARKETPLACE_CHAIN_IDS` lists no mainnet chain (dev's own
-   `84532,8453` per decision 11 already includes `8453` — for a prospects demo,
-   narrow it to `84532` for the duration, or the second line of defence hides
-   the cards).
-2. Show the marketplace grid to that company only, in that meeting. The card
-   reads "Coming soon" and nothing else.
-3. **Revert immediately after**: set the flag back to `false` (or restore
-   `HAVEN_MARKETPLACE_CHAIN_IDS` to its normal value). Leaving either on is an
-   operator error, not a code path Haven relies on to stay off prod.
+Dev runs with `HAVEN_MARKETPLACE_PROSPECTS=true` **and**
+`HAVEN_MARKETPLACE_CHAIN_IDS=84532,8453`, so a logged-in dev user sees the
+mainnet merchants, the Ampersend sandbox and the "Coming soon" prospects on one
+grid, all the time; nothing is flipped before or after a meeting. Two things
+still hold: agents and credential-less readers never see a prospect (measured
+2026-09-20: `haven_discover_tools` from the dev QA agent returns the nine live
+offers and no prospect; `GET /merchants/berget-ai` → 404), and prod never sets
+the flag — and could not show them if it did, because its list is `8453`.
+Showing the grid to a prospect's own people is still a private meeting, per
+each CRM record's external-mention ceiling (decision 9).
 
 ### Promotion: prospect → live
 

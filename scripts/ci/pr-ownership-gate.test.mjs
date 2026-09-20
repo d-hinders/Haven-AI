@@ -70,6 +70,14 @@ describe('the verdict (#3179 acceptance fixtures)', () => {
     assert.match(r.report, /assigned to @PhilipEriksson \(no live claim comment found/)
   })
 
+  test('genuinely later activity DOES earn the "last active" clause (positive direction)', () => {
+    // Mutation `const active = ''` must go red here; the mirror case above only
+    // proves the clause is absent when it should be.
+    const later = { ...antonio, lastActivityAt: '2026-09-15T13:20:00Z' } // 17 min after the claim
+    const r = evaluate({ pr, issues: [{ number: 3015, state: 'open', assignees: [], live: [later] }], nowMs: NOW })
+    assert.match(r.report, /claimed it 25 min ago on #1289 \(branch `fix\/3015-boolean-env-flags`\), last active on it 8 min ago/)
+  })
+
   test('a live holder who is not assigned still counts (the #3178 holder rule)', () => {
     const r = evaluate({ pr, issues: [{ number: 3015, state: 'open', assignees: [], live: [antonio] }], nowMs: NOW })
     assert.equal(r.verdict, 'fail')

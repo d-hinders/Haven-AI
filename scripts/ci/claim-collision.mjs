@@ -194,7 +194,7 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
  * claim in force) after `claimedAt` does not count against it (older hold
  * wins).
  *
- * @returns {{others: string[], live: {holder:string, claim:object, ageMs:number, lastActivityAt:string|null}[], stale: object[]}}
+ * @returns {{others: string[], live: {holder:string, claim:object, firstClaim:object|null, ageMs:number, lastActivityAt:string|null}[], stale: {holder:string, claim:object, firstClaim:object|null, ageMs:number, lastActivityAt:string|null}[]}}
  */
 export function liveHolders({ issue, claimant, assignees, comments, claimedAt = null, nowMs = Date.now(), channelIssue = CHANNEL_ISSUE }) {
   // Candidates: every collaborator (person, not bot) who posted a claim of this

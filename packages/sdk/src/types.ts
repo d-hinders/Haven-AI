@@ -862,7 +862,21 @@ export interface HavenPaymentReceipt {
   paymentId: string
   paymentIntentId?: string | null
   approvalRequestId?: string | null
+  /**
+   * #3134: the payment protocol this receipt settled on (`x402`), under the
+   * name the transactions feed uses for the same concept. Distinct from
+   * `scope.source`, which names the LIST population (#3132) — the transaction
+   * row carries the same two.
+   */
+  source: string
+  /** @deprecated (#3134) twin of {@link source}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
   rail: string
+  /**
+   * #3134: the evidence row's recorded proof status, under the transactions
+   * feed's name. Recorded or null-never-fabricated on both surfaces since #3132.
+   */
+  paymentProofStatus: string
+  /** @deprecated (#3134) twin of {@link paymentProofStatus}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
   proofStatus: string
   /**
    * @deprecated (#2998) meaning depends on the settlement scheme — the
@@ -881,7 +895,13 @@ export interface HavenPaymentReceipt {
    */
   settlementTxHash: string | null
   chainId: number
+  /** #3134: the paid resource, under the transactions feed's protocol-prefixed name. */
+  x402ResourceUrl: string
+  /** @deprecated (#3134) twin of {@link x402ResourceUrl}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
   resourceUrl: string
+  /** #3134: the merchant paid, under the transactions feed's protocol-prefixed name. */
+  x402MerchantAddress: string | null
+  /** @deprecated (#3134) twin of {@link x402MerchantAddress}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
   merchantAddress: string | null
   payerAddress: string
   /** #2960: additive alongside `payerAddress` above (`parties.treasury_account` only). */

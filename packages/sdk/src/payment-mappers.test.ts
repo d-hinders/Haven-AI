@@ -247,6 +247,53 @@ describe('list scope survives the receipt mapper (#3132)', () => {
   })
 })
 
+describe('receipt vocabulary converges on the transaction names (#3134)', () => {
+  // Each pair is asserted from the RAW column, not from its twin: a test that
+  // only compared receipt.source to receipt.rail would pass if the mapper
+  // pointed both at the wrong column.
+  it('emits the four survivors from the same columns the old names read', () => {
+    const receipt = mapPaymentReceipt(rawReceipt({
+      rail: 'x402',
+      proof_status: 'pending',
+      resource_url: 'https://merchant.example/paid',
+      merchant_address: '0xMerchantTwin',
+    }))
+    expect(receipt.source).toBe('x402')
+    expect(receipt.paymentProofStatus).toBe('pending')
+    expect(receipt.x402ResourceUrl).toBe('https://merchant.example/paid')
+    expect(receipt.x402MerchantAddress).toBe('0xMerchantTwin')
+  })
+
+  it('keeps the deprecated twins for one full release, byte-equal to the survivors', () => {
+    const receipt = mapPaymentReceipt(rawReceipt({
+      rail: 'x402',
+      proof_status: 'pending',
+      resource_url: 'https://merchant.example/paid',
+      merchant_address: null,
+    }))
+    expect(receipt.rail).toBe('x402')
+    expect(receipt.proofStatus).toBe('pending')
+    expect(receipt.resourceUrl).toBe('https://merchant.example/paid')
+    expect(receipt.merchantAddress).toBeNull()
+    expect(receipt.x402MerchantAddress).toBeNull()
+    // The removal condition lives on mapPaymentReceipt; when all three release
+    // clocks have moved, invert these four `toHaveProperty` lines.
+    for (const twin of ['rail', 'proofStatus', 'resourceUrl', 'merchantAddress']) {
+      expect(receipt).toHaveProperty(twin)
+    }
+  })
+
+  it('does not rename the wire — the raw receipt keys are the backend contract', () => {
+    const raw = rawReceipt()
+    expect(Object.keys(raw)).toEqual(expect.arrayContaining([
+      'rail', 'proof_status', 'resource_url', 'merchant_address',
+    ]))
+    for (const camel of ['source', 'paymentProofStatus', 'x402ResourceUrl', 'x402MerchantAddress']) {
+      expect(raw).not.toHaveProperty(camel)
+    }
+  })
+})
+
 describe('raw payment state mapping', () => {
   it('#2262: approved is fail-closed — stop, never a wait instruction', () => {
     // `approved` sat literally between two branches #2101 had already

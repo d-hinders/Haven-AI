@@ -14,6 +14,7 @@ import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
 import BudgetGrantAction from './BudgetGrantAction'
+import EditBudgetModal from './EditBudgetModal'
 import { Card } from './ui/Card'
 import { Skeleton } from './ui/Skeleton'
 import { Button } from './ui/Button'
@@ -54,9 +55,17 @@ const PERIODS: Array<{ label: string; seconds: number }> = [
 ]
 
 export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudgetChange }: Props) {
-  const { budgets, grant, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners } =
+  const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners } =
     useDelegationBudget(agentId, chainId)
   const { toast } = useToast()
+  // #3166: the ACTIVE budget whose limits are being edited in place, and the
+  // modal's open flag — one state so closing the modal and clearing the
+  // anchor cannot disagree.
+  const [editing, setEditing] = useState<DelegationBudget | null>(null)
+
+  const handleEditClosed = useCallback(() => {
+    setEditing(null)
+  }, [])
 
   const [token, setToken] = useState(tokens[0]?.address ?? '')
   const [amount, setAmount] = useState('')
@@ -234,7 +243,15 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
           </p>
         ) : (
           active.map((b) => (
-            <BudgetRow key={b.delegation_hash} budget={b} tokens={tokens} onRevoke={handleRevoke} busy={busy} ready={ready} />
+            <BudgetRow
+              key={b.delegation_hash}
+              budget={b}
+              tokens={tokens}
+              onRevoke={handleRevoke}
+              onEdit={setEditing}
+              busy={busy}
+              ready={ready}
+            />
           ))
         )}
       </Card.Section>
@@ -298,6 +315,21 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
           Budgets aren&rsquo;t available for this network yet.
         </p>
       )}
+
+      {/* #3166: edit-in-place for one active budget. Kept mounted here — the
+          modal owns its own `enabled: open` hook instance, so idle cost is one
+          closed portal. */}
+      {editing ? (
+        <EditBudgetModal
+          open={editing !== null}
+          onClose={handleEditClosed}
+          agentId={agentId}
+          chainId={chainId}
+          tokens={tokens}
+          budget={editing}
+          onBudgetChange={onBudgetChange}
+        />
+      ) : null}
     </Card>
   )
 }
@@ -306,12 +338,15 @@ function BudgetRow({
   budget,
   tokens,
   onRevoke,
+  onEdit,
   busy,
   ready,
 }: {
   budget: DelegationBudget
   tokens: TokenOption[]
   onRevoke: (hash: string) => void
+  /** Opens the edit-in-place flow (#3166) for THIS row. */
+  onEdit: (budget: DelegationBudget) => void
   busy: boolean
   ready: boolean
 }) {
@@ -329,9 +364,24 @@ function BudgetRow({
           {budget.recipient_address ? `to ${truncateAddress(budget.recipient_address)}` : 'to any recipient'}
         </p>
       </div>
-      <Button size="sm" variant="ghost" onClick={() => onRevoke(budget.delegation_hash)} disabled={busy || !ready}>
-        Stop
-      </Button>
+      {/* #3166: Edit changes this budget's limits in place — same slot, same
+          agent key, new owner-signed delegation. It is hidden while a
+          lifecycle action is busy, exactly like Stop, and requires a
+          reachable signer like every affordance that asks for one. */}
+      <div className="flex shrink-0 items-center gap-1">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onEdit(budget)}
+          disabled={busy || !ready}
+          aria-label={`Edit budget ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
+        >
+          Edit
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => onRevoke(budget.delegation_hash)} disabled={busy || !ready}>
+          Stop
+        </Button>
+      </div>
     </div>
   )
 }

@@ -49,9 +49,24 @@ name: Claim to assignee
 # the contract; today nothing depends on it, and the author type is passed
 # with `User` as the default so an empty field never widens the grammar.
 #
+# ## A second claim on a held issue is answered (#3178)
+#
+# The #3005 collision (2026-09-15) was two claims 76 minutes apart on one
+# issue; the projection added the second assignee without a word. Now a claim
+# is projected through `scripts/ci/claim-collision.mjs`: if another assignee
+# holds a LIVE claim (< 24 h, no RELEASE since — the rule AGENTS.md already
+# states), the claim is refused and a reply says who holds it, how old the
+# claim is and where to coordinate; a STALE claim (≥ 24 h, unreleased) is taken
+# over — holder unassigned, claimant assigned, reply says so; everything else
+# (nobody else, same author, released, or an assignee with no claim comment) is
+# accepted as before. The reply is the ONE comment this workflow writes, it is
+# shaped so the parser reads no marker from it, and the whole channel is read
+# to find the holder's claim, because most claims are posted there.
+#
 # Never fails the build: a comment that parses to nothing is the common case,
-# and an API refusal is logged, not raised. This workflow only ever adds or
-# removes an assignee — it never comments, closes, labels or edits a body.
+# and an API refusal is logged, not raised. This workflow adds or removes an
+# assignee and posts the one collision reply above — it never closes, labels or
+# edits a body.
 
 on:
   issue_comment:
@@ -62,7 +77,7 @@ on:
     types: [created]
 
 permissions:
-  issues: write # assign/unassign only
+  issues: write # assign/unassign, and the one collision reply (#3178)
 
 # No `concurrency` group, deliberately. Keying on the commented-on issue would
 # not serialise what matters — most claims are posted on #1289 ABOUT another
@@ -125,22 +140,12 @@ jobs:
 
             case "$verb" in
               claim)
-                # An assignee on a closed issue means nothing, and assigning one
-                # would leave residue no release will ever clear. Releases are
-                # not gated, so a late RELEASE on a closed issue tidies up.
-                state=$(gh api "repos/$REPO/issues/$number" --jq '.state' </dev/null 2>/dev/null || echo unknown)
-                if [ "$state" != "open" ]; then
-                  echo "  skip claim #$number — issue is $state"
-                  continue
-                fi
-                if gh issue edit "$number" --repo "$REPO" --add-assignee "$COMMENT_AUTHOR" </dev/null >/dev/null 2>&1; then
-                  echo "  assigned #$number to @$COMMENT_AUTHOR"
-                  echo "- assigned **#$number** to @$COMMENT_AUTHOR" >> "$GITHUB_STEP_SUMMARY"
-                else
-                  # Most likely: the author is not assignable on this repo.
-                  # Not an error — the claim comment is still the record.
-                  echo "  could not assign #$number to @$COMMENT_AUTHOR (skipped)"
-                fi
+                # Decided and applied by claim-collision.mjs (#3178): skip on a
+                # closed issue, accept, refuse with a reply, or take over a stale
+                # claim. It never exits non-zero once its arguments parse; a
+                # failed read leaves the field alone — the claim comment is
+                # still the record.
+                node scripts/ci/claim-collision.mjs --issue "$number" --claimant "$COMMENT_AUTHOR" --posted-on "$ON_ISSUE" --apply | tee -a collision.log
                 ;;
               release)
                 if gh issue edit "$number" --repo "$REPO" --remove-assignee "$COMMENT_AUTHOR" </dev/null >/dev/null 2>&1; then
@@ -152,3 +157,10 @@ jobs:
                 ;;
             esac
           done < actions.txt
+
+          if [ -s collision.log ]; then
+            # One line per claim, for the step summary.
+            grep -E '^\{' collision.log | while read -r d; do
+              echo "- claim: $(printf '%s' "$d" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(d.action+" — "+d.reason)')" >> "$GITHUB_STEP_SUMMARY"
+            done
+          fi

@@ -1,0 +1,277 @@
+// Answers a `🔒 CLAIM #N` that lands on an issue somebody else already holds,
+// instead of silently adding a second assignee (#3178).
+//
+// ## The incident this closes
+//
+// #3005, 2026-09-15: a session posted `🔒 CLAIM #3005` 76 minutes after another
+// session had claimed the same issue with the same branch name. Its checker
+// "grepped remote branches and open PRs but not the claim comments". The
+// information was in the thread; nobody read it — and the projection
+// (`claim-assignee.yml`) added the second assignee without a word, so the
+// field itself said "two owners" where the protocol says "pick something else".
+//
+// ## The rule, as AGENTS.md § Cross-session agent coordination states it
+//
+// A live claim — posted less than 24 hours ago, no RELEASE since — means: pick
+// something else, or coordinate in #1289 first. This module makes the
+// projection enforce exactly that sentence at the moment a second claim
+// arrives, with the three outcomes the issue asked for:
+//
+//   refuse    another assignee holds a LIVE claim → not recorded, reply says who
+//             and how old, and where to coordinate.
+//   takeover  another assignee's claim is STALE (≥ 24 h, unreleased) → they are
+//             unassigned, the claimant assigned, and the reply says so.
+//   accept    nobody else holds it, or the other assignee released it, or the
+//             claimant is re-claiming their own issue (branch rename) → assign
+//             silently, as before. An assignee with NO claim comment at all
+//             (assigned by hand for tracking, or before the projection existed)
+//             is also "accept": the claimant is ADDED beside them, which is
+//             today's behaviour, because a tracking assignee is not a claim.
+//
+// ## The reply must not parse as a marker
+//
+// The reply is posted by `github-actions[bot]`, which never triggers this
+// workflow again (GITHUB_TOKEN comments do not fire `issue_comment`), and its
+// text is shaped so the parser in `claim-assignee.mjs` reads nothing from it
+// either: it opens with ⚠️ / ℹ️, never with the padlock, never with `#N`, and
+// the word RELEASE appears only after the number is out of the leading run.
+// Pinned by test.
+//
+// ## Why the whole channel is read
+//
+// Most claims are posted on #1289 ABOUT the issue, so "does @X hold a live
+// claim on #N" cannot be answered from the issue thread alone. The channel is
+// read in full (~14 REST pages today) because staleness needs the old claim,
+// not just the recent ones.
+
+import { parse } from './claim-assignee.mjs'
+
+export const CHANNEL_ISSUE = 1289
+export const LIVE_CLAIM_MS = 24 * 60 * 60_000
+
+/**
+ * `branch feat/x` / `branch \`feat/x\`` out of a claim line, if present. The
+ * token must contain a `/` — every branch this repo names has a prefix
+ * (`feat/`, `fix/`, `chore/`, `claude/`), and without it "no branch named"
+ * would yield "named".
+ */
+export function branchOf(body) {
+  const m = String(body ?? '').match(/\bbranch\s*[`"']?([^\s`"'—–,)]*\/[^\s`"'—–,)]+)/i)
+  return m ? m[1] : null
+}
+
+/** Human age: "76 min ago", "3 h ago", "3 d ago". */
+export function ageText(fromIso, nowMs) {
+  const ms = nowMs - Date.parse(fromIso)
+  if (!Number.isFinite(ms) || ms < 0) return 'just now'
+  const min = Math.round(ms / 60_000)
+  if (min < 90) return `${min} min ago`
+  const h = Math.round(ms / 3_600_000)
+  if (h < 48) return `${h} h ago`
+  return `${Math.round(ms / 86_400_000)} d ago`
+}
+
+/**
+ * For one holder, the newest claim of `issue` they posted and whether they
+ * released it since. `comments` are {author, body, createdAt, onIssue}.
+ */
+export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_ISSUE }) {
+  let claim = null
+  let releasedAfter = false
+  const mine = comments
+    .filter((c) => c.author === holder)
+    .slice()
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+  for (const c of mine) {
+    const r = parse({ body: c.body, onIssue: c.onIssue ?? null, channelIssue })
+    if (r.claim.includes(issue)) {
+      claim = c
+      releasedAfter = false
+    } else if (r.release.includes(issue) && claim) {
+      releasedAfter = true
+    }
+  }
+  return { claim, releasedAfter }
+}
+
+/**
+ * Decide what a `🔒 CLAIM #issue` by `claimant` does.
+ *
+ * @param {object} o
+ * @param {number} o.issue
+ * @param {string} o.claimant
+ * @param {string} o.state           the issue's state as GitHub reports it
+ * @param {string[]} o.assignees     current assignees
+ * @param {{author:string, body:string, createdAt:string, onIssue?:number}[]} o.comments
+ *        the issue's comments plus the channel's, tagged with where each was posted
+ * @param {number} o.postedOn        the issue the incoming claim was posted on
+ * @param {number} [o.nowMs]
+ * @param {number} [o.channelIssue]
+ * @returns {{action:'skip'|'accept'|'refuse'|'takeover', assign?:string, unassign?:string[], reply?:{issue:number, body:string}, reason:string}}
+ */
+export function decideClaim({ issue, claimant, state, assignees, comments, postedOn, nowMs = Date.now(), channelIssue = CHANNEL_ISSUE }) {
+  if (String(state).toLowerCase() !== 'open') return { action: 'skip', reason: `issue is ${state}` }
+  const others = (assignees ?? []).filter((a) => a && a !== claimant)
+  if (others.length === 0) return { action: 'accept', assign: claimant, reason: 'nobody else holds it' }
+
+  const live = []
+  const stale = []
+  for (const holder of others) {
+    const { claim, releasedAfter } = holderClaim({ holder, issue, comments, channelIssue })
+    if (!claim || releasedAfter) continue // tracking assignee, or released: not a claim in force
+    const ageMs = nowMs - Date.parse(claim.createdAt)
+    if (Number.isFinite(ageMs) && ageMs < LIVE_CLAIM_MS) live.push({ holder, claim, ageMs })
+    else stale.push({ holder, claim, ageMs })
+  }
+
+  if (live.length > 0) {
+    const lines = live.map(({ holder, claim }) => {
+      const branch = branchOf(claim.body)
+      const where = claim.onIssue === channelIssue ? `on #${channelIssue}` : 'on this issue'
+      return `@${holder} claimed it ${ageText(claim.createdAt, nowMs)} ${where}${branch ? ` (branch \`${branch}\`)` : ''} and has not released it.`
+    })
+    const body = [
+      `⚠️ Already claimed: issue ${issue} is held by ${live.map((l) => `@${l.holder}`).join(' and ')}. ${lines.join(' ')}`,
+      `Per AGENTS.md § Cross-session agent coordination a live claim (< 24 h, no RELEASE since) means: pick something else, or coordinate in #${channelIssue} first. **This claim by @${claimant} was not recorded** — the assignee field is unchanged. (Posted by the claim projection, #3178.)`,
+    ].join('\n\n')
+    return { action: 'refuse', reply: { issue: postedOn, body }, reason: `live claim by ${live.map((l) => l.holder).join(', ')}` }
+  }
+
+  if (stale.length > 0) {
+    const lines = stale.map(({ holder, claim }) => `@${holder}'s claim was ${ageText(claim.createdAt, nowMs)} with no RELEASE since`)
+    const body = [
+      `ℹ️ Taken over: issue ${issue} — ${lines.join('; ')}. A claim older than 24 h with no release is stale under AGENTS.md § Cross-session agent coordination, so it was reassigned to @${claimant}.`,
+      `${stale.map((s) => `@${s.holder}`).join(' ')}: if you are still on this, say so here and re-claim; the reassignment is a projection, not a judgement. (Posted by the claim projection, #3178.)`,
+    ].join('\n\n')
+    return {
+      action: 'takeover',
+      assign: claimant,
+      unassign: stale.map((s) => s.holder),
+      reply: { issue: postedOn, body },
+      reason: `stale claim by ${stale.map((s) => s.holder).join(', ')}`,
+    }
+  }
+
+  return { action: 'accept', assign: claimant, reason: 'other assignees hold no claim in force' }
+}
+
+// ---------------------------------------------------------------------------
+// Fetch and apply — `gh` injected, as in release-on-merge.mjs.
+// ---------------------------------------------------------------------------
+
+export function ghRunner() {
+  return async (args, { input } = {}) => {
+    const { execFileSync } = await import('node:child_process')
+    return execFileSync('gh', args, { encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 })
+  }
+}
+
+function parseJsonStrict(text, what) {
+  const t = String(text ?? '').trim()
+  if (t === '') throw new Error(`${what}: gh returned no output`)
+  return JSON.parse(t)
+}
+
+async function readComments({ gh, repo, issue }) {
+  const pages = parseJsonStrict(await gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments?per_page=100`]), `comments of #${issue}`) ?? []
+  const out = []
+  for (const page of Array.isArray(pages) ? pages : []) {
+    for (const c of Array.isArray(page) ? page : []) {
+      out.push({ author: c.user?.login ?? '', body: String(c.body ?? ''), createdAt: c.created_at, onIssue: issue })
+    }
+  }
+  return out
+}
+
+/** State, assignees, and the comments of the issue AND the channel. */
+export async function fetchClaimState({ gh, repo, issue, channelIssue = CHANNEL_ISSUE }) {
+  const meta = parseJsonStrict(await gh(['api', `repos/${repo}/issues/${issue}`]), `issue #${issue}`)
+  const state = meta?.state ?? 'unknown'
+  const assignees = (meta?.assignees ?? []).map((a) => a.login)
+  if (String(state).toLowerCase() !== 'open') return { state, assignees, comments: [] }
+  const comments = [...(await readComments({ gh, repo, issue }))]
+  if (issue !== channelIssue) comments.push(...(await readComments({ gh, repo, issue: channelIssue })))
+  return { state, assignees, comments }
+}
+
+/** Apply a decision; every write independent, refusals logged, never thrown. */
+export async function applyClaim(decision, { gh, repo, issue, log = console.log }) {
+  const done = []
+  for (const login of decision.unassign ?? []) {
+    try {
+      await gh(['issue', 'edit', String(issue), '--repo', repo, '--remove-assignee', login])
+      log(`  unassigned #${issue} from @${login} (stale claim taken over)`)
+      done.push({ kind: 'unassign', login })
+    } catch (e) {
+      log(`  could not unassign @${login} from #${issue} (skipped): ${e?.message ?? e}`)
+    }
+  }
+  if (decision.assign) {
+    try {
+      await gh(['issue', 'edit', String(issue), '--repo', repo, '--add-assignee', decision.assign])
+      log(`  assigned #${issue} to @${decision.assign}`)
+      done.push({ kind: 'assign', login: decision.assign })
+    } catch (e) {
+      log(`  could not assign #${issue} to @${decision.assign} (skipped): ${e?.message ?? e}`)
+    }
+  }
+  if (decision.reply) {
+    try {
+      await gh(['issue', 'comment', String(decision.reply.issue), '--repo', repo, '-F', '-'], { input: decision.reply.body })
+      log(`  replied on #${decision.reply.issue} (${decision.action})`)
+      done.push({ kind: 'reply', issue: decision.reply.issue })
+    } catch (e) {
+      log(`  could not reply on #${decision.reply.issue} (skipped): ${e?.message ?? e}`)
+    }
+  }
+  return done
+}
+
+// ---------------------------------------------------------------------------
+// CLI — one claim number per invocation, called from claim-assignee.yml.
+//
+//   node scripts/ci/claim-collision.mjs --issue N --claimant LOGIN --posted-on M [--apply]
+//
+// Exit 0 always once the arguments parse; a failed read logs and does nothing.
+// The process ends by itself — never `process.exit(0)` after a stdout write:
+// on a pipe the write is asynchronous and exit() drops it, which is how the
+// first dry run of this CLI printed nothing at all.
+// ---------------------------------------------------------------------------
+
+const isMain = (() => {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+})()
+
+if (isMain) {
+  const arg = (name, fallback = null) => {
+    const i = process.argv.indexOf(`--${name}`)
+    return i === -1 ? fallback : process.argv[i + 1]
+  }
+  const has = (name) => process.argv.includes(`--${name}`)
+  const issue = Number(arg('issue'))
+  const claimant = arg('claimant') ?? ''
+  const postedOn = Number(arg('posted-on') ?? issue)
+  if (!Number.isInteger(issue) || issue <= 0 || !/^[A-Za-z0-9-]+(\[bot\])?$/.test(claimant)) {
+    console.error('usage: claim-collision.mjs --issue N --claimant LOGIN [--posted-on M] [--apply]')
+    process.exit(2)
+  }
+  const repo = process.env.GITHUB_REPOSITORY ?? 'd-hinders/Haven-AI'
+  try {
+    const gh = ghRunner()
+    const { state, assignees, comments } = await fetchClaimState({ gh, repo, issue })
+    const decision = decideClaim({ issue, claimant, state, assignees, comments, postedOn })
+    process.stdout.write(`${JSON.stringify(decision)}\n`)
+    if (has('apply') && decision.action !== 'skip') await applyClaim(decision, { gh, repo, issue })
+    else if (decision.action === 'skip') console.log(`  skip claim #${issue} — ${decision.reason}`)
+  } catch (e) {
+    console.log(`could not read #${issue} or the channel — claim not projected (the comment is still the record): ${e?.message ?? e}`)
+  }
+  process.exitCode = 0
+}

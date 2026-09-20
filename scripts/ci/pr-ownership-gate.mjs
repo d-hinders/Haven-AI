@@ -31,13 +31,17 @@
 // The failure text gives the two ways out: coordinate in #1289 for a handover
 // (the holder posts `🔓 RELEASE`), or drop the closing keyword and use `Refs`.
 //
-// The author's OWN claim time is passed to the shared holder rule, so a claim
+// The author's OWN hold start is passed to the shared holder rule, so a claim
 // posted later than the author's — the one #3178 refuses — does not block the
 // author's PR: a refused claim is not a claim here either. Bot assignees do not
-// count (an assignable coding agent is nobody's claim).
+// count (a GitHub App's login ends in `[bot]`; the Copilot coding agent, login
+// `Copilot`, type Bot, is not distinguishable from a login alone — none of this
+// repo's assignable users is a bot today). A STALE foreign holder who is still
+// assigned blocks through the assignee field; the report names the third way
+// out for that case: post your own claim, and #3178 takes the stale hold over.
 //
-// Time of check vs time of use: the check re-runs on open, edit, push and
-// ready-for-review. An issue claimed by somebody else AFTER the last run can
+// Time of check vs time of use: the check re-runs on open, edit, push, reopen
+// and ready-for-review. An issue claimed by somebody else AFTER the last run can
 // merge on a stale green tick — the PR author was there first, which is the
 // protocol's own answer; stated so nobody reads the tick as a live lock.
 //
@@ -117,7 +121,7 @@ export function evaluate({ pr, issues, nowMs = Date.now(), channelIssue = CHANNE
       parts.push(`@${h.login} claimed it ${age} on ${h.where}${h.branch ? ` (branch \`${h.branch}\`)` : ''}${active}${h.url ? ` — ${h.url}` : ''}`)
     }
     const onlyAssigned = f.assignees.filter((a) => !f.holders.some((h) => sameLogin(h.login, a)))
-    if (onlyAssigned.length) parts.push(`assigned to ${onlyAssigned.map((a) => `@${a}`).join(', ')} (no live claim comment found — a tracking assignment still counts here)`)
+    if (onlyAssigned.length) parts.push(`assigned to ${onlyAssigned.map((a) => `@${a}`).join(', ')} (no live claim comment found — a tracking assignment still counts here; if their claim went stale, post your own \`🔒 CLAIM #${f.issue}\` and the projection takes it over)`)
     lines.push(`- #${f.issue}: ${parts.join('; ')}.`)
   }
   lines.push('', 'Two ways out (AGENTS.md § Cross-session agent coordination):', `1. Coordinate in #${channelIssue} for a handover — the holder posts \`🔓 RELEASE #<issue>\` (and unassigns), then re-run this check.`, '2. Keep the PR but stop closing the issue: change `Closes #<issue>` to `Refs #<issue>` in the body, title and commit messages (the check re-runs on edit and on push).', '', `A draft PR is not gated; mark ready when the ownership is settled. Posted by the PR ownership gate (#3179).`)
@@ -139,10 +143,11 @@ export async function collect({ gh, repo, prNumber, author, nowMs = Date.now(), 
       continue
     }
     const { assignees, comments } = await fetchClaimState({ gh, repo, issue: c.number, channelIssue })
-    // The author's own claim time: a claim posted after it does not block
-    // (older wins — the rule #3178's reply already applies).
+    // When the author's own hold BEGAN (their first claim after their last
+    // release — a re-claim or channel copy does not move it): a claim posted
+    // after it does not block (older wins — the rule #3178's reply applies).
     const own = holderClaim({ holder: author, issue: c.number, comments, channelIssue })
-    const claimedAt = own.claim && !own.releasedAfter ? own.claim.createdAt : null
+    const claimedAt = own.claim && !own.releasedAfter ? (own.firstClaim ?? own.claim).createdAt : null
     const { live } = liveHolders({ issue: c.number, claimant: author, assignees, comments, claimedAt, nowMs, channelIssue })
     issues.push({ number: c.number, state: 'open', assignees, live })
   }

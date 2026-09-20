@@ -143,16 +143,19 @@ export function ageText(fromIso, nowMs) {
 }
 
 /**
- * For one holder: the newest claim of `issue` they posted, whether they
- * released it since, and their last ACTIVITY about the issue after that claim
- * (a later comment by them on the issue's own thread, or a later comment by
- * them on the channel naming `#issue`). `comments` are
+ * For one holder: the newest claim of `issue` they posted, the FIRST claim of
+ * their current hold (the earliest claim after their last RELEASE — a re-claim
+ * or a channel copy does not restart a hold), whether they released it since,
+ * and their last ACTIVITY about the issue after that claim (a later comment by
+ * them on the issue's own thread, or a later comment by them on the channel
+ * naming `#issue`). `comments` are
  * {author, body, createdAt, onIssue}, sorted here by time; ties keep input
  * order (issue comments first, then channel), which only matters for a claim
  * and a release stamped in the same second — harmless either way.
  */
 export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_ISSUE }) {
   let claim = null
+  let firstClaim = null
   let releasedAfter = false
   let lastActivityAt = null
   const mine = comments
@@ -166,6 +169,7 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
     const r = parse({ body: c.body, onIssue: c.onIssue ?? null, channelIssue })
     if (r.claim.includes(issue)) {
       claim = c
+      if (!firstClaim || releasedAfter) firstClaim = c // a release ended the previous hold
       releasedAfter = false
       lastActivityAt = c.createdAt
     } else if (claim) {
@@ -173,7 +177,7 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
       if (c.onIssue === issue || mentionsIssue(c.body, issue)) lastActivityAt = c.createdAt
     }
   }
-  return { claim, releasedAfter, lastActivityAt }
+  return { claim, firstClaim, releasedAfter, lastActivityAt }
 }
 
 /**
@@ -212,12 +216,14 @@ export function liveHolders({ issue, claimant, assignees, comments, claimedAt = 
   const live = []
   const stale = []
   for (const holder of others) {
-    const { claim, releasedAfter, lastActivityAt } = holderClaim({ holder, issue, comments, channelIssue })
+    const { claim, firstClaim, releasedAfter, lastActivityAt } = holderClaim({ holder, issue, comments, channelIssue })
     if (!claim || releasedAfter) continue // tracking assignee, or released: not a claim in force
-    // Dead heat: a holder whose claim is NEWER than the incoming one does not
-    // block it — the older claim wins. Same second → smaller login wins.
+    // Dead heat: a holder whose hold BEGAN after the incoming claim does not
+    // block it — the older hold wins (measured from the holder's FIRST claim in
+    // force, so their own re-claim or channel copy does not make them
+    // "newer"). Same second → smaller login wins.
     const mineMs = Date.parse(claimedAt ?? '')
-    const theirsMs = Date.parse(claim.createdAt ?? '')
+    const theirsMs = Date.parse((firstClaim ?? claim).createdAt ?? '')
     if (Number.isFinite(mineMs) && Number.isFinite(theirsMs)) {
       if (theirsMs > mineMs) continue
       if (theirsMs === mineMs && String(holder).toLowerCase() > String(claimant).toLowerCase()) continue

@@ -522,6 +522,24 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
     assert.equal(decideClaim({ ...common, claimant: 'AntonioSaaranen' }).action, 'refuse')
   })
 
+  test('the tie-break uses the holder\'s FIRST claim in force: a re-claim or channel copy does not make them "newer"', () => {
+    // Antonio claimed at 12:00:00 (issue) and mirrored to #1289 at 12:00:20;
+    // Philip claimed at 12:00:05. Antonio's hold began first and must win even
+    // though his NEWEST claim is later than Philip's.
+    const a1 = { author: 'AntonioSaaranen', body: '🔒 CLAIM #3200 — branch `feat/3200-a`', createdAt: '2026-09-20T12:00:00Z', onIssue: 3200, authorAssociation: 'COLLABORATOR' }
+    const a2 = { ...a1, createdAt: '2026-09-20T12:00:20Z', onIssue: 1289 }
+    const p = { author: 'PhilipEriksson', body: '🔒 CLAIM #3200 — branch `feat/3200-p`', createdAt: '2026-09-20T12:00:05Z', onIssue: 1289, authorAssociation: 'COLLABORATOR' }
+    const now = Date.parse('2026-09-20T12:01:00Z')
+    const common = { issue: 3200, state: 'open', assignees: [], comments: [a1, p, a2], postedOn: 1289, nowMs: now }
+    assert.equal(decideClaim({ ...common, claimant: 'PhilipEriksson', claimedAt: p.createdAt }).action, 'refuse')
+    assert.equal(decideClaim({ ...common, claimant: 'AntonioSaaranen', claimedAt: a2.createdAt }).action, 'refuse', 'the incoming copy is later than Philip — but see the gate, which passes the hold start')
+    // …and a release RESTARTS the hold: claim, release, re-claim → first claim is the re-claim.
+    const rel = { author: 'AntonioSaaranen', body: '🔓 RELEASE #3200 — abandoned', createdAt: '2026-09-20T12:00:02Z', onIssue: 3200 }
+    const h = holderClaim({ holder: 'AntonioSaaranen', issue: 3200, comments: [a1, rel, a2] })
+    assert.equal(h.firstClaim.createdAt, a2.createdAt)
+    assert.equal(h.releasedAfter, false)
+  })
+
   test('S2: staleness is measured from the holder\'s LAST ACTIVITY about the issue, not the claim', () => {
     // Claimed 3 days ago, but commented on the issue thread 2 h ago: live.
     const old = { ...holderClaimLine, createdAt: '2026-09-12T12:51:40Z' }

@@ -168,6 +168,22 @@ describe('collect through an injected gh', () => {
     assert.equal(evaluate({ pr: { ...pr, author: 'PhilipEriksson' }, issues: theirs, nowMs: NOW }).verdict, 'fail')
   })
 
+  test('the author\'s own later re-claim or channel copy does not resurrect a refused foreign claim (hold start, not newest claim)', async () => {
+    const t0 = new Date(NOW - 6 * 3_600_000).toISOString() // Antonio claims on the issue
+    const t1 = new Date(NOW - 5 * 3_600_000).toISOString() // Philip claims on #1289 → refused by #3178
+    const t2 = new Date(NOW - 4.5 * 3_600_000).toISOString() // Antonio posts his channel copy
+    const { gh } = recorder({
+      closing: [{ number: 4242 }],
+      issue: () => ({ state: 'open', closed_at: null, assignees: [{ login: 'AntonioSaaranen' }] }),
+      comments: (n) => (n === 1289
+        ? [{ user: { login: 'PhilipEriksson', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #4242 — branch `feat/4242-p`', created_at: t1, html_url: 'https://x/P' },
+           { user: { login: 'AntonioSaaranen', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #4242 — branch `feat/4242-a`', created_at: t2, html_url: 'https://x/A2' }]
+        : [{ user: { login: 'AntonioSaaranen', type: 'User' }, author_association: 'COLLABORATOR', body: '🔒 CLAIM #4242 — branch `feat/4242-a`', created_at: t0, html_url: 'https://x/A1' }]),
+    })
+    const { issues } = await collect({ gh, repo: 'o/r', prNumber: 1, author: 'AntonioSaaranen', nowMs: NOW })
+    assert.equal(evaluate({ pr: { ...pr, author: 'AntonioSaaranen' }, issues, nowMs: NOW }).verdict, 'pass')
+  })
+
   test('a closed candidate is carried but not read for claims', async () => {
     const { gh, calls } = recorder({ closing: [{ number: 3010 }], issue: () => ({ state: 'closed', closed_at: '2026-09-01T00:00:00Z', assignees: [] }) })
     const { issues } = await collect({ gh, repo: 'o/r', prNumber: 1, author: 'x' })
@@ -253,8 +269,9 @@ describe('the workflow cannot mask the verdict', () => {
     assert.match(step, /\n\s+shell: bash\n\s+run: \|\n\s+set -o pipefail\n\s+node scripts\/ci\/pr-ownership-gate\.mjs --event "\$GITHUB_EVENT_PATH" \| tee -a "\$GITHUB_STEP_SUMMARY"\n/)
   })
 
-  test('the judge is the base branch\'s copy: pull_request_target, read-only token, no ref on the checkout', () => {
+  test('the judge is the default branch\'s copy: pull_request_target, read-only token, no ref on the checkout, one run per PR', () => {
     assert.match(yml, /^on:\n  pull_request_target:/m)
+    assert.match(yml, /concurrency:\n  group: pr-ownership-gate-\$\{\{ github\.event\.pull_request\.number \}\}\n  cancel-in-progress: true/)
     assert.doesNotMatch(yml, /^on:\n  pull_request:/m)
     assert.match(yml, /permissions:\n  contents: read\n  issues: read\n  pull-requests: read/)
     // No `ref:` under the checkout step — the default on pull_request_target is the base.

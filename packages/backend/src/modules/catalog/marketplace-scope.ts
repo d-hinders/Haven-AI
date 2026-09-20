@@ -46,7 +46,12 @@ export function isMainnetChain(chainId: number): boolean {
   return getChainData(chainId).faucetUrl === undefined
 }
 
-/** True when the marketplace lists at least one mainnet chain (or every chain). */
+/**
+ * True when the marketplace lists at least one mainnet chain (or every chain).
+ * No production caller since decision 14 (the prospects gate keys on
+ * `marketplaceListsTestnetExplicitly`); kept as a tested predicate for the
+ * scope suite and any future rule that needs the mainnet side.
+ */
 export function marketplaceListsMainnet(): boolean {
   const ids = marketplaceChainIds()
   if (ids === null) return true

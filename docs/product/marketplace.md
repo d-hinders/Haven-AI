@@ -151,14 +151,18 @@ may not see a prospect, so the URL does not confirm the row exists.
 
 ### Standing state on dev (decision 14)
 
-Dev runs with `HAVEN_MARKETPLACE_PROSPECTS=true` **and**
-`HAVEN_MARKETPLACE_CHAIN_IDS=84532,8453`, so a logged-in dev user sees the
-mainnet merchants, the Ampersend sandbox and the "Coming soon" prospects on one
-grid, all the time; nothing is flipped before or after a meeting. Two things
-still hold: agents and credential-less readers never see a prospect (measured
-2026-09-20: `haven_discover_tools` from the dev QA agent returns the nine live
-offers and no prospect; `GET /merchants/berget-ai` → 404), and prod never sets
-the flag — and could not show them if it did, because its list is `8453`.
+Dev's standing env is `HAVEN_MARKETPLACE_PROSPECTS=true` **and**
+`HAVEN_MARKETPLACE_CHAIN_IDS=84532,8453` (the list is restored to that value
+as the operator step after PR #3202 lands; for the 2026-09-20 demo it was
+narrowed to `84532`), so a logged-in dev user sees the mainnet merchants, the
+Ampersend sandbox and the "Coming soon" prospects on one grid, all the time;
+nothing is flipped before or after a meeting. Two things still hold: agents and
+credential-less readers never see a prospect (measured 2026-09-20 on dev at
+`84532`, before this rule change — the property, not the count, is what the
+route test pins: `haven_discover_tools` from the dev QA agent returned Sepolia
+offers only, none `coming_soon`; `GET /merchants/berget-ai` → 404), and prod
+never sets the flag — and could not show them if it did, because its list is
+`8453`.
 Showing the grid to a prospect's own people is still a private meeting, per
 each CRM record's external-mention ceiling (decision 9).
 

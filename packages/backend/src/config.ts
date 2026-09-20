@@ -379,9 +379,11 @@ export const config = {
     .filter((n) => Number.isInteger(n) && n > 0),
 
   // Prospects — merchants we are talking to, `listing_status: coming_soon`,
-  // seeded by #3080 — are listed only when this is on AND the marketplace
-  // lists no mainnet chain (the second line of defence lives in the route:
-  // a copied env cannot publish them on prod). Default off.
+  // seeded by #3080 — are listed only when this is on AND
+  // `HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet (decision 14,
+  // `modules/catalog/marketplace-scope.ts`; the deploy-chain fallback never
+  // counts, so a copied flag cannot publish them on prod, whose list is
+  // `8453`). Dev runs it on standing beside the mainnet merchants. Default off.
   marketplaceProspectsEnabled: parseBooleanFlag(
     'HAVEN_MARKETPLACE_PROSPECTS',
     process.env.HAVEN_MARKETPLACE_PROSPECTS,

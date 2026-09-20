@@ -90,6 +90,11 @@ describe('prospectsVisibleTo', () => {
   it('hides prospects on a mainnet-only explicit list — prod lists 8453, so a copied flag cannot publish them', () => {
     setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [8453], deployChainIds: [] })
     expect(prospectsVisibleTo(request({ user: { sub: 'u1' } }))).toBe(false)
+    // An UNREGISTERED id is not a testnet (isMainnetChain fails closed), so it
+    // cannot open the gate either. Mutation: `some((id) => id !== 8453)` → red.
+    setConfig({ marketplaceProspectsEnabled: true, marketplaceChainIds: [8453, 999999], deployChainIds: [] })
+    expect(marketplaceListsTestnetExplicitly()).toBe(false)
+    expect(prospectsVisibleTo(request({ user: { sub: 'u1' } }))).toBe(false)
   })
 
   it('the fallback list never opens the door: prod deploys 8453,84532, so an UNSET marketplace list must not count', () => {

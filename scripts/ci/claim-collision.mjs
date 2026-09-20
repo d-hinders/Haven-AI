@@ -34,8 +34,8 @@
 //
 // ## Holders are CLAIMANTS, not the assignee field
 //
-// A holder is anyone (other than the claimant) who posted a claim of this issue
-// — assigned or not. The assignee field is only a projection and is wrong in
+// A holder is any collaborator, and any person, other than the claimant who
+// posted a claim of this issue — assigned or not. The assignee field is only a projection and is wrong in
 // exactly the two cases that matter here: two claims seconds apart (the
 // workflow runs without a concurrency group, so both runs would read an empty
 // field and both would accept), and an author GitHub refuses to assign (the
@@ -197,8 +197,8 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
  */
 export function decideClaim({ issue, claimant, state, assignees, comments, postedOn, claimedAt = null, nowMs = Date.now(), channelIssue = CHANNEL_ISSUE }) {
   if (String(state).toLowerCase() !== 'open') return { action: 'skip', issue, reason: `issue is ${state}` }
-  // Candidates: everyone who ever posted a claim of this issue, plus whoever
-  // the field currently names — minus the claimant.
+  // Candidates: every collaborator (person, not bot) who posted a claim of this
+  // issue, plus whoever the field currently names — minus the claimant.
   const claimants = new Map() // lower-cased login → login as written
   for (const c of comments ?? []) {
     if (!c?.author || sameLogin(c.author, claimant)) continue
@@ -377,7 +377,7 @@ if (isMain) {
   const postedOn = Number(arg('posted-on') ?? issue)
   const claimedAt = arg('claimed-at')
   if (!Number.isInteger(issue) || issue <= 0 || !/^[A-Za-z0-9-]+(\[bot\])?$/.test(claimant)) {
-    console.error('usage: claim-collision.mjs --issue N --claimant LOGIN [--posted-on M] [--apply]')
+    console.error('usage: claim-collision.mjs --issue N --claimant LOGIN [--posted-on M] [--claimed-at ISO] [--apply]')
     process.exit(2)
   }
   const repo = process.env.GITHUB_REPOSITORY ?? 'd-hinders/Haven-AI'

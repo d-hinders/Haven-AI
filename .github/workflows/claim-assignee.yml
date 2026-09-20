@@ -3,7 +3,8 @@ name: Claim to assignee
 # Keeps GitHub's assignee field in step with the claim protocol in AGENTS.md
 # § Cross-session agent coordination. A `🔒 CLAIM #n` comment assigns its author
 # to #n — unless another session holds a live claim on it, in which case it is
-# refused with a reply (#3178, below); a `🔓 RELEASE #n` unassigns them (the
+# refused with a reply, or a stale one, which is taken over (#3178, below); a
+# `🔓 RELEASE #n` unassigns them (the
 # merge-time release, #3177, is posted and applied by
 # `claim-release-on-merge.yml` itself — see below).
 #
@@ -58,8 +59,8 @@ name: Claim to assignee
 # is projected through `scripts/ci/claim-collision.mjs`: if another session
 # holds a LIVE claim (its last comment about the issue < 24 h ago, no RELEASE
 # since — the rule AGENTS.md states), the claim is refused and a reply says who
-# holds it, how old the claim is, when they were last active on it, and where
-# to coordinate; a STALE claim (no activity for 24 h, unreleased) is taken over
+# holds it, how old the claim is, when they were last active on it if they have
+# commented since, and where to coordinate; a STALE claim (no activity for 24 h, unreleased) is taken over
 # — holder unassigned, claimant assigned, reply says so; everything else
 # (nobody else, same author, released, or an assignee with no claim comment) is
 # accepted as before. Holders are found from the CLAIM COMMENTS (issue thread +
@@ -166,8 +167,9 @@ jobs:
           done < actions.txt
 
           if [ -s collision.log ]; then
-            # One line per claim, for the step summary.
-            grep -E '^\{' collision.log | while read -r d; do
+            # One line per claim, for the step summary. `|| true`: a log with
+            # no JSON (a failed read) is the degraded path, not a red step.
+            (grep -E '^\{' collision.log || true) | while read -r d; do
               echo "- claim: $(printf '%s' "$d" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write("#"+d.issue+" "+d.action+" — "+d.reason)')" >> "$GITHUB_STEP_SUMMARY"
             done
           fi

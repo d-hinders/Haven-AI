@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from './claim-assignee.mjs'
-import { decideClaim, holderClaim, branchOf, ageText, fetchClaimState, applyClaim, LIVE_CLAIM_MS } from './claim-collision.mjs'
+import { decideClaim, holderClaim, branchOf, ageText, mentionsIssue, sameLogin, fetchClaimState, applyClaim, LIVE_CLAIM_MS, TRUSTED_ASSOCIATIONS } from './claim-collision.mjs'
 
 const CLI = fileURLToPath(new URL('./claim-assignee.mjs', import.meta.url))
 
@@ -338,9 +338,10 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
   // The #3005 shape, 2026-09-15, as #1289 records it: Philip claimed on #1289
   // at 11:35:36Z; Antonio claimed the same issue at 12:51:40Z (76 min later)
   // with the same branch, then withdrew at 13:00:47Z. Roles and times are the
-  // measured ones (`gh api --paginate repos/…/issues/1289/comments`).
+  // measured ones (`gh api --paginate repos/…/issues/1289/comments`); the
+  // branch name is abbreviated here (the real one was ci/3005-core-qa-agent-jobs).
   const NOW = Date.parse('2026-09-15T12:51:40Z')
-  const holderClaimLine = { author: 'PhilipEriksson', body: '🔒 CLAIM #3005 — branch `feat/3005-x` — touches: packages/backend/…', createdAt: '2026-09-15T11:35:36Z', onIssue: 1289 }
+  const holderClaimLine = { author: 'PhilipEriksson', body: '🔒 CLAIM #3005 — branch `feat/3005-x` — touches: packages/backend/…', createdAt: '2026-09-15T11:35:36Z', onIssue: 1289, authorAssociation: 'COLLABORATOR' }
   const base = { issue: 3005, claimant: 'AntonioSaaranen', state: 'open', assignees: ['PhilipEriksson'], postedOn: 1289, nowMs: NOW }
 
   test('second claim within 24 h → refused with a reply naming the holder, the age, the branch, and that nothing was recorded', () => {
@@ -361,7 +362,7 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
 
   test('same author re-claiming (branch rename) → accepted silently', () => {
     const d = decideClaim({ ...base, claimant: 'PhilipEriksson', comments: [holderClaimLine] })
-    assert.deepEqual(d, { action: 'accept', assign: 'PhilipEriksson', reason: 'nobody else holds it' })
+    assert.deepEqual(d, { action: 'accept', issue: 3005, assign: 'PhilipEriksson', reason: 'nobody else holds it' })
   })
 
   test('stale claim (≥ 24 h, unreleased) → taken over: holder unassigned, claimant assigned, reply says so', () => {
@@ -401,7 +402,7 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
   })
 
   test('a QUOTED claim by the holder is not their claim — reporting is not claiming', () => {
-    const quoted = { ...holderClaimLine, body: '> 🔒 CLAIM #3005 — branch `feat/3005-x`\n\nFYI: this is what Daniel posted.' }
+    const quoted = { ...holderClaimLine, body: '> 🔒 CLAIM #3005 — branch `feat/3005-x`\n\nFYI: quoting the claim as posted on the issue.' }
     assert.equal(decideClaim({ ...base, comments: [quoted] }).action, 'accept')
   })
 
@@ -455,6 +456,49 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
     assert.match(d.reply.body, /held by @PhilipEriksson/)
   })
 
+  test('S1 guard: a drive-by claim by a NON-collaborator on the public channel makes no holder', () => {
+    // #1289 is public. Without this, anyone could post `🔒 CLAIM #N` there and
+    // get every real claim of #N refused.
+    const driveBy = { ...holderClaimLine, author: 'stranger', authorAssociation: 'NONE' }
+    assert.equal(decideClaim({ ...base, assignees: [], comments: [driveBy] }).action, 'accept')
+    const firstTimer = { ...holderClaimLine, author: 'newbie', authorAssociation: 'FIRST_TIME_CONTRIBUTOR' }
+    assert.equal(decideClaim({ ...base, assignees: [], comments: [firstTimer] }).action, 'accept')
+    // …but the same stranger, once ASSIGNED by a maintainer, is a holder through the field.
+    assert.equal(decideClaim({ ...base, assignees: ['stranger'], comments: [driveBy] }).action, 'refuse')
+    assert.deepEqual([...TRUSTED_ASSOCIATIONS].sort(), ['COLLABORATOR', 'MEMBER', 'OWNER'])
+  })
+
+  test('every decision carries the issue number (the step summary prints it)', () => {
+    for (const c of [
+      decideClaim({ ...base, comments: [holderClaimLine] }),
+      decideClaim({ ...base, comments: [] }),
+      decideClaim({ ...base, state: 'closed', comments: [] }),
+      decideClaim({ ...base, comments: [{ ...holderClaimLine, createdAt: '2026-09-12T12:51:40Z' }] }),
+    ]) assert.equal(c.issue, 3005)
+  })
+
+  test('a bot comment quoting the claim format is never a holder', () => {
+    const bot = { ...holderClaimLine, author: 'github-actions[bot]', authorType: 'Bot', authorAssociation: 'MEMBER', body: '🔒 CLAIM #3005 — example of the format' }
+    assert.equal(decideClaim({ ...base, assignees: [], comments: [bot] }).action, 'accept')
+  })
+
+  test('logins compare case-insensitively (GitHub logins are)', () => {
+    assert.ok(sameLogin('PhilipEriksson', 'philiperiksson'))
+    const d = decideClaim({ ...base, claimant: 'philiperiksson', assignees: ['PhilipEriksson'], comments: [holderClaimLine] })
+    assert.equal(d.action, 'accept', 'own re-claim under a different casing')
+  })
+
+  test('S-c: a mention inside a quote or a code fence is not activity; a plain line is', () => {
+    assert.equal(mentionsIssue('> unrelated quote mentioning #3005', 3005), false)
+    assert.equal(mentionsIssue('```\n🔒 CLAIM #3005 — example\n```', 3005), false)
+    assert.equal(mentionsIssue('Morning report: open work #3001 #3005 #3010', 3005), true)
+    assert.equal(mentionsIssue('see #30050', 3005), false)
+    assert.equal(mentionsIssue('https://example.com/x/#3005', 3005), false)
+    const old = { ...holderClaimLine, createdAt: '2026-09-12T12:51:40Z' }
+    const quotedRecent = { author: 'PhilipEriksson', body: '> someone wrote about #3005', createdAt: '2026-09-15T10:51:40Z', onIssue: 1289 }
+    assert.equal(decideClaim({ ...base, comments: [old, quotedRecent] }).action, 'takeover')
+  })
+
   test('S2: staleness is measured from the holder\'s LAST ACTIVITY about the issue, not the claim', () => {
     // Claimed 3 days ago, but commented on the issue thread 2 h ago: live.
     const old = { ...holderClaimLine, createdAt: '2026-09-12T12:51:40Z' }
@@ -503,12 +547,12 @@ describe('collision fetch and apply through an injected gh (#3178)', () => {
   test('fetchClaimState reads the issue, its comments and the channel, tagging where each comment was posted', async () => {
     const { gh, calls } = recorder({
       issue: { state: 'open', assignees: [{ login: 'AntonioSaaranen' }] },
-      comments: (n) => (n === 1289 ? [{ user: { login: 'AntonioSaaranen' }, body: '🔒 CLAIM #3005 — x', created_at: '2026-09-15T11:44:00Z' }] : [{ user: { login: 'd-hinders' }, body: 'hi', created_at: '2026-09-15T09:00:00Z' }]),
+      comments: (n) => (n === 1289 ? [{ user: { login: 'AntonioSaaranen' }, author_association: 'OWNER', body: '🔒 CLAIM #3005 — x', created_at: '2026-09-15T11:44:00Z' }] : [{ user: { login: 'd-hinders' }, body: 'hi', created_at: '2026-09-15T09:00:00Z' }]),
     })
     const r = await fetchClaimState({ gh, repo: 'o/r', issue: 3005 })
     assert.equal(r.state, 'open')
     assert.deepEqual(r.assignees, ['AntonioSaaranen'])
-    assert.deepEqual(r.comments.map((c) => [c.author, c.onIssue]), [['d-hinders', 3005], ['AntonioSaaranen', 1289]])
+    assert.deepEqual(r.comments.map((c) => [c.author, c.onIssue, c.authorAssociation, c.authorType]), [['d-hinders', 3005, 'NONE', 'User'], ['AntonioSaaranen', 1289, 'OWNER', 'User']])
     assert.equal(calls.filter((c) => c.args.includes('--paginate')).length, 2)
   })
 
@@ -558,7 +602,7 @@ describe('claim-collision CLI end to end, with a stub gh on PATH (#3178)', () =>
   writeFileSync(ghStub, `#!/bin/sh
 case "$*" in
   *"issues/3005/comments"*) echo '[[]]' ;;
-  *"issues/1289/comments"*) echo '[[{"user":{"login":"PhilipEriksson"},"body":"🔒 CLAIM #3005 — branch \`feat/3005-x\`","created_at":"${recent}"}]]' ;;
+  *"issues/1289/comments"*) echo '[[{"user":{"login":"PhilipEriksson"},"author_association":"COLLABORATOR","body":"🔒 CLAIM #3005 — branch \`feat/3005-x\`","created_at":"${recent}"}]]' ;;
   *"issues/3005"*) echo '{"state":"open","assignees":[{"login":"PhilipEriksson"}]}' ;;
   *) echo "$*" >> "${dir}/writes.txt"; cat >/dev/null; echo '' ;;
 esac
@@ -566,20 +610,26 @@ esac
   execFileSync('chmod', ['+x', ghStub])
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, GITHUB_REPOSITORY: 'o/r' }
 
+  const writesFile = path.join(dir, 'writes.txt')
+  const writesNow = () => { try { return execFileSync('cat', [writesFile], { encoding: 'utf8' }).trim().split('\n').filter(Boolean) } catch { return [] } }
+
   test('dry run prints exactly one JSON line and writes nothing', () => {
+    const before = writesNow().length
     const out = execFileSync(process.execPath, [CLI2, '--issue', '3005', '--claimant', 'AntonioSaaranen', '--posted-on', '1289'], { encoding: 'utf8', env })
     const lines = out.trim().split('\n').filter((l) => l.startsWith('{'))
     assert.equal(lines.length, 1)
     const d = JSON.parse(lines[0])
     assert.equal(d.action, 'refuse')
+    assert.equal(d.issue, 3005)
     assert.equal(d.reply.issue, 1289)
-    assert.throws(() => execFileSync('cat', [path.join(dir, 'writes.txt')], { stdio: 'pipe' }))
+    // Order-independent: the write count is unchanged by a dry run.
+    assert.equal(writesNow().length, before)
   })
 
   test('--apply posts the reply through gh (stdin body) and touches no assignee', () => {
+    const before = writesNow().length
     execFileSync(process.execPath, [CLI2, '--issue', '3005', '--claimant', 'AntonioSaaranen', '--posted-on', '1289', '--apply'], { encoding: 'utf8', env })
-    const writes = execFileSync('cat', [path.join(dir, 'writes.txt')], { encoding: 'utf8' }).trim().split('\n')
-    assert.deepEqual(writes, ['issue comment 1289 --repo o/r -F -'])
+    assert.deepEqual(writesNow().slice(before), ['issue comment 1289 --repo o/r -F -'])
   })
 
   test('a failed read (no gh on PATH) logs, prints no JSON, exits 0', () => {

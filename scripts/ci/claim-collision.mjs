@@ -12,15 +12,19 @@
 //
 // ## The rule, as AGENTS.md § Cross-session agent coordination states it
 //
-// A live claim — posted less than 24 hours ago, no RELEASE since — means: pick
-// something else, or coordinate in #1289 first. This module makes the
-// projection enforce exactly that sentence at the moment a second claim
-// arrives, with the three outcomes the issue asked for:
+// A live claim — the holder's last comment about it less than 24 hours ago, no
+// `🔓 RELEASE` since — means: pick something else, or coordinate in #1289
+// first. This module makes the projection enforce that rule at the moment a
+// second claim arrives, with staleness measured as the section below defines
+// it, and the three outcomes the issue asked for:
 //
-//   refuse    another assignee holds a LIVE claim → not recorded, reply says who
-//             and how old, and where to coordinate.
-//   takeover  another assignee's claim is STALE (≥ 24 h, unreleased) → they are
-//             unassigned, the claimant assigned, and the reply says so.
+//   refuse    another session holds a LIVE claim (a claim comment, assigned or
+//             not) → not recorded, reply says who, how old, when they were last
+//             active on it if they have commented since, and where to
+//             coordinate.
+//   takeover  another session's claim is STALE (no activity about the issue
+//             for 24 h, unreleased) → they are unassigned, the claimant
+//             assigned, and the reply says so.
 //   accept    nobody else holds it, or the other holder released it, or the
 //             claimant is re-claiming their own issue (branch rename) → assign
 //             silently, as before. An assignee with NO claim comment at all
@@ -37,7 +41,12 @@
 // field and both would accept), and an author GitHub refuses to assign (the
 // old shell said so itself: "the author is not assignable on this repo"), whose
 // claim would otherwise never be seen by anyone. The comments are already in
-// hand, so the check reads them.
+// hand, so the check reads them. Only a COLLABORATOR's comment can make a
+// holder: #1289 is public, and a drive-by `🔒 CLAIM #N` there must not be able
+// to get every real claim of #N refused. The REST comment carries
+// `author_association`; the same OWNER/MEMBER/COLLABORATOR set the workflow's
+// own trigger gate uses is applied to holders. Assignees need no such check —
+// GitHub only assigns users it would let the gate through.
 //
 // ## Staleness is measured from the holder's last ACTIVITY, not the claim
 //
@@ -70,6 +79,13 @@ import { parse } from './claim-assignee.mjs'
 export const CHANNEL_ISSUE = 1289
 /** AGENTS.md: "An unreleased claim blocks the other session for a day." */
 export const LIVE_CLAIM_MS = 24 * 60 * 60_000
+/** The same set `claim-assignee.yml`'s trigger gate admits. */
+export const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR'])
+
+/** GitHub logins are case-insensitive; every comparison here goes through this. */
+export function sameLogin(a, b) {
+  return String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase()
+}
 
 /**
  * `branch feat/x` / `branch \`feat/x\`` out of a claim line, if present. The
@@ -80,6 +96,25 @@ export const LIVE_CLAIM_MS = 24 * 60 * 60_000
 export function branchOf(body) {
   const m = String(body ?? '').match(/\bbranch\s*[`"']?([^\s`"'—–,)]*\/[^\s`"'—–,)]+)/i)
   return m ? m[1] : null
+}
+
+/**
+ * Does this body mention `#issue` as activity — on a line that is neither a
+ * quote nor inside a code fence, the same lines `parse()` reads? A quoted
+ * status rollup or a fenced example must not keep a claim alive.
+ */
+export function mentionsIssue(body, issue) {
+  const re = new RegExp(`(^|[^\\w/])#${issue}\\b`)
+  let inFence = false
+  for (const line of String(body ?? '').split('\n')) {
+    if (/^\s*(?:\`\`\`|~~~)/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence || /^\s*>/.test(line)) continue
+    if (re.test(line)) return true
+  }
+  return false
 }
 
 /** Human age: "76 min ago", "3 h ago", "3 d ago". */
@@ -106,9 +141,8 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
   let claim = null
   let releasedAfter = false
   let lastActivityAt = null
-  const mentions = new RegExp(`(^|[^\\w])#${issue}\\b`)
   const mine = comments
-    .filter((c) => c.author === holder)
+    .filter((c) => sameLogin(c.author, holder))
     .slice()
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   for (const c of mine) {
@@ -122,7 +156,7 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
       lastActivityAt = c.createdAt
     } else if (claim) {
       if (r.release.includes(issue)) releasedAfter = true
-      if (c.onIssue === issue || mentions.test(String(c.body ?? ''))) lastActivityAt = c.createdAt
+      if (c.onIssue === issue || mentionsIssue(c.body, issue)) lastActivityAt = c.createdAt
     }
   }
   return { claim, releasedAfter, lastActivityAt }
@@ -137,24 +171,37 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
  * @param {string} o.state           the issue's state as GitHub reports it
  * @param {string[]} o.assignees     current assignees (a projection — holders
  *        are found from the comments, the field only adds candidates)
- * @param {{author:string, body:string, createdAt:string, onIssue?:number}[]} o.comments
- *        the issue's comments plus the channel's, tagged with where each was posted
+ * @param {{author:string, body:string, createdAt:string, onIssue?:number, authorAssociation?:string}[]} o.comments
+ *        the issue's comments plus the channel's, tagged with where each was
+ *        posted and with GitHub's `author_association` for the author
  * @param {number} o.postedOn        the issue the incoming claim was posted on
  * @param {number} [o.nowMs]
  * @param {number} [o.channelIssue]
  * @returns {{action:'skip'|'accept'|'refuse'|'takeover', assign?:string, unassign?:string[], reply?:{issue:number, body:string}, reason:string}}
  */
 export function decideClaim({ issue, claimant, state, assignees, comments, postedOn, nowMs = Date.now(), channelIssue = CHANNEL_ISSUE }) {
-  if (String(state).toLowerCase() !== 'open') return { action: 'skip', reason: `issue is ${state}` }
+  if (String(state).toLowerCase() !== 'open') return { action: 'skip', issue, reason: `issue is ${state}` }
   // Candidates: everyone who ever posted a claim of this issue, plus whoever
   // the field currently names — minus the claimant.
-  const claimants = new Set()
+  const claimants = new Map() // lower-cased login → login as written
   for (const c of comments ?? []) {
-    if (!c?.author || c.author === claimant) continue
-    if (parse({ body: c.body, onIssue: c.onIssue ?? null, channelIssue }).claim.includes(issue)) claimants.add(c.author)
+    if (!c?.author || sameLogin(c.author, claimant)) continue
+    // A holder must be a collaborator and a person: a drive-by claim on the
+    // public channel, or a bot quoting the format, cannot get real claims
+    // refused. (Assignees below need no check — GitHub only assigns users it
+    // would let the gate through.)
+    if (!TRUSTED_ASSOCIATIONS.has(String(c.authorAssociation ?? '').toUpperCase())) continue
+    if (String(c.authorType ?? 'User') === 'Bot') continue
+    if (parse({ body: c.body, onIssue: c.onIssue ?? null, channelIssue }).claim.includes(issue)) claimants.set(c.author.toLowerCase(), c.author)
   }
-  const others = [...new Set([...(assignees ?? []), ...claimants])].filter((a) => a && a !== claimant)
-  if (others.length === 0) return { action: 'accept', assign: claimant, reason: 'nobody else holds it' }
+  const seen = new Set()
+  const others = []
+  for (const a of [...(assignees ?? []), ...claimants.values()]) {
+    if (!a || sameLogin(a, claimant) || seen.has(a.toLowerCase())) continue
+    seen.add(a.toLowerCase())
+    others.push(a)
+  }
+  if (others.length === 0) return { action: 'accept', issue, assign: claimant, reason: 'nobody else holds it' }
 
   const live = []
   const stale = []
@@ -179,7 +226,7 @@ export function decideClaim({ issue, claimant, state, assignees, comments, poste
       `⚠️ Already claimed: issue ${issue} is held by ${live.map((l) => `@${l.holder}`).join(' and ')}. ${lines.join(' ')}`,
       `Per AGENTS.md § Cross-session agent coordination a live claim (< 24 h, no RELEASE since) means: pick something else, or coordinate in #${channelIssue} first. **This claim by @${claimant} was not recorded** — the assignee field is unchanged. (Posted by the claim projection, #3178.)`,
     ].join('\n\n')
-    return { action: 'refuse', reply: { issue: postedOn, body }, reason: `live claim by ${live.map((l) => l.holder).join(', ')}` }
+    return { action: 'refuse', issue, reply: { issue: postedOn, body }, reason: `live claim by ${live.map((l) => l.holder).join(', ')}` }
   }
 
   if (stale.length > 0) {
@@ -190,6 +237,7 @@ export function decideClaim({ issue, claimant, state, assignees, comments, poste
     ].join('\n\n')
     return {
       action: 'takeover',
+      issue,
       assign: claimant,
       unassign: stale.map((s) => s.holder),
       reply: { issue: postedOn, body },
@@ -197,7 +245,7 @@ export function decideClaim({ issue, claimant, state, assignees, comments, poste
     }
   }
 
-  return { action: 'accept', assign: claimant, reason: 'other assignees hold no claim in force' }
+  return { action: 'accept', issue, assign: claimant, reason: 'nobody else holds a claim in force' }
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +270,7 @@ async function readComments({ gh, repo, issue }) {
   const out = []
   for (const page of Array.isArray(pages) ? pages : []) {
     for (const c of Array.isArray(page) ? page : []) {
-      out.push({ author: c.user?.login ?? '', body: String(c.body ?? ''), createdAt: c.created_at, onIssue: issue })
+      out.push({ author: c.user?.login ?? '', body: String(c.body ?? ''), createdAt: c.created_at, onIssue: issue, authorAssociation: c.author_association ?? 'NONE', authorType: c.user?.type ?? 'User' })
     }
   }
   return out

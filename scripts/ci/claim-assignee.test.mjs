@@ -533,6 +533,11 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
     const common = { issue: 3200, state: 'open', assignees: [], comments: [a1, p, a2], postedOn: 1289, nowMs: now }
     assert.equal(decideClaim({ ...common, claimant: 'PhilipEriksson', claimedAt: p.createdAt }).action, 'refuse')
     assert.equal(decideClaim({ ...common, claimant: 'AntonioSaaranen', claimedAt: a2.createdAt }).action, 'refuse', 'the incoming copy is later than Philip — but see the gate, which passes the hold start')
+    // The refusal reply ages Antonio's HOLD (12:00:00, on the issue), not his
+    // mirror, and appends no "last active" clause for a mere mirror.
+    const reply = decideClaim({ ...common, claimant: 'PhilipEriksson', claimedAt: p.createdAt }).reply.body
+    assert.match(reply, /@AntonioSaaranen claimed it 1 min ago on this issue/)
+    assert.doesNotMatch(reply, /last active on it/)
     // …and a release RESTARTS the hold: claim, release, re-claim → first claim is the re-claim.
     const rel = { author: 'AntonioSaaranen', body: '🔓 RELEASE #3200 — abandoned', createdAt: '2026-09-20T12:00:02Z', onIssue: 3200 }
     const h = holderClaim({ holder: 'AntonioSaaranen', issue: 3200, comments: [a1, rel, a2] })

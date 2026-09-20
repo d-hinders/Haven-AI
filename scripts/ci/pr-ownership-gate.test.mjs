@@ -182,6 +182,17 @@ describe('collect through an injected gh', () => {
     })
     const { issues } = await collect({ gh, repo: 'o/r', prNumber: 1, author: 'AntonioSaaranen', nowMs: NOW })
     assert.equal(evaluate({ pr: { ...pr, author: 'AntonioSaaranen' }, issues, nowMs: NOW }).verdict, 'pass')
+    // …and from Philip's side the report names Antonio's HOLD START (first
+    // claim, on the issue, https://x/A1), not his newest channel copy, and
+    // does not append a "last active" clause for a mere mirror.
+    const { issues: theirs } = await collect({ gh, repo: 'o/r', prNumber: 2, author: 'PhilipEriksson', nowMs: NOW })
+    const r = evaluate({ pr: { ...pr, author: 'PhilipEriksson' }, issues: theirs, nowMs: NOW })
+    assert.equal(r.verdict, 'fail')
+    assert.equal(r.findings[0].holders[0].url, 'https://x/A1')
+    assert.equal(r.findings[0].holders[0].where, '#4242')
+    assert.equal(r.findings[0].holders[0].claimedAt, t0)
+    assert.match(r.report, /claimed it 6 h ago on #4242/)
+    assert.doesNotMatch(r.report, /last active on it/)
   })
 
   test('a closed candidate is carried but not read for claims', async () => {

@@ -66,7 +66,7 @@ import { fetchClaimState, liveHolders, holderClaim, ageText, branchOf, sameLogin
  *
  * @param {object} o
  * @param {{number:number, author:string, draft:boolean, base?:string|null, defaultBranch?:string|null}} o.pr
- * @param {{number:number, state:string, isPullRequest?:boolean, unreadable?:boolean, assignees:string[], live:{holder:string, claim:{createdAt:string, body?:string, onIssue?:number, htmlUrl?:string|null}, lastActivityAt?:string|null}[]}[]} o.issues
+ * @param {{number:number, state:string, isPullRequest?:boolean, unreadable?:boolean, assignees:string[], live:{holder:string, claim:{createdAt:string, body?:string, onIssue?:number, htmlUrl?:string|null}, firstClaim?:{createdAt:string, onIssue?:number, htmlUrl?:string|null}|null, lastActivityAt?:string|null}[]}[]} o.issues
  *        every candidate, read back: assignees, and the live holders OTHER
  *        than the author (from `liveHolders`)
  * @param {number} [o.nowMs]
@@ -94,6 +94,7 @@ export function evaluate({ pr, issues, nowMs = Date.now(), channelIssue = CHANNE
         return {
           login: h.holder,
           claimedAt: since?.createdAt ?? null,
+          newestClaimAt: h.claim?.createdAt ?? null,
           lastActivityAt: h.lastActivityAt ?? null,
           url: since?.htmlUrl ?? null,
           branch: branchOf(h.claim?.body),
@@ -120,7 +121,9 @@ export function evaluate({ pr, issues, nowMs = Date.now(), channelIssue = CHANNE
     const parts = []
     for (const h of f.holders) {
       const age = h.claimedAt ? ageText(h.claimedAt, nowMs) : 'at an unknown time'
-      const active = h.lastActivityAt && h.lastActivityAt !== h.claimedAt ? `, last active on it ${ageText(h.lastActivityAt, nowMs)}` : ''
+      // Activity is a clause only when later than the NEWEST claim (a channel
+      // mirror of the claim is not new activity); the age itself is the hold's.
+      const active = h.lastActivityAt && h.lastActivityAt !== h.newestClaimAt ? `, last active on it ${ageText(h.lastActivityAt, nowMs)}` : ''
       parts.push(`@${h.login} claimed it ${age} on ${h.where}${h.branch ? ` (branch \`${h.branch}\`)` : ''}${active}${h.url ? ` — ${h.url}` : ''}`)
     }
     const onlyAssigned = f.assignees.filter((a) => !f.holders.some((h) => sameLogin(h.login, a)))

@@ -271,7 +271,9 @@ export function decideClaim({ issue, claimant, state, assignees, comments, poste
       const since = firstClaim ?? claim // the hold's start, not the newest re-claim
       const branch = branchOf(claim.body)
       const where = since.onIssue === channelIssue ? `on #${channelIssue}` : 'on this issue'
-      const active = lastActivityAt && lastActivityAt !== since.createdAt ? `, last active on it ${ageText(lastActivityAt, nowMs)}` : ''
+      // Activity is worth a clause only when it is later than the NEWEST
+      // claim; a channel mirror of the claim is not new activity.
+      const active = lastActivityAt && lastActivityAt !== claim.createdAt ? `, last active on it ${ageText(lastActivityAt, nowMs)}` : ''
       return `@${holder} claimed it ${ageText(since.createdAt, nowMs)} ${where}${branch ? ` (branch \`${branch}\`)` : ''}${active} and has not released it.`
     })
     const body = [
@@ -282,7 +284,7 @@ export function decideClaim({ issue, claimant, state, assignees, comments, poste
   }
 
   if (stale.length > 0) {
-    const lines = stale.map(({ holder, claim, lastActivityAt }) => `@${holder}'s claim was ${ageText(claim.createdAt, nowMs)}, their last comment about it ${ageText(lastActivityAt ?? claim.createdAt, nowMs)}, with no RELEASE since`)
+    const lines = stale.map(({ holder, claim, firstClaim, lastActivityAt }) => `@${holder}'s claim was ${ageText((firstClaim ?? claim).createdAt, nowMs)}, their last comment about it ${ageText(lastActivityAt ?? claim.createdAt, nowMs)}, with no RELEASE since`)
     const body = [
       `ℹ️ Taken over: issue ${issue} — ${lines.join('; ')}. A claim with no activity for 24 h and no release is stale under AGENTS.md § Cross-session agent coordination, so it was reassigned to @${claimant}.`,
       `${stale.map((s) => `@${s.holder}`).join(' ')}: if you are still on this, say so here and re-claim; the reassignment is a projection, not a judgement. (Posted by the claim projection, #3178.)`,

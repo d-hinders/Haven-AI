@@ -67,7 +67,7 @@ name: Claim to assignee
 # accepted as before. Holders are found from the CLAIM COMMENTS (issue thread +
 # the whole channel), not from the assignee field, so two claims seconds apart
 # and a non-assignable author are both caught (a dead heat is resolved by age:
-# the older claim wins, the newer run is the one refused) — and only a collaborator's, and a
+# the older HOLD wins — first claim in force — the newer run is the one refused) — and only a collaborator's, and a
 # person's (`author_association` in this gate's set, `user.type` not `Bot`), so
 # a drive-by claim on the public channel cannot refuse real ones. The reply is
 # the only kind of

@@ -1,0 +1,106 @@
+name: PR ownership gate
+
+# A pull request that would close an issue somebody else holds cannot merge
+# (#3179). For every issue the PR closes — GitHub's linked references plus the
+# closing keywords in the title and commit messages, the same candidate set the
+# merge-time release (#3177) uses — the check fails if the issue is open and
+# somebody other than the PR author is its assignee or holds a live claim on it
+# under the #3178 holder rule (a collaborator's claim comment, last activity
+# < 24 h, no RELEASE since; a hold that began after the author's own — their
+# first claim in force — does not count: a refused claim is not a claim). It names them, links the claim, and
+# gives the two ways out: a handover in #1289 (the holder posts `🔓 RELEASE`),
+# or `Refs` instead of `Closes`. Decision logic and tests:
+# `scripts/ci/pr-ownership-gate.mjs`.
+#
+# ## The incident
+#
+# #3015, 2026-09-15: two claims (12:50:01Z on the issue, 13:03:08Z on #1289); a
+# PR opened at 13:28:09Z by the first claimant, who released the issue fifty
+# seconds later; merged at 13:41:14Z while the second claimant was still
+# assigned — nobody talked. Nothing between a pushed branch and a merged PR
+# asked whose issue it was.
+#
+# ## What passes
+#
+# - No assignee and no live claim, or the assignee/holder IS the author.
+# - A DRAFT PR (not a merge candidate) — the check re-runs on `ready_for_review`.
+# - A PR into a non-default branch (GitHub closes nothing there).
+# - Closed candidates and pull-request numbers are skipped; bot assignees do
+#   not count.
+#
+# ## Why `pull_request_target`, and why that is safe here
+#
+# The judge must not be the code under judgement: on `pull_request` the PR's
+# own copy of `pr-ownership-gate.mjs` would run, and a session blocked by this
+# gate could edit one line of it in the same PR. `pull_request_target` runs the
+# workflow from the repository's DEFAULT branch and checks it out (`GITHUB_SHA`
+# is the default branch's tip), so the script that judges is the one already on
+# `dev` — which is also why this workflow cannot run on the PR that adds it:
+# its first run is the next PR opened after that merge. That trigger normally warrants care
+# because it carries a write-capable token — here `permissions` is read-only,
+# the PR's code is never checked out or executed, and the only PR-derived input
+# is the event payload, read from the file GitHub provides. The check still
+# attaches to the PR and can be made required.
+#
+# ## Fail closed, and the exit code is the verdict
+#
+# A required check that cannot read the issues it must judge FAILS, with the
+# error in the log (the operator-verify close guard's precedent). Re-run the job
+# after a transient error. `shell: bash` + `set -o pipefail` keep the script's
+# exit 1 through the `tee` into the step summary — Actions' default `bash -e`
+# has no pipefail and would have turned every failure green (measured).
+#
+# ## Operator step (owner)
+#
+# Making this a REQUIRED context is a ruleset change, not a workflow change:
+# add "PR ownership gate" to the *Haven automerge rules* required status
+# checks. That ruleset targets BOTH `dev` and `main`, so it becomes the 16th
+# required context on `dev` and the 20th on `main`. Until then the check runs
+# and reports on every PR but does not block. The ruleset inventory in
+# docs/contributing/autonomous-pr-loop.md records the state and names the
+# counts to update.
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+# One run per PR at a time: `edited` fires on every body/title edit and the
+# runs land on the same head sha, so without this an earlier red could
+# complete after a later green (labeler.yml's shape).
+concurrency:
+  group: pr-ownership-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ownership:
+    name: PR ownership gate
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Default checkout on pull_request_target = the DEFAULT branch (`dev`):
+      # the judge is dev's copy of the script, never the PR's. Do not add
+      # `ref:` here.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: Judge the issues this pull request would close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        # The event payload is read from the file GitHub provides (it carries
+        # the PR body, public text) — never interpolated. Exit 1 fails the check.
+        # `shell: bash` matters: without it Actions runs `bash -e {0}` with NO
+        # pipefail, and `| tee` would turn the script's exit 1 into a green
+        # check (measured: `bash -e -c 'false | tee /dev/null'` exits 0). With
+        # `shell: bash` Actions runs `bash --noprofile --norc -eo pipefail {0}`.
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/ci/pr-ownership-gate.mjs --event "$GITHUB_EVENT_PATH" | tee -a "$GITHUB_STEP_SUMMARY"

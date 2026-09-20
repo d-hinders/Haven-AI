@@ -125,6 +125,25 @@ export type BudgetResult =
   | { ok: true }
   | { ok: false; reason: 'cancelled' | 'failed' | 'too_many' }
 
+/**
+ * The edit-in-place result (#3166). Distinct from `BudgetResult` because the
+ * composition has states the single grant does not:
+ *
+ * - `refused` — the backend refused the BUILD step by name (revoked agent,
+ *   re-key in flight, off-rail account). `detail` is the backend's own
+ *   sentence; the old budget is live and untouched.
+ * - `revoke_unfinished` — the new grant is LIVE but the old one is not yet
+ *   revoked on-chain (the stop signature was cancelled or the submit failed).
+ *   `newDelegationHash` lets the caller point at the live budget; the owner
+ *   finishes the stop from the budget card's own Stop button.
+ * - `oldDelegationRevoked` is false in the one success-shaped race where the
+ *   old grant was already revoked before the flow asked for the stop
+ *   signature — the goal is met, so this still reports `ok: true`.
+ */
+export type EditBudgetResult =
+  | { ok: true; newDelegationHash: string; oldDelegationRevoked: boolean }
+  | { ok: false; reason: 'cancelled' | 'failed' | 'refused' | 'revoke_unfinished'; detail?: string; newDelegationHash?: string }
+
 async function signTyped(
   signer: NonNullable<ReturnType<typeof useActiveSigner>>,
   payload: TypedDataPayload,
@@ -272,6 +291,140 @@ export function useDelegationBudget(
     [agentId, signingPath, reload, signer, signers],
   )
 
+  // ── Edit budget limits in place (#3166) ──────────────────────────────────
+  // REPLACE = grant(new) + revoke(old) — the composition the lifecycle API's
+  // header comment defines. The DELEGATE KEY AND LOCAL SIGNER ARE NEVER
+  // TOUCHED: both signatures below are OWNER signatures made client-side, and
+  // no rotate/rekey endpoint is ever called. Ordering is activate-then-revoke,
+  // deliberately: Haven cannot revoke on its own (the revoke UserOp needs an
+  // owner signature), and revoking first would leave the agent with NO budget
+  // if the new grant is abandoned — the issue's own criterion forbids that.
+  // Once the owner signs the new delegation, activation retires the old grant
+  // in Haven's mirror atomically (`activatePendingDelegationInSlot`); the
+  // follow-up revoke kills it on-chain. Between the two signatures the two
+  // grants briefly coexist on-chain (combined exposure = their sum, each
+  // caveat-enforced) — that window is stated in the UI copy.
+  //
+  // Failure shapes, all leaving the old budget live and untouched:
+  // - build refused (revoked agent, rekey in flight, off-rail account): the
+  //   backend's named 409 travels as `refused`.
+  // - new-grant signature cancelled or failed: nothing was granted, nothing
+  //   was revoked (`cancelled` / `failed`).
+  // - activation raced a revoke-all: the 409 "no longer pending" surfaces as
+  //   `failed` with the old state untouched (the grant did not land).
+  // - the old budget was ALREADY revoked by the time the stop signature is
+  //   asked for (the same revoke-all race, other side): the goal — old grant
+  //   dead — is already met, so the flow reports success.
+  const editBudget = useCallback(
+    async (
+      oldDelegationHash: string,
+      input: GrantInput,
+      opts: { expiresAt?: number } = {},
+    ): Promise<EditBudgetResult> => {
+      setBusy(true)
+      try {
+        let built: BuildResponse
+        try {
+          built = await api.post<BuildResponse>(`/agents/${agentId}/delegations/build`, {
+            token_address: input.tokenAddress,
+            recipient_address: input.recipientAddress ?? null,
+            budget_atomic: input.budgetAtomic,
+            period_seconds: input.periodSeconds,
+            ...(opts.expiresAt !== undefined ? { expires_at: opts.expiresAt } : {}),
+          })
+        } catch (err) {
+          // The build refusals are named 409s the owner can act on — pass the
+          // backend's own sentence through instead of a generic failure.
+          if (err instanceof Error && err.message.trim()) {
+            return { ok: false, reason: 'refused', detail: err.message }
+          }
+          throw err
+        }
+        let grantSignature: string
+        if (signingPath === 'passkey' && signers) {
+          // ONE passkey ceremony — the kit signs the delegation itself; the
+          // typed-data message IS the delegation (#828's payload).
+          const { signDelegationWithPasskey } = await import('@/lib/delegationPasskeySigner')
+          grantSignature = await signDelegationWithPasskey(
+            signers,
+            built.signing_payload.message as unknown as DelegationMessage,
+          )
+        } else {
+          if (!signer) return { ok: false, reason: 'failed' }
+          grantSignature = await signTyped(signer, built.signing_payload)
+        }
+        try {
+          await api.post(`/agents/${agentId}/delegations/${built.delegation_hash}/activate`, {
+            signature: grantSignature,
+          })
+        } catch (err) {
+          // Nothing was granted — the old budget is exactly what it was.
+          return { ok: false, reason: cancelled(err) ? 'cancelled' : 'failed' }
+        }
+        // The new grant is live and the old one is retired in the mirror.
+        // Kill it on-chain with ONE more owner signature.
+        let prep: RevokePrepare
+        try {
+          prep = await api.post<RevokePrepare>(
+            `/agents/${agentId}/delegations/${oldDelegationHash}/revoke`,
+            { signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop' },
+          )
+        } catch (err) {
+          // "Already revoked" means the goal is met (a concurrent revoke-all
+          // or the reconciliation heal got there first) — not a failure.
+          if (err instanceof Error && /already revoked/i.test(err.message)) {
+            await reload()
+            return { ok: true, newDelegationHash: built.delegation_hash, oldDelegationRevoked: false }
+          }
+          // The new grant is LIVE; only the on-chain stop of the old one is
+          // unfinished. Report the partial state honestly so the UI can tell
+          // the owner to finish it from the budget card's Stop button.
+          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: built.delegation_hash }
+        }
+        let revokeSignature: string
+        try {
+          if (prep.signature_scheme === 'webauthn_userop') {
+            if (!signers) {
+              return { ok: false, reason: 'revoke_unfinished', newDelegationHash: built.delegation_hash }
+            }
+            // ONE passkey ceremony — the account signs its own UserOperation.
+            const { signUserOpWithPasskey } = await import('@/lib/delegationPasskeySigner')
+            revokeSignature = await signUserOpWithPasskey(
+              signers,
+              prep.user_operation as Record<string, unknown>,
+            )
+          } else {
+            if (!signer || !prep.signing_payload) {
+              return { ok: false, reason: 'revoke_unfinished', newDelegationHash: built.delegation_hash }
+            }
+            revokeSignature = await signTyped(signer, prep.signing_payload)
+          }
+        } catch {
+          // A cancelled or failed STOP signature is NOT the generic outcome:
+          // the new grant is already live, so the partial state — not
+          // "nothing changed" — is what the owner must be told.
+          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: built.delegation_hash }
+        }
+        try {
+          await api.post(`/agents/${agentId}/delegations/${oldDelegationHash}/revoke/submit`, {
+            signature: revokeSignature,
+            user_operation: prep.user_operation,
+          })
+        } catch {
+          // Same partial-state shape: new grant live, old grant still to stop.
+          return { ok: false, reason: 'revoke_unfinished', newDelegationHash: built.delegation_hash }
+        }
+        await reload()
+        return { ok: true, newDelegationHash: built.delegation_hash, oldDelegationRevoked: true }
+      } catch (err) {
+        return { ok: false, reason: cancelled(err) ? 'cancelled' : 'failed' }
+      } finally {
+        setBusy(false)
+      }
+    },
+    [agentId, signingPath, reload, signer, signers],
+  )
+
   const revoke = useCallback(
     async (delegationHash: string): Promise<BudgetResult> => {
       setBusy(true)
@@ -366,6 +519,7 @@ export function useDelegationBudget(
   return {
     budgets,
     grant,
+    editBudget,
     revoke,
     revokeAll,
     busy,

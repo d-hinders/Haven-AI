@@ -338,6 +338,29 @@ chain.
 > `ANY(...)` — the same ownership property, written differently. An earlier
 > draft of this note said `WHERE user_id = $1` flatly; review measured it.
 
+> **Re-verified #3166 (edit budget limits in place):** this diff touched one
+> file in this document's coverage list, `hooks/useDelegationBudget.ts` — it
+> gains `editBudget`, a frontend composition of the EXISTING lifecycle routes
+> (build → owner signs → activate → per-hash revoke prepare → owner signs →
+> submit) so the dashboard can change one active budget's limits without
+> regenerating the delegate key. Nothing this document describes moves: the
+> delegate key and local signer are untouched by construction (the only two
+> ceremonies are OWNER signatures made client-side — the delegation itself and
+> the revoke UserOp — and no rotate/rekey endpoint is on the flow's wire
+> order, pinned by the hook test). Ordering is activate-then-revoke: Haven
+> cannot revoke by itself (the revoke UserOp needs an owner signature), and
+> revoking first would leave the agent with no budget if the new grant were
+> abandoned. While the flow runs the old budget keeps working; between the two
+> signatures both delegations exist on-chain (combined exposure = their sum,
+> each bounded by its own caveat enforcers) — the window is stated in the UI
+> copy and closed by the second signature. Refusals surface verbatim: the
+> in-flight re-key guard (§3) refuses the BUILD step, and a revoke-all that
+> raced the edit either 409s the activation (old state untouched) or is
+> reported as success-shape when the per-hash revoke finds the old row already
+> reconciled. Abandoned at any point, the old budget stays live and untouched.
+> Scope of this note: that one hook. Nothing else in this document was
+> re-verified.
+>
 > **Re-verified #3093 (frontend hooks: array wire keys default to `[]`):** this
 > diff touched one file in this document's coverage list,
 > `hooks/useDelegationBudget.ts`, by one expression: `setBudgets(res.delegations)`

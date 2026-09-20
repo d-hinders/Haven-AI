@@ -37,7 +37,8 @@ export type TransactionCurrency = (typeof TRANSACTION_CURRENCIES)[number]
  * default ledger currency. A user who never touched settings keeps the
  * figures they were getting; now the figure names its currency.
  *
- * Migration 091 (owner decision, Philip, 2026-09-19) makes the stored data
+ * Migration 091 (owner decision, Antonio, 2026-09-20 (proposed by Philip
+ * 2026-09-19)) makes the stored data
  * agree with this default: every pre-existing `currency_preference='USD'`
  * row — the literal inherited from `000_initial.ts`'s column default, never
  * chosen by the user — is set to NULL, so those users are served THIS

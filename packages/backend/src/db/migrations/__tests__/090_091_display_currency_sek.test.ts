@@ -1,7 +1,8 @@
 /**
  * Real-Postgres proof for migration 090 — the display-side SEK columns
  * (#3127 round 2) — and migration 091 — the stored preference catching up to
- * the documented default (owner decision, 2026-09-19). No mocks — #1219's
+ * the documented default (owner decision, Antonio, 2026-09-20 (proposed by
+ * Philip 2026-09-19)). No mocks — #1219's
  * rule.
  *
  * The harness applies the FULL migration set, so by the time a test body

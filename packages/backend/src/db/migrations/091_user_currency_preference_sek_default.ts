@@ -4,7 +4,7 @@ export const version = '091_user_currency_preference_sek_default'
 
 /**
  * The stored preference catches up to the documented default (#3127, owner
- * decision 2026-09-19).
+ * decision, Antonio, 2026-09-20 (proposed by Philip 2026-09-19)).
  *
  * Every pre-existing `users.currency_preference` row carries the literal
  * `'USD'` — inherited from `000_initial.ts`'s column default, never chosen:

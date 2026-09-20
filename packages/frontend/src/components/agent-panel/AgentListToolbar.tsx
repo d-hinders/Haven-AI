@@ -77,11 +77,9 @@ export function AgentListToolbar({
   // Escape unmounts the panel with focus inside it; without this a keyboard
   // user lands on <body> and a screen reader hears nothing (#3165 review).
   const closeToTrigger = useCallback(() => {
-    setOpen((current) => {
-      if (current) triggerRefs.current[current]?.focus()
-      return null
-    })
-  }, [])
+    if (open) triggerRefs.current[open]?.focus()
+    setOpen(null)
+  }, [open])
 
   useEscapeToClose(open !== null, closeToTrigger)
 

@@ -542,7 +542,7 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
   })
 
   test('S1 guard: a drive-by claim by a NON-collaborator on the public channel makes no holder', () => {
-    // #1289 is public. Without this, anyone could post `🔒 CLAIM #N` there and
+    // The channel is public. Without this, anyone could post `🔒 CLAIM #N` there and
     // get every real claim of #N refused.
     const driveBy = { ...holderClaimLine, author: 'stranger', authorAssociation: 'NONE' }
     assert.equal(decideClaim({ ...base, assignees: [], comments: [driveBy] }).action, 'accept')
@@ -608,7 +608,7 @@ describe('a second CLAIM on a held issue is answered, not silently accepted (#31
   })
 
   test('the tie-break uses the holder\'s FIRST claim in force: a re-claim or channel copy does not make them "newer"', () => {
-    // Antonio claimed at 12:00:00 (issue) and mirrored to #1289 at 12:00:20;
+    // Antonio claimed at 12:00:00 (issue) and mirrored to the channel at 12:00:20;
     // Philip claimed at 12:00:05. Antonio's hold began first and must win even
     // though his NEWEST claim is later than Philip's.
     const a1 = { author: 'AntonioSaaranen', body: '🔒 CLAIM #3200 — branch `feat/3200-a`', createdAt: '2026-09-20T12:00:00Z', onIssue: 3200, authorAssociation: 'COLLABORATOR' }

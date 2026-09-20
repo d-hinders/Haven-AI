@@ -179,7 +179,7 @@ describe('collect through an injected gh', () => {
 
   test('the author\'s own later re-claim or channel copy does not resurrect a refused foreign claim (hold start, not newest claim)', async () => {
     const t0 = new Date(NOW - 6 * 3_600_000).toISOString() // Antonio claims on the issue
-    const t1 = new Date(NOW - 5 * 3_600_000).toISOString() // Philip claims on #1289 → refused by #3178
+    const t1 = new Date(NOW - 5 * 3_600_000).toISOString() // Philip claims on the channel → refused by #3178
     const t2 = new Date(NOW - 4.5 * 3_600_000).toISOString() // Antonio posts his channel copy
     const { gh } = recorder({
       closing: [{ number: 4242 }],

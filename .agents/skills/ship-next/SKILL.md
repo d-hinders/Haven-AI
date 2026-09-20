@@ -148,9 +148,8 @@ Also post the same `CLAIM` to the channel,
 a shared surface another session could plausibly pick up. The list of shared
 surfaces lives in AGENTS.md § *Cross-session agent coordination* — the one
 canonical copy of the protocol (#3182); this skill states the workflow around
-it and does not repeat it. A claim you give up because you should not have made
-it (a collision, a duplicate) is `↩️ WITHDRAWN #<issue> — <why>`, which the
-projection treats as a release.
+it and does not repeat the list. Giving up a claim you should not have made is
+a withdrawal, defined in AGENTS.md § *Release what you drop*.
 
 The release is automatic on merge (#3177): `claim-release-on-merge.yml` posts
 `🔓 RELEASE` on every issue the merged PR closed (GitHub's linked references

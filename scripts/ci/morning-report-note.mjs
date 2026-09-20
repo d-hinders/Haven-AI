@@ -100,6 +100,7 @@ export const TOPIC_OVERLAP = 0.5
 export const FORBIDDEN = [
   { re: /(?:^|\s)🔒\s*CLAIM/u, why: 'contains a CLAIM marker — only a session may claim work' },
   { re: /(?:^|\s)🔓\s*RELEASE/u, why: 'contains a RELEASE marker — only a session, or the merge-time workflow (#3177), may release a claim' },
+  { re: /(?:^|\s)↩\uFE0F?\s*WITHDRAWN/u, why: 'contains a WITHDRAWN marker — a withdrawal releases a claim (#3182), and only a session may do that' },
   { re: /<!--/, why: 'contains an HTML comment — could hide content or poison dedupe' },
   { re: /<\s*\/?\s*[a-z][a-z0-9]*(?:\s|\/?>)/i, why: 'contains raw HTML' },
 ]

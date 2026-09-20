@@ -206,12 +206,25 @@ export function parse({ body, onIssue = null, channelIssue = CHANNEL_ISSUE, auth
     // in which case the run starts at the line head rather than after a keyword.
     const clean = undecorate(line)
     const leadsWithRef = /^#\d{1,6}\b/.test(clean)
-    // A WITHDRAWN line that also says RELEASE puts its numbers after RELEASE
-    // (`⚠️ WITHDRAWN — RELEASE #2117`); one that does not puts them after the
-    // word itself (`↩️ WITHDRAWN #3005 — …`).
-    const releaseKeyword = withdrawnLine(clean) && !/\breleas(e|ed)\b/i.test(clean) ? /withdrawn\b:?/i : /releas(e|ed)\b:?/i
-    const keyword = leadsWithRef ? null : isRelease ? releaseKeyword : /claim\b/i
-    let refs = refsOn(clean, keyword)
+    const keyword = leadsWithRef ? null : isRelease ? /releas(e|ed)\b:?/i : /claim\b/i
+    let refs
+    if (!leadsWithRef && isRelease && withdrawnLine(clean)) {
+      // A withdrawal puts its number after the word (`↩️ WITHDRAWN #3005 — …`).
+      // Only when nothing follows the word is the number looked for after
+      // RELEASE (the historical `⚠️ WITHDRAWN — RELEASE #2117`). The order
+      // matters: the reason prose after the number routinely says "released"
+      // ("… Philip already released this one"), and searching after that word
+      // first would find nothing and leave the stale assignee in place —
+      // measured in review of #3182.
+      refs = refsOn(clean, /withdrawn\b:?/i)
+      if (refs.length === 0) refs = refsOn(clean, keyword)
+    } else {
+      refs = refsOn(clean, keyword)
+    }
+    // A line that LEADS with the issue and goes on to say WITHDRAWN (`#3005 —
+    // WITHDRAWN, collided`) is deliberately not a release: `releaseLine`'s
+    // ref-leading arm is reserved for the word RELEASE, which the corpus uses
+    // that way (`#2680 (…): RELEASE — PR #2754`); WITHDRAWN has no such use.
 
     // A marker made ON its own issue may not restate the number:
     // "🔒 CLAIM — branch feat/x — touches: …" posted on #2947.
@@ -223,7 +236,8 @@ export function parse({ body, onIssue = null, channelIssue = CHANNEL_ISSUE, auth
     // live claim. That is the exact failure this module exists to avoid, and it
     // would fire on the owner, whose claim it erases. An explicit 🔓 is a
     // deliberate use of the protocol and keeps the fallback.
-    const mayFallBack = !fromBot && (isClaim || /^\s*(?:🔓|↩️)/.test(undecorate(line)))
+    // `↩` with or without the U+FE0F presentation selector, as keyboards differ.
+    const mayFallBack = !fromBot && (isClaim || /^\s*(?:🔓|↩\uFE0F?)/.test(undecorate(line)))
     if (refs.length === 0 && mayFallBack && onIssue && onIssue !== channelIssue) refs = [onIssue]
 
     for (const n of refs) {

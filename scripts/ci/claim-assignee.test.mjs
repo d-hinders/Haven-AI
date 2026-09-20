@@ -85,6 +85,12 @@ describe('releases, matched generously because a stale assignee misleads', () =>
     ['withdrawn, superseded by a PR', "↩️ WITHDRAWN #3015 — superseded by @d-hinders's PR #3022 (merged 13:41Z, closes #3015, no claim posted here; my claim stood from 13:03Z).", 3015],
     ['withdrawn with a warning sign, number after RELEASE', '⚠️ WITHDRAWN — RELEASE #2117 (PR #2134) closed as superseded by #2135 (merged `a0fffaf0`).', 2117],
     ['padlock release that says withdrawn mid-line', '🔓 RELEASE #2780 — claim **WITHDRAWN AS SUPERSEDED** (duplicate claim, nothing built).', 2780],
+    // The reason prose after the number may say "release(d)"; the number is
+    // still read after WITHDRAWN (review of #3182 measured these three as []).
+    ['withdrawn, reason says released', '↩️ WITHDRAWN #3005 — Philip already released this one', 3005],
+    ['withdrawn, superseded and released the branch', '↩️ WITHDRAWN #3005 — superseded by PR #3010, released the branch', 3005],
+    ['withdrawn, holder will release later', '↩️ WITHDRAWN #3005 — collided with @philip; he will release when done', 3005],
+    ['withdrawn without the presentation selector', '↩ WITHDRAWN #3005 — same marker, plain arrow', 3005],
   ]
   for (const [name, body, expected] of cases) {
     test(name, () => {
@@ -99,6 +105,11 @@ describe('releases, matched generously because a stale assignee misleads', () =>
 
   test('a withdrawal posted on its own issue may omit the number, like 🔓 (#3182)', () => {
     assert.deepEqual(parse({ body: '↩️ WITHDRAWN — collided with Philip, standing down', onIssue: 3005 }), { claim: [], release: [3005] })
+    assert.deepEqual(parse({ body: '↩ WITHDRAWN — standing down (plain arrow)', onIssue: 3005 }), { claim: [], release: [3005] })
+  })
+
+  test('a line that leads with the issue and then says WITHDRAWN is not a marker (deliberate; RELEASE has that arm)', () => {
+    assert.deepEqual(onChannel('#3005 — WITHDRAWN, collided'), { claim: [], release: [] })
   })
 
   test('the word withdrawn mid-sentence is prose, not a marker', () => {
@@ -148,12 +159,18 @@ describe('the channel number is single-sourced (#3182)', () => {
     assert.deepEqual(hits, ['../../AGENTS.md'])
   })
 
-  test('the protocol docs link a retired channel at most once each, as the predecessor', async () => {
+  test('the protocol docs name a retired channel only where they call it the predecessor or history', async () => {
+    // The first cut of this test matched the URL form only and stayed green
+    // over five bare `#1289` live-rule sentences (review of #3182). Bare
+    // mentions are the ones agents read, so every LINE that carries one must
+    // also say what it is. Mutation: put `coordinate in #1289` back → red.
     const { RETIRED_CHANNEL_ISSUES } = await import('./coordination-channel.mjs')
     for (const old of RETIRED_CHANNEL_ISSUES) {
       for (const f of ['../../AGENTS.md', '../../.agents/skills/ship-next/SKILL.md']) {
-        const urls = read(f).match(new RegExp(`issues/${old}\\b`, 'g')) ?? []
-        assert.ok(urls.length <= 1, `${f} links the retired channel ${urls.length} times`)
+        const offenders = read(f)
+          .split('\n')
+          .filter((l) => new RegExp(`(?:#|issues/)${old}\\b`).test(l) && !/predecessor|history/i.test(l))
+        assert.deepEqual(offenders, [], `${f} names the retired channel #${old} as if it were live`)
       }
     }
   })

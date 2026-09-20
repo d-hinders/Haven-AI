@@ -23,10 +23,20 @@ export const ACCOUNTED_SCOPE_COMPANIES_READ = 'companies:read'
 /** The write scope the feed needs; cannot be validated at connect (#3017 docs). */
 export const ACCOUNTED_SCOPE_DOCUMENTS_WRITE = 'documents:write'
 
-/** The two scopes a valid Accounted key must carry, in the order the copy names them. */
-export const ACCOUNTED_REQUIRED_SCOPES: readonly [string, string] = [
+/** The scope webhook subscription management needs; used at connect (#3019 docs). */
+export const ACCOUNTED_SCOPE_WEBHOOKS_MANAGE = 'webhooks:manage'
+
+/**
+ * The scopes a valid Accounted key must carry, in the order the copy names
+ * them. #3019 adds `webhooks:manage`: connect now creates the three event
+ * subscriptions, and the provider refuses a key without the scope at
+ * registration time (`INSUFFICIENT_SCOPE`), which surfaces as
+ * `needs_attention` on the connection.
+ */
+export const ACCOUNTED_REQUIRED_SCOPES: readonly [string, string, string] = [
   ACCOUNTED_SCOPE_COMPANIES_READ,
   ACCOUNTED_SCOPE_DOCUMENTS_WRITE,
+  ACCOUNTED_SCOPE_WEBHOOKS_MANAGE,
 ] as const
 
 /** The separator the helper copy puts between the two scope names. */

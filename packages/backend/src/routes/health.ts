@@ -30,11 +30,12 @@ export interface HealthRouteOptions {
  */
 export type HealthOpsAccounting =
   | (AccountingOpsCounters & { unavailable?: false })
-  | { exhaustedSyncs: null; connectionsNeedingAttention: null; unavailable: true }
+  | { exhaustedSyncs: null; connectionsNeedingAttention: null; webhookCounters: null; unavailable: true }
 
 const ACCOUNTING_UNAVAILABLE: HealthOpsAccounting = {
   exhaustedSyncs: null,
   connectionsNeedingAttention: null,
+  webhookCounters: null,
   unavailable: true,
 }
 

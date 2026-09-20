@@ -1169,6 +1169,11 @@ export const openapiSpec = {
     { name: 'Machine payments' },
     { name: 'Transactions' },
     { name: 'Delegations' },
+    {
+      name: 'Webhooks',
+      description:
+        'Inbound provider callbacks (#3019). Authenticated by a per-connection capability URL token plus the provider HMAC signature — never a session.',
+    },
   ],
   paths: {
     '/openapi.json': {
@@ -3536,6 +3541,64 @@ export const openapiSpec = {
     // Verify, reopen, sync and status keep their feed-scoped home under
     // `/accounting/feed/*` (review, 2026-09-11): they act on the ACTIVE
     // destination, so there is no provider-scoped duplicate of them here.
+    '/accounting/webhooks/accounted/{token}': {
+      post: {
+        tags: ['Webhooks'],
+        operationId: 'accountedWebhookCallback',
+        summary: 'PUBLIC Accounted webhook callback — authenticated by the capability token + the HMAC signature, not by a session.',
+        description:
+          "Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (a webhook carries no credential header).",
+        security: [],
+        parameters: [{ name: 'token', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['status'],
+                  properties: { status: { type: 'string' }, counted: { type: 'string' }, deliveryId: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': { description: 'Bad or malformed signature, or a stale timestamp.' },
+          '404': { description: 'No connection carries this token.' },
+        },
+      },
+    },
+    // The trailing-slash twin of the callback path, registered so Fastify's
+    // redirect never answers the provider with a 3xx (a 3xx or a 410
+    // auto-disables the subscription). Same handler, same contract, own
+    // operationId because the generator indexes by operation.
+    '/accounting/webhooks/accounted/{token}/': {
+      post: {
+        tags: ['Webhooks'],
+        operationId: 'accountedWebhookCallbackTrailingSlash',
+        summary: 'PUBLIC Accounted webhook callback (trailing-slash twin — the same handler; never a redirect).',
+        description:
+          'Registered EXPLICITLY so the provider never meets Fastify\'s trailing-slash redirect: a 3xx would hand it a URL the subscription was not registered with, and a 410 would auto-disable the subscription without replay (#3019). Identical contract to `accountedWebhookCallback`.',
+        security: [],
+        parameters: [{ name: 'token', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['status'],
+                  properties: { status: { type: 'string' }, counted: { type: 'string' }, deliveryId: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': { description: 'Bad or malformed signature, or a stale timestamp.' },
+          '404': { description: 'No connection carries this token.' },
+        },
+      },
+    },
     '/accounting/providers': {
       get: {
         tags: ['Dashboard'],

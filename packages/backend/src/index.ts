@@ -71,6 +71,7 @@ import analyticsOverviewRoutes from './routes/analytics-overview.js'
 import accountingRoutes from './routes/accounting.js'
 import accountingConnectionsRoutes from './routes/accounting-connections.js'
 import accountingFeedRoutes from './routes/accounting-feed.js'
+import accountingWebhookRoutes from './routes/accounting-webhooks.js'
 import { registerConnector, startRetrySweep, getAccountingOpsCounters, setOpsEventSink } from './modules/accounting/index.js'
 import { AccountedConnector } from './modules/accounting/index.js'
 import { FortnoxConnector } from './modules/accounting/index.js'
@@ -321,6 +322,11 @@ await app.register(accountingRoutes, { prefix: '/accounting' })
 // `/accounting/connections/*`) replaced the Fortnox-shaped router.
 await app.register(accountingConnectionsRoutes, { prefix: '/accounting' })
 await app.register(accountingFeedRoutes, { prefix: '/accounting/feed' })
+// #3019: the Accounted webhook receiver. Public (the provider carries no
+// session), capability-URL token + HMAC as the credentials, and its OWN
+// encapsulated content-type parser — registering it as a plugin keeps the
+// raw-body capture off every other route.
+await app.register(accountingWebhookRoutes)
 // #496: the live Fortnox feed adapter. Registering it flips hasLiveConnector()
 // → true, which removes the Reporting page's "preview" banner. Gated on env:
 // deployments without Fortnox credentials keep the feed inert (no-op), same

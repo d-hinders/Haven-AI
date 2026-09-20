@@ -3,6 +3,21 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import { readFile } from 'node:fs/promises'
 import { registerHealthRoutes, type HealthRouteOptions } from '../routes/health.js'
 
+/** The zero webhook counter block (#3019) — the shape `/health/ops` carries. */
+function zeroWebhookCounters() {
+  return {
+    received: 0,
+    bad_signature: 0,
+    stale: 0,
+    unknown_token: 0,
+    duplicate: 0,
+    processed: 0,
+    feature_off: 0,
+    unknown_type: 0,
+    confirmed: 0,
+  }
+}
+
 describe('GET /health', () => {
   let app: FastifyInstance | undefined
 
@@ -27,7 +42,7 @@ describe('GET /health', () => {
       getPassportStatus: () => ({ configured: true }) as never,
       trustProxyHops: 1,
       opsToken: 'operator-secret',
-      getAccountingCounters: async () => ({ exhaustedSyncs: 0, connectionsNeedingAttention: 0 }),
+      getAccountingCounters: async () => ({ exhaustedSyncs: 0, connectionsNeedingAttention: 0, webhookCounters: zeroWebhookCounters() }),
       ...overrides,
     })
     return app
@@ -82,7 +97,7 @@ describe('GET /health/ops', () => {
       getPassportStatus: () => ({ configured: true }) as never,
       trustProxyHops: 1,
       opsToken,
-      getAccountingCounters: async () => ({ exhaustedSyncs: 0, connectionsNeedingAttention: 0 }),
+      getAccountingCounters: async () => ({ exhaustedSyncs: 0, connectionsNeedingAttention: 0, webhookCounters: zeroWebhookCounters() }),
       ...overrides,
     })
     return app
@@ -112,7 +127,7 @@ describe('GET /health/ops', () => {
       relayer: [],
       passport: { configured: true },
       trustProxy: { hops: 1, authRateLimitArmed: true },
-      accounting: { exhaustedSyncs: 0, connectionsNeedingAttention: 0 },
+      accounting: { exhaustedSyncs: 0, connectionsNeedingAttention: 0, webhookCounters: zeroWebhookCounters() },
       // The request-validation shadow counters (#3029). This bare app installs
       // no plugin, so the module-level counters sit at their pre-install
       // default: mode 'off', nothing counted (vitest isolates per test file).
@@ -129,11 +144,11 @@ describe('GET /health/ops', () => {
   })
 
   it('carries the two accounting counters (#2872) verbatim from the module, and nothing else about accounting', async () => {
-    const getAccountingCounters = vi.fn(async () => ({ exhaustedSyncs: 3, connectionsNeedingAttention: 2 }))
+    const getAccountingCounters = vi.fn(async () => ({ exhaustedSyncs: 3, connectionsNeedingAttention: 2, webhookCounters: zeroWebhookCounters() }))
     const app = buildOpsApp('operator-secret', { getAccountingCounters })
     const res = await app.inject({ method: 'GET', url: '/health/ops', headers: { 'x-haven-ops-token': 'operator-secret' } })
     expect(res.statusCode).toBe(200)
-    expect(res.json().accounting).toEqual({ exhaustedSyncs: 3, connectionsNeedingAttention: 2 })
+    expect(res.json().accounting).toEqual({ exhaustedSyncs: 3, connectionsNeedingAttention: 2, webhookCounters: zeroWebhookCounters() })
     expect(getAccountingCounters).toHaveBeenCalledTimes(1)
     // A refused token never reaches the database.
     getAccountingCounters.mockClear()
@@ -171,7 +186,7 @@ describe('GET /health/ops', () => {
       relayer: [expect.objectContaining({ chainId: 8453, low: true })],
       passport: { configured: true },
       trustProxy: { hops: 1, authRateLimitArmed: true },
-      accounting: { exhaustedSyncs: null, connectionsNeedingAttention: null, unavailable: true },
+      accounting: { exhaustedSyncs: null, connectionsNeedingAttention: null, webhookCounters: null, unavailable: true },
       // The request-validation shadow counters (#3029, plus #3082's coercion
       // pair); pre-install default, same reason as the valid-token test above.
       request_validation: {

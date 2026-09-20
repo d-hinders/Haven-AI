@@ -13,7 +13,7 @@ covers:
   - packages/backend/src/openapi/route-modules.generated.ts
   - packages/backend/scripts/generate-route-modules.ts
   - packages/backend/src/index.ts
-last-verified: "2026-09-18"
+last-verified: "2026-09-20"
 ---
 
 # Dev environment
@@ -384,6 +384,23 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > prefix-determined and mode-independent), the `/merchants` path items in
   > the OpenAPI spec, and the read-only GET registrations in the
   > `/merchants` route module.
+
+  > **Re-verified #3019 (2026-09-20):** PR's `index.ts` change registers ONE
+  > new plugin — `app.register(accountingWebhookRoutes)` — the Accounted
+  > webhook receiver (`routes/accounting-webhooks.ts`, capability-URL token +
+  > HMAC, its own encapsulated raw-body parser so the capture stays off every
+  > other route). The doc's config claims are unaffected: the receiver reads
+  > the existing `HAVEN_ACCOUNTING_ENABLED` flag (feature off → the route
+  > still answers 200 with a counter — deliberate: a 4xx would eat the
+  > provider's ~87 h retry budget) and adds no variable. The
+  > request-validation claims hold unchanged: the webhook module is NOT in
+  > `enforcedModules` (public route, spec-documented, carries no session
+  > surface to shadow), and `route-modules.generated.ts` was regenerated in
+  > the same commit (`npm run check:route-modules` green), including the
+  > trailing-slash twin's spec entry so the provider never meets Fastify's
+  > redirect. `HAVEN_SECRETS_KEY` now also protects the three webhook
+  > signing secrets (same blob, same key) — the *Secrets at rest* section of
+  > `docs/operations/accounting-feed.md` is the reference, not this file.
 
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 

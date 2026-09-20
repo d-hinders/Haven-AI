@@ -91,6 +91,8 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "POST /accounting/feed/reopen/{paymentId}": "routes/accounting-feed.ts",
   "POST /accounting/feed/sync": "routes/accounting-feed.ts",
   "POST /accounting/fortnox/push": "routes/accounting.ts",
+  "POST /accounting/webhooks/accounted/{token}": "routes/accounting-webhooks.ts",
+  "POST /accounting/webhooks/accounted/{token}/": "routes/accounting-webhooks.ts",
   "POST /accounts/hybrid": "routes/hybrid-accounts.ts",
   "POST /accounts/hybrid/{address}/signers/prepare": "routes/hybrid-accounts.ts",
   "POST /accounts/hybrid/{address}/signers/submit": "routes/hybrid-accounts.ts",

@@ -48,7 +48,8 @@ import {
 } from '../../infra/repositories/accounting-connections.js'
 import { flagConnectionStatus } from './ops-signals.js'
 import { decryptSecrets } from '../../infra/secrets.js'
-import { connectWithApiKey } from './api-key-flow.js'
+import { connectWithApiKey, webhookApiOrigin } from './api-key-flow.js'
+import { deleteAccountedWebhooks, registerAccountedWebhooks, type AccountedWebhookSubscriptionSecret } from './accounted-webhooks.js'
 import { companySwitchLog } from './company-info.js'
 import { getConnector, type AccountingVerification, type ProviderSecrets } from './connector.js'
 import { syncUser } from './feed-orchestrator.js'
@@ -202,8 +203,36 @@ export async function connectProviderWithApiKey(
   apiKey: string,
 ): Promise<ConnectionSummary> {
   const { provider, connector } = assertConnectable(providerId, 'api_key')
-  const row = await connectWithApiKey({ provider, connector, userId, apiKey })
+  // #3019: Accounted's connection carries its three webhook subscriptions —
+  // the registration descriptor rides the call, the flow does the rest.
+  const row = await connectWithApiKey({
+    provider,
+    connector,
+    userId,
+    apiKey,
+    webhooks: provider.id === 'accounted' ? { register: registerAccountedWebhooksAdapter } : undefined,
+  })
   return toConnectionSummary(row)
+}
+
+/**
+ * The registration adapter the flow calls: decrypts nothing (the flow hands
+ * the plaintext secrets), builds the callback origin from the deployment's
+ * stated public URL, and returns the triples to store. Failures propagate —
+ * the flow flags the connection `needs_attention`.
+ */
+async function registerAccountedWebhooksAdapter(reg: {
+  secrets: { apiKey: string }
+  companyId: string
+  token: string
+}): Promise<AccountedWebhookSubscriptionSecret[]> {
+  return registerAccountedWebhooks({
+    apiKey: reg.secrets.apiKey,
+    companyId: reg.companyId,
+    apiOrigin: webhookApiOrigin(),
+    token: reg.token,
+    fetchImpl: fetch,
+  })
 }
 
 // ── Disconnect / activate ────────────────────────────────────────────────────
@@ -240,8 +269,40 @@ export async function disconnectProvider(
       }
     }
   }
+  // #3019: the three webhook subscriptions go with the disconnect, best
+  // effort — a provider outage must not block the user from disconnecting
+  // (the secrets are cleared below regardless; the runbook's
+  // dead-subscription section covers subscriptions left behind).
+  if (providerId === 'accounted' && row.status !== 'disconnected') {
+    await deleteAccountedWebhooksOnDisconnect(row)
+  }
   await disconnectRow(userId, providerId, revoked ? 'user disconnected (grant revoked at provider)' : 'user disconnected')
   return { existed: true, revoked, revokeError }
+}
+
+/**
+ * The webhook half of an Accounted disconnect: decrypt the stored triples
+ * (before the row's secrets are cleared) and DELETE each subscription.
+ * Never throws.
+ */
+async function deleteAccountedWebhooksOnDisconnect(row: AccountingConnectionRow): Promise<void> {
+  if (!row.secrets_ciphertext || !row.external_company_id) return
+  try {
+    const secrets = decryptSecrets<{ apiKey?: string; webhooks?: AccountedWebhookSubscriptionSecret[] }>(
+      row.secrets_ciphertext,
+      row.secrets_key_version,
+    )
+    if (!secrets.apiKey || !secrets.webhooks || secrets.webhooks.length === 0) return
+    await deleteAccountedWebhooks({
+      apiKey: secrets.apiKey,
+      companyId: row.external_company_id,
+      subscriptions: secrets.webhooks,
+      fetchImpl: fetch,
+    })
+  } catch {
+    // Best effort by contract: the disconnect proceeds whatever the provider
+    // answered, and the runbook names the manual cleanup.
+  }
 }
 
 export class ConnectionNotActivatableError extends Error {

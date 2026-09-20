@@ -73,14 +73,28 @@ describeDb('GET /health/ops accounting counters (#2872) — real queries', () =>
     app = undefined
   })
 
-  async function read(): Promise<{ exhaustedSyncs: number; connectionsNeedingAttention: number }> {
+  async function read(): Promise<{ exhaustedSyncs: number; connectionsNeedingAttention: number; webhookCounters: Record<string, number> }> {
     const res = await app!.inject({ method: 'GET', url: '/health/ops', headers: { 'x-haven-ops-token': 'operator-secret' } })
     expect(res.statusCode).toBe(200)
     return res.json().accounting
   }
 
-  it('reads 0 / 0 on an empty deployment', async () => {
-    expect(await read()).toEqual({ exhaustedSyncs: 0, connectionsNeedingAttention: 0 })
+  it('reads 0 / 0 on an empty deployment (webhook counters zero, #3019)', async () => {
+    expect(await read()).toEqual({
+      exhaustedSyncs: 0,
+      connectionsNeedingAttention: 0,
+      webhookCounters: {
+        received: 0,
+        bad_signature: 0,
+        stale: 0,
+        unknown_token: 0,
+        duplicate: 0,
+        processed: 0,
+        feature_off: 0,
+        unknown_type: 0,
+        confirmed: 0,
+      },
+    })
   })
 
   it('exhaustedSyncs counts failed rows AT the cap across every tenant — not retryable failures, not skipped, not pushed', async () => {

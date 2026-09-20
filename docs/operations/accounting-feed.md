@@ -5,14 +5,17 @@ covers:
   - packages/backend/src/modules/accounting/**
   - packages/backend/src/routes/accounting-feed.ts
   - packages/backend/src/routes/accounting-connections.ts
+  - packages/backend/src/routes/accounting-webhooks.ts
   - packages/backend/src/routes/health.ts
   - packages/backend/src/middleware/accountingFeed.ts
   - packages/backend/src/infra/secrets.ts
   - packages/backend/src/infra/repositories/accounting-feed-syncs.ts
   - packages/backend/src/infra/repositories/accounting-connections.ts
+  - packages/backend/src/infra/repositories/accounting-webhook-deliveries.ts
   - packages/backend/src/db/migrations/080_accounting_connections.ts
   - packages/backend/src/db/migrations/081_drop_fortnox_connections_retired.ts
   - packages/backend/src/db/migrations/082_evidence_ledger_fx_rates.ts
+  - packages/backend/src/db/migrations/092_accounting_webhook_deliveries.ts
   - packages/backend/src/domain/ledger-currency.ts
   - packages/backend/src/infra/prices.ts
   - packages/backend/src/infra/fiat-values.ts
@@ -298,6 +301,7 @@ which is what `missingScopes` on the API reads.
 | `needs_reauthorisation` | the token endpoint refused the refresh with a verdict on the GRANT: `invalid_grant`; a 400/403 with no readable code; or a 400/403 carrying any code that is NOT one of the client-side ones (`isGrantRefusal`, `oauth-flow.ts`). NOT on 401 / `invalid_client` and the other client-side codes — those are Haven's credentials — and not on 429 / 408 / 5xx / network, which leave the row untouched with the refresh token unconsumed | still the destination; every payment is recorded `skipped` with `connection needs_reauthorisation: <reason>`; nothing is refreshed, nothing pushed; the sweep leaves its rows alone | the user's **Reconnect** (the same connect-url + callback on the same row); then the skipped rows are re-claimed by the sweep or Sync now |
 | `scope_missing` | (1) at the callback, the echoed scope string is short of `requiredScopes`; (2) at connect, the company read was refused for scope; (3) PRE-push, the create call itself was refused for scope — the sync row is `skipped` (`scope refused before the invoice was created: …`), nothing exists at the provider; (4) POST-push, the attachment step was refused — the sync row stays **`pushed`** with the note, never re-pushed | no destination: no new rows, `syncUser` feeds nothing, the sweep's `c.status = 'connected'` leaves its rows alone | **Reconnect**; the callback UPDATEs the row and keeps settings, floor, flag and history. If it comes straight back `scope_missing`: the provider app registration lacks that scope (Fortnox: the developer-portal permissions must include every entry of `FORTNOX_SCOPE`) |
 | `revoked_at_provider` | reserved for a provider that reports a revocation to Haven (Fortnox has a consent-revoked webhook; Haven does not receive it). **No code path sets it today**; a revocation inside Fortnox surfaces as `needs_reauthorisation` at the next refresh | as `needs_reauthorisation` | Reconnect |
+| `needs_attention` (#3019) | Accounted only: the WEBHOOK half of a connect failed — the three event subscriptions could not be created at the provider (`webhook subscription failed — …` in `status_reason`). The key validated and the feed works; the push confirmations do not arrive | **Reconnect** (paste the key again): connect re-issues the capability token and re-runs the registration |
 | `disconnected` | the user's Disconnect; secrets NULL, `secrets_key_version = 0`, flag dropped, `status_reason = user disconnected [(grant revoked at provider)]` | nothing; history kept | **Connect** (the same row is reused; settings survive) |
 
 A `connected` row with a non-empty `missingScopes` is a grant that predates a
@@ -519,7 +523,8 @@ only after the token passes), under `accounting`:
 | field | query | meaning |
 |---|---|---|
 | `exhaustedSyncs` | `COUNT(*) FROM accounting_feed_syncs WHERE status = 'failed' AND attempts >= 8` (`COUNT_EXHAUSTED_SYNCS_SQL`) | rows the sweep has given up on, deployment-wide — the same predicate as the per-user `counts.exhausted`, never the reason prefix |
-| `connectionsNeedingAttention` | `COUNT(*) FROM accounting_connections WHERE status IN ('needs_reauthorisation', 'scope_missing', 'revoked_at_provider')` (`COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL`) | connections only a re-consent resolves; `disconnected` is the user's choice and is not counted |
+| `connectionsNeedingAttention` | `COUNT(*) FROM accounting_connections WHERE status IN ('needs_reauthorisation', 'scope_missing', 'revoked_at_provider', 'needs_attention')` (`COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL` over `NEEDS_ATTENTION_STATUSES`) | connections only a reconnect resolves; `disconnected` is the user's choice and is not counted |
+| `webhookCounters` (#3019) | in-process (`getAccountingWebhookCounters()`), reset on restart | the Accounted webhook receiver's per-answer-class counts: `received`, `bad_signature`, `stale`, `unknown_token`, `duplicate`, `processed`, `feature_off`, `unknown_type`, `confirmed`. The durable facts are the `accounting_webhook_deliveries` rows — read those, not these, for "what did we receive" |
 
 Both are read live, one aggregate each, no per-user data on the wire. When
 the queries throw, both fields are `null` and `unavailable: true` is added —
@@ -609,12 +614,20 @@ registered in the schema smoke (`npm run db:schema-smoke -w packages/backend`).
 - **`accounting_connections`** (migration 080): `user_id`, `provider`,
   `auth_kind` (`oauth2` | `api_key`), `secrets_ciphertext`,
   `secrets_key_version`, `external_company_id`, `external_company_name`,
-  `base_currency`, `status` (CHECKed to the five states),
+  `base_currency`, `status` (CHECKed to the six states — `needs_attention`
+  joined with the webhooks, migration 092),
   `status_reason`, `granted_scope`, `token_expires_at`,
   `is_active_destination` (partial unique per user), `feed_from`, `settings`
   JSONB (`suggested_account`, `auto_feed`, `backfill { since, requestedAt }`,
   `companySwitches[]` — append-only, oldest first), `last_push_at`,
-  `last_error`. UNIQUE (`user_id`, `provider`).
+  `last_error`, `webhook_token` (the capability-URL token, #3019).
+  UNIQUE (`user_id`, `provider`).
+- **`accounting_webhook_deliveries`** (migration 092, #3019): `provider`,
+  `delivery_id`, `event_type`, `api_version`, `request_id`, `payload` JSONB
+  (the redacted `journal_entry.committed` object only), `received_at`,
+  `processed_at`. UNIQUE (`provider`, `delivery_id`) — the dedupe: the row is
+  written before the 2xx and a replayed id is acknowledged without a second
+  processing. Indexed `(provider, received_at DESC)`.
 - **`accounting_feed_syncs`**: `user_id`, `provider`, `payment_id`,
   `status`, `attempts`, `external_ref`, `error`, `created_at`, `updated_at`.
   UNIQUE (`provider`, `payment_id`, `user_id`). No company column: a pushed
@@ -798,6 +811,104 @@ redirect target. Keys are created AND revoked at `/settings/api`; the sandbox
 test key is simulation-only — writes answer 403 `TEST_KEY_WRITE_BLOCKED`, so
 end-to-end document delivery can only be proven with a live key (#3018's
 probe).
+
+## Provider notes: Accounted webhooks (#3019, slice 3)
+
+The receiving half of the Accounted integration: the provider calls Haven back
+when the books move. Three subscriptions are created at connect — one event
+type each, because the provider models a subscription as ONE event type —
+`journal_entry.committed`, `period.locked`, `document.uploaded`, all pointing
+at the connection's capability URL
+`POST <HAVEN_API_URL>/accounting/webhooks/accounted/<token>`. The token is 32
+random bytes base64url (256 bits), generated fresh at every connect and stored
+on the connection row (`accounting_connections.webhook_token`); the URL is the
+route's first credential, the HMAC its second.
+
+**The answer matrix, and why it must not change.** 400 on a bad signature,
+a malformed signature header, or a timestamp older than 5 minutes; 404 on an
+unknown token; **200 for everything else** — feature off, `webhook.test`,
+unknown event types, unparseable-but-signed bodies, duplicates, success.
+Never 410 and never any 3xx: the provider **auto-disables** a subscription on
+410 (`active=false` + `disabled_reason`, re-enabled by
+`PATCH /webhooks/{id}` `active: true` **without replay**), and a redirect
+hands it a URL the subscription was never registered with. The route is
+registered on both the exact path and its trailing-slash twin so Fastify's
+redirect never fires. Tests enumerate the whole matrix on both spellings.
+
+**The dedupe ledger.** Every delivery is recorded in
+`accounting_webhook_deliveries` (migration 092) keyed
+`UNIQUE (provider, delivery_id)` BEFORE the 2xx — the provider retries a
+non-2xx for ~87 h (1m/5m/30m/2h/12h/24h/48h), and once it sees a 2xx it stops,
+so nothing may be deferred past the answer (processing is inline; no queue, no
+cron). A replayed id is answered 200 with no second processing. `payload`
+carries only a REDACTED `journal_entry.committed` `data.object` (sensitive
+keys dropped, 16 KB cap) — the probe's raw material for deciding whether a
+*booked* state is derivable (#3019 item 5). The counters under
+`accounting.webhookCounters` on `GET /health/ops` — received /
+bad_signature / stale / unknown_token / duplicate / processed /
+feature_off / unknown_type / confirmed — are process-lifetime; the rows are
+the durable facts. Rate limiting: the route carries its own 600/min ceiling —
+the shared limiter keys on `Authorization`/`X-API-Key`, which a webhook lacks,
+so it degrades to per-IP; 600/min dwarfs a 7-retry storm and keeps the
+provider out of the 429s that could push deliveries toward `dead`.
+
+**Registration is all-or-nothing.** If any of the three creates fails, the
+ones already created are deleted (a list sweep by callback URL catches the
+orphan a lost create response leaves — its secret was never recorded), and
+the connection is stored `connected` but flagged **`needs_attention`**
+(`webhook subscription failed — …`): the feed still works, the push
+confirmations do not arrive. Disconnect deletes all three, best effort — a
+provider outage never blocks a disconnect, and subscriptions left behind are
+removed by hand (below).
+
+**Secrets.** Each create answers its HMAC signing secret EXACTLY ONCE; the
+three `(subscription_id, event_type, secret)` triples live in the connection's
+encrypted secrets blob (`webhooks` key, beside `apiKey`). No secret is logged
+or echoed anywhere. `POST /api/v1/companies/{companyId}/webhooks/{id}/rotate-secret`
+returns a NEW secret once: rotate by updating the stored triple by hand (the
+runbook operation — no code path rotates), then verify with a
+`POST /webhooks/{id}/test` dispatch before discarding the old secret.
+
+**When the sandbox shows a subscription `dead`.** The provider auto-disables
+after enough failed dispatches (every answer above 2xx or a non-delivering
+URL — the two classics: the callback origin wrong for the deployment, or a
+tunnel to localhost instead of the deployed dev backend; the provider refuses
+to dispatch to private/loopback/link-local/metadata IPs by policy). Fix the
+cause, then re-enable with `PATCH /api/v1/companies/{companyId}/webhooks/{id}`
+`{"active": true}` — missed deliveries are NOT replayed on re-enable; recover
+them by hand below.
+
+**Outage recovery — list dead deliveries and retry each.** The recovery path
+is the webhook API, which the connector's key already covers (`webhooks:manage`
+— no `reports:read`, no `GET /journal-entries` scan: it has no `since` filter
+and is not the recovery path):
+
+1. `GET /api/v1/companies/{companyId}/webhooks` — the subscriptions, their
+   `status` (a `dead` one needs the re-enable above first).
+2. `GET /api/v1/companies/{companyId}/webhooks/{id}/deliveries` — newest
+   first; each row carries `status` (`pending | in_flight | delivered |
+   failed | dead`), `attempts`, `next_attempt_at`, `response_status`,
+   `response_body`. The `dead` (and any `delivered` that never reached a
+   live Haven — a deploy window, for example) are the backlog.
+3. `POST /api/v1/companies/{companyId}/webhook-deliveries/{deliveryId}/retry`
+   for each — re-enqueues with the SAME payload and a fresh id, so the
+   dedupe ledger treats it as a new delivery.
+4. Confirm: the counters above move, and a `journal_entry.committed` retry
+   lands a new row in `accounting_webhook_deliveries` with its redacted
+   payload.
+
+**The probe (#3019 item 5) — owner step, on the sandbox.** After #3018 has
+uploaded one document: commit a journal entry linked to it in the Accounted
+dashboard. The delivered `journal_entry.committed` payload is stored redacted
+in `accounting_webhook_deliveries.payload` — read it with
+`SELECT payload FROM accounting_webhook_deliveries WHERE event_type =
+'journal_entry.committed' ORDER BY received_at DESC LIMIT 1`, redact further
+if needed, and record it on the epic #3016. Document ids present → a
+follow-up slice adds a booked state; absent → the epic ends at delivery
+confirmation and the product doc says booking is not observable. A
+`POST /webhooks/{id}/test` dispatch is the dry run: it arrives as
+`webhook.test` and is answered 200 (unknown_type counter) — proof the
+receiver is reachable and verifying, before the first real commit.
 
 > **Re-verified #3093 (frontend hooks: wire keys default instead of crashing):**
 > this diff touched `hooks/useAccounting.ts`, in this document's coverage list, by

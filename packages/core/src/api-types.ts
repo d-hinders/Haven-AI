@@ -1165,6 +1165,46 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/accounting/webhooks/accounted/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * PUBLIC Accounted webhook callback — authenticated by the capability token + the HMAC signature, not by a session.
+         * @description Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (a webhook carries no credential header).
+         */
+        post: operations["accountedWebhookCallback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/webhooks/accounted/{token}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * PUBLIC Accounted webhook callback (trailing-slash twin — the same handler; never a redirect).
+         * @description Registered EXPLICITLY so the provider never meets Fastify's trailing-slash redirect: a 3xx would hand it a URL the subscription was not registered with, and a 410 would auto-disable the subscription without replay (#3019). Identical contract to `accountedWebhookCallback`.
+         */
+        post: operations["accountedWebhookCallbackTrailingSlash"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/accounting/providers": {
         parameters: {
             query?: never;
@@ -9336,6 +9376,86 @@ export interface operations {
                         switched_at?: string;
                     };
                 };
+            };
+        };
+    };
+    accountedWebhookCallback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status: string;
+                        counted?: string;
+                        deliveryId?: string;
+                    };
+                };
+            };
+            /** @description Bad or malformed signature, or a stale timestamp. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No connection carries this token. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    accountedWebhookCallbackTrailingSlash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status: string;
+                        counted?: string;
+                        deliveryId?: string;
+                    };
+                };
+            };
+            /** @description Bad or malformed signature, or a stale timestamp. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No connection carries this token. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

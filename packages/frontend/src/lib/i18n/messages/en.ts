@@ -278,6 +278,7 @@ export const en = {
         needs_reauthorisation: 'Sign-in expired',
         scope_missing: 'Needs more access',
         revoked_at_provider: 'Access revoked',
+        needs_attention: 'Needs attention',
         disconnected: 'Not connected',
       },
       detail: {
@@ -312,8 +313,9 @@ export const en = {
        * `useT()`; the provider-specific tokens inside them (the scope
        * identifiers, the test-key prefix, the dashboard path) are
        * interpolated from `accounting/accounted-copy.ts`, so the exact
-       * spelling is written exactly once — the modal test pins the two
-       * rendered sentences to both tokens.
+       * spelling is written exactly once — the modal test pins the rendered
+       * sentences to the tokens. #3019 widens the scope list to three:
+       * connect also creates the event subscriptions.
        */
       apiKey: {
         connect: 'Connect with API key',
@@ -323,9 +325,9 @@ export const en = {
         stepsTitle: 'In your Accounted dashboard:',
         /** Step 1 — where the keys page is. */
         stepOpen: (path: string) => `Open ${path} and choose Create key.`,
-        /** Step 2 — the two scopes to tick, interpolated from the copy module. */
+        /** Step 2 — the three scopes to tick, interpolated from the copy module. */
         stepScopes: (scopes: string) =>
-          `Tick exactly ${scopes}. Haven reads the company and feeds documents; it needs nothing else today.`,
+          `Tick exactly ${scopes}. Haven reads the company, feeds documents, and receives confirmations; it needs nothing else today.`,
         /** Step 3 — which key kind to paste (test today, live for production). */
         stepPaste: (testPrefix: string, livePrefix: string) =>
           `Copy the key shown after creation. Keys begin with ${testPrefix} for the sandbox used today, or ${livePrefix} for a production company. A key is shown only once.`,

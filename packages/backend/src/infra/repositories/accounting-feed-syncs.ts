@@ -458,3 +458,39 @@ export async function countExhaustedSyncs(db: Executor = pool): Promise<number> 
   const result = await db.query<{ n: number }>(COUNT_EXHAUSTED_SYNCS_SQL, [RETRY_MAX_ATTEMPTS])
   return result.rows[0]?.n ?? 0
 }
+
+// ── Delivery confirmation (#3019, epic #3016 slice 3) ────────────────────────
+//
+// A `document.uploaded` webhook names the document id the provider stored.
+// When it matches a pushed sync row's `external_ref`
+// (`accounted:document:<id>`), the row is delivery-confirmed by the PROVIDER
+// — independent evidence on top of the sha256 proof the upload ran. The flag
+// rides `error` (this slice has no dedicated column and must not add one:
+// #3019 stores confirmations in the deliveries table, the sync-row note is
+// the observable trace), appended read-modify-free as a fixed phrase.
+
+export const ACCOUNTED_DELIVERY_CONFIRMED_NOTE = 'delivery confirmed by provider webhook'
+
+export const CONFIRM_ACCOUNTED_DOCUMENT_SQL = `UPDATE accounting_feed_syncs
+     SET error = CASE
+           WHEN error IS NULL THEN $3
+           WHEN error LIKE '%' || $3 || '%' THEN error
+           ELSE error || ' — ' || $3
+         END,
+         updated_at = NOW()
+     WHERE provider = $1
+       AND status = 'pushed'
+       AND external_ref = $2
+     RETURNING id`
+
+export async function confirmAccountedDocumentDelivery(
+  documentId: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(CONFIRM_ACCOUNTED_DOCUMENT_SQL, [
+    'accounted',
+    `accounted:document:${documentId}`,
+    ACCOUNTED_DELIVERY_CONFIRMED_NOTE,
+  ])
+  return (result.rowCount ?? 0) > 0
+}

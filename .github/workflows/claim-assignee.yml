@@ -2,8 +2,10 @@ name: Claim to assignee
 
 # Keeps GitHub's assignee field in step with the claim protocol in AGENTS.md
 # § Cross-session agent coordination. A `🔒 CLAIM #n` comment assigns its author
-# to #n; a `🔓 RELEASE #n` unassigns them (the merge-time release, #3177, is
-# posted and applied by `claim-release-on-merge.yml` itself — see below).
+# to #n — unless another session holds a live claim on it, in which case it is
+# refused with a reply (#3178, below); a `🔓 RELEASE #n` unassigns them (the
+# merge-time release, #3177, is posted and applied by
+# `claim-release-on-merge.yml` itself — see below).
 #
 # ## Why the field is a projection and not the protocol
 #
@@ -53,15 +55,19 @@ name: Claim to assignee
 #
 # The #3005 collision (2026-09-15) was two claims 76 minutes apart on one
 # issue; the projection added the second assignee without a word. Now a claim
-# is projected through `scripts/ci/claim-collision.mjs`: if another assignee
-# holds a LIVE claim (< 24 h, no RELEASE since — the rule AGENTS.md already
-# states), the claim is refused and a reply says who holds it, how old the
-# claim is and where to coordinate; a STALE claim (≥ 24 h, unreleased) is taken
-# over — holder unassigned, claimant assigned, reply says so; everything else
+# is projected through `scripts/ci/claim-collision.mjs`: if another session
+# holds a LIVE claim (its last comment about the issue < 24 h ago, no RELEASE
+# since — the rule AGENTS.md states), the claim is refused and a reply says who
+# holds it, how old the claim is, when they were last active on it, and where
+# to coordinate; a STALE claim (no activity for 24 h, unreleased) is taken over
+# — holder unassigned, claimant assigned, reply says so; everything else
 # (nobody else, same author, released, or an assignee with no claim comment) is
-# accepted as before. The reply is the ONE comment this workflow writes, it is
-# shaped so the parser reads no marker from it, and the whole channel is read
-# to find the holder's claim, because most claims are posted there.
+# accepted as before. Holders are found from the CLAIM COMMENTS (issue thread +
+# the whole channel), not from the assignee field, so two claims seconds apart
+# and a non-assignable author are both caught. The reply is the only kind of
+# comment this workflow writes, and it is shaped so the parser reads no marker
+# from it. The `node` call is guarded like every `gh` call: a failure leaves the
+# field alone and the loop continues to the next number.
 #
 # Never fails the build: a comment that parses to nothing is the common case,
 # and an API refusal is logged, not raised. This workflow adds or removes an
@@ -145,7 +151,8 @@ jobs:
                 # claim. It never exits non-zero once its arguments parse; a
                 # failed read leaves the field alone — the claim comment is
                 # still the record.
-                node scripts/ci/claim-collision.mjs --issue "$number" --claimant "$COMMENT_AUTHOR" --posted-on "$ON_ISSUE" --apply | tee -a collision.log
+                node scripts/ci/claim-collision.mjs --issue "$number" --claimant "$COMMENT_AUTHOR" --posted-on "$ON_ISSUE" --apply </dev/null 2>&1 | tee -a collision.log \
+                  || echo "  claim #$number not projected (skipped)"
                 ;;
               release)
                 if gh issue edit "$number" --repo "$REPO" --remove-assignee "$COMMENT_AUTHOR" </dev/null >/dev/null 2>&1; then
@@ -161,6 +168,6 @@ jobs:
           if [ -s collision.log ]; then
             # One line per claim, for the step summary.
             grep -E '^\{' collision.log | while read -r d; do
-              echo "- claim: $(printf '%s' "$d" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write(d.action+" — "+d.reason)')" >> "$GITHUB_STEP_SUMMARY"
+              echo "- claim: $(printf '%s' "$d" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));process.stdout.write("#"+d.issue+" "+d.action+" — "+d.reason)')" >> "$GITHUB_STEP_SUMMARY"
             done
           fi

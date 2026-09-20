@@ -21,12 +21,33 @@
 //             and how old, and where to coordinate.
 //   takeover  another assignee's claim is STALE (≥ 24 h, unreleased) → they are
 //             unassigned, the claimant assigned, and the reply says so.
-//   accept    nobody else holds it, or the other assignee released it, or the
+//   accept    nobody else holds it, or the other holder released it, or the
 //             claimant is re-claiming their own issue (branch rename) → assign
 //             silently, as before. An assignee with NO claim comment at all
 //             (assigned by hand for tracking, or before the projection existed)
 //             is also "accept": the claimant is ADDED beside them, which is
 //             today's behaviour, because a tracking assignee is not a claim.
+//
+// ## Holders are CLAIMANTS, not the assignee field
+//
+// A holder is anyone (other than the claimant) who posted a claim of this issue
+// — assigned or not. The assignee field is only a projection and is wrong in
+// exactly the two cases that matter here: two claims seconds apart (the
+// workflow runs without a concurrency group, so both runs would read an empty
+// field and both would accept), and an author GitHub refuses to assign (the
+// old shell said so itself: "the author is not assignable on this repo"), whose
+// claim would otherwise never be seen by anyone. The comments are already in
+// hand, so the check reads them.
+//
+// ## Staleness is measured from the holder's last ACTIVITY, not the claim
+//
+// A four-day review round is normal here (#3170, #3172). The age that decides
+// live-or-stale is the holder's newest comment about the issue — the claim
+// itself, or any later comment by them on the issue's thread, or any later
+// comment by them on the channel that names the issue — so an owner who is
+// visibly working is never taken over on a timestamp alone. A holder whose
+// timestamps cannot be read is treated as LIVE (refuse), the direction that
+// cannot mislead.
 //
 // ## The reply must not parse as a marker
 //
@@ -47,6 +68,7 @@
 import { parse } from './claim-assignee.mjs'
 
 export const CHANNEL_ISSUE = 1289
+/** AGENTS.md: "An unreleased claim blocks the other session for a day." */
 export const LIVE_CLAIM_MS = 24 * 60 * 60_000
 
 /**
@@ -72,26 +94,38 @@ export function ageText(fromIso, nowMs) {
 }
 
 /**
- * For one holder, the newest claim of `issue` they posted and whether they
- * released it since. `comments` are {author, body, createdAt, onIssue}.
+ * For one holder: the newest claim of `issue` they posted, whether they
+ * released it since, and their last ACTIVITY about the issue after that claim
+ * (a later comment by them on the issue's own thread, or a later comment by
+ * them on the channel naming `#issue`). `comments` are
+ * {author, body, createdAt, onIssue}, sorted here by time; ties keep input
+ * order (issue comments first, then channel), which only matters for a claim
+ * and a release stamped in the same second — harmless either way.
  */
 export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_ISSUE }) {
   let claim = null
   let releasedAfter = false
+  let lastActivityAt = null
+  const mentions = new RegExp(`(^|[^\\w])#${issue}\\b`)
   const mine = comments
     .filter((c) => c.author === holder)
     .slice()
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   for (const c of mine) {
+    // Only the holder's OWN lines are parsed here, so the merge-time bot
+    // release (#3177) is not seen — it does not need to be: that workflow
+    // unassigns everyone itself, and a closed issue is skipped before this.
     const r = parse({ body: c.body, onIssue: c.onIssue ?? null, channelIssue })
     if (r.claim.includes(issue)) {
       claim = c
       releasedAfter = false
-    } else if (r.release.includes(issue) && claim) {
-      releasedAfter = true
+      lastActivityAt = c.createdAt
+    } else if (claim) {
+      if (r.release.includes(issue)) releasedAfter = true
+      if (c.onIssue === issue || mentions.test(String(c.body ?? ''))) lastActivityAt = c.createdAt
     }
   }
-  return { claim, releasedAfter }
+  return { claim, releasedAfter, lastActivityAt }
 }
 
 /**
@@ -101,7 +135,8 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
  * @param {number} o.issue
  * @param {string} o.claimant
  * @param {string} o.state           the issue's state as GitHub reports it
- * @param {string[]} o.assignees     current assignees
+ * @param {string[]} o.assignees     current assignees (a projection — holders
+ *        are found from the comments, the field only adds candidates)
  * @param {{author:string, body:string, createdAt:string, onIssue?:number}[]} o.comments
  *        the issue's comments plus the channel's, tagged with where each was posted
  * @param {number} o.postedOn        the issue the incoming claim was posted on
@@ -111,24 +146,34 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
  */
 export function decideClaim({ issue, claimant, state, assignees, comments, postedOn, nowMs = Date.now(), channelIssue = CHANNEL_ISSUE }) {
   if (String(state).toLowerCase() !== 'open') return { action: 'skip', reason: `issue is ${state}` }
-  const others = (assignees ?? []).filter((a) => a && a !== claimant)
+  // Candidates: everyone who ever posted a claim of this issue, plus whoever
+  // the field currently names — minus the claimant.
+  const claimants = new Set()
+  for (const c of comments ?? []) {
+    if (!c?.author || c.author === claimant) continue
+    if (parse({ body: c.body, onIssue: c.onIssue ?? null, channelIssue }).claim.includes(issue)) claimants.add(c.author)
+  }
+  const others = [...new Set([...(assignees ?? []), ...claimants])].filter((a) => a && a !== claimant)
   if (others.length === 0) return { action: 'accept', assign: claimant, reason: 'nobody else holds it' }
 
   const live = []
   const stale = []
   for (const holder of others) {
-    const { claim, releasedAfter } = holderClaim({ holder, issue, comments, channelIssue })
+    const { claim, releasedAfter, lastActivityAt } = holderClaim({ holder, issue, comments, channelIssue })
     if (!claim || releasedAfter) continue // tracking assignee, or released: not a claim in force
-    const ageMs = nowMs - Date.parse(claim.createdAt)
-    if (Number.isFinite(ageMs) && ageMs < LIVE_CLAIM_MS) live.push({ holder, claim, ageMs })
-    else stale.push({ holder, claim, ageMs })
+    const ageMs = nowMs - Date.parse(lastActivityAt ?? claim.createdAt)
+    // Unreadable timestamps count as LIVE: refusing is the direction that
+    // cannot mislead; a takeover on an unknown age would.
+    if (!Number.isFinite(ageMs) || ageMs < LIVE_CLAIM_MS) live.push({ holder, claim, ageMs, lastActivityAt })
+    else stale.push({ holder, claim, ageMs, lastActivityAt })
   }
 
   if (live.length > 0) {
-    const lines = live.map(({ holder, claim }) => {
+    const lines = live.map(({ holder, claim, lastActivityAt }) => {
       const branch = branchOf(claim.body)
       const where = claim.onIssue === channelIssue ? `on #${channelIssue}` : 'on this issue'
-      return `@${holder} claimed it ${ageText(claim.createdAt, nowMs)} ${where}${branch ? ` (branch \`${branch}\`)` : ''} and has not released it.`
+      const active = lastActivityAt && lastActivityAt !== claim.createdAt ? `, last active on it ${ageText(lastActivityAt, nowMs)}` : ''
+      return `@${holder} claimed it ${ageText(claim.createdAt, nowMs)} ${where}${branch ? ` (branch \`${branch}\`)` : ''}${active} and has not released it.`
     })
     const body = [
       `⚠️ Already claimed: issue ${issue} is held by ${live.map((l) => `@${l.holder}`).join(' and ')}. ${lines.join(' ')}`,
@@ -138,9 +183,9 @@ export function decideClaim({ issue, claimant, state, assignees, comments, poste
   }
 
   if (stale.length > 0) {
-    const lines = stale.map(({ holder, claim }) => `@${holder}'s claim was ${ageText(claim.createdAt, nowMs)} with no RELEASE since`)
+    const lines = stale.map(({ holder, claim, lastActivityAt }) => `@${holder}'s claim was ${ageText(claim.createdAt, nowMs)}, their last comment about it ${ageText(lastActivityAt ?? claim.createdAt, nowMs)}, with no RELEASE since`)
     const body = [
-      `ℹ️ Taken over: issue ${issue} — ${lines.join('; ')}. A claim older than 24 h with no release is stale under AGENTS.md § Cross-session agent coordination, so it was reassigned to @${claimant}.`,
+      `ℹ️ Taken over: issue ${issue} — ${lines.join('; ')}. A claim with no activity for 24 h and no release is stale under AGENTS.md § Cross-session agent coordination, so it was reassigned to @${claimant}.`,
       `${stale.map((s) => `@${s.holder}`).join(' ')}: if you are still on this, say so here and re-claim; the reassignment is a projection, not a judgement. (Posted by the claim projection, #3178.)`,
     ].join('\n\n')
     return {

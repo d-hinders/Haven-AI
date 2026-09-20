@@ -73,7 +73,8 @@ coordinate or pick the next candidate.
 Treat a live `CLAIM` on the candidate or coordination channel as an overlap when
 it is less than 24 hours old and has no matching `RELEASE`. The projection
 enforces the same rule (#3178): a second claim on a held issue is refused with a
-reply and is not a claim; a stale one is taken over and the reply says so.
+reply and is not a claim; a stale one (no activity for 24 h) is taken over and
+the reply says so.
 
 Stop and ask the user if scope or acceptance is unsafe to infer. Never guess on money movement, authentication, authorization, or schema.
 
@@ -84,6 +85,10 @@ Before building, post a one-line `CLAIM` comment on the selected issue:
 ```text
 🔒 CLAIM #<issue> — branch <name> — touches: <files/areas> — <session owner>
 ```
+
+**After posting, re-read the thread before you build:** a `⚠️ Already claimed`
+reply from `github-actions[bot]` means you do not hold the issue — coordinate in
+#1289 or pick another candidate (#3178).
 
 Also post the same `CLAIM` to issue
 [#1289](https://github.com/d-hinders/Haven-AI/issues/1289) when the work touches

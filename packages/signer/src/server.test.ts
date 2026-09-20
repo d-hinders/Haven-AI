@@ -13,7 +13,7 @@ import {
   verifySignature,
 } from '@haven_ai/sdk'
 import { createEdgeSigner } from './core.js'
-import { buildSignerMcpServer, resolveEdgeSigner, runSignerConsentGate } from './server.js'
+import { buildSignerMcpServer, resolveEdgeSigner, runSignerConsentGate, runSignerStdioServer } from './server.js'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 import { computeSignerConsentHash, type SignerConsentInput } from './consent.js'
 
@@ -185,6 +185,17 @@ describe('buildSignerMcpServer', () => {
 
     await client.close()
     await server.close()
+  })
+})
+
+describe('#3173: the consent refusal an MCP host relays names the connector doctor', () => {
+  it('runSignerStdioServer rejects with a message that names npx @haven_ai/connect --doctor', async () => {
+    const out: string[] = []
+    await expect(
+      runSignerStdioServer({ delegateKey: TEST_KEY, consentEnv: {}, consentOut: { write: (c: string) => out.push(c) } }),
+    ).rejects.toThrow(/npx @haven_ai\/connect --doctor/)
+    // and the block itself (stderr in real life) carries the same hint
+    expect(out.join('')).toContain('npx @haven_ai/connect --doctor')
   })
 })
 

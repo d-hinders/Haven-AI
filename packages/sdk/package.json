@@ -19,6 +19,16 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./edge": {
+      "import": {
+        "types": "./dist/edge.d.ts",
+        "default": "./dist/edge.js"
+      },
+      "require": {
+        "types": "./dist/edge.d.cts",
+        "default": "./dist/edge.cjs"
+      }
     }
   },
   "files": [
@@ -54,6 +64,7 @@
     "directory": "packages/sdk"
   },
   "dependencies": {
+    "@noble/curves": "1.9.1",
     "ethers": "^6.13.0",
     "viem": "^2.51.0",
     "x402": "^1.2.0"

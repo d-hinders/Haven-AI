@@ -1,4 +1,4 @@
-import { AgentPaymentNextAction, HavenSigningError, type NextStep } from '@haven_ai/sdk'
+import { AgentPaymentNextAction, HavenSigningError, type NextStep } from '@haven_ai/sdk/edge'
 import { signerRefusalStep } from './next-step.js'
 
 /**

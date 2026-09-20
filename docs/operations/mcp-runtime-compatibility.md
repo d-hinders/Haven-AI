@@ -15,6 +15,10 @@ covers:
   - packages/sdk/src/client.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-completion.ts
+  - packages/sdk/src/edge.ts
+  - packages/sdk/package.json
+  - packages/sdk/tsup.config.ts
+  - scripts/release-bump.mjs
   - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
@@ -188,6 +192,22 @@ last-verified: "2026-09-19"
 > direction. Neither skew moves money differently. `last-verified` is not
 > re-stamped: it already reads 2026-09-19. Nothing else in this document was
 > re-verified in this pass.
+>
+> **Recent re-verification (#3173):** the edge signer now imports
+> `@haven_ai/sdk/edge` (a new, ethers-free SDK entry) instead of the barrel and
+> lazy-loads `x402/schemes`; its CLI refuses unknown options and its consent
+> block/refusal name the connector doctor. No tool added, renamed or re-shaped
+> on either runtime — arguments, schemas, descriptions and the registered
+> tool-name set are untouched — so the consent hash and the version-skew
+> contract do not move. One NEW coupling to state: a signer at or above this
+> version resolves `@haven_ai/sdk/edge`, which does not exist on an SDK below
+> this version; the signer pins its SDK exactly (`release-bump.mjs` re-pins),
+> and the connector installs the pinned pair, so a mixed pair cannot arise
+> through the supported install path — a hand-installed older SDK beside a new
+> signer fails at import with `ERR_PACKAGE_PATH_NOT_EXPORTED` ("Package subpath
+> './edge' is not defined by \"exports\""), before any key is read.
+> `last-verified` is not re-stamped: this block is the scope. Nothing else in
+> this document was re-verified in this pass.
 >
 > **Recent re-verification (#3172):** the edge signer's audit sidecar is now
 > created owner-only, tightened in place when found permissive, and rotated at
@@ -2159,6 +2179,11 @@ to call next in structured fields, and those fields are typed end to end
   message names your version and how to upgrade. Upgrade Node and rerun setup.
   If setup succeeded but the signer now refuses to start, the runtime launching
   it is on an older Node than the shell you upgraded.
+- **Signer exits at import with `ERR_PACKAGE_PATH_NOT_EXPORTED` (`Package
+  subpath './edge' is not defined by "exports"`, #3173):** a hand-installed
+  `@haven_ai/sdk` older than the signer's exact pin sits beside a signer that
+  imports `@haven_ai/sdk/edge`. No key is read on this path. Re-run the
+  connector command to reinstall the pinned pair.
 - **Local MCP runtime install failed:** rerun the connector command. It will reuse
   local credentials and install the pinned runtime into `~/.haven/mcp-runtime`,
   falling back from the user's default npm cache to `~/.haven/npm-cache` if the

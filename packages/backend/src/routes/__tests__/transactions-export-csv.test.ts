@@ -15,6 +15,7 @@ import fastifyJwt from '@fastify/jwt'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { ethers } from 'ethers'
 import transactionRoutes from '../transactions.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import pool from '../../db.js'
 import { TRANSACTION_CSV_COLUMNS } from '../../modules/transactions/index.js'
 
@@ -296,6 +297,10 @@ describe('GET /transactions/export.csv', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/transactions.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(transactionRoutes, { prefix: '/transactions' })
   })
@@ -475,10 +480,11 @@ describe('GET /transactions/export.csv', () => {
     expect(byAccountId.headers['x-export-row-count']).toBe('1')
   })
 
-  it('400s an invalid ?accountId=', async () => {
+  it('400s an invalid ?accountId= — the spec\'s uuid, as the envelope (#3030)', async () => {
     const response = await get('?accountId=not-a-uuid')
     expect(response.statusCode).toBe(400)
-    expect(response.json()).toEqual({ error: 'Invalid accountId' })
+    expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(response.json().details).toContain('querystring/accountId')
   })
 
   it('resolves the counterparty name from the address book', async () => {
@@ -585,21 +591,34 @@ describe('GET /transactions/export.csv', () => {
     expect(response.headers['x-export-row-count']).toBe('10000')
   })
 
+  // #3030: the SHAPE refusals are the spec's (uuid, `user`-or-uuid,
+  // `<chain>:<address|native>`, the `direction` enum, a positive integer),
+  // answered as the 400 envelope by the enforced module before the handler;
+  // an unsupported chain is still the handler's own refusal. Mutation: drop
+  // the module from enforcedModules → `direction=sideways` exports (200).
   it.each([
-    ['?accountId=not-a-uuid', 'Invalid accountId'],
-    ['?agentId=not-a-uuid', 'Invalid agentId'],
-    ['?tokenKey=nonsense', 'Invalid tokenKey'],
-    ['?direction=sideways', 'Invalid direction'],
-    ['?chainId=abc', 'Invalid chainId'],
-    ['?chainId=999999', 'Unsupported chain: 999999'],
-  ])('rejects %s', async (query, error) => {
+    ['?accountId=not-a-uuid', 'querystring/accountId'],
+    ['?agentId=not-a-uuid', 'querystring/agentId'],
+    ['?tokenKey=nonsense', 'querystring/tokenKey'],
+    ['?direction=sideways', 'querystring/direction'],
+    ['?chainId=abc', 'querystring/chainId'],
+  ])('rejects %s with the envelope', async (query, field) => {
     stubExplorers()
     routeDbQueries({ smart_accounts: BOTH_SAFES })
 
     const response = await get(`${query}&fresh=1`)
 
     expect(response.statusCode).toBe(400)
-    expect(response.json()).toMatchObject({ error })
+    expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(response.json().details).toContain(field)
+  })
+
+  it('rejects ?chainId=999999 — a well-shaped chain Haven does not serve (semantic, kept in the handler)', async () => {
+    stubExplorers()
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
+    const response = await get('?chainId=999999&fresh=1')
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({ error: 'Unsupported chain: 999999' })
   })
 
   it('returns a header-only file when the user has no accounts', async () => {

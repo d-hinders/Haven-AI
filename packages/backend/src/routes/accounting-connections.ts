@@ -37,11 +37,13 @@ interface CallbackQuery {
 }
 
 interface ApiKeyBody {
-  apiKey?: string
+  /** Required by the spec, enforced before the handler (#3030). */
+  apiKey: string
 }
 
 interface BackfillBody {
-  since?: unknown
+  /** Required, an ISO date prefix by the spec (#3030); the rest is `backfillConnection`'s. */
+  since: string
 }
 
 const PROVIDER_ID_RE = /^[a-z][a-z0-9_-]{1,31}$/
@@ -206,7 +208,9 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { provider } = request.params
-      const apiKey = typeof request.body?.apiKey === 'string' ? request.body.apiKey.trim() : ''
+      // `apiKey` is a required string by the spec, enforced before the handler
+      // (#3030); blank after trimming stays a handler refusal.
+      const apiKey = request.body.apiKey.trim()
       if (!apiKey) return reply.code(400).send({ error: 'An API key is required.', error_code: 'API_KEY_REQUIRED' })
       try {
         const connection = await connectProviderWithApiKey(provider, sub, apiKey)
@@ -271,7 +275,7 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
       const { sub } = request.user as { sub: string }
       const { provider } = request.params
       try {
-        return await backfillConnection(sub, provider, request.body?.since)
+        return await backfillConnection(sub, provider, request.body.since)
       } catch (err) {
         if (err instanceof BackfillRefusedError) {
           const status = err.code === 'NOT_FOUND' ? 404 : err.code === 'NOT_ACTIVE' ? 409 : 400

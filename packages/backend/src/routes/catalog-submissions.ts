@@ -107,13 +107,15 @@ const MAX_HOSTNAME_LENGTH = 253
 const MAX_BODY_BYTES = 8 * 1024
 
 /** A plausible-looking field bots tend to autofill; humans leave it empty. */
+// The shapes are the spec's `CatalogSubmitRequest` (closed object, string
+// fields, `resource_url` required), enforced before the handler since #3030.
 interface SubmitBody {
-  resource_url?: unknown
+  resource_url: string
   /** Honeypot. Presence + non-empty → bot, dropped with a fake success. */
-  website?: unknown
+  website?: string
   /** #3078: the seller's display name and public site — real fields, bounded; `website` above stays the trap. */
-  merchant_name?: unknown
-  merchant_website?: unknown
+  merchant_name?: string
+  merchant_website?: string
 }
 
 
@@ -220,11 +222,12 @@ function acknowledgement(row: { id: string; status: string }): { id: string; sta
   return { id: row.id, status: row.status }
 }
 
+// `resource_url` is a required string by the spec (CatalogSubmitRequest),
+// enforced before the handler since #3030; what is normalised here — trim,
+// the length cap, the https form, the host — is semantic.
 function normalizeSubmitTarget(
-  raw: unknown,
+  raw: string,
 ): { hostname: string; resource_url: string } | { error: string } {
-  if (raw === undefined || raw === null) return { error: 'resource_url is required' }
-  if (typeof raw !== 'string') return { error: 'resource_url must be a string' }
   const resourceUrl = raw.trim()
   if (!resourceUrl) return { error: 'resource_url is required' }
   if (resourceUrl.length > MAX_RESOURCE_URL_LENGTH) {
@@ -289,7 +292,7 @@ export default async function catalogSubmissionRoutes(
   // the process-wide config.
   const ownershipSecret = opts.ownershipSecret ?? config.catalogOwnershipSecret
 
-  app.post<{ Body: SubmitBody | undefined }>(
+  app.post<{ Body: SubmitBody }>(
     '/submit',
     {
       // A public, unauthenticated endpoint should not accept Fastify's default
@@ -305,7 +308,7 @@ export default async function catalogSubmissionRoutes(
 
       // Honeypot: bots autofill `website`. Fake success, no write — the trap
       // must not teach the bot that the field is watched.
-      if (body && typeof body.website === 'string' && body.website.trim() !== '') {
+      if (body.website !== undefined && body.website.trim() !== '') {
         return reply.code(201).send({
           id: randomUUID(),
           verify_token: randomBytes(24).toString('hex'),
@@ -313,7 +316,7 @@ export default async function catalogSubmissionRoutes(
         })
       }
 
-      const target = normalizeSubmitTarget(body?.resource_url)
+      const target = normalizeSubmitTarget(body.resource_url)
       if ('error' in target) {
         return reply.code(400).send({ error: target.error })
       }

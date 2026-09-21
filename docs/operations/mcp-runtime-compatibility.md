@@ -45,7 +45,7 @@ covers:
   - scripts/lint-next-steps.mjs
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
-last-verified: "2026-09-20"
+last-verified: "2026-09-21"
 ---
 
 # MCP Runtime Compatibility
@@ -1997,6 +1997,24 @@ runtime compatibility.
 > `paid-mcp-completion.ts`, and inherits everything else from
 > `@haven_ai/sdk`. Nothing else in this document was re-verified in this
 > pass.
+
+> **Re-verified #3030 (2026-09-21, request validation slice 2):** the two
+> covered files this diff touches, `routes/transactions.ts` and
+> `routes/user-accounts.ts`, now have their request shapes enforced from the
+> OpenAPI spec (`index.ts` `enforcedModules`) instead of by hand in the
+> handlers. For the naming window described above nothing moves: `?safeId=`
+> is still DECLARED in the spec so it can still be REFUSED with the retired-
+> name 400 (that verdict runs in the handler, after validation, exactly as
+> before), a malformed `?accountId=` is now refused by the spec's uuid schema
+> (it always declared one; it is enforced now), and the dual-emitted response
+> keys are untouched. What a
+> published client that sent a malformed filter sees changed: the hand-rolled
+> `{ error: 'Invalid accountId' }` became the spec's 400 envelope
+> (`error_code: invalid_request`, `details` naming the field). The CLI sends
+> only well-formed filters (typed from `api-types.ts`), so no shipped version
+> is affected; the manifest table and `SUPPORTED_X402_EXPECTED_VERSIONS` are
+> unchanged. Scope of this note: those two files' request-shape edits.
+> Nothing else in this document was re-verified.
 
 `haven_prepare_catalog_purchase` (#1306) — the guided catalog-id preflight —
 persists the SAME `mcpCallContext` at quote time (it composes the identical

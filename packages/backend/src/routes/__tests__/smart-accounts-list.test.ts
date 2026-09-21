@@ -30,6 +30,7 @@ vi.mock('../../db.js', () => ({
 // module, so there is nothing left to mock.
 
 import userAccountsRoutes from '../user-accounts.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const USER = 'user-1'
 
@@ -39,6 +40,10 @@ describe('GET /user/accounts — list invariants', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module(s) enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/user-accounts.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })

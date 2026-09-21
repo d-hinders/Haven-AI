@@ -36,6 +36,7 @@ vi.mock('../../db.js', () => ({
 // left to mock here.
 
 import userAccountsRoutes from '../user-accounts.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const SAFE_ID = '11111111-1111-1111-1111-111111111111'
 const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
@@ -47,6 +48,10 @@ describe('user-safes characterization (#988)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module(s) enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/user-accounts.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })

@@ -2,6 +2,7 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import transactionRoutes from '../transactions.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 // #992: aggregation/enrichment/caching moved to src/modules/transactions/ —
 // these characterization tests (committed before the move) now import them
 // from there. Only this import changed; no test body or assertion did.
@@ -220,6 +221,10 @@ describe('transaction routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/transactions.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(transactionRoutes, { prefix: '/transactions' })
   })
@@ -320,10 +325,53 @@ describe('transaction routes', () => {
       headers: { authorization: `Bearer ${token}` },
     })
 
+    // #3030: the shape refusal is the spec's (`integer, minimum: 1`), the
+    // enforced module's envelope; the handler never runs.
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toBe('Invalid chain_id')
+    expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(response.json().details).toContain('querystring/chain_id')
     expect(queryMock).not.toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses every off-spec filter with the 400 envelope before any query or fetch (#3030)', async () => {
+    // Each of these was a hand-rolled 400 in the handler before the module
+    // was enforced: pagination bounds, the uuid filters, `agentId` as
+    // `user`-or-uuid, `tokenKey` as `<chain>:<address|native>`, the
+    // `direction` enum, the address pattern, positive chain ids. Mutation:
+    // drop the module from enforcedModules → the non-uuid accountId reaches
+    // `listBasicAccountsForUser` (queryMock called).
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    const fetchMock = stubEmptyTransactionFetch()
+    const queryMock = vi.spyOn(pool, 'query')
+    const cases: Array<[string, string]> = [
+      ['/transactions?limit=500', 'querystring/limit'],
+      ['/transactions?offset=-1', 'querystring/offset'],
+      ['/transactions?accountId=not-a-uuid', 'querystring/accountId'],
+      ['/transactions?agentId=nope', 'querystring/agentId'],
+      ['/transactions?tokenKey=garbage', 'querystring/tokenKey'],
+      ['/transactions?tokenKey=0:native', 'querystring/tokenKey'],
+      ['/transactions/export.csv?direction=sideways', 'querystring/direction'],
+      ['/transactions/export.csv?chainId=0', 'querystring/chainId'],
+      ['/transactions/payment-intents/not-a-uuid/evidence', 'params/paymentId'],
+      ['/transactions/not-an-address', 'params/accountAddress'],
+      [`/transactions/${SAFE_ADDRESS}?page=0`, 'querystring/page'],
+      [`/transactions/${SAFE_ADDRESS}?chain_id=-1`, 'querystring/chain_id'],
+    ]
+    for (const [url, field] of cases) {
+      const response = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${token}` } })
+      expect(response.statusCode, url).toBe(400)
+      expect(response.json(), url).toMatchObject({ error: 'Request does not match the API spec', statusCode: 400, error_code: 'invalid_request' })
+      expect(response.json().details, url).toContain(field)
+    }
+    expect(queryMock).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    // The literal `user` and a uuid are the two conformant agentId spellings.
+    queryMock.mockResolvedValue({ rows: [] } as never)
+    const ok = await app.inject({ method: 'GET', url: '/transactions?agentId=user&tokenKey=8453:native&limit=100', headers: { authorization: `Bearer ${token}` } })
+    // `[]` from the repository: the handler answers 200 with no rows.
+    expect(ok.statusCode).toBe(200)
   })
 
   it('rejects unsupported transaction chains before ownership lookup', async () => {
@@ -1126,6 +1174,10 @@ describe('transaction cache hit/miss (#992 characterization)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/transactions.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(transactionRoutes, { prefix: '/transactions' })
   })
@@ -1203,6 +1255,10 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/transactions.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(transactionRoutes, { prefix: '/transactions' })
   })
@@ -1680,6 +1736,10 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/transactions.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(transactionRoutes, { prefix: '/transactions' })
   })

@@ -22,11 +22,11 @@
 
 import type { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { retiredSafeInflowHandler } from '../middleware/safe-inflow-retired.js'
+import { retiredSafeInflowHandler, retiredSafeInflowRoute } from '../middleware/safe-inflow-retired.js'
 
 export default async function safeDeployRoutes(app: FastifyInstance): Promise<void> {
   // Auth first, so an anonymous caller still gets 401 rather than 410.
   app.addHook('onRequest', authMiddleware)
 
-  app.post('/deploy', retiredSafeInflowHandler('deploy'))
+  app.post('/deploy', retiredSafeInflowRoute('deploy'), retiredSafeInflowHandler('deploy'))
 }

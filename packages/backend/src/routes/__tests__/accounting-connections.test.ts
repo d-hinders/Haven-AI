@@ -140,6 +140,7 @@ vi.mock('../../modules/accounting/api-key-flow.js', async (importOriginal) => ({
 }))
 
 import accountingConnectionsRoutes from '../accounting-connections.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import {
   AccountedConnector,
   InMemoryConnector,
@@ -209,6 +210,10 @@ describe('accounting connection routes (#2862)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/accounting-connections.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(accountingConnectionsRoutes, { prefix: '/accounting' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
@@ -678,8 +683,18 @@ describe('accounting connection routes (#2862)', () => {
 
     it('400s SINCE_INVALID for a missing, unparseable, future or pre-2020 `since` — before any read', async () => {
       active()
-      // Strict ISO (review on #2901): free-form dates, TZ-less times and rolled-over days are refused too.
-      for (const payload of [{}, { since: 'yesterday' }, { since: 42 }, { since: '2999-01-01' }, { since: '2019-12-31' }, { since: 'Jan 5 2026' }, { since: '2026-01-01T00:00:00' }, { since: '2026-02-30' }, { since: '2025' }]) {
+      // #3030: the SHAPE half is the spec's now (`since` required, a string,
+      // an ISO date prefix) and answers the envelope before the handler; the
+      // semantic half — strict ISO (review on #2901): TZ-less times,
+      // rolled-over days, the 2020 floor, the future — stays SINCE_INVALID.
+      // Mutation: drop the module from enforcedModules → `{}` reaches the
+      // handler and answers SINCE_INVALID instead of the envelope.
+      for (const payload of [{}, { since: 'yesterday' }, { since: 42 }, { since: 'Jan 5 2026' }, { since: '2025' }]) {
+        const res = await authed('POST', '/accounting/connections/fortnox/backfill', payload)
+        expect(res.statusCode, JSON.stringify(payload)).toBe(400)
+        expect(res.json(), JSON.stringify(payload)).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+      }
+      for (const payload of [{ since: '2999-01-01' }, { since: '2019-12-31' }, { since: '2026-01-01T00:00:00' }, { since: '2026-02-30' }]) {
         const res = await authed('POST', '/accounting/connections/fortnox/backfill', payload)
         expect(res.statusCode, JSON.stringify(payload)).toBe(400)
         expect(res.json()).toMatchObject({ error_code: 'SINCE_INVALID' })
@@ -763,17 +778,24 @@ describe('accounting connection routes (#2862)', () => {
       expect((await authed('PATCH', '/accounting/connections/memory/settings', { suggested_account: '' })).statusCode).toBe(400)
     })
 
-    it('an unknown key or a wrong type is a 400 that names the key; nothing else in the patch is applied', async () => {
+    it('an unknown key or a wrong type is a 400 — the spec\'s closed object, before the handler (#3030); nothing else in the patch is applied', async () => {
+      // The settings body is `additionalProperties: false` with two typed
+      // keys in the spec, so the unknown-key and wrong-type refusals are the
+      // enforced module's envelope now; the module's own INVALID_SETTING
+      // (with `key`) still covers the semantic half — a non-BAS account, a
+      // too-long generic one — which the dashboard maps to field copy.
+      // Mutation: drop the module from enforcedModules → INVALID_SETTING here.
       withLog()
       const unknown = await authed('PATCH', '/accounting/connections/fortnox/settings', { auto_feed: false, supplier_strategy: 'per_payment' })
       expect(unknown.statusCode).toBe(400)
-      expect(unknown.json()).toEqual({ error: expect.stringContaining('supplier_strategy'), error_code: 'INVALID_SETTING', key: 'supplier_strategy' })
+      expect(unknown.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+      expect(unknown.json().details).toContain('additional properties')
       const typed = await authed('PATCH', '/accounting/connections/fortnox/settings', { auto_feed: 'no' })
       expect(typed.statusCode).toBe(400)
-      expect(typed.json()).toMatchObject({ error_code: 'INVALID_SETTING', key: 'auto_feed' })
+      expect(typed.json().details).toContain('body/auto_feed')
       const camel = await authed('PATCH', '/accounting/connections/fortnox/settings', { suggestedAccount: '6540' })
       expect(camel.statusCode).toBe(400)
-      expect(camel.json()).toMatchObject({ key: 'suggestedAccount' })
+      expect(camel.json().details).toContain('additional properties')
       expect(repo.mergeSettings).not.toHaveBeenCalled()
       expect(rows.get(`${USER}::fortnox`)!.settings).not.toHaveProperty('auto_feed')
     })

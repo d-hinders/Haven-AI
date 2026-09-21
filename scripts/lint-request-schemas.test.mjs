@@ -200,6 +200,10 @@ describe('index.ts readers', () => {
       await app.register(otherRoutes, { prefix: '/elsewhere' })
     `
     assert.deepEqual(prefixesFromIndex(src, 'userSafesRoutes'), ['/user/safes', '/user/accounts'])
+    // A bare registration mounts at the root (#3030: `accounting-webhooks.ts`
+    // was invisible to the gauge for exactly this). Mutation: drop the bare
+    // branch → [].
+    assert.deepEqual(prefixesFromIndex("await app.register(webhookRoutes)\nawait app.register(other, { prefix: '/x' })", 'webhookRoutes'), [''])
     assert.deepEqual(prefixesFromIndex(src, 'missingRoutes'), [])
   })
 
@@ -229,6 +233,31 @@ describe('index.ts readers', () => {
       'routes/merchants.ts',
       'routes/labels.ts',
       'routes/agent-labels.ts',
+      // Slice 2 (#3030): the 22 non-money modules and the inline index.ts pair.
+      'index.ts',
+      'routes/accounting.ts',
+      'routes/accounting-feed.ts',
+      'routes/accounting-connections.ts',
+      'routes/accounting-webhooks.ts',
+      'routes/agent-activity.ts',
+      'routes/analytics.ts',
+      'routes/analytics-overview.ts',
+      'routes/auth.ts',
+      'routes/balances.ts',
+      'routes/catalog.ts',
+      'routes/catalog-submissions.ts',
+      'routes/dashboard.ts',
+      'routes/discovery.ts',
+      'routes/health.ts',
+      'routes/openapi.ts',
+      'routes/passkeys.ts',
+      'routes/passport-verify.ts',
+      'routes/portfolio.ts',
+      'routes/safe-deploy.ts',
+      'routes/transactions.ts',
+      'routes/user.ts',
+      'routes/user-accounts.ts',
+      'routes/user-accounts-retired.ts',
     ])
   })
 })
@@ -286,9 +315,27 @@ describe('ownSchemaRoutes (#3135)', () => {
 })
 
 describe('typeofLines', () => {
-  it('counts lines mentioning typeof — the metric the baseline stores', () => {
-    assert.equal(typeofLines("const a = typeof x\n// typeof in a comment\nconst b = 1\ndo(() => typeof y)"), 3)
+  it('ignores a comment inside the enforcedModules array, apostrophes included (#3030)', () => {
+    const src = "installRequestValidation(app, {\n  enforcedModules: [\n    'routes/a.ts',\n    // the epic's fallback: don't read 'this'\n    /* nor 'this' */ 'routes/b.ts',\n  ],\n})"
+    assert.deepEqual(enforcedModulesFromIndex(src), ['routes/a.ts', 'routes/b.ts'])
+  })
+
+  it('counts lines carrying a RUNTIME typeof — the metric the baseline stores (#3030)', () => {
+    assert.equal(typeofLines("const a = typeof x\n// typeof in a comment\nconst b = 1\ndo(() => typeof y)"), 2)
     assert.equal(typeofLines('const clean = 1'), 0)
+    // Request-check shapes the migration deletes: each is one line.
+    assert.equal(typeofLines("if (typeof name !== 'string') return null\nconst raw = typeof body?.k === 'string' ? body.k : ''"), 2)
+  })
+
+  it('does not count a type position or a comment (#3030) — the three false positives the old gauge carried', () => {
+    // Mutation: revert to `includes('typeof')` → every line below counts.
+    assert.equal(typeofLines("export type Entry = ReturnType<typeof serialize> | ReturnType<typeof other>"), 0)
+    assert.equal(typeofLines("type Status = ReturnType<typeof import('../x.js')['fn']>"), 0)
+    assert.equal(typeofLines("type Keys = keyof typeof TABLE"), 0)
+    assert.equal(typeofLines("/* typeof */\n * typeof in a doc block\n// typeof tail"), 0)
+    assert.equal(typeofLines("const a = 1 // typeof in a trailing comment"), 0)
+    // …and a runtime typeof on a line that ALSO has a type position still counts.
+    assert.equal(typeofLines("const ok = typeof x === 'string' // ReturnType<typeof y>"), 1)
   })
 })
 

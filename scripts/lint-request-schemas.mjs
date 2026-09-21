@@ -55,7 +55,10 @@
 // non-literal (a variable) is invisible to the scanner; a file whose routes
 // are registered nowhere is invisible to index.ts and reads as unmounted (its
 // routes then never resolve to a spec path and it reports shadow: 0, which is
-// the safe direction — an unregistered file ships no refusals to shrink); and
+// the safe direction — an unregistered file ships no refusals to shrink; a
+// module registered with NO options, `app.register(fooRoutes)`, mounts at ''
+// and IS read since #3030 — it was the one registration shape the scanner
+// missed); and
 // whether a route belongs in the spec AT ALL is #1443's coverage gate's
 // problem, not this one — `unspecced` counts such routes so slice 4's
 // "all zeros" cannot silently exclude them, and says nothing about whether
@@ -123,6 +126,14 @@ export function prefixesFromIndex(indexSource, importName) {
   for (const m of indexSource.matchAll(re)) {
     if (m[1] === importName) prefixes.push(m[2])
   }
+  // A module registered WITHOUT options — `await app.register(fooRoutes)` —
+  // mounts at the root, so its routes carry their full path and the prefix
+  // is ''. Before #3030 this shape was invisible: `routes/accounting-webhooks.ts`
+  // (#3196) registered that way and read as unmounted (shadow 0) while the
+  // plugin ran it in shadow — the gate and the runtime disagreed exactly
+  // where the header says they cannot.
+  const bare = new RegExp(`app\\.register\\(\\s*${importName}\\s*\\)`, 'g')
+  for (const _m of indexSource.matchAll(bare)) prefixes.push('')
   return prefixes
 }
 
@@ -144,7 +155,11 @@ export function prefixesFromIndex(indexSource, importName) {
 export function enforcedModulesFromIndex(indexSource) {
   const m = indexSource.match(/installRequestValidation\([\s\S]*?enforcedModules:\s*\[([^\]]*)\]/)
   if (!m) return []
-  return [...m[1].matchAll(/'([^']*)'/g)].map((x) => x[1])
+  // Comments inside the array are stripped first (#3030): the list grew a
+  // rationale comment, and an apostrophe in prose (`the epic's fallback`)
+  // read as a string literal to the bare quote scan.
+  const code = m[1].replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+  return [...code.matchAll(/'([^']*)'/g)].map((x) => x[1])
 }
 
 /** The import name `src/index.ts` binds the route file to (null when unimported). */
@@ -211,9 +226,28 @@ export function ownSchemaRoutes(source) {
     .filter((line) => /^\s*schema:\s/.test(line)).length
 }
 
-/** The number of lines in `source` that mention `typeof` — the metric. */
+/**
+ * The number of lines in `source` carrying a RUNTIME `typeof` — the metric.
+ *
+ * Runtime only (#3030): the gauge is "hand-rolled request checks the spec's
+ * schemas replace", and three things the earlier `includes('typeof')` counted
+ * are not that — a comment that mentions the word, a type query
+ * (`ReturnType<typeof serialize>`, `keyof typeof X`), and a type-only import
+ * (`typeof import('./x.js')`). Slice 2 drives the metric to zero across 22
+ * route files; a gauge that could only reach zero by rewriting type aliases
+ * and comments would measure the rewrite, not the migration. Whole-line
+ * comments and `//` tails are stripped first; a `typeof` preceded by `<`
+ * (a generic argument), by `keyof `, or followed by `import(` is a type
+ * position and is skipped. A `typeof` inside a string literal still counts —
+ * accepted: none exists in a route file today and the direction is safe.
+ */
 export function typeofLines(source) {
-  return source.split('\n').filter((line) => line.includes('typeof')).length
+  return source.split('\n').filter((line) => {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return false
+    const code = line.replace(/\/\/.*$/, '')
+    return /(^|[^<\w])typeof\s+(?!import\()/.test(code.replace(/keyof\s+typeof\s+/g, ''))
+  }).length
 }
 
 /**

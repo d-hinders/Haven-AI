@@ -309,6 +309,15 @@ untouched. The doc is a contract doc for this change because
 there is the deletion of the two twin helpers, not the refusal machinery this
 document depends on.
 
+Re-verified again 2026-09-21 against PR #3207 (#3030, request validation
+slice 2): the only `config.ts` change is the JSDoc above
+`requestValidationMode`, whose example list of `enforcedModules` had been
+stale since #3167 and now points at `index.ts` as the list's one home; the
+key's parser, its three values and the boot refusal on any other value are
+untouched, `connectorChannel` and `/discovery` are untouched, so no claim in
+this document moved and `last-verified` is left where it is — the
+comment-only rule above.
+
 Re-verified again 2026-09-20 against PR #3202 (epic #3077 decision 14):
 the only `config.ts` change is the comment above `marketplaceProspectsEnabled`,
 which now states the prospects gate as "the explicit marketplace list names a

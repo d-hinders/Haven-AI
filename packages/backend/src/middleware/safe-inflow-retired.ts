@@ -85,9 +85,9 @@ export function safeRailRetired(kind: SafeInflowKind): {
 
 /**
  * The handler for a closed Safe inflow. Register it as the route's only
- * handler:
+ * handler, WITH the route options from `retiredSafeInflowRoute`:
  *
- *   app.post('/deploy', retiredSafeInflowHandler('deploy'))
+ *   app.post('/deploy', retiredSafeInflowRoute('deploy'), retiredSafeInflowHandler('deploy'))
  *
  * Auth still runs first: `authMiddleware` is an `onRequest` hook on each of
  * these route modules, and Fastify's lifecycle runs onRequest before the
@@ -101,4 +101,25 @@ export function retiredSafeInflowHandler(
     const retired = safeRailRetired(kind)
     return reply.code(retired.statusCode).send(retired.body)
   }
+}
+
+/**
+ * The route options that make the 410 precede request VALIDATION (#3030).
+ *
+ * Once a route module is in the request-validation plugin's
+ * `enforcedModules`, the spec's request schema runs in Fastify's
+ * preValidation step — before the handler. A retired inflow still declares
+ * its old request body in the spec (the shape a client of the retired rail
+ * sent), so a malformed body would answer the 400 envelope instead of the
+ * 410, and the client would read "fix your request" where the truth is "the
+ * flow is gone". This route-level `onRequest` hook answers the 410 before
+ * validation runs — after the module's `authMiddleware` hook, which was
+ * registered first and still wins for an anonymous caller. Pinned by
+ * `safe-inflow-retired.test.ts`: a malformed body is a 410, and an
+ * anonymous one a 401.
+ */
+export function retiredSafeInflowRoute(kind: SafeInflowKind): {
+  onRequest: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply>
+} {
+  return { onRequest: retiredSafeInflowHandler(kind) }
 }

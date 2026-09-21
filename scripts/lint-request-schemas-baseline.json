@@ -1,20 +1,4 @@
 {
-  "routes/accounting-connections.ts": {
-    "shadow": 1,
-    "typeof": 1
-  },
-  "routes/accounting-feed.ts": {
-    "shadow": 1,
-    "typeof": 0
-  },
-  "routes/accounting.ts": {
-    "shadow": 1,
-    "typeof": 0
-  },
-  "routes/agent-activity.ts": {
-    "shadow": 1,
-    "typeof": 0
-  },
   "routes/agent-connection-setups.ts": {
     "shadow": 1,
     "typeof": 13
@@ -25,7 +9,7 @@
   },
   "routes/agent-passports.ts": {
     "shadow": 1,
-    "typeof": 1
+    "typeof": 0
   },
   "routes/agent-rekey.ts": {
     "shadow": 1,
@@ -35,37 +19,9 @@
     "shadow": 1,
     "typeof": 2
   },
-  "routes/analytics-overview.ts": {
-    "shadow": 1,
-    "typeof": 0
-  },
-  "routes/analytics.ts": {
-    "shadow": 1,
-    "typeof": 0
-  },
-  "routes/auth.ts": {
-    "shadow": 1,
-    "typeof": 7
-  },
-  "routes/balances.ts": {
-    "shadow": 1,
-    "typeof": 0
-  },
-  "routes/catalog-submissions.ts": {
-    "shadow": 1,
-    "typeof": 3
-  },
-  "routes/catalog.ts": {
-    "shadow": 1,
-    "typeof": 8
-  },
   "routes/contacts.ts": {
     "shadow": 0,
-    "typeof": 2
-  },
-  "routes/health.ts": {
-    "shadow": 0,
-    "typeof": 3
+    "typeof": 1
   },
   "routes/hybrid-accounts.ts": {
     "shadow": 1,
@@ -75,34 +31,14 @@
     "shadow": 1,
     "typeof": 19
   },
-  "routes/passport-verify.ts": {
-    "shadow": 1,
-    "typeof": 0
-  },
   "routes/payments.ts": {
     "shadow": 1,
     "typeof": 4
-  },
-  "routes/portfolio.ts": {
-    "shadow": 1,
-    "typeof": 0
   },
   "routes/safe-deploy.ts": {
     "shadow": 0,
     "typeof": 0,
     "unspecced": 1
-  },
-  "routes/transactions.ts": {
-    "shadow": 1,
-    "typeof": 1
-  },
-  "routes/user-accounts.ts": {
-    "shadow": 1,
-    "typeof": 1
-  },
-  "routes/user.ts": {
-    "shadow": 1,
-    "typeof": 1
   },
   "routes/x402.ts": {
     "shadow": 1,

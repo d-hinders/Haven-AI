@@ -308,14 +308,26 @@ Isolation rules that are non-negotiable for a payments product:
   (#3029, epic #3028).
 
   **`enforce` is not global, despite the name.** A route is enforced only when
-  the route FILE that declares it is in the plugin's `enforcedModules`, which
-  `index.ts` sets to `['routes/contacts.ts', 'routes/merchants.ts']` —
+  the route FILE that declares it is in the plugin's `enforcedModules` —
   `mode` gates the `off` early-return and the counters and nothing else.
-  Setting `HAVEN_REQUEST_VALIDATION=enforce` today therefore refuses exactly
-  what `shadow` refuses, and since #3084 that includes off-spec
-  `/merchants/{slug}` requests (the required `slug` must match its pattern).
-  Epic #3028 slices 2–4 widen the list; the variable is not the switch
-  that does it.
+  Since #3030 (epic #3028 slice 2) `index.ts` lists **every non-money route
+  module** there — the four already-enforced ones (`contacts`, `merchants`,
+  `labels`, `agent-labels`), the 22 slice-2 files (`accounting*`,
+  `agent-activity`, `analytics*`, `auth`, `balances`, `catalog*`,
+  `dashboard`, `discovery`, `health`, `openapi`, `passkeys`,
+  `passport-verify`, `portfolio`, `safe-deploy`, `transactions`, `user`,
+  `user-accounts*`, plus `accounting-webhooks`, which #3196 landed in the
+  slice's base commit) and the bare `'index.ts'` for the inline `GET /` and
+  `GET /chains`. Only the money-path modules (`payments`, `x402`,
+  `machine-payments`, `agents`, `agent-delegations`, `agent-rekey`,
+  `agent-passports`, `agent-connection-setups`, `hybrid-accounts` — slices
+  3–4, #3031/#3032) are still shadowed, so on dev an off-spec request to any
+  other route answers the 400 envelope. Slice 2 flipped on the epic's
+  fallback (owner decision 2026-09-21 on #3028): the in-process shadow
+  counter resets on every deploy and carries no per-route traffic, so it
+  could not prove the 22 modules; each module's route tests (off-spec → the
+  envelope, conformant → unchanged) are the instrument, and `enforce` on
+  dev is the reading. The variable is not the switch that widens the list.
 
   **Keyed on the FILE, not the mount prefix, since #3135** (epic #3028
   decision 7). A prefix could not express the epic's slice partition:
@@ -327,8 +339,14 @@ Isolation rules that are non-negotiable for a payments product:
   `npm run generate:route-modules` after adding, moving or renaming a route
   (`npm run check:route-modules` and the backend suite both fail on a stale
   table). The `lint:request-schemas` gate keys its baseline entries with the
-  same string, so the gate and the runtime cannot disagree about which modules
-  are still shadowed.
+  same string, so the gate and the runtime agree about which modules are
+  still shadowed — with one stated limit, closed in #3030: the gate reads a
+  module's mount prefix from `index.ts`, and until #3030 it read only the
+  `{ prefix: '…' }` shape, so a module registered bare
+  (`app.register(fooRoutes)`, mounted at the root) was invisible to it and
+  reported shadow 0 while the plugin ran it in shadow. `accounting-webhooks.ts`
+  (#3196) was exactly that for a morning; the gate reads bare registrations
+  as prefix `''` now.
 
   Any other value refuses the boot rather than falling
   back — a misspelled `enforce` must not silently mean `shadow`. **A mode

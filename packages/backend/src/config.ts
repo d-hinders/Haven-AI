@@ -538,8 +538,8 @@ export function parseAccountingEntitlementMode(raw: string | undefined | null): 
  * The request-validation plugin's mode (#3029, epic #3028).
  *
  *   off     — no schema is injected and no route is observed, EXCEPT a module
- *             in the plugin's `enforcedModules` (`index.ts` sets
- *             `['routes/contacts.ts', 'routes/merchants.ts']`), which stays
+ *             in the plugin's `enforcedModules` (`index.ts` lists every
+ *             enforced module — every non-money module since #3030), which stays
  *             enforced whatever the mode is. Keyed on the route FILE since
  *             #3135 — a mount prefix could not flip the four modules sharing
  *             `/agents` independently.

@@ -36,7 +36,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-20"
+last-verified: "2026-09-21"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -1210,3 +1210,42 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > no caveat, and no key. Perimeter unchanged for this model — the CASP shard
 > `docs/regulatory/casp-changelog/2026-09-20-3167.md` carries the full
 > analysis.
+
+> **Re-verified #3030 (2026-09-21, request validation slice 2):** this diff
+> touches three files in this document's coverage list — `routes/auth.ts`,
+> `routes/transactions.ts`, `routes/user-accounts.ts` — and moves no authority
+> or custody boundary: it moves SHAPE checks out of the handlers and into the
+> OpenAPI request schemas the plugin now ENFORCES on these modules
+> (`index.ts` `enforcedModules`). What each file lost is a hand-rolled type or
+> pattern check that the spec's schema states (`auth.ts`: the password
+> bounds, `typeof` on name/email/user_code/device_code — the email FORM and
+> the control-character and blank-after-trim rules stay in the handler, and
+> the `via` marker the dashboard sends is now declared; `transactions.ts`:
+> the uuid / `user`-or-uuid / `<chain>:<address|native>` / positive-integer /
+> `in|out` shapes on its filters, while ownership (`listBasicAccountsForUser`,
+> `agentExistsForUser`, `findAccountOwnership`) and chain support stay
+> exactly where they were; `user-accounts.ts`: `typeof name` and the
+> pre-lookup uuid check, with `renameAccountForUser` still scoped to the
+> caller). Auth precedes validation on every ENFORCED route: `authMiddleware`
+> runs as an `onRequest` hook and validation is preValidation, so an
+> anonymous caller gets 401 before any 400. Three enforced routes had theirs
+> as a `preHandler` (after validation) — `POST /auth/device/lookup`,
+> `/approve` and `GET /analytics/funnel` — which the enforced schema turned
+> into a 400 for an anonymous malformed request (measured in review, both
+> rounds); all three moved to `onRequest` in this diff, pinned by
+> `auth-device.test.ts` and `analytics.test.ts`. Two shadowed money-path
+> modules still register `authMiddleware` as a `preHandler`
+> (`agent-passports.ts`, `agent-connection-setups.ts`); their 401-first
+> consequence holds today because a module outside `enforcedModules`
+> refuses nothing, whatever the mode; both are slice-4 files (#3032) and
+> must move to `onRequest` before that slice flips them — #3032's body
+> carries that line — and
+> the retired Safe-inflow 410s (`POST /user/accounts`, `PUT /user/account`,
+> `/deploy`) gained a route-level `onRequest` so they still precede
+> validation: a malformed body is told the flow is gone, not to fix its
+> request (pinned in `safe-inflow-retired.test.ts`). The three files carry
+> no inline tenant SQL; ownership runs in the repositories they call
+> (`listBasicAccountsForUser`, `agentExistsForUser`, `findAccountOwnership`,
+> `renameAccountForUser`), none of which this diff touches. Scope of this
+> note: those three files' request-shape edits and the hook order. Nothing
+> else in this document was re-verified.

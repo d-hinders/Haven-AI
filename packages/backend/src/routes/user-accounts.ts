@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { retiredSafeInflowHandler } from '../middleware/safe-inflow-retired.js'
+import { retiredSafeInflowHandler, retiredSafeInflowRoute } from '../middleware/safe-inflow-retired.js'
 import {
   deleteAccountForUser,
   findOwnedAccountAddress,
@@ -18,7 +18,6 @@ import {
   getFaucetUrl,
   minimumUsefulTokens,
   parseTokenAmount,
-  UUID_RE,
 } from '@haven_ai/core'
 
 /**
@@ -56,11 +55,11 @@ export default async function userAccountsRoutes(app: FastifyInstance): Promise<
   // had: any check that the caller owned `owner_address`. The relayer paid gas
   // to deploy a Safe for whatever address a caller named, bounded only by a
   // global rate limit — a surface that is now gone rather than guarded.
-  app.post('/deploy', retiredSafeInflowHandler('deploy'))
+  app.post('/deploy', retiredSafeInflowRoute('deploy'), retiredSafeInflowHandler('deploy'))
 
   // POST /user/accounts — TOMBSTONE (#1984 closed it, #1988 deleted the body).
   // Importing is the other half of creating; both are how a Safe entered Haven.
-  app.post('/', retiredSafeInflowHandler('import'))
+  app.post('/', retiredSafeInflowRoute('import'), retiredSafeInflowHandler('import'))
 
   // PUT /user/accounts/:accountId — rename an account
   app.put<{ Params: { accountId: string }; Body: RenameAccountBody }>(
@@ -70,7 +69,10 @@ export default async function userAccountsRoutes(app: FastifyInstance): Promise<
       const { accountId } = request.params
       const { name } = request.body
 
-      if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      // `name` is a required string of at least one character by the spec,
+      // enforced before the handler (#3030); blank after trimming is the
+      // one refusal no schema states.
+      if (name.trim().length === 0) {
         return reply.code(400).send({ error: 'Name is required' })
       }
 
@@ -162,11 +164,9 @@ app.get<{ Params: { accountId: string } }>(
     const { sub } = request.user as { sub: string }
     const { accountId } = request.params
 
-    // Format first: a malformed id cannot name a row, so answering 400 rather
-    // than 404 keeps the two cases apart for a caller debugging a typo.
-    if (!UUID_RE.test(accountId)) {
-      return reply.code(400).send({ error: 'Invalid account id' }) as never
-    }
+    // A malformed id is refused before the handler by the spec's
+    // `format: uuid` (#3030) — 400, never 404, so a caller debugging a typo
+    // still sees the two cases apart.
 
     // ONE tenant-scoped read: ownership, the account address and its chain, with
     // the delegation-rail scope the account lists apply (#2413) — funding

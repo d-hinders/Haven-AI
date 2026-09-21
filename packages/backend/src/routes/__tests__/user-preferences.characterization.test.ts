@@ -22,6 +22,8 @@ vi.mock('../../db.js', () => ({
 }))
 
 import { buildApp } from '../../__tests__/helpers.js'
+import { openapiSpec } from '../../openapi/spec.js'
+import { TRANSACTION_CURRENCIES } from '../../domain/transaction-currency.js'
 
 describe('user preferences (characterization, #1167)', () => {
   let app: FastifyInstance
@@ -164,7 +166,9 @@ describe('user preferences (characterization, #1167)', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toBe('Invalid currency. Must be SEK, USD, EUR.')
+      // #3030: the enum is the spec's — the enforced module's envelope.
+      expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+      expect(response.json().details).toContain('body/currency_preference')
       expect(mockQuery).not.toHaveBeenCalled()
     })
 
@@ -179,5 +183,13 @@ describe('user preferences (characterization, #1167)', () => {
       expect(response.statusCode).toBe(400)
       expect(mockQuery).not.toHaveBeenCalled()
     })
+  })
+
+  it('the spec\'s currency enum IS TRANSACTION_CURRENCIES (#3030 — the handler no longer checks)', () => {
+    // Mutation: add a currency to TRANSACTION_CURRENCIES without the spec → red.
+    const op = (openapiSpec.paths as Record<string, Record<string, unknown>>)['/user/preferences'].put as {
+      requestBody: { content: { 'application/json': { schema: { properties: { currency_preference: { enum: string[] } } } } } }
+    }
+    expect(op.requestBody.content['application/json'].schema.properties.currency_preference.enum).toEqual([...TRANSACTION_CURRENCIES])
   })
 })

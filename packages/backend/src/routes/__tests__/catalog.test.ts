@@ -9,7 +9,9 @@ vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
 
-import catalogRoutes from '../catalog.js'
+import catalogRoutes, { VALID_RAILS } from '../catalog.js'
+import { openapiSpec } from '../../openapi/spec.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const AGENT_KEY = 'sk_agent_test_catalog'
 const AGENT_KEY_HASH = createHash('sha256').update(AGENT_KEY).digest('hex')
@@ -24,8 +26,13 @@ const AGENT_ROW = {
   chain_id: 8453,
 }
 
+// A catalog id is a uuid and the spec's path parameter says so (`format:
+// uuid`); with the module enforced (#3030) 'cat-1' is refused before the
+// handler, so every fixture reads this one value.
+const CAT_ID = '7c2a9e4b-3f1d-4a8e-b6c5-2d1e0f9a8b7c'
+
 const ENTRY = {
-  id: 'cat-1',
+  id: CAT_ID,
   name: 'Soundside — text generation',
   description: 'Generate text content.',
   category: 'media',
@@ -89,6 +96,10 @@ describe('catalog routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/catalog.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(catalogRoutes, { prefix: '/catalog' })
   })
@@ -165,7 +176,7 @@ describe('catalog routes', () => {
     const body = res.json() as { entries: Array<Record<string, unknown>> }
     expect(body.entries).toHaveLength(1)
     expect(body.entries[0]).toMatchObject({
-      id: 'cat-1',
+      id: CAT_ID,
       rail: 'x402',
       protocol: 'mcp',
       tool_name: 'create_text',
@@ -330,8 +341,12 @@ describe('catalog routes', () => {
       url: '/catalog?category=vpn&category=storage',
       headers: { authorization: `Bearer ${token}` },
     })
+    // #3030: a repeated key is an array, and the spec's `type: string` refuses
+    // it — the enforced module's envelope, before the handler. Mutation: drop
+    // the module from enforcedModules → the array reaches the SQL.
     expect(repeatedCategory.statusCode).toBe(400)
-    expect(repeatedCategory.json()).toEqual({ error: 'Category must be a single string' })
+    expect(repeatedCategory.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(repeatedCategory.json().details).toContain('querystring/category')
 
     mockQuery.mockClear()
     const empty = await app.inject({
@@ -339,6 +354,8 @@ describe('catalog routes', () => {
       url: '/catalog?search=%20%20',
       headers: { authorization: `Bearer ${token}` },
     })
+    // Blank after trimming passes `minLength: 1`; this refusal stays the
+    // handler's (semantic).
     expect(empty.statusCode).toBe(400)
     expect(empty.json()).toEqual({ error: 'Search must not be empty' })
 
@@ -349,7 +366,8 @@ describe('catalog routes', () => {
       headers: { authorization: `Bearer ${token}` },
     })
     expect(repeated.statusCode).toBe(400)
-    expect(repeated.json()).toEqual({ error: 'Search must be a single string' })
+    expect(repeated.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(repeated.json().details).toContain('querystring/search')
 
     mockQuery.mockClear()
     const long = await app.inject({
@@ -357,12 +375,14 @@ describe('catalog routes', () => {
       url: `/catalog?search=${'x'.repeat(121)}`,
       headers: { authorization: `Bearer ${token}` },
     })
+    // `maxLength: 120` is the spec's.
     expect(long.statusCode).toBe(400)
-    expect(long.json()).toEqual({ error: 'Search must be 120 characters or fewer' })
+    expect(long.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(long.json().details).toContain('querystring/search')
     expect(mockQuery).not.toHaveBeenCalled()
   })
 
-  it('rejects an unknown rail filter', async () => {
+  it('rejects an unknown rail filter — the spec\'s enum, pinned to VALID_RAILS (#3030)', async () => {
     const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
     const res = await app.inject({
       method: 'GET',
@@ -370,6 +390,14 @@ describe('catalog routes', () => {
       headers: { authorization: `Bearer ${token}` },
     })
     expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(res.json().details).toContain('querystring/rail')
+    // The handler's own check is gone, so the enum must be the handler's set.
+    // Mutation: add a rail to VALID_RAILS without the spec → red.
+    const op = (openapiSpec.paths as Record<string, Record<string, unknown>>)['/catalog'].get as {
+      parameters: Array<{ name: string; schema: { enum?: string[] } }>
+    }
+    expect(op.parameters.find((p) => p.name === 'rail')!.schema.enum).toEqual([...VALID_RAILS])
   })
 
   it('returns one entry by id and 404s on misses', async () => {
@@ -378,16 +406,16 @@ describe('catalog routes', () => {
 
     const hit = await app.inject({
       method: 'GET',
-      url: '/catalog/cat-1',
+      url: `/catalog/${CAT_ID}`,
       headers: { authorization: `Bearer ${token}` },
     })
     expect(hit.statusCode).toBe(200)
-    expect(hit.json().id).toBe('cat-1')
+    expect(hit.json().id).toBe(CAT_ID)
 
     mockAgentLookupThen({ rows: [ENTRY] })
     const agentHit = await app.inject({
       method: 'GET',
-      url: '/catalog/cat-1',
+      url: `/catalog/${CAT_ID}`,
       headers: { authorization: `Bearer ${AGENT_KEY}` },
     })
     expect(agentHit.statusCode).toBe(200)
@@ -396,12 +424,13 @@ describe('catalog routes', () => {
       .reverse()
       .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
     expect(String(catalogCall?.[0])).toContain('mc.network = $2')
-    expect(catalogCall?.[1]).toEqual(['cat-1', 'eip155:8453'])
+    expect(catalogCall?.[1]).toEqual([CAT_ID, 'eip155:8453'])
 
     mockQuery.mockResolvedValueOnce({ rows: [] })
     const miss = await app.inject({
       method: 'GET',
-      url: '/catalog/cat-unknown',
+      // A well-formed id that no row carries (#3030: a malformed one is a 400 now).
+      url: '/catalog/00000000-0000-4000-8000-00000000dead',
       headers: { authorization: `Bearer ${token}` },
     })
     expect(miss.statusCode).toBe(404)
@@ -418,7 +447,7 @@ describe('catalog routes', () => {
     })
     await app.inject({
       method: 'GET',
-      url: '/catalog/cat-1',
+      url: `/catalog/${CAT_ID}`,
       headers: { authorization: `Bearer ${token}` },
     })
 
@@ -451,7 +480,7 @@ describe('catalog routes', () => {
     // verified_at set (probed OK, #2978), so it carries the payable badge
     // without the ownership badge — see the dedicated #2978 tests below for
     // the degraded / never-probed cases.
-    expect(entries[0]).toMatchObject({ id: 'cat-1', source: 'operator', domain_verified: false, verified_payable: true })
+    expect(entries[0]).toMatchObject({ id: CAT_ID, source: 'operator', domain_verified: false, verified_payable: true })
     expect(entries[1]).toMatchObject({
       id: '00000000-0000-4000-8000-000000000002',
       name: 'Directory Summarizer',
@@ -477,7 +506,7 @@ describe('catalog routes', () => {
     const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
     expect(res.statusCode).toBe(200)
     expect(res.json().entries[0]).toMatchObject({
-      id: 'cat-1',
+      id: CAT_ID,
       source: 'operator',
       domain_verified: false,
       verified_payable: true,
@@ -491,7 +520,7 @@ describe('catalog routes', () => {
     const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
     expect(res.statusCode).toBe(200)
     expect(res.json().entries[0]).toMatchObject({
-      id: 'cat-1',
+      id: CAT_ID,
       source: 'operator',
       domain_verified: false,
       verified_payable: false,
@@ -505,7 +534,7 @@ describe('catalog routes', () => {
     const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
     expect(res.statusCode).toBe(200)
     expect(res.json().entries[0]).toMatchObject({
-      id: 'cat-1',
+      id: CAT_ID,
       source: 'operator',
       domain_verified: false,
       verified_payable: false,
@@ -535,5 +564,17 @@ describe('catalog routes', () => {
     const jwt = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
     const dash = await app.inject({ method: 'GET', url: '/catalog?rail=mpp', headers: { authorization: `Bearer ${jwt}` } })
     expect(dash.json().entries).toHaveLength(1)
+  })
+
+  it('refuses a non-uuid catalog id with the 400 envelope before any query (#3030)', async () => {
+    // Mutation: drop the module from enforcedModules → the lookup runs with
+    // 'cat-1' and answers 404.
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+    mockQuery.mockClear()
+    const res = await app.inject({ method: 'GET', url: '/catalog/cat-1', headers: { authorization: `Bearer ${token}` } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(res.json().details).toContain('params/id')
+    expect(mockQuery).not.toHaveBeenCalled()
   })
 })

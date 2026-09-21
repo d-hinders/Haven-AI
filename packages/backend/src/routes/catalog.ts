@@ -38,7 +38,8 @@ import {
 import { marketplaceChainIds } from '../modules/catalog/index.js'
 import { CATALOG_ROW_WITH_MERCHANT_SELECT, type CatalogRowWithMerchant } from '../infra/repositories/merchants.js'
 
-const VALID_RAILS = new Set(['x402', 'mpp'])
+/** Exported for the test that pins the spec's `rail` enum to this set (#3030). */
+export const VALID_RAILS = new Set(['x402', 'mpp'])
 
 /**
  * Accept either an agent API key or a dashboard JWT. Agent keys are
@@ -101,7 +102,7 @@ export function merchantOf(row: CatalogRowWithMerchant) {
 
 /** The host of a merchant endpoint, or null if it will not parse. */
 export function endpointHost(resourceUrl: string | null | undefined): string | null {
-  if (typeof resourceUrl !== 'string' || !resourceUrl) return null
+  if (!resourceUrl) return null
   try {
     return new URL(resourceUrl).host || null
   } catch {
@@ -137,22 +138,27 @@ export type { CatalogRowWithMerchant }
  */
 const PUBLIC_GET_ROUTES = new Set(['/', '/catalog', '/catalog/', '/merchants', '/merchants/', '/merchants/:slug'])
 
+/** A header sent once, or nothing: a repeated `x-api-key` was never a key. */
+function singleHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? undefined : value
+}
+
 export function isPublicCatalogRead(request: FastifyRequest): boolean {
   if (request.method !== 'GET') return false
   const path = request.routeOptions?.url ?? request.url.split('?')[0]
   if (!PUBLIC_GET_ROUTES.has(path)) return false
   const authHeader = request.headers.authorization
-  const xApiKey = request.headers['x-api-key']
-  return !authHeader && typeof xApiKey !== 'string'
+  const xApiKey = singleHeader(request.headers['x-api-key'])
+  return !authHeader && xApiKey === undefined
 }
 
 export async function eitherAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   if (isPublicCatalogRead(request)) return
   const authHeader = request.headers.authorization
-  const xApiKey = request.headers['x-api-key']
+  const xApiKey = singleHeader(request.headers['x-api-key'])
   const hasAgentKey =
     authHeader?.startsWith('Bearer sk_agent_') ||
-    (typeof xApiKey === 'string' && xApiKey.startsWith('sk_agent_'))
+    (xApiKey !== undefined && xApiKey.startsWith('sk_agent_'))
 
   // The `sk_agent_` prefix only ROUTES to the agent middleware — it is not a
   // trust decision. agentAuthMiddleware then does a full SHA-256 hash lookup
@@ -251,31 +257,20 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
     async (request, reply) => {
       const { category, rail, search } = request.query
 
-      if (rail !== undefined && !VALID_RAILS.has(rail)) {
-        return reply.code(400).send({ error: `Invalid rail: ${rail}` })
-      }
-
-      // Search is deliberately bounded and normalized at the route boundary.
-      // This keeps the read-only discovery contract predictable for both the
-      // dashboard and agent clients, while the SQL below remains parameterized.
-      if (search !== undefined && typeof search !== 'string') {
-        return reply.code(400).send({ error: 'Search must be a single string' })
-      }
-      const normalizedSearch =
-        typeof search === 'string' ? search.trim().replace(/\s+/g, ' ') : undefined
+      // The shapes are the spec's, enforced before the handler since #3030:
+      // `rail` is the enum (pinned to VALID_RAILS by the test suite), `search`
+      // and `category` are single strings (a repeated query key is an array,
+      // which the schema refuses), `search` is 1–120 characters. Search is
+      // still normalised at the route boundary — trimmed, whitespace
+      // collapsed — and blank-after-trim is the one refusal no schema states.
+      const normalizedSearch = search?.trim().replace(/\s+/g, ' ')
       if (search !== undefined && !normalizedSearch) {
         return reply.code(400).send({ error: 'Search must not be empty' })
-      }
-      if (normalizedSearch && normalizedSearch.length > 120) {
-        return reply.code(400).send({ error: 'Search must be 120 characters or fewer' })
       }
 
       const conditions = [`mc.status != 'delisted'`]
       const values: unknown[] = []
-      if (category !== undefined && typeof category !== 'string') {
-        return reply.code(400).send({ error: 'Category must be a single string' })
-      }
-      const normalizedCategory = typeof category === 'string' ? category.trim() : undefined
+      const normalizedCategory = category?.trim()
       if (normalizedCategory) {
         values.push(normalizedCategory)
         conditions.push(`LOWER(TRIM(mc.category)) = LOWER(TRIM($${values.length}))`)

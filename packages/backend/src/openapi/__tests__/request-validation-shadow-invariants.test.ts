@@ -154,13 +154,13 @@ const DEFAULT_VS_HANDLER_FALLBACK: Record<string, { spec: unknown; handler: unkn
   'GET /agent-activity/{id}/activity query:offset': { spec: 0, handler: 0, site: 'routes/agent-activity.ts — `.offset) || 0`' },
   'GET /agent-activity/feed query:limit': { spec: 30, handler: 30, site: 'routes/agent-activity.ts — `.limit) || 30`' },
   'GET /agent-activity/feed query:offset': { spec: 0, handler: 0, site: 'routes/agent-activity.ts — `.offset) || 0`' },
-  'GET /analytics/overview query:currency': { spec: 'usd', handler: 'usd', site: "routes/analytics-overview.ts — `(currencyParam ?? 'usd')`" },
+  'GET /analytics/overview query:currency': { spec: 'usd', handler: 'usd', site: "routes/analytics-overview.ts — `currencyParam ?? 'usd'`" },
   'GET /analytics/overview query:tz': { spec: 'UTC', handler: 'UTC', site: "routes/analytics-overview.ts — `tzParam ?? 'UTC'`" },
   'GET /machine-payments/receipts query:limit': { spec: 25, handler: 25, site: 'routes/machine-payments.ts — `request.query.limit ? Number(request.query.limit) : 25`' },
-  'GET /transactions query:limit': { spec: 25, handler: 25, site: 'routes/transactions.ts — `parsePositiveInt(request.query.limit, 25, 1, 100)`' },
-  'GET /transactions query:offset': { spec: 0, handler: 0, site: 'routes/transactions.ts — `parsePositiveInt(request.query.offset, 0, 0, Number.MAX_SAFE_INTEGER)`' },
-  'GET /transactions/{accountAddress} query:limit': { spec: 25, handler: 25, site: 'routes/transactions.ts — `parsePositiveInt(request.query.limit, 25, 1, 100)`' },
-  'GET /transactions/{accountAddress} query:page': { spec: 1, handler: 1, site: 'routes/transactions.ts — `parsePositiveInt(request.query.page, 1, 1, Number.MAX_SAFE_INTEGER)`' },
+  'GET /transactions query:limit': { spec: 25, handler: 25, site: 'routes/transactions.ts — `readInt(request.query.limit, 25)`' },
+  'GET /transactions query:offset': { spec: 0, handler: 0, site: 'routes/transactions.ts — `readInt(request.query.offset, 0)`' },
+  'GET /transactions/{accountAddress} query:limit': { spec: 25, handler: 25, site: 'routes/transactions.ts — `readInt(request.query.limit, 25)`' },
+  'GET /transactions/{accountAddress} query:page': { spec: 1, handler: 1, site: 'routes/transactions.ts — `readInt(request.query.page, 1)`' },
 }
 
 /**

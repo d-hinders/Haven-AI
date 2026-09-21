@@ -67,10 +67,10 @@ type Site = {
   expect: { next_action: string; suggested_tool?: string } & Record<string, unknown>
 }
 
-/** Refusal fixtures: 30 HostedToolError sites, the eip3009 rejection carrying a live-state branch. */
-export const REFUSAL_SITE_COUNT = 31
-/** `refusalNextStep(` calls in the hosted source: 29 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder). */
-export const REFUSAL_STEP_CALLS = 37
+/** Refusal fixtures: 31 HostedToolError sites, the eip3009 rejection carrying a live-state branch. */
+export const REFUSAL_SITE_COUNT = 32
+/** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal). */
+export const REFUSAL_STEP_CALLS = 38
 
 export const REFUSAL_SITES: Site[] = [
   { site: 'catalog-purchase.ts prepare: allowance short', base: { code: 'INSUFFICIENT_ALLOWANCE', message: 'm', statusCode: 402, suggestedTool: 'haven_get_allowances' }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: 'the account needs funds or a higher allowance first; haven_get_allowances shows the numbers' }, expect: { next_action: 'fund_account_or_raise_allowance', suggested_tool: 'haven_get_allowances', ...OMIT('the account needs funds or a higher allowance first; haven_get_allowances shows the numbers') } },
@@ -98,6 +98,7 @@ export const REFUSAL_SITES: Site[] = [
   { site: 'cap-price.ts rail cannot settle erc7710', base: { code: 'RAIL_UNSUPPORTED', message: 'm', statusCode: 403, suggestedTool: 'haven_get_agent' }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_SUG }, expect: { next_action: 'stop_and_tell_user', suggested_tool: 'haven_get_agent', ...OMIT(STOP_SUG) } },
   { site: 'state-direct-recovery.ts check_funds: both-or-neither amount', base: { code: 'INVALID_INPUT', message: 'm', statusCode: 400 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP }, expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP) } },
   { site: 'state-direct-recovery.ts check_funds: unrecognised token address', base: { code: F.MaxAmountUnconvertible, message: 'm', statusCode: 400 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP }, expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP) } },
+  { site: 'state-direct-recovery.ts check_funds: symbol resolves to no or several allowances (#3213)', base: { code: 'INVALID_INPUT', message: 'm', statusCode: 400 }, step: { nextAction: A.RetryWithExplicitContext, nextTool: 'haven_get_allowances', nextArguments: {} }, expect: { next_action: 'retry_with_explicit_context', next_tool: 'mcp__haven__haven_get_allowances', next_tool_server: 'haven', next_tool_name: 'haven_get_allowances', next_tool_server_role: 'hosted', next_arguments: {} } },
   { site: 'state-direct-recovery.ts check_funds: human cap too precise', base: { code: F.MaxAmountUnconvertible, message: 'm', statusCode: 400 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP }, expect: { next_action: 'stop_and_tell_user', ...OMIT(STOP) } },
   { site: 'catalog-entry.ts not found', base: { code: 'CATALOG_ENTRY_NOT_FOUND', message: 'm', statusCode: 404, suggestedTool: 'haven_discover_tools' }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_SUG }, expect: { next_action: 'stop_and_tell_user', suggested_tool: 'haven_discover_tools', ...OMIT(STOP_SUG) } },
   { site: 'catalog-entry.ts unusable', base: { code: 'CATALOG_ENTRY_UNUSABLE', message: 'm', statusCode: 409, suggestedTool: 'haven_pay_mcp_tool' }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: STOP_SUG }, expect: { next_action: 'stop_and_tell_user', suggested_tool: 'haven_pay_mcp_tool', ...OMIT(STOP_SUG) } },

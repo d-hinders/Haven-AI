@@ -975,27 +975,47 @@ describe('x402 delegation-rail settlement (#830)', () => {
     }))
   })
 
+  // #3031: the module is ENFORCED, so the refusals below answer at the SCHEMA
+  // (the 400 envelope) before the handler — the handler's own checks remain
+  // for the conformant-shaped values the spec cannot see (the >64KB bound,
+  // the facilitator-address cross-check against the stored challenge).
   it('authorize 400s a malformed or oversized paymentRequired instead of silently dropping it', async () => {
-    for (const bad of ['a-string', [1, 2], { blob: 'x'.repeat(70000) }]) {
+    for (const bad of ['a-string', [1, 2]]) {
       const res = await app.inject({
         method: 'POST', url: '/x402/authorize',
-        headers: { authorization: 'Bearer sk_agent_test' },
+        headers: { authorization: 'Bearer ***' },
         payload: authorizeBody({ paymentRequired: bad }),
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json().error).toMatch(/paymentRequired/)
+      // The spec's `paymentRequired` requires `type: object` — the schema
+      // refuses these before the handler.
+      expect(res.json().error).toBe('Request does not match the API spec')
     }
+    // The oversized blob is spec-shaped (an object), so it reaches the
+    // handler, whose own 64KB bound refuses it with the handler's prose.
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer ***' },
+      payload: authorizeBody({ paymentRequired: { blob: 'x'.repeat(70000) } }),
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/paymentRequired/)
   })
 
   it('authorize 400s malformed facilitatorAddresses — garbage cannot half-pin a child', async () => {
+    // Every value below violates the spec's own `facilitatorAddresses`
+    // declaration (minItems 1, address pattern, maxItems 16): the enforced
+    // schema refuses them before the handler. The HANDLER's remaining
+    // facilitator refusal is the #3117 cross-check against the stored
+    // challenge, covered in its suite above.
     for (const bad of [[], ['not-an-address'], 'x', new Array(17).fill('0x' + 'aa'.repeat(20))]) {
       const res = await app.inject({
         method: 'POST', url: '/x402/authorize',
-        headers: { authorization: 'Bearer sk_agent_test' },
+        headers: { authorization: 'Bearer ***' },
         payload: authorizeBody({ facilitatorAddresses: bad }),
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json().error).toMatch(/facilitatorAddresses/)
+      expect(res.json().error).toBe('Request does not match the API spec')
     }
   })
 

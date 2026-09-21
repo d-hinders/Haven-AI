@@ -971,7 +971,7 @@ describe('delegation lifecycle API (#828)', () => {
         submitCall: vi.fn(),
       })
       const res = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke` })
-      expect(res.statusCode).toBe(200)
+      expect(res.statusCode, JSON.stringify(res.json())).toBe(200)
       expect(res.json().signing_payload.domain.name).toBe('HybridDeleGator')
       expect(res.json().instructions).toMatch(/Sign signing_payload/)
       // Nothing was submitted, nothing marked revoked yet:

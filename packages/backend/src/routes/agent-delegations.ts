@@ -301,9 +301,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const { token_address, recipient_address, budget_atomic, period_seconds, expires_at } =
       request.body ?? {}
     // The uint96 ceiling is the ERC20PeriodTransferEnforcer's word size, not a
-    // shape: the spec's `^[0-9]+$` pattern accepts any digit string, and the
-    // contract refuses one that cannot fit the enforcer's uint96.
-    if (BigInt(budget_atomic) > MAX_UINT96) {
+    // shape: the spec's `^[0-9]+$` pattern accepts any digit string. The
+    // positivity half is SEMANTIC — no pattern can exclude `'0'` while
+    // accepting every other digit string — so it stays here with the ceiling
+    // (characterization: 'zero budget' still 400s, unchanged).
+    if (BigInt(budget_atomic) <= 0n || BigInt(budget_atomic) > MAX_UINT96) {
       return reply.code(400).send({ error: 'budget_atomic must be a positive atomic amount' })
     }
     // The expiry default and the future rule are chain-time semantics

@@ -110,15 +110,22 @@ describeDb('GET /health/ops accounting counters (#2872) — real queries', () =>
     expect((await read()).exhaustedSyncs).toBe(2)
   })
 
-  it('connectionsNeedingAttention counts the three re-consent states across every tenant — never connected or disconnected', async () => {
+  it('connectionsNeedingAttention counts the four attention states across every tenant — never connected or disconnected', async () => {
     const a = await seedUser()
     const b = await seedUser()
     const c = await seedUser()
+    const d = await seedUser()
     await seedConnection(a, 'fortnox', 'needs_reauthorisation')
     await seedConnection(b, 'fortnox', 'scope_missing')
     await seedConnection(c, 'fortnox', 'revoked_at_provider')
+    // #3019: the fourth state is written to a REAL row here on purpose —
+    // it proves migration 092's widened CHECK accepts it and that the
+    // counter's predicate names it, in one case. Mutation: drop
+    // `needs_attention` from the CHECK → 23514 here; drop it from
+    // NEEDS_ATTENTION_STATUSES → 3, not 4.
+    await seedConnection(d, 'accounted', 'needs_attention')
     await seedConnection(a, 'accounted', 'connected')
     await seedConnection(b, 'accounted', 'disconnected')
-    expect((await read()).connectionsNeedingAttention).toBe(3)
+    expect((await read()).connectionsNeedingAttention).toBe(4)
   })
 })

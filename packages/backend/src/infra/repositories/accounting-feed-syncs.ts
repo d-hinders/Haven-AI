@@ -36,6 +36,10 @@ export interface FeedSyncRow {
   attempts: number
   created_at: string
   updated_at: string
+  /** When the provider's webhook confirmed the pushed document (#3019);
+   *  null until then, and on every non-Accounted row. Its own column so
+   *  `error` stays the failure vocabulary (PR #3196 S2). */
+  delivery_confirmed_at: string | null
 }
 
 export interface ClaimResult {
@@ -470,8 +474,6 @@ export async function countExhaustedSyncs(db: Executor = pool): Promise<number> 
 // page renders `s.error ?? rowIdentity...`, so a note written there HIDES
 // the document id on a confirmed pushed row), and the confirmation is a
 // fact about the delivery, not an error.
-
-export const ACCOUNTED_DELIVERY_CONFIRMED_NOTE = 'delivery confirmed by provider webhook'
 
 export const CONFIRM_ACCOUNTED_DOCUMENT_SQL = `UPDATE accounting_feed_syncs
      SET delivery_confirmed_at = NOW(), updated_at = NOW()

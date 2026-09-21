@@ -43,7 +43,14 @@ import type { PoolClient } from 'pg'
  *      row the capability token resolved. Without it the ledger cannot
  *      answer "whose deliveries are these" without joining through a token
  *      that a reconnect RETIRES — cheap to add while the table is born,
- *      expensive to backfill once real deliveries exist (S1).
+ *      expensive to backfill once real deliveries exist (S1). Typed as the
+ *      schema types every other owner column — `UUID REFERENCES users(id)`
+ *      (080:83 is the row it is copied from) — with `ON DELETE SET NULL`,
+ *      not CASCADE: the ledger is the dedupe record and the ops trail, and
+ *      a deleted user's deliveries must still count as received (the
+ *      provider does not retry after our 2xx). Round 2 of the review found
+ *      it born as TEXT; a later type change would be another migration on
+ *      the CODEOWNER path, so it is fixed here before any row exists.
  *
  *    - `accounting_feed_syncs.delivery_confirmed_at` — the provider-webhook
  *      confirmation timestamp on a pushed row (S2). The confirmation used to
@@ -65,7 +72,7 @@ export async function up(client: PoolClient): Promise<void> {
       id           BIGSERIAL PRIMARY KEY,
       provider     TEXT NOT NULL,
       delivery_id  TEXT NOT NULL,
-      user_id      TEXT,
+      user_id      UUID REFERENCES users(id) ON DELETE SET NULL,
       event_type   TEXT,
       api_version  TEXT,
       request_id   TEXT,

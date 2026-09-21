@@ -117,6 +117,24 @@ describeDb('migration 092_accounting_webhook_deliveries', () => {
        WHERE table_schema = current_schema() AND table_name = 'accounting_webhook_deliveries' AND column_name = 'user_id'`,
     )
     expect(deliveryCols.rows[0].n).toBe('1')
+    // …and typed like every other owner column: UUID with an FK to users
+    // that nulls (never cascades) on delete — the ledger outlives the user
+    // (round 2: the column was born TEXT). Mutation: TEXT back → red;
+    // CASCADE → red.
+    const userIdType = await db.query<{ data_type: string }>(
+      `SELECT data_type FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'accounting_webhook_deliveries' AND column_name = 'user_id'`,
+    )
+    expect(userIdType.rows[0].data_type).toBe('uuid')
+    const fk = await db.query<{ confdeltype: string; refname: string }>(
+      `SELECT c.confdeltype, r.relname AS refname
+       FROM pg_constraint c
+       JOIN pg_class t ON t.oid = c.conrelid
+       JOIN pg_class r ON r.oid = c.confrelid
+       JOIN pg_namespace n ON n.oid = t.relnamespace
+       WHERE n.nspname = current_schema() AND t.relname = 'accounting_webhook_deliveries' AND c.contype = 'f'`,
+    )
+    expect(fk.rows).toEqual([{ confdeltype: 'n', refname: 'users' }])
 
     // S2: the confirmation is its own column, never a note inside `error`.
     const confirmedCols = await db.query<{ n: string }>(

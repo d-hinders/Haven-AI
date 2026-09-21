@@ -58,6 +58,7 @@
     "lint:request-schemas": "node scripts/lint-request-schemas.mjs",
     "lint:request-schemas:update": "node scripts/lint-request-schemas.mjs --update",
     "lint:request-schemas:test": "node --test scripts/lint-request-schemas.test.mjs",
+    "shadow:reading": "node scripts/ci/shadow-reading.mjs",
     "lint:next-steps": "node scripts/lint-next-steps.mjs",
     "lint:next-steps:update": "node scripts/lint-next-steps.mjs --update",
     "lint:next-steps:test": "node --test scripts/lint-next-steps.test.mjs",

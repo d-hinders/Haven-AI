@@ -7403,7 +7403,7 @@ export const openapiSpec = {
       },
       HealthOpsResponse: {
         type: 'object',
-        required: ['relayer', 'passport', 'trustProxy', 'accounting'],
+        required: ['relayer', 'passport', 'trustProxy', 'accounting', 'request_validation'],
         properties: {
           relayer: {
             type: 'array',
@@ -7516,6 +7516,25 @@ export const openapiSpec = {
                 type: 'boolean',
                 description: 'Present and `true` only when the counters could not be read; the two integers and `webhookCounters` are then `null`.',
               },
+            },
+            additionalProperties: false,
+          },
+          request_validation: {
+            type: 'object',
+            description:
+              'The request-validation plugin\'s shadow counters (#3029, epic #3028) — served since the plugin shipped, declared here since #3208. ' +
+              'IN-PROCESS: they start at `since` (the plugin install, one per process) and dev redeploys on every merge, so a reading is only as wide as that window. ' +
+              '`seenByRoute` (#3208) is what makes a zero readable: a shadowed route with `seen: 0` in the window is NOT PROVEN, never clean. ' +
+              'Enforced routes are absent from `seenByRoute` — they refuse for real. The same events ride the log stream (`request_validation.would_refuse`, `would_coerce`, `seen`), which survives deploys; `scripts/ci/shadow-reading.mjs` aggregates them.',
+            required: ['mode', 'wouldRefuse', 'wouldCoerce', 'byRouteField', 'coerceByRouteField', 'since', 'seenByRoute'],
+            properties: {
+              mode: { type: 'string', enum: ['off', 'shadow', 'enforce'] },
+              wouldRefuse: { type: 'integer', minimum: 0, description: 'Would-be refusals in the window; at most one per request.' },
+              wouldCoerce: { type: 'integer', minimum: 0, description: 'Body FIELDS ajv rewrote and #3082 restored; one per field, never summed with `wouldRefuse`.' },
+              byRouteField: { type: 'object', additionalProperties: { type: 'integer', minimum: 0 }, description: 'Keyed `METHOD /path field`.' },
+              coerceByRouteField: { type: 'object', additionalProperties: { type: 'integer', minimum: 0 }, description: 'Keyed `METHOD /path field`.' },
+              since: { type: 'string', format: 'date-time', description: 'When these counters started — the process\'s plugin install.' },
+              seenByRoute: { type: 'object', additionalProperties: { type: 'integer', minimum: 0 }, description: 'Requests that reached validation per SHADOWED route (`METHOD /path`), whatever the verdict.' },
             },
             additionalProperties: false,
           },

@@ -283,6 +283,51 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
     expect(added[0]).toMatch(/^POST \/contacts body/)
   })
 
+  it('#3208: every shadowed request counts under seenByRoute — conformant or not — and the window has a start', async () => {
+    // A reading needs the traffic half: `wouldRefuse: 0` on a route the window
+    // never exercised is NOT PROVEN, and only `seen` can tell that apart from
+    // a conformant route. Mutation: drop `recordSeen` from the preValidation
+    // hook → `seen` stays at the previous value here.
+    const before = requestValidationOpsSnapshot()
+    const seenBefore = before.seenByRoute['POST /contacts'] ?? 0
+    expect(Date.parse(before.since)).toBeGreaterThan(Date.now() - 60 * 60_000)
+    await auth('POST', '/contacts', { name: 'Acme' }) // off-spec (address missing)
+    await auth('POST', '/contacts', { name: 'Acme', address: null }) // conformant
+    const after = requestValidationOpsSnapshot()
+    expect(after.seenByRoute['POST /contacts']).toBe(seenBefore + 2)
+    expect(after.since).toBe(before.since)
+    // The snapshot's keys are the sorted route set, never an unknown path.
+    expect(Object.keys(after.seenByRoute)).toEqual([...Object.keys(after.seenByRoute)].sort())
+  })
+
+  it('#3208: the seen log line is rate-limited to one per route per minute, carrying the running total', async () => {
+    // 100 requests inside one minute → exactly one `request_validation.seen`
+    // line for the route (the first), so a busy route cannot flood the log
+    // stream the reading is aggregated from. Mutation: drop the minute guard
+    // in `recordSeen` → 100 lines.
+    const lines: Array<{ event: string; route: string; seen: number }> = []
+    const originalInfo = app.log.info.bind(app.log)
+    ;(app.log as unknown as { info: (o: unknown, m?: string) => void }).info = (obj, msg) => {
+      if (msg === 'request_validation.seen') lines.push(obj as { event: string; route: string; seen: number })
+      return originalInfo(obj as never, msg as never)
+    }
+    vi.useFakeTimers({ now: new Date('2030-01-01T00:00:30.000Z'), toFake: ['Date'] })
+    try {
+      for (let i = 0; i < 100; i += 1) await auth('POST', '/contacts', { name: 'Acme', address: null })
+      const mine = lines.filter((l) => l.route === 'POST /contacts')
+      expect(mine.length).toBe(1)
+      // The next minute opens a new line, with the running total.
+      vi.setSystemTime(new Date('2030-01-01T00:01:00.000Z'))
+      await auth('POST', '/contacts', { name: 'Acme', address: null })
+      const next = lines.filter((l) => l.route === 'POST /contacts')
+      expect(next.length).toBe(mine.length + 1)
+      expect(next[next.length - 1].seen).toBe(requestValidationOpsSnapshot().seenByRoute['POST /contacts'])
+    } finally {
+      vi.useRealTimers()
+      ;(app.log as unknown as { info: unknown }).info = originalInfo
+    }
+  })
+
   it('#3082: shadow does NOT mutate the request body — null survives ajv coercion', async () => {
     // This assertion read `address: ''` until #3082 — as a characterization
     // of the defect, not as an intended contract. The schema is attached in
@@ -512,6 +557,17 @@ describe('installRequestValidation — enforce mode (#3029)', () => {
       statusCode: 400,
       error_code: 'invalid_request',
     })
+  })
+
+  it('#3208: an ENFORCED route is absent from seenByRoute — it refuses for real and has nothing to prove; an unknown path never enters the map', async () => {
+    // Mutation: count under `enforced` as well (hoist recordSeen above the
+    // shadow-only guard) → `POST /contacts` appears here → red.
+    await app.inject({ method: 'POST', url: '/contacts', headers: { authorization: `Bearer ${token}` }, payload: { name: 'Acme' } })
+    await app.inject({ method: 'POST', url: '/contacts', headers: { authorization: `Bearer ${token}` }, payload: { name: 'Acme', address: '0x1111111111111111111111111111111111111111' } })
+    await app.inject({ method: 'GET', url: '/nowhere', headers: { authorization: `Bearer ${token}` } })
+    const snap = requestValidationOpsSnapshot()
+    expect(snap.seenByRoute).not.toHaveProperty('POST /contacts')
+    expect(Object.keys(snap.seenByRoute).some((k) => k.includes('undefined') || k.includes('/nowhere'))).toBe(false)
   })
 
   it('a non-validation error on an enforced route keeps the app handler answer', async () => {

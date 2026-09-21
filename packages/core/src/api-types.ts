@@ -3115,6 +3115,32 @@ export type components = {
                 /** @description Present and `true` only when the counters could not be read; the two integers and `webhookCounters` are then `null`. */
                 unavailable?: boolean;
             };
+            /** @description The request-validation plugin's shadow counters (#3029, epic #3028) — served since the plugin shipped, declared here since #3208. IN-PROCESS: they start at `since` (the plugin install, one per process) and dev redeploys on every merge, so a reading is only as wide as that window. `seenByRoute` (#3208) is what makes a zero readable: a shadowed route with `seen: 0` in the window is NOT PROVEN, never clean. Enforced routes are absent from `seenByRoute` — they refuse for real. The same events ride the log stream (`request_validation.would_refuse`, `would_coerce`, `seen`), which survives deploys; `scripts/ci/shadow-reading.mjs` aggregates them. */
+            request_validation: {
+                /** @enum {string} */
+                mode: "off" | "shadow" | "enforce";
+                /** @description Would-be refusals in the window; at most one per request. */
+                wouldRefuse: number;
+                /** @description Body FIELDS ajv rewrote and #3082 restored; one per field, never summed with `wouldRefuse`. */
+                wouldCoerce: number;
+                /** @description Keyed `METHOD /path field`. */
+                byRouteField: {
+                    [key: string]: number;
+                };
+                /** @description Keyed `METHOD /path field`. */
+                coerceByRouteField: {
+                    [key: string]: number;
+                };
+                /**
+                 * Format: date-time
+                 * @description When these counters started — the process's plugin install.
+                 */
+                since: string;
+                /** @description Requests that reached validation per SHADOWED route (`METHOD /path`), whatever the verdict. */
+                seenByRoute: {
+                    [key: string]: number;
+                };
+            };
         };
         SuccessResponse: {
             success: boolean;

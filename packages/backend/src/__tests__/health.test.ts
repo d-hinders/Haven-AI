@@ -139,6 +139,10 @@ describe('GET /health/ops', () => {
         wouldCoerce: 0,
         byRouteField: {},
         coerceByRouteField: {},
+        // #3208: the window's start (the epoch, since nothing installed the
+        // plugin here) and the per-route traffic the reading is read against.
+        since: new Date(0).toISOString(),
+        seenByRoute: {},
       },
     })
   })
@@ -195,6 +199,10 @@ describe('GET /health/ops', () => {
         wouldCoerce: 0,
         byRouteField: {},
         coerceByRouteField: {},
+        // #3208: the window's start (the epoch, since nothing installed the
+        // plugin here) and the per-route traffic the reading is read against.
+        since: new Date(0).toISOString(),
+        seenByRoute: {},
       },
     })
     // The failure is logged at warn with the error's class only — never its message.

@@ -193,6 +193,23 @@ export interface RequestValidationSnapshot {
   wouldCoerce: number
   byRouteField: Record<string, number>
   coerceByRouteField: Record<string, number>
+  /**
+   * When these counters started (the plugin install — one per process), ISO.
+   * The counters are in-process and dev redeploys on every merge, so a
+   * reading is only as wide as this window (#3208: the 2026-09-21 reading
+   * covered five minutes and could not prove a single module).
+   */
+  since: string
+  /**
+   * Requests that reached validation, per shadowed route, whatever the
+   * verdict (#3208). This is what makes a `wouldRefuse` of zero readable:
+   * `seen: 200, refused: 0` is a conformant route; `seen: 0` is a route the
+   * window never exercised — NOT PROVEN, never "clean". Keyed on the
+   * registered route (`METHOD /path`), so an unknown path never enters the
+   * map. Enforced routes are not counted here: they refuse for real and have
+   * nothing left to prove.
+   */
+  seenByRoute: Record<string, number>
 }
 
 /**
@@ -203,18 +220,45 @@ export interface RequestValidationSnapshot {
  */
 const counters = {
   mode: 'off' as RequestValidationMode,
+  // The epoch until `installRequestValidation` runs — a sentinel that says
+  // "never installed", not a window start; production installs before it
+  // listens, so a served snapshot always carries the install time.
+  since: new Date(0).toISOString(),
   total: 0,
   byRouteField: new Map<string, number>(),
   coerceTotal: 0,
   coerceByRouteField: new Map<string, number>(),
+  seenByRoute: new Map<string, number>(),
+  /** Per route, the minute (epoch ms / 60 000) the last `seen` line was logged — the rate limit's state. */
+  seenLoggedMinute: new Map<string, number>(),
 }
 
 function resetCounters(mode: RequestValidationMode): void {
   counters.mode = mode
+  counters.since = new Date().toISOString()
   counters.total = 0
   counters.byRouteField.clear()
   counters.coerceTotal = 0
   counters.coerceByRouteField.clear()
+  counters.seenByRoute.clear()
+  counters.seenLoggedMinute.clear()
+}
+
+/**
+ * One `seen` increment per shadowed request, and at most one
+ * `request_validation.seen` log line per route per minute carrying the
+ * running total (#3208). The line is what lets a reading taken from the log
+ * stream — which survives the deploys the in-process map does not — total a
+ * route's traffic; the once-a-minute cap keeps a busy route from writing a
+ * line per request. Returns the total when a line is due, else null.
+ */
+function recordSeen(route: string, nowMs: number): number | null {
+  const seen = (counters.seenByRoute.get(route) ?? 0) + 1
+  counters.seenByRoute.set(route, seen)
+  const minute = Math.floor(nowMs / 60_000)
+  if (counters.seenLoggedMinute.get(route) === minute) return null
+  counters.seenLoggedMinute.set(route, minute)
+  return seen
 }
 
 function recordWouldRefuse(route: string, field: string): void {
@@ -260,12 +304,18 @@ export function requestValidationOpsSnapshot(): RequestValidationSnapshot {
   for (const key of [...counters.coerceByRouteField.keys()].sort()) {
     coerceByRouteField[key] = counters.coerceByRouteField.get(key) as number
   }
+  const seenByRoute: Record<string, number> = {}
+  for (const key of [...counters.seenByRoute.keys()].sort()) {
+    seenByRoute[key] = counters.seenByRoute.get(key) as number
+  }
   return {
     mode: counters.mode,
     wouldRefuse: counters.total,
     wouldCoerce: counters.coerceTotal,
     byRouteField,
     coerceByRouteField,
+    since: counters.since,
+    seenByRoute,
   }
 }
 
@@ -598,6 +648,16 @@ export function installRequestValidation(app: FastifyInstance, options: RequestV
 
   app.addHook('preValidation', (request: FastifyRequest, _reply, done) => {
     if (routeMode(request) !== 'shadow') return done()
+    // The traffic half of a reading (#3208): every shadowed request counts,
+    // before the verdict, so a route's zero refusals can be read against
+    // how many requests it saw.
+    {
+      const route = `${request.routeOptions.method} ${request.routeOptions.url}`
+      const total = recordSeen(route, Date.now())
+      if (total !== null) {
+        request.log.info({ event: 'request_validation.seen', route, seen: total }, 'request_validation.seen')
+      }
+    }
     const body: unknown = request.body
     // Only a structured body can be coerced into a different one; a string or
     // binary body has no properties for ajv to rewrite. Buffer AND every

@@ -4,7 +4,7 @@ status: current
 covers:
   - packages/mcp-server/**
   - docker-compose.yml
-last-verified: "2026-09-05"
+last-verified: "2026-09-21"
 ---
 
 # Deploy — Hosted MCP server (`@haven_ai/mcp-server`)
@@ -153,3 +153,17 @@ tests above.
 
 Rate limiting / WAF, Sentry, autoscaling beyond Railway defaults, custom
 domain DNS automation. Tracked separately if/when needed.
+
+Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`), 42
+mcp-server commits after the last verification: every operational claim above
+still matches the code: `assertHostedEnv`'s `HAVEN_DELEGATE_KEY` refusal and
+message text (`boot.ts`), `HAVEN_CONNECTOR_CHANNEL` dist-tag validation
+(`connector-channel.ts`), the `POST /v1` + `GET /healthz` surface
+(`http.ts`, `HAVEN_MCP_PATH` in `cli.ts`), the one-line access log (`log.ts`),
+the compose wiring (`docker-compose.yml` `mcp-server` service: Dockerfile
+path, 8788, `depends_on`, `HAVEN_API_URL: http://backend:3001`), and the CI
+job names this doc cites ("MCP server checks", "Docker build
+(MCP server)"). The intervening commits (#2812 tool extraction into
+`src/tools/`, #3118/#3155 the plain-HTTP x402 profile, #3102 refusal next
+steps, #3126 `haven_check_funds`) changed the tool surface behind the same
+HTTP and custody posture this doc describes; nothing here needed rewriting.

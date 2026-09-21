@@ -7,7 +7,7 @@ covers:
   - packages/mcp/**
   - packages/connect/**
   - packages/cli/**
-last-verified: "2026-09-15"
+last-verified: "2026-09-21"
 ---
 
 # SDK / API / credentials playbook
@@ -36,3 +36,11 @@ Run the package `typecheck` (`tsc --noEmit`) as the **final** gate step, after e
 ## 5. Merge
 
 `area:sdk` / `area:mcp` PRs auto-merge on green CI + clean review. A change that also touches a money-path file or release tooling (`scripts/release-bump.mjs`, `.github/workflows/publish.yml`) is classified `money-path` — which loads `money.md` and its characterization-test bar, but does not pause the merge (#1024). Only database migrations are hard-gated, by `.github/CODEOWNERS`.
+
+Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
+published-package set (`@haven_ai/{sdk,signer,mcp,connect,cli}`), the internal
+pin rule's both directions as enforced by `npm run lint:workspace-pins`, the
+`smoke:pack` script, and the release tooling names above are unchanged at this
+head. The intervening package commits (#3134 vocabulary convergence, #3173
+`@haven_ai/sdk/edge` split, #3155 the x402 MCP transport profile) changed
+package internals, not anything this playbook claims about process.

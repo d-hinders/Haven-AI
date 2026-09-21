@@ -1,7 +1,15 @@
 ---
-title: "Quality scan 2026-09-21 — agent surface, third pass"
-status: current
 owner: "@AntonioSaaranen"
+status: current
+covers:
+  - packages/mcp-server/src/tools/support/errors.ts
+  - packages/mcp-server/src/tools/contracts.ts
+  - packages/signer/src/sign-context.ts
+  - packages/signer/src/tools.ts
+  - packages/signer/src/audit.ts
+  - packages/sdk/src/x402-protocol.ts
+  - packages/demo-merchant-mcp/src/http.ts
+  - docs/operations/mcp-runtime-compatibility.md
 last-verified: "2026-09-21"
 ---
 

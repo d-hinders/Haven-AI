@@ -12,6 +12,7 @@ covers:
   - packages/backend/src/modules/catalog/marketplace-scope.ts
   - packages/backend/src/routes/merchants.ts
   - packages/backend/src/openapi/request-validation.ts
+  - scripts/ci/shadow-reading.mjs
   - packages/backend/src/openapi/route-modules.generated.ts
   - packages/backend/scripts/generate-route-modules.ts
   - packages/backend/src/index.ts
@@ -347,6 +348,33 @@ Isolation rules that are non-negotiable for a payments product:
   reported shadow 0 while the plugin ran it in shadow. `accounting-webhooks.ts`
   (#3196) was exactly that for a morning; the gate reads bare registrations
   as prefix `''` now.
+
+  **How to take a shadow reading (#3208).** Not from `/health/ops` alone:
+  its `request_validation` counters are in-process — they start at `since`
+  (the plugin install) and dev redeploys on every merge, so the 2026-09-21
+  reading covered five minutes and proved nothing (#3028 decision 8). The
+  same events ride the log stream, which survives deploys: one line per
+  would-refusal (`request_validation.would_refuse`), per coerced field
+  (`would_coerce`) and, at most once per route per minute, the route's
+  running traffic total (`request_validation.seen`). Aggregate a window of
+  the backend's logs:
+
+  ```bash
+  railway logs --service havenbackend-dev --json | node scripts/ci/shadow-reading.mjs --min-window-hours 24
+  ```
+
+  (`railway logs` reads the operator's own login; no token enters the repo.
+  A saved file works too: `--file logs.jsonl`.) The table has one row per
+  route with `seen`, `would_refuse` and `would_coerce` by field, and a
+  **verdict**: a route with `seen: 0` in the window is **NOT PROVEN** — the
+  epic's rule that no traffic is no proof, printed rather than left to the
+  reader. The header states the window bounds, the line counts and the
+  number of deploys inside it (a `seen` total restarts at each). The
+  minimum window is the epic's call per slice; `--min-window-hours` makes
+  the script refuse to print a narrower one as a reading. Paste the table on
+  #3028 — that is the operator step slices 3–4 (#3031, #3032) wait on.
+  `/health/ops` still carries the live snapshot, now with `since` and
+  `seenByRoute`, for a quick look between deploys.
 
   Any other value refuses the boot rather than falling
   back — a misspelled `enforce` must not silently mean `shadow`. **A mode

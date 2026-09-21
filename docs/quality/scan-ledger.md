@@ -842,8 +842,13 @@ pending the owner (carried as a note, not re-surfaced); #3105, #3119, #3130
   next-step ratchet guards the state-error branch only. Tracking: none
   open; the epic's slice did not enumerate these branches.
 - C1 — the runtime-compatibility contract cites 44 tracked paths and
-  covers 42; 21 cited-but-not-covered, 9 in scope (four new since 09-17:
-  the #3103/#3173 signer files its own re-verification notes cite).
+  declares 42 `covers:` entries; 7 cited paths sit outside every declared
+  glob (sdk ×3, one frontend hook, scripts ×3), 0 in scope, and the coupling
+  gate names the doc for none of them. *Corrected before merge:* first
+  recorded as "21, 9 in scope" — the reference loop's unquoted
+  `for g in $declared` globbed every `**` entry into directory names, so
+  glob-covered signer/mcp files counted as misses; the 09-15 and 09-17
+  figures for this doc were taken the same way and are not comparable.
 - Notes, not filed: the strict-refusal copy for an unknown key is the cap
   paragraph; the local qa-dev signer runtime on the scanning machine is the
   2026-09-15 dev build (#3119's class — every signer claim this run is from
@@ -866,9 +871,10 @@ pending the owner (carried as a note, not re-surfaced); #3105, #3119, #3130
   of them on the first pass (`grep -c` caught it); a `node_modules` symlink
   resolves workspace packages to the main checkout — `npm ci` the worktree.
 - block 2 (`covers:` completeness) → the reference's loop under `bash`
-  (`grep -rl`, since `rg` is not on bash's PATH) → 8 contract docs; in
-  scope 44 cited / 42 declared / 21 not covered (C1); the x402 sequence doc
-  26 / 45 / 3 (out of scope).
+  (`grep -rl`, since `rg` is not on bash's PATH; `set -f` before the match
+  loop — without it the published loop reads 21 for the runtime doc) → 8
+  contract docs; in scope 44 cited / 42 declared / 7 not covered (C1); the
+  x402 sequence doc 26 / 45 / 3 with or without `set -f` (out of scope).
 - block 3 (stale numbers) → partial: the 09-17 sizing re-derived (above);
   package READMEs not re-swept.
 - block 4 (retired vocabulary) → the reference's term list over the full
@@ -897,3 +903,12 @@ pending the owner (carried as a note, not re-surfaced); #3105, #3119, #3130
 - comment archaeology → `TODO|FIXME|HACK` in the four packages → 0.
 - live path → reads and quotes only; no prepare, no signature — the QA
   agent's budget is 0.001 USDC and the pass was read-only by design.
+
+**Disposition (owner, 2026-09-21): file all three, drop proposal 1.**
+D1 → #3213 (`area:mcp`, money-path by file); D2 → #3214 (`area:mcp`,
+money-path by file); C1 → #3215 (`area:docs`, filed at the corrected figure
+of 7). Proposal 1's success half (2026-09-13 F3 / this run's N4): **`rejected`**
+— not carried forward. N1–N3: not filed (below the bar / tracked under
+#3119). Instrument: the block-2 loop in the skill reference gains `set -f`
+in the same PR (#3212). Drive: `ship-next 3213`, `ship-next 3214`,
+`ship-next 3215`.

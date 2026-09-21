@@ -14,6 +14,10 @@ covers:
   - packages/mcp/src/tools.test.ts
   - packages/mcp-server/src/tools/support/mcp-context.ts
   - packages/signer/src/core.test.ts
+  - packages/frontend/src/hooks/useAgentConnectionSetupStatus.ts
+  - scripts/release-bump.test.mjs
+  - scripts/verify-connect-bundle.mjs
+  - scripts/docs/coupling-gate.mjs
 last-verified: "2026-09-21"
 ---
 
@@ -136,20 +140,33 @@ extended to the three branches; mutation red. Tracking: `gh issue list
 --search "API_ERROR next_action"` / `UNKNOWN_ERROR` → nothing open; #3102
 (closed) did not enumerate these branches.
 
-**C1 — `mcp-runtime-compatibility.md` cites 44 tracked paths and covers 42;
-21 cited-but-not-covered, 9 of them in scope.** Block 2 at `e42ed68f`:
-`packages/signer/src/{capabilities,consent,core,next-step,settlement-child,sign-context,tools}.ts`,
-`packages/mcp/src/tools.ts`, `packages/mcp-server/src/tools/support/mcp-context.ts`
-(+ `packages/mcp/src/tools.test.ts`, `packages/signer/src/core.test.ts`). The
-2026-09-17 entry recorded 17 of 28 and left it as unchanged from 09-15; the
-in-scope set has since grown by four (`next-step.ts`, `sign-context.ts`,
-`capabilities.ts`, `settlement-child.ts` — the #3103/#3173 files the doc's own
-re-verification notes cite). A change to any of the nine never re-implicates
-the runtime contract. Scope: the `covers:` block, one PR, no prose — plus a
+**C1 — `mcp-runtime-compatibility.md` cites 44 tracked paths and covers 42
+entries; 7 cited paths sit outside every declared glob, 0 of them in this
+run's four-package scope.** Block 2 at `e42ed68f`, under `bash` with
+`set -f`: `packages/sdk/src/{agent-guidance,connector-channel,skill-content}.ts`,
+`packages/frontend/src/hooks/useAgentConnectionSetupStatus.ts`,
+`scripts/README.md`, `scripts/release-bump.test.mjs`,
+`scripts/verify-connect-bundle.mjs`; `node scripts/docs/coupling-gate.mjs
+--changed=<path>` names the doc for none of the seven, run one at a time.
+`connector-channel.ts` is the dev-channel constant the doc's manifest prose
+depends on, so a change there never re-implicates the runtime contract.
+*Corrected before merge (2026-09-21, same day):* this paragraph first read
+"21 cited-but-not-covered, 9 in scope" and listed signer, mcp and mcp-server
+files — all of which `packages/signer/**`, `packages/mcp/**` and
+`packages/mcp-server/src/tools/**` do cover. The number came from the
+reference loop as published: its unquoted `for g in $declared` let the shell
+expand each `**` glob into directory entries before the match, so every
+glob-covered file counted as a miss; the coupling gate, asked directly,
+names the doc for `packages/signer/src/sign-context.ts` and
+`packages/mcp/src/tools.ts`. The 2026-09-15 and 2026-09-17 ledger figures
+for this doc (17 of 27 / 17 of 28) were taken the same way and are not
+comparable; the reference gains `set -f` in the PR that records this. The
+x402 sequence doc, which declares no `**` glob, reads 26 / 45 / 3 either
+way (control). Scope: the `covers:` block, one PR, no prose — plus a
 decision on whether re-verification notes are allowed to cite files the
 doc does not cover (they are the source of the drift). Verification: block
-2's loop → `cited-but-not-covered=0` for the doc; `npm run docs:coupling`
-green.
+2's loop (with `set -f`) → `cited-but-not-covered=0` for the doc; `npm run
+docs:coupling` green.
 
 **Notes, not filed** (below the bar or already tracked):
 - N1 — the strict-refusal explanation for an unknown key is the cap
@@ -168,7 +185,7 @@ green.
 
 - Sizing → examined → `git ls-tree -r --name-only origin/dev packages/<p>/src | grep '\.ts$'`, split on `.test.ts|__tests__`, `git show | wc -l` summed → signer 3,536 / 5,190 (09-17: 3,042 / 4,417); mcp 1,959 / 3,691 (1,863 / 3,577); mcp-server 7,627 / 14,683 (6,830 / 13,407); demo-merchant-mcp 3,741 / 4,042 (3,556 / 3,746).
 - Block 1 (guard falsifiability) → examined, 5 of a 64-file census → the reference's census script at `e42ed68f` → 64 candidate files; in scope, newest landing first: **5 mutations, 5 caught** — M1 #3169 `signer/src/tools.ts:542` refusal removed → `server.test.ts` 4 red (`core.test.ts` stays green: its #3169 case pins the absence of a raw-hash primitive, the tool-layer refusal is `server.test.ts`'s); M2 #3172 `audit.ts:63` rotation bound → never → `audit.test.ts` 2 red; M3 #3171 `demo-merchant-mcp/src/http.ts` `-32001` recovery `data` dropped → `http-session-restart.test.ts` 2 red; M4 #3116 `sdk/src/x402-protocol.ts` `unsupportedOnly = false` (sdk rebuilt) → `catalog-purchase.test.ts` 4 red; M5 #3102 `errors.ts:225` next-step family dropped → `next-step-refusal.test.ts` 3 red. Each restored byte-identically (`cmp`), `git status` clean. **Instrument lesson recorded:** the first pass of M1/M5 ran with a BSD-`sed` substitution that did not apply (`grep -c mutated` → 0) and reported green — a would-be false survivor; the census worktree also had to be `npm ci`'d, since a `node_modules` symlink resolves workspace packages to the main checkout (`Missing "./edge" specifier`, `checkFunds` undefined). Not examined: the 59 other candidates; `consent.test.ts`/`cli-args.test.ts` (#3173) beyond the census.
-- Block 2 (`covers:` completeness) → examined, all 8 contract docs → the reference's loop under `bash` (with `grep -rl`; `rg` is not on bash's PATH) → in scope: runtime doc 44 cited / 42 declared / 21 not covered (C1); `04-x402-payment-sequence.md` 26 / 45 / 3 (`modules/mpp/reconciliation.ts`, `core/src/machine-payment-lifecycle.ts`, `sdk/src/payment-mappers.ts` — out of scope); the other six unchanged from 09-15.
+- Block 2 (`covers:` completeness) → examined, all 8 contract docs → the reference's loop under `bash` (with `grep -rl`; `rg` is not on bash's PATH) with `set -f` — the published loop's unquoted `for g in $declared` globs `**` entries into directory names and counts every glob-covered file as a miss; first reading 21, corrected same day) → in scope: runtime doc 44 cited / 42 declared / 7 not covered, 0 in the four-package scope (C1); `04-x402-payment-sequence.md` 26 / 45 / 3 (identical with and without `set -f` (`modules/mpp/reconciliation.ts`, `core/src/machine-payment-lifecycle.ts`, `sdk/src/payment-mappers.ts` — out of scope); the other six unchanged from 09-15.
 - Block 3 (stale numbers) → partial → the ledger's 09-17 sizing re-derived above (all four grew); the four package READMEs not re-swept this run.
 - Block 4 (retired vocabulary) → examined → the reference's term list over the full tracked set at `e42ed68f` → 192 files (192 on 09-15), 46 historical / 146 live; positive control 36 shards; **in scope 10 live files** (09-17: 15) — 6 tests, and 4 non-test lines each describing the term as history (`mcp/src/consent.ts:19-20`, `mcp-server/src/tools/catalog-purchase.ts:684,699`, `mcp/src/tools.ts:560`, `mcp/src/server.ts:112`); `npm run lint:retired-rail-prose` → green. Safe-retirement pins: `git grep -l 'process.env.SAFE' -- packages/backend/src` → 0 (positive control `process\.env\.` → 57 files); the routing guard test, the retired-safe-names middleware + test and, since #3030, the four `retiredSafeInflowRoute(` registrations that put the 410 before request validation — present.
 - Block 5 (merge-method drift) → not examined (out of scope; 09-15 baseline stands).
@@ -186,5 +203,5 @@ green.
 
 ## 6. Decisions requested
 
-1. File D1 (one PR, `area:mcp`), D2 (one PR, money-path by file), C1 (one PR, docs) — or drop any of them with a reason.
-2. The proposal-1 success half (N4) has been pending since 2026-09-13; a decision either way lets the next run stop carrying it.
+1. File D1 (one PR, `area:mcp`), D2 (one PR, money-path by file), C1 (one PR, docs) — or drop any of them with a reason. **Decided 2026-09-21: file all three → #3213 (D1), #3214 (D2), #3215 (C1, at the corrected figure); D1 and D2 are money-path by file (`packages/mcp-server/src/**`).**
+2. The proposal-1 success half (N4) has been pending since 2026-09-13; a decision either way lets the next run stop carrying it. **Decided 2026-09-21: dropped — `rejected`; the next run does not carry it.**

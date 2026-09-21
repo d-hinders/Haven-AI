@@ -92,6 +92,7 @@ other 7 would never have re-implicated it.
 for d in $(rg -l "^contract: true" docs --glob '*.md' | sort); do
   declared=$(awk '/^---$/{c++; next} c==1' "$d" | awk '/^covers:/{f=1;next} f&&/^  - /{sub(/^  - /,"");print;next} f{f=0}' | sort -u)
   claimed=$(awk '/^---$/{c++; next} c>=2' "$d" | grep -o '`[^` ]*`' | tr -d '`' | grep -E '^(packages|scripts|\.github)/[^ ]+\.[a-z]+$' | sort -u | while read p; do git ls-files --error-unmatch "$p" >/dev/null 2>&1 && echo "$p"; done)
+  set -f  # no pathname expansion: `packages/signer/**` must stay a glob STRING, not become the directory listing
   missing=0; for p in $claimed; do hit=0; for g in $declared; do case "$g" in *'**'*) [[ "$p" == "${g%%\*\**}"* ]] && hit=1;; *) [ "$p" = "$g" ] && hit=1;; esac; done; [ $hit = 0 ] && missing=$((missing+1)); done
   echo "$d declared=$(echo "$declared" | grep -c .) cited=$(echo "$claimed" | grep -c .) cited-but-not-covered=$missing"
 done
@@ -99,7 +100,12 @@ done
 
 Run it under `bash` — zsh does not word-split `$claimed`, and the loop then
 reports one miss per doc whatever the truth is (measured: that is exactly the
-false reading a first draft of this block produced). Clean:
+false reading a first draft of this block produced). Keep the `set -f`: without
+it the unquoted `for g in $declared` expands every `**` entry into the
+directory's contents before the match, and every glob-covered file counts as
+a miss — the 2026-09-21 run first reported 21 misses for the runtime doc
+against a true 7 that way, and the figures below and in the 2026-09-15 /
+2026-09-17 ledger entries were taken without it. Clean:
 `cited-but-not-covered=0` on every doc, and no doc whose body cites nothing
 while its `covers:` is wide (over-wide: the doc trips on changes it says
 nothing about). Report both directions with the file names. On `893d74f6`:

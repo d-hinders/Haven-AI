@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+- `--doctor` no longer needs `--runtime` (#3210): the argument parser used to refuse a flagless `--doctor` before the doctor ran, which left #3120's record resolution reachable only by library callers. A flagless `--doctor` now checks the runtime recorded in `last-connect-outcome.json`, and with no resolvable record reports the existing `failed` "Runtime is unknown — the runtime config was NOT checked" verdict (exit 1). `--repair` still requires `--runtime` — it rewrites that config, so the runtime is named, never inherited — and its refusal message now says so. No exit code, `--json` field or check id changes.
+
 ## 0.4.0-alpha.0 — 2026-09-19
 
 - Setup names every other credential directory that still holds a stored key — with the account it can spend from — BEFORE the key is minted or anything is written, and still succeeds (#3122, owner decision: warn, not refuse); `--json` gains `existing_agents_before_write`. Each setup records what it bound in a non-secret `mcp-server-binding.json` (server name → agent id, backend URL, bound-at); a name taken over from another directory's record is named before the write, with a DIFFERENT-backend flag, as `server_name_rebound_from`; `--unwire` releases the record (its `--json` gains `binding_released`), and so does a `--replace` retirement (the setup outcome carries no such field); `--tombstone` leaves it and `--doctor` ignores a retired directory's record; `--doctor` reports two records claiming one name as the `mcp_server_name_rebound` advisory. No network call added.

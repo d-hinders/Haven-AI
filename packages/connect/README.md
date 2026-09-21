@@ -640,6 +640,7 @@ across the rest is yours.
 ## Diagnosing a stuck setup: `--doctor` / `--repair` (#1589)
 
 ```bash
+npx @haven_ai/connect@<channel> --doctor
 npx @haven_ai/connect@<channel> --doctor --runtime codex-desktop
 npx @haven_ai/connect@<channel> --doctor --repair --runtime codex-desktop
 ```
@@ -648,6 +649,15 @@ npx @haven_ai/connect@<channel> --doctor --repair --runtime codex-desktop
 not indifferent: `signer_runtime` compares the sidecar against the manifest of
 the connector **that runs the check**, so a doctor from another channel reports
 a skew that is not there. Use the channel your dashboard hands out.
+
+`--runtime` is optional for `--doctor` and required for `--repair` (#3210).
+Without the flag the doctor checks the runtime the setup recorded in the
+agent directory's `last-connect-outcome.json` (#3120), and says so; when no
+record names one, the `runtime_config` check FAILS with "Runtime is unknown —
+the runtime config was NOT checked" and the exit code is 1 — never a pass on a
+config it did not open. `--repair` rewrites that config, so the runtime it
+rewrites is named on the command line rather than inherited from a record on
+disk: a flagless `--repair` is refused before anything runs.
 
 `--doctor` is read-only and needs NO setup token: it checks the runtime config,
 the agent credential files, the pinned signer runtime install (and, since

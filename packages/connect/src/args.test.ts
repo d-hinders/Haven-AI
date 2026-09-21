@@ -204,6 +204,43 @@ describe('--replace (#2551)', () => {
   })
 })
 
+describe('--doctor / --repair runtime requirement (#3210)', () => {
+  // Read-only diagnosis passes through without a runtime: the doctor resolves
+  // it from the setup record, or reports it unknown (#3120). The parser used
+  // to refuse here, which made that resolution unreachable from the CLI.
+  it('--doctor parses with no --runtime; the runtime stays undefined for the doctor to resolve', () => {
+    const parsed = parseArgs(['--doctor'], {})
+    expect(parsed.doctor).toBe(true)
+    expect(parsed.repair).toBe(false)
+    expect(parsed.options.runtime).toBeUndefined()
+    expect(parseArgs(['--doctor', '--json'], {}).json).toBe(true)
+  })
+
+  it('--doctor --runtime <name> still carries the flag verbatim', () => {
+    expect(parseArgs(['--doctor', '--runtime', 'codex-cli'], {}).options.runtime).toBe('codex-cli')
+  })
+
+  // Repair REWRITES the runtime config, so the runtime it rewrites is named
+  // on the command line, never inherited from a record on disk.
+  it('--repair REFUSES without --runtime, alone or with --doctor, and says why', () => {
+    for (const argv of [['--repair'], ['--doctor', '--repair'], ['--repair', '--json']]) {
+      expect(() => parseArgs(argv, {}), argv.join(' ')).toThrow(/--repair needs --runtime <runtime>/)
+      expect(() => parseArgs(argv, {}), argv.join(' ')).toThrow(/--doctor alone resolves it from the record/)
+    }
+  })
+
+  it('--repair --runtime <name> parses, alone or with --doctor', () => {
+    expect(parseArgs(['--repair', '--runtime', 'codex-cli'], {})).toMatchObject({ repair: true, options: { runtime: 'codex-cli' } })
+    expect(parseArgs(['--doctor', '--repair', '--runtime', 'cursor'], {})).toMatchObject({ doctor: true, repair: true, options: { runtime: 'cursor' } })
+  })
+
+  it('the help text states the asymmetry', () => {
+    const help = helpText()
+    expect(help).toContain('--runtime is optional: without it the doctor checks the runtime the setup recorded')
+    expect(help).toContain('Requires --runtime <runtime>: it rewrites that config')
+  })
+})
+
 describe('parseArgs --destroy-key-material / --prune-signer-runtimes (#3123)', () => {
   it('--unwire --destroy-key-material sets the override on the unwire request', () => {
     const parsed = parseArgs(['--unwire', '/tmp/agents/agent-old', '--destroy-key-material'], {})

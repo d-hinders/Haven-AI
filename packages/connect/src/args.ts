@@ -233,8 +233,19 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (doctor || repair) {
     // Diagnosis/repair reuse STORED credentials — a setup token is exactly
     // what they exist to avoid needing.
-    if (!options.runtime) {
-      throw new Error('--doctor/--repair need --runtime <runtime> (which config to examine).')
+    //
+    // #3210: `--runtime` is required for --repair ONLY. --repair rewrites the
+    // user's editor config, so which config it rewrites is stated on the
+    // command line, never inherited from a record on disk. --doctor is
+    // read-only: it passes through with no runtime and the doctor resolves
+    // one from the setup record (`last-connect-outcome.json`, #3120) or
+    // reports the honest "Runtime is unknown" failure — a parser refusal
+    // here made that resolution unreachable from the CLI.
+    if (repair && !options.runtime) {
+      throw new Error(
+        '--repair needs --runtime <runtime>: it rewrites that runtime\'s config, so the runtime is named ' +
+          'explicitly rather than inherited from the setup record. --doctor alone resolves it from the record.',
+      )
     }
     return { options: options as ConnectOptions, help, json, doctor, repair, tombstone, rekey }
   }
@@ -288,9 +299,12 @@ export function helpText(): string {
     '  --json                     Emit one versioned, secret-free result object on stdout; progress stays on stderr.',
     '  --doctor                   Diagnose an existing setup (read-only, no token): config, credentials,',
     '                             signer runtime, hosted MCP, and a live signer handshake. Exits non-zero only on a failed check; an advisory (!) exits 0.',
+    '                             --runtime is optional: without it the doctor checks the runtime the setup recorded,',
+    '                             and reports a failure (not a pass) when no record names one.',
     '  --repair                   Repair, then re-diagnose (implies --doctor): reinstall the pinned signer',
     '                             runtime, rewrite the wrapper and runtime config from stored credentials.',
     '                             Hosted topology only (refuses to touch a --local config). No keys, no token.',
+    '                             Requires --runtime <runtime>: it rewrites that config, so the runtime is never inherited.',
     '  --rekey                    Replace this agent\'s signing key (no token). Generates a fresh keypair HERE and',
     '                             prints its public address to paste into the Haven agent page. Nothing changes',
     '                             until you finish; the agent keeps working on its old key throughout.',

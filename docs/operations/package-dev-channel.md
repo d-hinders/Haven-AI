@@ -24,7 +24,7 @@ covers:
   - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
-last-verified: "2026-09-19"
+last-verified: "2026-09-21"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -422,7 +422,9 @@ throughout.
    npx -y @haven_ai/connect@dev --doctor --runtime <claude-code|codex-desktop|codex-cli>
    ```
 
-   The doctor reports the installed signer and SDK versions (the snapshot),
+   `--runtime` is optional here since #3210 — a flagless `--doctor` checks the
+   runtime the setup recorded — and stays required for `--repair`, which
+   rewrites that config. The doctor reports the installed signer and SDK versions (the snapshot),
    starts the local signer for a real stdio handshake and prints its advertised
    compat versions. On the dev channel the pinned build moves often: an install
    that is intact but behind the connector's current pin is reported as an

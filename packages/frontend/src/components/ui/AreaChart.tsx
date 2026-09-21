@@ -342,10 +342,15 @@ export function AreaChart({
             key={`tick-${tick}`}
             data-testid="chart-tick-label"
             aria-hidden="true"
-            className="absolute block text-right text-xs leading-none text-[var(--v2-ink-3)]"
+            className="absolute block whitespace-nowrap text-right text-xs leading-none text-[var(--v2-ink-3)]"
             style={{
-              left: 0,
-              width: pct(plot.pad.left - 6, VIEW_W),
+              // Anchored by its RIGHT edge, 6 units inside the gutter, with no
+              // width of its own: the type is fixed 12px while the gutter
+              // scales with the svg, so a label the gutter cannot hold grows
+              // LEFT into the card's padding and never right into the plot
+              // (#3204 round 2: a width-boxed, right-aligned label spilled its
+              // overflow onto the line).
+              right: pct(VIEW_W - (plot.pad.left - 6), VIEW_W),
               top: pct(plot.yOf(tick), VIEW_H),
               transform: 'translateY(-50%)',
             }}

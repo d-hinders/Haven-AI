@@ -139,14 +139,20 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
     // The gutter is a fraction of the svg width; at 390 the desktop 48/640 is
     // ~21 CSS px and a currency tick drawn into it ran under the line; the
     // bar chart's 78 (~33 px) was measured short of `12 600 kr` (53.4 px)
-    // as well. 128 is a ~56 px box at 390. Callers pass a compact formatter
-    // on top. Mutation: drop PAD_NARROW, or put 78 back → red.
+    // as well. 128 is a ~56 px gutter at 390. The label is anchored by its
+    // right edge with no width, so any overflow grows left into the card
+    // padding, never right into the plot. Callers pass a compact formatter
+    // on top. Mutation: drop PAD_NARROW, put 78 back, or box the label with
+    // a width again → red.
     renderChart({ narrow: true, formatTick: (v: number) => `${Math.round(v)}` })
     const labels = screen.getAllByTestId('chart-tick-label')
     expect(labels.map((el) => el.textContent)).toEqual(['1050', '1100', '1150', '1200'])
-    const widthPct = Number.parseFloat((labels[0] as HTMLElement).style.width)
-    expect(widthPct).toBeCloseTo(((128 - 6) / 640) * 100, 3)
-    expect(widthPct).toBeGreaterThan(((100 - 6) / 640) * 100)
+    const style = (labels[0] as HTMLElement).style
+    expect(Number.parseFloat(style.right)).toBeCloseTo(((640 - (128 - 6)) / 640) * 100, 2)
+    expect(Number.parseFloat(style.right)).toBeLessThan(((640 - (100 - 6)) / 640) * 100)
+    expect(style.width).toBe('')
+    expect(style.left).toBe('')
+    expect(labels[0]).toHaveClass('whitespace-nowrap')
   })
 
   it('prints distinct integer ticks for a flat series (#3204 round 2)', () => {

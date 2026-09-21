@@ -127,7 +127,7 @@ version rather than an issue:
 ```
 
 Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
-directory held 415 shards at verification time, every one matching the
+directory held 416 shards at verification time, every one matching the
 `YYYY-MM-DD-<issue-or-version>` convention; the newest entries are the
 2026-09-20 money-path shards (#3019, #3134, #3166, #3167, #3173, #3202). The
 added-file gate behaviour, the immutability rules and the release-shard

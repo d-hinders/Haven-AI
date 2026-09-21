@@ -913,3 +913,7 @@ of 7). Proposal 1's success half (2026-09-13 F3 / this run's N4): **`rejected`**
 #3119). Instrument: the block-2 loop in the skill reference gains `set -f`
 in the same PR (#3212). Drive: `ship-next 3213`, `ship-next 3214`,
 `ship-next 3215`.
+
+**D1 → #3213: `shipped` 2026-09-21** — PR #3217, squash `52515ed7` on `dev`
+(symbol resolved through the agent's own allowances; the no-cap refusal names
+the check; two reviewer passes bound clean at `e535e76b`).

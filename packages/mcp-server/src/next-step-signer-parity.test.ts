@@ -89,9 +89,11 @@ describe('every hosted emission parses under the named tool\'s schema on the sur
     emitted.push({ site: fx.site, out: buildAgentGuidance({ ...handoff, nextAction: fx.action, safeToContinue: true, reason: 'r', summary }) as unknown as Record<string, unknown> })
   }
   for (const f of REFUSAL_SITES) {
-    const err = f.step === 'window-expired-helper'
-      ? paymentWindowExpiredError({ paymentId: 'pay_1', status: 'expired', phase: 'expired', rail: 'x402' })
-      : new HostedToolError({ ...f.base, nextStep: refusalNextStep(f.step) })
+    const err = f.thrown !== undefined
+      ? f.thrown
+      : f.step === 'window-expired-helper'
+        ? paymentWindowExpiredError({ paymentId: 'pay_1', status: 'expired', phase: 'expired', rail: 'x402' })
+        : new HostedToolError({ ...f.base, nextStep: refusalNextStep(f.step) })
     emitted.push({ site: `refusal: ${f.site}`, out: normalizeError(err) as unknown as Record<string, unknown> })
   }
 

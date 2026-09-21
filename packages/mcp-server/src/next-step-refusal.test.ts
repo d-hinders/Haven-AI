@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentPaymentNextAction, HavenPaymentStateError } from '@haven_ai/sdk'
+import { AgentPaymentNextAction, HavenApiError, HavenError, HavenPaymentStateError } from '@haven_ai/sdk'
 import { HostedToolError, normalizeError } from './tools/support/errors.js'
 import { buildAgentGuidance, refusalNextStep } from './tools/support/guidance.js'
 
@@ -59,5 +59,60 @@ describe('HostedToolError carries a NextStep (#3101)', () => {
     const plain = normalizeError(new HostedToolError({ code: 'X', message: 'm', nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.CheckStatusLater, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: 'p' } }) }))
     expect(plain.next_action).toBe('check_status_later')
     expect(plain.next_tool).toBe('mcp__haven__haven_get_payment_status')
+  })
+})
+
+/**
+ * #3214: the three GENERIC refusal branches — `HavenApiError`, `HavenError`
+ * and anything unrecognized — carry the typed step too. #3102's rule ("no
+ * hosted refusal carries a bare next_action") held only for refusals that
+ * carry a `next_action`; these three carried none at all, and a transient
+ * upstream 500 (the live case that filed this) left the agent with nothing
+ * to act on. The step rides through `nextStepWireFields`, exactly as on the
+ * state-error branch; deleting the added spread from any one of the three
+ * branches turns one of these cases red (mutation M5's gap, closed).
+ */
+describe('the generic refusal branches carry a typed step (#3214)', () => {
+  it('a 5xx HavenApiError — the live x402-quote 500 — says retry the same call once', () => {
+    const out = normalizeError(new HavenApiError('Expected an x402 quote response with HTTP 402, got HTTP 500.', 500)) as unknown as Record<string, unknown>
+    expect(out.success).toBe(false)
+    expect(out.code).toBe('API_ERROR')
+    expect(out.statusCode).toBe(500)
+    expect(out.next_action).toBe('retry_with_explicit_context')
+    expect(out.next_tool).toBeUndefined()
+    expect(out.next_tool_omitted_reason).toMatch(/same arguments/)
+    expect(out.next_tool_omitted_reason).toMatch(/idempotency_key/)
+  })
+
+  it('a 4xx HavenApiError says stop and tell the user', () => {
+    const out = normalizeError(new HavenApiError('refused as made', 404)) as unknown as Record<string, unknown>
+    expect(out.success).toBe(false)
+    expect(out.statusCode).toBe(404)
+    expect(out.next_action).toBe('stop_and_tell_user')
+    expect(out.next_tool).toBeUndefined()
+    expect(out.next_tool_omitted_reason).toMatch(/cannot succeed/)
+  })
+
+  it('a HavenError — a client-side failure with no upstream answer — says stop and tell the user', () => {
+    const out = normalizeError(new HavenError('config broke', 'CONFIG_ERROR', 500)) as unknown as Record<string, unknown>
+    expect(out.code).toBe('CONFIG_ERROR')
+    expect(out.next_action).toBe('stop_and_tell_user')
+    expect(out.next_tool).toBeUndefined()
+    expect(out.next_tool_omitted_reason).toMatch(/tell the user/)
+  })
+
+  it('a thrown non-Error (UNKNOWN_ERROR) still carries the family', () => {
+    const out = normalizeError('a string failure') as unknown as Record<string, unknown>
+    expect(out.code).toBe('UNKNOWN_ERROR')
+    expect(out.message).toBe('a string failure')
+    expect(out.next_action).toBe('stop_and_tell_user')
+    expect(out.next_tool).toBeUndefined()
+    expect(typeof out.next_tool_omitted_reason).toBe('string')
+  })
+
+  it('a status-less HavenApiError takes the retry family (the 4xx split needs a status)', () => {
+    const out = normalizeError(new HavenApiError('no status reported', undefined as unknown as number)) as unknown as Record<string, unknown>
+    expect(out.next_action).toBe('retry_with_explicit_context')
+    expect(out.next_tool_omitted_reason).toBeDefined()
   })
 })

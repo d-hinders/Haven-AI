@@ -680,8 +680,8 @@ const accountingConnection = {
     authKind: { type: 'string', enum: ['oauth2', 'api_key'] },
     status: {
       type: 'string',
-      enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
-      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider\'s required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.',
+      enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'needs_attention', 'disconnected'],
+      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider\'s required scopes, or by a push whose create call was refused for scope (#2865). `needs_attention` (#3019) is the webhook half failing independently of the feed — the key validates and pushes work, but the subscriptions could not be created (a `webhook subscription failed` registration) or the deployment states no public API origin (`no public API origin configured`); a reconnect after fixing the deployment state resolves it. A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.',
     },
     statusReason: { type: ['string', 'null'] },
     isActiveDestination: { type: 'boolean', description: 'Exactly one connection per user is where settled payments go.' },
@@ -1197,6 +1197,11 @@ export const openapiSpec = {
     { name: 'Machine payments' },
     { name: 'Transactions' },
     { name: 'Delegations' },
+    {
+      name: 'Webhooks',
+      description:
+        'Inbound provider callbacks (#3019). Authenticated by a per-connection capability URL token plus the provider HMAC signature — never a session.',
+    },
   ],
   paths: {
     '/openapi.json': {
@@ -3549,7 +3554,7 @@ export const openapiSpec = {
                         displayName: { type: 'string' },
                         status: {
                           type: 'string',
-                          enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
+                          enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'needs_attention', 'disconnected'],
                         },
                         companyName: { type: ['string', 'null'] },
                         lastPushAt: { type: ['string', 'null'], format: 'date-time' },
@@ -3709,6 +3714,64 @@ export const openapiSpec = {
     // Verify, reopen, sync and status keep their feed-scoped home under
     // `/accounting/feed/*` (review, 2026-09-11): they act on the ACTIVE
     // destination, so there is no provider-scoped duplicate of them here.
+    '/accounting/webhooks/accounted/{token}': {
+      post: {
+        tags: ['Webhooks'],
+        operationId: 'accountedWebhookCallback',
+        summary: 'PUBLIC Accounted webhook callback — authenticated by the capability token + the HMAC signature, not by a session.',
+        description:
+          "Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (a webhook carries no credential header).",
+        security: [],
+        parameters: [{ name: 'token', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['status'],
+                  properties: { status: { type: 'string' }, counted: { type: 'string' }, deliveryId: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': { description: 'Bad or malformed signature, or a stale timestamp.' },
+          '404': { description: 'No connection carries this token.' },
+        },
+      },
+    },
+    // The trailing-slash twin of the callback path, registered so Fastify's
+    // redirect never answers the provider with a 3xx (a 3xx or a 410
+    // auto-disables the subscription). Same handler, same contract, own
+    // operationId because the generator indexes by operation.
+    '/accounting/webhooks/accounted/{token}/': {
+      post: {
+        tags: ['Webhooks'],
+        operationId: 'accountedWebhookCallbackTrailingSlash',
+        summary: 'PUBLIC Accounted webhook callback (trailing-slash twin — the same handler; never a redirect).',
+        description:
+          'Registered EXPLICITLY so the provider never meets Fastify\'s trailing-slash redirect: a 3xx would hand it a URL the subscription was not registered with, and a 410 would auto-disable the subscription without replay (#3019). Identical contract to `accountedWebhookCallback`.',
+        security: [],
+        parameters: [{ name: 'token', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['status'],
+                  properties: { status: { type: 'string' }, counted: { type: 'string' }, deliveryId: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': { description: 'Bad or malformed signature, or a stale timestamp.' },
+          '404': { description: 'No connection carries this token.' },
+        },
+      },
+    },
     '/accounting/providers': {
       get: {
         tags: ['Dashboard'],
@@ -7398,20 +7461,43 @@ export const openapiSpec = {
           accounting: {
             type: 'object',
             description:
-              'Accounting-feed on-call counters (#2872), deployment-wide, read live from two aggregate ' +
-              'queries. `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the ' +
+              'Accounting-feed on-call counters (#2872, widened by #3019). `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the ' +
               'attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: ' +
-              'connections in `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — only the ' +
-              "user's re-consent resolves them. Thresholds: docs/operations/accounting-feed.md. " +
-              'The counters are the one database read on this payload: when the queries throw, both ' +
-              'are `null` and `unavailable` is `true` while the in-memory siblings still answer.',
-            required: ['exhaustedSyncs', 'connectionsNeedingAttention'],
+              'connections in `needs_reauthorisation`, `scope_missing`, `revoked_at_provider` or `needs_attention` — only the ' +
+              "user's re-consent (or, for `needs_attention`, a reconnect after the deployment fix) resolves them. `webhookCounters`: " +
+              'the Accounted webhook receiver\u2019s nine per-answer-class counters (received / bad_signature / stale / unknown_token / duplicate / ' +
+              'processed / feature_off / unknown_type / confirmed) — IN-PROCESS, process-lifetime, reset on restart; the durable facts are the ' +
+              '`accounting_webhook_deliveries` rows, not these. Thresholds: docs/operations/accounting-feed.md. ' +
+              'The two integer counters are the one database read on this payload: when the queries throw, both ' +
+              'are `null` (and `webhookCounters` with them) and `unavailable` is `true` while the in-memory siblings still answer.',
+            required: ['exhaustedSyncs', 'connectionsNeedingAttention', 'webhookCounters'],
             properties: {
               exhaustedSyncs: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
               connectionsNeedingAttention: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+              webhookCounters: {
+                anyOf: [
+                  {
+                    type: 'object',
+                    required: ['received', 'bad_signature', 'stale', 'unknown_token', 'duplicate', 'processed', 'feature_off', 'unknown_type', 'confirmed'],
+                    properties: {
+                      received: { type: 'integer', minimum: 0 },
+                      bad_signature: { type: 'integer', minimum: 0 },
+                      stale: { type: 'integer', minimum: 0 },
+                      unknown_token: { type: 'integer', minimum: 0 },
+                      duplicate: { type: 'integer', minimum: 0 },
+                      processed: { type: 'integer', minimum: 0 },
+                      feature_off: { type: 'integer', minimum: 0 },
+                      unknown_type: { type: 'integer', minimum: 0 },
+                      confirmed: { type: 'integer', minimum: 0 },
+                    },
+                    additionalProperties: false,
+                  },
+                  { type: 'null' },
+                ],
+              },
               unavailable: {
                 type: 'boolean',
-                description: 'Present and `true` only when the counters could not be read; the two integers are then `null`.',
+                description: 'Present and `true` only when the counters could not be read; the two integers and `webhookCounters` are then `null`.',
               },
             },
             additionalProperties: false,

@@ -1230,6 +1230,46 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/accounting/webhooks/accounted/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * PUBLIC Accounted webhook callback — authenticated by the capability token + the HMAC signature, not by a session.
+         * @description Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (a webhook carries no credential header).
+         */
+        post: operations["accountedWebhookCallback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/webhooks/accounted/{token}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * PUBLIC Accounted webhook callback (trailing-slash twin — the same handler; never a redirect).
+         * @description Registered EXPLICITLY so the provider never meets Fastify's trailing-slash redirect: a 3xx would hand it a URL the subscription was not registered with, and a 410 would auto-disable the subscription without replay (#3019). Identical contract to `accountedWebhookCallback`.
+         */
+        post: operations["accountedWebhookCallbackTrailingSlash"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/accounting/providers": {
         parameters: {
             query?: never;
@@ -3057,11 +3097,22 @@ export type components = {
                 hops: number;
                 authRateLimitArmed: boolean;
             };
-            /** @description Accounting-feed on-call counters (#2872), deployment-wide, read live from two aggregate queries. `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: connections in `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — only the user's re-consent resolves them. Thresholds: docs/operations/accounting-feed.md. The counters are the one database read on this payload: when the queries throw, both are `null` and `unavailable` is `true` while the in-memory siblings still answer. */
+            /** @description Accounting-feed on-call counters (#2872, widened by #3019). `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: connections in `needs_reauthorisation`, `scope_missing`, `revoked_at_provider` or `needs_attention` — only the user's re-consent (or, for `needs_attention`, a reconnect after the deployment fix) resolves them. `webhookCounters`: the Accounted webhook receiver’s nine per-answer-class counters (received / bad_signature / stale / unknown_token / duplicate / processed / feature_off / unknown_type / confirmed) — IN-PROCESS, process-lifetime, reset on restart; the durable facts are the `accounting_webhook_deliveries` rows, not these. Thresholds: docs/operations/accounting-feed.md. The two integer counters are the one database read on this payload: when the queries throw, both are `null` (and `webhookCounters` with them) and `unavailable` is `true` while the in-memory siblings still answer. */
             accounting: {
                 exhaustedSyncs: number | null;
                 connectionsNeedingAttention: number | null;
-                /** @description Present and `true` only when the counters could not be read; the two integers are then `null`. */
+                webhookCounters: {
+                    received: number;
+                    bad_signature: number;
+                    stale: number;
+                    unknown_token: number;
+                    duplicate: number;
+                    processed: number;
+                    feature_off: number;
+                    unknown_type: number;
+                    confirmed: number;
+                } | null;
+                /** @description Present and `true` only when the counters could not be read; the two integers and `webhookCounters` are then `null`. */
                 unavailable?: boolean;
             };
         };
@@ -9503,7 +9554,7 @@ export interface operations {
                             provider: string;
                             displayName: string;
                             /** @enum {string} */
-                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "needs_attention" | "disconnected";
                             companyName: string | null;
                             /** Format: date-time */
                             lastPushAt: string | null;
@@ -9778,6 +9829,86 @@ export interface operations {
             };
         };
     };
+    accountedWebhookCallback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status: string;
+                        counted?: string;
+                        deliveryId?: string;
+                    };
+                };
+            };
+            /** @description Bad or malformed signature, or a stale timestamp. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No connection carries this token. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    accountedWebhookCallbackTrailingSlash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status: string;
+                        counted?: string;
+                        deliveryId?: string;
+                    };
+                };
+            };
+            /** @description Bad or malformed signature, or a stale timestamp. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No connection carries this token. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     listAccountingProviders: {
         parameters: {
             query?: never;
@@ -9859,10 +9990,10 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). `needs_attention` (#3019) is the webhook half failing independently of the feed — the key validates and pushes work, but the subscriptions could not be created (a `webhook subscription failed` registration) or the deployment states no public API origin (`no public API origin configured`); a reconnect after fixing the deployment state resolves it. A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
                              * @enum {string}
                              */
-                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "needs_attention" | "disconnected";
                             statusReason: string | null;
                             /** @description Exactly one connection per user is where settled payments go. */
                             isActiveDestination: boolean;
@@ -10074,10 +10205,10 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). `needs_attention` (#3019) is the webhook half failing independently of the feed — the key validates and pushes work, but the subscriptions could not be created (a `webhook subscription failed` registration) or the deployment states no public API origin (`no public API origin configured`); a reconnect after fixing the deployment state resolves it. A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
                              * @enum {string}
                              */
-                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "needs_attention" | "disconnected";
                             statusReason: string | null;
                             /** @description Exactly one connection per user is where settled payments go. */
                             isActiveDestination: boolean;
@@ -10266,10 +10397,10 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). `needs_attention` (#3019) is the webhook half failing independently of the feed — the key validates and pushes work, but the subscriptions could not be created (a `webhook subscription failed` registration) or the deployment states no public API origin (`no public API origin configured`); a reconnect after fixing the deployment state resolves it. A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
                              * @enum {string}
                              */
-                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "needs_attention" | "disconnected";
                             statusReason: string | null;
                             /** @description Exactly one connection per user is where settled payments go. */
                             isActiveDestination: boolean;
@@ -10496,10 +10627,10 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). `needs_attention` (#3019) is the webhook half failing independently of the feed — the key validates and pushes work, but the subscriptions could not be created (a `webhook subscription failed` registration) or the deployment states no public API origin (`no public API origin configured`); a reconnect after fixing the deployment state resolves it. A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
                              * @enum {string}
                              */
-                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "needs_attention" | "disconnected";
                             statusReason: string | null;
                             /** @description Exactly one connection per user is where settled payments go. */
                             isActiveDestination: boolean;

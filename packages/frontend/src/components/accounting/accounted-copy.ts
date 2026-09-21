@@ -2,12 +2,12 @@
  * The Accounted paste-UI copy constants (#3017, epic #3016) — the ONE home of
  * every Accounted-specific TOKEN the user must read or type verbatim.
  *
- * The required key scopes are spelled exactly `companies:read` and
- * `documents:write` here and nowhere else: the i18n sentences in
- * `lib/i18n/messages/en.ts` interpolate them from this module instead of
- * writing their own copy of the identifier, and the two files' connection is
- * proven by `__tests__/ApiKeyConnectModal.test.tsx`, which asserts the
- * rendered sentences carry both exact tokens. A user who mis-ticks a scope is
+ * The required key scopes are spelled exactly `companies:read`,
+ * `documents:write` and `webhooks:manage` (#3019) here and nowhere else:
+ * the i18n sentences in `lib/i18n/messages/en.ts` interpolate them from this
+ * module instead of writing their own copy of the identifier, and the two
+ * files' connection is proven by `__tests__/ApiKeyConnectModal.test.tsx`,
+ * which asserts the rendered sentences carry all three exact tokens. A user who mis-ticks a scope is
  * refused by the provider at the first feed (the `scope_missing` path of
  * #2865), so a drifted copy spelling is a support bug, not a cosmetic one.
  *
@@ -23,10 +23,20 @@ export const ACCOUNTED_SCOPE_COMPANIES_READ = 'companies:read'
 /** The write scope the feed needs; cannot be validated at connect (#3017 docs). */
 export const ACCOUNTED_SCOPE_DOCUMENTS_WRITE = 'documents:write'
 
-/** The two scopes a valid Accounted key must carry, in the order the copy names them. */
-export const ACCOUNTED_REQUIRED_SCOPES: readonly [string, string] = [
+/** The scope webhook subscription management needs; used at connect (#3019 docs). */
+export const ACCOUNTED_SCOPE_WEBHOOKS_MANAGE = 'webhooks:manage'
+
+/**
+ * The scopes a valid Accounted key must carry, in the order the copy names
+ * them. #3019 adds `webhooks:manage`: connect now creates the three event
+ * subscriptions, and the provider refuses a key without the scope at
+ * registration time (`INSUFFICIENT_SCOPE`), which surfaces as
+ * `needs_attention` on the connection.
+ */
+export const ACCOUNTED_REQUIRED_SCOPES: readonly [string, string, string] = [
   ACCOUNTED_SCOPE_COMPANIES_READ,
   ACCOUNTED_SCOPE_DOCUMENTS_WRITE,
+  ACCOUNTED_SCOPE_WEBHOOKS_MANAGE,
 ] as const
 
 /** The separator the helper copy puts between the two scope names. */

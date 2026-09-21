@@ -45,6 +45,11 @@ export const ATTENTION_STATUSES: ReadonlyArray<AccountingFeedDestination['status
   'needs_reauthorisation',
   'scope_missing',
   'revoked_at_provider',
+  // #3019: the webhook half failing independently of the feed — the user
+  // pastes the key again (one carrying `webhooks:manage`) to re-run the
+  // registration; the operator-side cause (no public API origin) resolves
+  // the same way once the deployment states it.
+  'needs_attention',
 ]
 
 /**

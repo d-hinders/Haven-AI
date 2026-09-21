@@ -21,7 +21,7 @@ covers:
   - packages/frontend/src/components/accounting/ApiKeyConnectModal.tsx
   - packages/frontend/src/hooks/useAccounting.ts
   - packages/frontend/src/hooks/useAccountingFeed.ts
-last-verified: "2026-09-16"
+last-verified: "2026-09-20"
 ---
 
 # Accounting connections
@@ -121,9 +121,11 @@ company the key belongs to, then stores it encrypted (#3017).
 1. In Accounted, open **Settings → API keys** (`app.accounted.se/settings/api`)
    and choose **Create key**.
 
-2. Tick exactly the two scopes the feed needs: `companies:read` (so Haven can
-   tell whose company it is feeding) and `documents:write` (so it can deliver
-   documents). Nothing else is needed today.
+2. Tick exactly the three scopes the feed needs: `companies:read` (so Haven
+   can tell whose company it is feeding), `documents:write` (so it can
+   deliver documents) and `webhooks:manage` (so it can receive the
+   platform's confirmations when a document is archived, a journal entry is
+   committed or a period is locked). Nothing else is needed today.
 3. Copy the key Accounted shows after creation. A sandbox key begins with
    `gnubok_sk_test_`, a production key with `gnubok_sk_live_`. The key is
    shown only once.
@@ -147,7 +149,7 @@ Two Accounted specifics worth knowing:
 - **`documents:write` cannot be checked at connect.** Accounted offers no way
   to ask a key what it may write, so a key that is missing that scope passes
   connection and is refused at the first delivery. The row then reads *Needs
-  more access*, and the fix is a new key with both scopes.
+  more access*, and the fix is a new key with all three scopes.
 - **Revocation happens in Accounted, not in Haven.** Disconnecting here
   deletes the stored key and stops the feed. The key itself keeps working
   until you revoke it under `app.accounted.se/settings/api`.
@@ -174,6 +176,26 @@ exactly the bytes Haven sent.
 - **Your accountant books from the document.** Haven does not create journal
   entries or supplier invoices in Accounted — the document is the record, and
   the booking stays with your accountant.
+
+### What the confirmations show for Accounted (#3019)
+
+When Haven connects to Accounted it also subscribes to three events on the
+platform: when a document is stored, when a journal entry is committed and
+when a period is locked. Today the feed uses them as **delivery
+confirmations**: when Accounted reports that the very document Haven uploaded
+has been stored, the payment's row on `/accounting` notes that the provider
+has the evidence — independent confirmation, on top of the upload proof, that
+your accountant can see it.
+
+One thing the feed deliberately does **not** show for Accounted is *booked*.
+Whether Accounted tells Haven anything useful about a booking is not yet
+known — the confirmation events Haven receives are recorded, and only when a
+real booking event has been seen on the sandbox can Haven say what it carries.
+If it turns out to name the documents a booking covers, a later update adds a
+*Booked* badge like Fortnox's; if it does not, this page will say plainly
+that booking is not observable for Accounted. Until then: *Evidence archived*
+means the document is there, and the booking itself is visible only in
+Accounted.
 
 ## What to include: the backfill choice
 
@@ -214,6 +236,7 @@ resolving action, and in every state the feed history in Haven is kept.
 | **Sign-in expired** (`needs_reauthorisation`) | Fortnox stopped honouring Haven's sign-in — the approval expired after long disuse (Fortnox retires an unused approval after 45 days), or the integration was removed inside Fortnox. Payments settled in the meantime are held, not lost. | **Reconnect.** You approve the integration again; settings, the starting point and the history are kept, and the held payments are fed afterwards. |
 | **Needs more access** (`scope_missing`) | The approval Fortnox recorded lacks a permission the feed needs. The row names which — for example *file attachments* or *company information*. A payment that was already delivered keeps its document; its attachment may be missing. | **Reconnect.** Fortnox shows the full permission list again; approving it grants what was missing. If the row comes straight back as *Needs more access*, the Fortnox app registration itself lacks that permission — an operator fixes that in the Fortnox developer portal, not you. |
 | **Access revoked** (`revoked_at_provider`) | Reserved for a provider that tells Haven about a revocation on its side. Fortnox offers such a notification; Haven does not receive it yet, so today a revocation inside Fortnox surfaces as *Sign-in expired* instead, and nothing sets this state. | **Reconnect**, should it ever show. |
+| **Needs attention** (`needs_attention`, Accounted only) | Accounted accepted the key, but Haven could not register the event confirmations on the platform. The feed itself works; delivery confirmations do not arrive. | **Reconnect.** Paste the key again; Haven re-registers the confirmations. |
 | **Not connected** (`disconnected`, or never connected) | No feed. If you disconnected earlier, what was fed stays in Fortnox and the history stays in Haven. | **Connect.** |
 
 A payment that could not be delivered while the connection was in one of the

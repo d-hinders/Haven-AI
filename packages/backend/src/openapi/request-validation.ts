@@ -600,8 +600,15 @@ export function installRequestValidation(app: FastifyInstance, options: RequestV
     if (routeMode(request) !== 'shadow') return done()
     const body: unknown = request.body
     // Only a structured body can be coerced into a different one; a string or
-    // Buffer body has no properties for ajv to rewrite.
-    if (body === null || typeof body !== 'object') return done()
+    // binary body has no properties for ajv to rewrite. Buffer AND every
+    // other ArrayBuffer view are excluded explicitly: `structuredClone` turns
+    // a Buffer into a plain `Uint8Array`, whose `toString('utf8')` ignores its
+    // argument and answers the byte VALUES joined by commas — the snapshot
+    // would then "restore" those comma digits over the real body and every
+    // raw-body consumer (the Accounted webhook HMAC, #3019) would read bytes
+    // the client never sent. `typeof body === 'object'` alone does not see
+    // this: a Buffer IS an object.
+    if (body === null || typeof body !== 'object' || Buffer.isBuffer(body) || ArrayBuffer.isView(body)) return done()
     try {
       ;(request as FastifyRequest & { [k: symbol]: unknown })[BODY_SNAPSHOT] = structuredClone(body)
     } catch {

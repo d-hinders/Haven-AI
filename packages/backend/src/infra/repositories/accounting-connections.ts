@@ -33,6 +33,7 @@
  */
 
 import pool from '../../db.js'
+import { randomBytes } from 'node:crypto'
 import { withTransaction, type Executor } from '../transaction.js'
 
 export type { Executor }
@@ -42,6 +43,12 @@ export type ConnectionStatus =
   | 'needs_reauthorisation'
   | 'revoked_at_provider'
   | 'scope_missing'
+  | /**
+     * #3019: a connection whose WEBHOOK half failed — the feed still works,
+     * the push confirmations do not arrive. User-resolvable (reconnect), so
+     * it joins the NEEDS_ATTENTION_STATUSES list and the CHECK constraint.
+     */
+    'needs_attention'
   | 'disconnected'
 
 export type AuthKind = 'oauth2' | 'api_key'
@@ -69,12 +76,18 @@ export interface AccountingConnectionRow {
   last_error: string | null
   created_at: Date
   updated_at: Date
+  /**
+   * #3019: the capability-URL token of the inbound webhook callback
+   * (`/accounting/webhooks/accounted/<token>`), generated at connect, one
+   * per connection. Null on rows that have not connected since migration 092.
+   */
+  webhook_token: string | null
 }
 
 const COLUMNS = `id, user_id, provider, auth_kind, secrets_ciphertext, secrets_key_version,
        external_company_id, external_company_name, base_currency, status, status_reason,
        granted_scope, token_expires_at, is_active_destination, feed_from, settings,
-       last_push_at, last_error, created_at, updated_at`
+       last_push_at, last_error, created_at, updated_at, webhook_token`
 
 export const GET_ACCOUNTING_CONNECTION_SQL = `SELECT ${COLUMNS}
      FROM accounting_connections WHERE user_id = $1 AND provider = $2`
@@ -286,7 +299,7 @@ export const REENCRYPT_PLAINTEXT_SECRETS_SQL = `UPDATE accounting_connections
  * what the `/health/ops` counter counts (#2872). `disconnected` is the user's
  * own choice and is not attention; `connected` is fine.
  */
-export const NEEDS_ATTENTION_STATUSES = ['needs_reauthorisation', 'scope_missing', 'revoked_at_provider'] as const satisfies readonly ConnectionStatus[]
+export const NEEDS_ATTENTION_STATUSES = ['needs_reauthorisation', 'scope_missing', 'revoked_at_provider', 'needs_attention'] as const satisfies readonly ConnectionStatus[]
 
 /**
  * The `/health/ops` counter (#2872): every connection on the deployment in a
@@ -553,6 +566,59 @@ export async function disconnect(
   db: Executor = pool,
 ): Promise<void> {
   await db.query(DISCONNECT_ACCOUNTING_CONNECTION_SQL, [userId, provider, reason])
+}
+
+// ── Webhook capability URL (#3019, epic #3016 slice 3) ───────────────────────
+//
+// The `webhook_token` column (migration 092) carries the capability-URL token
+// of the ONE inbound callback route per connection. 32 random bytes
+// base64url = 256 bits of entropy — unguessable by construction, which is the
+// whole authentication model of the route before the HMAC check runs (the
+// reviewer trap list's identifier-entropy item; a UUID's 122 bits would also
+// do, but the base64url form is compact, URL-safe, and the entropy is STATED
+// here rather than implied).
+
+/** The callback path prefix of the inbound webhook route (`routes/accounting-webhooks.ts`). */
+export const ACCOUNTING_WEBHOOK_CALLBACK_PREFIX = '/accounting/webhooks/accounted'
+
+/** Generate one capability-URL token: 32 random bytes, base64url, 256 bits. */
+export function newWebhookToken(): string {
+  return randomBytes(32).toString('base64url')
+}
+
+/** The full public callback URL for a connection's token, on the given API origin. */
+export function webhookCallbackUrl(apiOrigin: string, token: string): string {
+  return `${apiOrigin.replace(/\/+$/, '')}${ACCOUNTING_WEBHOOK_CALLBACK_PREFIX}/${token}`
+}
+
+/** Set (or replace) the capability-URL token on a connection. Returns the row. */
+export const SET_WEBHOOK_TOKEN_SQL = `UPDATE accounting_connections
+     SET webhook_token = $3, updated_at = NOW()
+     WHERE user_id = $1 AND provider = $2
+     RETURNING ${COLUMNS}`
+
+export async function setWebhookToken(
+  userId: string,
+  provider: string,
+  token: string,
+  db: Executor = pool,
+): Promise<AccountingConnectionRow | null> {
+  const r = await db.query<AccountingConnectionRow>(SET_WEBHOOK_TOKEN_SQL, [userId, provider, token])
+  return r.rows[0] ?? null
+}
+
+/** The capability lookup the inbound webhook route runs: row BY TOKEN, any user. */
+export const GET_CONNECTION_BY_WEBHOOK_TOKEN_SQL = `SELECT ${COLUMNS}
+     FROM accounting_connections
+     WHERE webhook_token = $1 AND secrets_ciphertext IS NOT NULL AND status <> 'disconnected'
+     LIMIT 1`
+
+export async function getConnectionByWebhookToken(
+  token: string,
+  db: Executor = pool,
+): Promise<AccountingConnectionRow | null> {
+  const r = await db.query<AccountingConnectionRow>(GET_CONNECTION_BY_WEBHOOK_TOKEN_SQL, [token])
+  return r.rows[0] ?? null
 }
 
 /**

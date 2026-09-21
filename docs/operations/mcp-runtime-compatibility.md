@@ -1444,9 +1444,10 @@ know still refuses before any side effect — since #1719 as
 Pre-run, the dashboard knows nothing about the environment, so the "your app
 may ask you to approve running the connector command" heads-up shows for everyone
 during the waiting state, sharpening to app-specific wording once the
-connector's resolve reports the detected runtime. `--doctor`/`--repair` still
-require an explicit `--runtime` (they examine a stored config, which is a
-choice, not a detection).
+connector's resolve reports the detected runtime. `--repair` still requires
+an explicit `--runtime` (it rewrites a stored config, which is a choice, not a
+detection); since #3210 `--doctor` needs none and resolves the runtime from
+the setup record.
 
 **A failure the dashboard cannot name.** The runtime-resolution refusals above
 (`runtime_undetermined`, `runtime_no_installed_clients`, `runtime_prompt_aborted`,

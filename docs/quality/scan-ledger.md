@@ -5,7 +5,7 @@ covers:
   - .agents/skills/quality-scan/SKILL.md
   - .agents/skills/quality-scan/references/dimensions.md
   - scripts/test-support/guard-cli.mjs
-last-verified: "2026-09-15"
+last-verified: "2026-09-21"
 ---
 
 # Quality-Scan Ledger
@@ -814,8 +814,8 @@ Full report: [`docs/bug-reports/quality-scan-2026-09-21-agent-surface.md`](../bu
 — file:line evidence lives there; this entry stays path-free. Measured on
 `origin/dev` @ `e42ed68f`. Method: live exercise on dev through the hosted
 QA MCP and the local qa-dev signer (fifteen read-only calls: agent,
-allowances, receipts, status, discovery, three quote shapes, four
-sufficiency checks, one signer refusal; no intent, no signature), five
+allowances, receipts, status, discovery ×2, x402 quote ×2, two more quote
+shapes, four sufficiency checks, one signer refusal; no intent, no signature), five
 block-1 mutations in a `npm ci`'d detached worktree behind `cp` backups
 with byte-identical restores, blocks 2, 4 and 6 in scope, incident
 clustering over the 30 in-scope issues since 2026-09-17, workflow
@@ -879,8 +879,9 @@ pending the owner (carried as a note, not re-surfaced); #3105, #3119, #3130
   package READMEs not re-swept.
 - block 4 (retired vocabulary) → the reference's term list over the full
   tracked set → 192 files (192 on 09-15), 46 historical / 146 live;
-  positive control 36 shards; in scope 10 live files (09-17: 15) — 6 tests
-  and 4 history-describing comments; `npm run lint:retired-rail-prose` →
+  positive control 36 shards; in scope 16 live files (09-17: 15; first
+  written as 10, a hand sub-count corrected before merge) — 7 tests, 2
+  package READMEs and 7 history-describing comment lines; `npm run lint:retired-rail-prose` →
   green. Safe-retirement pins: `git grep -l 'process.env.SAFE' --
   packages/backend/src` → 0 (positive control 57), guard test + middleware
   present, the four `retiredSafeInflowRoute(` registrations from #3030.

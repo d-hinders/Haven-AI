@@ -58,7 +58,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { chartScale, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components/charts/chart-scale'
+import { chartScaleRange, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components/charts/chart-scale'
 
 /** The viewBox coordinate space; see `pct` for how the HTML labels read it. */
 const VIEW_W = 640
@@ -91,7 +91,12 @@ export interface AreaPoint {
 
 export interface AreaChartProps {
   points: AreaPoint[]
-  /** Display currency code the figures are in; printed, never derived. */
+  /**
+   * Display currency code the figures are in — named only in the accessible
+   * table's header. The annotation and the tooltip print `formatValue`'s
+   * output alone: callers pass a currency-style formatter, and appending the
+   * code again read "298,43 kr SEK" (#3204).
+   */
   currency: string
   /** Printed verbatim as the accessible name of the graphic, e.g.
    *  `Balance over 30 days: ends at 1,240 USD, 180 USD spent across the
@@ -119,15 +124,17 @@ export function AreaChart({
   const svgRef = useRef<SVGSVGElement | null>(null)
 
   // Everything the drawing needs, derived once from the points. The scale is
-  // computed on the PADDED extremes so the nice steps stay nice across the
-  // whole plot while the line keeps clear of the frame at both ends.
+  // computed on the PADDED extremes — floor AND ceiling — so the nice steps
+  // stay nice across the whole plot while the line keeps clear of the frame
+  // at both ends. Range-aware (`chartScaleRange`, #3204): the ticks live
+  // between the padded floor and the ceiling, never below the floor.
   const plot = useMemo(() => {
     const values = points.map((p) => p.value)
     const min = values.length > 0 ? Math.min(...values) : 0
     const max = values.length > 0 ? Math.max(...values) : 0
     const pad = Math.max((max - min) * HEADROOM, Math.abs(max) * HEADROOM * 0.5, 1)
-    const scale = chartScale(max + pad)
-    const floor = Math.max(0, min - pad)
+    const scale = chartScaleRange(Math.max(0, min - pad), max + pad)
+    const floor = scale.min
     const span = scale.max - floor
     const plotW = VIEW_W - PAD.left - PAD.right
     const plotH = VIEW_H - PAD.top - PAD.bottom
@@ -347,7 +354,7 @@ export function AreaChart({
           className="absolute block text-right text-xs leading-none text-[var(--v2-ink-3)]"
           style={{ right: pct(PAD.right, VIEW_W), top: pct(PAD.top - 2, VIEW_H) }}
         >
-          {deltaLabel(plot.delta)} {formatValue(Math.abs(plot.delta))} {currency}
+          {deltaLabel(plot.delta)} {formatValue(Math.abs(plot.delta))}
         </span>
       </div>
 
@@ -370,7 +377,7 @@ export function AreaChart({
         >
           <p className="text-xs text-[var(--v2-ink-2)]">{point.label}</p>
           <p className="mt-1 text-sm font-semibold text-[var(--v2-ink)]">
-            {currency} {formatValue(point.value)}
+            {formatValue(point.value)}
           </p>
         </div>
       )}

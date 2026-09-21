@@ -8,13 +8,17 @@ covers:
   - packages/frontend/src/components/analytics/MerchantsTable.tsx
   - packages/frontend/src/components/analytics/SpendSection.tsx
   - packages/frontend/src/components/ui/StackedBarChart.tsx
+  - packages/frontend/src/components/ui/AreaChart.tsx
+  - packages/frontend/src/components/charts/chart-scale.ts
+  - packages/frontend/src/components/ui/StatTile.tsx
+  - packages/frontend/src/components/analytics/AgentsTable.tsx
   - packages/frontend/src/lib/analytics-series.ts
   - packages/frontend/src/components/analytics/BalanceSection.tsx
   - packages/backend/src/routes/analytics-overview.ts
   - packages/backend/src/infra/repositories/analytics.ts
   - packages/backend/src/modules/mpp/budget-precheck.ts
   - packages/backend/src/routes/machine-payments.ts
-last-verified: "2026-09-19"
+last-verified: "2026-09-21"
 ---
 
 # Analytics
@@ -46,7 +50,14 @@ settlement evidence are not counted") instead of silently shrinking N.
 in the range, and — when they differ — how many attempts those refusals
 represent. The amount shown is the attempted amount. The page never says
 "saved": a refusal is a payment that did not happen, and treating every
-attempted amount as money saved would flatter the number.
+attempted amount as money saved would flatter the number. The tile carries
+only that basis; the two caveats that apply to the whole page — the day the
+refusal ledger starts recording, and the price-cap refusals the ledger never
+sees — are one line under the tile grid, not in the tile (#3204: joined into
+the tile they ran five to seven lines and made it twice its neighbours'
+height). The change chips on every tile write their percentage in the
+display currency's locale, so a `kr` figure sits beside `+15,9 %`, not
+`+15.9%`.
 
 **Budget used.** What each agent's own budget allows and how much of it is
 gone. The used amount is read from the chain per delegation, in token units,
@@ -63,7 +74,8 @@ whether the flag is on so the tile cannot go stale in either direction.
 with no payment and no refusal is not drawn, so the axis is the days that
 carry a figure, not the calendar — stacked by agent, in the display currency;
 a marker cap above a bar means the guardrails refused at least one payment
-that day (the tooltip and the data table say how many). The bars are the same
+that day (the tooltip and the data table say how many; the legend names the
+cap beside the agent rows whenever a day in the range has one). The bars are the same
 booked values the Spent tile sums, bucketed server-side in the page's time
 zone. Agents are ordered by spend, then id, and an agent that appears on the
 chart keeps one colour across the chart, its legend and the swatch beside its
@@ -104,7 +116,15 @@ currency. This is a record of what was held, not a live portfolio valuation.
 Under the SEK display currency, days snapshotted before the SEK column
 existed (migration 090) are omitted from the series rather than drawn as
 zero — the page distinguishes a day with no SEK figure from a day that was
-actually worth nothing.
+actually worth nothing. The chart does not start at zero: its floor is
+padded just under the range's lowest day and its ticks are computed over
+that range (`chartScaleRange`), so a 300 kr movement on a 12 000 kr balance
+fills the plot and the gridline labels bracket the data — 12 300 / 12 400 /
+… — rather than sitting below the floor (#3204: the ticks came from the
+zero-based bar-chart scale, so no gridline reached the plot and the line
+read as flat). The annotation and the tooltip print the amount once, in the
+display currency's own format ("gained 298,43 kr"), never with the currency
+code appended again.
 
 ## Which payments count, and why
 

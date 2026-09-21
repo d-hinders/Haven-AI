@@ -678,6 +678,19 @@ export function StackedBarChart({
             <span className="truncate">{row.name}</span>
           </li>
         ))}
+        {entries.some((d) => d.refusals > 0) && (
+          // The one mark the series rows do not explain: the ink cap over a
+          // day that refused something. Named here, in the legend that names
+          // everything else, rather than only in the card's prose (#3204).
+          <li data-testid="chart-legend-refusal" className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="inline-block h-[3px] w-2.5 flex-shrink-0 rounded-sm"
+              style={{ backgroundColor: INK, opacity: 0.55 }}
+            />
+            <span className="truncate">Refused (cap)</span>
+          </li>
+        )}
       </ul>
 
       {/* The tooltip: on a wide screen a callout over the day it describes;

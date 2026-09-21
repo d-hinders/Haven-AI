@@ -16,7 +16,7 @@ import type { AreaPoint } from '../AreaChart'
  *
  * The fixture's balance FALLS over the range (1 240 → 1 120), which is the
  * direction the page actually shows when agents have been spending: the
- * annotation reads `spent 120.00 USD`, the claim the issue asks for ("the
+ * annotation reads `spent 120.00` (the formatter already carries the currency), the claim the issue asks for ("the
  * range's spend annotated as the endpoint delta"), and not a signed number
  * the reader has to interpret.
  *
@@ -111,13 +111,21 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
       expect(y).toBeGreaterThan(14)
       expect(y).toBeLessThan(190)
     }
-    // And the scale did not fall to a zero floor: the gridline labels the
-    // reader sees are multiples of 500 (the nice step of this range), which
-    // only a data-anchored scale prints. A zero-based scale of the same
-    // height would print 200 / 400 / 600 / 800 / 1000 / 1200. The labels
-    // print through the caller's formatter, so they carry its grouping.
+    // And the ticks live INSIDE the plot, between the padded floor and the
+    // ceiling: for a 1,100–1,240 balance the nice step over the range is 100,
+    // so the reader sees 1,000 / 1,100 / 1,200 — labels that bracket the data.
+    // Until #3204 the ticks came from the zero-based scale (500 / 1,000 here),
+    // both below the padded floor, so no gridline reached the plot and the
+    // labels were positioned under the card. The labels print through the
+    // caller's formatter, so they carry its grouping.
     const tickLabels = screen.getAllByTestId('chart-tick-label').map((el) => el.textContent)
-    expect(tickLabels).toEqual(['500.00', '1,000.00'])
+    expect(tickLabels).toEqual(['1,000.00', '1,100.00', '1,200.00'])
+    // Every tick's label sits within the svg's height (0–100%), never below it.
+    for (const el of screen.getAllByTestId('chart-tick-label')) {
+      const top = Number.parseFloat((el as HTMLElement).style.top)
+      expect(top).toBeGreaterThanOrEqual(0)
+      expect(top).toBeLessThanOrEqual(100)
+    }
   })
 
   it('fills under the line without drawing over it, closing on the baseline', () => {
@@ -145,7 +153,10 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
     // The delta is endpoint-to-endpoint, not the sum of movements, and it
     // reads as a spent figure rather than a signed number: the balance fell
     // by 120, and a range of payments spent 120.
-    expect(screen.getByTestId('area-delta')).toHaveTextContent('spent 120.00 USD')
+    // Exact, not a substring: the formatter already carries the currency, and
+    // "spent 120.00 USD" (or "298,43 kr SEK") is the #3204 double-currency
+    // defect. Mutation: append `{currency}` again → red.
+    expect(screen.getByTestId('area-delta').textContent?.trim()).toBe('spent 120.00')
   })
 
   it('names the direction of the delta, including the two edges', () => {
@@ -160,7 +171,7 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
       { label: 'Wed 10', value: 210 },
     ])
     expect(container.querySelector('[data-testid="area-delta"]')).toHaveTextContent(
-      'gained 110.00 USD',
+      'gained 110.00',
     )
   })
 
@@ -265,7 +276,7 @@ describe('AreaChart — the reveal, the mobile half, the sparse half', () => {
     expect(screen.queryByTestId('chart-tooltip')).toBeNull()
     fireEvent.keyDown(svg, { key: 'ArrowRight' }) // → Tue 9
     expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
-    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/USD 1,100\.00/)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/1,100\.00/)
     fireEvent.keyDown(svg, { key: 'End' })
     expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Thu 11/)
     fireEvent.keyDown(svg, { key: 'Escape' })

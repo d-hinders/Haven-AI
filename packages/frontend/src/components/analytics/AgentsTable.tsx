@@ -314,7 +314,7 @@ function MobileAgentRow({
             {open ? 'Hide' : 'More'}
           </button>
         }
-        className="px-0 py-0"
+        density="flush"
       />
       <p className="v2-tabular mt-1 text-xs text-[var(--v2-ink-3)]">{budgetLine}</p>
       {open && (

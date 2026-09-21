@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   chartScale,
+  chartScaleRange,
   MAX_X_LABELS_DESKTOP,
   MAX_X_LABELS_MOBILE,
   MIN_CHARTABLE_DAYS,
@@ -293,5 +294,41 @@ describe('the scale module is the shared arithmetic it claims to be', () => {
     const source = codeOf(readFileSync(resolve(__dirname, '../chart-scale.ts'), 'utf8'))
     expect(source).not.toMatch(/\bfrom\s+['"]react['"]/)
     expect(source).not.toMatch(/\bwindow\.|\bdocument\.|HTMLElement|matchMedia/)
+  })
+})
+
+describe('chartScaleRange — a scale for a chart that does not start at zero (#3204)', () => {
+  it('brackets the range with nice ticks inside [floor, ceiling], never below the floor', () => {
+    // The balance-chart fixture: ≈12 354 → 12 650 with the HEADROOM pad. The
+    // zero-based scale gave max 15 000 and ticks 5 000 / 10 000 — every one
+    // below the padded floor. Mutation: compute the step from `hi` instead of
+    // `hi - lo` → the step becomes 5 000 and this goes red.
+    const { min, max, ticks } = chartScaleRange(12_330, 12_680)
+    expect(min).toBeLessThanOrEqual(12_330)
+    expect(max).toBeGreaterThan(12_680)
+    expect(ticks.length).toBeGreaterThanOrEqual(3)
+    for (const t of ticks) {
+      expect(t).toBeGreaterThanOrEqual(min)
+      expect(t).toBeLessThan(max)
+    }
+    expect(ticks[0]).toBe(min)
+    expect(max - min).toBeLessThan((12_680 - 12_330) * 3)
+  })
+
+  it('the AreaChart fixture (1,100–1,240, HEADROOM-padded to ≈1,063–1,277) prints 1,000 / 1,100 / 1,200', () => {
+    const { ticks } = chartScaleRange(1_062.8, 1_277.2)
+    expect(ticks).toEqual([1000, 1100, 1200])
+  })
+
+  it('a degenerate range returns the bounds and no ticks', () => {
+    expect(chartScaleRange(5, 5)).toEqual({ min: 5, max: 5, ticks: [] })
+    expect(chartScaleRange(Number.NaN, 1).ticks).toEqual([])
+  })
+
+  it('a range that starts at zero agrees with the zero-based scale on the ceiling', () => {
+    const zero = chartScale(1_240)
+    const ranged = chartScaleRange(0, 1_240)
+    expect(ranged.max).toBe(zero.max)
+    expect(ranged.min).toBe(0)
   })
 })

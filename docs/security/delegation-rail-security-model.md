@@ -36,7 +36,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-20"
+last-verified: "2026-09-21"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -1210,3 +1210,29 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > no caveat, and no key. Perimeter unchanged for this model — the CASP shard
 > `docs/regulatory/casp-changelog/2026-09-20-3167.md` carries the full
 > analysis.
+
+> **Re-verified #3030 (2026-09-21, request validation slice 2):** this diff
+> touches three files in this document's coverage list — `routes/auth.ts`,
+> `routes/transactions.ts`, `routes/user-accounts.ts` — and moves no authority
+> or custody boundary: it moves SHAPE checks out of the handlers and into the
+> OpenAPI request schemas the plugin now ENFORCES on these modules
+> (`index.ts` `enforcedModules`). What each file lost is a hand-rolled type or
+> pattern check that the spec's schema states (`auth.ts`: the password
+> bounds, `typeof` on name/email/user_code/device_code — the email FORM and
+> the control-character and blank-after-trim rules stay in the handler, and
+> the `via` marker the dashboard sends is now declared; `transactions.ts`:
+> the uuid / `user`-or-uuid / `<chain>:<address|native>` / positive-integer /
+> `in|out` shapes on its filters, while ownership (`listBasicAccountsForUser`,
+> `agentExistsForUser`, `findAccountOwnership`) and chain support stay
+> exactly where they were; `user-accounts.ts`: `typeof name` and the
+> pre-lookup uuid check, with `renameAccountForUser` still scoped to the
+> caller). The order of the auth hook and validation is unchanged for a live
+> route — `authMiddleware` is an `onRequest` hook and validation is
+> preValidation, so an anonymous caller still gets 401 before any 400 — and
+> the retired Safe-inflow 410s (`POST /user/accounts`, `PUT /user/account`,
+> `/deploy`) gained a route-level `onRequest` so they still precede
+> validation: a malformed body is told the flow is gone, not to fix its
+> request (pinned in `safe-inflow-retired.test.ts`). Every `WHERE user_id =`
+> in the three files is byte-identical. Scope of this note: those three
+> files' request-shape edits and the hook order. Nothing else in this
+> document was re-verified.

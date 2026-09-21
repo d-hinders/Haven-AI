@@ -9668,7 +9668,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Haven payment id. */
+                /** @description Haven payment id (a uuid, as every other `paymentId` path parameter says — #3030). */
                 paymentId: string;
             };
             cookie?: never;
@@ -9757,7 +9757,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Haven payment id. */
+                /** @description Haven payment id (a uuid, as every other `paymentId` path parameter says — #3030). */
                 paymentId: string;
             };
             cookie?: never;
@@ -10500,8 +10500,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /**
-                     * Format: date-time
-                     * @description ISO date or date-time; the new feed-from floor.
+                     * @description ISO date or date-time; the new feed-from floor. (#3030: was declared `format: date-time`, which refused the plain date the description — and the dashboard — send; the pattern states the prefix and the handler decides parseability, the 2020 floor and the future bound.)
                      * @example 2026-01-01
                      */
                     since: string;
@@ -11566,6 +11565,8 @@ export interface operations {
                     name: string;
                     email: string;
                     password: string;
+                    /** @description Agent hand-off marker (#2522): the dashboard sends `agent` when the signup came from an agent-initiated link. Sanitised server-side to `agent` or nothing; any other value is ignored. Declared in #3030 — the dashboard had been sending it undeclared. */
+                    via?: string;
                 };
             };
         };
@@ -15834,7 +15835,9 @@ export interface operations {
             query?: {
                 /** @description Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none. */
                 accountId?: string;
+                /** @description An agent id, or the literal `user` for payments the account holder made directly (#3030: the handler always refused anything else; the spec now says so). */
                 agentId?: string;
+                /** @description `<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler. */
                 tokenKey?: string;
                 offset?: number;
                 limit?: number;
@@ -15892,7 +15895,9 @@ export interface operations {
             query?: {
                 /** @description Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none. */
                 accountId?: string;
+                /** @description An agent id, or the literal `user` for payments the account holder made directly (#3030: the handler always refused anything else; the spec now says so). */
                 agentId?: string;
+                /** @description `<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler. */
                 tokenKey?: string;
                 direction?: "in" | "out";
                 chainId?: number;
@@ -16126,7 +16131,7 @@ export interface operations {
     getAccountBalances: {
         parameters: {
             query?: {
-                /** @description Required when the same address is linked on more than one chain. */
+                /** @description Required when the same address is linked on more than one chain. A chain id is positive (#3030: the handlers always refused 0 and negatives; the spec now says so). */
                 chain_id?: number;
             };
             header?: never;
@@ -16196,7 +16201,7 @@ export interface operations {
     getAccountPortfolio: {
         parameters: {
             query?: {
-                /** @description Required when the same address is linked on more than one chain. */
+                /** @description Required when the same address is linked on more than one chain. A chain id is positive (#3030: the handlers always refused 0 and negatives; the spec now says so). */
                 chain_id?: number;
             };
             header?: never;

@@ -44,6 +44,11 @@ function readInt(value: number | string | undefined, fallback: number): number {
   return typeof value === 'number' ? value : parseInt(value, 10)
 }
 
+/** The spec's `direction` enum, enforced before the handler (#3030); an alias
+ *  because a quoted union inside a route generic hides the path literal from
+ *  `generate-route-modules`. */
+type TransferDirection = 'in' | 'out'
+
 /** Shape (`integer, minimum: 1`) is the spec's since #3030; support is not. */
 function parseChainId(value: unknown): number | null {
   if (value === undefined) return null
@@ -240,7 +245,7 @@ export default async function transactionRoutes(
       accountId?: string
       agentId?: string
       tokenKey?: string
-      direction?: 'in' | 'out' // the spec's enum, enforced before the handler (#3030)
+      direction?: TransferDirection
       chainId?: string
       fresh?: string
     }

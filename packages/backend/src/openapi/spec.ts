@@ -3973,7 +3973,7 @@ export const openapiSpec = {
               schema: {
                 type: 'object',
                 required: ['since'],
-                properties: { since: { type: 'string', format: 'date-time', description: 'ISO date or date-time; the new feed-from floor.', examples: ['2026-01-01'] } },
+                properties: { since: { type: 'string', pattern: ISO_DATE_PREFIX, description: 'ISO date or date-time; the new feed-from floor. (#3030: was declared `format: date-time`, which refused the plain date the description — and the dashboard — send; the pattern states the prefix and the handler decides parseability, the 2020 floor and the future bound.)', examples: ['2026-01-01'] } },
               },
             },
           },
@@ -4463,6 +4463,7 @@ export const openapiSpec = {
                   name: { type: 'string', minLength: 1, maxLength: 80, description: 'Trimmed; control characters are rejected.' },
                   email: { type: 'string', maxLength: 255 },
                   password: { type: 'string', minLength: 8, maxLength: 128 },
+                  via: { type: 'string', description: 'Agent hand-off marker (#2522): the dashboard sends `agent` when the signup came from an agent-initiated link. Sanitised server-side to `agent` or nothing; any other value is ignored. Declared in #3030 — the dashboard had been sending it undeclared.' },
                 },
               },
             },

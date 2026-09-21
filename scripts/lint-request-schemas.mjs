@@ -144,7 +144,11 @@ export function prefixesFromIndex(indexSource, importName) {
 export function enforcedModulesFromIndex(indexSource) {
   const m = indexSource.match(/installRequestValidation\([\s\S]*?enforcedModules:\s*\[([^\]]*)\]/)
   if (!m) return []
-  return [...m[1].matchAll(/'([^']*)'/g)].map((x) => x[1])
+  // Comments inside the array are stripped first (#3030): the list grew a
+  // rationale comment, and an apostrophe in prose (`the epic's fallback`)
+  // read as a string literal to the bare quote scan.
+  const code = m[1].replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+  return [...code.matchAll(/'([^']*)'/g)].map((x) => x[1])
 }
 
 /** The import name `src/index.ts` binds the route file to (null when unimported). */
@@ -211,9 +215,28 @@ export function ownSchemaRoutes(source) {
     .filter((line) => /^\s*schema:\s/.test(line)).length
 }
 
-/** The number of lines in `source` that mention `typeof` — the metric. */
+/**
+ * The number of lines in `source` carrying a RUNTIME `typeof` — the metric.
+ *
+ * Runtime only (#3030): the gauge is "hand-rolled request checks the spec's
+ * schemas replace", and three things the earlier `includes('typeof')` counted
+ * are not that — a comment that mentions the word, a type query
+ * (`ReturnType<typeof serialize>`, `keyof typeof X`), and a type-only import
+ * (`typeof import('./x.js')`). Slice 2 drives the metric to zero across 22
+ * route files; a gauge that could only reach zero by rewriting type aliases
+ * and comments would measure the rewrite, not the migration. Whole-line
+ * comments and `//` tails are stripped first; a `typeof` preceded by `<`
+ * (a generic argument), by `keyof `, or followed by `import(` is a type
+ * position and is skipped. A `typeof` inside a string literal still counts —
+ * accepted: none exists in a route file today and the direction is safe.
+ */
 export function typeofLines(source) {
-  return source.split('\n').filter((line) => line.includes('typeof')).length
+  return source.split('\n').filter((line) => {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return false
+    const code = line.replace(/\/\/.*$/, '')
+    return /(^|[^<\w])typeof\s+(?!import\()/.test(code.replace(/keyof\s+typeof\s+/g, ''))
+  }).length
 }
 
 /**

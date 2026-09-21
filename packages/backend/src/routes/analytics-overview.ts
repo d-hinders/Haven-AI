@@ -39,6 +39,10 @@ const RANGE_DAYS = { '7d': 7, '30d': 30, '90d': 90 } as const
 type AnalyticsRange = keyof typeof RANGE_DAYS
 /** Exported for the test that pins the spec's enums to these (#3030). */
 export const ANALYTICS_OVERVIEW_ENUMS = { range: Object.keys(RANGE_DAYS), currency: ['usd', 'eur', 'sek'] } as const
+/** The spec's query, as the enforced module hands it over (#3030). Kept as
+ *  an alias: a quoted union inside the route generic hides the path literal
+ *  from `generate-route-modules`, which scans for it. */
+type OverviewQuery = { range: AnalyticsRange; currency?: 'usd' | 'eur' | 'sek'; tz?: string }
 
 /**
  * `Intl.DateTimeFormat`'s own constructor accepts far more than IANA zone
@@ -73,7 +77,7 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
   // the handler since #3030 — the module is in `enforcedModules`, so the
   // types below are the enums and the defaults are injected. `tz` stays a
   // handler decision: "a zone Intl knows" is not a shape the spec can state.
-  app.get<{ Querystring: { range: AnalyticsRange; currency?: 'usd' | 'eur' | 'sek'; tz?: string } }>(
+  app.get<{ Querystring: OverviewQuery }>(
     '/overview',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }

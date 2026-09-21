@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import pool from '../../db.js'
 import catalogSubmissionRoutes from '../catalog-submissions.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import { rateLimitKeyFor } from '../../middleware/rate-limit.js'
 
 const mockQuery = vi.spyOn(pool, 'query')
@@ -77,6 +78,10 @@ describe('catalog /submit (epic #1717 #1711)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/catalog-submissions.ts'] })
     await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
     await app.ready()
   })
@@ -188,23 +193,34 @@ describe('catalog /submit (epic #1717 #1711)', () => {
   })
 
   it('rejects invalid input with 400 without touching the queue', async () => {
-    const cases: Array<{ payload: Record<string, unknown>; fragment: string }> = [
-      { payload: {}, fragment: 'resource_url is required' },
+    // #3030: the SHAPE refusals — a missing `resource_url`, a non-string
+    // field, a too-long `merchant_name` (`maxLength: 120`) — are the spec's
+    // `CatalogSubmitRequest`, answered as the 400 envelope before the
+    // handler (`spec: true` below); the semantic ones — https, a public
+    // host, the seller-site form — stay the handler's, named as before.
+    // Mutation: drop the module from enforcedModules → `{}` reaches the
+    // handler and throws on `.trim()` of undefined (500).
+    const cases: Array<{ payload: Record<string, unknown>; fragment: string; spec?: true }> = [
+      { payload: {}, fragment: 'resource_url', spec: true },
       { payload: { resource_url: 'not-a-url' }, fragment: 'valid https URL' },
       { payload: { resource_url: 'http://mcp.example.com/x' }, fragment: 'https' },
       { payload: { resource_url: 'https://localhost/x' }, fragment: 'public hostname' },
       { payload: { resource_url: 'https://127.0.0.1/x' }, fragment: 'public hostname' },
       { payload: { resource_url: 'https://[::1]/x' }, fragment: 'public hostname' },
-      { payload: { resource_url: 42 }, fragment: 'must be a string' },
+      // A number is COERCED to its string by the plugin (`coerceTypes`, the
+      // #3082 restore applies to shadow only), so `42` reaches the handler
+      // as '42' and is refused as a URL, not as a type.
+      { payload: { resource_url: 42 }, fragment: 'valid https URL' },
       // #3078 seller fields: bounded name, https-only site, typed.
-      { payload: { resource_url: 'https://mcp.example.com/x', merchant_name: 'x'.repeat(121) }, fragment: '120 characters' },
-      { payload: { resource_url: 'https://mcp.example.com/x', merchant_name: 42 }, fragment: 'merchant_name must be a string' },
+      { payload: { resource_url: 'https://mcp.example.com/x', merchant_name: 'x'.repeat(121) }, fragment: 'body/merchant_name must NOT have more than 120', spec: true },
       { payload: { resource_url: 'https://mcp.example.com/x', merchant_website: 'http://seller.example' }, fragment: 'https URL' },
       { payload: { resource_url: 'https://mcp.example.com/x', merchant_website: 'not a url' }, fragment: 'https URL' },
-      { payload: { resource_url: 'https://mcp.example.com/x', merchant_website: 42 }, fragment: 'merchant_website must be a string' },
+      // A closed object: an undeclared key is the envelope.
+      { payload: { resource_url: 'https://mcp.example.com/x', extra: 1 }, fragment: 'additional properties', spec: true },
+      { payload: { resource_url: 'https://mcp.example.com/x', merchant_website: 42 }, fragment: 'https URL' },
     ]
 
-    for (const { payload, fragment } of cases) {
+    for (const { payload, fragment, spec } of cases) {
       mockQuery.mockClear()
       mockConnect.mockClear()
       primeSubmitDb({})
@@ -213,8 +229,13 @@ describe('catalog /submit (epic #1717 #1711)', () => {
         url: '/catalog/submit',
         payload,
       })
-      expect(response.statusCode).toBe(400)
-      expect(String(response.json().error)).toMatch(new RegExp(fragment, 'i'))
+      expect(response.statusCode, JSON.stringify(payload)).toBe(400)
+      if (spec) {
+        expect(response.json(), JSON.stringify(payload)).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+        expect(String(response.json().details)).toMatch(new RegExp(fragment, 'i'))
+      } else {
+        expect(String(response.json().error)).toMatch(new RegExp(fragment, 'i'))
+      }
       expect(insertCall()).toBeUndefined()
       expect(mockQuery).not.toHaveBeenCalled()
     }
@@ -415,6 +436,10 @@ describe('catalog /submit/:id status (epic #1717 #1715)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/catalog-submissions.ts'] })
     await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
     await app.ready()
     secretApp = Fastify({ logger: false })

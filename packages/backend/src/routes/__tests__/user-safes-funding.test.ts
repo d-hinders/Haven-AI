@@ -63,6 +63,7 @@ vi.mock('../../infra/chain/index.js', async (importOriginal) => {
 })
 
 import userAccountsRoutes from '../user-accounts.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const SAFE_ID = 'd2c47f10-9a83-4e61-8b25-7c3f0e91a4d6'
 const SAFE_ID_OTHER = 'e3d58f21-ab94-4f72-8c36-8d4f1f02b5e7'
@@ -96,6 +97,10 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module(s) enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/user-accounts.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     // #2914: one mount now, matching production (`index.ts`) — `#2907`'s
     // dual registration is gone.

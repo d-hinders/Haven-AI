@@ -3,8 +3,13 @@ import { matchesOpsToken } from '../middleware/ops-token.js'
 import type { AccountingOpsCounters } from '../modules/accounting/index.js'
 import { requestValidationOpsSnapshot, type RequestValidationSnapshot } from '../openapi/request-validation.js'
 
-type RelayerStatus = ReturnType<typeof import('../infra/relayer-balance-monitor.js')['getRelayerBalanceStatus']>
-type PassportStatus = ReturnType<typeof import('../modules/passport/index.js')['passportReadiness']>
+import type { RelayerBalanceStatus } from '../infra/relayer-balance-monitor.js'
+import type { PassportReadiness } from '../modules/passport/readiness.js'
+
+// Named by the modules that produce them (#3030: the `typeof import(...)`
+// forms these replaced counted against the request-schemas gauge).
+type RelayerStatus = RelayerBalanceStatus[]
+type PassportStatus = PassportReadiness
 
 export interface HealthRouteOptions {
   checkDatabase: () => Promise<unknown>
@@ -79,7 +84,7 @@ export function registerHealthRoutes(app: FastifyInstance, options: HealthRouteO
       accounting = await options.getAccountingCounters()
     } catch (err) {
       // The error's class only — never its message, which can carry SQL or a host name.
-      request.log.warn({ errName: err instanceof Error ? err.name : typeof err }, 'health/ops accounting counters unavailable')
+      request.log.warn({ errName: err instanceof Error ? err.name : 'non-error' }, 'health/ops accounting counters unavailable')
       accounting = ACCOUNTING_UNAVAILABLE
     }
 

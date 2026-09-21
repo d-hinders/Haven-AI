@@ -123,9 +123,12 @@ describe('/auth/device/* under request validation (#3030)', () => {
       expect(repo.approveDeviceAuthorization).not.toHaveBeenCalled()
     })
 
-    it('still authenticate first — anonymous is 401 before any 400', async () => {
-      const res = await app.inject({ method: 'POST', url: '/auth/device/approve', payload: {} })
-      expect(res.statusCode).toBe(401)
+    it('still authenticate first — anonymous is 401 before any 400, on both routes', async () => {
+      // Mutation: either route's authMiddleware back to `preHandler` → 400.
+      for (const url of ['/auth/device/lookup', '/auth/device/approve']) {
+        const res = await app.inject({ method: 'POST', url, payload: {} })
+        expect(res.statusCode, url).toBe(401)
+      }
     })
 
     it('approve refuses a non-boolean deny with the envelope', async () => {

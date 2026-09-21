@@ -1226,12 +1226,18 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > `agentExistsForUser`, `findAccountOwnership`) and chain support stay
 > exactly where they were; `user-accounts.ts`: `typeof name` and the
 > pre-lookup uuid check, with `renameAccountForUser` still scoped to the
-> caller). Auth precedes validation on every live route: `authMiddleware` is
-> an `onRequest` hook and validation is preValidation, so an anonymous caller
-> gets 401 before any 400 — `POST /auth/device/lookup` and `/approve` had
-> theirs as a `preHandler` (after validation), which an enforced schema
-> would have turned into a 400 for an anonymous malformed body; both moved
-> to `onRequest` in this diff and `auth-device.test.ts` pins the order — and
+> caller). Auth precedes validation on every ENFORCED route: `authMiddleware`
+> runs as an `onRequest` hook and validation is preValidation, so an
+> anonymous caller gets 401 before any 400. Three enforced routes had theirs
+> as a `preHandler` (after validation) — `POST /auth/device/lookup`,
+> `/approve` and `GET /analytics/funnel` — which the enforced schema turned
+> into a 400 for an anonymous malformed request (measured in review, both
+> rounds); all three moved to `onRequest` in this diff, pinned by
+> `auth-device.test.ts` and `analytics.test.ts`. Two shadowed money-path
+> modules still register `authMiddleware` as a `preHandler`
+> (`agent-passports.ts`, `agent-connection-setups.ts`); their 401-first
+> consequence holds today because shadow refuses nothing, and slices 3–4
+> move them before those modules flip — and
 > the retired Safe-inflow 410s (`POST /user/accounts`, `PUT /user/account`,
 > `/deploy`) gained a route-level `onRequest` so they still precede
 > validation: a malformed body is told the flow is gone, not to fix its

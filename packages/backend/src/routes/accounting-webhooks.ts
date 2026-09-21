@@ -61,10 +61,12 @@ import { decryptSecrets } from '../infra/secrets.js'
  * Header coercion and envelope interpretation live in the module
  * (`readAccountedWebhookContext`): the route file carries no hand-rolled
  * type-ladders for the request-schemas gauge to count — the spec
- * (`openapi/spec.ts`) carries the route's shape; the request-validation
- * plugin SHADOWS it (this module is not in `enforcedModules` and the body is
- * a raw Buffer the HMAC needs verbatim), so `readAccountedWebhookContext`
- * is the enforcement. The handler is branch-on-context only.
+ * (`openapi/spec.ts`) carries the route's shape — the `token` path parameter
+ * only; the operation declares no request body, since the body is a raw
+ * Buffer the HMAC needs verbatim — and the request-validation plugin
+ * enforces that parameter since #3030 (the module is in `enforcedModules`).
+ * The body's shape has no schema, so `readAccountedWebhookContext` stays the
+ * enforcement for it. The handler is branch-on-context only.
  *
  * Rate limiting (#3019 item 3): `@fastify/rate-limit` keys on
  * `Authorization`/`X-API-Key` (`middleware/rate-limit.ts`), which a webhook

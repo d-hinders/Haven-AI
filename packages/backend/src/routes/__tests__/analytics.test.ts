@@ -35,9 +35,13 @@ describe('analytics routes', () => {
     mockQuery.mockReset()
   })
 
-  it('rejects unauthenticated requests', async () => {
+  it('rejects unauthenticated requests — 401 before any 400, even for an off-spec query (#3030)', async () => {
     const res = await app.inject({ method: 'GET', url: '/analytics/funnel' })
     expect(res.statusCode).toBe(401)
+    // The auth hook is onRequest; validation is preValidation. Mutation:
+    // `preHandler` back → the off-spec anonymous call answers 400.
+    const offSpec = await app.inject({ method: 'GET', url: '/analytics/funnel?segment=bogus' })
+    expect(offSpec.statusCode).toBe(401)
   })
 
   it('returns funnel steps and medianTtfpMs for a date range', async () => {

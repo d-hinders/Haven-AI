@@ -15,7 +15,10 @@ export default async function analyticsRoutes(app: FastifyInstance): Promise<voi
   // in `enforcedModules`, so a value outside it never reaches this handler.
   app.get<{ Querystring: { from?: string; to?: string; segment?: FunnelSegment } }>(
     '/funnel',
-    { preHandler: [authMiddleware] },
+    // onRequest, not preHandler (#3030): validation runs in preValidation,
+    // so an auth hook registered later would let an anonymous caller read
+    // the schema's 400 before its 401.
+    { onRequest: [authMiddleware] },
     async (request, reply) => {
       const { from: fromStr, to: toStr, segment } = request.query
 

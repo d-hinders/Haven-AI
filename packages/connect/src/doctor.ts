@@ -166,14 +166,16 @@ function runtimeFlagFor(runtime: string): string {
  * REQUIRES `--runtime` in the parser (it rewrites that runtime's config), so a
  * bare `--doctor --repair` is refused when pasted — the exact dead end the
  * unknown-runtime path used to render. With the runtime unknown the command
- * carries an explicit `<runtime>` placeholder (the same form the
- * `--rekey-finish` repair already uses for `--api-key <…>`) and names the
+ * carries an explicit `<runtime>` placeholder — the form the #2424
+ * `runtime_spec_override` repair already uses unconditionally — and names the
  * allowed values, so the user is told what to fill in rather than bounced.
+ * `suffix` may end with a period; the unknown branch drops it so the
+ * explanatory clause reads on from the command.
  */
 function repairCommandFor(runtime: string, suffix = ''): string {
   if (normalizeRuntimeName(runtime)) return `Run: ${RERUN} --doctor --repair --runtime ${runtime}${suffix}`
   return (
-    `Run: ${RERUN} --doctor --repair --runtime <runtime>${suffix} — --repair needs the runtime named; ` +
+    `Run: ${RERUN} --doctor --repair --runtime <runtime>${suffix.replace(/\.$/, '')} — --repair needs the runtime named; ` +
     `one of: ${RUNTIME_FLAG_VALUE_LIST.join(', ')}.`
   )
 }
@@ -728,7 +730,7 @@ async function verdictsForAgent(
       detail: matches
         ? `Installed ${sidecar.signer_package}@${sidecar.signer_version} at ${sidecar.runtime_directory} (override install — see runtime_spec_override)`
         : `Override runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
-      ...(matches ? {} : { repair: repairCommandFor(input.runtime, ' with the same HAVEN_*_SPEC variables set') }),
+      ...(matches ? {} : { repair: repairCommandFor(input.runtime, ' with the same HAVEN_*_SPEC variables set.') }),
     })
   } else {
     // #2963: two questions, two references. "Is the directory intact?" is
@@ -1434,16 +1436,17 @@ export async function runDoctor(
   if (resolution.origin === 'record') {
     const rc = checks.find((check) => check.id === 'runtime_config')
     if (rc) {
-      rc.detail += ` Runtime '${resolution.runtime}' was resolved from ${join(directory ?? '', CONNECT_OUTCOME_FILENAME)}; pass --runtime to check a different one.`
+      rc.detail += ` (Resolved from ${join(directory ?? '', CONNECT_OUTCOME_FILENAME)}; pass --runtime to check a different one.)`
     }
   }
 
   // ── Restart still required? (informational, never fails the doctor) ───────
-  // #3210 review: `restartRequiredForRuntime('')` would fall back to env
-  // DETECTION — the doctor's own shell, not the runtime the agent uses — and
-  // answer about a runtime nobody named. The resolution above never guesses;
-  // neither does this check: unknown stays unknown.
-  const restart = input2.runtime === '' ? false : restartRequiredForRuntime(input2.runtime, deps.env)
+  // #3210 review: `restartRequiredForRuntime` falls back to env DETECTION for
+  // an empty OR unrecognised runtime — the doctor's own shell, not the runtime
+  // the agent uses — and would answer about a runtime nobody named. The
+  // resolution above never guesses; neither does this check: unknown stays
+  // unknown, and an unrecognised value gets the "no requirement known" line.
+  const restart = normalizedRuntime === null ? false : restartRequiredForRuntime(input2.runtime, deps.env)
   checks.push({
     id: 'restart',
     label: 'Runtime restart',

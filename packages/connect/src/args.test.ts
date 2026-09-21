@@ -93,12 +93,15 @@ describe('parseArgs --tombstone (#1681)', () => {
     })
   })
 
-  it('takes precedence over --doctor: no --runtime requirement kicks in', () => {
-    // cli.ts dispatches on tombstone FIRST; parseArgs must not throw doctor's
-    // runtime-required error when both are passed.
-    const parsed = parseArgs(['--tombstone', '/tmp/agents/agent-old', '--doctor'], {})
+  it('takes precedence over --doctor --repair: no --runtime requirement kicks in', () => {
+    // cli.ts dispatches on tombstone FIRST; parseArgs must not throw --repair's
+    // runtime-required error when both are passed. (#3210: a flagless --doctor
+    // alone no longer throws anywhere, so the case is pinned against --repair,
+    // which still does — otherwise this test would be vacuous.)
+    const parsed = parseArgs(['--tombstone', '/tmp/agents/agent-old', '--doctor', '--repair'], {})
     expect(parsed.tombstone?.directory).toBe('/tmp/agents/agent-old')
     expect(parsed.doctor).toBe(true)
+    expect(parsed.repair).toBe(true)
   })
 
   it('REFUSES --reason / --replaced-by without --tombstone — never a silent no-op', () => {

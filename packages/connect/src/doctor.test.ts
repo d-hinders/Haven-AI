@@ -1840,6 +1840,11 @@ describe('runtime resolution when --runtime is absent (#3120)', () => {
     // With the runtime NAMED, the same env is irrelevant and the real answer renders.
     const named = await runDoctor({ runtime: 'claude-desktop' }, { homeDir, env: { CLAUDECODE: '1' }, ...healthyDeps() })
     expect(named.checks.find((c) => c.id === 'restart')?.detail).toContain('restart it after any repair')
+    // An UNRECOGNISED value is not a runtime either: the registry would
+    // env-detect it too, so the check answers "no requirement known" instead
+    // of the shell's runtime (round-2 review, N2).
+    const bogus = await runDoctor({ runtime: 'foo' }, { homeDir, env: { CLAUDECODE: '1' }, ...healthyDeps() })
+    expect(bogus.checks.find((c) => c.id === 'restart')?.detail).toContain('No restart requirement known')
   })
 
   it('a record-resolved runtime says where it came from on the runtime_config verdict; an explicit flag does not (#3210 review)', async () => {
@@ -1847,11 +1852,9 @@ describe('runtime resolution when --runtime is absent (#3120)', () => {
     await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
     const fromRecord = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
     const rc = fromRecord.checks.find((c) => c.id === 'runtime_config')
-    expect(rc?.detail).toContain("Runtime 'cursor' was resolved from")
-    expect(rc?.detail).toContain(join(dir, CONNECT_OUTCOME_FILENAME))
-    expect(rc?.detail).toContain('pass --runtime to check a different one')
+    expect(rc?.detail).toContain(`(Resolved from ${join(dir, CONNECT_OUTCOME_FILENAME)}; pass --runtime to check a different one.)`)
     const explicit = await runDoctor({ runtime: 'cursor' }, { homeDir, ...healthyDeps() })
-    expect(explicit.checks.find((c) => c.id === 'runtime_config')?.detail).not.toContain('was resolved from')
+    expect(explicit.checks.find((c) => c.id === 'runtime_config')?.detail).not.toContain('Resolved from')
   })
 
   it('unknown runtime: no repair string is a bare `--doctor --repair`, which the parser refuses (#3210 review)', async () => {

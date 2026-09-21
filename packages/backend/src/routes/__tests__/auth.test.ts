@@ -127,11 +127,13 @@ describe('Auth routes', () => {
       // `via` (#2522) had been sent by the dashboard undeclared; it is in the
       // spec now, and a conformant signup carrying it is unchanged.
       expect(props.via).toMatchObject({ type: 'string' })
-      mockQuery.mockResolvedValueOnce({ rows: [] })
-      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'user-1', email: 'test@example.com', name: 'Ada Lovelace', wallet_address: null, currency_preference: 'USD', created_at: new Date() }] })
-      mockQuery.mockResolvedValue({ rows: [] })
+      // Keyed on the SQL, not positional (the db-mock ratchet, #1227).
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (/SELECT id FROM users/i.test(String(sql))) return { rows: [] }
+        return { rows: [{ id: 'user-1', email: 'test@example.com', name: 'Ada Lovelace', wallet_address: null, currency_preference: 'USD', created_at: new Date() }] }
+      })
       const res = await app.inject({ method: 'POST', url: '/auth/signup', payload: { name: 'Ada Lovelace', email: 'test@example.com', password: 'password123', via: 'agent' } })
-      expect(res.statusCode).not.toBe(400)
+      expect(res.statusCode).toBe(201)
     })
 
     it('returns 400 for overlong email', async () => {

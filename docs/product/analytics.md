@@ -134,10 +134,12 @@ supported tick sits clear of the line. A tick the gutter cannot hold (a
 320 px phone) is anchored by its right edge, so any overflow grows left
 into the card padding, never into the plot. The narrower plot also moved
 the first two date labels to a word-space apart at 390 ("11 Jun 18 Jun" read
-as one run): the start label is anchored at its left edge, so the shared
-label rule now gives it two label-widths — a 30-day range at 390 labels
-days 1, 15, 22 and 30, a 90-day range days 1, 37, 55 and 90; desktop is
-unchanged. A flat series pads by ±2 so every
+as one run): the balance chart anchors its start label at its left edge,
+so the shared label rule gives that chart's first pair two label-widths —
+a 30-day range at 390 labels days 1, 15, 22 and 30, a 90-day range days
+1, 37, 55 and 90. The spend chart centres every label on its bar and keeps
+its weekly labels; the product's 7/30/90-day ranges are unchanged on
+desktop. A flat series pads by ±2 so every
 integer tick stays distinct (±1 stepped by 0,5 and printed one label twice
 without the öre). The annotation and
 the tooltip print the amount once, in the display currency's own format

@@ -33,18 +33,23 @@ export const MIN_CHARTABLE_DAYS = 3
  * The fraction is set to the treatment that renders smallest. The density
  * bands above already keep most labels far wider than this; the rule
  * exists for the two places a collision can actually form: the endpoint
- * label moved next to a stride neighbour, and the START label, which is
- * anchored at its left edge (the whole label sits to the right of day 0,
- * not half of it) — see `FIRST_X_LABEL_SEPARATION_FACTOR`.
+ * label moved next to a stride neighbour, and — for a caller that anchors
+ * its START label at its left edge, so the whole label sits to the right
+ * of day 0 — the first pair; see `FIRST_X_LABEL_SEPARATION_FACTOR`.
  */
 export const MIN_X_LABEL_SEPARATION_WIDE = 0.06
 export const MIN_X_LABEL_SEPARATION_NARROW = 0.15
 /**
- * The first pair needs more room than a centred pair: the start label's full
+ * A left-anchored first label needs more room than a centred pair: its full
  * width plus half of its neighbour, plus a word-space of clear gap, is two
  * label-widths centre to centre (a centred pair needs one). Measured at 390
- * on the 30-day fixture (#3204 round 3): "11 Jun" and "18 Jun" sat 6px
- * apart — one word-space — and read as a single run.
+ * on the 30-day fixture (#3204 round 3): the area chart's "11 Jun" and
+ * "18 Jun" sat 6px apart — one word-space — and read as a single run. The
+ * factor applies ONLY when the caller says its start label is left-anchored
+ * (`startAnchoredLeft`): the area chart is, the bar chart centres every
+ * label on its bar and its first pair had a 24px gap at 390 — applying the
+ * factor there (round 4) cost the phone spend chart a label that never
+ * collided.
  */
 export const FIRST_X_LABEL_SEPARATION_FACTOR = 2
 
@@ -144,7 +149,10 @@ export function chartScaleRange(lo: number, hi: number, target = 4): ChartScale 
  * (the bar chart wants "Mon 8", the area chart the same day in the same
  * voice) and a scale that formats in two places drifts.
  */
-export function xLabelIndices(count: number, { narrow = false }: { narrow?: boolean } = {}): number[] {
+export function xLabelIndices(
+  count: number,
+  { narrow = false, startAnchoredLeft = false }: { narrow?: boolean; startAnchoredLeft?: boolean } = {},
+): number[] {
   if (count <= 0) return []
   let stride: number
   if (count <= 7) stride = 1
@@ -182,13 +190,15 @@ export function xLabelIndices(count: number, { narrow = false }: { narrow?: bool
       indices.splice(i, 1)
     }
   }
-  // The start label is anchored at its left edge, so the pair (0, next)
-  // is checked at the wider factor — and it is the NEXT label that drops,
-  // never day 0 (the left edge is where the range begins). Loop, because a
-  // drop moves a new neighbour into the slot; the endpoint is never a
-  // candidate. Both charts read this, so the rule is one rule.
-  while (indices.length > 2 && indices[1] / (count - 1) < minSeparation * FIRST_X_LABEL_SEPARATION_FACTOR) {
-    indices.splice(1, 1)
+  // A caller whose start label is anchored at its left edge gets the pair
+  // (0, next) checked at the wider factor — and it is the NEXT label that
+  // drops, never day 0 (the left edge is where the range begins). Loop,
+  // because a drop moves a new neighbour into the slot; the endpoint is
+  // never a candidate (the loop stops at two labels).
+  if (startAnchoredLeft) {
+    while (indices.length > 2 && indices[1] / (count - 1) < minSeparation * FIRST_X_LABEL_SEPARATION_FACTOR) {
+      indices.splice(1, 1)
+    }
   }
   return indices
 }

@@ -174,7 +174,9 @@ export function AreaChart({
       pad: P,
       xOf,
       yOf,
-      labelIdx: xLabelIndices(points.length, { narrow }),
+      // The first x label is anchored at its left edge (see the label's
+      // transform below), so the helper gives it two label-widths.
+      labelIdx: xLabelIndices(points.length, { narrow, startAnchoredLeft: true }),
       delta: values.length >= 2 ? values[values.length - 1] - values[0] : 0,
       // Two points make a line, which is the minimum the drawing can be;
       // below that there is nothing to connect.

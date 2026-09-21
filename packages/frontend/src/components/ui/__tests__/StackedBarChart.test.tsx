@@ -814,11 +814,14 @@ describe('StackedBarChart — what a reader who cannot see the chart is told', (
         narrow
       />,
     )
-    // The narrow list drops day 7 as well (#3204 round 3): the shared
-    // helper gives the left-anchored start label two label-widths, and the
-    // bar chart inherits the rule rather than special-casing around it.
+    // The bar chart centres every label on its bar (day 0 included), so
+    // its first pair had 24px of clear gap at 390 and it KEEPS day 7 — the
+    // area chart's left-anchored start-label rule (#3204 round 3) is that
+    // caller's opt-in, not this chart's (round 4). Mutation: pass
+    // `startAnchoredLeft` here → d7 gone.
     expect(screen.getAllByTestId('chart-x-label').map((el) => el.textContent)).toEqual([
       'd0',
+      'd7',
       'd14',
       'd21',
       'd29',

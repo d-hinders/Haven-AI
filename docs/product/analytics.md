@@ -12,6 +12,7 @@ covers:
   - packages/frontend/src/components/charts/chart-scale.ts
   - packages/frontend/src/components/ui/StatTile.tsx
   - packages/frontend/src/components/analytics/AgentsTable.tsx
+  - packages/frontend/src/lib/analytics-format.ts
   - packages/frontend/src/lib/analytics-series.ts
   - packages/frontend/src/components/analytics/BalanceSection.tsx
   - packages/backend/src/routes/analytics-overview.ts
@@ -117,14 +118,18 @@ Under the SEK display currency, days snapshotted before the SEK column
 existed (migration 090) are omitted from the series rather than drawn as
 zero — the page distinguishes a day with no SEK figure from a day that was
 actually worth nothing. The chart does not start at zero: its floor is
-padded just under the range's lowest day and its ticks are computed over
-that range (`chartScaleRange`), so a 300 kr movement on a 12 000 kr balance
-fills the plot and the gridline labels bracket the data — 12 300 / 12 400 /
-… — rather than sitting below the floor (#3204: the ticks came from the
-zero-based bar-chart scale, so no gridline reached the plot and the line
-read as flat). The annotation and the tooltip print the amount once, in the
-display currency's own format ("gained 298,43 kr"), never with the currency
-code appended again.
+padded just under the range's lowest day (6 % of the range, never a share
+of the balance itself) and its ticks are computed over that range
+(`chartScaleRange`), so a 300 kr movement on a 12 000 kr balance spans most
+of the plot's height and the gridline labels bracket the data — 12 300 /
+12 400 / 12 500 / 12 600 for a 12 342–12 641 series — rather than sitting
+below the floor (#3204: the ticks came from the zero-based bar-chart scale,
+so no gridline reached the plot, the labels were positioned under the card,
+and the line read as flat). Tick labels are compact (no öre/cents) and the
+phone treatment widens the label gutter, the same two rules the spend chart
+keeps, so a `12 500 kr` label never runs under the line. The annotation and
+the tooltip print the amount once, in the display currency's own format
+("gained 298,43 kr"), never with the currency code appended again.
 
 ## Which payments count, and why
 

@@ -106,8 +106,10 @@ export function chartScale(dataMax: number, target = 4): ChartScale {
 export function chartScaleRange(lo: number, hi: number, target = 4): ChartScale & { min: number } {
   if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return { min: lo, max: hi, ticks: [] }
   const step = roundNiceStep((hi - lo) / target)
-  const min = step * Math.floor(lo / step)
-  const max = step * Math.floor(hi / step + 1)
+  // Dust-rounded like the ticks, so `ticks[0] === min` holds for every input
+  // (`lo = 0.3` gave `min = 0.30000000000000004` beside a tick of `0.3`).
+  const min = Number((step * Math.floor(lo / step)).toPrecision(12))
+  const max = Number((step * Math.floor(hi / step + 1)).toPrecision(12))
   const ticks: number[] = []
   for (let v = min; v < max - step / 2; v += step) {
     ticks.push(Number(v.toPrecision(12)))

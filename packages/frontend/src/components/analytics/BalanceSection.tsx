@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 import { AreaChart, deltaLabel } from '@/components/ui/AreaChart'
 import type { AreaPoint } from '@/components/ui/AreaChart'
-import { formatAnalyticsDay, formatAnalyticsValue } from '@/lib/analytics-format'
+import { formatAnalyticsDay, formatAnalyticsTick, formatAnalyticsValue } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
 import { MIN_CHARTABLE_DAYS } from '@/components/charts/chart-scale'
 import { Card } from '@/components/ui/Card'
@@ -106,6 +106,9 @@ export function BalanceSection({
 
   const ariaLabel = balanceSummary(points, currency, rangeDays)
   const formatValue = (value: number) => formatAnalyticsValue(value, currency)
+  // Ticks without cents, the same rule the spend chart keeps: the gutter is
+  // narrow on a phone and a tick is a round scale value, never a figure.
+  const formatTick = (value: number) => formatAnalyticsTick(value, currency)
 
   return (
     <div data-testid="analytics-balance-section">
@@ -122,6 +125,7 @@ export function BalanceSection({
               currency={currency}
               ariaLabel={ariaLabel}
               formatValue={formatValue}
+              formatTick={formatTick}
             />
           </div>
           <div className="lg:hidden">
@@ -130,6 +134,7 @@ export function BalanceSection({
               currency={currency}
               ariaLabel={ariaLabel}
               formatValue={formatValue}
+              formatTick={formatTick}
               narrow
             />
           </div>

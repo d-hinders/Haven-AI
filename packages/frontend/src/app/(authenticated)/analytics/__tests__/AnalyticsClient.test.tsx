@@ -76,6 +76,13 @@ const NO_FLOOR: AnalyticsOverviewResponse = {
   basis: { ...POPULATED.basis, refusals_recorded_from: null },
 }
 
+/** A populated window with payments but no refusals at all — a real production
+ *  state (an account whose agents stayed inside every budget). */
+const NO_REFUSALS: AnalyticsOverviewResponse = {
+  ...POPULATED,
+  totals: { ...POPULATED.totals, refused_count: 0, refused_attempts: 0, refused_amount: '0', refused_previous_count: 0 },
+}
+
 function settled(overrides: Record<string, unknown> = {}) {
   return { data: POPULATED, loading: false, failed: false, refetch: mockRefetch, ...overrides }
 }
@@ -310,6 +317,16 @@ describe('Analytics — the populated page', () => {
       new Date('2026-05-28'),
     )
     expect(caveats.textContent).toMatch(new RegExp(`Refusals are recorded from ${expected}\\.`))
+  })
+
+  it('a populated window with zero refusals says so on the tile and still carries the page caveats (#3204)', () => {
+    mockUseAnalyticsOverview.mockReturnValue(settled({ data: NO_REFUSALS }))
+    render(<AnalyticsClient />)
+    const tile = screen.getByTestId('stat-tile-refused')
+    expect(within(tile).getByText('0')).toBeTruthy()
+    expect(tile.textContent).toMatch(/No refusals in this window/)
+    expect(tile.textContent).not.toMatch(/attempted/)
+    expect(screen.getByTestId('analytics-refusal-caveats').textContent).toMatch(/Price-cap refusals/)
   })
 
   it('renders NO floor line from a null `refusals_recorded_from` — an empty ledger names no day', () => {

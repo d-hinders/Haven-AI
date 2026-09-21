@@ -112,20 +112,39 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
       expect(y).toBeLessThan(190)
     }
     // And the ticks live INSIDE the plot, between the padded floor and the
-    // ceiling: for a 1,100–1,240 balance the nice step over the range is 100,
-    // so the reader sees 1,000 / 1,100 / 1,200 — labels that bracket the data.
-    // Until #3204 the ticks came from the zero-based scale (500 / 1,000 here),
-    // both below the padded floor, so no gridline reached the plot and the
-    // labels were positioned under the card. The labels print through the
-    // caller's formatter, so they carry its grouping.
+    // ceiling: for a 1,100–1,240 balance (pad 6% of the 140 range) the nice
+    // step over the range is 50, so the reader sees 1,050 / 1,100 / 1,150 /
+    // 1,200 — labels that bracket the data. Until #3204 the ticks came from
+    // the zero-based scale (500 / 1,000 here), both below the padded floor, so
+    // no gridline reached the plot and the labels were positioned under the
+    // card; a level-relative pad term then still gave a 100-step. The labels
+    // print through `formatTick` (here the same formatter), so they carry its
+    // grouping.
     const tickLabels = screen.getAllByTestId('chart-tick-label').map((el) => el.textContent)
-    expect(tickLabels).toEqual(['1,000.00', '1,100.00', '1,200.00'])
+    expect(tickLabels).toEqual(['1,050.00', '1,100.00', '1,150.00', '1,200.00'])
+    // The line uses the plot: its vertical extent is at least half the plot
+    // height (14 → 190 is 176). Mutation: put the `|max| * 3%` pad term back
+    // → the data's 140 becomes ~15% of a 500-wide span → red.
+    const extent = Math.max(...ys) - Math.min(...ys)
+    expect(extent).toBeGreaterThan(176 * 0.5)
     // Every tick's label sits within the svg's height (0–100%), never below it.
     for (const el of screen.getAllByTestId('chart-tick-label')) {
       const top = Number.parseFloat((el as HTMLElement).style.top)
       expect(top).toBeGreaterThanOrEqual(0)
       expect(top).toBeLessThanOrEqual(100)
     }
+  })
+
+  it('prints ticks through formatTick when given one, and widens the gutter on the narrow treatment (#3204)', () => {
+    // The gutter is a fraction of the svg width; at 390 the desktop 48/640 is
+    // ~21 CSS px and a currency tick drawn into it ran under the line. The
+    // narrow treatment uses the bar chart's 78, and callers pass a compact
+    // formatter so the label fits. Mutation: drop PAD_NARROW → red.
+    renderChart({ narrow: true, formatTick: (v: number) => `${Math.round(v)}` })
+    const labels = screen.getAllByTestId('chart-tick-label')
+    expect(labels.map((el) => el.textContent)).toEqual(['1050', '1100', '1150', '1200'])
+    const widthPct = Number.parseFloat((labels[0] as HTMLElement).style.width)
+    expect(widthPct).toBeCloseTo(((78 - 6) / 640) * 100, 3)
   })
 
   it('fills under the line without drawing over it, closing on the baseline', () => {
@@ -251,7 +270,13 @@ describe('AreaChart — what a reader who cannot see the chart is told', () => {
     // element, whose subtree assistive technology is not shown, would read
     // as a chart with no data table at all — silently.
     expect(table.closest('[role="img"]')).toBeNull()
-    expect(table.className).toContain('sr-only')
+    // Visually hidden through a WRAPPER, never the table itself: `sr-only`'s
+    // `height: 1px` is a minimum for a <table>, so the table rendered full
+    // height under the card's `overflow-hidden` and every screenshot capture
+    // reported ~800px of clipped content (#3204). Mutation: put `sr-only`
+    // back on the table → red.
+    expect(table.className).not.toContain('sr-only')
+    expect(table.parentElement?.className).toContain('sr-only')
     expect([...table.querySelectorAll('thead th')].map((th) => th.textContent)).toEqual([
       'Day',
       'Balance (USD)',

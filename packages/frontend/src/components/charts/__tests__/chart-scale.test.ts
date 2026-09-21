@@ -299,10 +299,11 @@ describe('the scale module is the shared arithmetic it claims to be', () => {
 
 describe('chartScaleRange — a scale for a chart that does not start at zero (#3204)', () => {
   it('brackets the range with nice ticks inside [floor, ceiling], never below the floor', () => {
-    // The balance-chart fixture: ≈12 354 → 12 650 with the HEADROOM pad. The
-    // zero-based scale gave max 15 000 and ticks 5 000 / 10 000 — every one
-    // below the padded floor. Mutation: compute the step from `hi` instead of
-    // `hi - lo` → the step becomes 5 000 and this goes red.
+    // A 12 330–12 680 range (a ~350-unit span — the balance fixture's own
+    // padded range is pinned in the test below). The zero-based scale gave
+    // max 15 000 and ticks 5 000 / 10 000 — every one below the padded floor.
+    // Mutation: compute the step from `hi` instead of `hi - lo` → the step
+    // becomes 5 000 and this goes red.
     const { min, max, ticks } = chartScaleRange(12_330, 12_680)
     expect(min).toBeLessThanOrEqual(12_330)
     expect(max).toBeGreaterThan(12_680)
@@ -315,9 +316,23 @@ describe('chartScaleRange — a scale for a chart that does not start at zero (#
     expect(max - min).toBeLessThan((12_680 - 12_330) * 3)
   })
 
-  it('the AreaChart fixture (1,100–1,240, HEADROOM-padded to ≈1,063–1,277) prints 1,000 / 1,100 / 1,200', () => {
-    const { ticks } = chartScaleRange(1_062.8, 1_277.2)
-    expect(ticks).toEqual([1000, 1100, 1200])
+  it('the AreaChart fixture (1,100–1,240, range-padded to ≈1,092–1,248) prints 1,050 … 1,200', () => {
+    const { ticks } = chartScaleRange(1_091.6, 1_248.4)
+    expect(ticks).toEqual([1050, 1100, 1150, 1200])
+  })
+
+  it('the balance fixture (≈12 342–12 641) prints 12 300 / 12 400 / 12 500 / 12 600 — the labels the product doc names', () => {
+    const pad = (12_641 - 12_342) * 0.06
+    const { min, max, ticks } = chartScaleRange(12_342 - pad, 12_641 + pad)
+    expect({ min, max, ticks }).toEqual({ min: 12_300, max: 12_700, ticks: [12_300, 12_400, 12_500, 12_600] })
+  })
+
+  it('the floor is dust-rounded like the ticks, so ticks[0] === min for fractional inputs', () => {
+    // `lo = 0.3` gave `min = 0.30000000000000004` beside a tick of `0.3`
+    // (review of #3204). Mutation: drop the `toPrecision(12)` on `min` → red.
+    const { min, ticks } = chartScaleRange(0.35, 0.75)
+    expect(ticks[0]).toBe(min)
+    expect(min).toBe(0.3)
   })
 
   it('a degenerate range returns the bounds and no ticks', () => {

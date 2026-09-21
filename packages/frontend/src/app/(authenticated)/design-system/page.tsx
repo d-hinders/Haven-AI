@@ -1354,7 +1354,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Row — the canonical list item"
-        description="One primitive for every list row in the app. Slots: leading icon (with optional tinted circle), title, subtitle, trailing. Hover and focus styles are baked in for interactive variants. Density toggles between comfortable lists and compact panels."
+        description="One primitive for every list row in the app. Slots: leading icon (with optional tinted circle), title, subtitle, trailing. Hover and focus styles are baked in for interactive variants. Density toggles between comfortable lists, compact panels and flush (a row inside a caller-padded box)."
       >
         <Card hover={false} className="overflow-hidden">
           <Row

@@ -32,8 +32,10 @@
  * From the data with headroom at both ends, and NOT from a zero baseline: a
  * balance that moved between 1,100 and 1,240 flattens into one hairline
  * across the plot on a zero-based scale, which is a chart whose whole claim
- * is that nothing happened. The nice-step rule still runs on the padded
- * maximum, so the gridlines stay values the data can be said to reach.
+ * is that nothing happened. The nice-step rule runs on the padded RANGE —
+ * floor to ceiling, `chartScaleRange` (#3204) — so the gridlines bracket the
+ * data and stay values the data can be said to reach; run on the padded
+ * maximum, as it was, every tick sat below the floor.
  *
  * ## Mobile, and the labels
  *
@@ -64,8 +66,18 @@ import { chartScaleRange, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components
 const VIEW_W = 640
 const VIEW_H = 220
 const PAD = { top: 14, right: 10, bottom: 30, left: 48 }
+/** The narrow treatment widens the tick gutter, exactly as the bar chart's
+ *  does: at 390 the desktop 48/640 is ~21 CSS px, and a currency tick drawn
+ *  into it ran under the line's first week (#3204 review; the labels were
+ *  never visible before that PR, so the gutter had never been measured). */
+const PAD_NARROW = { ...PAD, left: 78 }
 /** The fraction of the data's own span held free at each end, so the line
- *  clears the frame and no point sits on a gridline. */
+ *  clears the frame and no point sits on a gridline. The pad is RANGE-relative
+ *  only: an earlier level-relative term (`|max| × 3%`) meant a 300 kr movement
+ *  on a 12 000 kr balance got a 379 kr pad, a 500 kr step and a line using
+ *  15% of the plot — the flat read this chart exists to avoid (#3204). A flat
+ *  series (max === min) still needs SOME span to draw at all; that is the
+ *  `max(…, 1)` floor. */
 const HEADROOM = 0.06
 /** The line and the area are the first series stop: see the header. */
 const LINE_SERIES = 1
@@ -104,6 +116,8 @@ export interface AreaChartProps {
   ariaLabel: string
   /** The caller formats every money figure — one voice across the page. */
   formatValue: (amount: number) => string
+  /** Tick labels; callers keep it compact (no cents) so the gutter fits. Defaults to `formatValue`. */
+  formatTick?: (amount: number) => string
   /** Fewer ticks and the pinned panel: the 390px treatment, owned by the
    *  caller's breakpoint. */
   narrow?: boolean
@@ -115,6 +129,7 @@ export function AreaChart({
   currency,
   ariaLabel,
   formatValue,
+  formatTick = formatValue,
   narrow = false,
   className = '',
 }: AreaChartProps) {
@@ -132,15 +147,16 @@ export function AreaChart({
     const values = points.map((p) => p.value)
     const min = values.length > 0 ? Math.min(...values) : 0
     const max = values.length > 0 ? Math.max(...values) : 0
-    const pad = Math.max((max - min) * HEADROOM, Math.abs(max) * HEADROOM * 0.5, 1)
+    const pad = Math.max((max - min) * HEADROOM, 1)
     const scale = chartScaleRange(Math.max(0, min - pad), max + pad)
     const floor = scale.min
     const span = scale.max - floor
-    const plotW = VIEW_W - PAD.left - PAD.right
-    const plotH = VIEW_H - PAD.top - PAD.bottom
-    const baseY = PAD.top + plotH
+    const P = narrow ? PAD_NARROW : PAD
+    const plotW = VIEW_W - P.left - P.right
+    const plotH = VIEW_H - P.top - P.bottom
+    const baseY = P.top + plotH
     const xOf = (index: number) =>
-      PAD.left + (points.length <= 1 ? plotW / 2 : (plotW * index) / (points.length - 1))
+      P.left + (points.length <= 1 ? plotW / 2 : (plotW * index) / (points.length - 1))
     const yOf = (value: number) => (span <= 0 ? baseY : baseY - ((value - floor) / span) * plotH)
     return {
       scale,
@@ -149,6 +165,7 @@ export function AreaChart({
       plotW,
       plotH,
       baseY,
+      pad: P,
       xOf,
       yOf,
       labelIdx: xLabelIndices(points.length, { narrow }),
@@ -242,8 +259,8 @@ export function AreaChart({
             <line
               key={`grid-${tick}`}
               data-testid="chart-gridline"
-              x1={PAD.left}
-              x2={VIEW_W - PAD.right}
+              x1={plot.pad.left}
+              x2={VIEW_W - plot.pad.right}
               y1={plot.yOf(tick)}
               y2={plot.yOf(tick)}
               stroke={AXIS_COLOR}
@@ -251,8 +268,8 @@ export function AreaChart({
             />
           ))}
           <line
-            x1={PAD.left}
-            x2={VIEW_W - PAD.right}
+            x1={plot.pad.left}
+            x2={VIEW_W - plot.pad.right}
             y1={plot.baseY}
             y2={plot.baseY}
             stroke={AXIS_COLOR}
@@ -295,7 +312,7 @@ export function AreaChart({
                   dot: a day has to be selectable where the day is drawn. */}
               <rect
                 x={plot.xOf(i) - plot.plotW / Math.max(1, points.length - 1) / 2}
-                y={PAD.top}
+                y={plot.pad.top}
                 width={plot.plotW / Math.max(1, points.length - 1)}
                 height={plot.plotH}
                 fill="transparent"
@@ -322,12 +339,12 @@ export function AreaChart({
             className="absolute block text-right text-xs leading-none text-[var(--v2-ink-3)]"
             style={{
               left: 0,
-              width: pct(PAD.left - 6, VIEW_W),
+              width: pct(plot.pad.left - 6, VIEW_W),
               top: pct(plot.yOf(tick), VIEW_H),
               transform: 'translateY(-50%)',
             }}
           >
-            {formatValue(tick)}
+            {formatTick(tick)}
           </span>
         ))}
         {plot.labelIdx.map((i) => (
@@ -352,7 +369,7 @@ export function AreaChart({
           data-testid="area-delta"
           aria-hidden="true"
           className="absolute block text-right text-xs leading-none text-[var(--v2-ink-3)]"
-          style={{ right: pct(PAD.right, VIEW_W), top: pct(PAD.top - 2, VIEW_H) }}
+          style={{ right: pct(plot.pad.right, VIEW_W), top: pct(plot.pad.top - 2, VIEW_H) }}
         >
           {deltaLabel(plot.delta)} {formatValue(Math.abs(plot.delta))}
         </span>
@@ -387,8 +404,15 @@ export function AreaChart({
           visually-hidden data table is not a product table: `ui/Table` is
           visible rows with column staging and hover chrome, which is not
           what a screen reader is handed here. */}
-      {/* design-lint-disable-line: raw-table */}
-      <table data-testid="chart-data-table" className="sr-only">
+      {/* `sr-only` on a wrapper, not on the table element: Tailwind's
+          `sr-only` sets `height: 1px`, which a table treats as a minimum, so
+          the table rendered at full size, clipped by the card's
+          `overflow-hidden`, and the screenshot harness counted ~800px of
+          "hidden content" on every capture (#3204 design review). A block
+          wrapper honours the 1px. */}
+      <div className="sr-only">
+        {/* design-lint-disable-line: raw-table */}
+        <table data-testid="chart-data-table">
         <caption>{ariaLabel}</caption>
         <thead>
           <tr>
@@ -405,6 +429,7 @@ export function AreaChart({
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }

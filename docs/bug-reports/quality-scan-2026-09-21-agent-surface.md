@@ -10,6 +10,10 @@ covers:
   - packages/sdk/src/x402-protocol.ts
   - packages/demo-merchant-mcp/src/http.ts
   - docs/operations/mcp-runtime-compatibility.md
+  - packages/mcp/src/tools.ts
+  - packages/mcp/src/tools.test.ts
+  - packages/mcp-server/src/tools/support/mcp-context.ts
+  - packages/signer/src/core.test.ts
 last-verified: "2026-09-21"
 ---
 

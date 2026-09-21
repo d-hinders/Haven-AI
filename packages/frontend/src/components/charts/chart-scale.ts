@@ -27,13 +27,26 @@ export const MIN_CHARTABLE_DAYS = 3
  * per treatment (#3037). One label-width, expressed the only way a pure
  * module can: a fraction of the plot. The shortest calendar label ("10 Jul")
  * is ~36px of `text-xs`, which is ~6% of the plot at desktop widths and
- * ~11% at a 390px phone — the fraction is set generously to the treatment
- * that renders smallest. The density bands above already keep most labels
- * far wider than this; the rule exists for the one place a collision can
- * actually form, the endpoint label moved next to a stride neighbour.
+ * ~15% of the SMALLEST plot either chart renders — the balance chart's
+ * 235px at a 390px phone once its tick gutter grew to 128 units (#3204;
+ * the earlier 11% was measured on a ~330px plot that no longer exists).
+ * The fraction is set to the treatment that renders smallest. The density
+ * bands above already keep most labels far wider than this; the rule
+ * exists for the two places a collision can actually form: the endpoint
+ * label moved next to a stride neighbour, and the START label, which is
+ * anchored at its left edge (the whole label sits to the right of day 0,
+ * not half of it) — see `FIRST_X_LABEL_SEPARATION_FACTOR`.
  */
 export const MIN_X_LABEL_SEPARATION_WIDE = 0.06
-export const MIN_X_LABEL_SEPARATION_NARROW = 0.11
+export const MIN_X_LABEL_SEPARATION_NARROW = 0.15
+/**
+ * The first pair needs more room than a centred pair: the start label's full
+ * width plus half of its neighbour, plus a word-space of clear gap, is two
+ * label-widths centre to centre (a centred pair needs one). Measured at 390
+ * on the 30-day fixture (#3204 round 3): "11 Jun" and "18 Jun" sat 6px
+ * apart — one word-space — and read as a single run.
+ */
+export const FIRST_X_LABEL_SEPARATION_FACTOR = 2
 
 /**
  * The y-scale: `max` is the ceiling (never below the data), `ticks` are the
@@ -168,6 +181,14 @@ export function xLabelIndices(count: number, { narrow = false }: { narrow?: bool
     if ((indices[i + 1] - indices[i]) / (count - 1) < minSeparation) {
       indices.splice(i, 1)
     }
+  }
+  // The start label is anchored at its left edge, so the pair (0, next)
+  // is checked at the wider factor — and it is the NEXT label that drops,
+  // never day 0 (the left edge is where the range begins). Loop, because a
+  // drop moves a new neighbour into the slot; the endpoint is never a
+  // candidate. Both charts read this, so the rule is one rule.
+  while (indices.length > 2 && indices[1] / (count - 1) < minSeparation * FIRST_X_LABEL_SEPARATION_FACTOR) {
+    indices.splice(1, 1)
   }
   return indices
 }

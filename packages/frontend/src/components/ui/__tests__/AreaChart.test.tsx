@@ -239,7 +239,11 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
       // tests, not renders), and a second query would count both charts.
       const { unmount } = renderChart({ narrow }, points)
       const labels = screen.getAllByTestId('chart-x-label')
-      expect(labels.map((el) => el.textContent)).toEqual(['d0', 'd7', 'd14', 'd21', 'd29'])
+      // The narrow list drops day 7 as well (#3204 round 3): the start
+      // label is left-anchored and needs two label-widths to its neighbour.
+      expect(labels.map((el) => el.textContent)).toEqual(
+        narrow ? ['d0', 'd14', 'd21', 'd29'] : ['d0', 'd7', 'd14', 'd21', 'd29'],
+      )
       const boxes = labels.map((el) => {
         const x = Number.parseFloat(el.style.left)
         const label = el.textContent ?? ''
@@ -407,13 +411,9 @@ describe('AreaChart — the reveal, the mobile half, the sparse half', () => {
     renderChart({ narrow: true }, many)
     const labels = screen.getAllByTestId('chart-x-label')
     expect(labels.length).toBeLessThanOrEqual(5)
-    expect(labels.map((el) => el.textContent?.trim())).toEqual([
-      'd0',
-      'd18',
-      'd36',
-      'd54',
-      'd89',
-    ])
+    // Day 18 drops (#3204 round 3): 18/89 of the narrow plot is less than
+    // the two label-widths the left-anchored start label needs.
+    expect(labels.map((el) => el.textContent?.trim())).toEqual(['d0', 'd36', 'd54', 'd89'])
     fireEvent.keyDown(document.querySelector('svg')!, { key: 'End' })
     const tip = screen.getByTestId('chart-tooltip')
     expect(tip.className).not.toMatch(/absolute/)

@@ -5,6 +5,7 @@ import {
   chartScale,
   chartScaleRange,
   MAX_X_LABELS_DESKTOP,
+  FIRST_X_LABEL_SEPARATION_FACTOR,
   MAX_X_LABELS_MOBILE,
   MIN_CHARTABLE_DAYS,
   MIN_X_LABEL_SEPARATION_NARROW,
@@ -181,6 +182,28 @@ describe('xLabelIndices — the density the issue fixes for 7d, 30d, 90d', () =>
     expect(desktop[desktop.length - 1]).toBe(44)
   })
 
+  it('gives the left-anchored start label two label-widths, dropping its neighbour and never day 0 (#3204 round 3)', () => {
+    // Mutation: factor 1 → the narrow 30-day list keeps day 7 and the
+    // narrow 90-day list keeps day 18; separation back to 0.11 → the same.
+    // Desktop lists are untouched by the rule: 7/29 and 14/89 both clear
+    // 2 × 6%.
+    expect(FIRST_X_LABEL_SEPARATION_FACTOR).toBe(2)
+    expect(MIN_X_LABEL_SEPARATION_NARROW).toBe(0.15)
+    expect(xLabelIndices(30, { narrow: true })[1]).toBe(14)
+    expect(xLabelIndices(90, { narrow: true })[1]).toBe(36)
+    expect(xLabelIndices(7, { narrow: true })).toEqual([0, 2, 4, 6])
+    for (const count of [7, 30, 45, 90, 365]) {
+      for (const narrow of [false, true]) {
+        const idx = xLabelIndices(count, { narrow })
+        expect(idx[0]).toBe(0)
+        if (idx.length > 2) {
+          const sep = narrow ? MIN_X_LABEL_SEPARATION_NARROW : MIN_X_LABEL_SEPARATION_WIDE
+          expect(idx[1] / (count - 1)).toBeGreaterThanOrEqual(sep * FIRST_X_LABEL_SEPARATION_FACTOR)
+        }
+      }
+    }
+  })
+
   it('never exceeds the cap it is given, and always ends on the last day', () => {
     // The two rules are in tension — the endpoint label can push the list
     // one past the cap — and the resolution is that a slot MOVES rather than
@@ -251,8 +274,11 @@ describe('xLabelIndices — the density the issue fixes for 7d, 30d, 90d', () =>
     // exactly one label at the right edge in BOTH treatments (the stride
     // slot one day behind the endpoint drops), and the 90-day desktop range
     // drops the day-84 slot the endpoint move had left within a label-width.
+    // On the narrow 30-day list day 7 drops as well (#3204 round 3): the
+    // start label is left-anchored, so "11 Jun" + half of "18 Jun" is
+    // 51px against a 57px stride on the 235px plot — a word-space apart.
     expect(xLabelIndices(30)).toEqual([0, 7, 14, 21, 29])
-    expect(xLabelIndices(30, { narrow: true })).toEqual([0, 7, 14, 21, 29])
+    expect(xLabelIndices(30, { narrow: true })).toEqual([0, 14, 21, 29])
     expect(xLabelIndices(90)).toEqual([0, 14, 28, 42, 56, 70, 89])
   })
 
@@ -261,10 +287,13 @@ describe('xLabelIndices — the density the issue fixes for 7d, 30d, 90d', () =>
     // mid-plot stride the bands chose survives intact wherever it was
     // already wider than a label (30d stays weekly through day 21, 90d
     // stays fortnightly through day 70), the caps still hold, and the
-    // narrow 90-day list — five labels at the stride the density guard
-    // picked — is untouched, its endpoint gap 35 indices ≈ 39% of the plot.
+    // narrow 90-day list keeps the stride the density guard picked from
+    // day 36 on, its endpoint gap 35 indices ≈ 39% of the plot. Day 18
+    // drops: 18/89 of the 235px plot is 47px centre to centre, LESS than
+    // the 51px the left-anchored start label plus half a neighbour need —
+    // those two overlapped outright before #3204 round 3.
     expect(xLabelIndices(30)).toEqual([0, 7, 14, 21, 29])
-    expect(xLabelIndices(90, { narrow: true })).toEqual([0, 18, 36, 54, 89])
+    expect(xLabelIndices(90, { narrow: true })).toEqual([0, 36, 54, 89])
     for (const count of [7, 30, 45, 90, 365]) {
       for (const narrow of [false, true]) {
         const idx = xLabelIndices(count, { narrow })

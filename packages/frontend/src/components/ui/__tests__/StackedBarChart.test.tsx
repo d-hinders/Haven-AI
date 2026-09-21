@@ -814,9 +814,11 @@ describe('StackedBarChart — what a reader who cannot see the chart is told', (
         narrow
       />,
     )
+    // The narrow list drops day 7 as well (#3204 round 3): the shared
+    // helper gives the left-anchored start label two label-widths, and the
+    // bar chart inherits the rule rather than special-casing around it.
     expect(screen.getAllByTestId('chart-x-label').map((el) => el.textContent)).toEqual([
       'd0',
-      'd7',
       'd14',
       'd21',
       'd29',

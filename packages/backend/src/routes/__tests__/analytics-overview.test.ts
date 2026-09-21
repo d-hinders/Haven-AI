@@ -81,7 +81,9 @@ vi.mock('../../infra/repositories/payment-refusals.js', () => ({
   firstRefusalDayForUser: mockFirstRefusalDayForUser,
 }))
 
-import analyticsOverviewRoutes from '../analytics-overview.js'
+import analyticsOverviewRoutes, { ANALYTICS_OVERVIEW_ENUMS } from '../analytics-overview.js'
+import { openapiSpec } from '../../openapi/spec.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 function emptyFixtures(userId: string) {
@@ -191,6 +193,10 @@ describe('GET /analytics/overview', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/analytics-overview.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(analyticsOverviewRoutes, { prefix: '/analytics' })
     token = app.jwt.sign({ sub: USER, email: 'user@example.com' })
@@ -226,14 +232,37 @@ describe('GET /analytics/overview', () => {
     expect(mockSumTotalsSpendForUser).not.toHaveBeenCalled()
   })
 
-  it('400s on a range outside the enum', async () => {
+  // #3030: both refusals are the spec's enums, answered by the enforced
+  // module as the 400 envelope; the handler's own checks are gone. Mutation:
+  // drop the module from enforcedModules → `range=14d` is a 500 (undefined
+  // days) and `currency=gbp` reaches the repository.
+  it('400s on a range outside the enum, and on a missing range', async () => {
     const res = await call('/analytics/overview?range=14d', token)
     expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(res.json().details).toContain('querystring/range')
+    expect((await call('/analytics/overview', token)).statusCode).toBe(400)
+    expect(mockSumTotalsSpendForUser).not.toHaveBeenCalled()
   })
 
-  it('400s on an unrecognized currency', async () => {
+  it('400s on an unrecognized currency — and on upper-case, which the handler used to lower-case', async () => {
     const res = await call('/analytics/overview?range=30d&currency=gbp', token)
     expect(res.statusCode).toBe(400)
+    expect(res.json().details).toContain('querystring/currency')
+    // The dashboard sends the lower-cased wire form (useAnalyticsOverview);
+    // the spec enum is lower-case, so `USD` is off-spec now.
+    expect((await call('/analytics/overview?range=30d&currency=USD', token)).statusCode).toBe(400)
+    expect(mockSumTotalsSpendForUser).not.toHaveBeenCalled()
+  })
+
+  it('the spec enums ARE the handler\'s tables (#3030 — the handler no longer checks)', () => {
+    const op = (openapiSpec.paths as Record<string, Record<string, unknown>>)['/analytics/overview'].get as {
+      parameters: Array<{ name: string; required?: boolean; schema: { enum?: string[] } }>
+    }
+    const byName = Object.fromEntries(op.parameters.map((p) => [p.name, p]))
+    expect(byName.range.required).toBe(true)
+    expect(byName.range.schema.enum).toEqual(ANALYTICS_OVERVIEW_ENUMS.range)
+    expect(byName.currency.schema.enum).toEqual(ANALYTICS_OVERVIEW_ENUMS.currency)
   })
 
   it('accepts sek as a display currency (#3127 round 2)', async () => {

@@ -13,6 +13,7 @@ vi.mock('../../db.js', () => ({
 }))
 
 import agentActivityRoutes from '../agent-activity.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 // #2055 (epic #1440, #2021 readability waiver): `approval_requests` is
 // dropped and the activity/feed routes no longer query it at all — the
@@ -28,7 +29,7 @@ const TX_HASH = '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa
 function paymentRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'payment-1',
-    agent_id: 'agent-1',
+    agent_id: AGENT_ID,
     account_id: 'safe-base',
     account_address: SAFE_ADDRESS,
     account_name: 'Base wallet',
@@ -54,6 +55,11 @@ function paymentRow(overrides: Record<string, unknown> = {}) {
   }
 }
 
+// A real agent id is a uuid and the spec says so (`format: uuid` on the path
+// parameter); with the module enforced (#3030) 'agent-1' is refused before
+// the handler — the fixture describes a request the API accepts.
+const AGENT_ID = '0b3f8c1e-6a4d-4c2b-9e7f-1d2c3b4a5e6f'
+
 describe('agent activity routes', () => {
   let app: FastifyInstance
   let token: string
@@ -61,6 +67,10 @@ describe('agent activity routes', () => {
   beforeAll(async () => {
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/agent-activity.ts'] })
     await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
     token = app.jwt.sign({ sub: 'user-1', email: 'test@example.com' })
   })
@@ -83,7 +93,7 @@ describe('agent activity routes', () => {
   // claim narrows to it rather than disappearing.
   it('exposes the pinned execution_rail on payments (#799 rollover observability)', async () => {
     mockQuery.mockImplementation(async (sql: string) => {
-      if (sql.includes('SELECT id FROM agents')) return { rows: [{ id: 'agent-1' }] }
+      if (sql.includes('SELECT id FROM agents')) return { rows: [{ id: AGENT_ID }] }
       if (sql.includes('FROM payment_intents pi')) {
         return { rows: [paymentRow({ execution_rail: 'session_key' })] }
       }
@@ -93,7 +103,7 @@ describe('agent activity routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/agent-activity/agent-1/activity',
+      url: `/agent-activity/${AGENT_ID}/activity`,
       headers: { authorization: `Bearer ${token}` },
     })
 
@@ -121,7 +131,7 @@ describe('agent activity routes', () => {
   it('uses stored payment Safe identity for a single agent activity feed', async () => {
     mockQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT id FROM agents')) {
-        return { rows: [{ id: 'agent-1' }] }
+        return { rows: [{ id: AGENT_ID }] }
       }
       if (sql.includes('FROM payment_intents pi')) {
         return { rows: [paymentRow()] }
@@ -134,7 +144,7 @@ describe('agent activity routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/agent-activity/agent-1/activity',
+      url: `/agent-activity/${AGENT_ID}/activity`,
       headers: { authorization: `Bearer ${token}` },
     })
 
@@ -171,7 +181,7 @@ describe('agent activity routes', () => {
   it('uses stored payment Safe identity for the all-agent activity feed, pending_approvals hardcoded 0', async () => {
     mockQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT id, name FROM agents')) {
-        return { rows: [{ id: 'agent-1', name: 'Research agent' }] }
+        return { rows: [{ id: AGENT_ID, name: 'Research agent' }] }
       }
       if (sql.includes('FROM payment_intents pi')) {
         return { rows: [paymentRow()] }
@@ -196,7 +206,7 @@ describe('agent activity routes', () => {
     expectMatchesSpec('GET', '/agent-activity/feed', body)
     expect(body.activity[0]).toMatchObject({
       type: 'payment',
-      agent_id: 'agent-1',
+      agent_id: AGENT_ID,
       agent_name: 'Research agent',
       account_id: 'safe-base',
       account_address: SAFE_ADDRESS,
@@ -216,12 +226,12 @@ describe('agent activity routes', () => {
    * `/transactions` — the defect would have moved, not closed.
    */
   it.each([
-    ['per-agent', '/agent-activity/agent-1/activity', 'SELECT id FROM agents', [{ id: 'agent-1' }]],
+    ['per-agent', `/agent-activity/${AGENT_ID}/activity`, 'SELECT id FROM agents', [{ id: AGENT_ID }]],
     [
       'all-agent feed',
       '/agent-activity/feed?limit=10',
       'SELECT id, name FROM agents',
-      [{ id: 'agent-1', name: 'Research agent' }],
+      [{ id: AGENT_ID, name: 'Research agent' }],
     ],
   ] as const)(
     'emits every address in one canonical form on the %s mapper, from a row that mixes both (#3129)',
@@ -281,4 +291,30 @@ describe('agent activity routes', () => {
         }
     },
   )
+
+  describe('request validation (#3030, enforced module)', () => {
+    it('refuses a non-uuid agent id with the 400 envelope before any query', async () => {
+      // Mutation: drop the module from enforcedModules → this answers 404
+      // from the handler's lookup instead (mockQuery returns no rows).
+      mockQuery.mockResolvedValue({ rows: [] })
+      const res = await app.inject({ method: 'GET', url: '/agent-activity/agent-1/activity', headers: { authorization: `Bearer ${token}` } })
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toMatchObject({ error: 'Request does not match the API spec', statusCode: 400, error_code: 'invalid_request' })
+      expect(res.json().details).toContain('params/id')
+      expect(mockQuery).not.toHaveBeenCalled()
+    })
+
+    it('refuses limit above the spec maximum on the feed; a conformant limit reaches the handler unchanged', async () => {
+      // Before enforcement the handler clamped `limit=500` to 100; the spec
+      // says `maximum: 100`, so the request is now off-spec and refused.
+      const over = await app.inject({ method: 'GET', url: '/agent-activity/feed?limit=500', headers: { authorization: `Bearer ${token}` } })
+      expect(over.statusCode).toBe(400)
+      expect(over.json().details).toContain('querystring/limit')
+
+      mockQuery.mockResolvedValue({ rows: [] })
+      const ok = await app.inject({ method: 'GET', url: '/agent-activity/feed?limit=10&offset=0', headers: { authorization: `Bearer ${token}` } })
+      expect(ok.statusCode).toBe(200)
+      expect(JSON.parse(ok.body)).toEqual({ activity: [], pending_approvals: 0 })
+    })
+  })
 })

@@ -121,7 +121,44 @@ app.setErrorHandler(httpErrorHandler)
 installRequestValidation(app, {
   mode: config.requestValidationMode,
   // #3167: the label routes are born ENFORCED — new modules never enter shadow.
-  enforcedModules: ['routes/contacts.ts', 'routes/merchants.ts', 'routes/labels.ts', 'routes/agent-labels.ts'],
+  enforcedModules: [
+    // Slice 1 (#3029) proof module, and the modules born enforced since.
+    'routes/contacts.ts',
+    'routes/merchants.ts',
+    'routes/labels.ts',
+    'routes/agent-labels.ts',
+    // Slice 2 (#3030): every non-money route module, plus the two inline
+    // routes below (`GET /`, `GET /chains` — keyed `'index.ts'`). Flipped on
+    // the epic's fallback (owner decision 2026-09-21 on #3028): the dev
+    // shadow read could not prove these modules — the counter resets on
+    // every deploy and carries no per-route traffic — so each module's
+    // route tests (off-spec → the 400 envelope; conformant → byte-identical)
+    // are the instrument, and `enforce` on dev is the reading. Slices 3–4
+    // (#3031/#3032) flip the money-path modules on a persisted reading.
+    'index.ts',
+    'routes/accounting.ts',
+    'routes/accounting-feed.ts',
+    'routes/accounting-connections.ts',
+    'routes/agent-activity.ts',
+    'routes/analytics.ts',
+    'routes/analytics-overview.ts',
+    'routes/auth.ts',
+    'routes/balances.ts',
+    'routes/catalog.ts',
+    'routes/catalog-submissions.ts',
+    'routes/dashboard.ts',
+    'routes/discovery.ts',
+    'routes/health.ts',
+    'routes/openapi.ts',
+    'routes/passkeys.ts',
+    'routes/passport-verify.ts',
+    'routes/portfolio.ts',
+    'routes/safe-deploy.ts',
+    'routes/transactions.ts',
+    'routes/user.ts',
+    'routes/user-accounts.ts',
+    'routes/user-accounts-retired.ts',
+  ],
 })
 
 // --- Process-level error handlers ---

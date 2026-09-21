@@ -35,8 +35,10 @@ import {
  * is nothing to "fight over".
  */
 
-const RANGE_DAYS: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90 }
-const CURRENCIES = new Set(['usd', 'eur', 'sek'])
+const RANGE_DAYS = { '7d': 7, '30d': 30, '90d': 90 } as const
+type AnalyticsRange = keyof typeof RANGE_DAYS
+/** Exported for the test that pins the spec's enums to these (#3030). */
+export const ANALYTICS_OVERVIEW_ENUMS = { range: Object.keys(RANGE_DAYS), currency: ['usd', 'eur', 'sek'] } as const
 
 /**
  * `Intl.DateTimeFormat`'s own constructor accepts far more than IANA zone
@@ -67,20 +69,18 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
   app.addHook('onRequest', authMiddleware)
 
   // GET /analytics/overview?range=7d|30d|90d&currency=usd|eur|sek&tz=<IANA>
-  app.get<{ Querystring: { range?: string; currency?: string; tz?: string } }>(
+  // `range` (required) and `currency` are the spec's enums, enforced before
+  // the handler since #3030 — the module is in `enforcedModules`, so the
+  // types below are the enums and the defaults are injected. `tz` stays a
+  // handler decision: "a zone Intl knows" is not a shape the spec can state.
+  app.get<{ Querystring: { range: AnalyticsRange; currency?: 'usd' | 'eur' | 'sek'; tz?: string } }>(
     '/overview',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { range: rangeParam, currency: currencyParam, tz: tzParam } = request.query
 
-      const days = rangeParam ? RANGE_DAYS[rangeParam] : undefined
-      if (!days) {
-        return reply.code(400).send({ error: 'range must be one of: 7d, 30d, 90d' })
-      }
-      const currency = (currencyParam ?? 'usd').toLowerCase()
-      if (!CURRENCIES.has(currency)) {
-        return reply.code(400).send({ error: 'currency must be one of: usd, eur, sek' })
-      }
+      const days = RANGE_DAYS[rangeParam]
+      const currency = currencyParam ?? 'usd'
       const tz = tzParam ?? 'UTC'
       if (!isValidTimeZone(tz)) {
         // Never echo the raw query value: an offset/abbreviation/injection
@@ -88,7 +88,7 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
         // instrument this endpoint must not become.
         return reply.code(400).send({ error: 'unsupported tz' })
       }
-      const cur = currency as 'usd' | 'eur' | 'sek'
+      const cur = currency
 
       const now = new Date()
       const to = now

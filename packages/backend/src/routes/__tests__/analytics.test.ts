@@ -10,12 +10,19 @@ vi.mock('../../db.js', () => ({
 }))
 
 import analyticsRoutes from '../analytics.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
+import { openapiSpec } from '../../openapi/spec.js'
+import { FUNNEL_SEGMENTS } from '../../infra/repositories/onboarding-funnel.js'
 
 describe('analytics routes', () => {
   let app: FastifyInstance
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/analytics.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(analyticsRoutes, { prefix: '/analytics' })
   })
@@ -126,11 +133,28 @@ describe('analytics routes', () => {
       url: '/analytics/funnel?segment=handoff_via',
       headers: { authorization: `Bearer ${token}` },
     })
+    // #3030: the refusal is the spec's `segment` enum, answered by the
+    // enforced module as the 400 envelope. Mutation: drop the module from
+    // enforcedModules → 200 with an unsegmented body (the guard is gone from
+    // the handler).
     expect(res.statusCode).toBe(400)
-    expect(res.json().error).toContain('via, run_mode')
+    expect(res.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(res.json().details).toContain('querystring/segment')
     // The refusal has to precede the work, not follow it: a 400 that still ran
     // two aggregate scans is a free denial-of-service on a dashboard route.
     expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  it('the spec\'s segment enum IS the repository\'s segment list (#3030 — the handler no longer checks)', () => {
+    // The handler's own check was deleted when the module was enforced; the
+    // spec enum is the only guard now, so it must name exactly the segments
+    // the repository can split by. Mutation: add a key to FUNNEL_SEGMENTS
+    // without the spec → red.
+    const op = (openapiSpec.paths as Record<string, Record<string, unknown>>)['/analytics/funnel'].get as {
+      parameters: Array<{ name: string; schema: { enum?: string[] } }>
+    }
+    const segment = op.parameters.find((p) => p.name === 'segment')!
+    expect(segment.schema.enum).toEqual(Object.keys(FUNNEL_SEGMENTS))
   })
 
   it('omits segment and segments entirely when none was asked for', async () => {

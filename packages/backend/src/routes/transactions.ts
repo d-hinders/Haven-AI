@@ -28,37 +28,26 @@ import type { ListScope } from '../modules/transactions/index.js'
 import { CSV_BOM } from '../domain/csv.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
 /** Own-account name lookup key — address is case-insensitive, chain is not. */
 function accountNameKey(address: string, chainId: number): string {
   return `${address.toLowerCase()}:${chainId}`
 }
 
-function parsePositiveInt(
-  value: string | undefined,
-  fallback: number,
-  min: number,
-  max: number,
-): number | null {
+/**
+ * The bounds (`minimum`/`maximum`) and the defaults are the spec's, enforced
+ * and injected before the handler since #3030; ajv has coerced the value to
+ * a number by the time it arrives. The fallback only covers a caller that
+ * mounted the module without the plugin.
+ */
+function readInt(value: number | string | undefined, fallback: number): number {
   if (value === undefined) return fallback
-  const parsed = parseInt(value, 10)
-  if (Number.isNaN(parsed) || parsed < min || parsed > max) {
-    return null
-  }
-  return parsed
+  return typeof value === 'number' ? value : parseInt(value, 10)
 }
 
+/** Shape (`integer, minimum: 1`) is the spec's since #3030; support is not. */
 function parseChainId(value: unknown): number | null {
   if (value === undefined) return null
-  if (Array.isArray(value)) return Number.NaN
-
-  const raw = String(value).trim()
-  if (!/^[1-9]\d*$/.test(raw)) return Number.NaN
-
-  const chainId = Number(raw)
-  return Number.isSafeInteger(chainId) ? chainId : Number.NaN
+  return Number(value)
 }
 
 function parseFreshFlag(value: string | undefined): boolean {
@@ -108,13 +97,9 @@ export default async function transactionRoutes(
     }
   }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const offset = parsePositiveInt(request.query.offset, 0, 0, Number.MAX_SAFE_INTEGER)
-    const limit = parsePositiveInt(request.query.limit, 25, 1, 100)
+    const offset = readInt(request.query.offset, 0)
+    const limit = readInt(request.query.limit, 25)
     const fresh = parseFreshFlag(request.query.fresh)
-
-    if (offset === null || limit === null) {
-      return reply.code(400).send({ error: 'Invalid pagination params' })
-    }
 
     // #2914: `safeId` is retired. It stays DECLARED so it can be REFUSED —
     // Fastify drops an undeclared query key silently, and a filter that
@@ -127,19 +112,11 @@ export default async function transactionRoutes(
       return reply.code(400).send(retiredSafeQuery('safeId', 'accountId', safeIdVerdict.reason))
     }
 
+    // Shapes are the spec's since #3030 (`accountId` uuid, `agentId` `user`
+    // or a uuid, `tokenKey` `<chain>:<native|address>`); what is checked here
+    // is ownership and support — the id must be the caller's, the chain one
+    // Haven serves.
     const accountFilterId = request.query.accountId
-
-    if (accountFilterId && !UUID_RE.test(accountFilterId)) {
-      return reply.code(400).send({ error: 'Invalid accountId' })
-    }
-
-    if (
-      request.query.agentId &&
-      request.query.agentId !== 'user' &&
-      !UUID_RE.test(request.query.agentId)
-    ) {
-      return reply.code(400).send({ error: 'Invalid agentId' })
-    }
 
     const tokenFilter = parseTokenKey(request.query.tokenKey)
     if (request.query.tokenKey && !tokenFilter) {
@@ -226,10 +203,6 @@ export default async function transactionRoutes(
       const { sub } = request.user as { sub: string }
       const { paymentId } = request.params
 
-      if (!UUID_RE.test(paymentId)) {
-        return reply.code(400).send({ error: 'Invalid paymentId' })
-      }
-
       const evidence = await findMachinePaymentEvidenceDetail(paymentId, sub)
       if (!evidence) {
         return reply.code(404).send({ error: 'Payment evidence not found' })
@@ -267,7 +240,7 @@ export default async function transactionRoutes(
       accountId?: string
       agentId?: string
       tokenKey?: string
-      direction?: string
+      direction?: 'in' | 'out' // the spec's enum, enforced before the handler (#3030)
       chainId?: string
       fresh?: string
     }
@@ -280,19 +253,11 @@ export default async function transactionRoutes(
       return reply.code(400).send(retiredSafeQuery('safeId', 'accountId', safeIdVerdict.reason))
     }
 
+    // Shapes are the spec's since #3030 (`accountId` uuid, `agentId` `user`
+    // or a uuid, `tokenKey` `<chain>:<native|address>`); what is checked here
+    // is ownership and support — the id must be the caller's, the chain one
+    // Haven serves.
     const accountFilterId = request.query.accountId
-
-    if (accountFilterId && !UUID_RE.test(accountFilterId)) {
-      return reply.code(400).send({ error: 'Invalid accountId' })
-    }
-
-    if (
-      request.query.agentId &&
-      request.query.agentId !== 'user' &&
-      !UUID_RE.test(request.query.agentId)
-    ) {
-      return reply.code(400).send({ error: 'Invalid agentId' })
-    }
 
     const tokenFilter = parseTokenKey(request.query.tokenKey)
     if (request.query.tokenKey && !tokenFilter) {
@@ -300,14 +265,8 @@ export default async function transactionRoutes(
     }
 
     const direction = request.query.direction
-    if (direction !== undefined && direction !== 'in' && direction !== 'out') {
-      return reply.code(400).send({ error: 'Invalid direction' })
-    }
 
     const chainId = parseChainId(request.query.chainId)
-    if (Number.isNaN(chainId)) {
-      return reply.code(400).send({ error: 'Invalid chainId' })
-    }
     if (chainId !== null && !isSupportedChain(chainId)) {
       return reply.code(400).send({ error: `Unsupported chain: ${chainId}` })
     }
@@ -438,22 +397,10 @@ export default async function transactionRoutes(
   }>('/:accountAddress', async (request, reply) => {
     const { accountAddress: address } = request.params
     const { sub } = request.user as { sub: string }
-    const page = parsePositiveInt(request.query.page, 1, 1, Number.MAX_SAFE_INTEGER)
-    const limit = parsePositiveInt(request.query.limit, 25, 1, 100)
+    const page = readInt(request.query.page, 1)
+    const limit = readInt(request.query.limit, 25)
     const fresh = parseFreshFlag(request.query.fresh)
     const requestedChainId = parseChainId(request.query.chain_id)
-
-    if (page === null || limit === null) {
-      return reply.code(400).send({ error: 'Invalid pagination params' })
-    }
-
-    if (!ETH_ADDRESS_RE.test(address)) {
-      return reply.code(400).send({ error: 'Invalid address' })
-    }
-
-    if (Number.isNaN(requestedChainId)) {
-      return reply.code(400).send({ error: 'Invalid chain_id' })
-    }
 
     if (requestedChainId !== null && !isSupportedChain(requestedChainId)) {
       return reply.code(400).send({ error: `Unsupported chain: ${requestedChainId}` })

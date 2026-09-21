@@ -6,6 +6,17 @@ import {
   AgentPaymentRail,
 } from '../domain/agent-payment-taxonomy.js'
 
+/** The accounting period bounds: an ISO date prefix. The handlers always
+ *  refused anything else (`ISO_DATE_RE` in routes/accounting.ts); since #3030
+ *  the enforced module refuses it here, so the spec states it. */
+const ISO_DATE_PREFIX = '^\\d{4}-\\d{2}-\\d{2}'
+/** `/transactions` filters (#3030): `agentId` is an agent's uuid or the
+ *  literal `user`; `tokenKey` is `<chainId>:<address|native>`. Both were
+ *  handler refusals before the module was enforced. */
+const UUID_PATTERN = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+const AGENT_FILTER_PATTERN = `^(user|${UUID_PATTERN})$`
+const TOKEN_KEY_PATTERN = '^[1-9][0-9]*:(native|0x[0-9a-fA-F]{40})$'
+
 const address = {
   type: 'string',
   pattern: '^0x[0-9a-fA-F]{40}$',
@@ -3340,8 +3351,8 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'format', in: 'query', schema: { type: 'string', enum: ['sie'] }, description: "Defaults to 'sie'; anything else is a 400." },
-          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date (YYYY-MM-DD…).' },
-          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date (YYYY-MM-DD…).' },
+          { name: 'from', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date (YYYY-MM-DD…).' },
+          { name: 'to', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date (YYYY-MM-DD…).' },
           { name: 'company', in: 'query', schema: { type: 'string' }, description: "Company name in the file header; defaults to 'Haven'." },
         ],
         responses: {
@@ -3368,8 +3379,8 @@ export const openapiSpec = {
           'Read-only diagnosis, never a fix: it classifies each entry and counts the classes, so a user can see WHY a period will not balance before trying to book it. Note the camelCase byStatus/paymentId/txHash/settledAt fields — this report comes from the accounting module, not from SQL rows.',
         security: [{ DashboardJwt: [] }],
         parameters: [
-          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
-          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+          { name: 'from', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date.' },
+          { name: 'to', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date.' },
         ],
         responses: {
           '200': {
@@ -3624,7 +3635,7 @@ export const openapiSpec = {
         description:
           'Strictly read-only (#1362): it confirms whether the supplier invoice still exists and whether a human has booked it, and asserts nothing — the non-asserting principle is untouched. A payment that was never pushed, a disconnected provider, or a sync row with no invoice reference all answer 409 with a machine-readable error_code, because none of them is a verification result.',
         security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string' }, description: 'Haven payment id.' }],
+        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Haven payment id (a uuid, as every other `paymentId` path parameter says — #3030).' }],
         responses: {
           '200': {
             description: "The provider's verdict.",
@@ -3659,7 +3670,7 @@ export const openapiSpec = {
         description:
           "The ONLY path that flips a pushed row back to retryable, and it is conditional on the PROVIDER, not on the caller's say-so (#1365): the server re-runs the read-back and reopens only when the invoice is confirmed gone, or when a number collision proves the invoice at that number is not ours. **An invoice that still exists refuses with 409 and writes nothing** — that is the double-post guard, and reopening against a live invoice would duplicate it. A row that moved between the check and the flip (raced by a concurrent sync) also refuses rather than pretending. After a successful reopen, the next sync re-claims and re-pushes through the normal retry path.",
         security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string' }, description: 'Haven payment id.' }],
+        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Haven payment id (a uuid, as every other `paymentId` path parameter says — #3030).' }],
         responses: {
           '200': {
             description: 'Row reopened for retry.',
@@ -4054,8 +4065,8 @@ export const openapiSpec = {
           "The one Fortnox-shaped path left after #2862 replaced `/accounting/fortnox/*` with the provider-generic connections above: it is provider-specific by nature. The asserting counterpart to the accounting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
         security: [{ DashboardJwt: [] }],
         parameters: [
-          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
-          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+          { name: 'from', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date.' },
+          { name: 'to', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date.' },
         ],
         responses: {
           '200': {
@@ -6433,8 +6444,8 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'accountId', in: 'query', schema: uuid, description: 'Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none.' },
-          { name: 'agentId', in: 'query', schema: { type: 'string' } },
-          { name: 'tokenKey', in: 'query', schema: { type: 'string', examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] } },
+          { name: 'agentId', in: 'query', schema: { type: 'string', pattern: AGENT_FILTER_PATTERN }, description: "An agent id, or the literal `user` for payments the account holder made directly (#3030: the handler always refused anything else; the spec now says so)." },
+          { name: 'tokenKey', in: 'query', schema: { type: 'string', pattern: TOKEN_KEY_PATTERN, examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] }, description: '`<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler.' },
           { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
@@ -6467,10 +6478,10 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'accountId', in: 'query', schema: uuid, description: 'Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none.' },
-          { name: 'agentId', in: 'query', schema: { type: 'string' } },
-          { name: 'tokenKey', in: 'query', schema: { type: 'string', examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] } },
+          { name: 'agentId', in: 'query', schema: { type: 'string', pattern: AGENT_FILTER_PATTERN }, description: "An agent id, or the literal `user` for payments the account holder made directly (#3030: the handler always refused anything else; the spec now says so)." },
+          { name: 'tokenKey', in: 'query', schema: { type: 'string', pattern: TOKEN_KEY_PATTERN, examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] }, description: '`<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler.' },
           { name: 'direction', in: 'query', schema: { type: 'string', enum: ['in', 'out'] } },
-          { name: 'chainId', in: 'query', schema: { type: 'integer', examples: [8453] } },
+          { name: 'chainId', in: 'query', schema: { type: 'integer', minimum: 1, examples: [8453] } },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
         ],
         responses: {
@@ -6527,7 +6538,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'accountAddress', in: 'path', required: true, schema: address },
-          { name: 'chain_id', in: 'query', schema: { type: 'integer' } },
+          { name: 'chain_id', in: 'query', schema: { type: 'integer', minimum: 1 } },
           { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
@@ -6566,7 +6577,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'accountAddress', in: 'path', required: true, schema: address },
-          { name: 'chain_id', in: 'query', schema: { type: 'integer' }, description: 'Required when the same address is linked on more than one chain.' },
+          { name: 'chain_id', in: 'query', schema: { type: 'integer', minimum: 1 }, description: 'Required when the same address is linked on more than one chain. A chain id is positive (#3030: the handlers always refused 0 and negatives; the spec now says so).' },
         ],
         responses: {
           '200': {
@@ -6587,7 +6598,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'accountAddress', in: 'path', required: true, schema: address },
-          { name: 'chain_id', in: 'query', schema: { type: 'integer' }, description: 'Required when the same address is linked on more than one chain.' },
+          { name: 'chain_id', in: 'query', schema: { type: 'integer', minimum: 1 }, description: 'Required when the same address is linked on more than one chain. A chain id is positive (#3030: the handlers always refused 0 and negatives; the spec now says so).' },
         ],
         responses: {
           '200': {

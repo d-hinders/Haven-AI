@@ -26,12 +26,14 @@ interface PeriodQuery {
 }
 
 interface OverrideBody {
-  resourceUrl?: string
-  account?: string
+  resourceUrl: string
+  account: string
 }
 
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}/
-const BAS_ACCOUNT_RE = /^\d{3,6}$/
+// The request shapes — `format` enum, ISO `from`/`to`, the BAS account
+// pattern, a required `resourceUrl` — are the spec's and enforced before the
+// handler since #3030 (the module is in `enforcedModules`); what remains
+// below is semantic: blank-after-trim, the legacy gate, the connection.
 
 /**
  * Bookkeeping export (epic #462, P1 #464). Builds the canonical accounting
@@ -51,17 +53,8 @@ export default async function accountingRoutes(app: FastifyInstance): Promise<vo
       })
     }
     const { sub } = request.user as { sub: string }
-    const { format = 'sie', from, to, company } = request.query
+    const { from, to, company } = request.query
 
-    if (format !== 'sie') {
-      return reply.code(400).send({ error: `Unsupported export format: ${format}` })
-    }
-    if (from && !ISO_DATE_RE.test(from)) {
-      return reply.code(400).send({ error: 'Invalid "from" date (expected ISO)' })
-    }
-    if (to && !ISO_DATE_RE.test(to)) {
-      return reply.code(400).send({ error: 'Invalid "to" date (expected ISO)' })
-    }
 
     const entries = await buildAccountingEntries({ userId: sub, from, to })
     const result = sieExporter.export(entries, { companyName: company?.trim() || 'Haven' })
@@ -78,8 +71,6 @@ export default async function accountingRoutes(app: FastifyInstance): Promise<vo
   app.get<{ Querystring: PeriodQuery }>('/reconcile', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { from, to } = request.query
-    if (from && !ISO_DATE_RE.test(from)) return reply.code(400).send({ error: 'Invalid "from" date (expected ISO)' })
-    if (to && !ISO_DATE_RE.test(to)) return reply.code(400).send({ error: 'Invalid "to" date (expected ISO)' })
     const entries = await buildAccountingEntries({ userId: sub, from, to })
     return reconcileEntries(entries)
   })
@@ -98,12 +89,12 @@ export default async function accountingRoutes(app: FastifyInstance): Promise<vo
   // PUT /accounting/categories — set the BAS account for a merchant
   app.put<{ Body: OverrideBody }>('/categories', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const resourceUrl = request.body?.resourceUrl?.trim()
-    const account = request.body?.account?.trim()
+    // `account` matched the spec's BAS pattern to get here; `resourceUrl`
+    // passed minLength 1 but may be blank after trimming — that is not a
+    // shape the spec can express, so it stays a handler refusal.
+    const resourceUrl = request.body.resourceUrl.trim()
+    const { account } = request.body
     if (!resourceUrl) return reply.code(400).send({ error: 'resourceUrl is required' })
-    if (!account || !BAS_ACCOUNT_RE.test(account)) {
-      return reply.code(400).send({ error: 'account must be a BAS account number' })
-    }
     await pool.query(
       `INSERT INTO merchant_account_overrides (user_id, resource_url, bas_account, updated_at)
        VALUES ($1, $2, $3, NOW())
@@ -141,8 +132,6 @@ export default async function accountingRoutes(app: FastifyInstance): Promise<vo
     }
     const { sub } = request.user as { sub: string }
     const { from, to } = request.query
-    if (from && !ISO_DATE_RE.test(from)) return reply.code(400).send({ error: 'Invalid "from" date (expected ISO)' })
-    if (to && !ISO_DATE_RE.test(to)) return reply.code(400).send({ error: 'Invalid "to" date (expected ISO)' })
 
     const accessToken = await getValidFortnoxAccessToken(sub)
     if (!accessToken) return reply.code(400).send({ error: 'Fortnox is not connected. Connect it first.' })

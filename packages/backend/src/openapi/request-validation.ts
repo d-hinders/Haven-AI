@@ -220,6 +220,9 @@ export interface RequestValidationSnapshot {
  */
 const counters = {
   mode: 'off' as RequestValidationMode,
+  // The epoch until `installRequestValidation` runs — a sentinel that says
+  // "never installed", not a window start; production installs before it
+  // listens, so a served snapshot always carries the install time.
   since: new Date(0).toISOString(),
   total: 0,
   byRouteField: new Map<string, number>(),

@@ -131,7 +131,7 @@ installRequestValidation(app, {
     // routes below (`GET /`, `GET /chains` — keyed `'index.ts'`). Flipped on
     // the epic's fallback (owner decision 2026-09-21 on #3028): the dev
     // shadow read could not prove these modules — the counter resets on
-    // every deploy and carries no per-route traffic — so each module's
+    // every deploy and carried no per-route traffic (until #3208) — so each module's
     // route tests (off-spec → the 400 envelope; conformant → byte-identical)
     // are the instrument, and `enforce` on dev is the reading. Slices 3–4
     // (#3031/#3032) flip the money-path modules on a persisted reading.

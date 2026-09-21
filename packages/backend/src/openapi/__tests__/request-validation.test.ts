@@ -559,6 +559,17 @@ describe('installRequestValidation — enforce mode (#3029)', () => {
     })
   })
 
+  it('#3208: an ENFORCED route is absent from seenByRoute — it refuses for real and has nothing to prove; an unknown path never enters the map', async () => {
+    // Mutation: count under `enforced` as well (hoist recordSeen above the
+    // shadow-only guard) → `POST /contacts` appears here → red.
+    await app.inject({ method: 'POST', url: '/contacts', headers: { authorization: `Bearer ${token}` }, payload: { name: 'Acme' } })
+    await app.inject({ method: 'POST', url: '/contacts', headers: { authorization: `Bearer ${token}` }, payload: { name: 'Acme', address: '0x1111111111111111111111111111111111111111' } })
+    await app.inject({ method: 'GET', url: '/nowhere', headers: { authorization: `Bearer ${token}` } })
+    const snap = requestValidationOpsSnapshot()
+    expect(snap.seenByRoute).not.toHaveProperty('POST /contacts')
+    expect(Object.keys(snap.seenByRoute).some((k) => k.includes('undefined') || k.includes('/nowhere'))).toBe(false)
+  })
+
   it('a non-validation error on an enforced route keeps the app handler answer', async () => {
     const res = await app.inject({ method: 'GET', url: '/contacts/boom', headers: { authorization: `Bearer ${token}` } })
     expect(res.statusCode).toBe(503)

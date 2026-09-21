@@ -13,6 +13,7 @@ covers:
   - packages/backend/src/routes/merchants.ts
   - packages/backend/src/openapi/request-validation.ts
   - scripts/ci/shadow-reading.mjs
+  - packages/backend/src/routes/health.ts
   - packages/backend/src/openapi/route-modules.generated.ts
   - packages/backend/scripts/generate-route-modules.ts
   - packages/backend/src/index.ts
@@ -325,8 +326,8 @@ Isolation rules that are non-negotiable for a payments product:
   3–4, #3031/#3032) are still shadowed, so on dev an off-spec request to any
   other route answers the 400 envelope. Slice 2 flipped on the epic's
   fallback (owner decision 2026-09-21 on #3028): the in-process shadow
-  counter resets on every deploy and carries no per-route traffic, so it
-  could not prove the 22 modules; each module's route tests (off-spec → the
+  counter resets on every deploy and carried no per-route traffic (until
+  #3208), so it could not prove the 22 modules; each module's route tests (off-spec → the
   envelope, conformant → unchanged) are the instrument, and `enforce` on
   dev is the reading. The variable is not the switch that widens the list.
 
@@ -364,14 +365,31 @@ Isolation rules that are non-negotiable for a payments product:
   ```
 
   (`railway logs` reads the operator's own login; no token enters the repo.
-  A saved file works too: `--file logs.jsonl`.) The table has one row per
-  route with `seen`, `would_refuse` and `would_coerce` by field, and a
-  **verdict**: a route with `seen: 0` in the window is **NOT PROVEN** — the
-  epic's rule that no traffic is no proof, printed rather than left to the
-  reader. The header states the window bounds, the line counts and the
-  number of deploys inside it (a `seen` total restarts at each). The
-  minimum window is the epic's call per slice; `--min-window-hours` makes
-  the script refuse to print a narrower one as a reading. Paste the table on
+  A saved file works too: `--file logs.jsonl`; `--module routes/x402.ts`
+  limits the rows.) The table has one row per SHADOWED operation — every
+  operation in `route-modules.generated.ts`, not only the ones that logged —
+  with `seen`, `would_refuse` and `would_coerce` by field, and a **verdict**:
+  a route with `seen: 0` in the window is **NOT PROVEN** — the epic's rule
+  that no traffic is no proof, printed rather than left to the reader; an
+  enforced module's rows say "enforced" instead. The header states the
+  window bounds (taken from every timestamped line, so a quiet day reads as
+  a day), the line counts, the deploys, and the processes seen — traffic is
+  summed per process (`hostname:pid`, so replicas add) from the `seen`
+  line's running total; a process that started before the window is counted
+  from its first line in it (the header says how many were cut). Two things
+  the numbers under-state by design: a minute's last `seen` line is written
+  on that minute's FIRST request, so the final minute of a process is
+  under-counted by up to a minute's traffic; and a cut process with a single
+  line counts as 1. Both err towards NOT PROVEN. If the header says
+  `skipped` equals `read`, the CLI's envelope is not what the parser expects
+  (Railway may lift a JSON line's fields into `attributes`) — save the raw
+  lines and pass them with `--file`, or fix the one field name in
+  `parseLine`. If it says `1 deploy(s)` on a day with merges, the CLI handed
+  you the latest deployment's stream only — export the window from Railway's
+  log explorer and pass it with `--file`. The minimum window is **24 hours**
+  unless the epic's slice says more (#3028 decision 8); `--min-window-hours`
+  prints the table and then exits 1 with a stderr note below that, so a
+  narrower window cannot pass as a reading in a pipeline. Paste the table on
   #3028 — that is the operator step slices 3–4 (#3031, #3032) wait on.
   `/health/ops` still carries the live snapshot, now with `since` and
   `seenByRoute`, for a quick look between deploys.

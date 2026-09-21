@@ -40,8 +40,7 @@ function accountNameKey(address: string, chainId: number): string {
  * mounted the module without the plugin.
  */
 function readInt(value: number | string | undefined, fallback: number): number {
-  if (value === undefined) return fallback
-  return typeof value === 'number' ? value : parseInt(value, 10)
+  return value === undefined ? fallback : Number(value)
 }
 
 /** The spec's `direction` enum, enforced before the handler (#3030); an alias

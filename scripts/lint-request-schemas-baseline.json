@@ -40,10 +40,6 @@
     "typeof": 0,
     "unspecced": 1
   },
-  "routes/transactions.ts": {
-    "shadow": 0,
-    "typeof": 1
-  },
   "routes/x402.ts": {
     "shadow": 1,
     "typeof": 13

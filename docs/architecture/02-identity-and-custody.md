@@ -33,7 +33,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-09-11"
+last-verified: "2026-09-21"
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -262,3 +262,17 @@ one) and the independent exit/revocation story:
 and [`docs/exit/README.md`](../exit/README.md)
 ([delegation rail](../../packages/backend/src/rails/delegation-rail.ts),
 [delegation policy](../../packages/backend/src/rails/delegation-policy.ts)).
+
+Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
+retirement and custody claims above were re-checked against the code at this
+head. Migration 084's `user_safes` → `smart_accounts` rename (#2941) and
+#2911's follow-up migrations are on dev, so the doc's Safe-row language ("rows
+persist but reach no screen") describes a renamed-but-present table, which is
+what the code still shows. The remaining safe-retirement remainder items named
+by the 2026-09-13 scan (#2851, the P3 rename) are both CLOSED COMPLETED.
+`connect/src/runtime.ts` still registers the agent by public
+delegate address and API-key hash only (`middleware/agentAuth.ts`), and
+`signer/src/core.ts` still holds the delegate key locally. The intervening
+commits (#3167 labels, #3127 currency preference, #3151 `--unwire`
+recovery-credential guard) touched covered files and none moved a custody
+boundary; nothing here needed rewriting.

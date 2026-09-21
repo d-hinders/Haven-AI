@@ -19,7 +19,7 @@ covers:
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
-last-verified: "2026-09-15"
+last-verified: "2026-09-21"
 ---
 
 # Haven Product & UX Guide

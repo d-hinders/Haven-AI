@@ -25,7 +25,7 @@ covers:
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
   - packages/frontend/src/lib/signer.ts
-last-verified: "2026-09-11"
+last-verified: "2026-09-21"
 ---
 
 # Haven — System Context
@@ -217,3 +217,14 @@ flowchart LR
   relayer configuration over it per chain
   ([core registry](../../packages/core/src/chains.ts),
   [backend chain wiring](../../packages/backend/src/domain/chains.ts)).
+- Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
+  custody claims above were re-checked against the code at this head:
+  `middleware/agentAuth.ts` still stores `delegate_address` and the API-key
+  hash (never the key), `config.ts` still resolves
+  `RELAYER_PRIVATE_KEY_<chainId>` with the global fallback, the hosted
+  MCP facade still owns no key material (`tools/state-direct-recovery.ts`,
+  `tools/paid-mcp-completion.ts` under the `tools.ts` composition), and the
+  signer still keeps the delegate key local (`signer/src/core.ts`). The
+  intervening commits (#3167 agent labels, #3127 currency preference, #3173
+  signer cold start, #3202 marketplace prospects) touched covered files but
+  moved no custody boundary this diagram describes.

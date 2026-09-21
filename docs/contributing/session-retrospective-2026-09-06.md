@@ -14,7 +14,7 @@ covers:
   - docs/contributing/ai-agent-workflow.md
   - docs/contributing/ai-review-patterns.md
   - docs/bug-reports/qa-explore-agent-onboarding-2026-09-06.md
-last-verified: "2026-09-15"
+last-verified: "2026-09-21"
 ---
 
 # The one-session retrospective (2026-09-06)
@@ -194,3 +194,13 @@ by a script, and claiming otherwise would be this document committing its own
 finding. H2 is the one with a home, because "prove the instrument can say yes"
 already had one (guideline A3) and this only widens what counts as the
 instrument.
+
+Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): a dated
+record of one session's defects, left as written. What was re-checked: the
+pointers still land (`ai-review-patterns.md` § *Instrument Self-Reference And
+Staleness*, the Captain Self-Check Preflight in `ai-agent-workflow.md`, the
+reviewer role's must-check list), the surviving-mutation anchors now assert on
+behaviour as the text claims (`delegation-budget.ts` still types
+`BudgetUse = 'ceiling' | 'floor'`, `mcp/src/tools.ts` still pins the per-tool
+wiring), and the CLI default figure still matches
+`packages/cli/src/commands.ts` (`DEFAULT_API`, the production Railway URL).

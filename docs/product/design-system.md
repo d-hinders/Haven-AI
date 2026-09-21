@@ -91,7 +91,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-09-10"
+last-verified: "2026-09-21"
 ---
 
 # Haven Design System
@@ -1861,3 +1861,16 @@ gate's one-level-indirection blind spot by adopting that type (#1858).
 Marketing/landing surfaces are exempt from the lint gates (intentionally bespoke); the product app and `/design-system` stay fully gated.
 
 **Escape markers (reviewed exceptions).** One placement rule for the line-scanning gates: put the marker on the offending line **or the line directly above** — `design-lint-disable-line` (design-lint) and `// copy-lint-ignore` (copy-lint) both work either way (shared helper: `scripts/lib/lint-escapes.mjs`). The coupling gate's `// design-system-exempt: <reason>` is different by design — it exempts an *export*, sits as a trailing comment on the export line, and requires the colon + reason. Use escapes sparingly; each one is a standing reviewed exception.
+
+Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
+token table was checked mechanically against `globals.css`: all 16 rows match
+the light and dark definitions exactly, zero mismatches. The dark-mode
+sections (#2927–#2929) already describe the shipped three-part work, and the
+theme picker reads "Settings → Theme" with the row rendering `Theme`
+(`SettingsClient.tsx`, `t.settings.theme.label`), matching the product README.
+Intervening commits that touched covered files (#3147 marketing dark sweep,
+#3167 labels + `LabelChip`, #3197 AgentCard wrapper, #3204/#3205 analytics
+primitives and `Row.tsx`) changed components inside the documented system; the
+doc's token, typography, and gate claims needed no rewrite. `StatTile` and the
+`/analytics` work it shipped remain consistent with the § Statistics tile
+guidance.

@@ -26,7 +26,7 @@ covers:
   - packages/frontend/src/lib/agent-onboarding-prompt.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-09-09"
+last-verified: "2026-09-21"
 ---
 
 # Haven UX Copy Guidelines
@@ -613,6 +613,16 @@ These guidelines are enforced on frontend copy, not just documented. `npm run li
 - **Escape hatch.** For a legitimate advanced/developer-facing surface where the technical term is correct, add `// copy-lint-ignore` on the offending line (or the line directly above). Use it sparingly; it is for developer surfaces, not a way around writing good user copy.
 - Docs under `docs/product` are separately checked by the Vale `Haven.Terminology` rule (`.vale.ini`). Vale is **advisory** — `level: suggestion`, and the docs workflow runs it `continue-on-error` — so it nudges, it does not block.
 - Where the lint and this guide disagree, **this guide wins**. Known divergence: the lint rewrites "session key(s)" to "agent credential(s)", which pulls copy toward the very framing "Separate authentication from payment signing" warns against; the correct replacement is "private signing key" per the mapping table.
+
+Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
+enforcement claims above match the code at this head: `npm run lint:copy` /
+`lint:copy:update` in the root `package.json`, the scan set (`src/app`,
+`src/components`, plus the explicit `SCAN_FILES` allowlist for prose-holding
+`lib/` files), the cannot-add ratchet in `scripts/lib/ratchet.mjs` (#2728), and
+the baseline file (currently one entry: `page.tsx` "policy engine"). The
+biggest intervening commit (#3167, per-user labels) followed exactly this
+procedure: its shared label copy lives in `lib/label-copy.ts` and is named in
+`SCAN_FILES`.
 
 ## Writing rules
 

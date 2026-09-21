@@ -11,7 +11,7 @@ covers:
   - docs/operations/package-dev-channel.md
   - packages/backend/src/openapi/spec.test.ts
   - docs/quality/issue-classification-2026-09.csv
-last-verified: "2026-09-09"
+last-verified: "2026-09-21"
 ---
 
 # The 600-issue retrospective (2026-09-03)
@@ -253,3 +253,16 @@ The three skills that carry them shipped on 2026-09-03: #2499 (`doc-reviewer`),
 of evidence for this document — across those three reviews, **every wrong
 claim was caught by an independent read, and none by a gate**. On #2500, four
 of six review rounds blocked on a sentence whose basis could not be found.
+
+Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): this is a
+dated analysis of a fixed window (#1248–#2486, 2026-08-10 to 2026-09-03), so
+its figures are records, not live claims, and were not recomputed. What was
+re-checked is that the instrument pointers above still land: the three skills
+exist at the cited paths, the guideline targets (`reviewer.md` must-check
+list, the Captain Self-Check Preflight, `ai-review-patterns.md`, the
+`quality-scan` block in `openapi/spec.test.ts`) are all still present, and the
+classification CSV still sits beside this document. The largest intervening
+change to a covered file (#3182's coordination-hygiene rewrite of
+`ship-next/SKILL.md`, the #3193 channel rotation) renamed coordination
+surfaces inside the skill; the retrospective's own text quotes no channel
+number, so nothing here went stale with it.

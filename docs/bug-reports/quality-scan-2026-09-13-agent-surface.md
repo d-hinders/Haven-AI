@@ -22,7 +22,7 @@ covers:
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
   - packages/demo-merchant-mcp/src/invoice.ts
-last-verified: "2026-09-13"
+last-verified: "2026-09-21"
 ---
 
 # Quality scan — the agent surface (safe-retirement, MCP, signer, demo merchant) — 2026-09-13
@@ -286,3 +286,29 @@ otherwise leave out; the ledger entry keeps the skill's shape.
    (demo merchant) into two PRs?
 3. Proposals 4, 7, 8, 9: which (if any) to take into the backlog as
    features.
+
+## 8. Dispositions re-checked 2026-09-21 (weekly docs audit #3206, dev `7f17c9f3`)
+
+The report above is the 2026-09-13 record and is left as written; this section
+records what happened to its findings since. Re-verified in the code, not
+assumed:
+
+- **F2 slices (a) and (b) shipped** (#2970, #2969), as the scan's own status
+  line records: the skip-settle and already-used paths no longer print "Paid"
+  and no longer answer the zero hash as settled. Slices (c)/(d) remain open.
+- **B9 fixed** (#3001, follow-up to #2985/#2986): `fetchX402SignContext` now
+  fails with distinct signer-local refusal codes for timeout, unreachable
+  host, non-ok backend response and shape errors (`sign-context.ts`), instead
+  of hanging.
+- **B13 fixed** (#2997, PR #3003): the retired-rail guard now documents its
+  `PAYMENT_ENTRY_POINTS` entry-point rule in its own comment, and the stale
+  "five" against a four-element array is gone (`retired-rail-routing.guard.test.ts`).
+- **Section 4's "Remaining" list is done**: both #2851 (drop the three
+  self-sign tables) and the P3 rename #2911 are CLOSED COMPLETED on GitHub.
+- **B4 still holds**: the signer's `haven_sign` success shape remains
+  `{ signature, x402_binding }` with the next step in the description prose;
+  `next_action`/`next_tool_*` appear on refusal responses (`tools.ts`), not on
+  successes.
+- No disposition found in the repo for B1, B2, B3, B6, B7, B8, B10, B11, B12
+  or F1/F3's remaining slices; they read as open, and this note does not
+  declare them closed.

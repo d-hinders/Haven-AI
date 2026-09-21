@@ -807,3 +807,93 @@ transfer methods and payment flows before funding or signing*
 MCP x402 tool-result challenges and payment metadata*
 [#3118](https://github.com/d-hinders/Haven-AI/issues/3118). No new scan conducted
 in the implementation pass; no new structural finding.
+
+## 2026-09-21 — agent surface, third pass (safe-retirement, MCP hosted + local, signer, demo merchant; owner mandate 2026-09-12, re-invoked 2026-09-21)
+
+Full report: [`docs/bug-reports/quality-scan-2026-09-21-agent-surface.md`](../bug-reports/quality-scan-2026-09-21-agent-surface.md)
+— file:line evidence lives there; this entry stays path-free. Measured on
+`origin/dev` @ `e42ed68f`. Method: live exercise on dev through the hosted
+QA MCP and the local qa-dev signer (fifteen read-only calls: agent,
+allowances, receipts, status, discovery, three quote shapes, four
+sufficiency checks, one signer refusal; no intent, no signature), five
+block-1 mutations in a `npm ci`'d detached worktree behind `cp` backups
+with byte-identical restores, blocks 2, 4 and 6 in scope, incident
+clustering over the 30 in-scope issues since 2026-09-17, workflow
+archaeology over 200 runs.
+
+**Excluded this run:** every 2026-09-13 and 2026-09-17 item — B1 confirmed
+shipped live (9 / 9 badges); F1's `parties` triple, F2 (a)/(b), F3's key half,
+#3097, #3100, #3102 all confirmed live; F3's success half (proposal 1) still
+pending the owner (carried as a note, not re-surfaced); #3105, #3119, #3130
+(shipped / in flight) not re-surfaced.
+
+**Structural findings — none in the examined sample.**
+
+**Defects and candidates (one PR each), pending the owner's word:**
+- D1 — the hosted sufficiency check refuses the token SYMBOL every other
+  read hands the agent (`token: "USDC"` → `MAX_AMOUNT_UNCONVERTIBLE`, remedy
+  copy points at atomic units; the address works and the answer echoes
+  `token: "USDC"`), and its no-cap refusal borrows the paid-call copy.
+  Live ×4. Tracking: no open issue; the tool shipped 2026-09-18.
+- D2 — the hosted MCP's generic refusal branches (SDK API error, SDK error,
+  unknown) carry no `next_action` and no next-step family; a transient
+  merchant/backend 500 during an x402 quote landed there live (retry
+  succeeded) with nothing to tell the agent. Mutation M5 shows the
+  next-step ratchet guards the state-error branch only. Tracking: none
+  open; the epic's slice did not enumerate these branches.
+- C1 — the runtime-compatibility contract cites 44 tracked paths and
+  covers 42; 21 cited-but-not-covered, 9 in scope (four new since 09-17:
+  the #3103/#3173 signer files its own re-verification notes cite).
+- Notes, not filed: the strict-refusal copy for an unknown key is the cap
+  paragraph; the local qa-dev signer runtime on the scanning machine is the
+  2026-09-15 dev build (#3119's class — every signer claim this run is from
+  the tree, not the live runtime); the legacy `payerAddress` divergence
+  between status and receipt is unchanged and `parties` is canonical on
+  both; the sufficiency check's success step is prose (proposal 1's half).
+
+**Probed clean** (block → command → number, all at `e42ed68f`):
+- sizing → `git ls-tree -r --name-only origin/dev packages/<p>/src`, split
+  on `.test.ts|__tests__`, `git show | wc -l` summed → signer 3,536 / 5,190
+  (09-17: 3,042 / 4,417); mcp 1,959 / 3,691 (1,863 / 3,577); mcp-server
+  7,627 / 14,683 (6,830 / 13,407); demo-merchant-mcp 3,741 / 4,042
+  (3,556 / 3,746).
+- block 1 (guard falsifiability) → the reference's census script → 64
+  candidate files; 5 in-scope mutations, newest landing first → **5 caught**
+  (bare-hash refusal 4 red in the signer server suite; audit rotation bound
+  2; demo-merchant `-32001` recovery data 2; sdk unsupported-only 4 after an
+  sdk rebuild; hosted state-error next-step family 3). Instrument lesson:
+  a BSD-`sed` `\s` substitution that did not apply reported green for two
+  of them on the first pass (`grep -c` caught it); a `node_modules` symlink
+  resolves workspace packages to the main checkout — `npm ci` the worktree.
+- block 2 (`covers:` completeness) → the reference's loop under `bash`
+  (`grep -rl`, since `rg` is not on bash's PATH) → 8 contract docs; in
+  scope 44 cited / 42 declared / 21 not covered (C1); the x402 sequence doc
+  26 / 45 / 3 (out of scope).
+- block 3 (stale numbers) → partial: the 09-17 sizing re-derived (above);
+  package READMEs not re-swept.
+- block 4 (retired vocabulary) → the reference's term list over the full
+  tracked set → 192 files (192 on 09-15), 46 historical / 146 live;
+  positive control 36 shards; in scope 10 live files (09-17: 15) — 6 tests
+  and 4 history-describing comments; `npm run lint:retired-rail-prose` →
+  green. Safe-retirement pins: `git grep -l 'process.env.SAFE' --
+  packages/backend/src` → 0 (positive control 57), guard test + middleware
+  present, the four `retiredSafeInflowRoute(` registrations from #3030.
+- block 5 (merge-method drift) → not taken (out of scope).
+- block 6 (nets with holes) → money-verb half → 28 verb files, 18 outside
+  the perimeter (09-15: 29 / 20); in scope 3 verb files, 0 outside (#3098
+  held). Other halves not taken.
+- block 7 (chain health, ledger name) → partial → dev `/health` db ok; the
+  agent's on-chain remaining and the sufficiency read both `from_chain:
+  true`; the Ampersend sandbox 402 on all three endpoints by direct curl.
+- incident clustering → `gh issue list --state all --search
+  "created:>=2026-09-17"` filtered to the three area labels → 30 of 65;
+  next_* 6 (closed epic), connector/doctor 6 (#3119 open, #3210 open —
+  `packages/connect`, out of scope), vocabulary 4 (#3130 open), x402 3,
+  agent reads 3, demo merchant 3, perimeter 1.
+- workflow archaeology → last 200 runs: 0 with attempt > 1, 4 failures;
+  `ci.yml` last 60: 45 / 10 / 5 cancelled (09-17: 45 / 5 / 10) — the ten
+  failures are feature branches mid-build (four visual-baseline round
+  trips, #1777), none on `dev`; `qa-dev.yml` last 40 → 40 / 40.
+- comment archaeology → `TODO|FIXME|HACK` in the four packages → 0.
+- live path → reads and quotes only; no prepare, no signature — the QA
+  agent's budget is 0.001 USDC and the pass was read-only by design.

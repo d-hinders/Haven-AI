@@ -1852,9 +1852,10 @@ describe('runtime resolution when --runtime is absent (#3120)', () => {
     await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
     const fromRecord = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
     const rc = fromRecord.checks.find((c) => c.id === 'runtime_config')
-    expect(rc?.detail).toContain(`(Resolved from ${join(dir, CONNECT_OUTCOME_FILENAME)}; pass --runtime to check a different one.)`)
+    // Names the RUNTIME and the file — the README/CHANGELOG claim is both halves.
+    expect(rc?.detail).toContain(`(Resolved 'cursor' from ${join(dir, CONNECT_OUTCOME_FILENAME)}; pass --runtime to check a different one.)`)
     const explicit = await runDoctor({ runtime: 'cursor' }, { homeDir, ...healthyDeps() })
-    expect(explicit.checks.find((c) => c.id === 'runtime_config')?.detail).not.toContain('Resolved from')
+    expect(explicit.checks.find((c) => c.id === 'runtime_config')?.detail).not.toContain('(Resolved ')
   })
 
   it('unknown runtime: no repair string is a bare `--doctor --repair`, which the parser refuses (#3210 review)', async () => {

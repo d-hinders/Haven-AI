@@ -474,10 +474,10 @@ prints `RUNTIME SPEC OVERRIDE ACTIVE …` first; the install lands in
 the pinned directory) and is never reused between runs; and `--doctor` reports
 a **failing** `runtime_spec_override` check — that is the record of the override,
 not a defect. A malformed value is refused before npm runs. To return to the
-pinned manifest, unset the variables and run `--doctor --repair --runtime <runtime>`.
-The full
-contract — the three variables, what each replaces, the sidecar and wrapper
-records — is in the connector's own README:
+pinned manifest, unset the variables and run
+`--doctor --repair --runtime <runtime>`. The full contract — the three
+variables, what each replaces, the sidecar and wrapper records — is in the
+connector's own README:
 [`packages/connect/README.md` § *Installing an unpublished signer / SDK / MCP build*](../../packages/connect/README.md#installing-an-unpublished-signer--sdk--mcp-build-haven_signer_spec-2424).
 
 Every pin and every override key leaves its directory behind when you move

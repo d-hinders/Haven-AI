@@ -1436,7 +1436,7 @@ export async function runDoctor(
   if (resolution.origin === 'record') {
     const rc = checks.find((check) => check.id === 'runtime_config')
     if (rc) {
-      rc.detail += ` (Resolved from ${join(directory ?? '', CONNECT_OUTCOME_FILENAME)}; pass --runtime to check a different one.)`
+      rc.detail += ` (Resolved '${resolution.runtime}' from ${join(directory ?? '', CONNECT_OUTCOME_FILENAME)}; pass --runtime to check a different one.)`
     }
   }
 

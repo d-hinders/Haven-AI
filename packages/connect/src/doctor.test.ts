@@ -1821,15 +1821,60 @@ describe('runtime resolution when --runtime is absent (#3120)', () => {
 
   it('the restart check says "unknown" instead of "no restart requirement" when the runtime is unknown', async () => {
     const { homeDir } = await healthyHome()
-    // env: {} matters: restartRequiredForRuntime falls back to env DETECTION
-    // for an unknown runtime (registry semantics — a shell that looks like a
-    // runtime gets that runtime's answer). The doctor's own resolution never
-    // guesses, and with no detection signal the degraded detail renders.
     const report = await runDoctor({ runtime: '' }, { homeDir, env: {}, ...healthyDeps() })
     const restart = report.checks.find((c) => c.id === 'restart')
     expect(restart?.ok).toBe(true)
     expect(restart?.detail).toContain('Runtime is unknown')
     expect(restart?.detail).not.toContain('No restart requirement known')
+  })
+
+  it('the restart check never env-guesses an unknown runtime from the doctor\'s own shell (#3210 review)', async () => {
+    const { homeDir } = await healthyHome()
+    // A shell that LOOKS like Claude Code. Before #3210 review the check fell
+    // through to registry env detection and answered about a runtime nobody
+    // named; the resolution invariant says unknown stays unknown.
+    const report = await runDoctor({ runtime: '' }, { homeDir, env: { CLAUDECODE: '1' }, ...healthyDeps() })
+    const restart = report.checks.find((c) => c.id === 'restart')
+    expect(restart?.detail).toContain('Runtime is unknown')
+    expect(restart?.detail).not.toContain('restart it after any repair')
+    // With the runtime NAMED, the same env is irrelevant and the real answer renders.
+    const named = await runDoctor({ runtime: 'claude-desktop' }, { homeDir, env: { CLAUDECODE: '1' }, ...healthyDeps() })
+    expect(named.checks.find((c) => c.id === 'restart')?.detail).toContain('restart it after any repair')
+  })
+
+  it('a record-resolved runtime says where it came from on the runtime_config verdict; an explicit flag does not (#3210 review)', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
+    const fromRecord = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    const rc = fromRecord.checks.find((c) => c.id === 'runtime_config')
+    expect(rc?.detail).toContain("Runtime 'cursor' was resolved from")
+    expect(rc?.detail).toContain(join(dir, CONNECT_OUTCOME_FILENAME))
+    expect(rc?.detail).toContain('pass --runtime to check a different one')
+    const explicit = await runDoctor({ runtime: 'cursor' }, { homeDir, ...healthyDeps() })
+    expect(explicit.checks.find((c) => c.id === 'runtime_config')?.detail).not.toContain('was resolved from')
+  })
+
+  it('unknown runtime: no repair string is a bare `--doctor --repair`, which the parser refuses (#3210 review)', async () => {
+    // Credentials but NO prepared signer runtime, so signer_runtime and
+    // signer_process both fail with a --repair hint on the unknown path.
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-doctor-'))
+    await seedCredentials(homeDir)
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    const repairs = [...report.checks, ...report.agents.flatMap((a) => a.checks)]
+      .map((c) => c.repair ?? '')
+      .filter((r) => r.includes('--repair'))
+    expect(repairs.length).toBeGreaterThanOrEqual(2)
+    for (const repair of repairs) {
+      expect(repair, repair).not.toMatch(/--doctor --repair(?:\s*$|\s+[^-])/)
+      expect(repair, repair).toContain('--runtime <runtime>')
+      expect(repair, repair).toContain('one of: claude-code')
+    }
+    // ...and with the runtime known, the same hints carry the real value.
+    const known = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    for (const c of known.checks) {
+      if (c.repair?.includes('--repair')) expect(c.repair).toContain('--doctor --repair --runtime codex-cli')
+    }
+    await rm(homeDir, { recursive: true, force: true })
   })
 
   it('no rendered check string ever carries a bare --runtime (the paste-truncation bug)', async () => {

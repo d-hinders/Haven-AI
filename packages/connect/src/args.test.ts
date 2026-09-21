@@ -229,6 +229,12 @@ describe('--doctor / --repair runtime requirement (#3210)', () => {
     }
   })
 
+  it('a whitespace-only --runtime value does not satisfy --repair (the doctor would trim it and inherit from the record)', () => {
+    expect(() => parseArgs(['--repair', '--runtime', '   '], {})).toThrow(/--repair needs --runtime <runtime>/)
+    // --doctor is read-only, so the same value passes through for the doctor to trim and resolve.
+    expect(parseArgs(['--doctor', '--runtime', '   '], {}).options.runtime).toBe('   ')
+  })
+
   it('--repair --runtime <name> parses, alone or with --doctor', () => {
     expect(parseArgs(['--repair', '--runtime', 'codex-cli'], {})).toMatchObject({ repair: true, options: { runtime: 'codex-cli' } })
     expect(parseArgs(['--doctor', '--repair', '--runtime', 'cursor'], {})).toMatchObject({ doctor: true, repair: true, options: { runtime: 'cursor' } })

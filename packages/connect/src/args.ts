@@ -240,8 +240,10 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     // read-only: it passes through with no runtime and the doctor resolves
     // one from the setup record (`last-connect-outcome.json`, #3120) or
     // reports the honest "Runtime is unknown" failure — a parser refusal
-    // here made that resolution unreachable from the CLI.
-    if (repair && !options.runtime) {
+    // here made that resolution unreachable from the CLI. `.trim()` because
+    // the doctor trims too: `--runtime "  "` must not slip past this guard
+    // and then resolve from the record on the write path (#3210 review).
+    if (repair && !options.runtime?.trim()) {
       throw new Error(
         '--repair needs --runtime <runtime>: it rewrites that runtime\'s config, so the runtime is named ' +
           'explicitly rather than inherited from the setup record. --doctor alone resolves it from the record.',

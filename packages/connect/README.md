@@ -652,7 +652,8 @@ a skew that is not there. Use the channel your dashboard hands out.
 
 `--runtime` is optional for `--doctor` and required for `--repair` (#3210).
 Without the flag the doctor checks the runtime the setup recorded in the
-agent directory's `last-connect-outcome.json` (#3120), and says so; when no
+agent directory's `last-connect-outcome.json` (#3120), and the `runtime_config`
+verdict says which runtime it resolved and from which file; when no
 record names one, the `runtime_config` check FAILS with "Runtime is unknown —
 the runtime config was NOT checked" and the exit code is 1 — never a pass on a
 config it did not open. `--repair` rewrites that config, so the runtime it

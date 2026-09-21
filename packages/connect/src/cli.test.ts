@@ -776,6 +776,12 @@ describe('flagless --doctor resolves the runtime from the setup record, end to e
       expect(out).toContain('The runtime config was NOT checked')
       expect(out).toContain(CONNECT_OUTCOME_FILENAME)
       expect(out).not.toContain('✓ Runtime MCP config')
+      // Every --repair hint on this path is runnable-with-a-fill-in, never the
+      // bare `--doctor --repair` the parser refuses (#3210 review).
+      expect(out).not.toMatch(/--doctor --repair\s*$/m)
+      for (const line of out.split('\n')) {
+        if (line.includes('--repair')) expect(line, line).toContain('--runtime <runtime>')
+      }
     } finally {
       spy.mockRestore()
     }

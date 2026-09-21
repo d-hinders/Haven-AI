@@ -24,6 +24,7 @@ covers:
   - packages/backend/src/modules/x402/replay.ts
   - packages/cli/src/commands.ts
   - packages/cli/src/commands.test.ts
+  - packages/frontend/src/components/connect-agent/setup-copy.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/connect/src/installed-clients.test.ts
   - packages/backend/src/middleware/retired-safe-names.ts

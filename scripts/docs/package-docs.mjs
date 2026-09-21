@@ -215,6 +215,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
+    // #3210: EDITED, scope = the `--doctor` / `--repair` section's runtime-flag
+    // paragraph and the added flagless `--doctor` example (`--runtime` optional
+    // for `--doctor`, required for `--repair`). Nothing else re-verified. Prior:
     // #2515: EDITED, scope = the command examples only. Every
     // `npx @haven_ai/connect@alpha` became `@haven_ai/connect@<channel>`, and the
     // paragraph under the first example now defines `<channel>` as a placeholder
@@ -245,7 +248,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // with no prior phase to quote, so they rely on the general caveat already
     // stated once at the top of the file. Nothing else re-verified. Prior:
     // '2026-09-01' carried no provenance note.
-    'last-verified': '2026-09-04',
+    'last-verified': '2026-09-21',
   },
   {
     doc: 'packages/cli/README.md',

@@ -1686,10 +1686,12 @@ describe('credential address naming report (#2908)', () => {
  * in the agent credential directory (`last-connect-outcome.json`), and
  * unknown stays unknown: no fabricated pass, no truncated repair command.
  *
- * These tests drive `runDoctor`/`runRepair` directly because the shipped CLI
- * refuses flagless `--doctor` in the argument parser (args.ts) — the doctor
- * layer is where the empty-runtime path is reachable, and the premise note in
- * the PR body records that split.
+ * These tests drive `runDoctor`/`runRepair` directly: this is the doctor
+ * layer's own unit coverage of the empty-runtime path. Until #3210 it was
+ * also the ONLY way to reach it — the argument parser refused a flagless
+ * `--doctor` — so since #3210 the CLI path is pinned end to end in
+ * `cli.test.ts` instead, while `--repair`'s empty-runtime path stays
+ * library-only because the parser still requires `--runtime` for it.
  */
 describe('runtime resolution when --runtime is absent (#3120)', () => {
   it('resolves the recorded runtime from the primary directory and it reaches runtimeConfigPathFor', async () => {

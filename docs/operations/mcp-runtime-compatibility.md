@@ -12,13 +12,18 @@ covers:
   - packages/cli/src/connect-runner.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/account-reads.ts
+  - packages/sdk/src/agent-guidance.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/connector-channel.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/edge.ts
   - packages/sdk/package.json
   - packages/sdk/tsup.config.ts
   - scripts/release-bump.mjs
+  - scripts/release-bump.test.mjs
+  - scripts/verify-connect-bundle.mjs
+  - scripts/README.md
   - packages/mcp-server/src/description-size.test.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
@@ -26,6 +31,7 @@ covers:
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/setup-copy.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
+  - packages/frontend/src/hooks/useAgentConnectionSetupStatus.ts
   - packages/connect/src/installed-clients.test.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/backend/src/routes/transactions.ts
@@ -39,6 +45,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/tool-descriptions.ts
   - packages/sdk/src/next-step.ts
+  - packages/sdk/src/skill-content.ts
   - packages/mcp-server/src/server.ts
   - packages/mcp-server/src/http.ts
   - packages/mcp-server/src/next-step-signer-parity.test.ts

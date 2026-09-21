@@ -20,7 +20,7 @@ covers:
   - packages/frontend/src/lib/__tests__/served-docs.test.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-09-12"
+last-verified: "2026-09-21"
 ---
 
 # Documentation-quality system

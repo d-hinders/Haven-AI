@@ -4,7 +4,7 @@ import type { AccountingOpsCounters } from '../modules/accounting/index.js'
 import { requestValidationOpsSnapshot, type RequestValidationSnapshot } from '../openapi/request-validation.js'
 
 import type { RelayerBalanceStatus } from '../infra/relayer-balance-monitor.js'
-import type { PassportReadiness } from '../modules/passport/readiness.js'
+import type { PassportReadiness } from '../modules/passport/index.js'
 
 // Named by the modules that produce them (#3030: the `typeof import(...)`
 // forms these replaced counted against the request-schemas gauge).

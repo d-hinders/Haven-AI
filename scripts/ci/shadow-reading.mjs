@@ -38,7 +38,11 @@
 // running total counts pre-window requests too; for such a process the
 // in-window traffic is `last − first + 1` (the first line counted its own
 // request) and the header says how many processes were cut that way. Boot
-// lines (`Server listening at`) are counted as `deploys`.
+// lines (`Server listening at`) are counted as `deploys`. Lines are read in
+// FILE order for the boot boundary: a `seen` line that precedes its own boot
+// line in an unsorted file is counted once as cut traffic and once under
+// the booted process — feed the reading in time order, as `railway logs`
+// emits it (a concatenated export should be sorted on its timestamp first).
 //
 // Output: a Markdown table per route module (the same `routes/<file>.ts` key
 // the plugin's `enforcedModules` and the ratchet baseline use), one row per
@@ -93,7 +97,7 @@ export function parseLine(raw) {
   try {
     obj = JSON.parse(text)
   } catch {
-    return BOOT_RE.test(text) ? { kind: 'boot', time: null, process: '?' } : null
+    return BOOT_RE.test(text) ? { kind: 'boot', time: null, process: '?:?' } : null
   }
   if (!obj || typeof obj !== 'object') return null
   const time = timeOf(obj)
@@ -173,7 +177,12 @@ export function aggregate(lines, routeModules, enforcedModules = []) {
       const total = Number(ev.seen) || 0
       const t = p.totals.get(ev.route)
       if (!t) p.totals.set(ev.route, { first: total, last: total })
-      else t.last = Math.max(t.last, total)
+      else {
+        // Order-insensitive: an export that concatenates two streams may
+        // hand a process's lines out of time order (round 2 of PR #3209).
+        t.first = Math.min(t.first, total)
+        t.last = Math.max(t.last, total)
+      }
       continue
     }
     const bucket = ev.kind === 'request_validation.would_refuse' ? refused : coerced
@@ -244,7 +253,7 @@ export function aggregate(lines, routeModules, enforcedModules = []) {
 export function renderMarkdown(reading) {
   const out = []
   out.push(
-    `Shadow reading — window ${reading.window.first ?? '?'} → ${reading.window.last ?? '?'} (${reading.window.hours} h), ${reading.lines.read} lines read (${reading.lines.skipped} not ours), ${reading.deploys} deploy(s), ${reading.processes} process(es) seen, ${reading.cutProcesses} started before the window (their traffic counted from their first line in it).`,
+    `Shadow reading${reading.filteredTo ? ` (filtered to \`${reading.filteredTo}\`)` : ''} — window ${reading.window.first ?? '?'} → ${reading.window.last ?? '?'} (${reading.window.hours} h), ${reading.lines.read} lines read (${reading.lines.skipped} not ours), ${reading.deploys} deploy(s), ${reading.processes} process(es) seen, ${reading.cutProcesses} started before the window (their traffic counted from their first line in it).`,
   )
   out.push('')
   out.push('| module | operation | seen | would_refuse (field: n) | would_coerce (field: n) | verdict |')
@@ -276,7 +285,14 @@ function main(argv) {
   const routeModules = readRouteModules(readFileSync(ROUTE_MODULES_PATH, 'utf8'))
   const enforcedModules = enforcedModulesFromIndex(readFileSync(INDEX_PATH, 'utf8'))
   const reading = aggregate(text, routeModules, enforcedModules)
-  if (moduleFilter) reading.rows = reading.rows.filter((r) => r.module === moduleFilter)
+  if (moduleFilter) {
+    if (!Object.values(routeModules).includes(moduleFilter)) {
+      process.stderr.write(`shadow-reading: --module ${moduleFilter} is not a key in route-modules.generated.ts.\n`)
+      return 2
+    }
+    reading.rows = reading.rows.filter((r) => r.module === moduleFilter)
+    reading.filteredTo = moduleFilter
+  }
   process.stdout.write((json ? JSON.stringify(reading, null, 2) : renderMarkdown(reading)) + '\n')
   if (reading.window.hours < minHours) {
     process.stderr.write(`shadow-reading: the window is ${reading.window.hours} h, below the ${minHours} h minimum — not a reading to paste.\n`)

@@ -380,8 +380,9 @@ Isolation rules that are non-negotiable for a payments product:
   the numbers under-state by design: a minute's last `seen` line is written
   on that minute's FIRST request, so the final minute of a process is
   under-counted by up to a minute's traffic; and a cut process with a single
-  line counts as 1. Both err towards NOT PROVEN. If the header says
-  `skipped` equals `read`, the CLI's envelope is not what the parser expects
+  line counts as 1. Both err towards NOT PROVEN. If the header's `not ours`
+  count equals the lines read (`lines.skipped` = `lines.read` under
+  `--json`), the CLI's envelope is not what the parser expects
   (Railway may lift a JSON line's fields into `attributes`) — save the raw
   lines and pass them with `--file`, or fix the one field name in
   `parseLine`. If it says `1 deploy(s)` on a day with merges, the CLI handed

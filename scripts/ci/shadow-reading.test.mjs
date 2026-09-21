@@ -47,12 +47,15 @@ export function fixture() {
     wrap(pino({ pid: 100, event: 'request_validation.seen', route: 'GET /agents/:id/delegations', seen: 7 }), '2026-09-22T08:00:00.000Z'),
     // Deploy on h1: pid 200 boots inside the window; its totals start fresh.
     pino({ time: T0 + 9 * H, pid: 200, msg: 'Server listening at http://0.0.0.0:3001' }),
+    // A second replica boots in the same minute (chronological order, as the
+    // CLI emits it — so boot-only segmentation would close h1:200 here).
+    pino({ time: T0 + 9 * H, pid: 300, hostname: 'h2', msg: 'Server listening at http://0.0.0.0:3001' }),
     pino({ time: T0 + 10 * H, pid: 200, event: 'request_validation.seen', route: 'POST /x402', seen: 5 }),
-    // The trailing-slash twin folds onto the same operation.
+    // The trailing-slash twin has its OWN running total in the plugin; the
+    // two are summed under one operation.
     pino({ time: T0 + 10 * H, pid: 200, event: 'request_validation.seen', route: 'POST /x402/', seen: 2 }),
     pino({ time: T0 + 10 * H, pid: 200, event: 'request_validation.would_coerce', route: 'GET /agents/:id/delegations', field: 'limit' }),
-    // A second replica, booted in the window, with its own running total.
-    pino({ time: T0 + 9 * H, pid: 300, hostname: 'h2', msg: 'Server listening at http://0.0.0.0:3001' }),
+    // The replica's own running total.
     pino({ time: T0 + 11 * H, pid: 300, hostname: 'h2', event: 'request_validation.seen', route: 'POST /x402', seen: 10 }),
     // Refused but never seen in the window.
     pino({ time: T0 + 12 * H, pid: 200, event: 'request_validation.would_refuse', route: 'POST /payments', field: 'body/amount', message: 'y' }),
@@ -95,16 +98,22 @@ describe('shadow-reading (#3208)', () => {
   it('sums seen per PROCESS (hostname:pid) — a cut process counts last−first+1, a booted one its last total, replicas add — and folds the twin', () => {
     const r = aggregate(fixture(), ROUTE_MODULES, ENFORCED)
     const x402 = r.rows.find((x) => x.route === 'POST /x402')
-    // h1:100 cut: 503−500+1 = 4; h1:200 booted: max(5, twin 2) per key → 5 on
-    // `POST /x402` and 2 on the folded twin, both under the same operation
-    // = 7; h2:300 booted: 10. Total 4 + 7 + 10 = 21. Mutation: segment by
-    // boot line alone → the replica's boot closes h1:200's segment → red.
+    // h1:100 cut: 503−500+1 = 4; h1:200 booted: 5 on `POST /x402` plus 2 on
+    // its twin's own counter = 7; h2:300 booted: 10. Total 4 + 7 + 10 = 21.
+    // Mutation: one process for every line (segment by boot line alone) →
+    // the replica's boot, which precedes h1:200's lines, closes h1:200's
+    // segment → 16 → red.
     assert.equal(x402.seen, 21)
     assert.deepEqual(x402.wouldRefuse, { 'body/settlementScheme': 1 })
     assert.equal(x402.verdict, 'refusals — classify each line')
     assert.equal(r.processes, 3)
     assert.equal(r.cutProcesses, 1)
     assert.equal(r.deploys, 2)
+    // Out-of-order lines within a cut process: `first` is the minimum, not
+    // the first in file order (531 / 500 / 530 → 32, not 1). Mutation:
+    // `first` from file order → 1 → red.
+    const shuffled = [531, 500, 530].map((n) => pino({ time: T0 + 1 * H, pid: 900, event: 'request_validation.seen', route: 'POST /payments', seen: n })).join('\n')
+    assert.equal(aggregate(shuffled, ROUTE_MODULES, ENFORCED).rows.find((x) => x.route === 'POST /payments').seen, 32)
     // h1:100 is cut and logged ONE line for this route (total 7): the only
     // honest in-window figure is 1 — the request that line counted. The
     // pre-window six are not this window's.
@@ -177,5 +186,15 @@ describe('shadow-reading (#3208)', () => {
       bad = err.status
     }
     assert.equal(bad, 2)
+    // A module the table does not know is exit 2, not an empty table; a known
+    // one labels the header.
+    let unknown = 0
+    try {
+      execFileSync(process.execPath, [SCRIPT, '--file', FIXTURE, '--module', 'routes/nope.ts'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (err) {
+      unknown = err.status
+    }
+    assert.equal(unknown, 2)
+    assert.match(execFileSync(process.execPath, [SCRIPT, '--file', FIXTURE, '--module', 'routes/x402.ts'], { encoding: 'utf8' }), /^Shadow reading \(filtered to `routes\/x402.ts`\) — window/)
   })
 })

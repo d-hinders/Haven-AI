@@ -390,6 +390,31 @@ describe('haven_quote_x402', () => {
     expect(result.data.warnings?.[0]?.message).not.toContain('haven_pay_mcp_tool')
   })
 
+  // #3214: the live refusal that filed the issue — a transient upstream 500
+  // during haven_quote_x402 (hosted haven-qa-dev against an Ampersand sandbox
+  // fact endpoint, 2026-09-21) surfaced as a bare `API_ERROR` with nothing to
+  // act on; the same call succeeded on retry a minute later. Replayed here
+  // through the real handler and the SDK's real quote path: the SDK throws
+  // X402UnexpectedStatusError (a HavenApiError, statusCode 500) and
+  // normalizeError's generic branch now carries the retry-once step.
+  it('an upstream 500 during the quote is API_ERROR with a retry step, not a dead end (#3214)', async () => {
+    stubFetch({
+      'GET /paid': { status: 500, body: { error: 'upstream unavailable' } },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+    })
+    const payload = await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' })
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('API_ERROR')
+    expect(payload.statusCode).toBe(500)
+    expect(payload.next_action).toBe(AgentPaymentNextAction.RetryWithExplicitContext)
+    // No tool is named: normalizeError serves every tool, the agent's own last
+    // call says which to re-run, and the idempotency key must not change.
+    expect(payload.next_tool).toBeUndefined()
+    expect(payload.next_tool_omitted_reason).toMatch(/same arguments/)
+    expect(payload.next_tool_omitted_reason).toMatch(/idempotency_key/)
+  })
+
   it('a pay immediately after the quote selects exactly what the quote predicted', async () => {
     const quote = ok<Record<string, any>>(
       await quoteWithHeader(BOTH_ENTRIES_PAYMENT_REQUIRED, SCHEME_DELEGATION_AGENT),

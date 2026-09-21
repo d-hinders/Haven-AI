@@ -58,9 +58,11 @@ describe('hosted refusal next-step emissions — characterization (#3102)', () =
 
   for (const fixture of REFUSAL_SITES) {
     it(fixture.site, () => {
-      const err = fixture.step === 'window-expired-helper'
-        ? paymentWindowExpiredError({ paymentId: 'pay_1', status: 'expired', phase: 'expired', rail: 'x402' })
-        : new HostedToolError({ ...fixture.base, nextStep: refusalNextStep(fixture.step) })
+      const err = fixture.thrown !== undefined
+        ? fixture.thrown
+        : fixture.step === 'window-expired-helper'
+          ? paymentWindowExpiredError({ paymentId: 'pay_1', status: 'expired', phase: 'expired', rail: 'x402' })
+          : new HostedToolError({ ...fixture.base, nextStep: refusalNextStep(fixture.step) })
       const out = normalizeError(err) as unknown as Record<string, unknown>
       expect(out.success).toBe(false)
       const picked = Object.fromEntries(NEXT_KEYS.filter((k) => out[k] !== undefined).map((k) => [k, out[k]]))
@@ -71,9 +73,11 @@ describe('hosted refusal next-step emissions — characterization (#3102)', () =
   it('registry walk: every refusal names a tool whose arguments parse under its strict schema, or says why none follows', async () => {
     const { toolSchemas } = await import('./tools/contracts.js')
     for (const fixture of REFUSAL_SITES) {
-      const err = fixture.step === 'window-expired-helper'
-        ? paymentWindowExpiredError({ paymentId: 'pay_1', status: 'expired', phase: 'expired', rail: 'x402' })
-        : new HostedToolError({ ...fixture.base, nextStep: refusalNextStep(fixture.step) })
+      const err = fixture.thrown !== undefined
+        ? fixture.thrown
+        : fixture.step === 'window-expired-helper'
+          ? paymentWindowExpiredError({ paymentId: 'pay_1', status: 'expired', phase: 'expired', rail: 'x402' })
+          : new HostedToolError({ ...fixture.base, nextStep: refusalNextStep(fixture.step) })
       const out = normalizeError(err)
       if (out.next_tool) {
         const name = out.next_tool_name as keyof typeof toolSchemas

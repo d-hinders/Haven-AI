@@ -31,7 +31,6 @@ import type { Hex, Address } from '../domain/chain-client.js'
 // dep-lint-exempt: 8 grant-lifecycle statements on a dedicated client (pool.connect); the guarded version/waiver checks must travel with their writes, making this a >100-line move deferred under #999
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
-import { isAddress as isValidAddress } from '@haven_ai/core'
 import { getChain } from '../domain/chains.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../rails/hybrid-provisioning.js'
@@ -66,6 +65,7 @@ import {
   revokeDelegationsByHashes,
 } from '../infra/repositories/delegation-budgets.js'
 import { redactVendorSecrets } from '../rails/execution-rail.js'
+import { stringifyWithBigintN, reviveBigintN } from '../domain/userop-wire.js'
 // Signer management is shared with the account-scoped routes (#1081) — one
 // copy of the authority rules, reached two ways.
 import {
@@ -264,13 +264,21 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   )
 
   // ── POST /:id/delegations/build — grant step 1 (nothing signed yet) ───────
+  // #3031: shape — required fields, address forms, the budget's digit form,
+  // the period floor — is the spec's, enforced before the handler; the
+  // uint96 bound and the future-expiry rule stay here (the enforcer's word
+  // size and chain-time semantics, not shapes).
   app.post<{
     Params: { id: string }
+    // Required members match the spec's required array — since #3031 the
+    // enforced schema refuses a body missing any of them before the handler,
+    // so the handler can trust them (the #3082 lesson: type the route the way
+    // the wire now guarantees it).
     Body: {
-      token_address?: string
+      token_address: string
       recipient_address?: string | null
-      budget_atomic?: string
-      period_seconds?: number
+      budget_atomic: string
+      period_seconds: number
       expires_at?: number
     }
   }>('/:id/delegations/build', async (request, reply) => {
@@ -292,21 +300,17 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
 
     const { token_address, recipient_address, budget_atomic, period_seconds, expires_at } =
       request.body ?? {}
-    if (!token_address || !isValidAddress(token_address)) {
-      return reply.code(400).send({ error: 'Valid token_address is required' })
-    }
-    if (recipient_address != null && !isValidAddress(recipient_address)) {
-      return reply.code(400).send({ error: 'recipient_address must be a valid address when set' })
-    }
-    if (!budget_atomic || !/^\d+$/.test(budget_atomic) || BigInt(budget_atomic) <= 0n || BigInt(budget_atomic) > MAX_UINT96) {
+    // The uint96 ceiling is the ERC20PeriodTransferEnforcer's word size, not a
+    // shape: the spec's `^[0-9]+$` pattern accepts any digit string, and the
+    // contract refuses one that cannot fit the enforcer's uint96.
+    if (BigInt(budget_atomic) > MAX_UINT96) {
       return reply.code(400).send({ error: 'budget_atomic must be a positive atomic amount' })
     }
-    if (!period_seconds || !Number.isInteger(period_seconds) || period_seconds < 60) {
-      return reply.code(400).send({ error: 'period_seconds must be an integer ≥ 60' })
-    }
+    // The expiry default and the future rule are chain-time semantics
+    // (`Date.now()` here, seconds on-chain), not shapes.
     const nowSec = Math.floor(Date.now() / 1000)
     const expiry = expires_at ?? nowSec + 90 * 86_400
-    if (!Number.isInteger(expiry) || expiry <= nowSec) {
+    if (expiry <= nowSec) {
       return reply.code(400).send({ error: 'expires_at must be in the future' })
     }
 
@@ -470,8 +474,12 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const { signature } = request.body ?? {}
       // EOA signatures are 65 bytes (130 hex); a passkey account's delegation
       // signature is an ABI-encoded WebAuthn assertion — longer (#887). The
-      // REAL validator is EIP-1271 at redemption; this is a shape check only.
-      if (!signature || !/^0x[0-9a-fA-F]{130,}$/.test(signature) || signature.length % 2 !== 0) {
+      // REAL validator is EIP-1271 at redemption; the spec's `{130,}` pattern
+      // carries the shape since #3031, and the odd-length refusal stays here:
+      // the spec's pattern counts HEX CHARS, not bytes, so a longer odd-length
+      // string passes it and a passkey assertion must never be truncated to
+      // even it.
+      if (signature && signature.length % 2 !== 0) {
         return reply.code(400).send({ error: 'An owner signature is required (65-byte ECDSA or WebAuthn assertion)' })
       }
       if (!HASH_RE.test(request.params.hash)) {
@@ -590,10 +598,15 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         // Same refusal and wording as #2331's, with no RPC held across the
         // lock. Kept as one `if` so the transaction gains no second ROLLBACK
         // call site (`lint:deps` counts inline SQL per file, shrink-only).
+        // `signed.delegate` is compared through `String(...)` (#3031, free of
+        // the old type-check arm): an undefined or non-string delegate yields
+        // "undefined", which no derived address equals — the same refusal the
+        // old explicit type guard produced, now also covering the case the
+        // enforced `preparedUserOperation` schema (an open object) lets
+        // through.
         if (
           lockedAgent.delegate_address.toLowerCase() !== preLockDelegateKey.toLowerCase() ||
-          typeof signed.delegate !== 'string' ||
-          signed.delegate.toLowerCase() !== expectedDelegateAccountAddress.toLowerCase()
+          String(signed.delegate).toLowerCase() !== expectedDelegateAccountAddress.toLowerCase()
         ) {
           await client.query('ROLLBACK')
           return reply.code(409).send({ error: ROTATED_DELEGATE_KEY_REFUSAL })
@@ -732,9 +745,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
       })
       const prepared = await treasury.prepareCalls(calls)
-      const user_operation = JSON.parse(
-        JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
-      )
+      // `<digits>n` bigint wire encoding — domain/userop-wire.ts (#3031).
+      const user_operation = JSON.parse(stringifyWithBigintN(prepared.userOperation))
       const delegation_hashes = targets.map((target) => target.delegation_hash)
       if (resolved.scheme === 'webauthn_userop') {
         return {
@@ -770,17 +782,13 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
     const { signature, user_operation, delegation_hashes } = request.body ?? {}
-    if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
-      return reply.code(400).send({ error: 'signature is required' })
-    }
-    if (!user_operation || typeof user_operation !== 'object') {
-      return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
-    }
-    if (
-      !Array.isArray(delegation_hashes) ||
-      delegation_hashes.length === 0 ||
-      !delegation_hashes.every((h) => typeof h === 'string' && HASH_RE.test(h))
-    ) {
+    // Signature form, user_operation presence and the delegation_hashes array
+    // shape are the spec's since #3031 (`hexBytes` / `preparedUserOperation` /
+    // `delegationHashList`), enforced before the handler — the element pattern
+    // included. The `Array.isArray` below is a TYPE NARROWING for the relay
+    // call, not a second validation: the relay is re-derived from server
+    // state, so the body is transport, never authority.
+    if (!Array.isArray(delegation_hashes) || delegation_hashes.length === 0) {
       return reply.code(400).send({ error: 'delegation_hashes (from the prepare step) is required' })
     }
     const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
@@ -796,9 +804,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         rpcUrl: getChain(agent.chain_id).rpcUrl,
         sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
       })
-      const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>
-        typeof v === 'string' && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v,
-      )
+      // `<digits>n` marker revival — domain/userop-wire.ts (#3031).
+      const revived = reviveBigintN(user_operation)
       const result = await treasury.submitCall(
         { userOperation: revived, userOpHash: '0x' as Hex, signingTypedData: null, treasuryAddress: treasury.treasuryAddress },
         signature as Hex,
@@ -885,9 +892,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
         })
         const prepared = await treasury.prepareCall(revocation.to, revocation.data)
-        const user_operation = JSON.parse(
-          JSON.stringify(prepared.userOperation, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v)),
-        )
+        // `<digits>n` bigint wire encoding — domain/userop-wire.ts (#3031).
+        const user_operation = JSON.parse(stringifyWithBigintN(prepared.userOperation))
         if (resolved.scheme === 'webauthn_userop') {
           // Passkey accounts: the owner signs the userOpHash with the account
           // passkey (WebAuthn) — the frontend slice, #887. No EIP-712 payload.
@@ -931,12 +937,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
     const { signature, user_operation } = request.body ?? {}
-    if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
-      return reply.code(400).send({ error: 'signature is required' })
-    }
-    if (!user_operation || typeof user_operation !== 'object') {
-      return reply.code(400).send({ error: 'user_operation (from the prepare step) is required' })
-    }
+    // Signature form and user_operation presence are the spec's since #3031
+    // (`hexBytes` / `preparedUserOperation`), enforced before the handler.
     const owner = await loadHybridOwnerConfig(sub, agent.treasury_address as string, agent.chain_id)
     if (!owner) return reply.code(409).send({ error: 'Account signer configuration unknown' })
 
@@ -950,9 +952,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         rpcUrl: getChain(agent.chain_id).rpcUrl,
         sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
       })
-      const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>
-        typeof v === 'string' && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v,
-      )
+      // `<digits>n` marker revival — domain/userop-wire.ts (#3031).
+      const revived = reviveBigintN(user_operation)
       const result = await treasury.submitCall(
         { userOperation: revived, userOpHash: '0x' as Hex, signingTypedData: null, treasuryAddress: treasury.treasuryAddress },
         signature as Hex,

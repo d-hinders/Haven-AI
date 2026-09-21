@@ -6118,10 +6118,15 @@ export const openapiSpec = {
                   },
                   idempotency_key: {
                     type: 'string',
+                    minLength: 1,
+                    maxLength: 128,
                     description:
                       'Validated (1–128 characters) and then IGNORED — nothing is deduplicated, ' +
                       'because every call refuses. Accepted only so an existing client is ' +
-                      'refused by the rail rather than by a body error (#2105).',
+                      'refused by the rail rather than by a body error (#2105). The bounds are ' +
+                      '#3031: the handler always refused an empty or over-long key; the closed ' +
+                      'schema did not state it, so enforcement would have accepted what the ' +
+                      'description promised to refuse.',
                   },
                 },
                 additionalProperties: false,
@@ -8399,8 +8404,31 @@ export const openapiSpec = {
           description: { type: 'string' },
           maxTimeoutSeconds: { type: 'integer' },
           category: { type: 'string' },
-          idempotencyKey: { type: 'string', maxLength: 128 },
+          idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
           signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
+          /**
+           * #3031 (epic #3028 slice 3): the two fields every published SDK
+           * version sends were undeclared on this closed schema, so enforcing
+           * the spec as written would have refused every erc7710 payment.
+           * Declared as the handler validated them (#946/#1058): the scheme
+           * enum is the rail-INDEPENDENT structural check that answers before
+           * the rail seam's 410 (pinned by allowance-rail-retired.test.ts — a
+           * retired-rail account asking with a non-scheme value still gets the
+           * 400, and it makes no rail claim), and facilitatorAddresses is the
+           * redeemer pin the erc7710 settlement child is built from. The
+           * scheme/payTo AGREEMENT rule stays semantic in
+           * modules/x402/scheme-selection.ts — no schema can see the agent's
+           * delegate address the payTo shape is compared against.
+           */
+          settlementScheme: { type: 'string', enum: ['erc7710', 'eip3009'] },
+          facilitatorAddresses: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 16,
+            items: address,
+            description:
+              "#1058: the erc7710 challenge entry's extra.facilitatorAddresses — the settlement child is redeemable ONLY by these addresses. Forwarded verbatim; null means the merchant advertised none and the field is omitted.",
+          },
           mcpCallContext: {
             type: 'object',
             description:

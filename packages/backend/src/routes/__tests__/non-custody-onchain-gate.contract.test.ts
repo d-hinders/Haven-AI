@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 import {
   bannedModuleRefs as bannedRefsIn,
@@ -300,6 +301,8 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // Enforced wiring (#3031, epic #3028 slice 3) — fixtures are conformant.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/payments.ts'] })
     await app.register(paymentRoutes, { prefix: '/payments' })
   })
   afterAll(async () => { await app.close() })

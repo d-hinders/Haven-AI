@@ -135,6 +135,19 @@ installRequestValidation(app, {
     // route tests (off-spec → the 400 envelope; conformant → byte-identical)
     // are the instrument, and `enforce` on dev is the reading. Slices 3–4
     // (#3031/#3032) flip the money-path modules on a persisted reading.
+    // Slice 3 (#3031): the four money-path files below join the same way.
+    // The corrections first (B1 on the epic: `settlementScheme` +
+    // `facilitatorAddresses` on `X402AuthorizeRequest` — every published SDK
+    // version sends both, so enforcing the spec as written refused every
+    // erc7710 payment and stripping them was the silent-reroute hazard), the
+    // characterization pinned every accepted shape byte-identical, and the
+    // four incident tests name their refusing layer. The shadow reading over
+    // these modules (2026-09-21, #3028) showed exactly the two corrected
+    // fields on x402 and nothing else.
+    'routes/payments.ts',
+    'routes/x402.ts',
+    'routes/agent-delegations.ts',
+    'routes/machine-payments.ts',
     'index.ts',
     'routes/accounting.ts',
     'routes/accounting-feed.ts',

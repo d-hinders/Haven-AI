@@ -190,6 +190,12 @@ describe('delegation lifecycle API (#828)', () => {
   let app: FastifyInstance
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3031, epic #3028 slice 3): the module is
+    // ENFORCED — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it byte-identically. (The OPEN-budget
+    // suites at the bottom of this file assemble their own apps across all
+    // four wiring modes and keep doing so.)
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/agent-delegations.ts'] })
     await app.register(agentDelegationRoutes, { prefix: '/agents' })
   })
   afterAll(async () => app.close())
@@ -1388,6 +1394,8 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
   let app: FastifyInstance
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // Enforced wiring (#3031, epic #3028 slice 3) — see the first suite.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/agent-delegations.ts'] })
     await app.register(agentDelegationRoutes, { prefix: '/agents' })
   })
   afterAll(async () => app.close())

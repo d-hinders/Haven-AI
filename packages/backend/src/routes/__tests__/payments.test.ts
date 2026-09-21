@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 
 const { mockQuery, fiatMocks } = vi.hoisted(() => ({
@@ -181,6 +182,11 @@ describe('payment routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3031, epic #3028 slice 3): the module is
+    // ENFORCED, so this suite exercises the enforced request edge — off-spec
+    // requests answer the 400 envelope before the handler, conformant ones
+    // reach it byte-identically.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/payments.ts'] })
     await app.register(paymentRoutes, { prefix: '/payments' })
   })
 

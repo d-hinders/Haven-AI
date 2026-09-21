@@ -1,16 +1,13 @@
-import { FastifyInstance } from 'fastify'
+import { FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { getAgentPaymentStatus } from '../modules/payments/index.js'
 import { agentExecutionRailLabel } from '../rails/execution-rail.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
-import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   handleGetAllowances,
   handleBalanceCoverage,
   handleBudgetPrecheck,
-  budgetPrecheckBodyError,
-  parseBalanceCoverageQuery,
   handleReconciliationEvent,
   handleSend,
   attachEvidenceHandler,
@@ -21,14 +18,10 @@ import {
   prepareSweep,
   submitSweep,
   RECONCILIATION_EVENT_TYPES,
-  SUPPORTED_ASSETS,
-  type AuthorizeBody,
-  type BudgetPrecheckBody,
   type EvidenceBody,
   type ReconciliationEventBody,
   type SendAsset,
   type SendBody,
-  type SweepSubmitBody,
 } from '../modules/mpp/index.js'
 
 // Route handlers only: request validation, auth middleware wiring, rate-limit
@@ -38,12 +31,20 @@ import {
 // `src/modules/mpp/` (#997, epic #980 M4). See that module's `index.ts` for
 // the public surface and the boundary rationale.
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
-}
-
-/** #3128: a receipts cursor is a receipt id (uuid). */
+/** #3128: a receipts cursor is a receipt id (uuid). Kept as the handler's narrowing. */
 const RECEIPT_CURSOR_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * The receipts page's limit read, post-enforcement (#3031). The spec declares
+ * `limit` as `integer, minimum: 1, maximum: 100, default: 25`, so ajv coerces
+ * the query string and injects the default before the handler — the clamp
+ * (Number.isInteger / Math.min / Math.max) and the `? 25` fallback are gone.
+ * The guard covers a caller that mounted the module without the plugin (the
+ * transactions.ts precedent).
+ */
+function readReceiptsLimit(value: number | string | undefined, fallback: number): number {
+  return value === undefined ? fallback : Number(value)
+}
 
 export default async function machinePaymentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', agentAuthMiddleware)
@@ -97,32 +98,34 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   // every figure in the response is named for its concept (budget_* is
   // authority, covered is holdings). See modules/mpp/balance-coverage.ts for
   // the argument, and the OpenAPI entry for the agent-facing wording.
+  //
+  // #3031: the spec declares both query parameters (`token`, a
+  // required-by-handler string; `amount_atomic`), so the two hand-rolled
+  // guards in `modules/mpp/balance-coverage-guards.ts` (relocated out of this
+  // file by #3126 for the ratchet) are replaced by the enforced schema and
+  // deleted — `parseBalanceCoverageQuery` folded back into a one-line parse.
   app.get<{ Querystring: { token?: string; amount_atomic?: string } }>(
     '/balance-coverage',
     async (request, reply) => {
       const agent = request.agent as AgentContext
-      // #3126 query guards relocated to the mpp module
-      // (parseBalanceCoverageQuery) so the #3029 request-schemas ratchet
-      // keeps its shrink-only baseline for this file — checks and 400 bodies
-      // unchanged. Parses the raw wire query (amount_atomic) into the
-      // handler's camelCase input.
-      const parsed = parseBalanceCoverageQuery(request.query)
-      if ('error' in parsed) {
-        return reply.code(400).send(parsed)
-      }
-      const result = await handleBalanceCoverage(agent, parsed)
+      const result = await handleBalanceCoverage(agent, {
+        token: request.query.token ?? '',
+        amountAtomic: request.query.amount_atomic ?? '',
+      })
       return reply.code(result.statusCode).send(result.body)
     },
   )
 
   app.get<{ Querystring: { limit?: string; cursor?: string } }>('/receipts', async (request, reply) => {
     const agent = request.agent as AgentContext
-    const parsedLimit = request.query.limit ? Number(request.query.limit) : 25
-    const limit = Number.isInteger(parsedLimit)
-      ? Math.min(Math.max(parsedLimit, 1), 100)
-      : 25
-    // #3128: the cursor is a receipt id from a previous page. Anything else
-    // is refused up front rather than reaching the uuid cast in the query.
+    const limit = readReceiptsLimit(request.query.limit, 25)
+    // #3128: the cursor is a receipt id from a previous page. The spec
+    // declares `format: uuid` since #3031, so a NON-UUID cursor is refused by
+    // the enforced schema before the handler; the narrowing here covers a
+    // caller that mounted the module without the plugin. What STAYS semantic
+    // is the lookup below: a well-formed uuid that names no receipt of THIS
+    // agent is still a 400 from the handler (`listReceipts`), not a 404 —
+    // the cursor-vs-total distinction the #3128 review pinned.
     const cursor = request.query.cursor ?? null
     if (cursor !== null && !RECEIPT_CURSOR_PATTERN.test(cursor)) {
       return reply.code(400).send({ error: 'cursor must be the id of a receipt returned by a previous page (next_cursor).' })
@@ -149,109 +152,68 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   })
 
   // ── POST /send — Plain transfer (asset/recipient naming convention) ─────────
-
+  // #3031: the body shape — the asset enum, the recipient pattern, the
+  // amount's string form, idempotency_key's 1–128 bounds — is the spec's,
+  // enforced before the handler. The handler keeps only the amount's
+  // positive-number MEANING (Number-parse semantics the spec's bare `string`
+  // cannot state) and the rail refusals below.
   app.post<{ Body: SendBody }>('/send', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const { asset, recipient, amount } = request.body
 
-    // 1. Validate inputs
-    if (!asset || !SUPPORTED_ASSETS.includes(asset as SendAsset)) {
-      return reply.code(400).send({
-        error: 'asset must be one of: ETH, USDC',
-        supported: SUPPORTED_ASSETS,
-      })
-    }
-    if (!recipient || !isValidAddress(recipient)) {
-      return reply.code(400).send({ error: 'Valid recipient address is required' })
-    }
-    if (!amount || typeof amount !== 'string' || isNaN(Number(amount)) || Number(amount) <= 0) {
+    if (isNaN(Number(amount)) || Number(amount) <= 0) {
       return reply.code(400).send({ error: 'amount must be a positive number' })
     }
 
-    let idempotencyKey: string | undefined
-    if (request.body.idempotency_key !== undefined) {
-      const key = request.body.idempotency_key
-      if (typeof key !== 'string' || key.length < 1 || key.length > 128) {
-        return reply.code(400).send({ error: 'idempotency_key must be a string of 1–128 characters' })
-      }
-      idempotencyKey = key
-    }
-
-    const result = await handleSend(agent, asset as SendAsset, recipient, amount, idempotencyKey)
+    const result = await handleSend(agent, asset as SendAsset, recipient, amount, request.body.idempotency_key)
     return reply.code(result.statusCode).send(result.body)
   })
 
   // #1328: the legacy internal MPP demo flow is retired outright — fail
   // closed, nothing read or written beyond the agent-auth lookup the
-  // `onRequest` hook already did. `AuthorizeBody` stays as the route's
-  // request type for OpenAPI/documentation purposes; the body is never
-  // inspected. Agents are directed to the deployed x402 merchant flow.
-  app.post<{ Body: AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, async (_request, reply) => {
-    const refusal = mppDemoRetired()
-    return reply.code(refusal.statusCode).send(refusal.body)
-  })
+  // `onRequest` hook already did. Agents are directed to the deployed x402
+  // merchant flow.
+  //
+  // #3031: the module is now ENFORCED, and the spec declares a request body
+  // for this tombstone (`MachinePaymentAuthorizeRequest`, the shape a client
+  // of the retired rail sent) — so the route-level `onRequest` hook (the
+  // slice-2 `retiredSafeInflowRoute` pattern, local to this tombstone
+  // because the refusal's single producer is `mppDemoRetired`, not
+  // `safeRailRetired`) keeps the 410 ahead of validation: a malformed body
+  // is told the flow is GONE, not asked to fix its request. Auth still wins
+  // for an anonymous caller: the module-level `agentAuthMiddleware` hook
+  // above is registered first, and Fastify runs onRequest hooks in
+  // registration order. Pinned in this file's test.
+  app.post(
+    '/authorize',
+    {
+      onRequest: async (_request: FastifyRequest, reply: FastifyReply) => {
+        const refusal = mppDemoRetired()
+        return reply.code(refusal.statusCode).send(refusal.body)
+      },
+      config: moneyPathRateLimit,
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      // Unreachable: the onRequest hook answers every request. Kept because
+      // Fastify requires a handler.
+      const refusal = mppDemoRetired()
+      return reply.code(refusal.statusCode).send(refusal.body)
+    },
+  )
 
-  app.post<{ Body: EvidenceBody }>('/evidence', { config: moneyPathRateLimit }, async (request, reply) => {
+  // ── POST /evidence ────────────────────────────────────────────────────────
+  // #3031: the ladder is gone — every field's presence, type and form
+  // (paymentId uuid, rail string, txHash `0x`+64-hex, the four optional
+  // header strings, the three payload objects) is the spec's
+  // `MachinePaymentEvidenceRequest`, enforced before the handler.
+  app.post('/evidence', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
-    const body = request.body
-
-    if (!body || typeof body !== 'object') {
-      return reply.code(400).send({ error: 'Evidence body is required' })
-    }
-    if (!body.paymentId || typeof body.paymentId !== 'string') {
-      return reply.code(400).send({ error: 'paymentId is required' })
-    }
-    if (!body.rail || typeof body.rail !== 'string') {
-      return reply.code(400).send({ error: 'rail is required' })
-    }
-    if (!body.txHash || typeof body.txHash !== 'string') {
-      return reply.code(400).send({ error: 'txHash is required' })
-    }
-    if (body.resourceUrl !== undefined && typeof body.resourceUrl !== 'string') {
-      return reply.code(400).send({ error: 'resourceUrl must be a string' })
-    }
-    if (
-      body.paymentProofHeaderName !== undefined &&
-      typeof body.paymentProofHeaderName !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'paymentProofHeaderName must be a string' })
-    }
-    if (
-      body.paymentProofHeader !== undefined &&
-      typeof body.paymentProofHeader !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'paymentProofHeader must be a string' })
-    }
-    if (
-      body.protocolReceiptHeaderName !== undefined &&
-      typeof body.protocolReceiptHeaderName !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'protocolReceiptHeaderName must be a string' })
-    }
-    if (
-      body.protocolReceiptHeader !== undefined &&
-      typeof body.protocolReceiptHeader !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'protocolReceiptHeader must be a string' })
-    }
-    if (
-      body.challengePayload !== undefined &&
-      !isPlainObject(body.challengePayload)
-    ) {
-      return reply.code(400).send({ error: 'challengePayload must be an object' })
-    }
-    if (
-      body.selectedPayment !== undefined &&
-      !isPlainObject(body.selectedPayment)
-    ) {
-      return reply.code(400).send({ error: 'selectedPayment must be an object' })
-    }
-    if (
-      body.protocolReceiptPayload !== undefined &&
-      !isPlainObject(body.protocolReceiptPayload)
-    ) {
-      return reply.code(400).send({ error: 'protocolReceiptPayload must be an object' })
-    }
+    // `rail` reaches the module as its union type (`MachinePaymentRail`): the
+    // spec declares the field a plain string, the module's own type narrows
+    // it, and the cast documents that the closed schema + the union agree on
+    // the retired values' presence (`mpp` etc. are refused downstream by the
+    // module's semantic checks, not by shape).
+    const body = request.body as EvidenceBody
 
     const result = await attachEvidenceHandler(agent.id, body)
     return reply.code(result.statusCode).send(result.body)
@@ -269,6 +231,14 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     },
   )
 
+  // ── POST /reconciliation-events ───────────────────────────────────────────
+  // #3031: paymentId (uuid), rail, eventType, txHash (`0x`+64-hex), reason
+  // and details (object) are the spec's `MachinePaymentReconciliationEventRequest`,
+  // enforced before the handler. What stays is the enum's LIVE SOURCE — the
+  // schema's enum is pinned to this Set by test, and the handler reads the
+  // Set so a new event type lights up here first — plus the semantic
+  // refusals downstream (confirmed-payment requirement, #2292 acceptance
+  // terminality).
   app.post<{ Body: ReconciliationEventBody }>('/reconciliation-events', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const {
@@ -280,37 +250,15 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       details,
     } = request.body
 
-    if (!paymentId || typeof paymentId !== 'string') {
-      return reply.code(400).send({ error: 'paymentId is required' })
-    }
-    if (!rail || typeof rail !== 'string') {
-      return reply.code(400).send({ error: 'rail is required' })
-    }
-    if (!eventType || !RECONCILIATION_EVENT_TYPES.has(eventType)) {
+    if (!RECONCILIATION_EVENT_TYPES.has(eventType as string)) {
       return reply.code(400).send({ error: 'Unsupported reconciliation event type' })
-    }
-    if (txHash !== undefined && (
-      typeof txHash !== 'string' ||
-      !/^0x[0-9a-fA-F]{64}$/.test(txHash)
-    )) {
-      return reply.code(400).send({ error: 'txHash must be a 0x-prefixed transaction hash' })
-    }
-    if (reason !== undefined && typeof reason !== 'string') {
-      return reply.code(400).send({ error: 'reason must be a string' })
-    }
-    if (details !== undefined && (
-      !details ||
-      typeof details !== 'object' ||
-      Array.isArray(details)
-    )) {
-      return reply.code(400).send({ error: 'details must be an object' })
     }
 
     const result = await handleReconciliationEvent(
       agent.id,
-      paymentId,
-      rail,
-      eventType,
+      paymentId as string,
+      rail as string,
+      eventType as string,
       txHash,
       reason,
       details,
@@ -324,22 +272,19 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   // posture as every writer: the row is recorded through refuse() only —
   // never agent-asserted — and a fire-and-forget write can never change the
   // decided response.
-  app.post<{ Body: BudgetPrecheckBody }>(
+  //
+  // #3031: the spec's `BudgetPrecheckRequest` states every guard the
+  // `modules/mpp/budget-precheck-guards.ts` relocation carried (token
+  // address pattern, amountAtomic digit-string pattern, the three optional
+  // field types) — the module is enforced, so the guard file is deleted and
+  // the handler calls straight through. The 403/refusal-ledger behaviour is
+  // unchanged.
+  app.post<{ Body: { token: string; amountAtomic: string; chainId?: number; merchantTo?: string; resourceUrl?: string } }>(
     '/budget-precheck',
     { config: moneyPathRateLimit },
     async (request, reply) => {
       const agent = request.agent as AgentContext
-      // #3054 body guards relocated verbatim to the mpp module
-      // (budgetPrecheckBodyError) so the #3029 request-schemas ratchet keeps
-      // its shrink-only baseline for this file — checks and 400 bodies
-      // unchanged.
-      const body = (request.body ?? {}) as BudgetPrecheckBody
-      const bodyError = budgetPrecheckBodyError(body)
-      if (bodyError) {
-        return reply.code(400).send(bodyError)
-      }
-
-      const result = await handleBudgetPrecheck(agent, body)
+      const result = await handleBudgetPrecheck(agent, request.body)
       return reply.code(result.statusCode).send(result.body)
     },
   )
@@ -352,20 +297,17 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   })
 
   // ── POST /sweep/submit — relay a signed sweep authorization ─────────────────
-  app.post<{ Body: SweepSubmitBody }>('/sweep/submit', { config: moneyPathRateLimit }, async (request, reply) => {
+  // #3031: the body shape — authorization (the closed SweepAuthorization:
+  // every field, the nonce's 32-byte hex) and signature (`0x` hex) — is the
+  // spec's, enforced before the handler. `submitSweep` re-derives the
+  // authorization from server state and verifies the delegate signature; the
+  // body is transport, never authority.
+  app.post<{ Body: { authorization?: { nonce?: string }; signature?: string } }>('/sweep/submit', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const body = request.body ?? {}
-    const signature = body.signature
-    const nonce = body.authorization?.nonce
+    const nonce = body.authorization?.nonce as string
 
-    if (!signature || typeof signature !== 'string' || !/^0x[0-9a-fA-F]+$/.test(signature)) {
-      return reply.code(400).send({ error: 'signature must be a 0x-prefixed hex string' })
-    }
-    if (!nonce || typeof nonce !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(nonce)) {
-      return reply.code(400).send({ error: 'authorization.nonce must be a 0x-prefixed 32-byte hex string' })
-    }
-
-    const result = await submitSweep(agent, nonce, signature)
+    const result = await submitSweep(agent, nonce, body.signature as string)
     return reply.code(result.statusCode).send(result.body)
   })
 }

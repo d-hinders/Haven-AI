@@ -54,8 +54,10 @@ export {
 } from './reconciliation.js'
 export { prepareSweep, submitSweep } from './sweep.js'
 export { handleBudgetPrecheck } from './budget-precheck.js'
-export { budgetPrecheckBodyError } from './budget-precheck-guards.js'
-export { parseBalanceCoverageQuery } from './balance-coverage-guards.js'
+// The two input-guard relocations (#3126/#3054) ended here: #3031 enforced the
+// module, the spec's schemas state every check the guards carried, and
+// `routes/machine-payments.ts` no longer imports them — the files are deleted
+// with the ladders they held.
 
 export type {
   MachinePaymentRail,

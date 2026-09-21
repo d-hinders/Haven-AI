@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const { mockQuery, allowanceMocks, sweepMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -115,6 +116,8 @@ describe('machine payment sweep routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // Enforced wiring (#3031, epic #3028 slice 3).
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/machine-payments.ts'] })
     await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
   })
   afterAll(async () => {

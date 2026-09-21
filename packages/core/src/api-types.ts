@@ -3706,6 +3706,10 @@ export type components = {
             category?: string;
             idempotencyKey?: string;
             signature?: string;
+            /** @enum {string} */
+            settlementScheme?: "erc7710" | "eip3009";
+            /** @description #1058: the erc7710 challenge entry's extra.facilitatorAddresses — the settlement child is redeemable ONLY by these addresses. Forwarded verbatim; null means the merchant advertised none and the field is omitted. */
+            facilitatorAddresses?: string[];
             /** @description #1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time. */
             mcpCallContext?: {
                 /** Format: uri */
@@ -15150,7 +15154,7 @@ export interface operations {
                     recipient: string;
                     /** @description Human-readable amount, e.g. "1.5". */
                     amount: string;
-                    /** @description Validated (1–128 characters) and then IGNORED — nothing is deduplicated, because every call refuses. Accepted only so an existing client is refused by the rail rather than by a body error (#2105). */
+                    /** @description Validated (1–128 characters) and then IGNORED — nothing is deduplicated, because every call refuses. Accepted only so an existing client is refused by the rail rather than by a body error (#2105). The bounds are #3031: the handler always refused an empty or over-long key; the closed schema did not state it, so enforcement would have accepted what the description promised to refuse. */
                     idempotency_key?: string;
                 };
             };

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify'
 import x402Routes from '../x402.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 /**
  * Characterization scaffolding for the x402 / machine-payment consolidation
@@ -76,6 +77,11 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // Enforced wiring (#3031, epic #3028 slice 3): this file IS the
+    // byte-identical characterization — every conformant fixture below must
+    // reach the handler exactly as before, and the enforced schema refuses
+    // what it always refused, now one hop earlier.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => {

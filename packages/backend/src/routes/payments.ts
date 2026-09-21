@@ -28,7 +28,7 @@ import { AgentPaymentNextAction, AgentPaymentPhase } from '../domain/agent-payme
 import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import { classifyRevertForLedger, refuse } from '../modules/payments/index.js'
-import { formatTokenAmount, isAddress as isValidAddress, parseTokenAmount } from '@haven_ai/core'
+import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
 // public entry point (same pattern as routes/x402.ts -> modules/x402/).
@@ -289,26 +289,15 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
   // ── POST / — Create payment intent ──────────────────────
 
+  // #3031: shape — required fields, the address form, idempotency_key's
+  // 1–128 bound — is the spec's, enforced before the handler. What stays here
+  // is what no schema can state: the amount's positive-decimal MEANING (the
+  // parse below, which must accept every value `Number` would and refuse the
+  // rest), the rail seam above token resolution (#2274), token resolution,
+  // the idempotent replay and the delegation-rail prepare.
   app.post<{ Body: CreatePaymentBody }>('/', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const { token, amount, to, idempotency_key } = request.body
-
-    // 1. Validate inputs
-    if (!token || typeof token !== 'string') {
-      return reply.code(400).send({ error: 'Token symbol is required' })
-    }
-    if (!amount || typeof amount !== 'string' || isNaN(Number(amount)) || Number(amount) <= 0) {
-      return reply.code(400).send({ error: 'Amount must be a positive number' })
-    }
-    if (!to || !isValidAddress(to)) {
-      return reply.code(400).send({ error: 'Valid recipient address is required' })
-    }
-    if (
-      idempotency_key !== undefined &&
-      (typeof idempotency_key !== 'string' || idempotency_key.length === 0 || idempotency_key.length > 128)
-    ) {
-      return reply.code(400).send({ error: 'idempotency_key must be a non-empty string of at most 128 characters' })
-    }
 
     // 2. Resolve the execution rail — ABOVE token resolution (#2274).
     //
@@ -362,7 +351,13 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // Token address for AllowanceModule (native = zero address)
     const tokenAddress = tokenConfig.address ?? ZERO_ADDRESS
 
-    // 4. Convert human amount to raw units
+    // 4. Convert human amount to raw units. This IS the amount's semantic
+    // gate since #3031: `parseTokenAmount` refuses a non-positive, non-numeric
+    // or badly-scaled value — a superset of the old `isNaN(Number(amount)) ||
+    // Number(amount) <= 0` ladder, which the spec's `type: string` correctly
+    // does not restate. "1e3" and " 2 " (accepted by the old Number()-based
+    // check) still arrive here and now answer the parse's 400 instead of
+    // minting an intent for a number the sender never wrote.
     let amountRaw: bigint
     try {
       amountRaw = parseTokenAmount(amount, tokenConfig.decimals)
@@ -553,10 +548,15 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     async (request, reply) => {
       const agent = request.agent as AgentContext
       const { id } = request.params
+      // Presence + `0x` prefix are the spec's since #3031, enforced before the
+      // handler. What stays: the LENGTH form — an EIP-712 delegate signature
+      // is ≥ 65 bytes (100 hex chars) plus the `0x` prefix; the spec's
+      // `^0x[0-9a-fA-F]{130}$` fixed-65-byte pattern cannot state that range
+      // without narrowing what the account's own validator accepts below.
       const { signature } = request.body
 
-      if (!signature || typeof signature !== 'string' || !signature.startsWith('0x')) {
-        return reply.code(400).send({ error: 'Valid 0x-prefixed signature is required' })
+      if (!/^0x[0-9a-fA-F]{100,}$/.test(signature)) {
+        return reply.code(400).send({ error: 'Invalid signature format' })
       }
 
       // 1. Load intent

@@ -4,6 +4,7 @@
  */
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 
 const {
@@ -122,6 +123,10 @@ describe('x402 delegation-rail settlement (#830)', () => {
     process.env.X402_BINDING_PRIVATE_KEY =
       '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
     app = Fastify({ logger: false })
+    // The production wiring (#3031, epic #3028 slice 3): the module is
+    // ENFORCED — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it byte-identically.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => app.close())
@@ -2000,6 +2005,8 @@ describe('x402 sign-context by payment_id (#1263)', () => {
     process.env.X402_BINDING_PRIVATE_KEY =
       '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
     app = Fastify({ logger: false })
+    // Enforced wiring (#3031) — see the first suite in this file.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => app.close())
@@ -2170,6 +2177,8 @@ describe('x402 sign-context funded-but-unsettled resume (#2290)', () => {
     process.env.X402_BINDING_PRIVATE_KEY =
       '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
     app = Fastify({ logger: false })
+    // Enforced wiring (#3031) — see the first suite in this file.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => app.close())
@@ -2437,6 +2446,8 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
   let app: FastifyInstance
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // Enforced wiring (#3031) — see the first suite in this file.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => app.close())

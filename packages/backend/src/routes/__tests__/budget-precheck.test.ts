@@ -29,6 +29,7 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import { createHash } from 'crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const { mockGetTokenPrice } = vi.hoisted(() => ({ mockGetTokenPrice: vi.fn() }))
 vi.mock('../../infra/prices.js', () => ({
@@ -135,6 +136,9 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     // The route file registers the plugin-wide agent auth hook itself
     // (`app.addHook('onRequest', agentAuthMiddleware)`), so the REAL
     // credential path — sha256 key hash → agents/smart_accounts JOIN — runs.
+    // Enforced wiring (#3031, epic #3028 slice 3): the spec's closed body
+    // schema now carries the guards the mpp relocation held.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/machine-payments.ts'] })
     await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
   })
 

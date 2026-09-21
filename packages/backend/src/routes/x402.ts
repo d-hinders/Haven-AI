@@ -1,7 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
-import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   authorizeX402,
   settleX402,
@@ -29,6 +28,19 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
    * Two modes:
    * 1. Without `signature`: creates a payment intent, returns sign_hash (agent signs, then calls POST /payments/:id/sign)
    * 2. With `signature`: creates intent AND executes in one shot (for SDK convenience)
+   *
+   * #3031: the enforced spec carries every shape this handler used to
+   * re-state (required fields, address patterns, the amount's positive
+   * decimal form, the scheme enum, the facilitator array bounds, the
+   * mcpCallContext/mcpTransport shapes, the idempotencyKey and
+   * maxTimeoutSeconds types) and refuses off-spec requests before the
+   * handler — that ladder is deleted, not moved. What stays here is what no
+   * schema can state: the EIP-55 re-checksumming, chain resolution and the
+   * agent-chain match, the 64KB serialized bound on paymentRequired, and
+   * every semantic rule downstream (the rail seam's 410, the budget
+   * pre-check, the #1360 scheme/payTo agreement in
+   * `modules/x402/scheme-selection.ts`) — each at its #2245/#2274-vetted
+   * position.
    */
   const authorizeX402Handler = async (
     request: FastifyRequest<{ Body: X402AuthorizeBody }>,
@@ -45,39 +57,35 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       idempotencyKey,
       maxTimeoutSeconds,
       signature,
+      settlementScheme,
+      facilitatorAddresses,
+      mcpCallContext,
+      paymentRequired,
     } = request.body
-    if (maxTimeoutSeconds !== undefined && (typeof maxTimeoutSeconds !== 'number' || !Number.isFinite(maxTimeoutSeconds))) {
-      // #1053 review (minor): a non-numeric value used to NaN through the
-      // clamp and surface as a 502; it is a caller error and gets a 400.
-      return reply.code(400).send({ error: 'maxTimeoutSeconds must be a finite number' })
-    }
     let { payTo } = request.body
     let { merchantPayTo } = request.body
 
-    // 1. Validate inputs
-    if (!url || typeof url !== 'string') {
-      return reply.code(400).send({ error: 'Resource URL is required' })
-    }
-    if (!payTo || !isValidAddress(payTo)) {
-      return reply.code(400).send({ error: 'Valid payTo address is required' })
-    }
-    // Re-checksum to canonical EIP-55 form. Third-party x402 servers sometimes
-    // ship mis-cased addresses; ethers ABI-encoding rejects those downstream.
-    payTo = normaliseAddress(payTo)
-    if (!amount || typeof amount !== 'string') {
-      return reply.code(400).send({ error: 'Amount (atomic units) is required' })
-    }
+    // The amount's positive-decimal-integer FORM (#2274 doctrine): the spec's
+    // `type: string` cannot state it, so the handler keeps this rail-INDEPENDENT
+    // structural check above the rail seam — a retired-rail account naming an
+    // impossible amount still gets this 400, not the 410, exactly as #2274
+    // pinned the structural-precedence class (same position `POST /payments`
+    // keeps its own gate in via the token parse).
     if (!isPositiveDecimalAtomicAmount(amount)) {
       return reply.code(400).send({
         error: 'Invalid amount — must be a positive decimal integer in atomic units',
       })
     }
-    if (!asset || typeof asset !== 'string') {
-      return reply.code(400).send({ error: 'Asset (token address) is required' })
+
+    // Re-checksum to canonical EIP-55 form. Third-party x402 servers sometimes
+    // ship mis-cased addresses; ethers ABI-encoding rejects those downstream.
+    // (The spec's address pattern accepts any casing; this is canonicalisation,
+    // not validation.)
+    payTo = normaliseAddress(payTo)
+    if (merchantPayTo !== undefined) {
+      merchantPayTo = normaliseAddress(merchantPayTo)
     }
-    if (!network || typeof network !== 'string') {
-      return reply.code(400).send({ error: 'Network is required' })
-    }
+
     const requestedChainId = chainIdFromX402Network(network)
     if (!requestedChainId) {
       return reply.code(400).send({ error: `Unsupported x402 network: ${network}` })
@@ -87,89 +95,14 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
         error: `x402 network ${network} does not match agent chain ${agent.chain_id}`,
       })
     }
-    if (merchantPayTo !== undefined) {
-      if (!merchantPayTo || !isValidAddress(merchantPayTo)) {
-        return reply.code(400).send({ error: 'Valid merchantPayTo address is required' })
-      }
-      merchantPayTo = normaliseAddress(merchantPayTo)
-    }
-    if (idempotencyKey !== undefined && (
-      typeof idempotencyKey !== 'string' ||
-      idempotencyKey.length === 0 ||
-      idempotencyKey.length > 128
-    )) {
-      return reply.code(400).send({ error: 'idempotencyKey must be a non-empty string up to 128 characters' })
-    }
-
-    // Structural checks only, and rail-INDEPENDENT by construction — they
-    // reject a value that is not a settlement scheme at all, and say nothing
-    // about which rail could settle it. #2245 deleted the rail-DEPENDENT
-    // guards that used to follow (#946 erc7710 / #1058 facilitatorAddresses
-    // "requires a delegation-rail account"): a non-delegation account is now
-    // refused by the #1986 rail tombstone in `modules/x402/authorize.ts`, and
-    // the only scheme rules left are the delegation-rail-internal shape
-    // checks in `scheme-selection.ts`.
-    const { settlementScheme } = request.body
-    if (settlementScheme !== undefined && !['erc7710', 'eip3009'].includes(settlementScheme)) {
-      return reply.code(400).send({ error: "settlementScheme must be 'erc7710' or 'eip3009'" })
-    }
-    const { facilitatorAddresses } = request.body
-    if (facilitatorAddresses !== undefined) {
-      if (
-        !Array.isArray(facilitatorAddresses) ||
-        facilitatorAddresses.length === 0 ||
-        facilitatorAddresses.length > 16 ||
-        facilitatorAddresses.some((a) => typeof a !== 'string' || !isValidAddress(a))
-      ) {
-        return reply.code(400).send({
-          error: 'facilitatorAddresses must be 1-16 valid addresses (the erc7710 challenge entry\'s extra.facilitatorAddresses)',
-        })
-      }
-    }
-
-    // #1307: optional MCP merchant-call context — structural validation only
-    // (the settle-leg rehydration is a convenience for retrying the
-    // MERCHANT's own call, not payment authority; malformed input is a 400
-    // rather than silently dropped, so a client learns immediately).
-    const { mcpCallContext } = request.body
-    if (mcpCallContext !== undefined) {
-      if (
-        typeof mcpCallContext !== 'object' ||
-        mcpCallContext === null ||
-        typeof mcpCallContext.merchantUrl !== 'string' ||
-        mcpCallContext.merchantUrl.length === 0 ||
-        typeof mcpCallContext.toolName !== 'string' ||
-        mcpCallContext.toolName.length === 0
-      ) {
-        return reply.code(400).send({
-          error: 'mcpCallContext requires a non-empty merchantUrl and toolName',
-        })
-      }
-      if (mcpCallContext.mcpTransport !== undefined) {
-        const transport = mcpCallContext.mcpTransport
-        if (
-          typeof transport !== 'object' ||
-          transport === null ||
-          typeof transport.handshakeRequired !== 'boolean' ||
-          (transport.source !== 'path' && transport.source !== 'bazaar')
-        ) {
-          return reply.code(400).send({
-            error: "mcpCallContext.mcpTransport requires handshakeRequired (boolean) and source ('path'|'bazaar')",
-          })
-        }
-      }
-    }
 
     // #1355: optional full 402 PaymentRequired — persisted so sign-context can
-    // re-serve it and the signer needs only payment_id. Structural + size
-    // bound only: it is verified against the Haven-signed expected context at
-    // the signer, never trusted as authority here. Oversized input is a 400
-    // (not a silent drop) so a client learns immediately, mirroring #1307.
-    const { paymentRequired } = request.body
+    // re-serve it and the signer needs only payment_id. The spec bounds its
+    // SHAPE (an object); the SIZE bound stays here — it is a serialization
+    // budget on the stored row (UTF-8 bytes), not a shape. Oversized input is
+    // a 400 (not a silent drop) so a client learns immediately, mirroring
+    // #1307.
     if (paymentRequired !== undefined) {
-      if (typeof paymentRequired !== 'object' || paymentRequired === null || Array.isArray(paymentRequired)) {
-        return reply.code(400).send({ error: 'paymentRequired must be the parsed 402 PaymentRequired object' })
-      }
       if (Buffer.byteLength(JSON.stringify(paymentRequired), 'utf8') > 65536) {
         return reply.code(400).send({
           error: 'paymentRequired exceeds 64KB — omit it; the signer falls back to the caller-supplied copy',
@@ -205,7 +138,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
   // ── GET /x402/:id/sign-context — byte-free signing handoff (#1263) ───────
   // Read-only: re-serves the stored delegation-rail signing payload + a fresh
   // Haven-signed expected context so the LOCAL SIGNER can fetch exact bytes by
-  // payment_id instead of a model re-emitting them. All checks and the rebuild
+  // payment_id instead of an agent re-emitting them. All checks and the rebuild
   // live in the module (`getX402SignContext`).
   app.get<{ Params: { id: string } }>('/:id/sign-context', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
@@ -231,18 +164,21 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
 
   // ── POST /x402/:id/settle — delegation rail (#830) ───────────────────────
   // The agent has signed the settlement child (EIP-712). Assembly, signer
-  // recovery, and header encoding live in the module (`settleX402`); this
-  // route only validates the signature's wire shape and serializes the result.
-  app.post<{ Params: { id: string }; Body: { signature?: string } }>(
+  // recovery, and header encoding live in the module (`settleX402`). #2282:
+  // the snake-case twin (`mcp_transport`) is refused here by the enforced
+  // schema's `additionalProperties: false` — the incident that named this
+  // slice. #3031: the signature's wire shape (`0x` hex) is the spec's too,
+  // enforced before the handler.
+  app.post<{ Params: { id: string }; Body: { signature: string } }>(
     '/:id/settle',
     { config: moneyPathRateLimit },
     async (request, reply) => {
       const agent = request.agent as AgentContext
       const { id } = request.params
-      const { signature } = request.body ?? {}
-      if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
-        return reply.code(400).send({ error: 'A delegate EIP-712 signature is required' })
-      }
+      // Required + `0x`-hex pattern is the spec's since #3031, enforced before
+      // the handler; the Body generic matches the wire the enforcement
+      // guarantees (the #3082 lesson).
+      const { signature } = request.body
 
       const result = await settleX402(agent, id, signature, request.log)
       return reply.code(result.code).send(result.body)

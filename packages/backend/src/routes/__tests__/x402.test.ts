@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify'
 import x402Routes from '../x402.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -42,6 +43,13 @@ const AGENT = {
 
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const MERCHANT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
+// #3031: the spec's signature pattern (`^0x[0-9a-fA-F]{130}$`, declared since
+// the spec existed) is enforced now, so the one-shot fixtures below carry a
+// SHAPE-VALID 65-byte signature — '0xsig' was always off-spec wire data the
+// enforced schema refuses before the handler. What each test pins (the 410
+// tombstone, the absence of writes) is unchanged; only the fixture's wire
+// form moved to the shape the spec always declared.
+const ONE_SHOT_SIG = `0x${'ab'.repeat(65)}`
 const SIGN_HASH = `0x${'11'.repeat(32)}`
 const TX_HASH = `0x${'ab'.repeat(32)}`
 const PAYMENT_ID = '33333333-3333-3333-3333-333333333333'
@@ -193,6 +201,10 @@ describe('x402 routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3031, epic #3028 slice 3): the module is
+    // ENFORCED — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it byte-identically.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
 
@@ -475,7 +487,7 @@ describe('x402 routes', () => {
         asset: USDC,
         network: 'base',
         idempotencyKey: 'x402:test',
-        signature: '0xsig',
+        signature: ONE_SHOT_SIG,
       },
     })
 
@@ -522,7 +534,7 @@ describe('x402 routes', () => {
         asset: USDC,
         network: 'base',
         idempotencyKey: 'x402:test',
-        signature: '0xsig',
+        signature: ONE_SHOT_SIG,
       },
     })
 
@@ -557,7 +569,7 @@ describe('x402 routes', () => {
         asset: USDC,
         network: 'base',
         idempotencyKey: 'x402:test',
-        signature: '0xsig',
+        signature: ONE_SHOT_SIG,
       },
     })
 
@@ -590,7 +602,7 @@ describe('x402 routes', () => {
         asset: USDC,
         network: 'base',
         idempotencyKey: 'x402:test',
-        signature: '0xsig',
+        signature: ONE_SHOT_SIG,
       },
     })
 
@@ -629,7 +641,7 @@ describe('x402 routes', () => {
         asset: USDC,
         network: 'base',
         idempotencyKey: 'x402:test',
-        signature: '0xsig',
+        signature: ONE_SHOT_SIG,
       },
     })
 
@@ -686,7 +698,9 @@ describe('x402 routes', () => {
     })
 
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toBe('Valid payTo address is required')
+    // #3031: the enforced schema answers before the handler — same refusal,
+    // the spec's envelope instead of the handler's prose.
+    expect(response.json().error).toBe('Request does not match the API spec')
     // #2307 coverage replacement. A phantom `generateTransferHash` spy stood
     // here claiming "validation ran before any allowance work". Re-anchored
     // onto the query log, which is real and DOES go red: if the validation
@@ -712,7 +726,9 @@ describe('x402 routes', () => {
     })
 
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toBe('Valid merchantPayTo address is required')
+    // #3031: the enforced schema answers before the handler — same refusal,
+    // the spec's envelope instead of the handler's prose.
+    expect(response.json().error).toBe('Request does not match the API spec')
     // #2307 coverage replacement. A phantom `generateTransferHash` spy stood
     // here claiming "validation ran before any allowance work". Re-anchored
     // onto the query log, which is real and DOES go red: if the validation
@@ -747,6 +763,9 @@ describe('x402 routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
+      // #3031: the enforced schema answers before the handler. The spec's
+      // `amount` is `type: string` — a bare string cannot state "positive
+      // decimal integer" — so the handler's own message survives for these.
       expect(response.json().error).toBe(
         'Invalid amount — must be a positive decimal integer in atomic units',
       )
@@ -766,7 +785,11 @@ describe('x402 routes', () => {
     })
 
     expect(blankResponse.statusCode).toBe(400)
-    expect(blankResponse.json().error).toBe('Amount (atomic units) is required')
+    // #3031: an EMPTY amount still reaches the handler — the spec's
+    // `type: string` accepts it (a bare string cannot state "positive
+    // decimal integer"), and the handler's rail-independent semantic check
+    // answers with its own message, above the rail seam (#2274).
+    expect(blankResponse.json().error).toBe('Invalid amount — must be a positive decimal integer in atomic units')
     // Every rejected request only ever reached auth — none of the malformed
     // amounts triggered any further query.
     expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)

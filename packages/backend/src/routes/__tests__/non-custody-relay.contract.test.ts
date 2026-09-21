@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import { allowanceModuleRailRetired, serializeUserOp, deserializeUserOp } from '../../rails/execution-rail.js'
 
 /**
@@ -140,6 +141,8 @@ describe('non-custody: the relay is non-discretionary', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // Enforced wiring (#3031, epic #3028 slice 3) — fixtures are conformant.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/payments.ts'] })
     await app.register(paymentRoutes, { prefix: '/payments' })
   })
   afterAll(async () => { await app.close() })

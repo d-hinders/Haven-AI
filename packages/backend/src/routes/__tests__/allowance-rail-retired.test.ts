@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 /**
  * The Safe / AllowanceModule rail CANNOT SPEND (#1986, epic #1440 slice 3).
@@ -282,6 +283,16 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
   beforeAll(async () => {
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
+    // Enforced wiring (#3031, epic #3028 slice 3): the money modules refuse
+    // off-spec requests from the schema now. The #2245 suite below DEPENDS on
+    // the ordering this creates — a structurally invalid settlementScheme is
+    // the schema's 400 (refused BEFORE the seam), the scheme-bearing
+    // well-formed shapes still reach the tombstone's 410, and the 401
+    // (auth, an onRequest hook) still precedes both.
+    installRequestValidation(app, {
+      mode: 'enforce',
+      enforcedModules: ['routes/payments.ts', 'routes/x402.ts', 'routes/machine-payments.ts'],
+    })
     await app.register(paymentRoutes, { prefix: '/payments' })
     await app.register(x402Routes, { prefix: '/x402' })
     await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })

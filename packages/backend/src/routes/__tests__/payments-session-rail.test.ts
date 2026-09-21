@@ -12,6 +12,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { Wallet, getBytes } from 'ethers'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const { mockQuery, allowanceMocks, fiatMocks, delegationMocks, mockRecordRefusal } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -201,6 +202,9 @@ describe('POST /payments/:id/sign — execution-rail split (#745)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // Enforced wiring (#3031, epic #3028 slice 3) — every fixture below is
+    // conformant, so the schema layer is a pass-through here.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/payments.ts'] })
     await app.register(paymentRoutes, { prefix: '/payments' })
   })
 
@@ -482,6 +486,8 @@ describe('POST /payments — the refusal ledger on the direct paths (#2945)', ()
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // Enforced wiring (#3031, epic #3028 slice 3) — see the first suite.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/payments.ts'] })
     await app.register(paymentRoutes, { prefix: '/payments' })
   })
   afterAll(async () => {

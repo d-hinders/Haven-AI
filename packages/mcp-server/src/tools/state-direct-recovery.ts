@@ -98,13 +98,14 @@ const TOKEN_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/
  * agent `tokenSymbol` beside `tokenAddress`, so the symbol is what a cold
  * agent has in hand; the backend's coverage read wants the address. Exactly
  * one allowance carrying the symbol (case-insensitive) resolves; none, or
- * more than one (the same symbol on two chains), refuses with the address as
- * the remedy and `haven_get_allowances` as the tool that lists them.
+ * more than one (defensive — the read is chain-scoped and one budget per
+ * agent is enforced upstream, so two allowances with one symbol should not
+ * occur), refuses with the address as the remedy and `haven_get_allowances` as the tool that lists them.
  */
 async function resolveTokenAddressFromAllowances(haven: HavenClient, symbol: string): Promise<string> {
   const { allowances } = await haven.getAllowances()
   const wanted = symbol.toLowerCase()
-  const matches = allowances.filter((allowance) => allowance.tokenSymbol.toLowerCase() === wanted)
+  const matches = allowances.filter((allowance) => (allowance.tokenSymbol ?? '').toLowerCase() === wanted)
   if (matches.length === 1) return matches[0].tokenAddress
   const known = allowances.map((allowance) => `${allowance.tokenSymbol} (${allowance.tokenAddress})`)
   throw new HostedToolError({
@@ -188,7 +189,8 @@ export function createStateDirectRecoveryHandlers(
               code: 'MAX_AMOUNT_UNCONVERTIBLE',
               message:
                 `max_amount_human ("${cap.value}") cannot be applied: Haven does not recognise ` +
-                `token ${tokenAddress}, so the number of atomic units in one token is unknown and ` +
+                `token ${tokenAddress}${tokenAddress === args.token ? '' : ` ("${args.token}")`}, so the ` +
+                'number of atomic units in one token is unknown and ' +
                 'any conversion would be a guess. Nothing was read from any chain. Re-send the ' +
                 'amount as max_amount in atomic units.',
               statusCode: 400,

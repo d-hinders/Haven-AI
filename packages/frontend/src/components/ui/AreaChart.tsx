@@ -66,18 +66,24 @@ import { chartScaleRange, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components
 const VIEW_W = 640
 const VIEW_H = 220
 const PAD = { top: 14, right: 10, bottom: 30, left: 48 }
-/** The narrow treatment widens the tick gutter, exactly as the bar chart's
- *  does: at 390 the desktop 48/640 is ~21 CSS px, and a currency tick drawn
- *  into it ran under the line's first week (#3204 review; the labels were
- *  never visible before that PR, so the gutter had never been measured). */
-const PAD_NARROW = { ...PAD, left: 78 }
+/** The narrow treatment widens the tick gutter: at 390 the desktop 48/640
+ *  is ~21 CSS px, and a currency tick drawn into it ran under the line's
+ *  first week (#3204 review; the labels were never visible before that PR,
+ *  so the gutter had never been measured). The bar chart's 78 was tried and
+ *  measured short too: its label box is ~33 px at 390 while `12 600 kr`
+ *  (sv-SE, `text-xs` Inter) is 53.4 px and `$12,600` 46 px, so the end of
+ *  the label — `text-right`, no break opportunity — spilled into the plot.
+ *  128 gives a ~56 px box, wider than the widest supported tick. */
+const PAD_NARROW = { ...PAD, left: 128 }
 /** The fraction of the data's own span held free at each end, so the line
  *  clears the frame and no point sits on a gridline. The pad is RANGE-relative
  *  only: an earlier level-relative term (`|max| × 3%`) meant a 300 kr movement
  *  on a 12 000 kr balance got a 379 kr pad, a 500 kr step and a line using
  *  15% of the plot — the flat read this chart exists to avoid (#3204). A flat
  *  series (max === min) still needs SOME span to draw at all; that is the
- *  `max(…, 1)` floor. */
+ *  `max(…, 2)` floor. Two, not one: a ±1 span steps by 0.5 and the compact
+ *  (no-cents) tick formatter then prints two gridlines with one label; a
+ *  ±2 span steps by 1 and every integer tick is distinct. */
 const HEADROOM = 0.06
 /** The line and the area are the first series stop: see the header. */
 const LINE_SERIES = 1
@@ -147,7 +153,7 @@ export function AreaChart({
     const values = points.map((p) => p.value)
     const min = values.length > 0 ? Math.min(...values) : 0
     const max = values.length > 0 ? Math.max(...values) : 0
-    const pad = Math.max((max - min) * HEADROOM, 1)
+    const pad = Math.max((max - min) * HEADROOM, 2)
     const scale = chartScaleRange(Math.max(0, min - pad), max + pad)
     const floor = scale.min
     const span = scale.max - floor

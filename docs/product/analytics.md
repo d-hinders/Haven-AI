@@ -126,8 +126,12 @@ of the plot's height and the gridline labels bracket the data — 12 300 /
 below the floor (#3204: the ticks came from the zero-based bar-chart scale,
 so no gridline reached the plot, the labels were positioned under the card,
 and the line read as flat). Tick labels are compact (no öre/cents) and the
-phone treatment widens the label gutter, the same two rules the spend chart
-keeps, so a `12 500 kr` label never runs under the line. The annotation and
+phone treatment widens the label gutter to 128 of the drawing's 640 units
+(≈56 px at 390, measured against `12 600 kr` at 53 px — the spend chart's 78
+was ≈33 px and the label's end spilled into the plot), so the widest
+supported tick sits clear of the line. A flat series pads by ±2 so every
+integer tick stays distinct (±1 stepped by 0,5 and printed one label twice
+without the öre). The annotation and
 the tooltip print the amount once, in the display currency's own format
 ("gained 298,43 kr"), never with the currency code appended again.
 

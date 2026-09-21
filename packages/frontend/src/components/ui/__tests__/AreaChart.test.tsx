@@ -137,14 +137,29 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
 
   it('prints ticks through formatTick when given one, and widens the gutter on the narrow treatment (#3204)', () => {
     // The gutter is a fraction of the svg width; at 390 the desktop 48/640 is
-    // ~21 CSS px and a currency tick drawn into it ran under the line. The
-    // narrow treatment uses the bar chart's 78, and callers pass a compact
-    // formatter so the label fits. Mutation: drop PAD_NARROW → red.
+    // ~21 CSS px and a currency tick drawn into it ran under the line; the
+    // bar chart's 78 (~33 px) was measured short of `12 600 kr` (53.4 px)
+    // as well. 128 is a ~56 px box at 390. Callers pass a compact formatter
+    // on top. Mutation: drop PAD_NARROW, or put 78 back → red.
     renderChart({ narrow: true, formatTick: (v: number) => `${Math.round(v)}` })
     const labels = screen.getAllByTestId('chart-tick-label')
     expect(labels.map((el) => el.textContent)).toEqual(['1050', '1100', '1150', '1200'])
     const widthPct = Number.parseFloat((labels[0] as HTMLElement).style.width)
-    expect(widthPct).toBeCloseTo(((78 - 6) / 640) * 100, 3)
+    expect(widthPct).toBeCloseTo(((128 - 6) / 640) * 100, 3)
+    expect(widthPct).toBeGreaterThan(((100 - 6) / 640) * 100)
+  })
+
+  it('prints distinct integer ticks for a flat series (#3204 round 2)', () => {
+    // An idle account (no movement for the window) has max === min. The
+    // pad floor decides the step: a floor of 1 gave a ±1 span, a 0.5 step
+    // and — through the compact no-cents formatter the balance chart uses —
+    // two gridlines sharing one label (12 342 / 12 342). Mutation: floor
+    // back to 1 → red.
+    const flat = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `d${d}`, value: 12342.17 }))
+    renderChart({ formatTick: (v: number) => `${Math.round(v)}` }, flat)
+    const labels = screen.getAllByTestId('chart-tick-label').map((el) => el.textContent)
+    expect(labels.length).toBeGreaterThanOrEqual(3)
+    expect(new Set(labels).size).toBe(labels.length)
   })
 
   it('fills under the line without drawing over it, closing on the baseline', () => {

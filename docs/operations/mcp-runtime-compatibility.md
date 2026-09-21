@@ -24,6 +24,7 @@ covers:
   - packages/backend/src/modules/x402/replay.ts
   - packages/cli/src/commands.ts
   - packages/cli/src/commands.test.ts
+  - packages/frontend/src/components/connect-agent/setup-copy.ts
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/connect/src/installed-clients.test.ts
   - packages/backend/src/middleware/retired-safe-names.ts
@@ -1214,6 +1215,13 @@ picker id before the published connector does into a hard failure.
 > allowed-value lists. The doctor's new unknown-runtime verdict reuses
 > `RUNTIME_FLAG_VALUE_LIST` for its prose, so the values it names cannot drift
 > from this ladder's vocabulary.
+>
+> **Re-verified #3210:** that resolution is now reachable from the CLI for
+> `--doctor`. Until #3210 the argument parser refused a flagless `--doctor`
+> before the doctor ran (a guard from #1597), so the record path above was
+> exercised only by library callers. `--repair` keeps the parser requirement:
+> it rewrites the runtime config, so the runtime it rewrites is named on the
+> command line, never inherited from the record. The ladder is unchanged.
 
 ### Failure vocabulary for runtime selection (#1719)
 
@@ -1436,9 +1444,10 @@ know still refuses before any side effect — since #1719 as
 Pre-run, the dashboard knows nothing about the environment, so the "your app
 may ask you to approve running the connector command" heads-up shows for everyone
 during the waiting state, sharpening to app-specific wording once the
-connector's resolve reports the detected runtime. `--doctor`/`--repair` still
-require an explicit `--runtime` (they examine a stored config, which is a
-choice, not a detection).
+connector's resolve reports the detected runtime. `--repair` still requires
+an explicit `--runtime` (it rewrites a stored config, which is a choice, not a
+detection); since #3210 `--doctor` needs none and resolves the runtime from
+the setup record.
 
 **A failure the dashboard cannot name.** The runtime-resolution refusals above
 (`runtime_undetermined`, `runtime_no_installed_clients`, `runtime_prompt_aborted`,
@@ -2309,6 +2318,9 @@ to call next in structured fields, and those fields are typed end to end
   printing one repair action per failure and exiting non-zero. `--repair`
   reinstalls the pinned runtime and rewrites wrapper + config from STORED
   credentials — no new setup token, keys untouched. `--json` for automation.
+  Since #3210 `--runtime` is optional for `--doctor` (the doctor checks the
+  runtime the setup recorded, and fails honestly when no record names one)
+  and required for `--repair`.
 
   > **Re-verified #2963:** the `signer_runtime` check now asks its two
   > questions against two references — *intact?* against the sidecar's record

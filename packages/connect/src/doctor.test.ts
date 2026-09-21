@@ -1686,10 +1686,12 @@ describe('credential address naming report (#2908)', () => {
  * in the agent credential directory (`last-connect-outcome.json`), and
  * unknown stays unknown: no fabricated pass, no truncated repair command.
  *
- * These tests drive `runDoctor`/`runRepair` directly because the shipped CLI
- * refuses flagless `--doctor` in the argument parser (args.ts) — the doctor
- * layer is where the empty-runtime path is reachable, and the premise note in
- * the PR body records that split.
+ * These tests drive `runDoctor`/`runRepair` directly: this is the doctor
+ * layer's own unit coverage of the empty-runtime path. Until #3210 it was
+ * also the ONLY way to reach it — the argument parser refused a flagless
+ * `--doctor` — so since #3210 the CLI path is pinned end to end in
+ * `cli.test.ts` instead, while `--repair`'s empty-runtime path stays
+ * library-only because the parser still requires `--runtime` for it.
  */
 describe('runtime resolution when --runtime is absent (#3120)', () => {
   it('resolves the recorded runtime from the primary directory and it reaches runtimeConfigPathFor', async () => {
@@ -1819,15 +1821,64 @@ describe('runtime resolution when --runtime is absent (#3120)', () => {
 
   it('the restart check says "unknown" instead of "no restart requirement" when the runtime is unknown', async () => {
     const { homeDir } = await healthyHome()
-    // env: {} matters: restartRequiredForRuntime falls back to env DETECTION
-    // for an unknown runtime (registry semantics — a shell that looks like a
-    // runtime gets that runtime's answer). The doctor's own resolution never
-    // guesses, and with no detection signal the degraded detail renders.
     const report = await runDoctor({ runtime: '' }, { homeDir, env: {}, ...healthyDeps() })
     const restart = report.checks.find((c) => c.id === 'restart')
     expect(restart?.ok).toBe(true)
     expect(restart?.detail).toContain('Runtime is unknown')
     expect(restart?.detail).not.toContain('No restart requirement known')
+  })
+
+  it('the restart check never env-guesses an unknown runtime from the doctor\'s own shell (#3210 review)', async () => {
+    const { homeDir } = await healthyHome()
+    // A shell that LOOKS like Claude Code. Before #3210 review the check fell
+    // through to registry env detection and answered about a runtime nobody
+    // named; the resolution invariant says unknown stays unknown.
+    const report = await runDoctor({ runtime: '' }, { homeDir, env: { CLAUDECODE: '1' }, ...healthyDeps() })
+    const restart = report.checks.find((c) => c.id === 'restart')
+    expect(restart?.detail).toContain('Runtime is unknown')
+    expect(restart?.detail).not.toContain('restart it after any repair')
+    // With the runtime NAMED, the same env is irrelevant and the real answer renders.
+    const named = await runDoctor({ runtime: 'claude-desktop' }, { homeDir, env: { CLAUDECODE: '1' }, ...healthyDeps() })
+    expect(named.checks.find((c) => c.id === 'restart')?.detail).toContain('restart it after any repair')
+    // An UNRECOGNISED value is not a runtime either: the registry would
+    // env-detect it too, so the check answers "no requirement known" instead
+    // of the shell's runtime (round-2 review, N2).
+    const bogus = await runDoctor({ runtime: 'foo' }, { homeDir, env: { CLAUDECODE: '1' }, ...healthyDeps() })
+    expect(bogus.checks.find((c) => c.id === 'restart')?.detail).toContain('No restart requirement known')
+  })
+
+  it('a record-resolved runtime says where it came from on the runtime_config verdict; an explicit flag does not (#3210 review)', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
+    const fromRecord = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    const rc = fromRecord.checks.find((c) => c.id === 'runtime_config')
+    // Names the RUNTIME and the file — the README/CHANGELOG claim is both halves.
+    expect(rc?.detail).toContain(`(Resolved 'cursor' from ${join(dir, CONNECT_OUTCOME_FILENAME)}; pass --runtime to check a different one.)`)
+    const explicit = await runDoctor({ runtime: 'cursor' }, { homeDir, ...healthyDeps() })
+    expect(explicit.checks.find((c) => c.id === 'runtime_config')?.detail).not.toContain('(Resolved ')
+  })
+
+  it('unknown runtime: no repair string is a bare `--doctor --repair`, which the parser refuses (#3210 review)', async () => {
+    // Credentials but NO prepared signer runtime, so signer_runtime and
+    // signer_process both fail with a --repair hint on the unknown path.
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-doctor-'))
+    await seedCredentials(homeDir)
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    const repairs = [...report.checks, ...report.agents.flatMap((a) => a.checks)]
+      .map((c) => c.repair ?? '')
+      .filter((r) => r.includes('--repair'))
+    expect(repairs.length).toBeGreaterThanOrEqual(2)
+    for (const repair of repairs) {
+      expect(repair, repair).not.toMatch(/--doctor --repair(?:\s*$|\s+[^-])/)
+      expect(repair, repair).toContain('--runtime <runtime>')
+      expect(repair, repair).toContain('one of: claude-code')
+    }
+    // ...and with the runtime known, the same hints carry the real value.
+    const known = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    for (const c of known.checks) {
+      if (c.repair?.includes('--repair')) expect(c.repair).toContain('--doctor --repair --runtime codex-cli')
+    }
+    await rm(homeDir, { recursive: true, force: true })
   })
 
   it('no rendered check string ever carries a bare --runtime (the paste-truncation bug)', async () => {

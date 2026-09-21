@@ -151,14 +151,33 @@ interface IdentityFile {
 const RERUN = connectorRerunCommand()
 
 /**
- * #3120: the `--runtime <id>` fragment for a repair/rerun string, or '' when
- * the runtime is unknown. Repair strings interpolate this directly, so the
- * empty case renders as plain `--doctor --repair` (a rerun that will resolve
- * the runtime again) instead of a truncated `--runtime ` that breaks when
- * pasted. Never put a human-readable placeholder in a command line.
+ * #3120: the `--runtime <id>` fragment for a `--doctor` rerun string, or ''
+ * when the runtime is unknown. A flagless `--doctor` rerun is a real command
+ * (#3210: it resolves the runtime from the setup record again), so the empty
+ * case renders as plain `--doctor` instead of a truncated `--runtime ` that
+ * breaks when pasted.
  */
 function runtimeFlagFor(runtime: string): string {
   return normalizeRuntimeName(runtime) ? ` --runtime ${runtime}` : ''
+}
+
+/**
+ * #3210 review: the `--doctor --repair` command for a repair string. `--repair`
+ * REQUIRES `--runtime` in the parser (it rewrites that runtime's config), so a
+ * bare `--doctor --repair` is refused when pasted — the exact dead end the
+ * unknown-runtime path used to render. With the runtime unknown the command
+ * carries an explicit `<runtime>` placeholder — the form the #2424
+ * `runtime_spec_override` repair already uses unconditionally — and names the
+ * allowed values, so the user is told what to fill in rather than bounced.
+ * `suffix` may end with a period; the unknown branch drops it so the
+ * explanatory clause reads on from the command.
+ */
+function repairCommandFor(runtime: string, suffix = ''): string {
+  if (normalizeRuntimeName(runtime)) return `Run: ${RERUN} --doctor --repair --runtime ${runtime}${suffix}`
+  return (
+    `Run: ${RERUN} --doctor --repair --runtime <runtime>${suffix.replace(/\.$/, '')} — --repair needs the runtime named; ` +
+    `one of: ${RUNTIME_FLAG_VALUE_LIST.join(', ')}.`
+  )
 }
 
 /**
@@ -693,7 +712,7 @@ async function verdictsForAgent(
       label: 'Signer runtime (preinstalled wrapper)',
       level: 'failed',
       detail: 'No signer-runtime.json sidecar — the pinned signer runtime was never prepared (or a pre-#1586 npx config).',
-      repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)}`,
+      repair: repairCommandFor(input.runtime),
     })
   } else if (sidecar.runtime_spec_override) {
     // #2424: an override install is compared against what the run that wrote
@@ -711,7 +730,7 @@ async function verdictsForAgent(
       detail: matches
         ? `Installed ${sidecar.signer_package}@${sidecar.signer_version} at ${sidecar.runtime_directory} (override install — see runtime_spec_override)`
         : `Override runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
-      ...(matches ? {} : { repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)} with the same HAVEN_*_SPEC variables set.` }),
+      ...(matches ? {} : { repair: repairCommandFor(input.runtime, ' with the same HAVEN_*_SPEC variables set.') }),
     })
   } else {
     // #2963: two questions, two references. "Is the directory intact?" is
@@ -741,7 +760,7 @@ async function verdictsForAgent(
         : intact
           ? `Installed version ${sidecar.signer_version} does not match the connector's pinned ${MCP_RUNTIME_MANIFEST.signerVersion} — intact, but outdated.`
           : `Runtime directory is stale or empty (${sidecar.runtime_directory}) — the CLI or package versions are missing.`,
-      ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)}` }),
+      ...(ok ? {} : { repair: repairCommandFor(input.runtime) }),
     })
   }
 
@@ -887,7 +906,7 @@ async function verdictsForAgent(
         detail: probe.status === 'ok'
           ? `Signer started, listed ${probe.toolNames?.length ?? 0} tools${probe.serverInfo?.version ? ` (v${probe.serverInfo.version})` : ''}.${compatDetail}`
           : `Handshake failed: ${probe.status}.`,
-        ...(probe.status === 'ok' ? {} : { repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)}` }),
+        ...(probe.status === 'ok' ? {} : { repair: repairCommandFor(input.runtime) }),
       })
     }
   } else {
@@ -896,7 +915,7 @@ async function verdictsForAgent(
       label: 'Signer stdio handshake',
       level: 'failed',
       detail: 'Skipped — no prepared signer runtime to probe.',
-      repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input.runtime)}`,
+      repair: repairCommandFor(input.runtime),
     })
   }
 
@@ -1113,7 +1132,7 @@ export async function runDoctor(
       label: 'Runtime MCP config',
       level: 'failed',
       detail: `No runtime config at ${configPath}.`,
-      repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input2.runtime)}`,
+      repair: repairCommandFor(input2.runtime),
     })
   } else {
     const primaryIdentity = await readIdentity(primaryDirectory ?? '')
@@ -1135,7 +1154,7 @@ export async function runDoctor(
         : signerViaNpx
           ? `Config at ${configPath} still launches the signer via npx — the pre-#1586 shape that cannot start under a 120s startup timeout.`
           : `Config at ${configPath} is missing the Haven entries${primarySidecar && !wrapperReferenced ? ' (or references a different signer wrapper)' : ''}.`,
-      ...(ok ? {} : { repair: `Run: ${RERUN} --doctor --repair${runtimeFlagFor(input2.runtime)}` }),
+      ...(ok ? {} : { repair: repairCommandFor(input2.runtime) }),
     })
   }
 
@@ -1409,8 +1428,25 @@ export async function runDoctor(
     })
   }
 
+  // #3210: say where a resolved runtime came from. `runRepair` already prints
+  // it; the read-only report did not, so a reader could not tell a checked
+  // config from an inherited one — and a STALE record (the user switched
+  // editors) would otherwise read as a plain pass on a file they no longer
+  // use. Appended to the primary runtime_config verdict, whatever its level.
+  if (resolution.origin === 'record') {
+    const rc = checks.find((check) => check.id === 'runtime_config')
+    if (rc) {
+      rc.detail += ` (Resolved '${resolution.runtime}' from ${join(directory ?? '', CONNECT_OUTCOME_FILENAME)}; pass --runtime to check a different one.)`
+    }
+  }
+
   // ── Restart still required? (informational, never fails the doctor) ───────
-  const restart = restartRequiredForRuntime(input2.runtime, deps.env)
+  // #3210 review: `restartRequiredForRuntime` falls back to env DETECTION for
+  // an empty OR unrecognised runtime — the doctor's own shell, not the runtime
+  // the agent uses — and would answer about a runtime nobody named. The
+  // resolution above never guesses; neither does this check: unknown stays
+  // unknown, and an unrecognised value gets the "no requirement known" line.
+  const restart = normalizedRuntime === null ? false : restartRequiredForRuntime(input2.runtime, deps.env)
   checks.push({
     id: 'restart',
     label: 'Runtime restart',

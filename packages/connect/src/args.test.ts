@@ -93,12 +93,15 @@ describe('parseArgs --tombstone (#1681)', () => {
     })
   })
 
-  it('takes precedence over --doctor: no --runtime requirement kicks in', () => {
-    // cli.ts dispatches on tombstone FIRST; parseArgs must not throw doctor's
-    // runtime-required error when both are passed.
-    const parsed = parseArgs(['--tombstone', '/tmp/agents/agent-old', '--doctor'], {})
+  it('takes precedence over --doctor --repair: no --runtime requirement kicks in', () => {
+    // cli.ts dispatches on tombstone FIRST; parseArgs must not throw --repair's
+    // runtime-required error when both are passed. (#3210: a flagless --doctor
+    // alone no longer throws anywhere, so the case is pinned against --repair,
+    // which still does — otherwise this test would be vacuous.)
+    const parsed = parseArgs(['--tombstone', '/tmp/agents/agent-old', '--doctor', '--repair'], {})
     expect(parsed.tombstone?.directory).toBe('/tmp/agents/agent-old')
     expect(parsed.doctor).toBe(true)
+    expect(parsed.repair).toBe(true)
   })
 
   it('REFUSES --reason / --replaced-by without --tombstone — never a silent no-op', () => {
@@ -201,6 +204,49 @@ describe('--replace (#2551)', () => {
     const help = helpText()
     expect(help).toContain('--replace')
     expect(help).toContain('wiring_collision')
+  })
+})
+
+describe('--doctor / --repair runtime requirement (#3210)', () => {
+  // Read-only diagnosis passes through without a runtime: the doctor resolves
+  // it from the setup record, or reports it unknown (#3120). The parser used
+  // to refuse here, which made that resolution unreachable from the CLI.
+  it('--doctor parses with no --runtime; the runtime stays undefined for the doctor to resolve', () => {
+    const parsed = parseArgs(['--doctor'], {})
+    expect(parsed.doctor).toBe(true)
+    expect(parsed.repair).toBe(false)
+    expect(parsed.options.runtime).toBeUndefined()
+    expect(parseArgs(['--doctor', '--json'], {}).json).toBe(true)
+  })
+
+  it('--doctor --runtime <name> still carries the flag verbatim', () => {
+    expect(parseArgs(['--doctor', '--runtime', 'codex-cli'], {}).options.runtime).toBe('codex-cli')
+  })
+
+  // Repair REWRITES the runtime config, so the runtime it rewrites is named
+  // on the command line, never inherited from a record on disk.
+  it('--repair REFUSES without --runtime, alone or with --doctor, and says why', () => {
+    for (const argv of [['--repair'], ['--doctor', '--repair'], ['--repair', '--json']]) {
+      expect(() => parseArgs(argv, {}), argv.join(' ')).toThrow(/--repair needs --runtime <runtime>/)
+      expect(() => parseArgs(argv, {}), argv.join(' ')).toThrow(/--doctor alone resolves it from the record/)
+    }
+  })
+
+  it('a whitespace-only --runtime value does not satisfy --repair (the doctor would trim it and inherit from the record)', () => {
+    expect(() => parseArgs(['--repair', '--runtime', '   '], {})).toThrow(/--repair needs --runtime <runtime>/)
+    // --doctor is read-only, so the same value passes through for the doctor to trim and resolve.
+    expect(parseArgs(['--doctor', '--runtime', '   '], {}).options.runtime).toBe('   ')
+  })
+
+  it('--repair --runtime <name> parses, alone or with --doctor', () => {
+    expect(parseArgs(['--repair', '--runtime', 'codex-cli'], {})).toMatchObject({ repair: true, options: { runtime: 'codex-cli' } })
+    expect(parseArgs(['--doctor', '--repair', '--runtime', 'cursor'], {})).toMatchObject({ doctor: true, repair: true, options: { runtime: 'cursor' } })
+  })
+
+  it('the help text states the asymmetry', () => {
+    const help = helpText()
+    expect(help).toContain('--runtime is optional: without it the doctor checks the runtime the setup recorded')
+    expect(help).toContain('Requires --runtime <runtime>: it rewrites that config')
   })
 })
 

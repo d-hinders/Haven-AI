@@ -359,6 +359,9 @@ export async function runCli(
   }
   if (parsed.doctor || parsed.repair) {
     const { runDoctor, runRepair } = await import('./doctor.js')
+    // '' is the doctor's "no flag given" input: it resolves the runtime from
+    // the setup record, else reports it unknown (#3120). Reachable for
+    // --doctor since #3210; --repair never gets here without a flag (args.ts).
     const runtime = parsed.options.runtime ?? ''
     const credentialsDir = parsed.options.credentialsDir
     try {

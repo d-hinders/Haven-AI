@@ -24,7 +24,7 @@ covers:
   - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
-last-verified: "2026-09-19"
+last-verified: "2026-09-21"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -422,13 +422,17 @@ throughout.
    npx -y @haven_ai/connect@dev --doctor --runtime <claude-code|codex-desktop|codex-cli>
    ```
 
-   The doctor reports the installed signer and SDK versions (the snapshot),
+   `--runtime` is optional here since #3210 — a flagless `--doctor` checks the
+   runtime the setup recorded — and stays required for `--repair`, which
+   rewrites that config. The doctor reports the installed signer and SDK
+   versions (the snapshot),
    starts the local signer for a real stdio handshake and prints its advertised
    compat versions. On the dev channel the pinned build moves often: an install
    that is intact but behind the connector's current pin is reported as an
    **advisory** (`!` marker, "intact, but outdated", both versions named) and
-   exits 0 — only a real failure exits 1 (#3121). Run `--doctor --repair` to
-   catch up when you want the newer snapshot. Its hosted MCP row proves endpoint reachability; the
+   exits 0 — only a real failure exits 1 (#3121). Run
+   `--doctor --repair --runtime <runtime>` to catch up when you want the newer
+   snapshot. Its hosted MCP row proves endpoint reachability; the
    `identity_match` row is the authenticated stored-credential check. Every
    "re-run `npx @haven_ai/connect@<tag>`" hint the
    snapshot's packages print names **`@dev`**, because the tag is a build-time
@@ -470,9 +474,10 @@ prints `RUNTIME SPEC OVERRIDE ACTIVE …` first; the install lands in
 the pinned directory) and is never reused between runs; and `--doctor` reports
 a **failing** `runtime_spec_override` check — that is the record of the override,
 not a defect. A malformed value is refused before npm runs. To return to the
-pinned manifest, unset the variables and run `--doctor --repair`. The full
-contract — the three variables, what each replaces, the sidecar and wrapper
-records — is in the connector's own README:
+pinned manifest, unset the variables and run
+`--doctor --repair --runtime <runtime>`. The full contract — the three
+variables, what each replaces, the sidecar and wrapper records — is in the
+connector's own README:
 [`packages/connect/README.md` § *Installing an unpublished signer / SDK / MCP build*](../../packages/connect/README.md#installing-an-unpublished-signer--sdk--mcp-build-haven_signer_spec-2424).
 
 Every pin and every override key leaves its directory behind when you move
@@ -490,11 +495,11 @@ only until you prune.
 > described above is unchanged (it already compared against the sidecar).
 
 > **Re-verified #3120:** the doctor/repair surfaces this loop uses keep their
-> contracts. `--doctor` (and `--doctor --repair`) now resolve the runtime from
-> the agent directory's `last-connect-outcome.json` when the `--runtime` flag
-> is absent, and an unknown runtime makes `--repair` refuse before any write or
-> npm spawn — the override flow above always names its runtime, so it never
-> enters that path. The section's commands keep explicit `--runtime <name>`
+> contracts. `--doctor` now resolves the runtime from the agent directory's
+> `last-connect-outcome.json` when the `--runtime` flag is absent; `--repair`
+> is refused by the parser without `--runtime` (#3210), so it never inherits a
+> runtime — the override flow above always names its runtime, so it never
+> enters either path. The section's commands keep explicit `--runtime <name>`
 > flags and behave exactly as written; the snapshot channel rules, the five
 > guards and `HAVEN_CONNECTOR_CHANNEL` did not move.
 
@@ -666,7 +671,7 @@ newest.
 | The run fails in the bump step with `short sha "0…" is all digits with a leading zero` | Semver forbids a leading zero in a numeric prerelease identifier, and that commit's 7-hex short SHA happens to be all digits (`release-snapshot-version.mjs`) | Nothing is wrong with the commit. Re-run the workflow on a later commit |
 | The dev dashboard's command names `@alpha` | `HAVEN_CONNECTOR_CHANNEL` is unset or empty on the dev backend | Checklist step 5 — after step 4 |
 | The dev backend or hosted MCP will not boot after setting the variable | The value is not a well-formed dist-tag | Fix or unset it; the boot log names the variable and the pattern |
-| `--doctor` fails on `runtime_spec_override` | A `HAVEN_*_SPEC` variable is set in the shell, or the last install ran under one | By design — the finding is the record. Unset and `--doctor --repair` to return to the pin |
+| `--doctor` fails on `runtime_spec_override` | A `HAVEN_*_SPEC` variable is set in the shell, or the last install ran under one | By design — the finding is the record. Unset and `--doctor --repair --runtime <runtime>` to return to the pin |
 | A `0.0.0-dev.*` version shows up on `alpha` or `latest` | Should be impossible: five guards in `publish.yml` / `release-bump.mjs` | Treat as an incident in the workflow itself, not as a bad publish; the guards are named in the workflow header |
 
 ## Not covered here

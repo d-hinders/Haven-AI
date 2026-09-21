@@ -93,8 +93,9 @@ export function runtimeStatusHelper(
   // runtime_config_write_failed IS retryable and keeps the retry wording.
   //
   // The command is spelled out WITH --runtime because the connector's parser
-  // requires it for --doctor/--repair and has no detection fallback on that
-  // path (packages/connect/src/args.ts) — advice that reproduces the failure
+  // requires it for --repair (packages/connect/src/args.ts; since #3210
+  // `--doctor` alone resolves the runtime from the setup record) and this
+  // command always passes --repair — advice that reproduces the failure
   // with a second, less legible error is worse than no advice. `runtime` is
   // optional on the wire, so the placeholder keeps the shape correct when the
   // connector never reported one.

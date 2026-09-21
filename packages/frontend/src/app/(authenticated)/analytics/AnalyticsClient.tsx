@@ -10,6 +10,7 @@ import {
   percentChange,
   rangeCaption,
   refusalsCaption,
+  analyticsCurrencyLocale,
 } from '@/lib/analytics-format'
 import type { AnalyticsOverviewResponse, AnalyticsRangeValue } from '@/types/analytics'
 import {
@@ -143,24 +144,31 @@ function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currenc
   // client's.
   const refusalLedgerFloor =
     basis.refusals_recorded_from != null ? (
-      <>
-        {' · '}
-        <RefusalsRecordedFromFootnote fromDate={formatFloorDate(basis.refusals_recorded_from)} />
-      </>
+      <RefusalsRecordedFromFootnote fromDate={formatFloorDate(basis.refusals_recorded_from)} />
     ) : null
 
+  // The tile keeps the figure's own basis (count, attempts, amount). The two
+  // caveats that apply to the PAGE — the ledger's floor date and the
+  // unrecorded price-cap refusals — moved out to `refusalCaveats`, rendered
+  // once under the grid: joined into the tile they ran five lines on a phone
+  // and seven on desktop, making the Refused tile twice its neighbours' height
+  // and the grid row's loudest element a paragraph, not a figure (#3204).
   const refusedFootnote =
     totals.refused_count > 0 || totals.refused_attempts > 0 ? (
       <>
         {refusalsCaption(totals.refused_count, totals.refused_attempts)}
         {` · ${formatAnalyticsAmount(totals.refused_amount, currency)} attempted`}
-        {refusalLedgerFloor}
-        {' · '}
-        {UNRECORDED_REFUSALS_NOTE}
       </>
     ) : (
-      UNRECORDED_REFUSALS_NOTE
+      'No refusals in this window'
     )
+  const refusalCaveats = (
+    <>
+      {refusalLedgerFloor}
+      {refusalLedgerFloor ? ' · ' : ''}
+      {UNRECORDED_REFUSALS_NOTE}
+    </>
+  )
 
   const bands = totals.budget_bands
   const hasBudgets = bands.agents_with_budget > 0
@@ -173,6 +181,7 @@ function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currenc
         polarity="neutral"
         delta={percentChange(totals.spent, totals.spent_previous)}
         deltaCaption={windowCaption}
+        deltaLocale={analyticsCurrencyLocale(currency)}
         footnote={spentFootnote}
       />
       <StatTile
@@ -181,6 +190,7 @@ function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currenc
         polarity="higher-is-bad"
         delta={percentChange(totals.refused_count, totals.refused_previous_count)}
         deltaCaption={windowCaption}
+        deltaLocale={analyticsCurrencyLocale(currency)}
         footnote={refusedFootnote}
       />
       <StatTile
@@ -202,8 +212,15 @@ function TileGrid({ data, currency }: { data: AnalyticsOverviewResponse; currenc
         // about a number the fee schedule does not keep.
         delta={fees.flag_on ? percentChange(fees.amount, fees.previous) : null}
         deltaCaption={fees.flag_on ? windowCaption : undefined}
+        deltaLocale={analyticsCurrencyLocale(currency)}
         footnote={feesFootnote}
       />
+      <p
+        className="text-xs leading-relaxed text-[var(--v2-ink-3)] sm:col-span-2 xl:col-span-4"
+        data-testid="analytics-refusal-caveats"
+      >
+        {refusalCaveats}
+      </p>
     </div>
   )
 }

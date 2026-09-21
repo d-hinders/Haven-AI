@@ -678,6 +678,19 @@ export function StackedBarChart({
             <span className="truncate">{row.name}</span>
           </li>
         ))}
+        {entries.some((d) => d.refusals > 0) && (
+          // The one mark the series rows do not explain: the ink cap over a
+          // day that refused something. Named here, in the legend that names
+          // everything else, rather than only in the card's prose (#3204).
+          <li data-testid="chart-legend-refusal" className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="inline-block h-[3px] w-2.5 flex-shrink-0 rounded-sm"
+              style={{ backgroundColor: INK, opacity: 0.55 }}
+            />
+            <span className="truncate">Refused (cap)</span>
+          </li>
+        )}
       </ul>
 
       {/* The tooltip: on a wide screen a callout over the day it describes;
@@ -813,8 +826,15 @@ export function StackedBarChart({
           table is not a product table: `ui/Table` is visible rows with
           sticky headers, column staging, and hover chrome, and none of that
           is what a screen reader is handed here. */}
-      {/* design-lint-disable-line: raw-table */}
-      <table data-testid="chart-data-table" className="sr-only">
+      {/* `sr-only` on a wrapper, not on the table element: Tailwind's
+          `sr-only` sets `height: 1px`, which a table treats as a minimum, so
+          the table rendered at full size, clipped by the card's
+          `overflow-hidden`, and the screenshot harness counted ~800px of
+          "hidden content" on every capture (#3204 design review). A block
+          wrapper honours the 1px. */}
+      <div className="sr-only">
+        {/* design-lint-disable-line: raw-table */}
+        <table data-testid="chart-data-table">
         <caption>{ariaLabel}</caption>
         <thead>
           <tr>
@@ -843,6 +863,7 @@ export function StackedBarChart({
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }

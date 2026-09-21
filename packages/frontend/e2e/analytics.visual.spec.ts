@@ -315,27 +315,28 @@ const SCENARIOS: Scenario[] = [
       await expect(section(page, 'stat-tile-refused').getByText(COPY.refusedCount)).toHaveCount(1)
       await expect(section(page, 'stat-tile-refused').getByText(COPY.refusedAttempts)).toHaveCount(1)
       await expect(section(page, 'stat-tile-refused').getByText(COPY.refusedAmount)).toHaveCount(1)
-      // The #3013 ledger-floor clause rides the Refused tile's footnote when
-      // the response reports a floor (the fixture's basis carries '2026-05-28'):
+      // The #3013 ledger-floor clause and the #3055 limit-of-visibility clause
+      // ride the page-level caveat line under the tile grid (#3204 moved them
+      // out of the Refused tile, which they made twice its neighbours' height):
       // a floor the endpoint reports but the page drops is a silently larger
-      // refusals total, the same defect class the basis lines above pin.
+      // refusals total, the same defect class the basis lines above pin, and
+      // the one class the ledger never sees is named rather than silently
+      // absent from the count. Neither rides the tile any more.
       await expect(
-        section(page, 'stat-tile-refused').getByText(COPY.refusalsRecordedFrom),
-        'the ledger floor the response reports must be named on the face of the tile',
+        section(page, 'analytics-refusal-caveats').getByText(COPY.refusalsRecordedFrom),
+        'the ledger floor the response reports must be named on the page',
       ).toHaveCount(1)
-      // The #3055 limit-of-visibility clause rides the same footnote: the one
-      // class the ledger never sees is named rather than silently absent from
-      // the count.
+      await expect(section(page, 'stat-tile-refused').getByText(COPY.refusalsRecordedFrom)).toHaveCount(0)
       await expect(
-        section(page, 'stat-tile-refused').getByText(COPY.refusedUnrecorded),
+        section(page, 'analytics-refusal-caveats').getByText(COPY.refusedUnrecorded),
         "the footnote must name the price cap the agent's own runtime applies, and nothing the ledger records",
       ).toHaveCount(1)
       // Held as negatives: the quote tools quote and refuse nothing, so naming
       // a quote would describe a refusal no code path raises; and the hosted
       // prepare-time budget refusal IS recorded since #3109, so a footnote
       // calling it unrecorded would contradict the count above it (#3055).
-      await expect(section(page, 'stat-tile-refused').getByText(/quote/i)).toHaveCount(0)
-      await expect(section(page, 'stat-tile-refused').getByText(/hosted tools/i)).toHaveCount(0)
+      await expect(section(page, 'analytics-refusal-caveats').getByText(/quote/i)).toHaveCount(0)
+      await expect(section(page, 'analytics-refusal-caveats').getByText(/hosted tools/i)).toHaveCount(0)
       await expect(section(page, 'stat-tile-budget-used').getByText(COPY.budgetBands)).toHaveCount(1)
       await expect(section(page, 'stat-tile-fees-paid-to-haven').getByText(COPY.feesOff)).toHaveCount(1)
       await expect(

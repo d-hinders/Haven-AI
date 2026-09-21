@@ -2988,6 +2988,12 @@ function setAccountingFeedStage(next) {
  * than no scenario at all.
  */
 async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
+  // Virtual clock at the fixture's anchor day: the agents table's "Last
+  // payment: 2h ago" caption reads the real clock, and against a fixture
+  // pinned to 2026-07-10 the real clock printed "2mo ago" beside "4 payments"
+  // in a 30-day window (#3204). The rest of the page reads server figures
+  // and is unaffected.
+  await page.clock.install({ time: new Date('2026-07-10T14:00:00.000Z') })
   await page.goto(`${BASE_URL}/analytics`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.evaluate(() => document.fonts.ready)
   await dismissMobileSidebar(page, vp)

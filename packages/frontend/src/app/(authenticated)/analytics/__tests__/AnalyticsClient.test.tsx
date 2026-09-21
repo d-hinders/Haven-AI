@@ -76,6 +76,13 @@ const NO_FLOOR: AnalyticsOverviewResponse = {
   basis: { ...POPULATED.basis, refusals_recorded_from: null },
 }
 
+/** A populated window with payments but no refusals at all — a real production
+ *  state (an account whose agents stayed inside every budget). */
+const NO_REFUSALS: AnalyticsOverviewResponse = {
+  ...POPULATED,
+  totals: { ...POPULATED.totals, refused_count: 0, refused_attempts: 0, refused_amount: '0', refused_previous_count: 0 },
+}
+
 function settled(overrides: Record<string, unknown> = {}) {
   return { data: POPULATED, loading: false, failed: false, refetch: mockRefetch, ...overrides }
 }
@@ -282,41 +289,58 @@ describe('Analytics — the populated page', () => {
     // prepare-time budget refusal is NOT named any more — #3109 gave it a
     // writer (`source: 'hosted_prepare'`) so the tile counts it, and the
     // footnote must not tell the reader those rows do not exist (#3055 revert).
-    expect(tile.textContent).toMatch(/Price-cap refusals in your agent's runtime are not recorded\./)
-    expect(tile.textContent).not.toMatch(/hosted tools/)
-    expect(tile.textContent).not.toMatch(/prepare a purchase/)
+    // Since #3204 the caveat lives ONCE under the grid, not on the tile: the
+    // tile keeps its own basis (count, attempts, amount) and stays the height
+    // of its neighbours. Mutation: join the caveat back into the tile → red.
+    const caveats = screen.getByTestId('analytics-refusal-caveats')
+    expect(caveats.textContent).toMatch(/Price-cap refusals in your agent's runtime are not recorded\./)
+    expect(tile.textContent).not.toMatch(/Price-cap refusals/)
+    expect(caveats.textContent).not.toMatch(/hosted tools/)
+    expect(caveats.textContent).not.toMatch(/prepare a purchase/)
     // The phrasing the issue retires: the quote tools quote and refuse
     // nothing, so a footnote that blames the quote describes a refusal no
     // code path raises.
+    expect(caveats.textContent).not.toMatch(/quote/i)
     expect(tile.textContent).not.toMatch(/quote/i)
   })
 
   it('names the ledger floor when the endpoint reports one, and stays silent when it does not (#3013)', () => {
     // The populated fixture carries `refusals_recorded_from: '2026-05-28'`:
     // the renderer formats it (en-GB day + short month) and the clause sits
-    // inside the Refused tile — the count above it stays the truth for the
-    // part of the window the ledger covers. The expected label below is the
-    // same expression the production formatter uses, so this pin follows the
-    // formatter rather than restating it.
+    // in the page-level caveat line under the tile grid (#3204) — the count
+    // on the tile stays the truth for the part of the window the ledger
+    // covers. The expected label below is the same expression the production
+    // formatter uses, so this pin follows the formatter rather than restating it.
     render(<AnalyticsClient />)
-    const tile = screen.getByTestId('stat-tile-refused')
+    const caveats = screen.getByTestId('analytics-refusal-caveats')
     const expected = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(
       new Date('2026-05-28'),
     )
-    expect(tile.textContent).toMatch(new RegExp(`Refusals are recorded from ${expected}\\.`))
+    expect(caveats.textContent).toMatch(new RegExp(`Refusals are recorded from ${expected}\\.`))
+  })
+
+  it('a populated window with zero refusals says so on the tile and still carries the page caveats (#3204)', () => {
+    mockUseAnalyticsOverview.mockReturnValue(settled({ data: NO_REFUSALS }))
+    render(<AnalyticsClient />)
+    const tile = screen.getByTestId('stat-tile-refused')
+    expect(within(tile).getByText('0')).toBeTruthy()
+    expect(tile.textContent).toMatch(/No refusals in this window/)
+    expect(tile.textContent).not.toMatch(/attempted/)
+    expect(screen.getByTestId('analytics-refusal-caveats').textContent).toMatch(/Price-cap refusals/)
   })
 
   it('renders NO floor line from a null `refusals_recorded_from` — an empty ledger names no day', () => {
     mockUseAnalyticsOverview.mockReturnValue(settled({ data: NO_FLOOR }))
     render(<AnalyticsClient />)
     const tile = screen.getByTestId('stat-tile-refused')
-    expect(tile.textContent).not.toMatch(/Refusals are recorded from/)
+    const caveats = screen.getByTestId('analytics-refusal-caveats')
+    expect(caveats.textContent).not.toMatch(/Refusals are recorded from/)
     // The rest of the refusal sentence stays: the count and the one
     // unrecorded class are independent of the ledger floor — an empty ledger
     // does not make the path the page cannot see any more visible (#3055).
     expect(tile.textContent).toMatch(/2 refused payments/)
-    expect(tile.textContent).toMatch(/Price-cap refusals in your agent's runtime are not recorded\./)
-    expect(tile.textContent).not.toMatch(/hosted tools/)
+    expect(caveats.textContent).toMatch(/Price-cap refusals in your agent's runtime are not recorded\./)
+    expect(caveats.textContent).not.toMatch(/hosted tools/)
   })
 
   it('renders the budget bands as a count of agents over their own budgets', () => {

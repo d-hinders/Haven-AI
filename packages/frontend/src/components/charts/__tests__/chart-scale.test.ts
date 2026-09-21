@@ -3,7 +3,9 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   chartScale,
+  chartScaleRange,
   MAX_X_LABELS_DESKTOP,
+  FIRST_X_LABEL_SEPARATION_FACTOR,
   MAX_X_LABELS_MOBILE,
   MIN_CHARTABLE_DAYS,
   MIN_X_LABEL_SEPARATION_NARROW,
@@ -180,6 +182,37 @@ describe('xLabelIndices — the density the issue fixes for 7d, 30d, 90d', () =>
     expect(desktop[desktop.length - 1]).toBe(44)
   })
 
+  it('gives a left-anchored start label two label-widths, dropping its neighbour and never day 0 — opt-in, the centred caller is untouched (#3204 rounds 3–4)', () => {
+    // Mutations: factor 1 → the opted-in narrow 30-day list keeps day 7 and
+    // the 90-day list keeps day 18; separation back to 0.11 → the same;
+    // the option ignored (rule always on) → the centred lists lose day 7
+    // and day 18. The product's ranges (7d/30d/90d) are unchanged on
+    // desktop with the option: 7/29 and 14/89 both clear 2 × 6%. (A 365-day
+    // desktop list WOULD lose its second label under the option — 31/364 is
+    // under 12% — which is why the option is the area chart's alone and
+    // the doc says "7/30/90 on desktop unchanged", not "desktop unchanged".)
+    expect(FIRST_X_LABEL_SEPARATION_FACTOR).toBe(2)
+    expect(MIN_X_LABEL_SEPARATION_NARROW).toBe(0.15)
+    expect(xLabelIndices(30, { narrow: true, startAnchoredLeft: true })[1]).toBe(14)
+    expect(xLabelIndices(90, { narrow: true, startAnchoredLeft: true })[1]).toBe(36)
+    expect(xLabelIndices(30, { narrow: true })[1]).toBe(7)
+    expect(xLabelIndices(90, { narrow: true })[1]).toBe(18)
+    expect(xLabelIndices(7, { narrow: true, startAnchoredLeft: true })).toEqual([0, 2, 4, 6])
+    for (const count of [7, 30, 90]) {
+      for (const narrow of [false, true]) {
+        const plain = xLabelIndices(count, { narrow })
+        const anchored = xLabelIndices(count, { narrow, startAnchoredLeft: true })
+        expect(anchored[0]).toBe(0)
+        expect(anchored[anchored.length - 1]).toBe(count - 1)
+        if (!narrow) expect(anchored).toEqual(plain)
+        if (anchored.length > 2) {
+          const sep = narrow ? MIN_X_LABEL_SEPARATION_NARROW : MIN_X_LABEL_SEPARATION_WIDE
+          expect(anchored[1] / (count - 1)).toBeGreaterThanOrEqual(sep * FIRST_X_LABEL_SEPARATION_FACTOR)
+        }
+      }
+    }
+  })
+
   it('never exceeds the cap it is given, and always ends on the last day', () => {
     // The two rules are in tension — the endpoint label can push the list
     // one past the cap — and the resolution is that a slot MOVES rather than
@@ -250,8 +283,13 @@ describe('xLabelIndices — the density the issue fixes for 7d, 30d, 90d', () =>
     // exactly one label at the right edge in BOTH treatments (the stride
     // slot one day behind the endpoint drops), and the 90-day desktop range
     // drops the day-84 slot the endpoint move had left within a label-width.
+    // The area chart's narrow 30-day list drops day 7 as well (#3204
+    // round 3): its start label is left-anchored, so "11 Jun" + half of
+    // "18 Jun" is 51px against a 57px stride on the 235px plot — a
+    // word-space apart. The bar chart centres every label and keeps day 7.
     expect(xLabelIndices(30)).toEqual([0, 7, 14, 21, 29])
     expect(xLabelIndices(30, { narrow: true })).toEqual([0, 7, 14, 21, 29])
+    expect(xLabelIndices(30, { narrow: true, startAnchoredLeft: true })).toEqual([0, 14, 21, 29])
     expect(xLabelIndices(90)).toEqual([0, 14, 28, 42, 56, 70, 89])
   })
 
@@ -261,9 +299,14 @@ describe('xLabelIndices — the density the issue fixes for 7d, 30d, 90d', () =>
     // already wider than a label (30d stays weekly through day 21, 90d
     // stays fortnightly through day 70), the caps still hold, and the
     // narrow 90-day list — five labels at the stride the density guard
-    // picked — is untouched, its endpoint gap 35 indices ≈ 39% of the plot.
+    // picked — is untouched for a centred caller, its endpoint gap 35
+    // indices ≈ 39% of the plot. For the left-anchored caller day 18
+    // drops: 18/89 of the 235px plot is 47px centre to centre, LESS than
+    // the 51px the start label plus half a neighbour need — those two
+    // overlapped outright before #3204 round 3.
     expect(xLabelIndices(30)).toEqual([0, 7, 14, 21, 29])
     expect(xLabelIndices(90, { narrow: true })).toEqual([0, 18, 36, 54, 89])
+    expect(xLabelIndices(90, { narrow: true, startAnchoredLeft: true })).toEqual([0, 36, 54, 89])
     for (const count of [7, 30, 45, 90, 365]) {
       for (const narrow of [false, true]) {
         const idx = xLabelIndices(count, { narrow })
@@ -293,5 +336,56 @@ describe('the scale module is the shared arithmetic it claims to be', () => {
     const source = codeOf(readFileSync(resolve(__dirname, '../chart-scale.ts'), 'utf8'))
     expect(source).not.toMatch(/\bfrom\s+['"]react['"]/)
     expect(source).not.toMatch(/\bwindow\.|\bdocument\.|HTMLElement|matchMedia/)
+  })
+})
+
+describe('chartScaleRange — a scale for a chart that does not start at zero (#3204)', () => {
+  it('brackets the range with nice ticks inside [floor, ceiling], never below the floor', () => {
+    // A 12 330–12 680 range (a ~350-unit span — the balance fixture's own
+    // padded range is pinned in the test below). The zero-based scale gave
+    // max 15 000 and ticks 5 000 / 10 000 — every one below the padded floor.
+    // Mutation: compute the step from `hi` instead of `hi - lo` → the step
+    // becomes 5 000 and this goes red.
+    const { min, max, ticks } = chartScaleRange(12_330, 12_680)
+    expect(min).toBeLessThanOrEqual(12_330)
+    expect(max).toBeGreaterThan(12_680)
+    expect(ticks.length).toBeGreaterThanOrEqual(3)
+    for (const t of ticks) {
+      expect(t).toBeGreaterThanOrEqual(min)
+      expect(t).toBeLessThan(max)
+    }
+    expect(ticks[0]).toBe(min)
+    expect(max - min).toBeLessThan((12_680 - 12_330) * 3)
+  })
+
+  it('the AreaChart fixture (1,100–1,240, range-padded to ≈1,092–1,248) prints 1,050 … 1,200', () => {
+    const { ticks } = chartScaleRange(1_091.6, 1_248.4)
+    expect(ticks).toEqual([1050, 1100, 1150, 1200])
+  })
+
+  it('the balance fixture (≈12 342–12 641) prints 12 300 / 12 400 / 12 500 / 12 600 — the labels the product doc names', () => {
+    const pad = (12_641 - 12_342) * 0.06
+    const { min, max, ticks } = chartScaleRange(12_342 - pad, 12_641 + pad)
+    expect({ min, max, ticks }).toEqual({ min: 12_300, max: 12_700, ticks: [12_300, 12_400, 12_500, 12_600] })
+  })
+
+  it('the floor is dust-rounded like the ticks, so ticks[0] === min for fractional inputs', () => {
+    // `lo = 0.3` gave `min = 0.30000000000000004` beside a tick of `0.3`
+    // (review of #3204). Mutation: drop the `toPrecision(12)` on `min` → red.
+    const { min, ticks } = chartScaleRange(0.35, 0.75)
+    expect(ticks[0]).toBe(min)
+    expect(min).toBe(0.3)
+  })
+
+  it('a degenerate range returns the bounds and no ticks', () => {
+    expect(chartScaleRange(5, 5)).toEqual({ min: 5, max: 5, ticks: [] })
+    expect(chartScaleRange(Number.NaN, 1).ticks).toEqual([])
+  })
+
+  it('a range that starts at zero agrees with the zero-based scale on the ceiling', () => {
+    const zero = chartScale(1_240)
+    const ranged = chartScaleRange(0, 1_240)
+    expect(ranged.max).toBe(zero.max)
+    expect(ranged.min).toBe(0)
   })
 })

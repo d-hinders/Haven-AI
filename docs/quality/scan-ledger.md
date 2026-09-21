@@ -881,7 +881,7 @@ pending the owner (carried as a note, not re-surfaced); #3105, #3119, #3130
   tracked set → 192 files (192 on 09-15), 46 historical / 146 live;
   positive control 36 shards; in scope 16 live files (09-17: 15; first
   written as 10, a hand sub-count corrected before merge) — 7 tests, 2
-  package READMEs and 7 history-describing comment lines; `npm run lint:retired-rail-prose` →
+  package READMEs and 7 history-describing files (9 lines); `npm run lint:retired-rail-prose` →
   green. Safe-retirement pins: `git grep -l 'process.env.SAFE' --
   packages/backend/src` → 0 (positive control 57), guard test + middleware
   present, the four `retiredSafeInflowRoute(` registrations from #3030.

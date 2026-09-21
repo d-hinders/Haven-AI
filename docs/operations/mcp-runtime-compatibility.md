@@ -2733,3 +2733,29 @@ to call next in structured fields, and those fields are typed end to end
 > additive case every consumer ignores. Version-skew and consent-hash
 > contracts are untouched. Scope of this note: the `labels[]` addition on the
 > agent rows. Nothing else in this document was re-verified.
+
+> **Re-verification (#3214, every branch of `normalizeError` names its next
+> step, 2026-09-21):** this diff touches
+> `packages/mcp-server/src/tools/support/errors.ts` (the three generic
+> branches of `normalizeError`), the next-step tests and fixtures, and
+> `packages/mcp-server/src/tools/plain-http-x402.test.ts` (the live-500
+> replay). The #3102 note above recorded "no hosted refusal carries a bare
+> `next_action`"; that held only for refusals that carry a `next_action` —
+> the `HavenApiError`, `HavenError` and `UNKNOWN_ERROR` branches returned
+> `code`/`message`/`statusCode`/`paymentId` and nothing else, and a transient
+> upstream 500 during `haven_quote_x402` (the live refusal that filed #3214)
+> landed in exactly that gap. Each of the three branches now emits a typed
+> step through the same builder and `nextStepWireFields` spread as the
+> payment-state branch: a 5xx (or status-less) `HavenApiError` →
+> `next_action: retry_with_explicit_context` with `next_tool_omitted_reason`
+> saying re-call the same tool with the same arguments (and the same
+> idempotency key) once; a 4xx `HavenApiError`, a `HavenError` and the
+> `UNKNOWN_ERROR` fallback → `next_action: stop_and_tell_user` with its
+> omitted reason. None of the three names a tool (`normalizeError` serves
+> every tool; the agent's own last call says which to re-run). Additive only:
+> no error class changes shape, nothing is thrown that was not thrown before,
+> no payment behaviour moves, and every field the three branches emitted
+> before is byte-identical — pinned by the characterization census (35
+> refusal fixtures, 41 `refusalNextStep` calls) written over the four bare
+> shapes before the change, plus the per-branch ratchet cases. Scope of this
+> note: those fields. Nothing else in this document was re-verified.

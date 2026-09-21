@@ -175,6 +175,25 @@ last-verified: "2026-09-21"
 > authenticated, unlike the two `npm view` reads. Nothing else in this document
 > was re-verified in this pass.
 >
+> **Recent re-verification (#3213):** `haven_check_funds` now accepts its
+> `token` argument as the contract address OR the SYMBOL the identity and
+> allowance reads report (`packages/mcp-server/src/tools/state-direct-recovery.ts`,
+> `resolveTokenAddressFromAllowances`): a symbol is resolved to the address of
+> this agent's one allowance carrying it through the existing
+> `GET /machine-payments/allowances` read, and the coverage read
+> `GET /machine-payments/balance-coverage` still receives an address — the
+> backend route, its two query guards and its 400 bodies are untouched, so the
+> wire contract this document describes does not move. Additive on the tool:
+> the address form takes the #3126 path unchanged (no allowance read); a symbol
+> no allowance carries, or two carry, refuses `INVALID_INPUT` with the address
+> as the remedy and `haven_get_allowances` as the typed next step; the
+> read-only no-cap refusal names the check rather than a paid merchant call
+> (`readMaxAmountCap` gained an optional `uncappedRefusal` opener; every
+> purchase tool keeps the shared copy). One description re-cut under the
+> #1591 mean cap (the test is the instrument: total 20,995 of 21,000 at the
+> delivered head); no tool added or renamed, no version-skew or consent-hash
+> change. Nothing else in this document was re-verified in this pass.
+>
 > **Recent re-verification (#3169):** the edge signer's `haven_sign` no longer
 > signs a bare `payload_hash` (no `payment_id`, no `typed_data` /
 > `typed_data_b64`, no `x402_expected`): that arm was raw secp256k1 over caller

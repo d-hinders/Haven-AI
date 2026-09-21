@@ -90,6 +90,44 @@ export type StateDirectRecoveryToolName = (typeof STATE_DIRECT_RECOVERY_TOOLS)[n
  * a handler (or a handler without a name) is a compile error here rather than
  * a runtime registry issue discovered at server boot.
  */
+const TOKEN_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/
+
+/**
+ * #3213: resolve a token SYMBOL to the contract address of this agent's own
+ * allowance for it. `haven_get_agent` and `haven_get_allowances` hand the
+ * agent `tokenSymbol` beside `tokenAddress`, so the symbol is what a cold
+ * agent has in hand; the backend's coverage read wants the address. Exactly
+ * one allowance carrying the symbol (case-insensitive) resolves; none, or
+ * more than one (the same symbol on two chains), refuses with the address as
+ * the remedy and `haven_get_allowances` as the tool that lists them.
+ */
+async function resolveTokenAddressFromAllowances(haven: HavenClient, symbol: string): Promise<string> {
+  const { allowances } = await haven.getAllowances()
+  const wanted = symbol.toLowerCase()
+  const matches = allowances.filter((allowance) => allowance.tokenSymbol.toLowerCase() === wanted)
+  if (matches.length === 1) return matches[0].tokenAddress
+  const known = allowances.map((allowance) => `${allowance.tokenSymbol} (${allowance.tokenAddress})`)
+  throw new HostedToolError({
+    code: 'INVALID_INPUT',
+    message:
+      matches.length === 0
+        ? `token "${symbol}" is not the symbol of any allowance this agent holds` +
+          (known.length > 0 ? ` (it holds: ${known.join(', ')})` : ' (it holds none)') +
+          '. Nothing was read from any chain. Re-send token as the 0x contract address — ' +
+          'haven_get_allowances lists each allowance with its address.'
+        : `token "${symbol}" names ${matches.length} allowances of this agent (${matches
+            .map((allowance) => allowance.tokenAddress)
+            .join(', ')}), so the symbol alone does not say which one to check. Nothing was read ` +
+          'from any chain. Re-send token as the 0x contract address of the one you mean.',
+    statusCode: 400,
+    nextStep: refusalNextStep({
+      nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+      nextTool: 'haven_get_allowances',
+      nextArguments: {},
+    }),
+  })
+}
+
 export function createStateDirectRecoveryHandlers(
   haven: HavenClient,
 ): HostedToolHandlers<StateDirectRecoveryToolName> {
@@ -109,8 +147,22 @@ export function createStateDirectRecoveryHandlers(
     haven_check_funds: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_check_funds', input)
-        const cap = readMaxAmountCap(args, { required: true })
-        const token = resolveTokenFromAddress(args.token)
+        const cap = readMaxAmountCap(args, {
+          required: true,
+          // #3213: this tool spends nothing, so its no-cap refusal names the
+          // check, not a merchant call.
+          uncappedRefusal: 'An amount is REQUIRED for the sufficiency check.',
+        })
+        // #3213: `token` is the contract address every other read reports
+        // beside the symbol — or the SYMBOL itself, resolved against this
+        // agent's own allowances (the tokens it may spend). A symbol that
+        // resolves to no allowance, or to more than one, refuses with the
+        // ADDRESS as the remedy; the atomic-units remedy below is for an
+        // address the registry cannot convert, never for a symbol.
+        const tokenAddress = TOKEN_ADDRESS_PATTERN.test(args.token)
+          ? args.token
+          : await resolveTokenAddressFromAllowances(haven, args.token)
+        const token = resolveTokenFromAddress(tokenAddress)
         // Same conversion contract as the pay tools' caps (#1351): a human
         // amount is interpreted through the decimals of the token the
         // ADDRESS resolves to, never a guess; an unresolvable token or an
@@ -136,7 +188,7 @@ export function createStateDirectRecoveryHandlers(
               code: 'MAX_AMOUNT_UNCONVERTIBLE',
               message:
                 `max_amount_human ("${cap.value}") cannot be applied: Haven does not recognise ` +
-                `token ${args.token}, so the number of atomic units in one token is unknown and ` +
+                `token ${tokenAddress}, so the number of atomic units in one token is unknown and ` +
                 'any conversion would be a guess. Nothing was read from any chain. Re-send the ' +
                 'amount as max_amount in atomic units.',
               statusCode: 400,
@@ -169,7 +221,7 @@ export function createStateDirectRecoveryHandlers(
           maxAmountAtomic = cap.value
         }
         const coverage = await haven.checkFunds({
-          token: args.token,
+          token: tokenAddress,
           amountAtomic: maxAmountAtomic,
         })
         const amountDisplay = token

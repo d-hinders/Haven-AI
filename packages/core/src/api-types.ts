@@ -4668,10 +4668,10 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
                 "application/json": {
-                    /** @description What the client calls itself, shown on the approval screen. Free text from an unauthenticated caller: bounded and stripped of control characters server-side, and rendered as text, never as markup. */
+                    /** @description What the client calls itself, shown on the approval screen. Free text from an unauthenticated caller: TRUNCATED to 80 characters and stripped of control characters server-side (never refused for length — a long hostname must not fail `haven login`, #3030), and rendered as text, never as markup. */
                     client_label?: string;
                 };
             };
@@ -15839,6 +15839,7 @@ export interface operations {
                 agentId?: string;
                 /** @description `<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler. */
                 tokenKey?: string;
+                /** @description Bounded to a safe integer (#3030: the handler used to cap it; ajv reads `1e400` as an integer). */
                 offset?: number;
                 limit?: number;
                 fresh?: "1" | "true";

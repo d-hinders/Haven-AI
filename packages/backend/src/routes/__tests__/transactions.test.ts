@@ -370,7 +370,8 @@ describe('transaction routes', () => {
     // The literal `user` and a uuid are the two conformant agentId spellings.
     queryMock.mockResolvedValue({ rows: [] } as never)
     const ok = await app.inject({ method: 'GET', url: '/transactions?agentId=user&tokenKey=8453:native&limit=100', headers: { authorization: `Bearer ${token}` } })
-    expect(ok.statusCode).not.toBe(400)
+    // `[]` from the repository: the handler answers 200 with no rows.
+    expect(ok.statusCode).toBe(200)
   })
 
   it('rejects unsupported transaction chains before ownership lookup', async () => {

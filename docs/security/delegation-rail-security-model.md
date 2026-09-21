@@ -1226,13 +1226,18 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > `agentExistsForUser`, `findAccountOwnership`) and chain support stay
 > exactly where they were; `user-accounts.ts`: `typeof name` and the
 > pre-lookup uuid check, with `renameAccountForUser` still scoped to the
-> caller). The order of the auth hook and validation is unchanged for a live
-> route — `authMiddleware` is an `onRequest` hook and validation is
-> preValidation, so an anonymous caller still gets 401 before any 400 — and
+> caller). Auth precedes validation on every live route: `authMiddleware` is
+> an `onRequest` hook and validation is preValidation, so an anonymous caller
+> gets 401 before any 400 — `POST /auth/device/lookup` and `/approve` had
+> theirs as a `preHandler` (after validation), which an enforced schema
+> would have turned into a 400 for an anonymous malformed body; both moved
+> to `onRequest` in this diff and `auth-device.test.ts` pins the order — and
 > the retired Safe-inflow 410s (`POST /user/accounts`, `PUT /user/account`,
 > `/deploy`) gained a route-level `onRequest` so they still precede
 > validation: a malformed body is told the flow is gone, not to fix its
-> request (pinned in `safe-inflow-retired.test.ts`). Every `WHERE user_id =`
-> in the three files is byte-identical. Scope of this note: those three
-> files' request-shape edits and the hook order. Nothing else in this
-> document was re-verified.
+> request (pinned in `safe-inflow-retired.test.ts`). The three files carry
+> no inline tenant SQL; ownership runs in the repositories they call
+> (`listBasicAccountsForUser`, `agentExistsForUser`, `findAccountOwnership`,
+> `renameAccountForUser`), none of which this diff touches. Scope of this
+> note: those three files' request-shape edits and the hook order. Nothing
+> else in this document was re-verified.

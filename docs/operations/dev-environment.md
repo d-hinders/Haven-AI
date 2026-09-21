@@ -311,12 +311,13 @@ Isolation rules that are non-negotiable for a payments product:
   the route FILE that declares it is in the plugin's `enforcedModules` —
   `mode` gates the `off` early-return and the counters and nothing else.
   Since #3030 (epic #3028 slice 2) `index.ts` lists **every non-money route
-  module** there — the four born-enforced ones (`contacts`, `merchants`,
+  module** there — the four already-enforced ones (`contacts`, `merchants`,
   `labels`, `agent-labels`), the 22 slice-2 files (`accounting*`,
   `agent-activity`, `analytics*`, `auth`, `balances`, `catalog*`,
   `dashboard`, `discovery`, `health`, `openapi`, `passkeys`,
   `passport-verify`, `portfolio`, `safe-deploy`, `transactions`, `user`,
-  `user-accounts*`) and the bare `'index.ts'` for the inline `GET /` and
+  `user-accounts*`, plus `accounting-webhooks`, which #3196 landed in the
+  slice's base commit) and the bare `'index.ts'` for the inline `GET /` and
   `GET /chains`. Only the money-path modules (`payments`, `x402`,
   `machine-payments`, `agents`, `agent-delegations`, `agent-rekey`,
   `agent-passports`, `agent-connection-setups`, `hybrid-accounts` — slices
@@ -338,8 +339,14 @@ Isolation rules that are non-negotiable for a payments product:
   `npm run generate:route-modules` after adding, moving or renaming a route
   (`npm run check:route-modules` and the backend suite both fail on a stale
   table). The `lint:request-schemas` gate keys its baseline entries with the
-  same string, so the gate and the runtime cannot disagree about which modules
-  are still shadowed.
+  same string, so the gate and the runtime agree about which modules are
+  still shadowed — with one stated limit, closed in #3030: the gate reads a
+  module's mount prefix from `index.ts`, and until #3030 it read only the
+  `{ prefix: '…' }` shape, so a module registered bare
+  (`app.register(fooRoutes)`, mounted at the root) was invisible to it and
+  reported shadow 0 while the plugin ran it in shadow. `accounting-webhooks.ts`
+  (#3196) was exactly that for a morning; the gate reads bare registrations
+  as prefix `''` now.
 
   Any other value refuses the boot rather than falling
   back — a misspelled `enforce` must not silently mean `shadow`. **A mode

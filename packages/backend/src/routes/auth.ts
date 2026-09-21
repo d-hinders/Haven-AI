@@ -253,7 +253,7 @@ export default async function authRoutes(
    */
 
   // POST /auth/device/start — unauthenticated: this is where a CLI begins.
-  app.post<{ Body: { client_label?: string } | undefined }>(
+  app.post<{ Body: { client_label?: string } }>(
     '/device/start',
     { config: { ...authRateLimit(trustProxyHops, 'device_start') } },
     async (request, reply) => {
@@ -270,7 +270,7 @@ export default async function authRoutes(
       // a human on the approval screen, so it is bounded and stripped of
       // control characters here. The screen still renders it as text, never
       // as markup — two independent reasons it cannot become a lure.
-      const rawLabel = request.body?.client_label ?? ''
+      const rawLabel = request.body.client_label ?? ''
       const clientLabel = rawLabel.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 80) || null
 
       await createDeviceAuthorization({ userCode, deviceCode, clientLabel, expiresAt })
@@ -295,7 +295,7 @@ export default async function authRoutes(
   // is — a CLI session must not be able to inspect pending grants either.
   app.post<{ Body: { user_code: string } }>(
     '/device/lookup',
-    { preHandler: authMiddleware, config: { ...authRateLimit(trustProxyHops, 'device_lookup') } },
+    { onRequest: authMiddleware, config: { ...authRateLimit(trustProxyHops, 'device_lookup') } },
     async (request, reply) => {
       const userCode = request.body.user_code
       if (!userCode.trim()) {
@@ -319,7 +319,7 @@ export default async function authRoutes(
   // allow-list, so the default refusal covers it.
   app.post<{ Body: { user_code: string; deny?: boolean } }>(
     '/device/approve',
-    { preHandler: authMiddleware },
+    { onRequest: authMiddleware },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const userCode = request.body.user_code

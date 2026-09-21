@@ -200,6 +200,10 @@ describe('index.ts readers', () => {
       await app.register(otherRoutes, { prefix: '/elsewhere' })
     `
     assert.deepEqual(prefixesFromIndex(src, 'userSafesRoutes'), ['/user/safes', '/user/accounts'])
+    // A bare registration mounts at the root (#3030: `accounting-webhooks.ts`
+    // was invisible to the gauge for exactly this). Mutation: drop the bare
+    // branch → [].
+    assert.deepEqual(prefixesFromIndex("await app.register(webhookRoutes)\nawait app.register(other, { prefix: '/x' })", 'webhookRoutes'), [''])
     assert.deepEqual(prefixesFromIndex(src, 'missingRoutes'), [])
   })
 
@@ -234,6 +238,7 @@ describe('index.ts readers', () => {
       'routes/accounting.ts',
       'routes/accounting-feed.ts',
       'routes/accounting-connections.ts',
+      'routes/accounting-webhooks.ts',
       'routes/agent-activity.ts',
       'routes/analytics.ts',
       'routes/analytics-overview.ts',

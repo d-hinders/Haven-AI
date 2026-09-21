@@ -139,6 +139,10 @@ installRequestValidation(app, {
     'routes/accounting.ts',
     'routes/accounting-feed.ts',
     'routes/accounting-connections.ts',
+    // #3196's receiver landed in this slice's base commit, registered without
+    // a prefix (its routes carry the full path); the doc review found it
+    // shadowed and unseen by the gauge, so it joins the list here.
+    'routes/accounting-webhooks.ts',
     'routes/agent-activity.ts',
     'routes/analytics.ts',
     'routes/analytics-overview.ts',

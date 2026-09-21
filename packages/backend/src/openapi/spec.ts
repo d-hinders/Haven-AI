@@ -1295,7 +1295,12 @@ export const openapiSpec = {
           'Both are stored hashed; the grant expires in 10 minutes.',
         security: [],
         requestBody: {
-          required: false,
+          // Required since #3030: the plugin validates whatever arrives against
+          // the object schema (an absent body is not an object), and the one
+          // client — the CLI — always sends `{ client_label }`, so declaring
+          // the body optional described a shape the enforced route could not
+          // honour.
+          required: true,
           content: {
             'application/json': {
               schema: {
@@ -1303,11 +1308,11 @@ export const openapiSpec = {
                 properties: {
                   client_label: {
                     type: 'string',
-                    maxLength: 80,
                     description:
                       'What the client calls itself, shown on the approval screen. Free text ' +
-                      'from an unauthenticated caller: bounded and stripped of control ' +
-                      'characters server-side, and rendered as text, never as markup.',
+                      'from an unauthenticated caller: TRUNCATED to 80 characters and stripped of control ' +
+                      'characters server-side (never refused for length — a long hostname must not fail ' +
+                      '`haven login`, #3030), and rendered as text, never as markup.',
                   },
                 },
                 additionalProperties: false,
@@ -4614,7 +4619,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
-          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 9007199254740991, default: 0 } },
         ],
         responses: {
           '200': {
@@ -4676,7 +4681,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
-          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 9007199254740991, default: 0 } },
         ],
         responses: {
           '200': {
@@ -6447,7 +6452,7 @@ export const openapiSpec = {
           { name: 'accountId', in: 'query', schema: uuid, description: 'Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none.' },
           { name: 'agentId', in: 'query', schema: { type: 'string', pattern: AGENT_FILTER_PATTERN }, description: "An agent id, or the literal `user` for payments the account holder made directly (#3030: the handler always refused anything else; the spec now says so)." },
           { name: 'tokenKey', in: 'query', schema: { type: 'string', pattern: TOKEN_KEY_PATTERN, examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] }, description: '`<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler.' },
-          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 9007199254740991, default: 0 }, description: 'Bounded to a safe integer (#3030: the handler used to cap it; ajv reads `1e400` as an integer).' },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
         ],
@@ -6540,7 +6545,7 @@ export const openapiSpec = {
         parameters: [
           { name: 'accountAddress', in: 'path', required: true, schema: address },
           { name: 'chain_id', in: 'query', schema: { type: 'integer', minimum: 1 } },
-          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 9007199254740991, default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
         ],

@@ -2005,8 +2005,9 @@ runtime compatibility.
 > handlers. For the naming window described above nothing moves: `?safeId=`
 > is still DECLARED in the spec so it can still be REFUSED with the retired-
 > name 400 (that verdict runs in the handler, after validation, exactly as
-> before), `?accountId=` is a uuid by the spec now (it always had to be one
-> to match a row), and the dual-emitted response keys are untouched. What a
+> before), a malformed `?accountId=` is now refused by the spec's uuid schema
+> (it always declared one; it is enforced now), and the dual-emitted response
+> keys are untouched. What a
 > published client that sent a malformed filter sees changed: the hand-rolled
 > `{ error: 'Invalid accountId' }` became the spec's 400 envelope
 > (`error_code: invalid_request`, `details` naming the field). The CLI sends

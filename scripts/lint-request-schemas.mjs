@@ -55,7 +55,10 @@
 // non-literal (a variable) is invisible to the scanner; a file whose routes
 // are registered nowhere is invisible to index.ts and reads as unmounted (its
 // routes then never resolve to a spec path and it reports shadow: 0, which is
-// the safe direction — an unregistered file ships no refusals to shrink); and
+// the safe direction — an unregistered file ships no refusals to shrink; a
+// module registered with NO options, `app.register(fooRoutes)`, mounts at ''
+// and IS read since #3030 — it was the one registration shape the scanner
+// missed); and
 // whether a route belongs in the spec AT ALL is #1443's coverage gate's
 // problem, not this one — `unspecced` counts such routes so slice 4's
 // "all zeros" cannot silently exclude them, and says nothing about whether
@@ -123,6 +126,14 @@ export function prefixesFromIndex(indexSource, importName) {
   for (const m of indexSource.matchAll(re)) {
     if (m[1] === importName) prefixes.push(m[2])
   }
+  // A module registered WITHOUT options — `await app.register(fooRoutes)` —
+  // mounts at the root, so its routes carry their full path and the prefix
+  // is ''. Before #3030 this shape was invisible: `routes/accounting-webhooks.ts`
+  // (#3196) registered that way and read as unmounted (shadow 0) while the
+  // plugin ran it in shadow — the gate and the runtime disagreed exactly
+  // where the header says they cannot.
+  const bare = new RegExp(`app\\.register\\(\\s*${importName}\\s*\\)`, 'g')
+  for (const _m of indexSource.matchAll(bare)) prefixes.push('')
   return prefixes
 }
 

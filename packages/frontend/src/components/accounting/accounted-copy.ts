@@ -2,12 +2,12 @@
  * The Accounted paste-UI copy constants (#3017, epic #3016) — the ONE home of
  * every Accounted-specific TOKEN the user must read or type verbatim.
  *
- * The required key scopes are spelled exactly `companies:read` and
- * `documents:write` here and nowhere else: the i18n sentences in
- * `lib/i18n/messages/en.ts` interpolate them from this module instead of
- * writing their own copy of the identifier, and the two files' connection is
- * proven by `__tests__/ApiKeyConnectModal.test.tsx`, which asserts the
- * rendered sentences carry both exact tokens. A user who mis-ticks a scope is
+ * The required key scopes are spelled exactly `companies:read`,
+ * `documents:write` and `webhooks:manage` (#3019) here and nowhere else:
+ * the i18n sentences in `lib/i18n/messages/en.ts` interpolate them from this
+ * module instead of writing their own copy of the identifier, and the two
+ * files' connection is proven by `__tests__/ApiKeyConnectModal.test.tsx`,
+ * which asserts the rendered sentences carry all three exact tokens. A user who mis-ticks a scope is
  * refused by the provider at the first feed (the `scope_missing` path of
  * #2865), so a drifted copy spelling is a support bug, not a cosmetic one.
  *

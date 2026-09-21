@@ -38,12 +38,17 @@ const { companyInfoMocks } = vi.hoisted(() => ({
 }))
 vi.mock('../company-info.js', () => companyInfoMocks)
 
-const { registerSpy, deleteSpy, flagSpy } = vi.hoisted(() => ({
+const { registerSpy, deleteSpy, flagSpy, emitSpy } = vi.hoisted(() => ({
   registerSpy: vi.fn(),
   deleteSpy: vi.fn(),
   flagSpy: vi.fn(),
+  emitSpy: vi.fn(),
 }))
-vi.mock('../ops-signals.js', () => ({ flagConnectionStatus: flagSpy }))
+vi.mock('../ops-signals.js', () => ({
+  flagConnectionStatus: flagSpy,
+  emitOpsEvent: emitSpy,
+  ACCOUNTING_EVENT: { webhookTeardownFailed: 'accounting.webhook.teardown_failed' },
+}))
 vi.mock('../accounted-webhooks.js', () => ({
   AccountedWebhookRegistrationError: class extends Error {
     constructor(message: string) {
@@ -224,6 +229,32 @@ describe('connectWithApiKey #3019 — the webhook half of connect', () => {
     expect(del.apiKey).toBe('gnubok_sk_old')
     expect(del.companyId).toBe('comp_1')
     expect(del.subscriptions).toEqual(TRIPLES)
+  })
+
+  it('a teardown the provider refuses (rotated key) is not silent: one warn event with the failed count, and the reconnect still proceeds (S-E)', async () => {
+    const oldBlob = encryptSecrets({ apiKey: 'gnubok_sk_old', webhooks: TRIPLES } as unknown as Record<string, unknown>)
+    repoMocks.getConnection.mockResolvedValue(
+      row({ webhook_token: 'old-token', secrets_ciphertext: oldBlob.ciphertext, secrets_key_version: oldBlob.keyVersion }),
+    )
+    deleteSpy.mockResolvedValue({ deleted: 0, failed: 3 })
+
+    const saved = await connectWithApiKey({ provider: PROVIDER, connector: CONNECTOR, userId: 'user_1', apiKey: 'gnubok_sk_test_k', webhooks: { register: registerSpy } })
+
+    expect(saved.status).toBe('connected')
+    expect(repoMocks.upsertConnection).toHaveBeenCalledTimes(1)
+    expect(emitSpy).toHaveBeenCalledTimes(1)
+    expect(emitSpy).toHaveBeenCalledWith('warn', {
+      event: 'accounting.webhook.teardown_failed',
+      userId: 'user_1',
+      provider: 'accounted',
+      deleted: 0,
+      failed: 3,
+    })
+    // A teardown that deleted everything says nothing.
+    emitSpy.mockClear()
+    deleteSpy.mockResolvedValue({ deleted: 3, failed: 0 })
+    await connectWithApiKey({ provider: PROVIDER, connector: CONNECTOR, userId: 'user_1', apiKey: 'gnubok_sk_test_k', webhooks: { register: registerSpy } })
+    expect(emitSpy).not.toHaveBeenCalled()
   })
 
   it('a first connect never tears anything down (S3 is a reconnect-only step)', async () => {

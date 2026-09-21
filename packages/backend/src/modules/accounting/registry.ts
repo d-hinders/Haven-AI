@@ -60,7 +60,7 @@ export const ACCOUNTED: AccountingProvider = {
   // Per `provider.ts`: empty for api_key providers. `grantedScope` is stored
   // as null for this kind, so a non-empty list would make
   // `missingScopesFor` compute against nothing. The required key scopes
-  // (`companies:read`, `documents:write`) are named in the paste-UI copy and
+  // (`companies:read`, `documents:write`, `webhooks:manage` — #3019) are named in the paste-UI copy and
   // the product doc instead; `documents:read` is NOT required in v1 (nothing
   // reads back), and the write scope cannot be validated at connect (no
   // scope-introspection endpoint, `dry_run` unsupported on upload) — the

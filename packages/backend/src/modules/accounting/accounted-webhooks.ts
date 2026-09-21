@@ -251,9 +251,9 @@ export function verifyAccountedSignature(input: {
 //  - `period.locked` → counted only.
 //  - unknown types (incl. `webhook.test`) → counted as unknown.
 //
-// Redaction follows the allowlist principle the issue states: the stored
-// object is the envelope's `data.object` with obviously sensitive keys
-// dropped and the whole thing size-capped. Nothing about a user, a payment
+// Redaction is a DENYLIST (the CASP shard says so, and says what that does
+// not guarantee): the stored object is the envelope's `data.object` with the
+// named sensitive keys dropped and the whole thing size-capped. Nothing about a user, a payment
 // or an amount is claimed from it anywhere in this slice.
 
 /** Keys never stored from a `data.object`, however the provider shapes it. */
@@ -281,7 +281,7 @@ export const ACCOUNTED_WEBHOOK_STORED_PAYLOAD_MAX_BYTES = 16_384
  * when nothing may be stored (non-object, everything redacted, or over the
  * cap). Shallow-by-design: one level of keys is what the probe needs, and a
  * deep walk would need its own policy for nested objects this slice has
- * never seen — the raw payload lands on the epic FIRST, the allowlist is
+ * never seen — the raw payload lands on the epic FIRST, the denylist is
  * widened from evidence, not imagination.
  */
 export function redactAccountedWebhookObject(object: Record<string, unknown>): Record<string, unknown> | null {
@@ -345,9 +345,11 @@ function extractDocumentId(object: Record<string, unknown> | null): string | nul
 //
 // Header coercion and envelope interpretation live HERE, not in the route
 // file: the route module carries no hand-rolled `typeof` ladders for the
-// request-schemas gauge to count — the spec carries the route's shape and the
-// validation plugin enforces it, and what the wire "means" is the module's
-// vocabulary.
+// request-schemas gauge to count — the spec carries the route's shape (the
+// validation plugin runs it in shadow mode: the module is not in
+// `enforcedModules`, and the body is a raw Buffer the HMAC needs verbatim,
+// so the coercion below is the enforcement), and what the wire "means" is
+// the module's vocabulary.
 
 /** The delivery envelope, per docs.gnubok.se/webhooks § Payload shape. */
 export interface AccountedWebhookEnvelope {

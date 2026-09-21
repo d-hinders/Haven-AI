@@ -55,6 +55,7 @@ import { SettingsRow } from '@/app/(authenticated)/settings/SettingsSection'
 import type { AccountingConnection, AccountingConnectionStatus, AccountingProvider } from '@/hooks/useAccounting'
 import { INTL_LOCALE, type Locale } from '@/lib/i18n'
 import { connectionSettingsRegionId } from './ConnectionSettings'
+import { ACCOUNTED_SCOPE_WEBHOOKS_MANAGE } from './accounted-copy'
 
 export type ConnectionAction = 'connect' | 'reconnect' | 'settings'
 
@@ -180,7 +181,7 @@ export function ConnectionRow({
       detail = copy.detail.revoked(name)
       break
     case 'needs_attention':
-      detail = copy.detail.needsAttention(name)
+      detail = copy.detail.needsAttention(name, ACCOUNTED_SCOPE_WEBHOOKS_MANAGE)
       break
     case 'disconnected':
       if (!provider.configured) detail = copy.notConfigured

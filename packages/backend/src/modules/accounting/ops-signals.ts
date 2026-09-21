@@ -10,8 +10,9 @@ import { scopesFromStatusReason } from './provider.js'
 
 /**
  * Operations signals for the accounting feed (#2872, epic #2858): the
- * structured log events on-call greps for and the two counters `/health/ops`
- * exposes. Nothing here decides anything — it is what the module SAYS about
+ * structured log events on-call greps for and the counters `/health/ops`
+ * exposes (two feed aggregates read live, plus the in-process webhook
+ * counters since #3019). Nothing here decides anything — it is what the module SAYS about
  * what it did.
  *
  * ## The events
@@ -54,6 +55,8 @@ export const ACCOUNTING_EVENT = {
   connectionNeedsAttention: 'accounting.connection.needs_attention',
   /** The sweep's tick threw outside a run (leader election, an unhandled error) — `retry-sweep.ts`, always at `warn`. */
   sweepFailed: 'accounting.sweep.failed',
+  /** A reconnect could not delete (some of) the previous webhook subscriptions at the provider — `api-key-flow.ts`, always at `warn`. The reconnect still proceeds; the orphans dispatch to a retired token until the provider retires them (runbook: dead subscriptions). */
+  webhookTeardownFailed: 'accounting.webhook.teardown_failed',
 } as const
 
 export type OpsEventLevel = 'info' | 'warn'

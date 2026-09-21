@@ -38,7 +38,7 @@ import { SecretsKeyMissingError, decryptSecrets, encryptSecrets, secretsKeyConfi
 import { applyCompanyInfo } from './company-info.js'
 import type { AccountingConnector } from './connector.js'
 import { ProviderError, assertSupportedBaseCurrency, type AccountingProvider, type ProviderCompanyInfo } from './provider.js'
-import { flagConnectionStatus } from './ops-signals.js'
+import { ACCOUNTING_EVENT, emitOpsEvent, flagConnectionStatus } from './ops-signals.js'
 import {
   AccountedWebhookRegistrationError,
   deleteAccountedWebhooks,
@@ -167,15 +167,36 @@ export async function connectWithApiKey(input: {
         existed.secrets_key_version,
       )
       if (previous.apiKey && previous.webhooks && previous.webhooks.length > 0) {
-        await deleteAccountedWebhooks({
+        const outcome = await deleteAccountedWebhooks({
           apiKey: previous.apiKey,
           companyId: existed.external_company_id,
           subscriptions: previous.webhooks,
           fetchImpl: input.fetchImpl ?? fetch,
         })
+        // Best effort by contract, but never silent (PR #3196 round 2, S-E):
+        // the usual reason to reconnect an api_key provider is a rotated or
+        // revoked key, and then every delete with the OLD key is refused —
+        // the orphans keep dispatching to a token that now 404s until the
+        // provider retires them. The event is the operator's only signal.
+        if (outcome.failed > 0) {
+          emitOpsEvent('warn', {
+            event: ACCOUNTING_EVENT.webhookTeardownFailed,
+            userId: input.userId,
+            provider: input.provider.id,
+            deleted: outcome.deleted,
+            failed: outcome.failed,
+          })
+        }
       }
-    } catch {
-      // Best effort by contract.
+    } catch (err) {
+      emitOpsEvent('warn', {
+        event: ACCOUNTING_EVENT.webhookTeardownFailed,
+        userId: input.userId,
+        provider: input.provider.id,
+        deleted: 0,
+        failed: -1,
+        error: err instanceof Error ? err.name : 'unknown',
+      })
     }
   }
   const saved = await upsertConnection(input.userId, {

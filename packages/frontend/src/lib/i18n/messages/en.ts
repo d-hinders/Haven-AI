@@ -293,8 +293,9 @@ export const en = {
         scopeMissingUnnamed: (provider: string) =>
           `${provider} needs more access than it granted. Reconnect to grant it.`,
         revoked: (provider: string) => `Access was revoked in ${provider}. Reconnect to resume feeding.`,
-        needsAttention: (provider: string) =>
-          `${provider} is connected, but its webhook subscriptions could not be set up. Reconnect after fixing the deployment state.`,
+        /** `scope` is the exact token from `accounted-copy.ts` (spelled there, nowhere else). */
+        needsAttention: (provider: string, scope: string) =>
+          `${provider} is connected and feeding, but Haven could not register its delivery confirmations. Paste the key again — one minted with ${scope} — to re-register them.`,
         /** Never connected: guide the action. */
         notConnected: (provider: string) => `Connect to feed settled payments to ${provider}.`,
         /** Disconnected after a connection: say what happened to the history. */

@@ -36,7 +36,7 @@ covers:
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/ConnectionSettings.tsx
   - packages/frontend/src/components/accounting/BackfillDialog.tsx
-last-verified: "2026-09-20"
+last-verified: "2026-09-21"
 ---
 
 # Accounting feed — operations runbook
@@ -95,7 +95,8 @@ does not carry the agent's delegate address (only `agent_id`).
 | `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` | Who passes the entitlement gate once the feed is on (#2861): `granted` (default, also when unset) — accounts holding an `account_entitlements` row for `accounting_feed`; `all` — every account, no row read or written. **Any other value refuses the boot** naming both modes | `all` | unset |
 | `HAVEN_SECRETS_KEY` | 32 bytes, base64 (`openssl rand -base64 32`). Encrypts provider secrets at rest (#2860). Without it a NEW connection and a token refresh are refused before the provider is called; rows are never written in plaintext. See *Secrets at rest* | set | unset until #2876 (zero rows) |
 | `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` | Retry-sweep cadence (#2866). Default 300 000 (5 min); floor 10 000; unset, empty, 0 or NaN take the default | default | default |
-| `HAVEN_OPS_TOKEN` | Gates `GET /health/ops`, where the two accounting counters live (#2872). Unset → the route is 404 | set | set |
+| `HAVEN_OPS_TOKEN` | Gates `GET /health/ops`, where the accounting counters live (#2872; the webhook counters joined in #3019). Unset → the route is 404 | set | set |
+| `HAVEN_API_URL` (fallback `PUBLIC_API_URL`) | The public origin Accounted calls back to (#3019): the webhook subscriptions are registered as `<origin>/accounting/webhooks/accounted/<token>`. No localhost fallback — unset, an Accounted connect stores the row, registers nothing and flags it `needs_attention` with reason `no public API origin configured`; the feed still works. Dev states it in `.env.dev.example` | set | set |
 | `FORTNOX_CLIENT_ID`, `FORTNOX_CLIENT_SECRET`, `FORTNOX_REDIRECT_URI` | The Fortnox app registration. All three, or Fortnox is `configured: false` in `GET /accounting/providers` and cannot be connected. The redirect URI is `<backend>/accounting/connections/fortnox/callback` — here AND in the Fortnox developer portal (a consent returning to the pre-#2862 `/accounting/fortnox/callback` 404s and the user sees no connection) | set | unset |
 
 Availability for one account is `hosted && enabled && entitled`;
@@ -552,7 +553,8 @@ tuned ones — a handful of connections exist):
 
 ## Secrets at rest, and the key
 
-Provider credentials — the Fortnox OAuth token pair today — live in
+Provider credentials — the Fortnox OAuth token pair, and for Accounted the
+API key with its three webhook signing secrets (`webhooks`, #3019) — live in
 `accounting_connections.secrets_ciphertext` as an AES-256-GCM blob
 (`iv || tag || ciphertext`), keyed by `HAVEN_SECRETS_KEY`, never in the
 database (`infra/secrets.ts` is the only file that reads the variable).
@@ -627,13 +629,18 @@ registered in the schema smoke (`npm run db:schema-smoke -w packages/backend`).
   `last_error`, `webhook_token` (the capability-URL token, #3019).
   UNIQUE (`user_id`, `provider`).
 - **`accounting_webhook_deliveries`** (migration 092, #3019): `provider`,
-  `delivery_id`, `event_type`, `api_version`, `request_id`, `payload` JSONB
+  `delivery_id`, `user_id` (nullable UUID → `users`, `ON DELETE SET NULL`:
+  the connection the token resolved; the ledger outlives the user),
+  `event_type`, `api_version`, `request_id`, `payload` JSONB
   (the redacted `journal_entry.committed` object only), `received_at`,
   `processed_at`. UNIQUE (`provider`, `delivery_id`) — the dedupe: the row is
   written before the 2xx and a replayed id is acknowledged without a second
   processing. Indexed `(provider, received_at DESC)`.
 - **`accounting_feed_syncs`**: `user_id`, `provider`, `payment_id`,
-  `status`, `attempts`, `external_ref`, `error`, `created_at`, `updated_at`.
+  `status`, `attempts`, `external_ref`, `error`, `delivery_confirmed_at`
+  (092: when the provider's webhook confirmed the pushed document — its own
+  column, so `error` stays the failure vocabulary), `created_at`,
+  `updated_at`.
   UNIQUE (`provider`, `payment_id`, `user_id`). No company column: a pushed
   row is attributed to a company by TIME against `settings.companySwitches`
   (`companyIdAt`), which is what makes the reopen refuse `previous_company`.
@@ -804,7 +811,7 @@ harness's `capabilities` (attachments/verify false) and
 `declares.baseCurrency: false` skip — by name, with printed reasons — cases
 3/6, case 4's booking halves, and cases 7/7c/7d. Case 4b (foreign /
 no_invoice_ref) and 6b (pre-push scope refusal) still run. The skip
-skip decisions are pinned by `connector-conformance-skips.test.ts`, and
+decisions are pinned by `connector-conformance-skips.test.ts`, and
 `accounted-outbound-allowlist.test.ts` pins the connector's outbound surface
 to exactly `GET /api/v1/companies` + `POST .../documents` over the recorded
 request log (`/download`, `journal-entries`, `supplier-invoices`, `link`

@@ -13,7 +13,9 @@ covers:
   - packages/backend/src/openapi/route-modules.generated.ts
   - packages/backend/scripts/generate-route-modules.ts
   - packages/backend/src/index.ts
-last-verified: "2026-09-20"
+  - packages/backend/src/modules/accounting/api-key-flow.ts
+  - packages/backend/src/routes/accounting-webhooks.ts
+last-verified: "2026-09-21"
 ---
 
 # Dev environment

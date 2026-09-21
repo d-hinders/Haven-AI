@@ -31,7 +31,8 @@ vi.mock('../../infra/repositories/device-authorizations.js', async (importOrigin
   const actual = await importOriginal<typeof import('../../infra/repositories/device-authorizations.js')>()
   return { ...actual, ...repo }
 })
-vi.mock('../../db.js', () => ({ default: { query: vi.fn(async () => ({ rows: [] })) } }))
+// No db.js mock: every repository call this file exercises is mocked above,
+// and the pool is never queried (the db-mock ratchet, #1227).
 
 import authRoutes from '../auth.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'

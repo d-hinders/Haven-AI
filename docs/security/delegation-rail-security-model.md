@@ -1236,8 +1236,10 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > `auth-device.test.ts` and `analytics.test.ts`. Two shadowed money-path
 > modules still register `authMiddleware` as a `preHandler`
 > (`agent-passports.ts`, `agent-connection-setups.ts`); their 401-first
-> consequence holds today because shadow refuses nothing, and slices 3–4
-> move them before those modules flip — and
+> consequence holds today because a module outside `enforcedModules`
+> refuses nothing, whatever the mode; both are slice-4 files (#3032) and
+> must move to `onRequest` before that slice flips them — #3032's body
+> carries that line — and
 > the retired Safe-inflow 410s (`POST /user/accounts`, `PUT /user/account`,
 > `/deploy`) gained a route-level `onRequest` so they still precede
 > validation: a malformed body is told the flow is gone, not to fix its

@@ -11,11 +11,11 @@ import {
   normaliseAddress,
   chainIdFromX402Network,
   type X402AuthorizeBody,
-  type X402McpCallContextInput,
 } from '../modules/x402/index.js'
 
-// Route handlers only: request validation, auth middleware wiring, rate-limit
-// config, and response serialization. Everything else — settlement-scheme
+// Route handlers only: auth middleware wiring, rate-limit config, and response
+// serialization — the request SHAPE has been the plugin's since #3031, and
+// what stays here is what JSON Schema cannot state. Everything else — settlement-scheme
 // routing, delegation/replay orchestration, and settle assembly — lives in
 // `src/modules/x402/` (#996, epic #980 M4). See that module's `index.ts` for
 // the public surface and the boundary rationale.

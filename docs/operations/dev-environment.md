@@ -326,7 +326,8 @@ Isolation rules that are non-negotiable for a payments product:
   modules are still shadowed (`payments`, `machine-payments`, `agents`,
   `agent-delegations`, `agent-rekey`, `agent-passports`,
   `agent-connection-setups`, `hybrid-accounts` — the rest of slices 3–4,
-  #3031/#3032), fifteen of whose operations the reading printed NOT PROVEN, so on dev an off-spec request to any
+  #3031/#3032). The reading printed NOT PROVEN for 48 of their operations —
+  15 in slice 3's three remaining modules, 33 in slice 4's five — so on dev an off-spec request to any
   other route answers the 400 envelope. Slice 2 flipped on the epic's
   fallback (owner decision 2026-09-21 on #3028): the in-process shadow
   counter resets on every deploy and carried no per-route traffic (until

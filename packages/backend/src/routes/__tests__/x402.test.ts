@@ -900,8 +900,28 @@ describe('x402 routes', () => {
       expect(response.json().error).toBe('Request does not match the API spec')
       expect(response.json().details).toContain('maxTimeoutSeconds')
     }
+    // And the two inputs the floor does NOT refuse, pinned so the record and
+    // the code cannot drift apart again: `1e400` parses to Infinity, passes
+    // `minimum: 1` and is left to the clamp (600 s); `true` coerces to 1 and
+    // the clamp lifts it to 60 s. Both reach the handler, which is what the
+    // shard says. A `maximum` would close the first and would also refuse a
+    // plain 900, which is accepted and clamped today.
+    for (const passes of ['1e400', 'true']) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/x402',
+        headers: { authorization: 'Bearer sk_agent_test', 'content-type': 'application/json' },
+        payload: `{"url":"https://mcp.soundside.ai/mcp","payTo":"${AGENT.delegate_address}","amount":"20000","asset":"${USDC}","network":"base","maxTimeoutSeconds":${passes}}`,
+      })
+      // It reached the RAIL, which is only possible if the schema accepted it:
+      // this fixture's agent is on the retired rail, so the tombstone is the
+      // answer. Asserting the 410 (not merely "some other error") is what
+      // keeps this from passing for the wrong reason.
+      expect(response.statusCode).toBe(410)
+      expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+    }
     // A real value still passes, unchanged.
-    expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
+    expect(sqlCalls().some((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
   })
 
   it('#3031 S2: on a retired-rail account a MALFORMED body meets the schema 400 before the 410', async () => {

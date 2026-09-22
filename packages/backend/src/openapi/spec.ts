@@ -8345,6 +8345,11 @@ export const openapiSpec = {
       },
       Parties: partiesSchema,
       AgentPaymentStatus: agentPaymentStatus,
+      // #3031 note: this option's `maxTimeoutSeconds` stays `integer` while
+      // `X402AuthorizeRequest`'s is `number, minimum: 1`. Not a contradiction —
+      // this schema describes the MERCHANT's advertised option inside the
+      // free-form `paymentRequired` blob and is never compiled against a
+      // request body; the request rule is the other one.
       X402PaymentOption: {
         type: 'object',
         required: ['scheme', 'network', 'amount', 'asset', 'payTo', 'maxTimeoutSeconds'],
@@ -8404,15 +8409,20 @@ export const openapiSpec = {
           description: { type: 'string' },
           // #3031: `integer` was the spec's claim, never the route's rule —
           // the handler accepted any finite number and clamped it. Stated as
-          // it behaves. `minimum: 1` is NOT a narrowing: it is the deleted
-          // rung ('maxTimeoutSeconds must be a finite number'). With ajv
-          // coercion on, `null`, `false` and a JSON `Infinity` all arrive as
-          // 0, and 0 SURVIVES the `?? 300` default in
-          // `modules/x402/delegation-authorize.ts`, so the settlement child
-          // would silently expire in 60 s (the clamp floor in
+          // it behaves. `minimum: 1` restores the HARMFUL half of the deleted
+          // rung ('maxTimeoutSeconds must be a finite number'): with ajv
+          // coercion on, `null` and `false` arrive as 0, and 0 SURVIVES the
+          // `?? 300` default in `modules/x402/delegation-authorize.ts`, so the
+          // settlement child would silently expire in 60 s (the clamp floor in
           // `x402-delegation.ts`) instead of 300 — and, with `paymentRequired`
           // alongside, trip #3117's option match with a message blaming the
-          // merchant's challenge. An upper bound stays a separate decision.
+          // merchant's challenge. The FINITENESS half is deliberately left to
+          // the clamp: `1e400` parses to `Infinity`, passes `minimum: 1`
+          // (measured) and `Math.min(…, MAX_SETTLEMENT_WINDOW_SECONDS)` turns
+          // it into 600 — harmless, and a `maximum` that refused it would also
+          // refuse a plain `900`, which is accepted and clamped today and
+          // which no shadow reading covers. Two inputs the old rung passed and
+          // this floor refuses: `-1` and `0.5` (both clamped to 60 before).
           maxTimeoutSeconds: { type: 'number', minimum: 1 },
           category: { type: 'string' },
           idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },

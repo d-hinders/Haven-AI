@@ -775,10 +775,14 @@ test.describe('driven focus-state visual regression', () => {
       await expect(target).toHaveCount(1)
       await expect(target).toBeVisible()
 
-      // The action row, located as the control's own parent rather than by its
-      // class string — same rule as the popover above. Asserting the count
-      // keeps "the row moved" from silently becoming "some other div".
-      const actionRow = target.locator('xpath=..')
+      // The action row, located by its stable testid rather than the
+      // control's parent: the round-3 rework (#3164) wraps each `|` with the
+      // button it introduces below `lg` (S9, no dangling pipes on a wrapped
+      // line), so a button's parent is a grouping span, not the row. The
+      // testid survives such re-groupings; the old "own parent" walk did not
+      // (measured: the resume/remove-delegation driven captures failed their
+      // control-set assertions against a span in the round-3 baseline run).
+      const actionRow = page.getByTestId('agent-card-actions')
       await expect(actionRow).toHaveCount(1)
       await expectRowControlsUnwrapped(actionRow, `AgentCard action row · ${control.label}`)
 
@@ -942,7 +946,9 @@ test.describe('driven focus-state visual regression', () => {
       await expect(target).toHaveCount(1)
       await expect(target).toBeVisible()
 
-      const actionRow = target.locator('xpath=..')
+      // Stable testid — see the pause loop above for why the parent walk
+      // cannot be used anymore (the S9 pipe-grouping spans).
+      const actionRow = page.getByTestId('agent-card-actions')
       await expect(actionRow).toHaveCount(1)
       await expectRowControls(
         actionRow,
@@ -1003,7 +1009,9 @@ test.describe('driven focus-state visual regression', () => {
     await expect(target).toHaveCount(1)
     await expect(target).toBeVisible()
 
-    const actionRow = target.locator('xpath=..')
+    // Same stable testid as the desktop captures — the parent walk broke
+    // when the S9 pipe-grouping spans landed (see the pause loop above).
+    const actionRow = page.getByTestId('agent-card-actions')
     await expect(actionRow).toHaveCount(1)
 
     // The label is atomic at this width too — the whole point of pinning it.

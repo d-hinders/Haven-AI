@@ -358,7 +358,10 @@ export function AgentCard({
           `text-xs` would equalise the band at 16px and make all five branches
           4px, but it also resizes a visible glyph, so it is a design change
           rather than this fix. */}
-      <div className="flex flex-wrap lg:flex-nowrap items-center gap-2 pt-3 pb-1 border-t border-[var(--v2-border)]">
+      <div
+        data-testid="agent-card-actions"
+        className="flex flex-wrap lg:flex-nowrap items-center gap-2 pt-3 pb-1 border-t border-[var(--v2-border)]"
+      >
         {/* #3164 review: `flex-wrap` — the row holds four `min-w-11` text
             actions plus separators, and below `lg` a card is the full grid
             column (one column at 390, `minmax(0,1fr)` track at 768). At the

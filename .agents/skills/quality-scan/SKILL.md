@@ -188,9 +188,10 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
      service's deployed revision where one can be read (`railway status
      --json`, a deployment record) — or the words "not determinable", which
      is a coverage limit, not a gap to fill by assumption.
-   - **A claim about the TREE comes from a tree instrument that was run** — a
-     test that pins the behaviour, a `git grep` at the SHA — never from
-     reading source, and never from what the live runtime did. The 2026-09-21
+   - **A claim about what the tree DOES comes from a tree instrument that
+     was run** — a test that pins the behaviour — not inferred from a source
+     reading or from what the live runtime did. (Citing `file:line` for what
+     the source SAYS is fine; inferring what it does at runtime is not.) The 2026-09-21
      report recorded the runtime identity correctly (a 2026-09-15 dev build of
      the signer, against a newer dev dist-tag), then wrote that the tree's
      `sign-context.ts` sets exactly what the stale runtime returned. It does
@@ -222,16 +223,16 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
    correcting it in place does not touch the append-only rule — and present
    the findings at the reviewed SHA, a corrected figure stated as corrected.
    **It costs the owner time, and that is the trade:** on 2026-09-21 the owner
-   acted on its decision at 14:24:21Z (the first filing), 26 minutes 56
-   seconds and three review rounds before the report's last reviewed head
-   (`702fe38e`, 14:51:17Z) — on a report carrying a `covers:` figure of 21 against
+   acted on its decision at 14:24:21Z (the first filing), at least 26 minutes
+   56 seconds before the report's last reviewed commit (`702fe38e`,
+   14:51:17Z, bound in the third review round) — on a report carrying a `covers:` figure of 21 against
    a true 7 (caught only because `new-task` re-measured before filing), an
    in-scope residue count of 10 against a true 16, and a claim about the tree
    read off a stale runtime. Then **stop for the human decision**, and record
    it in a **separate** ledger pull request: appending it to the reviewed one
    voids the verdict for the file it binds. That run appended its decision to
-   the scan's own pull request (#3212, `958ac624`) and the review restarted
-   from there; #3218 shows the separate shape, used for the same entry's later
+   the scan's own pull request (#3212, `958ac624`), and its review started at
+   that commit — after the decision; #3218 shows the separate shape, used for the same entry's later
    `shipped` disposition. On
    explicit approval to file, append the decision and hand off to
    [new-task](../new-task/SKILL.md), preserving its filing checks and backlog

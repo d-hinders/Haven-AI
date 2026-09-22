@@ -29,9 +29,12 @@ Four rules hold for every block:
   2 first measured without `--strict`, got 12 of 14, and wrote an exception
   for the other two that CI never makes. Before any block, check that its
   tools exist in the shell you will run it in —
-  `command -v rg >/dev/null || { echo 'rg missing: every count below would be a broken-instrument zero'; exit 1; }`
+  `command -v rg >/dev/null || echo 'rg missing: every count below would be a broken-instrument zero — stop'`
   — because a missing `rg` prints `command not found` to stderr and a
-  pipeline then reports `0`. On the machine that ran the 2026-09-21 scan `rg`
+  pipeline then reports `0`. (It only prints: an `exit` pasted into an
+  interactive shell would close the session.) Block 2 has to run under
+  `bash`, where `rg` may be absent; there it uses `grep -rl`, as the
+  2026-09-21 run did. On the machine that ran the 2026-09-21 scan `rg`
   resolved only as a function the agent harness injects into its own shell;
   neither a plain `bash -l` nor `zsh -li` had it.
 - **The bar is unchanged.** These blocks produce evidence; whether it qualifies as a
@@ -129,7 +132,8 @@ every miss with the gate CI runs before it becomes a finding**:
 the doc for a path the loop reports as uncovered. The loop is a heuristic over
 glob strings; the gate is the authority, and `--strict` is how CI invokes it
 (without the flag the gate drops test and generated paths swept up by a
-wildcard, which strict mode keeps for contract docs — rule 4 above). Measured
+wildcard, which strict mode keeps for contract docs — see *Run each
+instrument the way CI runs it* above). Measured
 on `e42ed68f` with `--strict`: of the first reading's 21 misses, the gate names
 the runtime doc for all 14 false ones and for none of the 7 true ones, so the
 confirmation alone would have settled that reading. On `893d74f6`:

@@ -53,7 +53,8 @@ reviewed before it is presented, instruments run the way CI runs them, and
 scoped counts come from the instrument, not from a hand count. §5 lists
 seven places where one of our own instruments gave a wrong reading during
 this run. Figures corrected after the independent review are marked
-*Corrected in review* where they stand.
+*Corrected in review* where they stand. Figures the captain corrected
+before the review saw them are marked *Corrected before presentation*.
 
 ## 1. Structural finding
 
@@ -138,8 +139,10 @@ Nothing reads what a changed baseline carries with it:
 - **#3222 (open, 2026-09-22).** The Status and Budget filters disappeared,
   and `agents-list-filtered-mobile.png` and `agents-list-mobile.png` were
   re-committed to match. At the reviewed head `cf8e720c`, *Frontend checks*,
-  *Design visual regression* and *Lint* were all green. Only the design
-  review caught it.
+  *Design visual regression* and *Lint* were all green. No gate caught it:
+  the PR's review did, as finding B2 of a combined code-and-design review.
+  The review does not say which pass found it. *Corrected before
+  presentation:* first written as "Only the design review caught it".
 - Tracking: `gh issue list --state all --search` for "bless", "blessed",
   "baseline regression", "re-committed baseline" and "baseline diff review"
   → no open issue.
@@ -291,9 +294,9 @@ records what it counts, and prints the target state.**
   repos/d-hinders/Haven-AI/pulls/<n>/commits` over all 259 PRs merged into
   `dev` since 2026-09-08, counting two-parent commits whose subject matches
   `^Merge (remote-tracking )?branch '(origin/)?dev'` → **29** resync commits
-  in **23** PRs. The review found 14 more `Merge origin/dev…` subjects
-  outside that pattern, so 29 is a floor. *Corrected before presentation:*
-  first recorded as 17 in 13, a sample of 200 of the 259. Example:
+  in **23** PRs, so the count is at least 29. *Corrected before presentation:* first
+  recorded as 17 in 13, a sample of 200 of the 259. The review later found
+  14 more `Merge origin/dev…` subjects outside that pattern. Example:
   #3196 has two, both `Merge remote-tracking branch 'origin/dev' into …`.
 - *Where it is relied on:* `docs/contributing/branch-and-release-flow.md`
   still names this command as the number that says whether the
@@ -318,8 +321,9 @@ nowhere, so the required per-package check passes as "skipped".**
     - `scripts/vitest/assert-fresh-dist.mjs` (test setup for connect,
       mcp-server and qa-agent)
     - `scripts/lib/lint-escapes.mjs` (the frontend job's `design:lint`
-      over real source; its own self-test and the unconditional *Banned
-      product-copy terms* job do still run it on every PR)
+      over real source; the design-lint self-test in the ungated *Repo CI
+      config checks* job and the unconditional *Banned product-copy terms*
+      job do still exercise it on every PR)
   - Positive control: the backend package's entry-point source file → `code,backend`.
   - None of the five appears in `.github/root-guard-ownership.json` or
     `scripts/ci/routing-matrix.mjs`. The matrix documents other unrouted
@@ -444,8 +448,9 @@ All at `fd7b1289`.
     Command: `git diff --numstat --no-renames 89fadec0 fd7b1289 --
     packages/backend/src`, filtered to non-test `.ts|.tsx|.mjs`, summed by
     directory → total +7,635. *Corrected in review:* first written as
-    `modules` +3,357 and `openapi` +654, figures that counted deleted JSON
-    fixtures under `openapi/__fixtures__`.
+    `modules` +3,357 and `openapi` +654. The `openapi` figure counted 13
+    deleted JSON fixtures under `openapi/__fixtures__` (−380); the
+    `modules` figure counted `modules/accounting/README.md` (+19 net).
 
   - Largest non-generated file: `openapi/spec.ts` at 9,607 lines (09-15:
     9,042). `core` is almost entirely the generated `api-types.ts` (16,925

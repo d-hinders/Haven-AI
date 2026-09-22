@@ -946,11 +946,12 @@ finding (`accepted-as-debt`), and the parked-run re-run mechanism (recorded
   baseline; 19 carrying a design-review verdict at merge, 5 skipped or
   pending, 11 with none (a hand classification); 13 of the 24 modifying
   ones carry a verdict, and 2 of the 9 landings since 2026-09-18 do.
-  *Corrected in review:* first recorded as 17 / 6 / 12 and 1 of 9.
+  *Corrected in review:* the report first recorded 17 / 6 / 12 and 1 of
+  9, and this entry first recorded 17.
   Cost: #2217 / #2218 (a silent re-bless caught by a hand blob-hash audit),
   #3167 → #3197 (a known regression blessed and defended by the gate) and
   #3222 (filters removed, baselines re-committed, all gates green, caught
-  only by design review). Four disjoint slices proposed: a trailer gate,
+  by the PR's combined code-and-design review, not by any gate). Four disjoint slices proposed: a trailer gate,
   the follow-up comment's wording, a before/after artifact, and the
   design-reviewer brief.
 
@@ -978,7 +979,9 @@ finding (`accepted-as-debt`), and the parked-run re-run mechanism (recorded
 - C4 — five files that gated jobs read are routed to no surface by the
   change classifier (the env example, two lint baselines, a vitest setup
   hook and a lint helper). A PR that breaks one merges green: shown for the
-  env example and the request-schemas baseline.
+  env example and the request-schemas baseline. (The lint helper is still
+  exercised on every PR by two ungated jobs; only the frontend job's run
+  over real source is skipped.)
 - C5 — the next-steps and wire-types ratchets and their self-tests pass
   when every scan target is hidden (0 files read, ✓).
 - Notes, not proposed: facets pinned only by pixels at the AgentPanel level
@@ -988,8 +991,8 @@ finding (`accepted-as-debt`), and the parked-run re-run mechanism (recorded
   tool-contracts test (09-19, release branch).
 
 **Probed clean** (block → command → number, all at `fd7b1289`):
-- sizing → `git ls-files -z packages/<p>/src`, split on
-  `.test.|__tests__|.spec.`, `xargs -0 cat | wc -l` → backend 77,152 /
+- sizing → `git ls-files -z packages/<p>/src`, filtered to
+  `.ts|.tsx|.mjs`, split on `.test.|__tests__|.spec.`, `xargs -0 cat | wc -l` → backend 77,152 /
   95,359. The same command at `89fadec0` gives the 09-15 figures of 69,517 /
   83,443 exactly, so the one-week delta is +11 % source and +14 % test.
   frontend 50,187 / 44,347; connect 11,389 / 14,047 (09-13: 10,223 /

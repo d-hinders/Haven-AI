@@ -823,9 +823,11 @@ test.describe('driven focus-state visual regression', () => {
       // Details behind `canUseWalletActions` (and nothing else — `Revoke` is
       // gone since #2258), but Remove is not gated at all: it renders
       // unconditionally inside `isOperational` (#2413 deleted
-      // `isDelegationAgent`) — so this branch is three controls.
+      // `isDelegationAgent`). #3164 adds `Move` between Details and the
+      // pause/resume control on every operational card — four controls.
       rowControls: [
         'Open details for Ledger agent',
+        'Move Ledger agent to an organization',
         'Pause Ledger agent',
         'Remove Ledger agent',
       ],
@@ -838,7 +840,13 @@ test.describe('driven focus-state visual regression', () => {
       control: 'Resume Paused agent',
       // #2264: Remove, not Revoke — same rail branch as the row above.
       // #3168: the first control is now Details, not Edit.
-      rowControls: ['Open details for Paused agent', 'Resume Paused agent', 'Remove Paused agent'],
+      // #3164: Move joins every operational row, Details first.
+      rowControls: [
+        'Open details for Paused agent',
+        'Move Paused agent to an organization',
+        'Resume Paused agent',
+        'Remove Paused agent',
+      ],
       tone: 'brand',
       label: 'Resume from pause',
     },
@@ -868,7 +876,13 @@ test.describe('driven focus-state visual regression', () => {
       control: 'Remove Delegation agent',
       // #3168: the first control is now Details, not Edit — same substitution
       // as the paused branch above.
-      rowControls: ['Open details for Delegation agent', 'Pause Delegation agent', 'Remove Delegation agent'],
+      // #3164: Move joins every operational row, Details first.
+      rowControls: [
+        'Open details for Delegation agent',
+        'Move Delegation agent to an organization',
+        'Pause Delegation agent',
+        'Remove Delegation agent',
+      ],
       tone: 'danger',
       label: 'Remove (delegation)',
     },

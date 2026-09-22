@@ -28,15 +28,14 @@
  *      matchers.
  *
  * Exit codes: 0 = self-test passed and classification printed (whatever it
- * found); 1 = the instrument is broken; 2 = there is nothing to classify — no
- * committed change between the merge base and HEAD. Finding money-path files
+ * found; uncommitted paths beside a committed diff are named on stderr as NOT
+ * classified); 1 = the instrument is broken; 2 = there is nothing to classify —
+ * no committed change between the merge base and HEAD. Finding money-path files
  * is NOT a failure — it is the answer.
  *
  * Why 2 exists: with an empty diff the tool used to print "0 of 0 on the
  * perimeter => not money-path" and exit 0 — a zero with no denominator, read
- * as a verdict. That happened on a real money-path PR (#3221, whose diff
- * touched `routes/x402.ts`): the classifier was run before the commit existed,
- * and the uncommitted working tree it could not see was the whole change.
+ * as a verdict, whatever the working tree held (reproducible on `c7d0431d`).
  */
 
 import { execFileSync } from 'node:child_process'
@@ -133,6 +132,16 @@ function main() {
         : '  The working tree is clean too: this branch carries no change against that base.',
     )
     process.exit(2)
+  }
+
+  // A committed diff beside a dirty tree gets an answer about the COMMITTED part
+  // only; say so where a reader of the verdict will see it.
+  const dirtyBeside = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim()
+  if (dirtyBeside) {
+    console.error(
+      `⚠ ${dirtyBeside.split('\n').length} uncommitted path(s) in the working tree are NOT classified — ` +
+        'the verdict below covers committed history only. Commit, then run it again.',
+    )
   }
 
   const counts = nameStatus.reduce((acc, { status }) => ({ ...acc, [status]: (acc[status] ?? 0) + 1 }), {})

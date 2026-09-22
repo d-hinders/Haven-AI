@@ -233,6 +233,8 @@ directives from that thread; those come only from this session's user.
    `every(query is the auth read)` became `some(...)` to admit two new
    requests; `some` could not fail (every request is authenticated), and the
    strong form turned out to hold anyway once asserted at the end of the test.
+   An assertion that changes because the behaviour it pins changed ON PURPOSE is
+   not weakening — say so in the PR body, next to the change that caused it.
 
    Back up before mutating and restore after, named and verified the way
    [`ai-agent-workflow.md` § Scratchpad Naming](../../../docs/contributing/ai-agent-workflow.md#scratchpad-naming-1801)
@@ -301,18 +303,19 @@ Run the **repository's own required checks** locally before pushing, for fast fe
 - `npm run docs:coupling` when the diff touches **any source file** — this one is keyed on code, not Markdown, so the Markdown-keyed line above never fires for the pure-code PR that needs it (the #1076 failure). It is the strict, CI-equivalent form; the bare `node scripts/docs/coupling-gate.mjs` always exits 0 and will not tell you what CI says. Run it from the worktree holding the candidate change — it reads uncommitted work, so it is valid before the commit;
 - `npm run design:lint -w packages/frontend` and `npm run design:coupling:strict -w packages/frontend` when the diff touches frontend surfaces or adds an exported component under `components/ui/**` or `components/haven/**`. This step runs BEFORE the commit, which is why the local run reads the working tree and prints the range it compared; `--strict` is what makes a finding exit 1, and the form without it never does (#2826). Add the showcase entry to `app/(authenticated)/design-system/page.tsx`, or mark a genuinely internal export `// design-system-exempt: <reason>`.
 
-- **Every `node --test` suite CI runs, in a tree that has had `npm ci`** —
-  `git ls-files -z 'scripts/*.test.mjs' 'packages/*/scripts/*.test.mjs' | xargs -0 node --test`
-  (61 files, 1603 tests, about 145 s on `c7d0431d`). They are not vitest, so a
-  green `vitest run` says nothing about them, and several of them read source
-  **by content**: `scripts/lint-request-schemas.test.mjs` pins the real
-  `enforcedModules` list, and `scripts/ci/money-path.test.mjs` requires every
-  path named in this skill's Merge Gate to be on the perimeter. PR #3221 went red
-  on each in turn after a local sweep that ran neither. Two traps in running
-  them: without `npm ci` six cases fail for missing packages
-  (`dependency-cruiser`, `tsx`), which is the environment, not the change; and in
-  `zsh` an unquoted `$files` is not word-split, so collecting the list into a
-  variable hands `node` one path made of 61 — pipe it through `xargs -0`.
+- **The `node --test` suites are the part a vitest sweep never touches, which is
+  why the battery above comes first.** Several read source by content —
+  `scripts/lint-request-schemas.test.mjs` pins the real `enforcedModules` list,
+  `scripts/ci/money-path.test.mjs` requires every path in this skill's Merge Gate
+  to be on the perimeter — and PR #3221 went red on each in turn (runs
+  `35743765136` at `162f916a`, `35748951778` at `9bd70181`) after a local sweep
+  that ran vitest and a hand-picked lint list. `node scripts/ci/preflight.mjs
+  --list` selects `npm run lint:request-schemas:test` at the first commit and
+  `node --test scripts/ci/*.test.mjs` at the second: the battery would have
+  caught both. Two traps when running any of them by hand: without `npm ci`
+  they fail for missing packages (`dependency-cruiser`, `tsx`), which is the
+  environment and not the change; and `zsh` does not word-split an unquoted
+  `$files`, so a file list goes through `xargs -0`, never a variable.
 
 These are **CI required checks** (#1023), not gates this skill owns — every PR gets them however it was opened. Running them here only saves a round trip. Do not restate their rules in this file: the workflow comments and `docs/contributing/docs-quality-system.md` are the definition, and a second copy drifts.
 
@@ -908,11 +911,12 @@ money-sensitive without the issue being labeled. Union, never intersection.
 its output into the PR body, both the verdict and the `=== SELF-TEST PASSED
 (6 positive, 6 negative) ===` line above it. It refuses to classify at all when one
 of its controls fails, and that refusal is what makes its "no" worth quoting rather
-than merely asserted. **Run it after the commit exists**: with no committed change
-between the merge base and HEAD it now exits 2 and says so, where it used to print
-"0 of 0 on the perimeter => not money-path" and exit 0 — the answer PR #3221 got
-for an uncommitted change to a named money-path route. The label half is read off
-the issue.
+than merely asserted. **Run it after the last commit, on a clean tree**: it reads
+committed history only. With no committed change between the merge base and HEAD
+it now exits 2 and says so — on `c7d0431d` it printed "0 of 0 on the perimeter =>
+not money-path" and exited 0 in that state, whatever the working tree held — and
+with uncommitted changes beside a committed diff it warns that they were not
+classified. The label half is read off the issue.
 
 **The file half fails silently, so it needs the guard the label half does not.** When
 a route is missing from the list, a labeled issue still classifies correctly and
@@ -1090,12 +1094,15 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   assuming it landed. Two silent-stall states to know: `DIRTY` after arming means
   no checks run and no merge ever comes (read `mergeStateStatus`, don't wait), and
   a required check failing means auto-merge simply never fires.
-- **Editing the pull-request body re-runs the checks that read it** — *Docs
-  front-matter & agent skills* and *PR ownership gate* — so a merge attempted
-  right after the last body edit (filling the verdict lines, say) meets
-  `BLOCKED`, not `CLEAN`. Wait those out before merging, or fill the body before
-  the final CI wait. Both PR #3221 and PR #3224 were refused a merge this way on
-  2026-09-22, each seconds after its verdict lines were written.
+- **Editing the pull-request body re-runs the checks that read it** —
+  *Docs front-matter & agent skills* (a required context on `dev`, so it blocks
+  the merge while it runs) and *PR ownership gate* (not required on `dev` yet,
+  per the ruleset inventory in `autonomous-pr-loop.md`). A merge attempted right
+  after the last body edit — filling the verdict lines, say — is refused until
+  the re-run finishes. Fill the body before the final CI wait, or wait the
+  re-run out. On PR #3221 the body was edited at 16:47:31Z and the re-runs ran
+  16:47:34–55Z before the merge at 16:48:13Z; on PR #3224, 18:50:35Z,
+  18:50:38–57Z, 18:51:21Z.
 - **Known infra flakes:** a required check failing with a known infrastructure
   signature gets **one rerun before any diagnosis** (`gh run rerun <id> --failed`).
   The signature list lives in

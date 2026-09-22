@@ -17,9 +17,14 @@ import { fileURLToPath } from 'node:url'
 
 const SCRIPT = fileURLToPath(new URL('./money-path-classify.mjs', import.meta.url))
 
-function repo() {
+// Inherited GIT_* variables (GIT_DIR, GIT_WORK_TREE, … — set when tests run from
+// inside a git hook) would point every git call below at the HOST repository.
+const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')))
+
+function repo(made) {
   const dir = mkdtempSync(path.join(tmpdir(), 'mp-classify-'))
-  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+  made.push(dir)
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: ENV })
   git('init', '-q', '-b', 'base')
   git('config', 'user.email', 'test@example.com')
   git('config', 'user.name', 'test')
@@ -31,12 +36,13 @@ function repo() {
 }
 
 function run(dir) {
-  return spawnSync('node', [SCRIPT, 'base'], { cwd: dir, encoding: 'utf8' })
+  return spawnSync('node', [SCRIPT, 'base'], { cwd: dir, encoding: 'utf8', env: ENV })
 }
 
 test('an empty change with a DIRTY tree is refused with exit 2 and names the cause', () => {
-  const { dir } = repo()
+  const made = []
   try {
+    const { dir } = repo(made)
     mkdirSync(path.join(dir, 'packages/backend/src/routes'), { recursive: true })
     writeFileSync(path.join(dir, 'packages/backend/src/routes/x402.ts'), 'export {}\n')
     const r = run(dir)
@@ -46,24 +52,27 @@ test('an empty change with a DIRTY tree is refused with exit 2 and names the cau
     // The refusal must not ALSO print a verdict a reader could take as one.
     assert.doesNotMatch(r.stdout, /not money-path/)
   } finally {
-    rmSync(dir, { recursive: true, force: true })
+    for (const d of made) rmSync(d, { recursive: true, force: true })
   }
 })
 
 test('an empty change with a CLEAN tree is refused with exit 2 and says so', () => {
-  const { dir } = repo()
+  const made = []
   try {
+    const { dir } = repo(made)
     const r = run(dir)
     assert.equal(r.status, 2, r.stdout + r.stderr)
     assert.match(r.stderr, /working tree is clean too/)
+    assert.doesNotMatch(r.stdout, /not money-path|=> MONEY-PATH/)
   } finally {
-    rmSync(dir, { recursive: true, force: true })
+    for (const d of made) rmSync(d, { recursive: true, force: true })
   }
 })
 
 test('control: a COMMITTED money-path change is classified, exit 0, not refused', () => {
-  const { dir, git } = repo()
+  const made = []
   try {
+    const { dir, git } = repo(made)
     mkdirSync(path.join(dir, 'packages/backend/src/routes'), { recursive: true })
     writeFileSync(path.join(dir, 'packages/backend/src/routes/x402.ts'), 'export {}\n')
     git('add', '.')
@@ -74,6 +83,24 @@ test('control: a COMMITTED money-path change is classified, exit 0, not refused'
     assert.match(r.stdout, /1 runtime-glob \+ 0 control-glob = 1 of 1 on the perimeter/)
     assert.match(r.stdout, /=> MONEY-PATH\./)
   } finally {
-    rmSync(dir, { recursive: true, force: true })
+    for (const d of made) rmSync(d, { recursive: true, force: true })
+  }
+})
+
+test('a committed diff beside a dirty tree is classified AND warns that the dirty part was not', () => {
+  const made = []
+  try {
+    const { dir, git } = repo(made)
+    writeFileSync(path.join(dir, 'README.md'), 'changed\n')
+    git('add', '.')
+    git('commit', '-q', '-m', 'docs')
+    mkdirSync(path.join(dir, 'packages/backend/src/routes'), { recursive: true })
+    writeFileSync(path.join(dir, 'packages/backend/src/routes/x402.ts'), 'export {}\n')
+    const r = run(dir)
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+    assert.match(r.stdout, /0 of 1 on the perimeter/)
+    assert.match(r.stderr, /uncommitted path\(s\) in the working tree are NOT classified/)
+  } finally {
+    for (const d of made) rmSync(d, { recursive: true, force: true })
   }
 })

@@ -13,6 +13,12 @@ covers:
   - packages/backend/src/db/migrations/__tests__/092_accounting_webhook_deliveries.test.ts
   - scripts/branch-hygiene.mjs
   - scripts/ci/change-classifier.mjs
+  - scripts/lint-request-schemas-baseline.json
+  - scripts/lint-next-steps-baseline.json
+  - scripts/vitest/assert-fresh-dist.mjs
+  - scripts/lib/lint-escapes.mjs
+  - packages/frontend/src/components/AgentPanel.tsx
+  - packages/qa-agent/src/run.ts
   - scripts/ci/routing-matrix.mjs
   - .github/root-guard-ownership.json
   - scripts/lint-next-steps.mjs
@@ -45,7 +51,7 @@ nothing was pushed except this branch.
 The rules merged earlier the same day in #3224 apply: this report is
 reviewed before it is presented, instruments run the way CI runs them, and
 scoped counts come from the instrument, not from a hand count. §5 lists
-four places where one of our own instruments gave a wrong reading during
+five places where one of our own instruments gave a wrong reading during
 this run.
 
 ## 1. Structural finding
@@ -289,10 +295,10 @@ nowhere, so the required per-package check passes as "skipped".**
     - `scripts/vitest/assert-fresh-dist.mjs` (test setup for connect,
       mcp-server and qa-agent)
     - `scripts/lib/lint-escapes.mjs` (the frontend job's `design:lint`)
-  - Positive control: `packages/backend/src/index.ts` → `code,backend`.
+  - Positive control: the backend package's entry-point source file → `code,backend`.
   - None of the five appears in `.github/root-guard-ownership.json` or
     `scripts/ci/routing-matrix.mjs`. The matrix documents other unrouted
-    files (`.nvmrc`, `CODEOWNERS`, `.gitignore`, `Dockerfile`) as known
+    files (the Node version pin, the code-owners file, the git ignore file and the Dockerfile) as known
     gaps.
   - Over every tracked file: 749 of 2,603 route nowhere, and 149 of those
     are not docs or images.

@@ -930,7 +930,8 @@ byte-identical restores; real-database runs used a disposable local
 database, dropped afterwards. No live call was made.
 
 **Excluded this run:** every item from 2026-09-13, 09-17 and 09-21 (D1
-shipped, D2 and C1 in flight as #3214 / #3215), the 2026-09-15 mock-families
+shipped; D2 → #3214 closed 2026-09-21 via PR #3220; C1 → #3215 closed
+2026-09-21 via PR #3219), the 2026-09-15 mock-families
 finding (`accepted-as-debt`), and the parked-run re-run mechanism (recorded
 2026-09-17).
 
@@ -942,7 +943,10 @@ finding (`accepted-as-debt`), and the parked-run re-run mechanism (recorded
   follow-up comment asserts the images are correct, and a test pins that
   wording. The visual check is not required on `dev`. Measured since
   2026-09-01: 35 baseline landings, 24 of them modifying an existing
-  baseline, 17 carrying a design-review verdict (a hand classification).
+  baseline; 19 carrying a design-review verdict at merge, 5 skipped or
+  pending, 11 with none (a hand classification); 13 of the 24 modifying
+  ones carry a verdict, and 2 of the 9 landings since 2026-09-18 do.
+  *Corrected in review:* first recorded as 17 / 6 / 12 and 1 of 9.
   Cost: #2217 / #2218 (a silent re-bless caught by a hand blob-hash audit),
   #3167 → #3197 (a known regression blessed and defended by the gate) and
   #3222 (filters removed, baselines re-committed, all gates green, caught
@@ -957,16 +961,20 @@ finding (`accepted-as-debt`), and the parked-run re-run mechanism (recorded
   re-defaulted and relabelled the victim's rows. The route pre-checks are
   load-bearing and tested, so nothing is reachable today, and a repository
   test pins the unscoped shape as correct. SQL census over 66 files: 168
-  mutating statements, 112 scoped, 56 not, of which these 3 plus the labels
-  pair are the request-id cases.
+  mutating statements, 112 scoped by a principal column and 56 not. The
+  three account statements (from two functions) are the request-id cases
+  among the 56; the labels pair counts among the 112 as scoped by
+  `agent_id` only (45 statements, not traced beyond this pair).
+  *Corrected in review:* first placed the labels pair among the 56.
 - C2 — two of #3019's webhook acceptance criteria are met by tests that
   cannot fail: the trailing-slash loop never sends its suffix, and the
   dedupe decision has no real-database test (the migration test pastes
   its own INSERT). Proposed as a comment on #3019, not a new issue.
 - C3 — the branch-hygiene meter counts resync merges in `dev`'s history,
   which the squash-only ruleset (2026-09-07) removed. It reads 0 since
-  2026-09-08 and prints the target state, while 17 resync commits sat
-  inside 13 of 200 sampled merged PRs.
+  2026-09-08 and prints the target state, while at least 29 resync
+  commits sat inside 23 of the 259 PRs merged in that window (first
+  recorded as 17 in 13 of a 200-PR sample).
 - C4 — five files that gated jobs read are routed to no surface by the
   change classifier (the env example, two lint baselines, a vitest setup
   hook and a lint helper). A PR that breaks one merges green: shown for the
@@ -995,8 +1003,8 @@ finding (`accepted-as-debt`), and the parked-run re-run mechanism (recorded
   CASP guardrails 6 (09-15) and x402 sequence 3 (09-21) are unchanged, and
   2 new each sit on the docs-quality system and package-dev-channel docs.
   `npm run docs:covers-gaps` → 138 pairs / 36 docs (09-15: 146 / 37).
-- block 3 (stale numbers) → 25 newest shards → 12 figure-bearing lines, 0
-  with a command; `any` → 24 (23 at `89fadec0`), but only 6 of those lines
+- block 3 (stale numbers) → 25 newest shards → 12 figure matches on 11
+  lines, 0 with a command; `any` → 24 (23 at `89fadec0`), but only 6 of those lines
   are code; db-mock gauge → 54 / 273 / 57 (09-15: 54 / 280 / 57).
 - block 4 (retired vocabulary) → the reference's term list with the
   corrected exclusion → 191 files, 46 historical / 145 live, equal to the
@@ -1018,9 +1026,12 @@ finding (`accepted-as-debt`), and the parked-run re-run mechanism (recorded
 - workflow archaeology → `ci.yml` last 200 → 10 with attempt > 1 (9 are
   parked bot-push runs, 1 is a real timeout), 23 failures (0 on `dev`), 19
   cancelled; `qa-dev.yml` last 40 → 40 / 40. The three local 5 s timeouts
-  are not a CI flake class (1 of 32 failed logs, and not a timeout).
-- comment archaeology → `rg -c -w 'TODO|FIXME|HACK|XXX'` in non-test
-  package source → 0; including tests → 2 (the positive control).
+  were not seen in CI, but only 1 failed-job log in the sample ran the
+  backend suite at all, so this is weak evidence, not a clean bill.
+- comment archaeology → `git grep -c -w -E 'TODO|FIXME|HACK|XXX' --
+  'packages/*/src/*'` → 0 with or without tests; positive control `import`
+  over the same pathspec → 1,437 files (`-- 'packages/*/src'` without the
+  trailing `/*` matches nothing at all).
 - live exercise → not taken.
 
 Instrument lessons: `rg` is a zsh function here and absent from `bash -c`
@@ -1028,4 +1039,6 @@ Instrument lessons: `rg` is a zsh function here and absent from `bash -c`
 reads 0 against a true 1; the first sizing pass word-split wrong in zsh and
 a rerun died silently after its header; the coupling gate reports "no
 covered docs implicated" for a non-existent path; the block-3 `any` regex
-counts prose.
+counts prose; the branch-hygiene meter reads only `--since=` and silently
+falls back to 7 days on `--since <date>`; a `git grep` pathspec of
+`packages/*/src` matches no file.

@@ -51,8 +51,9 @@ nothing was pushed except this branch.
 The rules merged earlier the same day in #3224 apply: this report is
 reviewed before it is presented, instruments run the way CI runs them, and
 scoped counts come from the instrument, not from a hand count. §5 lists
-five places where one of our own instruments gave a wrong reading during
-this run.
+seven places where one of our own instruments gave a wrong reading during
+this run. Figures corrected after the independent review are marked
+*Corrected in review* where they stand.
 
 ## 1. Structural finding
 
@@ -77,11 +78,15 @@ Nothing reads what a changed baseline carries with it:
 - `git grep -l haven-design-reviewer fd7b1289 -- scripts .github` → 1 file,
   the pull-request template.
 - The workflow's audit trailer (`Regenerated with --update-snapshots=…;
-  baselines moved: …`) is written but never read: only its writer and the
-  writer's test reference it.
-- The workflow keeps a diff image only when a comparison fails
-  (`visual-regression-diffs`, `if: failure()`). After a re-bless the
-  comparison passes, so no diff image is kept.
+  baselines moved: …`) is written but never read. Only three places refer
+  to it: its writer (`commitTrailer()` in `scripts/ci/baseline-audit.mjs`),
+  the writer's test, and the workflow that puts it into the commit
+  message. *Corrected in review:* first written as "only its writer and the
+  writer's test", which left out the workflow.
+- CI's visual job (`.github/workflows/ci.yml`) keeps a diff image only
+  when a comparison fails (`visual-regression-diffs`, `if: failure()`), and
+  the regeneration workflow uploads no artifact at all. After a re-bless the
+  comparison passes, so no diff image is kept anywhere.
 - On a bot push, the sticky comment from
   `scripts/ci/baseline-push-followup.mjs` (`buildComment`) says the baselines
   are "**correct and already pushed**" and "Nothing about the images is
@@ -99,17 +104,22 @@ Nothing reads what a changed baseline carries with it:
   -- packages/frontend/e2e/__screenshots__/ | wc -l` → **35** landings
   touch a baseline, of 444 first-parent landings in the window.
 - **24** of the 35 modify an existing baseline (git status `M`).
-- **17** of the 35 carry a design-review verdict line in the PR body: 15
-  passed or cleared, 2 recorded findings (#3057, #2450). This is a hand
+- **19** of the 35 carry a design-review verdict in the PR body at merge,
+  including 2 recorded findings (#3057, #2450). This is a hand
   classification. A regex pass over the bodies
   (`design-reviewer|design review|design pass|design-lens`) found the
   candidates, and each hit was then read.
-- 6 were skipped or still pending at merge: #3205, #2816, #2650, #2470,
-  #2471 and #2331.
-- **12** have no design-review line at all. One of them, #2643, is a CLI fix
-  that re-blessed `agentpanel-empty-onboarding-prompt-desktop.png`.
-- Of the 24 that modify an existing baseline, 12 carry a verdict. Since
-  2026-09-18, 1 of 9 baseline landings carries one (#3199).
+- **5** were skipped or still pending at merge: #2816, #2650, #2470, #2471
+  and #2331. #2816's body says pending, but a "passed" verdict was posted
+  as a PR comment 3 seconds before the merge.
+- **11** have no design-review line at all. One of them, #2643, is a CLI
+  fix that re-blessed `agentpanel-empty-onboarding-prompt-desktop.png`.
+- Of the 24 that modify an existing baseline, 13 carry a verdict. Since
+  2026-09-18, 2 of 9 baseline landings carry one (#3199, #3205).
+- *Corrected in review:* first recorded as 17 / 6 / 12, 12 of 24, and 1 of
+  9. #3205's merged body carries "approve (visual)" (round 4), and #2951's
+  records an in-session design-reviewer pass. Re-derived over W3's hand
+  table with both moves: 19 + 5 + 11 = 35.
 
 *Demonstrated cost:*
 - **#2217 / #2218 (2026-08-30).** A dispatch silently re-blessed a baseline
@@ -149,9 +159,14 @@ evidence that the pictures are right.
 3. The regeneration run publishes a before/after image for every
    baseline it rewrites (workflow artifact), so the reviewer has something
    to look at. Files: `.github/workflows/update-visual-baselines.yml` only.
-4. The design-reviewer brief gains a baseline-diff step
-   (`.claude/agents/haven-design-reviewer.md`; it mentions baselines 0
-   times today).
+4. The design-reviewer brief gains a baseline-diff step. The target file
+   is the role's canonical reference,
+   `.agents/skills/haven-agent-workflow/references/design-reviewer.md`,
+   which `.claude/agents/haven-design-reviewer.md` dispatches to. The agent
+   file mentions baselines 0 times. The reference mentions a committed
+   pixel baseline once, about whether one exists, never about reviewing a
+   changed one. *Corrected before presentation:* first named the agent
+   file.
 Whether *Design visual regression* should also be required on `dev` is an
 owner decision, not a slice.
 
@@ -190,10 +205,14 @@ tenancy rests on a route pre-check in another file.**
   `infra/repositories/__tests__/smart-accounts.test.ts` ("clear is scoped to
   the user, set is by id") asserts the SET's parameters are `['safe-1']`,
   against a mock executor.
-- *It contradicts the stated convention.*
-  `packages/backend/src/infra/repositories/README.md` rule 3 makes tenant
-  scoping a required parameter, and rule 6 says guards travel with the
-  write they protect.
+- *It contradicts the stated convention.* The header of
+  `packages/backend/src/infra/repositories/agent-labels.ts` says "Every
+  function takes the owner's `userId` and every statement filters on it (or
+  joins through an agent the user owns)"; the labels pair does neither.
+  `packages/backend/src/infra/repositories/README.md` rule 6 says guards
+  travel with the write they protect. (Rule 3, a required tenant parameter,
+  is met in letter: each function does take `userId`.) *Corrected in
+  review:* first cited rule 3 as the contradiction.
 - *Cost and history:*
   - The same shape was found in PR #3222 today (review S1: the probe moved
     another user's agent).
@@ -269,8 +288,12 @@ records what it counts, and prints the target state.**
   | 09-08→09-23 | 0 | "✓ One branch per PR, each cut fresh. This is the target state (#1500)." |
 
 - *The resyncs did not stop.* `gh api
-  repos/d-hinders/Haven-AI/pulls/<n>/commits` over 200 of the 259 PRs merged
-  into `dev` since 2026-09-08 → **17** resync commits in **13** PRs. Example:
+  repos/d-hinders/Haven-AI/pulls/<n>/commits` over all 259 PRs merged into
+  `dev` since 2026-09-08, counting two-parent commits whose subject matches
+  `^Merge (remote-tracking )?branch '(origin/)?dev'` → **29** resync commits
+  in **23** PRs. The review found 14 more `Merge origin/dev…` subjects
+  outside that pattern, so 29 is a floor. *Corrected before presentation:*
+  first recorded as 17 in 13, a sample of 200 of the 259. Example:
   #3196 has two, both `Merge remote-tracking branch 'origin/dev' into …`.
 - *Where it is relied on:* `docs/contributing/branch-and-release-flow.md`
   still names this command as the number that says whether the
@@ -294,14 +317,17 @@ nowhere, so the required per-package check passes as "skipped".**
       Signer jobs)
     - `scripts/vitest/assert-fresh-dist.mjs` (test setup for connect,
       mcp-server and qa-agent)
-    - `scripts/lib/lint-escapes.mjs` (the frontend job's `design:lint`)
+    - `scripts/lib/lint-escapes.mjs` (the frontend job's `design:lint`
+      over real source; its own self-test and the unconditional *Banned
+      product-copy terms* job do still run it on every PR)
   - Positive control: the backend package's entry-point source file → `code,backend`.
   - None of the five appears in `.github/root-guard-ownership.json` or
     `scripts/ci/routing-matrix.mjs`. The matrix documents other unrouted
     files (the Node version pin, the code-owners file, the git ignore file and the Dockerfile) as known
     gaps.
   - Over every tracked file: 749 of 2,603 route nowhere, and 149 of those
-    are not docs or images.
+    are not Markdown or images (147 if everything under `docs/` also counts
+    as docs).
 - *Demonstrated* (each behind a `cp` backup, restored byte-identical):
   - Removing `PORT=` from `.env.example` classifies as 1 path and 0
     surfaces, while the drift test goes from 5 passed to 1 failed.
@@ -375,7 +401,9 @@ and so do their own self-tests.**
 - The two docs that `npm run docs:covers-gaps` reports as outside the
   governed set (`docs/contributing/code-quality-loop.md`,
   `docs/operations/session-rail-vendor-ops.md`) are `status: archived`
-  redirect stubs that the script names on purpose.
+  with `covers: []`, and the script names them on purpose. The first is a
+  redirect stub; the second is a 120-line retired runbook kept as a
+  historical record.
 
 ## 4. Coverage record (block → examined / partial / not examined → command → result)
 
@@ -407,11 +435,17 @@ All at `fd7b1289`.
 
     | Directory | Net lines |
     |---|---|
-    | `modules` | +3,357 (accounting/Accounted leads) |
+    | `modules` | +3,338 (accounting/Accounted leads) |
     | `infra` | +1,094 (the merchants repository leads) |
+    | `openapi` | +1,034 (`request-validation.ts` is new, 735 lines) |
     | `db` | +920 (migration 088) |
     | `routes` | +834 |
-    | `openapi` | +654 (`request-validation.ts` is new, 735 lines) |
+
+    Command: `git diff --numstat --no-renames 89fadec0 fd7b1289 --
+    packages/backend/src`, filtered to non-test `.ts|.tsx|.mjs`, summed by
+    directory → total +7,635. *Corrected in review:* first written as
+    `modules` +3,357 and `openapi` +654, figures that counted deleted JSON
+    fixtures under `openapi/__fixtures__`.
 
   - Largest non-generated file: `openapi/spec.ts` at 9,607 lines (09-15:
     9,042). `core` is almost entirely the generated `api-types.ts` (16,925
@@ -446,8 +480,8 @@ All at `fd7b1289`.
   - `npm run docs:covers-gaps` → 138 baselined pairs across 36 docs
     (09-15: 146 / 37).
 - **Block 3 (stale numbers)** → examined.
-  - The 25 newest CASP shards hold 12 figure-bearing lines, and 0 of them
-    quote a command. The count is `rg -c`, which prints nothing for zero.
+  - The 25 newest CASP shards hold 12 figure matches on 11 lines (`rg -o`
+    counts matches), and 0 of those lines quote a command. The count is `rg -c`, which prints nothing for zero.
   - Re-derivations:
     - `any`: 24 (23 at `89fadec0`). Of the 24 lines only 6 are code — see
       §5.
@@ -508,28 +542,37 @@ All at `fd7b1289`.
   - `gh run list --workflow ci.yml --limit 200` (2026-09-19T08:36Z →
     09-22T21:07Z): 10 with `attempt > 1`, 23 failures (0 on `dev`), 19
     cancelled.
-  - Failed jobs across the 32 failed or re-attempted runs:
+  - Failed jobs across every attempt of the 32 failed or re-attempted runs
+    (*Corrected in review:* first counted the latest attempt only, which
+    dropped attempt 1 of run 35436827209 — the one real flake):
 
     | Job | Failures |
     |---|---|
-    | Lint, Type-check & Build | 12 |
+    | Lint, Type-check & Build | 13 |
     | Design visual regression | 9 |
     | Backend checks | 6 |
     | Install-path smoke | 3 |
     | Frontend checks | 2 |
     | Frontend browser smoke | 2 |
     | Repo CI config checks | 1 |
+    | MCP server checks | 1 |
 
   - `qa-dev.yml`, last 40 runs: 40 / 40 success.
   - The three 5 s timeouts seen locally (`transactions-export-csv` ×2 and
-    `x402-binding-signer-import-graph`) appear in 1 of the 32 failed logs,
-    and that hit is a db-harness "slow" notice, not a timeout. So they are
-    a local-machine effect, not a CI flake class.
+    `x402-binding-signer-import-graph`) matched 1 of the 32 failed runs.
+    That hit is a stderr config warning plus two passing lines, not a
+    timeout. It was also the only failed-job log that ran the backend suite
+    at all, so the evidence is 1 of 1 eligible log, not 1 of 32. No CI
+    timeout of these tests was observed; the sample cannot show that they
+    never happen. *Corrected in review:* first described as a db-harness
+    "slow" notice, out of 32.
 - **Comment archaeology** → examined.
-  - `rg -c -w 'TODO|FIXME|HACK|XXX' packages/*/src` with tests excluded →
-    0.
-  - Including tests, `git grep -c -w` gives 2. That is the positive
-    control: the instrument can find a hit.
+  - `git grep -c -w -E 'TODO|FIXME|HACK|XXX' fd7b1289 -- 'packages/*/src/*'`
+    → 0, with or without tests.
+  - Positive control: the same pathspec finds `import` in 1,437 files. The
+    2 hits over all of `packages` are outside `src` (an e2e fixture and a
+    PNG). *Corrected in review:* first gave "including tests → 2" as the
+    control, which was a different scope.
 - **Live exercise** → not examined. No surface in this sample needed a live
   call, and none was authorised.
 
@@ -553,6 +596,13 @@ Each is a reading that would have entered this report wrong.
   implicated` for a path that does not exist, so a typo in block 2's
   confirmation step would confirm a miss falsely. Every path confirmed here
   came from `git ls-files`.
+- **`branch-hygiene.mjs` flag form.** It reads only `--since=<date>`.
+  `--since <date>` with a space silently falls back to its 7-day default,
+  and the captain's first check of C3 did exactly that. The C3 table above
+  is taken with the `=` form.
+- **A `git grep` pathspec that matches nothing.** `-- 'packages/*/src'`
+  matches no file at all (`import` → 0); `-- 'packages/*/src/*'` finds
+  1,437. A zero from the first form says nothing.
 - **The `any` meter in block 3.** It is mostly prose: of 24 lines, 6 are
   code `any` (`rails/delegation-rail.ts` ×5, `mcp/src/server.ts` ×1), and
   the rest are English ("any long-lived", "as anything"). The recorded trend

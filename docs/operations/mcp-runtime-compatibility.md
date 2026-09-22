@@ -53,7 +53,7 @@ covers:
   - scripts/lint-next-steps.mjs
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
-last-verified: "2026-09-21"
+last-verified: "2026-09-22"
 ---
 
 # MCP Runtime Compatibility
@@ -2771,6 +2771,19 @@ to call next in structured fields, and those fields are typed end to end
 > additive case every consumer ignores. Version-skew and consent-hash
 > contracts are untouched. Scope of this note: the `labels[]` addition on the
 > agent rows. Nothing else in this document was re-verified.
+
+> **Re-verified #3164 (2026-09-22):** same covered file,
+> `packages/backend/src/routes/agents.ts`, same class of change as #3167 —
+> the agent rows the MCP server lists now carry an extra read-only
+> `organization_id` field (the #3164 folder placement; null = top level).
+> The wire contract the MCP server depends on did not move: no existing
+> field changed shape or name, no request the server sends gained a required
+> member (`organization_id` on `PUT /agents/:id` is optional and a dashboard
+> surface no MCP client calls; the new `/organizations` routes are a
+> separate dashboard module), and an extra response field is the additive
+> case every consumer ignores. Version-skew and consent-hash contracts are
+> untouched. Scope of this note: the `organization_id` addition on the agent
+> rows. Nothing else in this document was re-verified.
 
 > **Re-verification (#3214, every branch of `normalizeError` names its next
 > step, 2026-09-21):** this diff touches

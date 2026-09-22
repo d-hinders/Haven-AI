@@ -109,6 +109,10 @@ export const SCAN_FILES = [
   // the editor's helper lines. Extracted from the modals the same way #2195
   // extracted the pause/stranded copy, so the same gate must read it.
   'packages/frontend/src/lib/label-copy.ts',
+  // #3164: the organization UI's shared sentences — the picker's label and
+  // note, the delete confirm's promotion promise. Extracted from the modals
+  // the same way #2195/#3167 extracted theirs, so the same gate must read it.
+  'packages/frontend/src/lib/organization-copy.ts',
   // Credential-row labels ("Passkey · added {date}", "Passkey N") rendered by
   // WalletButton.tsx and AccountSignersCard.tsx. copy-guidelines.md § "Name
   // credentials 'passkey'" (#1679) specifies this string by name (#2333).

@@ -5,11 +5,13 @@ import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanne
 import { LabelChipRow } from '@/components/haven/LabelChip'
 import { useState } from 'react'
 import { type Agent } from '@/hooks/useAgents'
+import type { Organization } from '@/hooks/useOrganizations'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
 import ConfirmDialog from '../ConfirmDialog'
+import MoveAgentModal from '../MoveAgentModal'
 import { RemoveAgentDialog } from './RemoveAgentDialog'
 import { entityCardClassName } from '../ui/entityCardStyles'
 import { ConfiguredAllowanceRow } from './ConfiguredAllowanceRow'
@@ -29,8 +31,10 @@ export function AgentCard({
   onRevokeCredential,
   onArchive,
   onRestore,
+  onMoveToOrganization,
   busyAction,
   chainId = DEFAULT_CHAIN_ID,
+  organizations = [],
 }: {
   agent: Agent
   onViewDetails: (agent: Agent) => void
@@ -41,11 +45,18 @@ export function AgentCard({
   /** RemoveAgentDialog step 3: archive (#1401), throws on failure. */
   onArchive: (agent: Agent) => Promise<void>
   onRestore: (agent: Agent) => void
+  /** #3164: the card hosts the Move modal; this delivers the saved agent back. */
+  onMoveToOrganization: (agent: Agent) => void
   busyAction: AgentBusyAction
   chainId?: number
+  /** #3164: the user's organization tree, for the card's Move picker. */
+  organizations?: Organization[]
 }) {
   const [pauseModalOpen, setPauseModalOpen] = useState(false)
   const [removeModalOpen, setRemoveModalOpen] = useState(false)
+  // #3164: mounted only while open (the per-agent modal, same pattern as
+  // RemoveAgentDialog below).
+  const [moveModalOpen, setMoveModalOpen] = useState(false)
 
   const isActive = agent.status === 'active'
   const isPaused = agent.status === 'paused'
@@ -365,6 +376,19 @@ export function AgentCard({
             >
               Details
             </button>
+            {/* #3164: file the agent under an organization. Placement only —
+                the modal's note says so, and nothing here touches authority. */}
+            <>
+              <span className="text-[var(--v2-border-strong)]">|</span>
+              <button
+                onClick={() => setMoveModalOpen(true)}
+                disabled={isBusy}
+                aria-label={`Move ${agent.name} to an organization`}
+                className={ACTION_BUTTON_CLASS}
+              >
+                Move
+              </button>
+            </>
             <span className="text-[var(--v2-border-strong)]">|</span>
             {isActive ? (
                   <button
@@ -503,6 +527,18 @@ export function AgentCard({
         onRevokeCredential={() => onRevokeCredential(agent.id)}
         onArchive={() => onArchive(agent)}
         onClose={() => setRemoveModalOpen(false)}
+      />
+    )}
+
+    {/* #3164: the org picker for THIS agent, mounted only while open. The
+        vocabulary comes from the panel (one fetch serves every card). */}
+    {moveModalOpen && (
+      <MoveAgentModal
+        open={moveModalOpen}
+        onClose={() => setMoveModalOpen(false)}
+        agent={agent}
+        organizations={organizations}
+        onMoved={onMoveToOrganization}
       />
     )}
     </>

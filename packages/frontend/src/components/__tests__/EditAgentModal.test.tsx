@@ -30,6 +30,7 @@ const AGENT: Agent = {
   created_at: '2026-05-01T00:00:00Z',
   allowances: [],
   labels: [],
+  organization_id: null,
 }
 
 const VOCABULARY = {
@@ -39,10 +40,35 @@ const VOCABULARY = {
   ],
 }
 
+const ORGANIZATIONS = {
+  organizations: [
+    {
+      id: 'org-1',
+      parent_organization_id: null,
+      name: 'Acme',
+      created_at: '2026-05-01T00:00:00Z',
+      updated_at: '2026-05-01T00:00:00Z',
+      agent_count: 0,
+    },
+    {
+      id: 'org-2',
+      parent_organization_id: 'org-1',
+      name: 'Tech Agents',
+      created_at: '2026-05-01T00:00:00Z',
+      updated_at: '2026-05-01T00:00:00Z',
+      agent_count: 0,
+    },
+  ],
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockPut.mockResolvedValue({})
-  mockGet.mockResolvedValue(VOCABULARY)
+  // The modal opens two reads: the label vocabulary and the org tree —
+  // dispatched by URL so either can be asserted independently.
+  mockGet.mockImplementation((url: string) =>
+    url === '/organizations' ? Promise.resolve(ORGANIZATIONS) : Promise.resolve(VOCABULARY),
+  )
   mockPost.mockResolvedValue(VOCABULARY.labels[0])
 })
 
@@ -132,5 +158,55 @@ describe('EditAgentModal', () => {
       expect(mockPut).toHaveBeenCalledWith('/agents/agent-1/labels', { label_ids: [] }),
     )
     expect(mockPut).not.toHaveBeenCalledWith('/agents/agent-1', expect.anything())
+  })
+
+  // ── Organization picker (#3164) ────────────────────────────────────────────
+  it('files the agent under an organization; the save is one PUT with organization_id', async () => {
+    renderModal()
+    // The org tree arrives async; the option must exist before a change can
+    // select it (a select set to a missing option stays where it was).
+    await vi.waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Acme / Tech Agents' })).toBeInTheDocument(),
+    )
+    const picker = screen.getByLabelText('Organization')
+    expect(picker).toHaveValue('')
+
+    fireEvent.change(picker, { target: { value: 'org-2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    // The review step names the destination (path-labelled).
+    expect(screen.getByTestId('review-organization')).toHaveTextContent('Acme / Tech Agents')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save details' }))
+    await vi.waitFor(() =>
+      expect(mockPut).toHaveBeenCalledWith('/agents/agent-1', { organization_id: 'org-2' }),
+    )
+    // Identity and labels unchanged: no other PUT.
+    expect(mockPut).toHaveBeenCalledTimes(1)
+  })
+
+  it('an organization-only change on an orgless agent saves without identity fields', async () => {
+    renderModal()
+    await vi.waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Acme' })).toBeInTheDocument(),
+    )
+    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'org-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    expect(screen.getByTestId('review-organization')).toHaveTextContent('Acme')
+    fireEvent.click(screen.getByRole('button', { name: 'Save details' }))
+
+    await vi.waitFor(() =>
+      expect(mockPut).toHaveBeenCalledWith('/agents/agent-1', { organization_id: 'org-1' }),
+    )
+    // The identity PUT body never carries a stale name/description rewrite.
+    expect(mockPut).not.toHaveBeenCalledWith(
+      '/agents/agent-1',
+      expect.objectContaining({ name: expect.anything() }),
+    )
+  })
+
+  it('an unchanged placement does not enable Review on its own', () => {
+    renderModal()
+    expect(screen.getByRole('button', { name: 'Review changes' })).toBeDisabled()
+    expect(screen.queryByTestId('review-organization')).not.toBeInTheDocument()
   })
 })

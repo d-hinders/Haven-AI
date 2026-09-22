@@ -227,12 +227,14 @@ describe('index.ts readers', () => {
     )
     // Exact FILE keys — the same strings the baseline uses. If this ever
     // reads a prefix again, the gate and the plugin have split. #3167 adds
-    // two born-enforced label modules (epic #3028's forward direction).
+    // two born-enforced label modules (epic #3028's forward direction);
+    // #3164 adds the born-enforced organization module the same way.
     assert.deepEqual(enforcedModulesFromIndex(real), [
       'routes/contacts.ts',
       'routes/merchants.ts',
       'routes/labels.ts',
       'routes/agent-labels.ts',
+      'routes/agent-organizations.ts',
       // Slice 2 (#3030): the 22 non-money modules and the inline index.ts pair.
       'index.ts',
       'routes/accounting.ts',

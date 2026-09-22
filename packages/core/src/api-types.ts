@@ -185,6 +185,54 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/organizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the signed-in user's organizations.
+         * @description Flat rows with parent ids; the caller builds the tree. Multiple roots are allowed (one per company); a null parent is the top level. `agent_count` is the number of agents filed DIRECTLY under the folder — sub-organization members are not counted.
+         */
+        get: operations["listOrganizations"];
+        put?: never;
+        /**
+         * Create an organization, optionally inside another one.
+         * @description The name must be unique among siblings under the same parent (case-insensitively); a repeat is a 409. Omit `parent_organization_id` to create a top-level organization.
+         */
+        post: operations["createOrganization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rename an organization and/or move it inside another one.
+         * @description Rename changes the name everywhere it renders, never which agents file under it. The move is expressed by `parent_organization_id`: present means move (null = the top level), absent means keep. Moving into the organization’s own subtree is refused with 400 — it would make the folder its own ancestor. A rename or move onto a sibling name that already holds is a 409.
+         */
+        put: operations["updateOrganization"];
+        post?: never;
+        /**
+         * Delete an organization; its contents move up one level.
+         * @description Deleting never orphans anything: the folder’s sub-organizations and member agents take the deleted folder’s own parent (agents of a deleted root return to the top level). Agents are never deleted, hidden, or changed in any way beyond the placement. The response is `{ ok: true }`.
+         */
+        delete: operations["deleteOrganization"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents": {
         parameters: {
             query?: never;
@@ -3167,6 +3215,33 @@ export type components = {
             /** @enum {string} */
             color?: "neutral" | "brand" | "success" | "debit";
         };
+        Organization: {
+            /** Format: uuid */
+            id: string;
+            parent_organization_id: string | null;
+            name: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            agent_count: number;
+        };
+        OrganizationListResponse: {
+            organizations: components["schemas"]["Organization"][];
+        };
+        CreateOrganizationRequest: {
+            name: string;
+            /** Format: uuid */
+            parent_organization_id?: string;
+        };
+        /** @description Rename and/or move. An empty object is accepted and changes nothing. */
+        UpdateOrganizationRequest: {
+            name?: string;
+            parent_organization_id?: string | null;
+        };
+        DeleteOrganizationResponse: {
+            ok: boolean;
+        };
         ReplaceAgentLabelsRequest: {
             label_ids: string[];
         };
@@ -3429,6 +3504,7 @@ export type components = {
             archived_at?: string | null;
             allowances: components["schemas"]["AgentAllowance"][];
             labels: components["schemas"]["Label"][];
+            organization_id: string | null;
             mcp_last_seen_at?: string | null;
             mcp_server_name?: string | null;
             has_stranded_funds?: boolean;
@@ -4616,6 +4692,7 @@ export type components = {
     parameters: {
         AgentId: string;
         LabelId: string;
+        OrganizationId: string;
         PaymentId: string;
         SetupId: string;
     };
@@ -4898,6 +4975,263 @@ export interface operations {
             };
         };
     };
+    listOrganizations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user’s organizations, name-sorted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationListResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    createOrganization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOrganizationRequest"];
+            };
+        };
+        responses: {
+            /** @description The created organization. A new folder has no members yet. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Organization"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    updateOrganization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["OrganizationId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateOrganizationRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated organization. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Organization"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    deleteOrganization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["OrganizationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. The contents were promoted one level up. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteOrganizationResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     listAgents: {
         parameters: {
             query?: never;
@@ -5087,6 +5421,8 @@ export interface operations {
                     name?: string;
                     /** @description Trimmed. */
                     description?: string;
+                    /** @description The organization to file the agent under; null = the top level. */
+                    organization_id?: string | null;
                 };
             };
         };

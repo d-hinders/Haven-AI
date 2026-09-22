@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents, type Agent } from '@/hooks/useAgents'
+import { useOrganizations } from '@/hooks/useOrganizations'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 
 export type AgentBusyAction = 'pause' | 'resume' | 'archive' | 'restore' | null
@@ -30,6 +31,18 @@ export function useAgentPanelState() {
     unarchiveAgent,
     refetch,
   } = useAgents()
+  // #3164: the organization tree. Fetched once for the panel; the tree, the
+  // #3165 facet and every card's Move picker read the same list.
+  const {
+    organizations,
+    loading: organizationsLoading,
+    error: organizationsError,
+    fetchOrganizations,
+  } = useOrganizations()
+
+  useEffect(() => {
+    void fetchOrganizations()
+  }, [fetchOrganizations])
 
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
   const [firstAgentSetup, setFirstAgentSetup] = useState(false)
@@ -39,6 +52,9 @@ export function useAgentPanelState() {
   // from the agents panel header. Edit itself lives on the agent detail page
   // (#3168), not here.
   const [labelsManagerOpen, setLabelsManagerOpen] = useState(false)
+  // #3164: the organization tree manager (create, rename, move, delete) —
+  // opened from the panel's organization tree.
+  const [organizationsManagerOpen, setOrganizationsManagerOpen] = useState(false)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<AgentBusyAction>(null)
   const [showRemovedAgents, setShowRemovedAgents] = useState(false)
@@ -198,6 +214,20 @@ export function useAgentPanelState() {
     void refetch()
   }
 
+  // #3164: the Move modal saved a placement — fold the updated agent into
+  // state without a refetch (the PUT response IS the new row), and refresh
+  // the tree's counts, which read from the API rather than the agent list.
+  const [moveAgent, setMoveAgent] = useState<Agent | null>(null)
+  function handleAgentMoved() {
+    setMoveAgent(null)
+    void refetch({ silent: true })
+    void fetchOrganizations()
+  }
+  function handleOrganizationsChanged() {
+    void refetch({ silent: true })
+    void fetchOrganizations()
+  }
+
   return {
     accountAddress,
     chainId,
@@ -218,6 +248,17 @@ export function useAgentPanelState() {
     handleAgentEdited,
     labelsManagerOpen,
     setLabelsManagerOpen,
+    // #3164: organizations — tree, facet, Move modal, manager.
+    organizations,
+    organizationsLoading,
+    organizationsError,
+    fetchOrganizations,
+    moveAgent,
+    setMoveAgent,
+    handleAgentMoved,
+    handleOrganizationsChanged,
+    organizationsManagerOpen,
+    setOrganizationsManagerOpen,
     busyAgentId,
     busyAction,
     handleViewDetails,

@@ -11,6 +11,8 @@ covers:
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/routes/agents.ts
+  - packages/backend/src/infra/repositories/agent-organizations.ts
+  - packages/backend/src/db/migrations/094_agent_organizations.ts
   - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/routes/transactions.ts
   - packages/backend/src/middleware/retired-safe-names.ts
@@ -36,7 +38,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-21"
+last-verified: "2026-09-22"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -670,6 +672,16 @@ informed two-to-one transition. Copy never promises recovery Haven cannot
 deliver.
 
 ### 6a. Agent delegate-key rotation — a DIFFERENT layer (#1698, epic #1694)
+
+> **Display metadata is not authority (#3164, 2026-09-22).** The agent row
+> gained an `organization_id` (migration `094_agent_organizations`, the
+> per-user folder tree in `infra/repositories/agent-organizations.ts`) and
+> the label set before it (#3167). Both are categorization for the `/agents`
+> list: no query that decides what an agent may spend reads them, they
+> appear on no delegation, budget or revocation path, and `rekey` — the flow
+> above, which deliberately preserves identity — is untouched by them. A
+> folder rename or delete moves display placement only; it can never grant,
+> widen or restore spending authority.
 
 Everything above is about the **account's signer set**: the passkeys and EOA
 owners that sign delegations. An **agent's delegate key** — the key that

@@ -1,15 +1,18 @@
 'use client'
 
-import { ChevronRight, CircleAlert, Clock, LoaderCircle, Plus, Tag } from 'lucide-react'
+import { ChevronRight, CircleAlert, Clock, LoaderCircle, Network, Plus, Tag } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { setupIdFromSearch } from '@/lib/discovery'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import { useAgentListFilters } from '@/hooks/useAgentListFilters'
+import { organizationFacet } from '@/lib/agent-organizations'
 import { AgentListToolbar } from './agent-panel/AgentListToolbar'
+import { AgentOrganizationTree } from './agent-panel/AgentOrganizationTree'
 import ConnectAgentModal from './ConnectAgentModal'
 import LabelsManagerModal from './LabelsManagerModal'
+import OrganizationsManagerModal from './OrganizationsManagerModal'
 import { AgentCard } from './agent-panel/AgentCard'
 import { MCP_NOT_RECORDED_NOTE, hasUnrecordedMcpServerName } from './agent-panel/McpServerName'
 import { BotIcon } from './agent-panel/agent-display'
@@ -43,7 +46,27 @@ export default function AgentPanel() {
 
   // #3165: search / facets / sort over the managed list, state in the URL.
   // Reads `visibleAgents` only; removed agents stay behind their own toggle.
-  const listFilters = useAgentListFilters(visibleAgents)
+  // #3164 registers the organization facet (a plain data value over the
+  // fetched tree) alongside the built-ins — the toolbar, the URL codec and
+  // the counts pick it up without any of them knowing what an org is.
+  const orgFacets = useMemo(
+    () => (panel.organizations.length > 0 ? [organizationFacet(panel.organizations)] : []),
+    [panel.organizations],
+  )
+  const listFilters = useAgentListFilters(visibleAgents, orgFacets)
+
+  // The tree's selected row IS the organization facet's selection (one
+  // source of truth, URL-mirrored by the filter state).
+  const selectedOrgId = listFilters.state.facets.organization?.[0] ?? null
+  const selectOrganization = useCallback(
+    (orgId: string | null) => {
+      listFilters.setState({
+        ...listFilters.state,
+        facets: { ...listFilters.state.facets, organization: orgId ? [orgId] : [] },
+      })
+    },
+    [listFilters],
+  )
 
   /**
    * `/agents?setup=<id>` — the budget-approval hand-off link (#2522).
@@ -135,12 +158,36 @@ export default function AgentPanel() {
             <Icon icon={Tag} className="h-3.5 w-3.5" />
             Labels
           </Button>
+          {/* #3164: the organization manager — create/rename/move/delete. The
+              tree above the list appears once at least one organization exists. */}
+          <Button onClick={() => panel.setOrganizationsManagerOpen(true)} size="sm" variant="tertiary">
+            <Icon icon={Network} className="h-3.5 w-3.5" />
+            Organizations
+          </Button>
           <Button onClick={() => panel.setConnectAgentOpen(true)} size="sm">
             <Icon icon={Plus} className="h-3.5 w-3.5" />
             Connect agent
           </Button>
         </div>
       </div>
+
+      {/* #3164: the organization tree above the list — only when the user HAS
+          organizations. An empty tree would be a permanent empty management
+          panel on every org-less /agents visit (product README, First-Run
+          Simplicity); the header's Organizations button is the entry point
+          until one exists. */}
+      {panel.organizations.length > 0 && (
+        <AgentOrganizationTree
+          organizations={panel.organizations}
+          loading={panel.organizationsLoading}
+          error={panel.organizationsError}
+          selectedId={selectedOrgId}
+          onSelect={selectOrganization}
+          onCreate={() => panel.setOrganizationsManagerOpen(true)}
+          onManage={() => panel.setOrganizationsManagerOpen(true)}
+          onRetry={() => void panel.fetchOrganizations()}
+        />
+      )}
 
       {visibleAgents.length > 0 && (
         <AgentListToolbar
@@ -351,8 +398,10 @@ export default function AgentPanel() {
                     onRevokeCredential={panel.revokeAgentCredential}
                     onArchive={panel.handleArchive}
                     onRestore={panel.handleRestore}
+                    onMoveToOrganization={panel.handleAgentMoved}
                     busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
                     chainId={agentChainId}
+                    organizations={panel.organizations}
                   />
                 )
               })}
@@ -397,8 +446,10 @@ export default function AgentPanel() {
                 onRevokeCredential={panel.revokeAgentCredential}
                 onArchive={panel.handleArchive}
                 onRestore={panel.handleRestore}
+                onMoveToOrganization={panel.handleAgentMoved}
                 busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
                 chainId={agent.account_chain_id ?? chainId}
+                organizations={panel.organizations}
               />
             ))}
           </div>
@@ -421,6 +472,13 @@ export default function AgentPanel() {
         open={panel.labelsManagerOpen}
         onClose={() => panel.setLabelsManagerOpen(false)}
         onLabelsChanged={panel.handleAgentEdited}
+      />
+
+      {/* Manage organizations (#3164): the tree — create, rename, move, delete. */}
+      <OrganizationsManagerModal
+        open={panel.organizationsManagerOpen}
+        onClose={() => panel.setOrganizationsManagerOpen(false)}
+        onOrganizationsChanged={panel.handleOrganizationsChanged}
       />
     </div>
   )

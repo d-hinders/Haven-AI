@@ -36,6 +36,7 @@ function agentFixture(overrides: Partial<Agent> = {}): Agent {
     created_at: '2026-05-01T00:00:00Z',
     allowances: [],
     labels: [],
+    organization_id: null,
     ...overrides,
   } as Agent
 }
@@ -52,6 +53,7 @@ function renderCard(agent: Agent, { busyAction = null }: { busyAction?: import('
       onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
       onArchive={vi.fn().mockResolvedValue(undefined)}
       onRestore={onRestore}
+      onMoveToOrganization={vi.fn()}
       busyAction={busyAction}
     />,
   )

@@ -1198,6 +1198,7 @@ export const openapiSpec = {
   tags: [
     { name: 'Health' },
     { name: 'Agents' },
+    { name: 'Organizations' },
     { name: 'Connect Agent 2' },
     { name: 'Payments' },
     {
@@ -1503,6 +1504,115 @@ export const openapiSpec = {
         },
       },
     },
+    // ── Agent organizations (#3164) ──────────────────────────────────────
+    // The per-user folder tree agents file into. DISPLAY/CATEGORIZATION
+    // ONLY: no path here changes delegation authority, budgets, or on-chain
+    // enforcement, and nothing in the money path reads these tables.
+    '/organizations': {
+      get: {
+        tags: ['Organizations'],
+        operationId: 'listOrganizations',
+        summary: "List the signed-in user's organizations.",
+        description:
+          'Flat rows with parent ids; the caller builds the tree. Multiple roots are allowed (one per company); a null parent is the top level. `agent_count` is the number of agents filed DIRECTLY under the folder — sub-organization members are not counted.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The user’s organizations, name-sorted.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/OrganizationListResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      post: {
+        tags: ['Organizations'],
+        operationId: 'createOrganization',
+        summary: 'Create an organization, optionally inside another one.',
+        description:
+          'The name must be unique among siblings under the same parent (case-insensitively); a repeat is a 409. Omit `parent_organization_id` to create a top-level organization.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateOrganizationRequest' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'The created organization. A new folder has no members yet.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Organization' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/organizations/{id}': {
+      put: {
+        tags: ['Organizations'],
+        operationId: 'updateOrganization',
+        summary: 'Rename an organization and/or move it inside another one.',
+        description:
+          'Rename changes the name everywhere it renders, never which agents file under it. The move is expressed by `parent_organization_id`: present means move (null = the top level), absent means keep. Moving into the organization’s own subtree is refused with 400 — it would make the folder its own ancestor. A rename or move onto a sibling name that already holds is a 409.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/OrganizationId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateOrganizationRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The updated organization.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Organization' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Organizations'],
+        operationId: 'deleteOrganization',
+        summary: 'Delete an organization; its contents move up one level.',
+        description:
+          'Deleting never orphans anything: the folder’s sub-organizations and member agents take the deleted folder’s own parent (agents of a deleted root return to the top level). Agents are never deleted, hidden, or changed in any way beyond the placement. The response is `{ ok: true }`.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/OrganizationId' }],
+        responses: {
+          '200': {
+            description: 'Deleted. The contents were promoted one level up.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DeleteOrganizationResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     '/agents': {
       get: {
         tags: ['Agents'],
@@ -1600,6 +1710,15 @@ export const openapiSpec = {
                 properties: {
                   name: { type: 'string', description: 'Trimmed.' },
                   description: { type: 'string', description: 'Trimmed.' },
+                  /**
+                   * #3164: file the agent under one of the user's
+                   * organizations, or null for the top level. Absent keeps
+                   * the current placement. DISPLAY ONLY.
+                   */
+                  organization_id: {
+                    anyOf: [uuid, { type: 'null' }],
+                    description: 'The organization to file the agent under; null = the top level.',
+                  },
                 },
               },
             },
@@ -6963,6 +7082,12 @@ export const openapiSpec = {
         required: true,
         schema: uuid,
       },
+      OrganizationId: {
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: uuid,
+      },
       PaymentId: {
         name: 'id',
         in: 'path',
@@ -7595,6 +7720,70 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       /**
+       * Agent organization (#3164) — one node of the user's folder tree.
+       * DISPLAY/CATEGORIZATION ONLY: nothing in the delegation, budget, or
+       * on-chain enforcement path may read it. `agent_count` counts agents
+       * filed DIRECTLY under the folder (sub-organization members are not
+       * folded in — the tree renders the count on the node the agents sit in).
+       */
+      Organization: {
+        type: 'object',
+        required: ['id', 'parent_organization_id', 'name', 'created_at', 'updated_at', 'agent_count'],
+        properties: {
+          id: uuid,
+          /** The parent folder, or null for a top-level organization. */
+          parent_organization_id: { anyOf: [uuid, { type: 'null' }] },
+          /** Trimmed; unique among siblings under the same parent, case-insensitively. Max 64 characters. */
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          created_at: isoDateTime,
+          updated_at: isoDateTime,
+          agent_count: { type: 'integer', minimum: 0 },
+        },
+        additionalProperties: false,
+      },
+      OrganizationListResponse: {
+        type: 'object',
+        required: ['organizations'],
+        properties: {
+          organizations: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/Organization' },
+          },
+        },
+        additionalProperties: false,
+      },
+      CreateOrganizationRequest: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          /** Omit for a top-level organization. Must be an organization the caller owns. */
+          parent_organization_id: uuid,
+        },
+        additionalProperties: false,
+      },
+      UpdateOrganizationRequest: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          /**
+           * Three-state by presence: the key present (null included) MOVES —
+           * null is the top level; the key absent keeps the current parent.
+           */
+          parent_organization_id: { anyOf: [uuid, { type: 'null' }] },
+        },
+        additionalProperties: false,
+        description: 'Rename and/or move. An empty object is accepted and changes nothing.',
+      },
+      DeleteOrganizationResponse: {
+        type: 'object',
+        required: ['ok'],
+        properties: {
+          ok: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      },
+      /**
        * FULL REPLACEMENT is the mutation: the agent ends up carrying exactly
        * this set. An empty array clears the agent's labels — that is the
        * editor's "remove every chip", not a refused no-op.
@@ -8088,6 +8277,7 @@ export const openapiSpec = {
           'id', 'name', 'delegate_address',
           'account_id', 'account_address', 'account_name', 'account_chain_id',
           'api_key_prefix', 'status', 'created_at', 'allowances', 'labels',
+          'organization_id',
         ],
         properties: {
           id: uuid,
@@ -8119,6 +8309,14 @@ export const openapiSpec = {
            * Always present (an unlabelled agent carries `[]`).
            */
           labels: { type: 'array', items: { $ref: '#/components/schemas/Label' } },
+          /**
+           * #3164: the organization this agent files under (the user's
+           * folder tree; null = the top level, outside every folder).
+           * DISPLAY/CATEGORIZATION ONLY — the same boundary as `labels`:
+           * nothing in the delegation, budget, or on-chain enforcement path
+           * may read it.
+           */
+          organization_id: { anyOf: [uuid, { type: 'null' }] },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
           /**

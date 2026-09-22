@@ -92,6 +92,7 @@ import * as displayCurrencySek from './090_display_currency_sek.js'
 import * as userCurrencyPreferenceSekDefault from './091_user_currency_preference_sek_default.js'
 import * as accountingWebhookDeliveries from './092_accounting_webhook_deliveries.js'
 import * as agentLabels from './093_agent_labels.js'
+import * as agentOrganizations from './094_agent_organizations.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -243,4 +244,5 @@ export const migrations: Migration[] = [
   userCurrencyPreferenceSekDefault,
   accountingWebhookDeliveries,
   agentLabels,
+  agentOrganizations,
 ]

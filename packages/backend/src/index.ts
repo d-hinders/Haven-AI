@@ -28,6 +28,7 @@ import dashboardRoutes from './routes/dashboard.js'
 import agentRoutes from './routes/agents.js'
 import labelRoutes from './routes/labels.js'
 import agentLabelRoutes from './routes/agent-labels.js'
+import agentOrganizationRoutes from './routes/agent-organizations.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
 import agentDelegationRoutes from './routes/agent-delegations.js'
 import agentRekeyRoutes from './routes/agent-rekey.js'
@@ -127,6 +128,9 @@ installRequestValidation(app, {
     'routes/merchants.ts',
     'routes/labels.ts',
     'routes/agent-labels.ts',
+    // #3164: the organization routes are born ENFORCED — new modules never
+    // enter shadow.
+    'routes/agent-organizations.ts',
     // Slice 2 (#3030): every non-money route module, plus the two inline
     // routes below (`GET /`, `GET /chains` — keyed `'index.ts'`). Flipped on
     // the epic's fallback (owner decision 2026-09-21 on #3028): the dev
@@ -334,6 +338,9 @@ await app.register(agentLabelRoutes, { prefix: '/agents' })
 // The label vocabulary itself — GET/POST /labels, PUT/DELETE /labels/:id
 // (#3167). Same prefix rule: one route file, one enforcedModules entry.
 await app.register(labelRoutes, { prefix: '/labels' })
+// #3164: the organization tree — GET/POST /organizations, PUT/DELETE
+// /organizations/:id. Its own prefix and route file, born enforced.
+await app.register(agentOrganizationRoutes, { prefix: '/organizations' })
 // Public and unauthenticated (#974): the caller is a merchant deciding whether
 // to serve an agent, and it has no Haven account. Registered separately from
 // the dashboard-authed passport routes so the auth hook cannot be assumed.

@@ -363,8 +363,10 @@ describe('PUT /agents/:id', () => {
     })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ id: 'agent-1', name: 'Renamed', allowances: [] })
-    // Trimmed inputs, tenant-scoped params, in this exact order.
-    expect(mockQuery.mock.calls[0][1]).toEqual(['agent-1', 'user-1', 'Renamed', 'new desc'])
+    // Trimmed inputs, tenant-scoped params, in this exact order — plus the
+    // #3164 org pair the PUT now carries: no `organization_id` in the body
+    // means "keep", encoded as (NULL, 'keep').
+    expect(mockQuery.mock.calls[0][1]).toEqual(['agent-1', 'user-1', 'Renamed', 'new desc', null, 'keep'])
     // The UPDATE plus the labels ride-along — still no `agent_allowances`
     // read for a legacy/non-delegation agent (#2020).
     expect(mockQuery).toHaveBeenCalledTimes(2)

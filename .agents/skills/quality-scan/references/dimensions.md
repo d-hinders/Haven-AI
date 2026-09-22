@@ -8,7 +8,7 @@ its positive control until the ledger supersedes them.
 The 2026-09-03 retrospective over the 600-issue wave measured what the wave
 was made of; these are its measured classes, one block each, so a reader can
 re-take any of them and the ledger can tell "no finding" from "did not look".
-Three rules hold for every block:
+Four rules hold for every block:
 
 - **Use the instrument that exists; never re-implement it.** The money-path
   matcher is `scripts/ci/qa-freshness.mjs`'s `matchesGlob` (the one
@@ -21,6 +21,19 @@ Three rules hold for every block:
   produced a non-zero — the figures under each block, taken on
   `origin/dev@893d74f6` (2026-09-03), are that control until a later run
   supersedes them in the ledger.
+- **Run each instrument the way CI runs it, and prove the tools resolve.**
+  A gate CI invokes with a flag answers a different question without it:
+  `coupling-gate.mjs` runs `--strict` in `docs-coupling.yml`, and strict mode
+  turns off the incidental-path filter for contract docs, so the same path can
+  be named or ignored depending on the flag. The 2026-09-21 hardening of block
+  2 first measured without `--strict`, got 12 of 14, and wrote an exception
+  for the other two that CI never makes. Before any block, check that its
+  tools exist in the shell you will run it in —
+  `command -v rg >/dev/null || { echo 'rg missing: every count below would be a broken-instrument zero'; exit 1; }`
+  — because a missing `rg` prints `command not found` to stderr and a
+  pipeline then reports `0`. On the machine that ran the 2026-09-21 scan `rg`
+  resolved only as a function the agent harness injects into its own shell;
+  neither a plain `bash -l` nor `zsh -li` had it.
 - **The bar is unchanged.** These blocks produce evidence; whether it qualifies as a
   structural finding or improvement candidate is decided by the canonical
   skill's respective bar. The skill still implements nothing and files nothing.
@@ -111,18 +124,15 @@ without it (the corrected values are given in parentheses below). Clean:
 `cited-but-not-covered=0` on every doc, and no doc whose body cites nothing
 while its `covers:` is wide (over-wide: the doc trips on changes it says
 nothing about). Report both directions with the file names — and **confirm
-every non-test miss with the authoritative instrument before it becomes a
-finding**: `node scripts/docs/coupling-gate.mjs --changed=<path>` must NOT name
+every miss with the gate CI runs before it becomes a finding**:
+`node scripts/docs/coupling-gate.mjs --strict --changed=<path>` must NOT name
 the doc for a path the loop reports as uncovered. The loop is a heuristic over
-glob strings; the gate is what CI runs. The exception is a test, generated or
-screenshot path: the gate lets one implicate a doc only when `covers:` names it
-EXACTLY (`isIncidentalPath` in the same script), so under a wildcard it is
-silent by design, and silence there is not a miss — judge those by the glob.
-Measured on `e42ed68f`: of the first reading's 21 misses, the 14 that were
-false split 12 non-test paths the gate names the runtime doc for and 2 test
-files it is silent on by that rule; the 7 true misses it names the doc for
-none of. The confirmation alone would have removed the 12; the `set -f` glob
-match is what settles the 2. On `893d74f6`:
+glob strings; the gate is the authority, and `--strict` is how CI invokes it
+(without the flag the gate drops test and generated paths swept up by a
+wildcard, which strict mode keeps for contract docs — rule 4 above). Measured
+on `e42ed68f` with `--strict`: of the first reading's 21 misses, the gate names
+the runtime doc for all 14 false ones and for none of the 7 true ones, so the
+confirmation alone would have settled that reading. On `893d74f6`:
 8 contract docs; `docs-quality-system.md` cites 17 existing paths and covers
 3 of them (10 with `set -f`), `mcp-runtime-compatibility.md` 18 and 5 (11
 with `set -f`), `dev-environment.md` 5 and 1 (unchanged); `delegation-rail-security-model.md` declares 23 and cites 0.
@@ -164,9 +174,13 @@ residue has a code half too: an exported function with no live importer.
 # Terms: the identifiers the last removal epic's shards list as deleted
 # (#1440 / #2055 today — update the list when the next epic retires more).
 T='executeAllowanceTransfer|generateTransferHash|hasTokenAllowanceConfigured|decideCoverage|legacy-authorize|allowance-nonce|safe_approver_metadata|approval_requests|pendingApprovals|approval queue'
-# The skill file holds this very list, so it is excluded: an instrument that
-# counts itself reports one live copy on a clean tree.
-rg -l -i "$T" docs packages .agents scripts -g '*.md' -g '*.ts' -g '*.tsx' -g '*.mjs' -g '*.json' -g '!node_modules' -g '!**/dist/**' -g '!.agents/skills/quality-scan/SKILL.md' | sort > "$SCRATCH/rv-files.txt"
+# THIS file holds the list, so it is excluded: an instrument that counts
+# itself reports one live copy on a clean tree. (Until 2026-09-22 the line
+# below excluded SKILL.md, which never held the list — the exclusion pointed
+# at the wrong file from the day this block landed in #2506, and every run
+# since counted this file as one live copy: on `e42ed68f` the corrected
+# exclusion reads 191 / 46 / 145 against the 192 / 46 / 146 recorded then.)
+rg -l -i "$T" docs packages .agents scripts -g '*.md' -g '*.ts' -g '*.tsx' -g '*.mjs' -g '*.json' -g '!node_modules' -g '!**/dist/**' -g '!.agents/skills/quality-scan/references/dimensions.md' | sort > "$SCRATCH/rv-files.txt"
 # Positive control: the shards that RECORD the deletion must match, so a zero
 # here means the instrument is broken, not that the residue is gone.
 rg -l -i "$T" docs/regulatory/casp-changelog | wc -l
@@ -194,13 +208,10 @@ grep -cE ' packages/(mcp|mcp-server|signer|demo-merchant-mcp)/' "$SCRATCH/rv-liv
 grep -E  ' packages/(mcp|mcp-server|signer|demo-merchant-mcp)/' "$SCRATCH/rv-live.txt" | grep -cE '\.test\.ts$|__tests__'   # of which tests
 ```
 
-On `e42ed68f` that reads **16 live, 7 of them tests**; the 2026-09-21 report
-first wrote 10, counted by hand with the tests left out of "live" — the one
-number in that block not produced by its instrument. **Under `bash`, `rg` may
-not resolve** (on the machine that ran it, `rg` is a shell function the login
-shell defines); `git ls-files docs packages .agents scripts | grep -E
-'\.(md|ts|tsx|mjs|json)$' | grep -v /dist/ | xargs grep -l -i -E "$T"` stands
-in for the first `rg -l` and reproduced 192 / 46 / 146 on `e42ed68f`.
+On `e42ed68f` that reads **16 live, 7 of them tests**. The 2026-09-21 report
+first wrote 10 — "6 tests, and 4 non-test lines" — a hand-kept list that had
+missed one test, both package READMEs and three source files: the one number
+in that block not produced by its instrument.
 
 Clean: positive control > 0, and every live file is either a guard that names
 the term to assert its absence (a `*retired*.test.ts`, a banned-list) or a

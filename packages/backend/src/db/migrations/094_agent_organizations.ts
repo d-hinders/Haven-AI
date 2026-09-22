@@ -30,10 +30,20 @@ import type { PoolClient } from 'pg'
  * collide with roots exactly as siblings collide with siblings.
  *
  * A direct self-parent is refused by CHECK; longer cycles (A→B→A) cannot be
- * expressed as a CHECK — the move path walks the ancestor chain inside its
- * transaction and refuses a cycle before writing (repositories/agent-
- * organizations.ts). Every write goes through that module; the schema guards
- * what one row can say, the module guards what the graph can become.
+ * expressed as a CHECK — the move path walks the ancestor chain INSIDE one
+ * per-user advisory-lock transaction (round-3 review, NB1: without the lock
+ * two crossing moves raced a cycle into the table 39/40 on a real database,
+ * and a walk that hits the depth cap now refuses the move instead of
+ * silently dropping the rest of the chain) and refuses a cycle before
+ * writing (repositories/agent-organizations.ts). Every write goes through
+ * that module; the schema guards what one row can say, the module guards
+ * what the graph can become.
+ *
+ * `parent_organization_id` carries its own index (round-3 review, S5): the
+ * delete-promotion, the move's subtree walk and the list's nesting all touch
+ * it, the RESTRICT FK needs it for parent lookups, and the table is created
+ * here (empty) — an index on it is free now and expensive to add on a live
+ * table later.
  *
  * ## The boundary this schema draws — and the one it must not cross
  *
@@ -80,6 +90,14 @@ export async function up(client: PoolClient): Promise<void> {
     CREATE INDEX IF NOT EXISTS agents_organization_id_idx
       ON agents (organization_id)
   `)
+  // S5 (#3164 round-3 review): the self-FK's reverse lookups (children of a
+  // folder — the promote, the subtree walk, the tree) and the RESTRICT's
+  // parent-existence check need this index; creating it with the table
+  // keeps it off the live-DDL path forever.
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS agent_organizations_parent_idx
+      ON agent_organizations (parent_organization_id)
+  `)
 }
 
 /**
@@ -91,6 +109,7 @@ export async function up(client: PoolClient): Promise<void> {
 export async function down(client: PoolClient): Promise<void> {
   await client.query(`DROP INDEX IF EXISTS agents_organization_id_idx`)
   await client.query(`ALTER TABLE agents DROP COLUMN IF EXISTS organization_id`)
+  await client.query(`DROP INDEX IF EXISTS agent_organizations_parent_idx`)
   await client.query(`DROP INDEX IF EXISTS agent_organizations_user_parent_lower_name_unique`)
   await client.query(`DROP TABLE IF EXISTS agent_organizations`)
 }

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.hoisted(() => vi.fn())
 const mockUseAgents = vi.hoisted(() => vi.fn())
+const mockUseOrganizations = vi.hoisted(() => vi.fn())
 const mockRouterPush = vi.hoisted(() => vi.fn())
 
 vi.mock('@/context/AuthContext', () => ({
@@ -11,6 +12,13 @@ vi.mock('@/context/AuthContext', () => ({
 
 vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
+}))
+
+// #3164: the organization list feeds the tree above the list and the
+// facet registered in the toolbar; tests that need orgs set
+// `mockUseOrganizations` directly (default: none, loading settled).
+vi.mock('@/hooks/useOrganizations', () => ({
+  useOrganizations: () => mockUseOrganizations(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -76,6 +84,15 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockUseAuth.mockReturnValue({ activeAccount: SAFE })
   setAgents([])
+  mockUseOrganizations.mockReturnValue({
+    organizations: [],
+    loading: false,
+    error: null,
+    fetchOrganizations: vi.fn(),
+    createOrganization: vi.fn(),
+    updateOrganization: vi.fn(),
+    deleteOrganization: vi.fn(),
+  })
 })
 
 describe('AgentPanel agent detail navigation (#3168)', () => {
@@ -224,5 +241,38 @@ describe('AgentPanel list toolbar (#3165)', () => {
     setAgents([])
     render(<AgentPanel />)
     expect(screen.queryByTestId('agent-list-toolbar')).toBeNull()
+  })
+
+  // Round-3 review (NB2): the org facet EXTENDS the built-ins — the hook's
+  // default fires only on `undefined`, so passing `[]` (no organizations)
+  // used to strip Status/Budget entirely and a shared `?status=active` link
+  // was silently ignored. Mutation: pass `orgFacets` raw again → both
+  // assertions go red (org-less users lose Status; org users lose Status
+  // AND Budget).
+  it('keeps the built-in Status/Budget facets when no organizations exist', () => {
+    setAgents([agent({ id: 'a1', name: 'Alpha' })])
+    render(<AgentPanel />)
+    expect(screen.getByRole('button', { name: /Status:/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Budget:/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Organization:/ })).toBeNull()
+  })
+
+  it('appends the Organization facet alongside Status and Budget', () => {
+    mockUseOrganizations.mockReturnValue({
+      organizations: [
+        { id: 'org-1', parent_organization_id: null, name: 'Company A', created_at: '2026-09-22T00:00:00Z', updated_at: '2026-09-22T00:00:00Z', agent_count: 0 },
+      ],
+      loading: false,
+      error: null,
+      fetchOrganizations: vi.fn(),
+      createOrganization: vi.fn(),
+      updateOrganization: vi.fn(),
+      deleteOrganization: vi.fn(),
+    })
+    setAgents([agent({ id: 'a1', name: 'Alpha' })])
+    render(<AgentPanel />)
+    expect(screen.getByRole('button', { name: /Status:/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Budget:/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Organization:/ })).toBeInTheDocument()
   })
 })

@@ -299,8 +299,8 @@ export default function OrganizationsManagerModal({
                       ) : null}
                     </div>
                   ) : (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="min-w-0 flex-1">
+                    <div className="sm:flex sm:items-center sm:gap-2">
+                      <div className="min-w-0 sm:flex-1">
                         <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{org.name}</p>
                         <p className="truncate text-xs text-[var(--v2-ink-3)]">
                           {org.parent_organization_id
@@ -311,7 +311,14 @@ export default function OrganizationsManagerModal({
                           {org.agent_count === 1 ? ' agent' : ' agents'}
                         </p>
                       </div>
-                      <span className="flex items-center gap-1">
+                      {/* Round-3 review (NB3): the name takes the FULL row
+                          below `sm` and the actions sit on their own line —
+                          the old `flex-1` name beside this fixed group
+                          truncated every name and path to 2-3 characters at
+                          390px, leaving the user unable to tell which
+                          organization they were about to DELETE. At `sm` and
+                          up the row shares one line as before. */}
+                      <div className="mt-2 flex items-center gap-1 sm:mt-0 sm:shrink-0">
                         <Button
                           variant="tertiary"
                           size="sm"
@@ -337,7 +344,7 @@ export default function OrganizationsManagerModal({
                         >
                           Delete
                         </Button>
-                      </span>
+                      </div>
                     </div>
                   )}
                 </li>

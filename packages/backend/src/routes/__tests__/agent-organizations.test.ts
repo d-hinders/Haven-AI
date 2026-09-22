@@ -29,6 +29,10 @@ import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import agentRoutes from '../agents.js'
 import agentOrganizationRoutes from '../agent-organizations.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
+import {
+  deleteOrganizationPromoting,
+  OrganizationNotDeletedError,
+} from '../../infra/repositories/agent-organizations.js'
 
 let seq = 0
 
@@ -328,6 +332,153 @@ describeDb('organization routes (#3164)', () => {
     )
     expect(still.rows[0].count).toBe('1')
     expect(root).toBeDefined()
+  })
+
+  // ── Cycle / depth integrity (round-3 review, NB1 + S1 + S2) ───────────────
+
+  it('moving a folder under another user\'s folder is a 404 that writes nothing (S2)', async () => {
+    const owner = await seedUser()
+    const other = await seedUser()
+    const mine = await createOrg(owner, { name: 'Mine' })
+    const foreign = await createOrg(other, { name: 'Not mine' })
+
+    const res = await app.inject({
+      method: 'PUT', url: `/organizations/${mine.body.id as string}`, ...auth(owner),
+      payload: { parent_organization_id: foreign.body.id as string },
+    })
+    expect(res.statusCode).toBe(404)
+    const row = await db.query<{ parent_organization_id: string | null }>(
+      `SELECT parent_organization_id FROM agent_organizations WHERE id = $1`,
+      [mine.body.id],
+    )
+    expect(row.rows[0].parent_organization_id).toBeNull()
+  })
+
+  it('serializes two crossing moves — no cycle is stored (NB1 race)', async () => {
+    // The codeowner's probe: A under B and B under A, fired in parallel,
+    // stored an A<->B cycle in 39/40 trials when the walk and the write ran
+    // as separate pool queries. Under the per-user advisory lock the loser
+    // of the interleave sees the winner's committed parent and refuses.
+    const userId = await seedUser()
+    const a = await createOrg(userId, { name: 'A' })
+    const b = await createOrg(userId, { name: 'B' })
+    const aId = a.body.id as string
+    const bId = b.body.id as string
+
+    const results = await Promise.all([
+      app.inject({
+        method: 'PUT', url: `/organizations/${aId}`, ...auth(userId),
+        payload: { parent_organization_id: bId },
+      }),
+      app.inject({
+        method: 'PUT', url: `/organizations/${bId}`, ...auth(userId),
+        payload: { parent_organization_id: aId },
+      }),
+    ])
+
+    const aParent = await db.query<{ parent_organization_id: string | null }>(
+      `SELECT parent_organization_id FROM agent_organizations WHERE id = $1`,
+      [aId],
+    )
+    const bParent = await db.query<{ parent_organization_id: string | null }>(
+      `SELECT parent_organization_id FROM agent_organizations WHERE id = $1`,
+      [bId],
+    )
+    const stored = [aParent.rows[0].parent_organization_id, bParent.rows[0].parent_organization_id]
+    // Exactly one of the two moves won; the graph stays a tree.
+    const cycle = stored[0] !== null && stored[0] === bId && stored[1] === aId
+    expect(cycle).toBe(false)
+    const statuses = results.map((r) => r.statusCode).sort()
+    expect(statuses).toEqual([200, 400])
+  }, 15_000)
+
+  it('DELETE on a member of a stored (pre-existing) cycle answers 200, not 500 (NB1)', async () => {
+    const userId = await seedUser()
+    const a = await createOrg(userId, { name: 'A' })
+    const b = await createOrg(userId, { name: 'B' })
+    const aId = a.body.id as string
+    const bId = b.body.id as string
+    // A LEGACY cycle, stored by an older build (the write path can no
+    // longer produce one): the schema's self-parent CHECK only refuses the
+    // one-row shape, so the two-row shape is expressible by hand.
+    await db.query(`UPDATE agent_organizations SET parent_organization_id = $2 WHERE id = $1`, [aId, bId])
+    await db.query(`UPDATE agent_organizations SET parent_organization_id = $2 WHERE id = $1`, [bId, aId])
+
+    // A->B->A: deleting A would promote B to A's parent (itself) — the old
+    // shape tripped agent_organizations_no_self_parent and answered 500.
+    // The delete must succeed cleanly and break the cycle; B lands at the
+    // top level.
+    const del = await app.inject({ method: 'DELETE', url: `/organizations/${aId}`, ...auth(userId) })
+    expect(del.statusCode).toBe(200)
+    const bParent = await db.query<{ parent_organization_id: string | null }>(
+      `SELECT parent_organization_id FROM agent_organizations WHERE id = $1`,
+      [bId],
+    )
+    expect(bParent.rows[0].parent_organization_id).toBeNull()
+  })
+
+  it('refuses a move under a target whose chain exceeds the depth cap (NB1, no silent truncation)', async () => {
+    const userId = await seedUser()
+    // A chain longer than the walk's cap, built directly (the routes now
+    // refuse depth > 64 one request at a time — same guard the migration
+    // tests exercise below).
+    const depth = 67
+    let parentId: string | null = null
+    let deepestId = ''
+    for (let i = 0; i < depth; i += 1) {
+      const { rows }: { rows: { id: string }[] } = await db.query<{ id: string }>(
+        `INSERT INTO agent_organizations (user_id, parent_organization_id, name)
+         VALUES ($1, $2, $3) RETURNING id`,
+        [userId, parentId, `Level ${i}`],
+      )
+      parentId = rows[0].id
+      deepestId = rows[0].id
+    }
+    const mover = await createOrg(userId, { name: 'Mover' })
+    // The deepest node's ancestor chain is 67 long — past the cap. Moving
+    // ANY folder under it used to decide on a silently-truncated chain.
+    const res = await app.inject({
+      method: 'PUT', url: `/organizations/${mover.body.id as string}`, ...auth(userId),
+      payload: { parent_organization_id: deepestId },
+    })
+    expect(res.statusCode).toBe(400)
+    const row = await db.query<{ parent_organization_id: string | null }>(
+      `SELECT parent_organization_id FROM agent_organizations WHERE id = $1`,
+      [mover.body.id],
+    )
+    expect(row.rows[0].parent_organization_id).toBeNull()
+  })
+
+  it('a foreign user\'s failed delete promotes nothing and rolls back (S1)', async () => {
+    const owner = await seedUser()
+    const intruder = await seedUser()
+    const victimAgent = await seedAgent(owner)
+    const victimFolder = await createOrg(owner, { name: 'Victim folder' })
+    const victimId = victimFolder.body.id as string
+    const file = await app.inject({
+      method: 'PUT', url: `/agents/${victimAgent}`, ...auth(owner),
+      payload: { organization_id: victimId },
+    })
+    expect(file.statusCode).toBe(200)
+
+    // The intruder walks in with an ownership check first (the route's own
+    // 404 gate) — the probe ran the REPOSITORY call with a foreign id, so
+    // this proves the repository itself refuses, not just the route.
+    await expect(deleteOrganizationPromoting(victimId, intruder)).rejects.toBeInstanceOf(
+      OrganizationNotDeletedError,
+    )
+
+    // Nothing was promoted, nothing was deleted.
+    const agentRow = await db.query<{ organization_id: string | null }>(
+      `SELECT organization_id FROM agents WHERE id = $1`,
+      [victimAgent],
+    )
+    expect(agentRow.rows[0].organization_id).toBe(victimId)
+    const folders = await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM agent_organizations WHERE id = $1`,
+      [victimId],
+    )
+    expect(folders.rows[0].count).toBe('1')
   })
 
   // ── Agent filing ──────────────────────────────────────────────────────────

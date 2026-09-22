@@ -18,18 +18,23 @@
  *   the DB enforces; a clean 400 here beats Postgres's 22001 as a 500);
  * - a parent id must be an organization THIS user owns (404, not FK-500);
  * - a move cannot nest a folder inside itself or inside its own descendant
- *   (a cycle would strand every member render). The check reads the target's
- *   ancestor chain and refuses before writing; a same-millisecond two-tab
- *   race could still interleave two moves — a display-only surface, self-
- *   inflicted, and recoverable by moving one folder again. The schema's
- *   self-parent CHECK catches the trivial half structurally.
+ *   (a cycle would strand every member render). The cycle walk runs INSIDE
+ *   the repository's per-user advisory-lock transaction, on the same
+ *   connection as the write (round-3 review, NB1: the old read-on-pool /
+ *   write-on-pool pair raced two parallel crossing moves into a stored
+ *   cycle 39/40 times, and the walk's depth cap silently dropped the rest
+ *   of the chain instead of refusing). Cycle and depth refusals surface as
+ *   the typed errors `updateOrganization` throws; the schema's self-parent
+ *   CHECK catches the trivial half structurally.
  * - DELETE promotes contents one level up (the repository owns the
  *   transaction); the response is `{ ok: true }` like the label delete.
+ *   A delete whose row never went away (foreign id, or a stored cycle the
+ *   promotion could not untangle — NB1's former 500) throws before the
+ *   response; the foreign case is answered 404 below.
  */
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import {
-  ancestorIdsOf,
   countMemberAgents,
   createOrganization,
   deleteOrganizationPromoting,
@@ -37,6 +42,9 @@ import {
   isForeignKeyViolation,
   isUniqueViolation,
   listOrganizationsForUser,
+  OrganizationCycleError,
+  OrganizationNotDeletedError,
+  OrganizationTooDeepError,
   updateOrganization,
 } from '../infra/repositories/agent-organizations.js'
 
@@ -83,6 +91,11 @@ export default async function agentOrganizationRoutes(app: FastifyInstance): Pro
         // A new folder has no members yet — the count is a constant here.
         return reply.code(201).send({ ...created, agent_count: 0 })
       } catch (err) {
+        if (err instanceof OrganizationTooDeepError) {
+          return reply.code(400).send({
+            error: 'This organization would nest deeper than the tree allows',
+          })
+        }
         if (isUniqueViolation(err)) {
           return reply.code(409).send({
             error: 'You already have an organization with this name in that place',
@@ -130,14 +143,9 @@ export default async function agentOrganizationRoutes(app: FastifyInstance): Pro
         if (!target) {
           return reply.code(404).send({ error: 'Parent organization not found' })
         }
-        // Moving under a folder whose ancestor chain contains THIS folder
-        // would make this folder its own ancestor — a cycle.
-        const targetAncestors = await ancestorIdsOf(parent_organization_id, sub)
-        if (targetAncestors && targetAncestors.includes(id)) {
-          return reply.code(400).send({
-            error: 'An organization cannot be moved inside one of its own sub-organizations',
-          })
-        }
+        // The cycle/depth walk itself runs INSIDE `updateOrganization`'s
+        // per-user advisory-lock transaction — see the module header. What
+        // remains here is the cheap same-shape refusal with its stable copy.
       }
 
       try {
@@ -147,6 +155,16 @@ export default async function agentOrganizationRoutes(app: FastifyInstance): Pro
         }
         return { ...updated, agent_count: await countMemberAgents(id) }
       } catch (err) {
+        if (err instanceof OrganizationCycleError) {
+          return reply.code(400).send({
+            error: 'An organization cannot be moved inside one of its own sub-organizations',
+          })
+        }
+        if (err instanceof OrganizationTooDeepError) {
+          return reply.code(400).send({
+            error: 'This move would nest the organization deeper than the tree allows',
+          })
+        }
         if (isUniqueViolation(err)) {
           return reply.code(409).send({
             error: 'You already have an organization with this name in that place',
@@ -163,7 +181,9 @@ export default async function agentOrganizationRoutes(app: FastifyInstance): Pro
   // DELETE /organizations/:id — the folder goes away, its contents move up
   // one level (sub-organizations and member agents take its parent). Agents
   // are never orphaned or hidden: the promotion runs in the same transaction
-  // as the delete (repositories/agent-organizations.ts).
+  // as the delete (repositories/agent-organizations.ts). The promotion is
+  // also cycle-safe by construction now: a child whose promoted parent would
+  // be itself demotes to the top level (the stored-cycle 500's fix).
   app.delete<{ Params: { id: string } }>('/:id', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
@@ -173,7 +193,16 @@ export default async function agentOrganizationRoutes(app: FastifyInstance): Pro
       return reply.code(404).send({ error: 'Organization not found' })
     }
 
-    await deleteOrganizationPromoting(id, sub)
+    try {
+      await deleteOrganizationPromoting(id, sub)
+    } catch (err) {
+      // Lost a race with a concurrent delete of the same folder: the row is
+      // already gone, which is what a 404 means here.
+      if (err instanceof OrganizationNotDeletedError) {
+        return reply.code(404).send({ error: 'Organization not found' })
+      }
+      throw err
+    }
     return { ok: true }
   })
 }

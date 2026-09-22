@@ -25,10 +25,18 @@ export interface OrganizationNode {
  * IMPOSSIBLE from the API (every row is the caller's own), but a client that
  * received a partially-failed fetch could hold a child without its parent;
  * such a row degrades to a root rather than disappearing (an agent filed
- * under it must stay reachable). The API's move guard makes cycles
- * unreachable; if a hostile payload carried one anyway, the members would
- * never be reached from the roots, so they are promoted to roots below —
- * every organization renders, nothing loops.
+ * under it must stay reachable).
+ *
+ * A cycle in the payload cannot hang the render. The API's move path refuses
+ * cycles transactionally (#3164 round-3 review), but this function is the
+ * last line of defence for a hostile or broken payload, and a naive walk
+ * over one recurses forever (`RangeError: Maximum call stack size exceeded`
+ * — measured). Cycle members end up in EACH OTHER's `children`, so nothing
+ * on the cycle is reachable from the roots; they are promoted to roots
+ * below, and every traversal in this module (`flattenOrganizationTree`,
+ * `subtreeIds`) carries its own visited-set guard so no walk can loop. The
+ * earlier "promoted to roots … nothing loops" comment was wrong about the
+ * loops: promotion fixes reachability, the guards fix termination.
  */
 export function buildOrganizationTree(organizations: Organization[]): OrganizationNode[] {
   const byId = new Map<string, OrganizationNode>()
@@ -73,8 +81,15 @@ export function buildOrganizationTree(organizations: Organization[]): Organizati
 /** Flat, depth-ordered row list for renders (the tree, pre-order). */
 export function flattenOrganizationTree(nodes: OrganizationNode[]): OrganizationNode[] {
   const out: OrganizationNode[] = []
+  // Visited-set guard (#3164 round-3 review): on a cycle the children arrays
+  // point back at each other, and this walk without the set recurses until
+  // the stack dies — taking the agents list (rendered through it) down with
+  // it. The first visit wins; a repeated node is skipped, not re-walked.
+  const seen = new Set<string>()
   const walk = (nodes: OrganizationNode[]) => {
     for (const node of nodes) {
+      if (seen.has(node.org.id)) continue
+      seen.add(node.org.id)
       out.push(node)
       walk(node.children)
     }
@@ -91,8 +106,13 @@ export function subtreeIds(organizations: Organization[], orgId: string): string
     list.push(org.id)
     childrenByParent.set(org.parent_organization_id, list)
   }
+  // Visited-set guard: same cycle defence as `flattenOrganizationTree` —
+  // this walk feeds the facet's subtree cache, built in a render-time memo.
   const out: string[] = []
+  const seen = new Set<string>()
   const walk = (id: string) => {
+    if (seen.has(id)) return
+    seen.add(id)
     out.push(id)
     for (const child of childrenByParent.get(id) ?? []) walk(child)
   }

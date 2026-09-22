@@ -105,6 +105,18 @@ describe('flattenOrganizationTree', () => {
       'devops:2',
     ])
   })
+
+  // Round-3 review (NB1): buildOrganizationTree's promotion fixes
+  // REACHABILITY, not termination — cycle members sit in each other's
+  // children, and this walk stack-overflowed (RangeError) without a visited
+  // set, taking the /agents render — and with it Pause and Remove — down.
+  it('flattens a cycle without recursing forever, every org rendered once', () => {
+    const a = org('a', 'A', 'b', 1)
+    const b = org('b', 'B', 'a', 0)
+    const roots = buildOrganizationTree([a, b])
+    const rows = flattenOrganizationTree(roots)
+    expect(rows.map((r) => r.org.id).sort()).toEqual(['a', 'b'])
+  })
 })
 
 describe('subtreeIds', () => {
@@ -150,5 +162,23 @@ describe('organizationFacet (#3165 extension)', () => {
 
   it('an unknown agent placement matches nothing (never a false positive)', () => {
     expect(facet.predicate(agent('elsewhere'), 'tech')).toBe(false)
+  })
+
+  // Round-3 review (NB1): the facet's subtree cache calls subtreeIds at
+  // render time (a useMemo in AgentPanel) — on a cycle that walk looped
+  // forever without its visited set. Both the cache build and the predicate
+  // must survive a hostile payload.
+  it('builds the facet from a cycle without looping', () => {
+    const a = org('a', 'A', 'b', 1)
+    const b = org('b', 'B', 'a', 0)
+    const cycleFacet = organizationFacet([a, b])
+    expect(cycleFacet.options.map((o) => o.value)).toEqual([TOP_LEVEL_OPTION, 'a', 'b'])
+    // The subtree of a cycle member is exactly the cycle — each id once.
+    expect(subtreeIds([a, b], 'a').sort()).toEqual(['a', 'b'])
+    expect(subtreeIds([a, b], 'b').sort()).toEqual(['a', 'b'])
+    // An agent filed under 'a' matches both options of the cycle.
+    expect(cycleFacet.predicate(agent('a'), 'a')).toBe(true)
+    expect(cycleFacet.predicate(agent('a'), 'b')).toBe(true)
+    expect(cycleFacet.predicate(agent(null), TOP_LEVEL_OPTION)).toBe(true)
   })
 })

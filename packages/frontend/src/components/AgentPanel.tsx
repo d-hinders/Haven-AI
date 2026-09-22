@@ -7,6 +7,7 @@ import { useAuth } from '@/context/AuthContext'
 import { setupIdFromSearch } from '@/lib/discovery'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import { useAgentListFilters } from '@/hooks/useAgentListFilters'
+import { BUILT_IN_FACETS } from '@/lib/agent-list-filters'
 import { organizationFacet } from '@/lib/agent-organizations'
 import { AgentListToolbar } from './agent-panel/AgentListToolbar'
 import { AgentOrganizationTree } from './agent-panel/AgentOrganizationTree'
@@ -47,13 +48,19 @@ export default function AgentPanel() {
   // #3165: search / facets / sort over the managed list, state in the URL.
   // Reads `visibleAgents` only; removed agents stay behind their own toggle.
   // #3164 registers the organization facet (a plain data value over the
-  // fetched tree) alongside the built-ins — the toolbar, the URL codec and
+  // fetched tree) ALONGSIDE the built-ins — the toolbar, the URL codec and
   // the counts pick it up without any of them knowing what an org is.
+  // Round-3 review (NB2): the second argument REPLACES the hook's
+  // `BUILT_IN_FACETS` default (a default fires only on `undefined`, so
+  // `[]` counted as a real answer and org-less users lost Status/Budget
+  // entirely, while a shared `?status=active` link was silently ignored).
+  // The spread below is the hook doc's prescribed shape.
   const orgFacets = useMemo(
     () => (panel.organizations.length > 0 ? [organizationFacet(panel.organizations)] : []),
     [panel.organizations],
   )
-  const listFilters = useAgentListFilters(visibleAgents, orgFacets)
+  const allFacets = useMemo(() => [...BUILT_IN_FACETS, ...orgFacets], [orgFacets])
+  const listFilters = useAgentListFilters(visibleAgents, allFacets)
 
   // The tree's selected row IS the organization facet's selection (one
   // source of truth, URL-mirrored by the filter state).

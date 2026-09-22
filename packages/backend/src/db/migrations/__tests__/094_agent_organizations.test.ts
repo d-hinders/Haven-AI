@@ -19,6 +19,12 @@ import {
   withMigrationReverted,
 } from '../../../infra/__tests__/helpers/db-harness.js'
 import { down, up, version } from '../094_agent_organizations.js'
+import {
+  ancestorIdsOf,
+  createOrganization,
+  ORGANIZATION_DEPTH_LIMIT,
+  OrganizationTooDeepError,
+} from '../../../infra/repositories/agent-organizations.js'
 
 async function runUp(): Promise<void> {
   const client = await db.connect()
@@ -121,7 +127,7 @@ describeDb('migration 094_agent_organizations', () => {
     await runUp()
   })
 
-  it('allows multiple roots and unlimited depth', async () => {
+  it('allows multiple roots and deep chains', async () => {
     await runUp()
     const userId = await seedUser()
     const rootA = await insertOrg(userId, 'Company A')
@@ -141,6 +147,77 @@ describeDb('migration 094_agent_organizations', () => {
     expect(depth.rows[0].n).toBe(4)
     expect(rootA).toBeDefined()
     expect(rootB).toBeDefined()
+  })
+
+  // Round-3 review (S5): the self-FK's reverse lookups (the promote, the
+  // subtree walk, the tree) need this index, and 094 is still unapplied on
+  // dev — creating it with the table keeps it off the live-DDL path.
+  it('indexes parent_organization_id (S5)', async () => {
+    await runUp()
+    const index = await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM pg_indexes
+       WHERE schemaname = current_schema()
+         AND tablename = 'agent_organizations'
+         AND indexname = 'agent_organizations_parent_idx'`,
+    )
+    expect(index.rows[0].count).toBe('1')
+  })
+
+  // Round-3 review (NB1): the ancestor walk REFUSES past the cap (truncated
+  // flag) instead of silently dropping the rest of the chain — a 67-level
+  // chain used to let a root move under its deepest descendant.
+  it('the ancestor walk reports truncation past the cap, not a partial chain', async () => {
+    await runUp()
+    const userId = await seedUser()
+    let parentId: string | null = null
+    let deepestId = ''
+    let shallowId = ''
+    let shallowParentId = ''
+    for (let i = 0; i < 67; i += 1) {
+      const { rows }: { rows: { id: string }[] } = await db.query(
+        `INSERT INTO agent_organizations (user_id, parent_organization_id, name)
+         VALUES ($1, $2, $3) RETURNING id`,
+        [userId, parentId, `Level ${i}`],
+      )
+      // `parentId` still holds the PREVIOUS node here — the inserted row's parent.
+      if (i === 62) {
+        shallowId = rows[0].id
+        shallowParentId = parentId as string
+      }
+      parentId = rows[0].id
+      deepestId = rows[0].id
+    }
+    const truncated = await ancestorIdsOf(deepestId, userId)
+    expect(truncated.truncated).toBe(true)
+    // A node inside the cap is not truncated, and the ids are nearest-first:
+    // Level 62 sits 62 edges deep with exactly 62 ancestors above it.
+    const shallow = await ancestorIdsOf(shallowId, userId)
+    expect(shallow.truncated).toBe(false)
+    expect(shallow.ids).toHaveLength(62)
+    expect(shallow.ids?.[0]).toBe(shallowParentId)
+  })
+
+  it('a create nesting past the depth limit is refused (OrganizationTooDeepError)', async () => {
+    await runUp()
+    const userId = await seedUser()
+    let parentId: string | null = null
+    for (let i = 0; i < ORGANIZATION_DEPTH_LIMIT; i += 1) {
+      const { rows }: { rows: { id: string }[] } = await db.query(
+        `INSERT INTO agent_organizations (user_id, parent_organization_id, name)
+         VALUES ($1, $2, $3) RETURNING id`,
+        [userId, parentId, `Level ${i}`],
+      )
+      parentId = rows[0].id
+    }
+    const deepParent = parentId as string
+    await expect(
+      createOrganization(userId, { name: 'One too deep', parent_organization_id: deepParent }),
+    ).rejects.toBeInstanceOf(OrganizationTooDeepError)
+    const count = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM agent_organizations WHERE user_id = $1`,
+      [userId],
+    )
+    expect(count.rows[0].n).toBe(ORGANIZATION_DEPTH_LIMIT)
   })
 
   it('enforces one sibling name per user on the LOWERCASED name, roots included', async () => {

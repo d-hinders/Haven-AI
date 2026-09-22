@@ -393,7 +393,12 @@ export function AgentCard({
             </button>
             {/* #3164: file the agent under an organization. Placement only —
                 the modal's note says so, and nothing here touches authority. */}
-            <>
+            {/* Round-3 review (S9): each `|` travels WITH the button it
+                introduces — on a wrapped line below `lg` the row used to
+                strand a pipe at the previous line's end (a dangling `|`
+                followed by a lone "Remove"). At `lg`+ the row is nowrap and
+                renders byte-identically to the committed close-up baselines. */}
+            <span className="flex items-center gap-2">
               <span className="text-[var(--v2-border-strong)]">|</span>
               <button
                 onClick={() => setMoveModalOpen(true)}
@@ -403,41 +408,43 @@ export function AgentCard({
               >
                 Move
               </button>
-            </>
+            </span>
             <span className="text-[var(--v2-border-strong)]">|</span>
-            {isActive ? (
-                  <button
-                    onClick={() => setPauseModalOpen(true)}
-                    disabled={isBusy}
-                    aria-label={`Pause ${agent.name}`}
-                    className={ACTION_BUTTON_CLASS}
-                  >
-                    {busyAction === 'pause' ? 'Pausing…' : 'Pause'}
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => onResume(agent)}
-                    disabled={isBusy}
-                    aria-label={`Resume ${agent.name}`}
-                    className={ACTION_BUTTON_CLASS}
-                  >
-                {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
-              </button>
-            )}
+            <span className="flex items-center gap-2">
+              {isActive ? (
+                <button
+                  onClick={() => setPauseModalOpen(true)}
+                  disabled={isBusy}
+                  aria-label={`Pause ${agent.name}`}
+                  className={ACTION_BUTTON_CLASS}
+                >
+                  {busyAction === 'pause' ? 'Pausing…' : 'Pause'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => onResume(agent)}
+                  disabled={isBusy}
+                  aria-label={`Resume ${agent.name}`}
+                  className={ACTION_BUTTON_CLASS}
+                >
+                  {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
+                </button>
+              )}
+            </span>
             {/* #1402: Remove stops the live delegation and archives its
                 credential. #2413 dropped the legacy "Unlink" variant with the
                 records it named. */}
-            <>
-                <span className="text-[var(--v2-border-strong)]">|</span>
-                <button
-                  onClick={() => setRemoveModalOpen(true)}
-                  disabled={isBusy}
-                  aria-label={`Remove ${agent.name}`}
-                  className={DANGER_ACTION_BUTTON_CLASS}
-                >
-                  Remove
-                </button>
-            </>
+            <span className="flex items-center gap-2">
+              <span className="text-[var(--v2-border-strong)]">|</span>
+              <button
+                onClick={() => setRemoveModalOpen(true)}
+                disabled={isBusy}
+                aria-label={`Remove ${agent.name}`}
+                className={DANGER_ACTION_BUTTON_CLASS}
+              >
+                Remove
+              </button>
+            </span>
           </>
         )}
         {isRevoked && !isArchived && (

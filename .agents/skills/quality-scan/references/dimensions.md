@@ -110,7 +110,19 @@ against a true 7 that way, and the figures below, the 2026-09-15 /
 without it (the corrected values are given in parentheses below). Clean:
 `cited-but-not-covered=0` on every doc, and no doc whose body cites nothing
 while its `covers:` is wide (over-wide: the doc trips on changes it says
-nothing about). Report both directions with the file names. On `893d74f6`:
+nothing about). Report both directions with the file names — and **confirm
+every non-test miss with the authoritative instrument before it becomes a
+finding**: `node scripts/docs/coupling-gate.mjs --changed=<path>` must NOT name
+the doc for a path the loop reports as uncovered. The loop is a heuristic over
+glob strings; the gate is what CI runs. The exception is a test, generated or
+screenshot path: the gate lets one implicate a doc only when `covers:` names it
+EXACTLY (`isIncidentalPath` in the same script), so under a wildcard it is
+silent by design, and silence there is not a miss — judge those by the glob.
+Measured on `e42ed68f`: of the first reading's 21 misses, the 14 that were
+false split 12 non-test paths the gate names the runtime doc for and 2 test
+files it is silent on by that rule; the 7 true misses it names the doc for
+none of. The confirmation alone would have removed the 12; the `set -f` glob
+match is what settles the 2. On `893d74f6`:
 8 contract docs; `docs-quality-system.md` cites 17 existing paths and covers
 3 of them (10 with `set -f`), `mcp-runtime-compatibility.md` 18 and 5 (11
 with `set -f`), `dev-environment.md` 5 and 1 (unchanged); `delegation-rail-security-model.md` declares 23 and cites 0.
@@ -172,6 +184,23 @@ echo "files=$(wc -l < "$SCRATCH/rv-files.txt") historical=$hist live=$live"; sor
 # x402-authorizations.ts because they were outside its named list.
 for n in recordX402Signature confirmX402Intent failPendingX402Intent; do echo "== $n"; rg -l "$n" packages --glob '!**/__tests__/**' -g '!**/dist/**'; done
 ```
+
+**A scope is a filter over `rv-live.txt`, never a hand count.** A run limited
+to some packages takes its in-scope figure from the partition the command
+already wrote, so tests stay counted as live exactly as they are tree-wide:
+
+```bash
+grep -cE ' packages/(mcp|mcp-server|signer|demo-merchant-mcp)/' "$SCRATCH/rv-live.txt"    # in-scope live files
+grep -E  ' packages/(mcp|mcp-server|signer|demo-merchant-mcp)/' "$SCRATCH/rv-live.txt" | grep -cE '\.test\.ts$|__tests__'   # of which tests
+```
+
+On `e42ed68f` that reads **16 live, 7 of them tests**; the 2026-09-21 report
+first wrote 10, counted by hand with the tests left out of "live" — the one
+number in that block not produced by its instrument. **Under `bash`, `rg` may
+not resolve** (on the machine that ran it, `rg` is a shell function the login
+shell defines); `git ls-files docs packages .agents scripts | grep -E
+'\.(md|ts|tsx|mjs|json)$' | grep -v /dist/ | xargs grep -l -i -E "$T"` stands
+in for the first `rg -l` and reproduced 192 / 46 / 146 on `e42ed68f`.
 
 Clean: positive control > 0, and every live file is either a guard that names
 the term to assert its absence (a `*retired*.test.ts`, a banned-list) or a

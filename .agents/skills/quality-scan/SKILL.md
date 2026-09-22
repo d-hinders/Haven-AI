@@ -173,6 +173,18 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
       checks, and each gate's green-without-running exit branches. This is
       the *CI gate coverage vs. what is actually exercised* dimension made
       concrete (#2317, #2088, #2300, #1044).
+   **When the scope asks for a live exercise** (the 2026-09 mandate did, three
+   runs running), record the identity of every runtime under test **before the
+   first call**: the tree SHA the scan reads, the deployed revision of each
+   hosted service, and the installed version of each local package — and
+   compare them. A behaviour claim then names what it was observed on, and
+   where the live runtime and the tree disagree the report says both and which
+   is newer; it never infers one from the other. Live calls stay read-only
+   unless the owner authorises one, and a refusal proves reachability as well
+   as a success does. Measured cost of skipping it: on 2026-09-21 the local
+   signer under test was a 2026-09-15 build that predated three fixes, and the
+   report's first draft read that runtime's missing `next_tool_name` as the
+   TREE's behaviour — backwards, caught only by the doc review.
 4. Read the comment archaeology: `TODO`s, issue-number references, and
    repeated warning comments are where a codebase names its own recurring
    pain. A warning copy-pasted across files is a structural finding announcing
@@ -183,7 +195,19 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
    and disjoint proposed slices. Report **Improvement candidates** (up to
    five) using the fields above. Include the coverage record and qualify
    conclusions to the sample actually examined.
-7. Append the run to the ledger, then **stop for the human decision**. On
+7. Append the run to the ledger, open the report and the entry as a pull
+   request, and run its **independent doc-reviewer pass before presenting
+   anything for decision** — the pass re-derives every figure from its
+   instrument, which is the scan's own dimension 3 applied to the scan. Apply
+   its corrections, then present the findings at the reviewed SHA, a
+   corrected figure stated as corrected. The review is mandatory on every pull
+   request anyway (`CLAUDE.md` § *How shipping is governed*); what this step
+   fixes is the ORDER. On 2026-09-21 the owner decided on three findings at a
+   report carrying two false figures (a `covers:` gap reported as 21 files
+   against a true 7, an in-scope residue count of 10 against a true 16) and a
+   backwards runtime claim. The false 21 was caught only because `new-task`
+   re-measured before filing; the review that found the other two ran after
+   the decision. Then **stop for the human decision**. On
    explicit approval to file, append the decision and hand off to
    [new-task](../new-task/SKILL.md), preserving its filing checks and backlog
    default. Do not file an unverified defect as though it were reproduced.

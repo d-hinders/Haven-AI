@@ -875,13 +875,14 @@ describe('x402 routes', () => {
 
   it('#3031 S1: a coerced maxTimeoutSeconds can no longer become 0 — the floor is the deleted rung', async () => {
     primeDb(AUTH)
-    // Review finding S1. ajv coercion turns `null`, `false` and a JSON
-    // Infinity into 0, and 0 SURVIVES `maxTimeoutSeconds ?? 300` in
+    // Review finding S1. ajv coercion turns `null` and `false` into 0, and 0
+    // SURVIVES `maxTimeoutSeconds ?? 300` in
     // `modules/x402/delegation-authorize.ts` — the settlement child would
     // then expire in 60 s (the clamp floor in `x402-delegation.ts`) instead
     // of 300, silently, on the route whose whole point is a child the
-    // merchant must redeem in time. `minimum: 1` restores the refusal the
-    // deleted rung made.
+    // merchant must redeem in time. `minimum: 1` restores THAT half of the
+    // deleted rung. The finiteness half is deliberately left to the clamp —
+    // see the `1e400` leg below, which measures it rather than assuming it.
     for (const bad of [null, false]) {
       const response = await app.inject({
         method: 'POST',
@@ -920,8 +921,14 @@ describe('x402 routes', () => {
       expect(response.statusCode).toBe(410)
       expect(response.json().error).toBe(allowanceModuleRailRetired('account').body.error)
     }
-    // A real value still passes, unchanged.
-    expect(sqlCalls().some((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
+    // None of these four requests queried anything beyond the auth read — the
+    // two refusals never reached the handler, and the two 410s answer from the
+    // agent row auth already loaded. Measured in the strong form on purpose:
+    // an intermediate draft weakened this to `some`, which cannot go red
+    // (every request here is authenticated, so the auth query is always
+    // present) — a guard that cannot fail is the defect this repo names most
+    // often.
+    expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
   })
 
   it('#3031 S2: on a retired-rail account a MALFORMED body meets the schema 400 before the 410', async () => {

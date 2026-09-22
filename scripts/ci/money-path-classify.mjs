@@ -28,8 +28,15 @@
  *      matchers.
  *
  * Exit codes: 0 = self-test passed and classification printed (whatever it
- * found); 1 = the instrument is broken. Finding money-path files is NOT a
- * failure — it is the answer.
+ * found); 1 = the instrument is broken; 2 = there is nothing to classify — no
+ * committed change between the merge base and HEAD. Finding money-path files
+ * is NOT a failure — it is the answer.
+ *
+ * Why 2 exists: with an empty diff the tool used to print "0 of 0 on the
+ * perimeter => not money-path" and exit 0 — a zero with no denominator, read
+ * as a verdict. That happened on a real money-path PR (#3221, whose diff
+ * touched `routes/x402.ts`): the classifier was run before the commit existed,
+ * and the uncommitted working tree it could not see was the whole change.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -112,6 +119,21 @@ function main() {
       const [status, ...rest] = line.split('\t')
       return { status: status[0], file: rest[rest.length - 1] }
     })
+
+  if (nameStatus.length === 0) {
+    // Nothing committed since the merge base. Refuse rather than answer: "0 of
+    // 0" is not a classification, and the most common cause is a change that
+    // exists only in the working tree, which a three-dot diff never sees.
+    const dirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim()
+    console.error(`✗ Nothing to classify: no committed change between the merge base of ${base} and HEAD.`)
+    console.error(
+      dirty
+        ? `  The working tree HAS uncommitted changes (${dirty.split('\n').length} path(s)) — the classifier reads\n` +
+            '  COMMITTED history only. Commit, then run it again.'
+        : '  The working tree is clean too: this branch carries no change against that base.',
+    )
+    process.exit(2)
+  }
 
   const counts = nameStatus.reduce((acc, { status }) => ({ ...acc, [status]: (acc[status] ?? 0) + 1 }), {})
   const runtime = []

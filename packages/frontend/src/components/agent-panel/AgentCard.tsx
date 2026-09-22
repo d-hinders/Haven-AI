@@ -358,7 +358,22 @@ export function AgentCard({
           `text-xs` would equalise the band at 16px and make all five branches
           4px, but it also resizes a visible glyph, so it is a design change
           rather than this fix. */}
-      <div className="flex items-center gap-2 pt-3 pb-1 border-t border-[var(--v2-border)]">
+      <div className="flex flex-wrap lg:flex-nowrap items-center gap-2 pt-3 pb-1 border-t border-[var(--v2-border)]">
+        {/* #3164 review: `flex-wrap` — the row holds four `min-w-11` text
+            actions plus separators, and below `lg` a card is the full grid
+            column (one column at 390, `minmax(0,1fr)` track at 768). At the
+            narrowest supported width (320) the operational row's actions
+            (~270px natural) exceed the card's content box (~288px), so the
+            row MUST be allowed to wrap between controls; `gap-2` is the
+            wrapped lines' row-gap too. The Mobile-shell gate asserts the
+            ARCHIVED row's own 390px no-overflow budget
+            (`focus-visible.visual.spec.ts`), and the /agents card row was
+            measured fitting 393 with ~50px to spare — this wrap is the
+            320-hardening, not a fix for a 393 overflow. `lg:flex-nowrap`
+            keeps every desktop render byte-identical: the desktop captures
+            in this file (438px rows with 9px of slack on the widest branch)
+            were taken with the row on one line, and font-metric drift is the
+            one thing a baseline cannot absorb. */}
         {isOperational && (
           <>
             {/* #3168: "Details" is the first action on EVERY operational card.

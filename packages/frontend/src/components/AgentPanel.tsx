@@ -144,7 +144,23 @@ export default function AgentPanel() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      {/* #3164 review: this row WRAPS. Adding the header's Organizations
+          button (#3164) grew the action cluster (Labels · Organizations ·
+          Connect agent) to ~335px, which no longer shares one
+          `justify-between` line with the count chip inside the ~345px
+          content box a 393px viewport leaves — measured as
+          `contentScrollWidth` 435 vs 393 on the `navigation.mobile` gate
+          (42px overflow, deterministic). The card action rows were NOT the
+          offender: the widest of them measures ~255px here and fits with
+          room to spare. `flex-wrap` drops the cluster to its own line below
+          the chip instead of overflowing, and the cluster itself wraps at
+          the narrowest supported width (320) for the same reason — its
+          natural width exceeds a 320px screen's content box. Desktop is
+          untouched: the two clusters fit one line there with hundreds of px
+          to spare, so nothing ever wraps at `lg` and up. `gap-y-2` spaces
+          the wrapped lines; without it the cluster sits flush under the
+          chip. */}
+      <div className="flex flex-wrap items-center justify-between gap-y-2 mb-4">
         <div className="flex items-center gap-1">
           <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--v2-surface-2)] text-[var(--v2-ink)]">
             Agents
@@ -153,7 +169,7 @@ export default function AgentPanel() {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => panel.setLabelsManagerOpen(true)} size="sm" variant="tertiary">
             <Icon icon={Tag} className="h-3.5 w-3.5" />
             Labels

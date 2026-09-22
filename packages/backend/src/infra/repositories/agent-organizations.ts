@@ -130,7 +130,16 @@ export const COUNT_CHILD_ORGANIZATIONS_SQL = `
  * cycle guard's walk. `max_depth` (the int range cap) bounds the recursion at
  * a depth no UI tree reaches; a real cycle would hit the cap and be reported,
  * rather than recursing without bound. NULL when the id is foreign (or the
- * chain is somehow broken) — callers treat NULL as "unknown, refuse".
+ * chain is somehow broken — the self-FK is ON DELETE RESTRICT, so a parent
+ * cannot be deleted out from under its children).
+ *
+ * #3164 review: NULL is NOT "unknown, refuse". The only caller, the PUT
+ * route, resolves the parent through `findOrganizationForUser` before this
+ * call (so a foreign id cannot reach the walk) and deliberately passes a
+ * null `parent_organization_id` THROUGH — a move to the top level has no
+ * ancestors to cycle against, so it needs no walk at all. Treat NULL here as
+ * "no chain to check"; a caller that cannot pre-resolve the id owns the
+ * foreign case itself.
  */
 export const ANCESTOR_IDS_SQL = `
   WITH RECURSIVE chain AS (

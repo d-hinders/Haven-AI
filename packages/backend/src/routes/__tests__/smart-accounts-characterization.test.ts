@@ -144,7 +144,11 @@ describe('user-safes characterization (#988)', () => {
   describe('PUT /user/accounts/:safeId/default', () => {
     it('clears every default, sets the new one, and mirrors the legacy column — in a transaction', async () => {
       mockPoolQuery.mockResolvedValueOnce({ rows: [{ id: SAFE_ID, account_address: SAFE_ADDRESS }] })
-      mockClientQuery.mockResolvedValue({ rows: [] })
+      // The owned row matches the tenant-scoped set, as it does on a real
+      // database (#3227: the mirror is written only when the set hit a row).
+      mockClientQuery.mockImplementation(async (sql: string) =>
+        /SET is_default = true/.test(String(sql)) ? { rows: [], rowCount: 1 } : { rows: [] },
+      )
 
       const res = await app.inject({
         method: 'PUT',
@@ -169,8 +173,10 @@ describe('user-safes characterization (#988)', () => {
       expect(idx.clear).toBeLessThan(idx.set)
       expect(idx.set).toBeLessThan(idx.legacy)
       expect(idx.legacy).toBeLessThan(idx.commit)
-      expect(calls[idx.clear][1]).toEqual([USER])
-      expect(calls[idx.set][1]).toEqual([SAFE_ID])
+      // #3227 changed these on purpose: the clear is conditional on the caller
+      // owning SAFE_ID, and the set is tenant-scoped.
+      expect(calls[idx.clear][1]).toEqual([USER, SAFE_ID])
+      expect(calls[idx.set][1]).toEqual([SAFE_ID, USER])
       expect(calls[idx.legacy][1]).toEqual([SAFE_ADDRESS, USER])
       expect(mockRelease).toHaveBeenCalledTimes(1)
     })
@@ -195,6 +201,7 @@ describe('user-safes characterization (#988)', () => {
       mockPoolQuery.mockResolvedValue({ rows: [{ id: SAFE_ID, is_default: true }] })
       mockClientQuery.mockImplementation(async (sql: string) => {
         if (/SELECT id, account_address FROM smart_accounts/.test(String(sql))) return { rows: [NEXT] }
+        if (/DELETE FROM smart_accounts/.test(String(sql))) return { rows: [], rowCount: 1 }
         return { rows: [] }
       })
 
@@ -218,7 +225,10 @@ describe('user-safes characterization (#988)', () => {
 
     it('clears legacy users.account_address when the last Safe is deleted', async () => {
       mockPoolQuery.mockResolvedValue({ rows: [{ id: SAFE_ID, is_default: true }] })
-      mockClientQuery.mockResolvedValue({ rows: [] }) // no remaining Safe
+      // No remaining Safe; the tenant-scoped DELETE matches the owned row (#3227).
+      mockClientQuery.mockImplementation(async (sql: string) =>
+        /DELETE FROM smart_accounts/.test(String(sql)) ? { rows: [], rowCount: 1 } : { rows: [] },
+      )
 
       const res = await app.inject({
         method: 'DELETE',

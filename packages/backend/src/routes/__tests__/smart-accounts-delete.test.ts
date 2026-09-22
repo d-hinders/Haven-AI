@@ -55,8 +55,9 @@ describe('DELETE /user/accounts/:safeId', () => {
   it('never issues a self-sign-agent orphan statement — the table is gone (#2851)', async () => {
     // Ownership check: a non-default Safe that belongs to the user.
     mockPoolQuery.mockResolvedValue({ rows: [{ id: SAFE_ID, is_default: false }] })
-    // Every transactional statement succeeds.
-    mockClientQuery.mockResolvedValue({ rows: [] })
+    // Every transactional statement succeeds — each write hits the owned row
+    // (#3227: the tenant-scoped DELETE reports `false` when it matches none).
+    mockClientQuery.mockResolvedValue({ rows: [], rowCount: 1 })
 
     const response = await app.inject({
       method: 'DELETE',

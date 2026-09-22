@@ -3692,7 +3692,7 @@ export type components = {
             payTo: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             merchantPayTo?: string;
-            /** @description Atomic token amount from the x402 challenge. */
+            /** @description Atomic token amount from the x402 challenge. Digits only; the route additionally refuses zero (`isPositiveDecimalAtomicAmount`), which JSON Schema does not express. */
             amount: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             asset: string;
@@ -3705,6 +3705,10 @@ export type components = {
             maxTimeoutSeconds?: number;
             category?: string;
             idempotencyKey?: string;
+            /** @enum {string} */
+            settlementScheme?: "erc7710" | "eip3009";
+            /** @description #1058: the erc7710 challenge entry's extra.facilitatorAddresses — the facilitator pin carried into the settlement child delegation. */
+            facilitatorAddresses?: string[];
             signature?: string;
             /** @description #1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time. */
             mcpCallContext?: {

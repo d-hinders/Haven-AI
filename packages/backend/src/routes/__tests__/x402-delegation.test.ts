@@ -85,6 +85,7 @@ vi.mock('../../modules/payments/refusal-ledger.js', async (importOriginal) => {
 })
 
 const x402Routes = (await import('../x402.js')).default
+const { installRequestValidation } = await import('../../openapi/request-validation.js')
 const { buildBudgetDelegation } = await import('../../rails/delegation-policy.js')
 
 const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
@@ -122,6 +123,9 @@ describe('x402 delegation-rail settlement (#830)', () => {
     process.env.X402_BINDING_PRIVATE_KEY =
       '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
     app = Fastify({ logger: false })
+    // #3031: production wiring — `routes/x402.ts` is in `enforcedModules`,
+    // so the request schema refuses off-spec shapes before the handler.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => app.close())
@@ -970,18 +974,36 @@ describe('x402 delegation-rail settlement (#830)', () => {
     }))
   })
 
+  // #3031: still 400, still naming the field — but the two halves are refused
+  // by DIFFERENT layers now, and the test says which. A wrong TYPE is the
+  // schema's job (`paymentRequired` is declared `type: 'object'`); the 64 KB
+  // bound is not expressible in JSON Schema, so that rung stayed in the
+  // handler and answers with its own sentence.
   it('authorize 400s a malformed or oversized paymentRequired instead of silently dropping it', async () => {
-    for (const bad of ['a-string', [1, 2], { blob: 'x'.repeat(70000) }]) {
+    for (const bad of ['a-string', [1, 2]]) {
       const res = await app.inject({
         method: 'POST', url: '/x402/authorize',
         headers: { authorization: 'Bearer sk_agent_test' },
         payload: authorizeBody({ paymentRequired: bad }),
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json().error).toMatch(/paymentRequired/)
+      expect(res.json().error).toBe('Request does not match the API spec')
+      expect(res.json().details).toMatch(/paymentRequired/)
     }
+
+    const oversized = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ paymentRequired: { blob: 'x'.repeat(70000) } }),
+    })
+    expect(oversized.statusCode).toBe(400)
+    expect(oversized.json().error).toMatch(/paymentRequired exceeds 64KB/)
   })
 
+  // #3031: every one of these four is a SHAPE the schema now declares —
+  // `minItems: 1`, `maxItems: 16`, `items` on the address pattern, and the
+  // array type itself — so all four are refused before the handler. The rung
+  // that used to say this sentence is deleted; the guarantee is not.
   it('authorize 400s malformed facilitatorAddresses — garbage cannot half-pin a child', async () => {
     for (const bad of [[], ['not-an-address'], 'x', new Array(17).fill('0x' + 'aa'.repeat(20))]) {
       const res = await app.inject({
@@ -990,7 +1012,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
         payload: authorizeBody({ facilitatorAddresses: bad }),
       })
       expect(res.statusCode).toBe(400)
-      expect(res.json().error).toMatch(/facilitatorAddresses/)
+      expect(res.json().error).toBe('Request does not match the API spec')
+      expect(res.json().details).toMatch(/facilitatorAddresses/)
     }
   })
 
@@ -2000,6 +2023,9 @@ describe('x402 sign-context by payment_id (#1263)', () => {
     process.env.X402_BINDING_PRIVATE_KEY =
       '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
     app = Fastify({ logger: false })
+    // #3031: production wiring — `routes/x402.ts` is in `enforcedModules`,
+    // so the request schema refuses off-spec shapes before the handler.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => app.close())
@@ -2170,6 +2196,9 @@ describe('x402 sign-context funded-but-unsettled resume (#2290)', () => {
     process.env.X402_BINDING_PRIVATE_KEY =
       '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
     app = Fastify({ logger: false })
+    // #3031: production wiring — `routes/x402.ts` is in `enforcedModules`,
+    // so the request schema refuses off-spec shapes before the handler.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => app.close())
@@ -2437,6 +2466,9 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
   let app: FastifyInstance
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring — `routes/x402.ts` is in `enforcedModules`,
+    // so the request schema refuses off-spec shapes before the handler.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => app.close())

@@ -415,12 +415,15 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
     expect(added[0]).toMatch(/^GET \/agent-activity\/:id\/activity params\/id$/)
   })
 
-  it('CHARACTERIZATION: POST /x402/authorize with settlementScheme is NOT refused in shadow — it logs (#3029, the gap slice 3 closes)', async () => {
-    // The shipped SDK sends `settlementScheme`; the spec's X402AuthorizeRequest
-    // is additionalProperties: false and does not declare it — a known,
-    // owner-acknowledged spec gap. Shadow must DEMONSTRATE it (one would_refuse
-    // line, the request continues) and this slice must NOT fix the spec
-    // (a spec correction is a contract change: slice 3, #3031).
+  it('#3031 CLOSED the gap: POST /x402/authorize with settlementScheme now logs NOTHING in shadow — the field is declared', async () => {
+    // Until #3031 this test asserted the OPPOSITE, and that was the point:
+    // the shipped SDK sends `settlementScheme`, `X402AuthorizeRequest` is
+    // `additionalProperties: false` and did not declare it, so shadow logged
+    // one `would_refuse` per erc7710 authorize — a known, owner-acknowledged
+    // spec gap that slice 2 was forbidden to fix. Slice 3 declares the field
+    // (and `facilitatorAddresses` beside it), so the same request is now
+    // conformant and logs nothing. The assertion is inverted deliberately:
+    // it is the regression alarm for anyone who removes the declaration.
     const lines: unknown[] = []
     const originalInfo = app.log.info.bind(app.log)
     ;(app.log as unknown as { info: (o: unknown, m?: string) => void }).info = (obj, msg) => {
@@ -440,22 +443,16 @@ describe('installRequestValidation — shadow mode (#3029)', () => {
 
     // The route continues on its normal path — the probe answers, not a 400.
     expect(res.statusCode).toBe(200)
-    // Exactly one would_refuse, naming the field the spec does not declare.
-    expect(lines.length).toBe(1)
-    expect(lines[0]).toMatchObject({
-      event: 'request_validation.would_refuse',
-      route: 'POST /x402/authorize',
-    })
-    expect(String((lines[0] as { field: string }).field)).toMatch(/^body\/settlementScheme$/)
-    expect(String((lines[0] as { message: string }).message)).toMatch(/additional/)
-    // And the counter moved.
-    expect(requestValidationOpsSnapshot().wouldRefuse).toBe(before.wouldRefuse + 1)
+    // And now: no would_refuse line at all, and the counter did not move.
+    expect(lines).toEqual([])
+    expect(requestValidationOpsSnapshot().wouldRefuse).toBe(before.wouldRefuse)
     ;(app.log as unknown as { info: typeof originalInfo }).info = originalInfo
   })
 
   it('CHARACTERIZATION: the same x402 body WITHOUT settlementScheme produces no refusal at all', async () => {
-    // Proves the log above is caused by the undeclared field specifically —
-    // the conformant shape passes the spec as written today.
+    // The control for the test above: with the field declared, BOTH shapes are
+    // silent, so this one alone no longer proves anything about
+    // `settlementScheme`. It stays as the baseline conformant body.
     const before = requestValidationOpsSnapshot()
     const res = await auth('POST', '/x402/authorize', {
       url: 'https://merchant.example/mcp',

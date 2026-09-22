@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import x402Routes from '../x402.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 
 /**
@@ -76,6 +77,9 @@ describe('x402↔MPP consolidation — characterization (PT-1)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring — `routes/x402.ts` is in `enforcedModules`,
+    // so the request schema refuses off-spec shapes before the handler.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
   afterAll(async () => {

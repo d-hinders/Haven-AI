@@ -71,7 +71,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-20"
+last-verified: "2026-09-22"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -207,12 +207,20 @@ Haven backend
 > others. Note the second half is narrower than "the only thing that answers it",
 > deliberately: refusals that are not rail claims still precede the seam, and a
 > sentence that swallowed them would be false. What still precedes the 410 there
-> is rail-INDEPENDENT and makes no claim about any rail: the route's structural
-> validation — required fields, address and network shape, and the
-> `settlementScheme` enum check — the same position `POST /payments` puts its own
-> gate in, and the same class as the 401 auth hook. Pinned by
+> is rail-INDEPENDENT and makes no claim about any rail. **Since #3031 most of
+> it is the request SCHEMA, not the route**: required fields, address and
+> network shape and the `settlementScheme` enum are refused by the
+> request-validation plugin at `preValidation`, and the route keeps only the
+> rules JSON Schema cannot state (a non-zero amount, the network/chain
+> agreement, the 64 KB `paymentRequired` bound). The position is unchanged —
+> ahead of the seam, the same place `POST /payments` puts its own gate, the
+> same class as the 401 auth hook — and so is the property: the refusal names
+> a FIELD, never a rail. One consequence is recorded rather than glossed: a
+> request that is BOTH malformed and on a retired rail now meets the 400
+> before the 410. Pinned by
 > `routes/__tests__/allowance-rail-retired.test.ts` → "a caller-supplied
-> settlementScheme cannot divert the tombstone (#2245)".
+> settlementScheme cannot divert the tombstone (#2245)", whose assertions
+> moved to the plugin's envelope in that slice.
 >
 > **Token resolution no longer belongs in that list**
 > ([#2274](https://github.com/d-hinders/Haven-AI/issues/2274)). This sentence

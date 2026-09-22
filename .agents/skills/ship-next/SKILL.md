@@ -806,8 +806,9 @@ you need the reasoning. Never edit one without the other — CI will not let you
 - `packages/backend/src/openapi/request-validation.ts` (#3029, epic #3028 — the
   request-validation plugin. Runtime, not control: it sits IN FRONT OF every
   payment route, so a green money-flow QA run exercises it on every leg from
-  the day it lands. In epic #3028 slice 1 it refuses only on the contacts
-  proof module and shadow-logs everywhere else; it is a shape VALIDATOR —
+  the day it lands. It refuses on the modules the backend's own
+  `enforcedModules` install option names and shadow-logs everywhere else —
+  read that list in the source, never a count here; it is a shape VALIDATOR —
   it reads the request against the spec, refuses or logs, and never
   authorizes or constructs spend intent. It does REWRITE values where the
   spec declares a type and ajv coerces: #3082 found a shadow-mode body

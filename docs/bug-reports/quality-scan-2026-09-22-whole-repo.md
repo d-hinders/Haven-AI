@@ -83,7 +83,7 @@ Nothing reads what a changed baseline carries with it:
   the writer's test, and the workflow that puts it into the commit
   message. *Corrected in review:* first written as "only its writer and the
   writer's test", which left out the workflow.
-- CI's visual job (`.github/workflows/ci.yml`) keeps a diff image only
+- CI's *Design visual regression* job keeps a diff image only
   when a comparison fails (`visual-regression-diffs`, `if: failure()`), and
   the regeneration workflow uploads no artifact at all. After a re-bless the
   comparison passes, so no diff image is kept anywhere.

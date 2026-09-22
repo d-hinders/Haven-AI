@@ -48,12 +48,13 @@ covers:
   - packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
   - packages/demo-merchant-mcp/src/invoice.ts
+  - packages/backend/src/openapi/request-validation.ts
 # #1496: a casp-changelog shard satisfies this doc too — every money-path PR
 # already writes one, and mandatory note-prepends to last-verified caused three
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-19"
+last-verified: "2026-09-22"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -135,8 +136,8 @@ Source of truth:
 - [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts) — auth
   wiring, rate-limit config, and response serialization only. Since
   [#3031](https://github.com/d-hinders/Haven-AI/issues/3031) the request
-  SHAPE is not checked here either: the file is in the request-validation
-  plugin's `enforcedModules`, so the OpenAPI schema refuses an off-spec body
+  SHAPE is not checked here either: the plugin enforces this
+  module, so an off-spec body is refused
   before the handler and the route keeps only the rules JSON Schema cannot
   state (a non-zero amount, a network this agent's chain can settle, the
   64 KB bound on `paymentRequired`).
@@ -1271,7 +1272,8 @@ The flow is a two-call variant of `/x402/authorize`:
    flips ([#1053](https://github.com/d-hinders/Haven-AI/issues/1053) review,
    finding 3). A signature from the wrong key is a `400` with
    the intent left signable (one whose WIRE SHAPE is malformed is refused a
-   step earlier, by the operation's `^0x[0-9a-fA-F]+$` — #3031) — the client re-signs the same `sign_data`; nothing
+   step earlier, by the request-validation plugin against the operation's
+   schema — #3031) — the client re-signs the same `sign_data`; nothing
    is burned. (Recovery lives in
    [`rails/delegation-policy.ts`](../../packages/backend/src/rails/delegation-policy.ts)
    as `recoverDelegationSigner`, not in the route: `routes/**` may not import
@@ -1909,10 +1911,12 @@ with", and for a retired-rail account the answer is none on every asset, so a
 settles. Rail-INDEPENDENT residue — it asserted nothing false about a rail,
 which is why #2245 filed it rather than folding it in, and why it was fixed on
 `POST /x402/authorize` and `POST /payments` **together**: one route alone
-recreates the asymmetry #2245 removed. What still precedes the gate is the
-route's structural validation (`settlementScheme` enum shape, required fields,
-address and network checks) — the same position `POST /payments` puts its own
-gate in, and the same class as the 401 auth hook. A malformed request is still
+recreates the asymmetry #2245 removed. What still precedes the gate is
+structural validation (`settlementScheme` enum shape, required fields, address
+and network checks) — since #3031 the request-validation plugin does that part
+for `routes/x402.ts`, at `preValidation`, and the route keeps only what JSON
+Schema cannot say; the position is the same one `POST /payments` puts its own gate in,
+and the same class as the 401 auth hook. A malformed request is still
 a 400 on both routes: the tombstone is not the route's error handler.
 
 **How 3009-mode works.** EIP-3009 (`transferWithAuthorization`) is ECDSA-based —
@@ -1993,8 +1997,11 @@ same reason it was written: the caller named the payment, so refusing on
 `chainRpcs` entry — a money-safety fix turned into an availability regression.
 This is a funding-leg concern only; erc7710 has no delegate balance to exhaust.
 
-Further hardening with #1061: a non-numeric `maxTimeoutSeconds` is a `400` at
-the top of authorize rather than a `NaN` that clamps through into a `502`; and
+Further hardening with #1061: a non-numeric `maxTimeoutSeconds` is a `400`
+rather than a `NaN` that clamps through into a `502` — since #3031 that refusal
+is the request schema's, and with ajv coercion on, a numeric STRING (`"300"`)
+is now accepted and coerced to `300` instead of refused (#3031's shard records
+the three inputs that widened); and
 `delegationRailBundlerUrl()` asserts that a chain-scoped bundler URL names the
 chain being requested. `DELEGATION_RAIL_BUNDLER_URL` is a single value while two
 chains are enabled, so a mismatched env now fails at first use with a config

@@ -126,7 +126,7 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
       signature,
       settlementScheme,
       facilitatorAddresses,
-      mcpCallContext: mcpCallContext as X402McpCallContextInput | undefined,
+      mcpCallContext,
       paymentRequired,
       log: request.log,
     })
@@ -166,7 +166,8 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
   // ── POST /x402/:id/settle — delegation rail (#830) ───────────────────────
   // The agent has signed the settlement child (EIP-712). Assembly, signer
   // recovery, and header encoding live in the module (`settleX402`); this
-  // route only validates the signature's wire shape and serializes the result.
+  // route only serializes the result — the signature's wire shape is refused
+  // by the operation's request schema (#3031).
   app.post<{ Params: { id: string }; Body: { signature: string } }>(
     '/:id/settle',
     { config: moneyPathRateLimit },

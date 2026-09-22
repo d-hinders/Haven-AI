@@ -873,6 +873,89 @@ describe('x402 routes', () => {
     expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
   })
 
+  it('#3031 S1: a coerced maxTimeoutSeconds can no longer become 0 — the floor is the deleted rung', async () => {
+    primeDb(AUTH)
+    // Review finding S1. ajv coercion turns `null`, `false` and a JSON
+    // Infinity into 0, and 0 SURVIVES `maxTimeoutSeconds ?? 300` in
+    // `modules/x402/delegation-authorize.ts` — the settlement child would
+    // then expire in 60 s (the clamp floor in `x402-delegation.ts`) instead
+    // of 300, silently, on the route whose whole point is a child the
+    // merchant must redeem in time. `minimum: 1` restores the refusal the
+    // deleted rung made.
+    for (const bad of [null, false]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/x402',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: {
+          url: 'https://mcp.soundside.ai/mcp',
+          payTo: AGENT.delegate_address,
+          amount: '20000',
+          asset: USDC,
+          network: 'base',
+          maxTimeoutSeconds: bad,
+        },
+      })
+      expect(response.statusCode).toBe(400)
+      expect(response.json().error).toBe('Request does not match the API spec')
+      expect(response.json().details).toContain('maxTimeoutSeconds')
+    }
+    // A real value still passes, unchanged.
+    expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
+  })
+
+  it('#3031 S2: on a retired-rail account a MALFORMED body meets the schema 400 before the 410', async () => {
+    // The ordering this slice changed, pinned rather than asserted in prose.
+    // Five fixtures in this file carried the placeholder `0xsig`, which the
+    // declared 65-byte signature pattern refuses; they were made conformant
+    // so they keep testing the rail. This test is the one that keeps testing
+    // the ORDER: schema first, tombstone second, for a request that is both
+    // malformed AND on a retired rail. The reviewer's call (2026-09-22) was
+    // to keep this order — the 410 is a property of the ACCOUNT, resolved by
+    // a database read inside `authorizeX402`, and an onRequest tombstone
+    // would spend that query on a malformed request.
+    primeDb(AUTH)
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        signature: '0xsig',
+      },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toBe('Request does not match the API spec')
+    expect(response.json().details).toContain('signature')
+    // And it still makes no rail claim — the #2245 property, on the refusal
+    // that now comes first.
+    expect(JSON.stringify(response.json())).not.toContain('AllowanceModule')
+    expect(JSON.stringify(response.json())).not.toContain('retired')
+    // The conformant twin gets the 410: same account, same everything but a
+    // well-formed signature.
+    const conformant = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        merchantPayTo: MERCHANT,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        signature: ONE_SHOT_SIGNATURE,
+      },
+    })
+    expect(conformant.statusCode).toBe(410)
+    expect(conformant.json().error).toBe(allowanceModuleRailRetired('account').body.error)
+  })
+
   it('#1469: a null hole in paymentRequired.accepts[] is NOT a schema refusal — the blob stays free-form', async () => {
     // Filed by the issue as "schema, before the handler". It is not, and the
     // slice does not make it one: `paymentRequired` is the merchant's own

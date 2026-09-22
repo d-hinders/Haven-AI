@@ -6,9 +6,11 @@
  * enforced — the one boundary of the API contract with neither runtime nor
  * test enforcement, and it fronts the money path. The spec was largely
  * backfilled (#1446): it describes what routes were BELIEVED to accept, not
- * what installed clients send (the first proof is already live —
- * `X402AuthorizeRequest` is `additionalProperties: false` and does not declare
- * `settlementScheme`, which the shipped SDK sends). So enforcement lands
+ * what installed clients send (the first proof was live for two slices —
+ * `X402AuthorizeRequest` was `additionalProperties: false` and did not declare
+ * `settlementScheme`, which the shipped SDK sends; #3031 declared it and
+ * `facilitatorAddresses` beside it when it enforced that module). So
+ * enforcement lands
  * BEHIND A MODE, shadow-first (owner decision #2, epic #3028):
  *
  *   off     — no schema is injected and no route is observed, EXCEPT a

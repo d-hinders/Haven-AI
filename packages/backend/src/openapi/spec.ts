@@ -8404,8 +8404,16 @@ export const openapiSpec = {
           description: { type: 'string' },
           // #3031: `integer` was the spec's claim, never the route's rule —
           // the handler accepted any finite number and clamped it. Stated as
-          // it behaves; narrowing it is a separate decision.
-          maxTimeoutSeconds: { type: 'number' },
+          // it behaves. `minimum: 1` is NOT a narrowing: it is the deleted
+          // rung ('maxTimeoutSeconds must be a finite number'). With ajv
+          // coercion on, `null`, `false` and a JSON `Infinity` all arrive as
+          // 0, and 0 SURVIVES the `?? 300` default in
+          // `modules/x402/delegation-authorize.ts`, so the settlement child
+          // would silently expire in 60 s (the clamp floor in
+          // `x402-delegation.ts`) instead of 300 — and, with `paymentRequired`
+          // alongside, trip #3117's option match with a message blaming the
+          // merchant's challenge. An upper bound stays a separate decision.
+          maxTimeoutSeconds: { type: 'number', minimum: 1 },
           category: { type: 'string' },
           idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
           // #3031: both fields are SENT by the published SDK (`sdk/client.ts`

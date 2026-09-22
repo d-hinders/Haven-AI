@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import x402Routes from '../x402.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
+import { expectRejectsOffSpec } from '../../openapi/response-shape.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 
 const { mockQuery, allowanceMocks, fiatMocks, evidenceMocks } = vi.hoisted(() => ({
@@ -46,6 +48,14 @@ const SIGN_HASH = `0x${'11'.repeat(32)}`
 const TX_HASH = `0x${'ab'.repeat(32)}`
 const PAYMENT_ID = '33333333-3333-3333-3333-333333333333'
 const X402_BINDING_PRIVATE_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
+// #3031: a WELL-FORMED delegate signature (65 bytes). These five fixtures
+// exercise the retired-rail 410, never signature validation, and used to carry
+// the placeholder `0xsig`. Since `routes/x402.ts` is enforced, the request
+// schema's `^0x[0-9a-fA-F]{130}$` refuses that placeholder BEFORE the rail
+// tombstone can answer — so the fixture is made conformant and the new
+// ordering is pinned by its own test ('the schema answers before the rail
+// tombstone' below) rather than left to surface as a rail regression.
+const ONE_SHOT_SIGNATURE = `0x${'11'.repeat(65)}`
 
 function pendingX402Intent(overrides: Record<string, unknown> = {}) {
   return {
@@ -193,6 +203,11 @@ describe('x402 routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: the production wiring (epic #3028 slice 3). `routes/x402.ts` is
+    // enforced on `dev` and in `index.ts`, so the shape refusals these tests
+    // exercise are the SCHEMA's, taken before the handler — which is why the
+    // handler no longer carries the rungs that used to make them.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(x402Routes, { prefix: '/x402' })
   })
 
@@ -475,7 +490,7 @@ describe('x402 routes', () => {
         asset: USDC,
         network: 'base',
         idempotencyKey: 'x402:test',
-        signature: '0xsig',
+        signature: ONE_SHOT_SIGNATURE,
       },
     })
 
@@ -522,7 +537,7 @@ describe('x402 routes', () => {
         asset: USDC,
         network: 'base',
         idempotencyKey: 'x402:test',
-        signature: '0xsig',
+        signature: ONE_SHOT_SIGNATURE,
       },
     })
 
@@ -557,7 +572,7 @@ describe('x402 routes', () => {
         asset: USDC,
         network: 'base',
         idempotencyKey: 'x402:test',
-        signature: '0xsig',
+        signature: ONE_SHOT_SIGNATURE,
       },
     })
 
@@ -590,7 +605,7 @@ describe('x402 routes', () => {
         asset: USDC,
         network: 'base',
         idempotencyKey: 'x402:test',
-        signature: '0xsig',
+        signature: ONE_SHOT_SIGNATURE,
       },
     })
 
@@ -629,7 +644,7 @@ describe('x402 routes', () => {
         asset: USDC,
         network: 'base',
         idempotencyKey: 'x402:test',
-        signature: '0xsig',
+        signature: ONE_SHOT_SIGNATURE,
       },
     })
 
@@ -685,8 +700,13 @@ describe('x402 routes', () => {
       },
     })
 
+    // #3031: the SCHEMA refuses it (`payTo` carries the address pattern), one
+    // step before the handler — so the sentence is the spec envelope's, not
+    // the deleted rung's, and `details` still names the field.
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toBe('Valid payTo address is required')
+    expect(response.json().error).toBe('Request does not match the API spec')
+    expect(response.json().error_code).toBe('invalid_request')
+    expect(response.json().details).toContain('payTo')
     // #2307 coverage replacement. A phantom `generateTransferHash` spy stood
     // here claiming "validation ran before any allowance work". Re-anchored
     // onto the query log, which is real and DOES go red: if the validation
@@ -711,8 +731,10 @@ describe('x402 routes', () => {
       },
     })
 
+    // #3031: the schema's address pattern on `merchantPayTo`, before the handler.
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toBe('Valid merchantPayTo address is required')
+    expect(response.json().error).toBe('Request does not match the API spec')
+    expect(response.json().details).toContain('merchantPayTo')
     // #2307 coverage replacement. A phantom `generateTransferHash` spy stood
     // here claiming "validation ran before any allowance work". Re-anchored
     // onto the query log, which is real and DOES go red: if the validation
@@ -722,17 +744,22 @@ describe('x402 routes', () => {
 
   it('rejects malformed decimal atomic amounts before allowance checks', async () => {
     primeDb(AUTH)
-    const malformedAmounts = [
+    // #3031: the list splits by REFUSING LAYER, which is the point of the
+    // slice. Everything that is not digits-only is refused by the schema's
+    // `^[0-9]+$` before the handler; `'0'` IS digits-only, so it passes the
+    // schema and the handler's `isPositiveDecimalAtomicAmount` — the `> 0`
+    // half JSON Schema cannot express — is what refuses it. That rung
+    // deliberately stayed.
+    const schemaRefusedAmounts = [
       '0x4e20',
       '1e6',
       '+20000',
       '-1',
       ' 20000',
       '20000 ',
-      '0',
     ]
 
-    for (const amount of malformedAmounts) {
+    for (const amount of schemaRefusedAmounts) {
       const response = await app.inject({
         method: 'POST',
         url: '/x402',
@@ -747,10 +774,27 @@ describe('x402 routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toBe(
-        'Invalid amount — must be a positive decimal integer in atomic units',
-      )
+      expect(response.json().error).toBe('Request does not match the API spec')
+      expect(response.json().details).toContain('amount')
     }
+
+    const zeroResponse = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        amount: '0',
+        asset: USDC,
+        network: 'base',
+      },
+    })
+
+    expect(zeroResponse.statusCode).toBe(400)
+    expect(zeroResponse.json().error).toBe(
+      'Invalid amount — must be a positive decimal integer in atomic units',
+    )
 
     const blankResponse = await app.inject({
       method: 'POST',
@@ -765,11 +809,98 @@ describe('x402 routes', () => {
       },
     })
 
+    // An empty string is not digits, so the schema answers first here too.
     expect(blankResponse.statusCode).toBe(400)
-    expect(blankResponse.json().error).toBe('Amount (atomic units) is required')
+    expect(blankResponse.json().error).toBe('Request does not match the API spec')
+    expect(blankResponse.json().details).toContain('amount')
     // Every rejected request only ever reached auth — none of the malformed
     // amounts triggered any further query.
     expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
+  })
+
+  // ── #3031: the incidents this slice was filed on, each naming its layer ──
+
+  it('#2282: mcp_transport in snake_case is REFUSED by the schema, never silently ignored', async () => {
+    primeDb(AUTH)
+    // The incident: the settle leg required `mcp_transport` while callers sent
+    // `mcpTransport` (or the reverse), and the wrong spelling was dropped on
+    // the floor — a merchant handshake hint that silently did not arrive.
+    // `mcpCallContext` is a CLOSED object on the spec, so the misspelling is
+    // now a refusal that names the field rather than a field that vanishes.
+    await expectRejectsOffSpec(
+      app,
+      'POST /x402',
+      {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        mcpCallContext: {
+          merchantUrl: 'https://mcp.soundside.ai/mcp',
+          toolName: 'search',
+          mcp_transport: { handshakeRequired: true, source: 'path' },
+        },
+      },
+      'body/mcpCallContext',
+      { authorization: 'Bearer sk_agent_test' },
+    )
+    // Refused before the handler: nothing beyond the auth read was queried.
+    expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
+  })
+
+  it('#3031: an undeclared top-level field is REFUSED, not stripped', async () => {
+    primeDb(AUTH)
+    // The compiler runs with `removeAdditional: false` on purpose. If it ever
+    // flipped to the ajv default, this body would be accepted with the field
+    // quietly deleted — which on `facilitatorAddresses` would mean an erc7710
+    // payment rerouted to 3009 with no facilitator pin. A refusal is the only
+    // safe answer, and this is the test that says so.
+    await expectRejectsOffSpec(
+      app,
+      'POST /x402',
+      {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        settlement_scheme: 'erc7710',
+      },
+      'body',
+      { authorization: 'Bearer sk_agent_test' },
+    )
+    expect(sqlCalls().every((c) => /api_key_hash = \$1/.test(c.sql))).toBe(true)
+  })
+
+  it('#1469: a null hole in paymentRequired.accepts[] is NOT a schema refusal — the blob stays free-form', async () => {
+    // Filed by the issue as "schema, before the handler". It is not, and the
+    // slice does not make it one: `paymentRequired` is the merchant's own
+    // parsed 402 challenge, declared `additionalProperties: true` with no
+    // inner shape ON PURPOSE (#1355 — reporting material, verified against the
+    // Haven-signed expected context at the signer, never trusted as authority
+    // here). Declaring `accepts[]` would make every merchant field variation a
+    // refusal on a money route, which no shadow reading supports. The null
+    // hole is handled where it was fixed — the SDK's option selectors
+    // (`selectStandardPaymentOption` / `selectErc7710PaymentOption`), which
+    // skip non-object entries instead of throwing.
+    primeDb(AUTH)
+    const response = await app.inject({
+      method: 'POST',
+      url: '/x402',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: {
+        url: 'https://mcp.soundside.ai/mcp',
+        payTo: AGENT.delegate_address,
+        amount: '20000',
+        asset: USDC,
+        network: 'base',
+        paymentRequired: { x402Version: 1, accepts: [null, { scheme: 'exact' }] },
+      },
+    })
+    // Whatever the rail answers, it is NOT the spec envelope: the schema let
+    // this through.
+    expect(response.json().error).not.toBe('Request does not match the API spec')
   })
 
   it('returns an existing pending signature intent for duplicate idempotency keys', async () => {

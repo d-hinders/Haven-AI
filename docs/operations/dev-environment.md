@@ -361,12 +361,27 @@ Isolation rules that are non-negotiable for a payments product:
   the backend's logs:
 
   ```bash
-  railway logs --service havenbackend-dev --json | node scripts/ci/shadow-reading.mjs --min-window-hours 24
+  railway logs --service '@haven/backend' --json --since 26h --filter "request_validation" --lines 5000 > rv.jsonl
+  railway logs --service '@haven/backend' --json --lines 500 > anchor.jsonl
+  cat rv.jsonl anchor.jsonl | node scripts/ci/shadow-reading.mjs --min-window-hours 24
   ```
 
   (`railway logs` reads the operator's own login; no token enters the repo.
   A saved file works too: `--file logs.jsonl`; `--module routes/x402.ts`
-  limits the rows.) The table has one row per SHADOWED operation — every
+  limits the rows.)
+
+  **The service is `@haven/backend` in environment `dev`** — quote it; `@` and
+  `/` are shell-significant, and `railway status --json` lists the names. This
+  runbook and #3208 both said `havenbackend-dev` until the first live reading
+  (2026-09-22) met `Service 'havenbackend-dev' not found`; the script names no
+  service, so it needed no correction. **Two fetches, because `railway logs` caps a page at 500 lines
+  whatever `--since` says** (measured: `--since 1h` → 500, `--since 24h` →
+  500), and this backend writes ~500 lines per two minutes, so one unfiltered
+  fetch buys a two-minute window. The filtered fetch carries the data (`seen`
+  is at most one line per route per minute, so 5000 rows reach well past a
+  day); the unfiltered tail anchors the window's late edge. Anchor lines parse
+  as `other` and widen the window only, never a count. `--since 26h` rather
+  than `24h` leaves room for the cap to land the oldest row inside the day. The table has one row per SHADOWED operation — every
   operation in `route-modules.generated.ts`, not only the ones that logged —
   with `seen`, `would_refuse` and `would_coerce` by field, and a **verdict**:
   a route with `seen: 0` in the window is **NOT PROVEN** — the epic's rule
@@ -381,11 +396,17 @@ Isolation rules that are non-negotiable for a payments product:
   on that minute's FIRST request, so the final minute of a process is
   under-counted by up to a minute's traffic; and a cut process with a single
   line counts as 1. Both err towards NOT PROVEN. If the header's `not ours`
-  count equals the lines read (`lines.skipped` = `lines.read` under
-  `--json`), the CLI's envelope is not what the parser expects
-  (Railway may lift a JSON line's fields into `attributes`) — save the raw
-  lines and pass them with `--file`, or fix the one field name in
-  `parseLine`. If it says `1 deploy(s)` on a day with merges, the CLI handed
+  count equals the lines read (`lines.skipped` = `lines.read` under `--json`),
+  that is **usually just a window with no validation lines in it** — the first
+  2026-09-22 fetch read 500 traffic lines and none of ours, and
+  `grep -c request_validation` on the raw file said 0. Check that before
+  suspecting the envelope: Railway's `--json` hands the pino line FLATTENED
+  (its fields lifted to the top level beside Railway's own `timestamp`), which
+  `parseLine` reads correctly — proven by feeding two synthetic
+  `request_validation` lines in that exact shape through with real traffic and
+  watching their row appear. Only when a line you KNOW is present fails to
+  appear is the envelope the problem; then save the raw lines and pass them
+  with `--file`, or fix the one field name in `parseLine`. If it says `1 deploy(s)` on a day with merges, the CLI handed
   you the latest deployment's stream only — export the window from Railway's
   log explorer and pass it with `--file`. The minimum window is **24 hours**
   unless the epic's slice says more (#3028 decision 8); `--min-window-hours`

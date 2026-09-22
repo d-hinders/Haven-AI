@@ -132,8 +132,14 @@ Source of truth:
   the resource is already paid for, and bookkeeping that threw would turn a
   completed payment into a reported failure.
 - [`packages/sdk/src/payment-state.ts`](../../packages/sdk/src/payment-state.ts) — shared payment-state/status-error normalization.
-- [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts) — request
-  validation, auth wiring, rate-limit config, and response serialization only.
+- [`packages/backend/src/routes/x402.ts`](../../packages/backend/src/routes/x402.ts) — auth
+  wiring, rate-limit config, and response serialization only. Since
+  [#3031](https://github.com/d-hinders/Haven-AI/issues/3031) the request
+  SHAPE is not checked here either: the file is in the request-validation
+  plugin's `enforcedModules`, so the OpenAPI schema refuses an off-spec body
+  before the handler and the route keeps only the rules JSON Schema cannot
+  state (a non-zero amount, a network this agent's chain can settle, the
+  64 KB bound on `paymentRequired`).
   The authorize orchestration (scheme routing, funding-leg prep, erc7710 child
   building, the #961 replay/resume logic) and settle assembly live in
   [`packages/backend/src/modules/x402/`](../../packages/backend/src/modules/x402/index.ts)
@@ -1263,8 +1269,9 @@ The flow is a two-call variant of `/x402/authorize`:
    **recovers the signer** from the child delegation's EIP-712 payload and
    compares it to the agent's `delegate_address` *before* the intent status
    flips ([#1053](https://github.com/d-hinders/Haven-AI/issues/1053) review,
-   finding 3). A malformed signature or one from the wrong key is a `400` with
-   the intent left signable — the client re-signs the same `sign_data`; nothing
+   finding 3). A signature from the wrong key is a `400` with
+   the intent left signable (one whose WIRE SHAPE is malformed is refused a
+   step earlier, by the operation's `^0x[0-9a-fA-F]+$` — #3031) — the client re-signs the same `sign_data`; nothing
    is burned. (Recovery lives in
    [`rails/delegation-policy.ts`](../../packages/backend/src/rails/delegation-policy.ts)
    as `recoverDelegationSigner`, not in the route: `routes/**` may not import

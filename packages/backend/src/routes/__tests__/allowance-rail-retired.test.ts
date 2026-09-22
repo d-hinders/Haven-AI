@@ -145,6 +145,7 @@ import path from 'node:path'
 
 import paymentRoutes from '../payments.js'
 import x402Routes from '../x402.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import machinePaymentRoutes from '../machine-payments.js'
 import {
   allowanceModuleRailRetired,
@@ -281,6 +282,11 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring. `routes/x402.ts` is the one module in
+    // `enforcedModules` here — `payments` and `machine-payments` are still
+    // shadowed, exactly as on `dev`, so this file keeps pinning the seam
+    // across BOTH postures at once.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/x402.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(paymentRoutes, { prefix: '/payments' })
     await app.register(x402Routes, { prefix: '/x402' })
@@ -571,8 +577,10 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
      * 410 on this route, and BOTH are rail-INDEPENDENT — neither makes a claim
      * about any rail, which is the property #2245 is actually about:
      *
-     *   - `routes/x402.ts`'s structural enum check on `settlementScheme`
-     *     (a value that is not a settlement scheme at all), and
+     *   - the REQUEST SCHEMA's enum on `settlementScheme` (#3031 moved this
+     *     from a handler rung to `X402AuthorizeRequest`; a value that is not a
+     *     settlement scheme at all is refused before the handler, and the
+     *     envelope it answers with names a field, never a rail), and
      *   - token resolution in `authorizeX402`, exactly where `POST /payments`
      *     puts its own gate relative to the seam.
      *
@@ -589,10 +597,11 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
       })
 
       expect(res.statusCode).toBe(400)
-      expect(res.json().error).toMatch(/settlementScheme must be/)
+      expect(res.json().error).toBe('Request does not match the API spec')
+      expect(res.json().details).toContain('settlementScheme')
       // The point of keeping it: it says nothing about what any rail settles.
-      expect(res.json().error).not.toContain('AllowanceModule')
-      expect(res.json().error).not.toContain('EIP-3009')
+      expect(JSON.stringify(res.json())).not.toContain('AllowanceModule')
+      expect(JSON.stringify(res.json())).not.toContain('EIP-3009')
       expectNothingHappened()
     })
 
@@ -607,7 +616,8 @@ describe('the Safe / AllowanceModule rail cannot spend (#1986)', () => {
       })
 
       expect(res.statusCode).toBe(400)
-      expect(res.json().error).toMatch(/settlementScheme must be/)
+      expect(res.json().error).toBe('Request does not match the API spec')
+      expect(res.json().details).toContain('settlementScheme')
       expectNothingHappened()
     })
   })

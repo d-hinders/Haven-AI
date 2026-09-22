@@ -8393,13 +8393,36 @@ export const openapiSpec = {
           url: { type: 'string', format: 'uri' },
           payTo: address,
           merchantPayTo: address,
-          amount: { type: 'string', description: 'Atomic token amount from the x402 challenge.' },
+          amount: {
+            type: 'string',
+            pattern: '^[0-9]+$',
+            description:
+              'Atomic token amount from the x402 challenge. Digits only; the route additionally refuses zero (`isPositiveDecimalAtomicAmount`), which JSON Schema does not express.',
+          },
           asset: address,
           network: { type: 'string', examples: ['base', 'eip155:8453'] },
           description: { type: 'string' },
-          maxTimeoutSeconds: { type: 'integer' },
+          // #3031: `integer` was the spec's claim, never the route's rule —
+          // the handler accepted any finite number and clamped it. Stated as
+          // it behaves; narrowing it is a separate decision.
+          maxTimeoutSeconds: { type: 'number' },
           category: { type: 'string' },
-          idempotencyKey: { type: 'string', maxLength: 128 },
+          idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
+          // #3031: both fields are SENT by the published SDK (`sdk/client.ts`
+          // → `x402-erc7710.ts`) and READ by the handler, and neither was
+          // declared. On a closed schema that is not a cosmetic gap: enforcing
+          // without them refuses every erc7710 payment, and a compiler with
+          // `removeAdditional: true` (which this plugin deliberately does not
+          // set) would strip the facilitator pin and silently reroute to 3009.
+          settlementScheme: { type: 'string', enum: ['erc7710', 'eip3009'] },
+          facilitatorAddresses: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 16,
+            items: address,
+            description:
+              "#1058: the erc7710 challenge entry's extra.facilitatorAddresses — the facilitator pin carried into the settlement child delegation.",
+          },
           signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
           mcpCallContext: {
             type: 'object',

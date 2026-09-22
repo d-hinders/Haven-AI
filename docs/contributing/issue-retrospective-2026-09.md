@@ -230,7 +230,7 @@ Added 2026-09-06 from a single-session retrospective, [`session-retrospective-20
 
 | | Guideline | Landed in |
 |---|---|---|
-| **H1** | A correction is a new claim. Verify the replacement sentence against its instrument, never against the sentence it replaces. | Stated, not mechanised: `ship-next` *Independent Review* step 2 and the doc-reviewer role's §4 (#3225, after two corrections on 2026-09-22 were themselves false — commits `05a250d0` and `6ceca30e`), and the reviewer role. Not mechanisable by a script, and said so rather than claimed. |
+| **H1** | A correction is a new claim. Verify the replacement sentence against its instrument, never against the sentence it replaces. | Stated, not mechanised: `ship-next` *Independent Review* step 2 (#3225, after two corrections on 2026-09-22 were themselves false — commits `05a250d0` and `6ceca30e`) and the reviewer role (`reviewer.md`); the doc-reviewer role's §4 holds the reviewer-side counterpart — a behavioural claim is executed, a claim about an earlier commit is checked against it. Not mechanisable by a script, and said so rather than claimed. |
 | **H2** | Before a "none found", check the instrument is looking at the column, the tree and the process you mean. | `ai-review-patterns.md` § *Instrument Self-Reference And Staleness*; the Captain Self-Check Preflight; `reviewer.md` must-check list |
 | **H3** | After editing a sentence, read it to its full stop in the rendered file — the tail that describes the old head is on the line the diff does not show. | Stated only. |
 

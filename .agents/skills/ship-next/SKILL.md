@@ -313,7 +313,7 @@ Run the **repository's own required checks** locally before pushing, for fast fe
   --list` selects `npm run lint:request-schemas:test` at the first commit and
   `node --test scripts/ci/*.test.mjs` at the second: the battery would have
   caught both. Two traps when running any of them by hand: without `npm ci`
-  they fail for missing packages (`dependency-cruiser`, `tsx`), which is the
+  six cases fail for missing packages (`dependency-cruiser`, `tsx`), which is the
   environment and not the change; and `zsh` does not word-split an unquoted
   `$files`, so a file list goes through `xargs -0`, never a variable.
 

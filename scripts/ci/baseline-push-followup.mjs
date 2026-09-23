@@ -186,16 +186,54 @@ export function classify({ committed, hasPushToken, openPrCount }) {
 }
 
 /**
+ * Read the audit step's `moved` output (`[{ name, status }]`, #3233).
+ * Anything unreadable returns null, and the comment then says it could not
+ * list them rather than listing nothing — an empty list would read as "no
+ * baseline needs a look".
+ */
+export function parseMoved(raw) {
+  try {
+    const list = JSON.parse(String(raw ?? ''))
+    if (!Array.isArray(list)) return null
+    return list
+      .filter((m) => m && typeof m.name === 'string')
+      .map((m) => ({ name: m.name, status: typeof m.status === 'string' ? m.status : 'changed' }))
+  } catch {
+    return null
+  }
+}
+
+/** The regenerated set, as the comment lists it. */
+export function renderMovedSection({ moved, runUrl }) {
+  if (moved === null || moved === undefined) {
+    return `The list of regenerated baselines could not be read here; the [run's audit summary](${runUrl}) has it.`
+  }
+  if (moved.length === 0) return 'The audit recorded no moved baseline.'
+  const lines = moved.map((m) => `- \`${m.name}\` (${m.status})`)
+  return `Regenerated in this push (${moved.length}):\n\n${lines.join('\n')}`
+}
+
+/**
  * The comment body. It has to carry everything the reader needs WITHOUT the
  * reader knowing this failure mode already, because not knowing it is the
  * entire cost being paid (#1777: four sessions, a step each).
  */
-export function buildComment({ repo, branch, sha, runUrl, parked = [] }) {
+export function buildComment({ repo, branch, sha, runUrl, parked = [], moved = null }) {
   const short = String(sha ?? '').slice(0, 9) || '(unknown)'
+  // #3233: this comment used to say the baselines were "correct" and that
+  // "nothing about the images is wrong". The workflow cannot know that: a
+  // regeneration writes whatever rendered, and it was posted on #3222 over
+  // baselines that had captured a regression. It states what it knows.
   return `${STICKY_MARKER}
 ### ⚠️ Baselines were regenerated, but this PR's checks are parked, not running
 
-The Linux-rendered \`/design-system\` baselines are **correct and already pushed** as \`${short}\`. Nothing about the images is wrong. What is wrong is that **this PR's checks will never start on their own**, so every required check will sit at *"Expected — waiting for status"* indefinitely.
+The Linux-rendered visual baselines were regenerated and pushed as \`${short}\`.
+
+${renderMovedSection({ moved, runUrl })}
+
+**Regenerated is not reviewed.** A regeneration writes whatever rendered: it proves the new images match the current render, not that the render is right. Each baseline above still needs a design review before merge — its old and new image, where both exist — [frontend playbook §4](https://github.com/${repo}/blob/dev/docs/contributing/ship-playbooks/frontend.md#4-verification).
+
+Separately, and certainly: **this PR's checks will never start on their own**, so every required check will sit at *"Expected — waiting for status"* indefinitely.
 
 **Why — and the precise version matters, because the imprecise one sends you to the wrong repair.** \`BASELINE_PUSH_TOKEN\` is unset, so [*Update visual baselines*](${runUrl}) pushed as \`github-actions[bot]\`. It is **not** that the push failed to trigger anything. The \`pull_request\` events *are* delivered and the runs *are* created; GitHub then **parks them at \`conclusion: action_required\`**, awaiting approval, because a bot pushed. No job executes, so no check run attaches to the head SHA — which is why the SHA looks empty:
 
@@ -423,7 +461,8 @@ async function main() {
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     })
     console.log(`Parked runs found: ${parked.length}`)
-    const body = buildComment({ repo, branch, sha, runUrl, parked })
+    const moved = parseMoved(process.env.MOVED_BASELINES)
+    const body = buildComment({ repo, branch, sha, runUrl, parked, moved })
     for (const pr of prs) {
       if (pr.number == null) continue
       try {

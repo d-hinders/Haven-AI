@@ -60,6 +60,31 @@ export function hasShrunk(counts, baseline) {
   return false
 }
 
+/**
+ * The zero-scan refusal (#3230), as a pure function so both gates on it test
+ * the same decision: which of `entries` matched no files at all.
+ *
+ * A ratchet whose every scan target is missing reads ZERO files and still
+ * prints a clean verdict — and `--update` would then write that zero in as
+ * the new baseline, laundering the hole. `frontend-copy-lint` refused its own
+ * instance of this shape at the scan site (#2317, `SCAN_DIRS entry matched no
+ * source files`); the 2026-09-22 quality scan (candidate C5) found the same
+ * live defect in `lint-next-steps` and `lint-wire-types`, which passed with
+ * all targets moved aside and advised `--update` over the empty scan. The
+ * check lives here, next to the other refusal decisions every gate shares,
+ * rather than as a third hand-rolled copy.
+ *
+ * `entries` is the gate's configured target list — SCAN_DIRS, SCAN_TARGETS,
+ * an allowlist — and `readCount` maps an entry to the number of files the
+ * scan actually read from it. Returning the list keeps the CALLER the gate:
+ * it owns the message wording (its own target vocabulary) and the exit, and a
+ * test can pin the refusal by removing the caller's guard and watching the
+ * self-test go red.
+ */
+export function zeroScanEntries(entries, readCount) {
+  return entries.filter((e) => (readCount.get(e) ?? 0) === 0)
+}
+
 /** Write the baseline deterministically (files and keys sorted) so diffs stay
  *  reviewable. Returns the serialized string (also written to path). */
 export function writeBaseline(path, counts) {

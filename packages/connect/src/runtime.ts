@@ -195,6 +195,15 @@ export interface ConnectOutcome {
   superseded_agents_retired_locally?: boolean
   retired_agent_ids?: readonly string[]
   /**
+   * #3259, additive within schema_version 1: present only on a replace run
+   * where a retired directory's surviving ledger record could NOT be written —
+   * agent id → errno code (or `mirror_write_failed`). The directory is still
+   * retired (tombstoned in place, key files removed) and counts in
+   * `retired_agent_ids`; only `--doctor`'s view after the directory is deleted
+   * is lost.
+   */
+  retirement_mirror_errors?: Readonly<Record<string, string>>
+  /**
    * #3122, additive within schema_version 1. Every OTHER credential directory
    * on this machine that still held key material when this run began — named
    * BEFORE the first credential write (the same list the pre-write heads-up
@@ -819,6 +828,7 @@ async function executeConnect(
   // Nothing is revoked: that stays the owner's action on the Haven agent page.
   let supersededAgentsRetiredLocally: boolean | undefined
   const retiredAgentIds: string[] = []
+  const retirementMirrorErrors: Record<string, string> = {}
   if (replacing) {
     if (runtimeInstall.errorCode) {
       supersededAgentsRetiredLocally = false
@@ -844,6 +854,7 @@ async function executeConnect(
           // is written, so the key teardown below MUST still run, or the
           // directory reads retired while its key can still spend.
           if (mirrorError !== undefined) {
+            retirementMirrorErrors[entry.agentId] = mirrorError
             log(
               `Warning: the surviving tombstone record for ${entry.agentId} could not be written to ` +
                 `${tombstonesDirForCredentialRoot(options.credentialsDir)} (${mirrorError}). ` +
@@ -977,6 +988,7 @@ async function executeConnect(
     supersededAgentIds,
     supersededAgentsRetiredLocally,
     ...(replacing ? { retiredAgentIds } : {}),
+    ...(Object.keys(retirementMirrorErrors).length > 0 ? { retirementMirrorErrors } : {}),
     existingAgentsBeforeWrite: existingAgents.map((a) => ({ agent_id: a.agentId, account_address: a.accountAddress })),
     ...(reboundFrom ? { serverNameReboundFrom: reboundFrom } : {}),
     setupChallengeExpiresAt: setup.challenge.expires_at,
@@ -1011,6 +1023,8 @@ export function completionOutcome(input: {
   /** #2551: only a replace run sets these; see the outcome fields' doc comments. */
   supersededAgentsRetiredLocally?: boolean
   retiredAgentIds?: readonly string[]
+  /** #3259: only set when a retirement's ledger mirror failed. */
+  retirementMirrorErrors?: Readonly<Record<string, string>>
   setupChallengeExpiresAt?: string
   approvalRequired: boolean
   approvalUrl?: string
@@ -1071,6 +1085,7 @@ export function completionOutcome(input: {
       ? { superseded_agents_retired_locally: input.supersededAgentsRetiredLocally }
       : {}),
     ...(input.retiredAgentIds ? { retired_agent_ids: input.retiredAgentIds } : {}),
+    ...(input.retirementMirrorErrors ? { retirement_mirror_errors: input.retirementMirrorErrors } : {}),
     // #3122: always emitted on a completed run (empty list included), for the
     // same reason as superseded_agent_ids above.
     existing_agents_before_write: input.existingAgentsBeforeWrite ?? [],

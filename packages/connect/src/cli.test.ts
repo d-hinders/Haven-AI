@@ -337,6 +337,9 @@ describe('--tombstone (#1681)', () => {
     expect(await runCli(['--tombstone', dir2], { stdout: (m) => text.push(m), stderr: () => undefined })).toBe(0)
     expect(text.join('')).toMatch(/surviving tombstone record could NOT be written/)
     expect(text.join('')).not.toMatch(/was mirrored to/)
+    // #3259 review: and no later sentence claims the copy exists either.
+    expect(text.join('')).not.toMatch(/mirrored record keeps this retirement observable/)
+    expect(text.join('')).toMatch(/Restart EVERY long-lived MCP host/)
   })
 
   it('--json emits one secret-free record', async () => {

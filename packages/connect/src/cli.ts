@@ -151,8 +151,12 @@ export async function runCli(
         io.stdout(
           'Restart EVERY long-lived MCP host (gateway, TUI workers, editors): each holds the ' +
             'wiring snapshot from its own start time, and the tombstone only speaks when a stale ' +
-            'host next probes the old path. The mirrored record keeps this retirement observable ' +
-            'even after the agent directory itself is deleted.\n',
+            'host next probes the old path.' +
+            // #3259 review: never claim a copy that the line above says was not written.
+            (info.recordPath !== null
+              ? ' The mirrored record keeps this retirement observable even after the agent directory itself is deleted.'
+              : '') +
+            '\n',
         )
       }
       return 0

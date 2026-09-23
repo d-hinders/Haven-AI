@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { newViolations } from './lib/ratchet.mjs'
-import { scanSource, readBlock, updateRefusals, BASELINE_PATH } from './lint-wire-types.mjs'
+import { scanSource, readBlock, updateRefusals, scanAll, BASELINE_PATH, SCAN_DIRS } from './lint-wire-types.mjs'
 
 // — scanSource — what counts as a wire shape —
 test('counts an interface with a snake_case property', () => {
@@ -170,7 +170,14 @@ const snake = (n) =>
 test('CLI: growth past the baseline exits non-zero and names the file', () => {
   const { status, out } = runGuard('lint-wire-types.mjs', {
     also: ['lib/ratchet.mjs'],
-    files: { [HOOK]: snake(3), 'packages/frontend/wire-type-baseline.json': '{}' },
+    // Placeholder in the OTHER scan dir: since #3230 the gate refuses when any
+    // SCAN_DIRS entry matches no files, so fixtures exercising other refusals
+    // must satisfy the census for the growth verdict to be what fires.
+    files: {
+      [HOOK]: snake(3),
+      'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
+      'packages/frontend/wire-type-baseline.json': '{}',
+    },
   })
   assert.equal(status, 1)
   assert.match(out, /hand-written wire shapes grew/)
@@ -184,6 +191,7 @@ test('CLI: a tree with no hand-written shapes exits 0', () => {
     also: ['lib/ratchet.mjs'],
     files: {
       'packages/frontend/src/hooks/useThing.ts': 'export type T = { camelCase: string }\n',
+      'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
       'packages/frontend/wire-type-baseline.json': '{}',
     },
   })
@@ -196,6 +204,7 @@ test('CLI: `--update` REFUSES to raise a baselined file\'s count', () => {
     args: ['--update'],
     files: {
       [HOOK]: snake(3),
+      'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
       'packages/frontend/wire-type-baseline.json': JSON.stringify({ [HOOK]: { PrepareResponse: 1 } }),
     },
   })
@@ -215,6 +224,7 @@ test('CLI: `--update` refuses a brand-new file when the baseline is not empty', 
     args: ['--update'],
     files: {
       [HOOK]: snake(1),
+      'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
       'packages/frontend/wire-type-baseline.json': JSON.stringify({
         'packages/frontend/src/hooks/other.ts': { PrepareResponse: 1 },
       }),
@@ -226,7 +236,16 @@ test('CLI: `--update` refuses a brand-new file when the baseline is not empty', 
 
 test('CLI: a MISSING baseline refuses debt unless --accept-new is explicit', () => {
   const base = 'packages/frontend/wire-type-baseline.json'
-  const shared = { also: ['lib/ratchet.mjs'], files: { [HOOK]: snake(2) }, readBack: [base] }
+  const shared = {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [HOOK]: snake(2),
+      // #3230: the census must see both scan dirs, or the zero-scan refusal
+      // fires before the first-run refusal this test exists to pin.
+      'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
+    },
+    readBack: [base],
+  }
   const refused = runGuard('lint-wire-types.mjs', { ...shared, args: ['--update'] })
   assert.equal(refused.status, 1)
   assert.match(refused.out, /--update --accept-new/)
@@ -240,7 +259,11 @@ test('CLI: a MISSING baseline refuses debt unless --accept-new is explicit', () 
 test('CLI: a MISSING baseline still writes an empty first scan without --accept-new', () => {
   const base = 'packages/frontend/wire-type-baseline.json'
   const { status, wrote } = runGuard('lint-wire-types.mjs', {
-    also: ['lib/ratchet.mjs'], files: { [HOOK]: 'export type T = { camelCase: string }\n' },
+    also: ['lib/ratchet.mjs'],
+    files: {
+      'packages/frontend/src/hooks/useThing.ts': 'export type T = { camelCase: string }\n',
+      'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
+    },
     args: ['--update'], readBack: [base],
   })
   assert.equal(status, 0)
@@ -255,6 +278,7 @@ test('CLI: a malformed baseline prints one line, not a node:internal banner', ()
     also: ['lib/ratchet.mjs'],
     files: {
       [HOOK]: snake(1),
+      'packages/frontend/src/types/placeholder.ts': 'export type TypesPlaceholder = { camelCaseOnly: string }\n',
       'packages/frontend/wire-type-baseline.json': JSON.stringify({ [HOOK]: { T: 'x' } }),
     },
   })
@@ -262,4 +286,72 @@ test('CLI: a malformed baseline prints one line, not a node:internal banner', ()
   assert.match(out, /✗ lint-wire-types: /)
   assert.match(out, /\[T\] is "x", not a number/)
   assert.doesNotMatch(out, /node:internal/)
+})
+
+// — the zero-scan refusal (#3230) —
+// `runGuard` copies the script into a fixture and runs it there, so the scan
+// reads the FIXTURE's packages/frontend — where every CLI test below writes
+// its own hooks file. A missing dir and an empty-but-present dir are the two
+// shapes the census must both see as zero.
+test('CLI: a MISSING scan dir refuses — tolerance removed (#3230)', () => {
+  const { status, out } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    // `types` dir absent entirely; the baseline is irrelevant, the refusal
+    // must fire before it is even read.
+    files: { [HOOK]: snake(1) },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /matched no source files/)
+  assert.match(out, /packages[\\/]frontend[\\/]src[\\/]types/)
+  assert.doesNotMatch(out, /✓ no new hand-written wire shapes/)
+})
+
+test('CLI: an EMPTY scan dir (zero .ts files) refuses too — the census counts reads, not dir entries', () => {
+  const { status, out } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    files: {
+      [HOOK]: snake(1),
+      // readdir succeeds but yields no source files — the walk returns
+      // without error, so only the read-count check can catch this shape.
+      'packages/frontend/src/types/README.md': 'no source here\n',
+    },
+  })
+  assert.equal(status, 1)
+  assert.match(out, /matched no source files/)
+  assert.match(out, /packages[\\/]frontend[\\/]src[\\/]types/)
+})
+
+test('CLI: --update over an EMPTY scan writes NO baseline (#3230)', () => {
+  const base = 'packages/frontend/wire-type-baseline.json'
+  const { status, out, wrote } = runGuard('lint-wire-types.mjs', {
+    also: ['lib/ratchet.mjs'],
+    args: ['--update'],
+    // No hooks/types files at all: both dirs starved. Pre-#3230 this wrote
+    // `{}` over the baseline and exited 0 — the measured laundering path.
+    files: { [base]: JSON.stringify({ [HOOK]: { T: 1 } }) },
+    readBack: [base],
+  })
+  assert.equal(status, 1)
+  assert.match(out, /matched no source files/)
+  assert.equal(wrote[base], JSON.stringify({ [HOOK]: { T: 1 } }), 'baseline must be byte-identical after the refusal')
+})
+
+test('scanAll() reports the census on this repo: both dirs read, fileCount > 0', async () => {
+  const { fileCount, readByDir } = await scanAll()
+  assert.ok(fileCount > 0, 'the real tree reads a non-zero number of files')
+  for (const dir of SCAN_DIRS) {
+    assert.ok((readByDir.get(dir) ?? 0) > 0, `${dir} matched no files in the census`)
+  }
+})
+
+test('scanAll() counts files actually read on a real tree — not a stub', async () => {
+  // The copy-lint review precedent: a second walk implementation in the test
+  // could drift from the scanned one. This tree IS this repo, so the census
+  // is compared against the same reality the gate reads, not against a
+  // hand-maintained fixture.
+  const { fileCount, readByDir } = await scanAll()
+  const hooksRead = readByDir.get(SCAN_DIRS[0]) ?? 0
+  const typesRead = readByDir.get(SCAN_DIRS[1]) ?? 0
+  assert.ok(hooksRead > 0 && typesRead > 0)
+  assert.equal(fileCount, hooksRead + typesRead)
 })

@@ -8543,6 +8543,11 @@ export const openapiSpec = {
       },
       Parties: partiesSchema,
       AgentPaymentStatus: agentPaymentStatus,
+      // #3031 note: this option's `maxTimeoutSeconds` stays `integer` while
+      // `X402AuthorizeRequest`'s is `number, minimum: 1`. Not a contradiction —
+      // this schema describes the MERCHANT's advertised option inside the
+      // free-form `paymentRequired` blob and is never compiled against a
+      // request body; the request rule is the other one.
       X402PaymentOption: {
         type: 'object',
         required: ['scheme', 'network', 'amount', 'asset', 'payTo', 'maxTimeoutSeconds'],
@@ -8591,13 +8596,49 @@ export const openapiSpec = {
           url: { type: 'string', format: 'uri' },
           payTo: address,
           merchantPayTo: address,
-          amount: { type: 'string', description: 'Atomic token amount from the x402 challenge.' },
+          amount: {
+            type: 'string',
+            pattern: '^[0-9]+$',
+            description:
+              'Atomic token amount from the x402 challenge. Digits only; the route additionally refuses zero (`isPositiveDecimalAtomicAmount`), which JSON Schema does not express.',
+          },
           asset: address,
           network: { type: 'string', examples: ['base', 'eip155:8453'] },
           description: { type: 'string' },
-          maxTimeoutSeconds: { type: 'integer' },
+          // #3031: `integer` was the spec's claim, never the route's rule —
+          // the handler accepted any finite number and clamped it. Stated as
+          // it behaves. `minimum: 1` restores the HARMFUL half of the deleted
+          // rung ('maxTimeoutSeconds must be a finite number'): with ajv
+          // coercion on, `null` and `false` arrive as 0, and 0 SURVIVES the
+          // `?? 300` default in `modules/x402/delegation-authorize.ts`, so the
+          // settlement child would silently expire in 60 s (the clamp floor in
+          // `x402-delegation.ts`) instead of 300 — and, with `paymentRequired`
+          // alongside, trip #3117's option match with a message blaming the
+          // merchant's challenge. The FINITENESS half is deliberately left to
+          // the clamp: `1e400` parses to `Infinity`, passes `minimum: 1`
+          // (measured) and `Math.min(…, MAX_SETTLEMENT_WINDOW_SECONDS)` turns
+          // it into 600 — harmless, and a `maximum` that refused it would also
+          // refuse a plain `900`, which is accepted and clamped today and
+          // which no shadow reading covers. Two inputs the old rung passed and
+          // this floor refuses: `-1` and `0.5` (both clamped to 60 before).
+          maxTimeoutSeconds: { type: 'number', minimum: 1 },
           category: { type: 'string' },
-          idempotencyKey: { type: 'string', maxLength: 128 },
+          idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
+          // #3031: both fields are SENT by the published SDK (`sdk/client.ts`
+          // → `x402-erc7710.ts`) and READ by the handler, and neither was
+          // declared. On a closed schema that is not a cosmetic gap: enforcing
+          // without them refuses every erc7710 payment, and a compiler with
+          // `removeAdditional: true` (which this plugin deliberately does not
+          // set) would strip the facilitator pin and silently reroute to 3009.
+          settlementScheme: { type: 'string', enum: ['erc7710', 'eip3009'] },
+          facilitatorAddresses: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 16,
+            items: address,
+            description:
+              "#1058: the erc7710 challenge entry's extra.facilitatorAddresses — the facilitator pin carried into the settlement child delegation.",
+          },
           signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
           mcpCallContext: {
             type: 'object',

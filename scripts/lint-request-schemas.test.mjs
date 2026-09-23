@@ -260,6 +260,9 @@ describe('index.ts readers', () => {
       'routes/user.ts',
       'routes/user-accounts.ts',
       'routes/user-accounts-retired.ts',
+      // Slice 3 (#3031): the FIRST money-path module, and the only one the
+      // 2026-09-22 shadow reading proved conformant on every operation.
+      'routes/x402.ts',
     ])
   })
 })

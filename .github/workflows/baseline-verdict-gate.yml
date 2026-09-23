@@ -1,0 +1,106 @@
+name: Baseline change gate
+
+# A pull request that MODIFIES an existing visual baseline must declare, for
+# each modified PNG, why it moved, and must carry a design-review verdict that
+# names it (#3232, slice 1 of epic #3231; quality scan 2026-09-22 finding F1).
+# Decision logic, the declaration format and the tests:
+# `scripts/ci/baseline-verdict-gate.mjs`.
+#
+# ## Why a separate workflow, and not a step in ci.yml's frontend job
+#
+# ci.yml's `pull_request` trigger has the default types — no `edited` — so a
+# verdict added to the body during review is never re-read, and re-running a
+# job replays the original payload. Adding `edited` to ci.yml would re-run ALL
+# of CI on every body edit. The precedent is a separate workflow on the wide
+# type list that reads the PR through the API (`docs.yml`,
+# `pr-ownership-gate.yml`). Here `edited` matters more than for the ownership
+# gate: the declaration lines are exactly what an author adds mid-review after
+# a reviewer asks why a baseline moved, and the re-run on `edited` is what
+# turns that edit into a green tick without a push.
+#
+# ## PRs into the default branch only
+#
+# A dev→main promotion PR shows every modified baseline in its window, and
+# squash commits keep the audit trailer but not the PR body — a promotion
+# cannot carry per-file verdicts, so the gate passes promotions with that
+# stated as the reason instead of pretending to have judged. The baselines a
+# promotion carries were judged by THIS gate on the dev PRs that moved them.
+# Push events are not pull requests; there is nothing to read.
+#
+# ## Why `pull_request_target`, and why that is safe here
+#
+# The judge must not be the code under judgement: on `pull_request` the PR's
+# own copy of `baseline-verdict-gate.mjs` would run, and a PR missing its
+# declaration lines could edit the gate in the same PR. `pull_request_target`
+# runs the workflow from the repository's DEFAULT branch and checks it out
+# (`GITHUB_SHA` is the default branch's tip), so the script that judges is the
+# one already on `dev` — which is also why this workflow cannot run on the PR
+# that adds it: its first run is the next PR opened after that merge. The
+# trigger normally warrants care because it carries a write-capable token —
+# here `permissions` is read-only, the PR's code is never checked out or
+# executed, and the only PR-derived inputs are the changed-file list, the body,
+# the comments and the commit messages, read from the API as public text.
+#
+# ## Fail closed, and the exit code is the verdict
+#
+# A check that cannot read the PR it must judge FAILS, with the error in the
+# log (the operator-verify close guard's precedent). Re-run the job after a
+# transient error. `shell: bash` + `set -o pipefail` keep the script's exit 1
+# through the `tee` into the step summary — Actions' default `bash -e` has no
+# pipefail and would have turned every failure green (measured, and pinned by
+# the sibling gate's suite).
+#
+# ## Advisory until a ruleset change says otherwise
+#
+# Making this a REQUIRED context is a ruleset change, not a workflow change:
+# add "Baseline change gate" to the required status checks if/when the epic
+# owner makes *Design visual regression* required on `dev` (#3231). Until then
+# the check runs and reports on every qualifying PR but does not block, which
+# is also the rollout answer for open PRs that already modify baselines
+# (e.g. #3222): they go red-on-report on their next push, with the exact lines
+# to paste in the report.
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+# One run per PR at a time: `edited` fires on every body edit and the runs
+# land on the same head sha, so without this an earlier red could complete
+# after a later green (labeler.yml's shape).
+concurrency:
+  group: baseline-change-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  baseline_change_gate:
+    name: Baseline change gate
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Default checkout on pull_request_target = the DEFAULT branch (`dev`):
+      # the judge is dev's copy of the script, never the PR's. Do not add
+      # `ref:` here.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: Judge the changed visual baselines
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        # The event payload is read from the file GitHub provides — never
+        # interpolated; the PR's body/commits/comments and changed-file list
+        # are read back from the API inside the script. Exit 1 fails the check.
+        # `shell: bash` matters: without it Actions runs `bash -e {0}` with NO
+        # pipefail, and `| tee` would turn the script's exit 1 into a green
+        # check (measured on the sibling gate; pinned by its suite).
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/ci/baseline-verdict-gate.mjs --event "$GITHUB_EVENT_PATH" | tee -a "$GITHUB_STEP_SUMMARY"

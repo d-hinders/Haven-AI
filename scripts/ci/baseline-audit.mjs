@@ -260,6 +260,17 @@ export function renderReport({ mode, expected, result }) {
   return lines.join('\n')
 }
 
+/**
+ * The moved set as a job output (#3233): `[{ name, status }]` as one line of
+ * JSON, so the bot-push follow-up can LIST what was regenerated instead of
+ * claiming the images are right. A separate output rather than a parse of the
+ * trailer, which is prose for humans.
+ */
+export function movedOutput(result) {
+  // `path` since #3234: the before/after artifact needs to find each file.
+  return JSON.stringify(result.moved.map((c) => ({ name: baselineName(c.path), path: c.path, status: c.status })))
+}
+
 /** One line for the commit message trailer, so the delta survives in git history. */
 export function commitTrailer({ mode, result }) {
   return `Regenerated with --update-snapshots=${mode}; baselines moved: ${
@@ -363,7 +374,7 @@ function main() {
   if (process.env.GITHUB_OUTPUT) {
     fs.appendFileSync(
       process.env.GITHUB_OUTPUT,
-      `trailer=${commitTrailer({ mode, result })}\n`,
+      `trailer=${commitTrailer({ mode, result })}\nmoved=${movedOutput(result)}\n`,
     )
   }
   if (result.exitCode !== 0) {

@@ -917,3 +917,153 @@ in the same PR (#3212). Drive: `ship-next 3213`, `ship-next 3214`,
 **D1 → #3213: `shipped` 2026-09-21** — PR #3217, squash `52515ed7` on `dev`
 (symbol resolved through the agent's own allowances; the no-cap refusal names
 the check; two reviewer passes bound clean at `e535e76b`).
+
+## 2026-09-22 — whole repo, weighted to the least recently scanned surfaces (owner request 2026-09-22, no scope named)
+
+Full report: [`docs/bug-reports/quality-scan-2026-09-22-whole-repo.md`](../bug-reports/quality-scan-2026-09-22-whole-repo.md)
+— file:line evidence lives there; this entry stays path-free. Measured on
+`origin/dev` @ `fd7b1289` by the captain and three read-only workers in
+detached worktrees (backend data layer and accounting module; CI and
+reporting scripts as instruments; frontend, CLI and connect), all removed
+with a plain `git worktree remove`. Mutations used `cp` backups with
+byte-identical restores; real-database runs used a disposable local
+database, dropped afterwards. No live call was made.
+
+**Excluded this run:** every item from 2026-09-13, 09-17 and 09-21 (D1
+shipped; D2 → #3214 closed 2026-09-21 via PR #3220; C1 → #3215 closed
+2026-09-21 via PR #3219), the 2026-09-15 mock-families
+finding (`accepted-as-debt`), and the parked-run re-run mechanism (recorded
+2026-09-17).
+
+**Structural findings (pending the owner's word):**
+- F1 — the visual-baseline net cannot tell an intended screen change from
+  a re-blessed failing comparison. The regeneration dispatch's default
+  mode rewrites exactly the failing baselines. Nothing reads its audit
+  trailer. No diff image survives a passing comparison. The bot-push
+  follow-up comment asserts the images are correct, and a test pins that
+  wording. The visual check is not required on `dev`. Measured since
+  2026-09-01: 35 baseline landings, 24 of them modifying an existing
+  baseline; 19 carrying a design-review verdict at merge, 5 skipped or
+  pending, 11 with none (a hand classification); 13 of the 24 modifying
+  ones carry a verdict, and 2 of the 9 landings since 2026-09-18 do.
+  *Corrected in review:* the report first recorded 17 / 6 / 12 and 1 of
+  9, and this entry first recorded 17.
+  Cost: #2217 / #2218 (a silent re-bless caught by a hand blob-hash audit),
+  #3167 → #3197 (a known regression blessed and defended by the gate) and
+  #3222 (filters removed, baselines re-committed, all gates green, caught
+  by the PR's combined code-and-design review, not by any gate). Four disjoint slices proposed: a trailer gate,
+  the follow-up comment's wording, a before/after artifact, and the
+  design-reviewer brief.
+
+**Improvement candidates (one PR each), pending the owner's word:**
+- C1 — three repository writes (`setDefaultAccountForUser`,
+  `deleteAccountForUser`, `replaceAgentLabels`) take a user id but scope
+  their SQL by row id alone. On a real database, a second user's id deleted,
+  re-defaulted and relabelled the victim's rows. The route pre-checks are
+  load-bearing and tested, so nothing is reachable today, and a repository
+  test pins the unscoped shape as correct. SQL census over 66 files: 168
+  mutating statements, 112 scoped by a principal column and 56 not. The
+  three account statements (from two functions) are the request-id cases
+  among the 56; the labels pair counts among the 112 as scoped by
+  `agent_id` only (45 statements, not traced beyond this pair).
+  *Corrected in review:* first placed the labels pair among the 56.
+- C2 — two of #3019's webhook acceptance criteria are met by tests that
+  cannot fail: the trailing-slash loop never sends its suffix, and the
+  dedupe decision has no real-database test (the migration test pastes
+  its own INSERT). Proposed as a comment on #3019, not a new issue.
+- C3 — the branch-hygiene meter counts resync merges in `dev`'s history,
+  which the squash-only ruleset (2026-09-07) removed. It reads 0 since
+  2026-09-08 and prints the target state, while at least 29 resync
+  commits sat inside 23 of the 259 PRs merged in that window (first
+  recorded as 17 in 13 of a 200-PR sample).
+- C4 — five files that gated jobs read are routed to no surface by the
+  change classifier (the env example, two lint baselines, a vitest setup
+  hook and a lint helper). A PR that breaks one merges green: shown for the
+  env example and the request-schemas baseline. (The lint helper is still
+  exercised on every PR by two ungated jobs; only the frontend job's run
+  over real source is skipped.)
+- C5 — the next-steps and wire-types ratchets and their self-tests pass
+  when every scan target is hidden (0 files read, ✓).
+- Notes, not proposed: facets pinned only by pixels at the AgentPanel level
+  (closes if #3222's round-3 test lands); the webhook token lookup's two
+  clauses are individually redundant; the dist-freshness check's ✓
+  wording for a missing dist; one real CI timeout in the hosted MCP's
+  tool-contracts test (09-19, release branch).
+
+**Probed clean** (block → command → number, all at `fd7b1289`):
+- sizing → `git ls-files -z packages/<p>/src`, filtered to
+  `.ts|.tsx|.mjs`, split on `.test.|__tests__|.spec.`, `xargs -0 cat | wc -l` → backend 77,152 /
+  95,359. The same command at `89fadec0` gives the 09-15 figures of 69,517 /
+  83,443 exactly, so the one-week delta is +11 % source and +14 % test.
+  frontend 50,187 / 44,347; connect 11,389 / 14,047 (09-13: 10,223 /
+  12,093); cli 2,567 / 2,416.
+- block 1 (guard falsifiability) → 20 mutations over two hand-chosen
+  non-money samples → accounting 4 caught / 4 survived (C2, token-lookup
+  note); connect, cli and frontend 11 red / 1 survived (facets note).
+- block 2 (`covers:` completeness) → the reference's loop under bash with
+  `set -f`, each miss confirmed with the strict coupling gate → 17 across 5
+  of 8 contract docs. The runtime-compatibility doc is down from 7 to 0; the
+  CASP guardrails 6 (09-15) and x402 sequence 3 (09-21) are unchanged, and
+  2 new each sit on the docs-quality system and package-dev-channel docs.
+  `npm run docs:covers-gaps` → 138 pairs / 36 docs (09-15: 146 / 37).
+- block 3 (stale numbers) → 25 newest shards → 12 figure matches on 11
+  lines, 0 with a command; `any` → 24 (23 at `89fadec0`), but only 6 of those lines
+  are code; db-mock gauge → 54 / 273 / 57 (09-15: 54 / 280 / 57).
+- block 4 (retired vocabulary) → the reference's term list with the
+  corrected exclusion → 191 files, 46 historical / 145 live, equal to the
+  corrected `e42ed68f` reading; positive control 36 shards; the ratchet is
+  green below baseline.
+- block 5 (merge-method drift) → first-parent since 2026-09-15T00:00:00Z
+  → 0 merge-commit / 122 squash (clean). Since 2026-08-10T00:00:00Z → 282
+  / 693 of 978, of which 4 are sync-backs. The newest counted landing is
+  #2646 (2026-09-07), itself a `main` sync-back under a prefix the block
+  does not recognise.
+- block 6 (nets with holes) → partial → the 15 required checks on `dev`
+  read for skip paths (C4, C5 undocumented); the visual net is F1;
+  copy-lint, the money perimeter and the docs boundary were not taken.
+- scripts as instruments on empty input → 30 of 41 run → 8 give a clean
+  verdict on empty input: 2 correct, 5 hide that nothing was read, 1 is
+  deliberate (the coupling gate's explicit empty list).
+- incident clustering → issues created since 2026-09-15 → 111 (99 / 12
+  open); every open one is tracked; no untracked cluster.
+- workflow archaeology → `ci.yml` last 200 → 10 with attempt > 1 (9 are
+  parked bot-push runs, 1 is a real timeout), 23 failures (0 on `dev`), 19
+  cancelled; `qa-dev.yml` last 40 → 40 / 40. The three local 5 s timeouts
+  were not seen in CI, but only 1 failed-job log in the sample ran the
+  backend suite at all, so this is weak evidence, not a clean bill.
+- comment archaeology → `git grep -c -w -E 'TODO|FIXME|HACK|XXX' --
+  'packages/*/src/*'` → 0 with or without tests; positive control `import`
+  over the same pathspec → 1,437 files (`-- 'packages/*/src'` without the
+  trailing `/*` matches nothing at all).
+- live exercise → not taken.
+
+Instrument lessons: `rg` is a zsh function here and absent from `bash -c`
+(the #3224 guard stopped the loop, as intended); `\b` in `git grep -E`
+reads 0 against a true 1; the first sizing pass word-split wrong in zsh and
+a rerun died silently after its header; the coupling gate reports "no
+covered docs implicated" for a non-existent path; the block-3 `any` regex
+counts prose; the branch-hygiene meter reads only `--since=` and silently
+falls back to 7 days on `--since <date>`; a `git grep` pathspec of
+`packages/*/src` matches no file.
+
+**Disposition (owner, 2026-09-22): file all; C2 as a comment on #3019.**
+F1 → epic #3231 (`epic`, `area:frontend`, `area:ci`, `area:docs`) with
+slices #3232 (trailer and verdict gate), #3233 (follow-up comment wording),
+#3234 (before/after artifact) and #3235 (design-reviewer brief); the epic's
+spec review was posted on it (38 claims re-run, 4 wrong and fixed). C1 →
+#3227 (`area:backend`, `money-path` by file; owner decisions: a cross-tenant
+call is a silent no-op, and a census ratchet for the class is filed
+separately later). C2 → a comment on #3019, no new issue. C3 → #3228,
+C4 → #3229, C5 → #3230 (`area:ci`). Notes: not filed. Filed to the backlog
+(no `code-quality`).
+
+**Shipped 2026-09-23** (squash on `dev`):
+- C1 → #3227: `shipped` — PR #3237, `79592c11`.
+- C3 → #3228: `shipped` — PR #3239, `a98c7903`.
+- C4 → #3229: `shipped` — PR #3238, `62b1e8da`.
+- C5 → #3230: `shipped` — PR #3242, `257b0553`.
+- F1 slice #3232: `shipped` — PR #3243, `4fd4ec07`.
+- F1 slice #3233: `shipped` — PR #3240, `ef6ba51b`.
+
+F1 (#3231) stays open until #3234 and #3235 have landed and its promotion
+checklist is ticked.

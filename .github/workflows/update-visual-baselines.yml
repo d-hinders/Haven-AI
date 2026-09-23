@@ -1,4 +1,5 @@
-# Regenerate the /design-system visual baselines (#897) on a branch.
+# Regenerate the visual baselines (#897) on a branch — every `*.visual.spec.ts`,
+# not only /design-system (#3233).
 #
 # Baselines MUST be Linux-rendered (CI is the judge; macOS fonts differ), so
 # intended visual changes are accepted by dispatching this workflow on the PR
@@ -72,7 +73,7 @@ permissions:
 
 jobs:
   update:
-    name: Regenerate /design-system baselines
+    name: Regenerate visual baselines
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -185,7 +186,7 @@ jobs:
       # what was on disk). A first dispatch with no dark baselines committed
       # writes them (Playwright's `changed` mode writes what it cannot
       # compare), and the audit step below sees them as new files.
-      - name: Regenerate dark baselines (design system)
+      - name: Regenerate dark baselines
         run: npm run test:visual:dark -w packages/frontend -- --update-snapshots="$UPDATE_MODE"
         env:
           UPDATE_MODE: ${{ inputs.mode }}
@@ -212,6 +213,47 @@ jobs:
           EXPECTED_BASELINES: ${{ inputs.expected }}
         run: node scripts/ci/baseline-audit.mjs
 
+      # #3234. After a re-bless the comparison passes and CI keeps no diff
+      # image, so the reviewer had nothing to look at. Collect before (the
+      # branch tip — read HERE, before the commit step moves HEAD), after, dev's
+      # version when it differs, and a pixel diff, for every baseline the audit
+      # reports as moved. `!cancelled()`: the audit writes its `moved` list even
+      # when it REFUSES the commit, and that is the run whose images matter most.
+      # `ubuntu-latest` does NOT ship ImageMagick (measured on the #3234 probe
+      # dispatch, run 35831434982: "`compare` is not on this runner"). Install
+      # it only when something moved; a failed install costs the diff image,
+      # never the run.
+      - name: Install ImageMagick for the pixel diff
+        if: "!cancelled() && steps.audit.outputs.moved != '' && steps.audit.outputs.moved != '[]'"
+        continue-on-error: true
+        run: command -v compare || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends imagemagick)
+
+      - name: Collect before/after images of every rewritten baseline
+        id: baseline_images
+        if: "!cancelled() && steps.audit.outcome != 'skipped'"
+        # An image failure must never cost the baseline push below (#3234 review).
+        continue-on-error: true
+        env:
+          MOVED_BASELINES: ${{ steps.audit.outputs.moved }}
+        run: node scripts/ci/baseline-artifact.mjs
+
+      - name: Upload the before/after images
+        id: baseline_artifact
+        if: "!cancelled() && steps.baseline_images.outputs.count != '' && steps.baseline_images.outputs.count != '0'"
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-before-after
+          path: ${{ steps.baseline_images.outputs.dir }}
+          retention-days: 7
+
+      - name: Link the images in the run summary
+        if: "!cancelled() && steps.baseline_artifact.outputs.artifact-url != ''"
+        continue-on-error: true
+        env:
+          ARTIFACT_URL: ${{ steps.baseline_artifact.outputs.artifact-url }}
+        run: echo "**Before/after images:** [baseline-before-after]($ARTIFACT_URL) (kept 7 days)" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Commit baselines to the branch
         id: commit
         env:
@@ -227,7 +269,7 @@ jobs:
             # The audit's one-line delta rides in the commit message, so the
             # answer to "which baselines did this dispatch move, and from which
             # blobs" outlives the run's log-retention window.
-            git commit -m "chore: regenerate /design-system visual baselines (Linux-rendered)" -m "$AUDIT_TRAILER"
+            git commit -m "chore: regenerate visual baselines (Linux-rendered)" -m "$AUDIT_TRAILER"
             git push
             echo "committed=true" >> "$GITHUB_OUTPUT"
             echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -241,8 +283,9 @@ jobs:
       # So the condition is reported where the person is actually looking (a
       # sticky comment on the PR) and the run goes RED. A green run that leaves
       # the PR unmergeable is the least useful of the three possible outcomes.
-      # The red does NOT mean the baselines are bad: they are committed and
-      # pushed by the step above, before this one runs.
+      # The red is about the parked checks, not the images: the baselines are
+      # committed and pushed by the step above, before this one runs. Whether
+      # the images are RIGHT is a design review's call, not this step's (#3233).
       #
       # The decision itself is a tested pure function rather than inline bash —
       # inline YAML only proves itself in production, which is precisely how the
@@ -262,4 +305,9 @@ jobs:
           HAS_PUSH_TOKEN: ${{ secrets.BASELINE_PUSH_TOKEN != '' }}
           BASELINES_COMMITTED: ${{ steps.commit.outputs.committed }}
           PUSHED_SHA: ${{ steps.commit.outputs.sha }}
+          # #3233: the audited moved set, so the comment lists what was
+          # regenerated instead of vouching for it.
+          MOVED_BASELINES: ${{ steps.audit.outputs.moved }}
+          # #3234: the before/after images, linked from the comment.
+          BASELINE_ARTIFACT_URL: ${{ steps.baseline_artifact.outputs.artifact-url }}
         run: node scripts/ci/baseline-push-followup.mjs

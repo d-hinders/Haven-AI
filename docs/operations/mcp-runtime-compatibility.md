@@ -53,6 +53,8 @@ covers:
   - scripts/lint-next-steps.mjs
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
+last-verified: "2026-09-23"
+
 last-verified: "2026-09-22"
 ---
 
@@ -61,6 +63,15 @@ last-verified: "2026-09-22"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Re-verified unchanged (#3241):** the change is test-only in
+> `packages/connect/src/doctor.test.ts` (+47/−1) — a `stampAgentMtimes()`
+> helper stamping the seeded `identity.json` files with synthetic,
+> strictly-increasing utimes so `discoverCredentialDirectory`'s newest-wins
+> selection is deterministic under the kernel's coarse-clock ties. No runtime,
+> tool, schema, description or wire change: nothing in this document moves,
+> and the doctor's selection contract itself is unchanged — the fix only makes
+> the fixtures honor it deterministically.
 >
 > **Re-verified unchanged (#3131, and again for #3133):** this doc is coupled to
 > `.github/workflows/ci.yml`. #3131 added one dependency-free step to the
@@ -2810,3 +2821,39 @@ to call next in structured fields, and those fields are typed end to end
 > refusal fixtures, 41 `refusalNextStep` calls) written over the four bare
 > shapes before the change, plus the per-branch ratchet cases. Scope of this
 > note: those fields. Nothing else in this document was re-verified.
+
+> **Re-verification (#3230, the next-step ratchet refuses an empty scan,
+> 2026-09-23):** this diff touches `scripts/lint-next-steps.mjs` (listed in
+> `covers:` above). The gate's NUMERATOR is untouched — what counts as an
+> unnamed emission or an argument-less discovery entry, the block-parsing
+> rules, the baseline shape and the `--update` growth refusal are all
+> byte-identical. What changed is when the gate is allowed to speak at all:
+> `scan()` additionally returns a per-target read census, and `main` refuses
+> (exit 1) when any `SCAN_TARGETS` entry matched no files, so the ✓ verdict
+> and the `--update` write can no longer be produced over a zero-file scan
+> (the quality scan 2026-09-22 measured both passing with all five targets
+> moved aside). Nothing this document states about the contract moves: the
+> same emissions are still demanded to name a tool or an omitted-reason, the
+> baseline stays at zero, and the extra refusal only fires on a broken scan
+> configuration, never on a scanned one. The success line now also prints
+> the number of files read. Scope of this note: the lint gate itself.
+> Nothing else in this document was re-verified.
+
+> **Re-verified #3227 (2026-09-23, repository tenant scope):** this diff
+> touches `routes/user-accounts.ts`, a covered file, in its unlink handler
+> only. When the now tenant-scoped delete matches no row, the handler re-reads
+> ownership and answers 200 if the account is already gone, the way a
+> concurrent second unlink by the same owner answered before this change.
+> The set of statuses the route returns (200, 404, 409) and every response
+> body are unchanged. No published CLI, SDK, MCP or connector version calls
+> the unlink or re-default routes; only the dashboard does
+> (`git grep -n "user/accounts" packages/{cli,sdk,mcp,mcp-server,connect}/src`
+> finds only the account list, the funding read and the rename). Scope of this note: that
+> handler. Nothing else in this document was re-verified.
+
+> **Re-verified #3228 (2026-09-23, branch-hygiene source):** this diff
+> touches `.github/workflows/ci.yml`, a covered file, in one comment only —
+> the branch-hygiene report reads merged PRs' commits now, not `dev`'s
+> history. No step, job, trigger, publish path or runtime check changes.
+> Scope of this note: that comment. Nothing else in this document was
+> re-verified.

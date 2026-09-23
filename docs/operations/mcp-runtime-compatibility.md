@@ -2826,3 +2826,10 @@ to call next in structured fields, and those fields are typed end to end
 > (`git grep -n "user/accounts" packages/{cli,sdk,mcp,mcp-server,connect}/src`
 > finds only the account list, the funding read and the rename). Scope of this note: that
 > handler. Nothing else in this document was re-verified.
+
+> **Re-verified #3228 (2026-09-23, branch-hygiene source):** this diff
+> touches `.github/workflows/ci.yml`, a covered file, in one comment only —
+> the branch-hygiene report reads merged PRs' commits now, not `dev`'s
+> history. No step, job, trigger, publish path or runtime check changes.
+> Scope of this note: that comment. Nothing else in this document was
+> re-verified.

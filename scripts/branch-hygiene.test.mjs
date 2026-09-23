@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { classify, summarize } from './branch-hygiene.mjs'
+import { classify } from './branch-hygiene.mjs'
 
 test('a resync into a work branch is counted, and names the branch that went stale', () => {
   assert.deepEqual(
@@ -60,29 +60,144 @@ test('MUTATION-SENSITIVE: a subject that only MENTIONS the phrase is not a resyn
   )
 })
 
-test('summarize groups by branch, so a 6-PR branch reads as one problem not six', () => {
-  const report = summarize([
-    "Merge branch 'dev' into claude/long-lived",
-    "Merge branch 'dev' into claude/long-lived",
-    "Merge remote-tracking branch 'origin/claude/long-lived' into claude/long-lived",
-    "Merge branch 'dev' into fix/other",
-    'feat(x): something ordinary (#1)',
-  ])
+// ── #3228: counted from merged PRs' own commits, not from dev's history ──────
 
-  assert.equal(report.total, 5)
+import { summarizePullRequests, parseArgs } from './branch-hygiene.mjs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'branch-hygiene.mjs')
+
+/** Runs the real entry point on a fixture, the way a reader runs the report. */
+function runOnFixture(fixture, extra = []) {
+  const dir = mkdtempSync(join(tmpdir(), 'branch-hygiene-'))
+  const file = join(dir, 'prs.json')
+  writeFileSync(file, JSON.stringify(fixture))
+  return spawnSync(process.execPath, [SCRIPT, '--since=2026-09-08', '--until=2026-09-23', `--from-json=${file}`, ...extra], {
+    encoding: 'utf8',
+  })
+}
+
+const DEV_TIP = 'd'.repeat(40)
+const pr = (number, headRefName, commits) => ({ number, headRefName, commits })
+const commit = (oid, subject, parents) => ({ oid, subject, parents })
+
+test('a merge whose parent is dev history is a resync, whatever its subject says', () => {
+  // Hand-written subjects are common in PR commits ("Merge origin/dev into x",
+  // "merge dev (73a7beaa) into x"); a subject regex missed 14 of them over
+  // 2026-09-08 → 09-23. The parent is the fact.
+  const report = summarizePullRequests(
+    [
+      pr(1, 'feat/a', [
+        commit('a1', 'feat: work', ['base']),
+        commit('a2', 'merge dev (73a7beaa) into feat/a', ['a1', DEV_TIP]),
+      ]),
+    ],
+    (oid) => oid === DEV_TIP,
+  )
+  assert.equal(report.resyncs, 1)
+  assert.deepEqual(report.branches, [{ branch: 'feat/a', resync: 1, divergence: 0, prs: [1] }])
+})
+
+test("a parent that is the PR's OWN commit is never dev, even when dev has it now", () => {
+  // Before the squash-only ruleset a PR was merge-merged, so its branch
+  // commits became dev history. A merge of two of the PR's own commits is not
+  // a resync — it is reported as an other merge.
+  const report = summarizePullRequests(
+    [pr(2, 'feat/b', [commit('b1', 'x', ['base']), commit('b2', 'y', ['base']), commit('b3', 'merge b1 into b2', ['b2', 'b1'])])],
+    () => true,
+  )
+  assert.equal(report.resyncs, 0)
+  assert.equal(report.otherMerges, 1)
+})
+
+test('the same-name subject wins over the parent test — a branch reused across PRs (#1417)', () => {
+  // origin/<b>'s tip was an EARLIER PR's commit: outside this PR and on dev.
+  const report = summarizePullRequests(
+    [pr(1417, 'claude/reused', [
+      commit('c1', 'feat: more', ['base']),
+      commit('c2', "Merge remote-tracking branch 'origin/claude/reused' into claude/reused", ['c1', 'earlier-pr-tip']),
+    ])],
+    (oid) => oid === 'earlier-pr-tip',
+  )
+  assert.equal(report.divergences, 1)
+  assert.equal(report.resyncs, 0)
+})
+
+test('a sync-back from main is release reconciliation, not a stale work branch', () => {
+  const report = summarizePullRequests(
+    [
+      pr(3, 'codex/sync-2634-main', [commit('s1', "Merge branch 'main' into codex/sync-2634-main", ['x', DEV_TIP])]),
+      pr(4, 'sync/main-0.4', [commit('s2', 'merge', ['y', DEV_TIP])]),
+    ],
+    () => true,
+  )
+  assert.equal(report.prs, 0)
+  assert.equal(report.resyncs, 0)
+})
+
+test('the entry point counts a fixture resync and names the PR', () => {
+  const out = runOnFixture({
+    prs: [pr(3196, 'sync-3019', [commit('e1', 'feat: x', ['base']), commit('e2', "Merge remote-tracking branch 'origin/dev' into HEAD", ['e1', DEV_TIP])])],
+    onDev: [DEV_TIP],
+  })
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /stale-branch resyncs: {6}1/)
+  assert.match(out.stdout, /sync-3019 \(#3196\) — 1 resync/)
+})
+
+test('MUTATION PROOF: a window with no merged PR refuses instead of printing the target state', () => {
+  // The bug #3228 fixed: the dev-history meter printed "✓ … target state"
+  // over a window whose resyncs it could no longer see. An empty read is not
+  // a clean one.
+  const out = runOnFixture({ prs: [], onDev: [] })
+  assert.equal(out.status, 1)
+  assert.doesNotMatch(out.stdout, /target state/)
+  assert.match(out.stderr, /nothing was measured/)
+})
+
+test('a clean window with PRs prints the target state and how many PRs it read', () => {
+  const out = runOnFixture({ prs: [pr(9, 'feat/clean', [commit('f1', 'feat: y', ['base'])])], onDev: [] })
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /across 1 PRs\. This is the target state/)
+})
+
+test('a space-separated flag is refused, never silently defaulted', () => {
+  // `--since 2026-09-08` used to fall back to the 7-day default without a word.
+  assert.throws(() => parseArgs(['--since', '2026-09-08']), /--since=<value>/)
+  assert.throws(() => parseArgs(['--until=last week']), /YYYY-MM-DD/)
+  assert.equal(parseArgs(['--since=2026-09-08']).since, '2026-09-08')
+  const out = spawnSync(process.execPath, [SCRIPT, '--since', '2026-09-08'], { encoding: 'utf8' })
+  assert.equal(out.status, 2)
+})
+
+test('the report groups by branch, so a branch reused across PRs reads as one problem not several', () => {
+  const report = summarizePullRequests(
+    [
+      pr(10, 'claude/long-lived', [commit('g1', 'x', ['base']), commit('g2', 'merge', ['g1', DEV_TIP])]),
+      pr(11, 'claude/long-lived', [
+        commit('g3', 'y', ['base']),
+        commit('g4', 'merge', ['g3', DEV_TIP]),
+        commit('g5', "Merge remote-tracking branch 'origin/claude/long-lived' into claude/long-lived", ['g4', 'g3']),
+      ]),
+      pr(12, 'fix/other', [commit('h1', 'z', ['base']), commit('h2', 'merge', ['h1', DEV_TIP])]),
+      pr(13, 'feat/clean', [commit('k1', 'feat(x): something ordinary (#1)', ['base'])]),
+    ],
+    (oid) => oid === DEV_TIP,
+  )
+  assert.equal(report.prs, 4)
   assert.equal(report.resyncs, 3)
   assert.equal(report.divergences, 1)
   assert.equal(report.branches.length, 2)
   // Ordered worst-first: the branch to talk about is the one at the top.
-  assert.deepEqual(report.branches[0], {
-    branch: 'claude/long-lived',
-    resync: 2,
-    divergence: 1,
-  })
+  assert.deepEqual(report.branches[0], { branch: 'claude/long-lived', resync: 2, divergence: 1, prs: [10, 11] })
 })
 
 test('a clean window reports zero and lists no branches — the #1500 target state', () => {
-  const report = summarize(['feat(a): one (#1)', 'fix(b): two (#2)'])
+  const report = summarizePullRequests([pr(14, 'feat/a', [commit('m1', 'feat(a): one (#1)', ['base'])])], () => true)
   assert.equal(report.resyncs, 0)
   assert.equal(report.divergences, 0)
   assert.deepEqual(report.branches, [])

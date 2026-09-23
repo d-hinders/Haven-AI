@@ -2797,3 +2797,10 @@ to call next in structured fields, and those fields are typed end to end
 > refusal fixtures, 41 `refusalNextStep` calls) written over the four bare
 > shapes before the change, plus the per-branch ratchet cases. Scope of this
 > note: those fields. Nothing else in this document was re-verified.
+
+> **Re-verified #3228 (2026-09-23, branch-hygiene source):** this diff
+> touches `.github/workflows/ci.yml`, a covered file, in one comment only —
+> the branch-hygiene report reads merged PRs' commits now, not `dev`'s
+> history. No step, job, trigger, publish path or runtime check changes.
+> Scope of this note: that comment. Nothing else in this document was
+> re-verified.

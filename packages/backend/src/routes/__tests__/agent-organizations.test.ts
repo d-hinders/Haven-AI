@@ -32,6 +32,7 @@ import { installRequestValidation } from '../../openapi/request-validation.js'
 import {
   deleteOrganizationPromoting,
   OrganizationNotDeletedError,
+  updateOrganization,
 } from '../../infra/repositories/agent-organizations.js'
 
 let seq = 0
@@ -354,43 +355,66 @@ describeDb('organization routes (#3164)', () => {
     expect(row.rows[0].parent_organization_id).toBeNull()
   })
 
-  it('serializes two crossing moves — no cycle is stored (NB1 race)', async () => {
+  it('the repository itself refuses a foreign parent: null, nothing written, the owner can still delete theirs (N2)', async () => {
+    // Behind the route's pre-check: calling the repository directly with a
+    // foreign target used to run the UPDATE anyway and store the other
+    // user's folder as the parent, after which their own DELETE answered 500.
+    const owner = await seedUser()
+    const other = await seedUser()
+    const mine = (await createOrg(owner, { name: 'Mine' })).body.id as string
+    const foreign = (await createOrg(other, { name: 'Theirs' })).body.id as string
+
+    expect(await updateOrganization(mine, owner, { parent_organization_id: foreign })).toBeNull()
+    const row = await db.query<{ parent_organization_id: string | null }>(
+      `SELECT parent_organization_id FROM agent_organizations WHERE id = $1`,
+      [mine],
+    )
+    expect(row.rows[0].parent_organization_id).toBeNull()
+
+    const del = await app.inject({ method: 'DELETE', url: `/organizations/${foreign}`, ...auth(other) })
+    expect(del.statusCode).toBe(200)
+  })
+
+  it('serializes two crossing moves — no cycle is stored in 40 trials (NB1 race)', async () => {
     // The codeowner's probe: A under B and B under A, fired in parallel,
     // stored an A<->B cycle in 39/40 trials when the walk and the write ran
     // as separate pool queries. Under the per-user advisory lock the loser
     // of the interleave sees the winner's committed parent and refuses.
+    //
+    // 40 trials, calling the repository directly on the pool: one pair of
+    // HTTP injects inside the whole suite never interleaved, so a single
+    // trial passed with the lock deleted (13/13) — a guard that could not
+    // fail (#3222 re-review N1). Each trial resets the pair to the top level.
     const userId = await seedUser()
     const a = await createOrg(userId, { name: 'A' })
     const b = await createOrg(userId, { name: 'B' })
     const aId = a.body.id as string
     const bId = b.body.id as string
 
-    const results = await Promise.all([
-      app.inject({
-        method: 'PUT', url: `/organizations/${aId}`, ...auth(userId),
-        payload: { parent_organization_id: bId },
-      }),
-      app.inject({
-        method: 'PUT', url: `/organizations/${bId}`, ...auth(userId),
-        payload: { parent_organization_id: aId },
-      }),
-    ])
-
-    const aParent = await db.query<{ parent_organization_id: string | null }>(
-      `SELECT parent_organization_id FROM agent_organizations WHERE id = $1`,
-      [aId],
-    )
-    const bParent = await db.query<{ parent_organization_id: string | null }>(
-      `SELECT parent_organization_id FROM agent_organizations WHERE id = $1`,
-      [bId],
-    )
-    const stored = [aParent.rows[0].parent_organization_id, bParent.rows[0].parent_organization_id]
-    // Exactly one of the two moves won; the graph stays a tree.
-    const cycle = stored[0] !== null && stored[0] === bId && stored[1] === aId
-    expect(cycle).toBe(false)
-    const statuses = results.map((r) => r.statusCode).sort()
-    expect(statuses).toEqual([200, 400])
-  }, 15_000)
+    let cycles = 0
+    const outcomes = new Map<string, number>()
+    for (let trial = 0; trial < 40; trial += 1) {
+      await db.query(`UPDATE agent_organizations SET parent_organization_id = NULL WHERE id = ANY($1::uuid[])`, [[aId, bId]])
+      const settled = await Promise.allSettled([
+        updateOrganization(aId, userId, { parent_organization_id: bId }),
+        updateOrganization(bId, userId, { parent_organization_id: aId }),
+      ])
+      const { rows } = await db.query<{ id: string; parent_organization_id: string | null }>(
+        `SELECT id, parent_organization_id FROM agent_organizations WHERE id = ANY($1::uuid[])`,
+        [[aId, bId]],
+      )
+      const parent = new Map(rows.map((r) => [r.id, r.parent_organization_id]))
+      if (parent.get(aId) === bId && parent.get(bId) === aId) cycles += 1
+      const key = settled
+        .map((r) => (r.status === 'fulfilled' ? 'ok' : (r.reason as Error).constructor.name))
+        .sort()
+        .join('+')
+      outcomes.set(key, (outcomes.get(key) ?? 0) + 1)
+    }
+    expect(cycles).toBe(0)
+    // Every trial: exactly one move wins, the other is refused as a cycle.
+    expect([...outcomes.keys()]).toEqual(['OrganizationCycleError+ok'])
+  }, 30_000)
 
   it('DELETE on a member of a stored (pre-existing) cycle answers 200, not 500 (NB1)', async () => {
     const userId = await seedUser()

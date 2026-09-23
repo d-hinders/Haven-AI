@@ -409,16 +409,13 @@ export async function updateOrganization(
     if (targetId !== null) {
       // The target must be this user's own folder. Resolving it INSIDE the
       // lock also means a target deleted by a concurrent request of the same
-      // user is seen committed, not half-removed (a foreign id stays the
-      // route's 404, via the UPDATE returning no row below).
+      // user is seen committed, not half-removed. A foreign or unknown target
+      // writes NOTHING and returns null (the route's 404): the UPDATE's WHERE
+      // is on the MOVING folder, which the caller does own, so running it
+      // here would store another user's folder as the parent (#3222
+      // re-review N2) — and that user's own DELETE would then 500 on RESTRICT.
       const target = await findOrganizationForUser(targetId, userId, client)
-      if (!target) {
-        const { rows: foreign } = await client.query<AgentOrganizationRow>(
-          UPDATE_ORGANIZATION_SQL,
-          params,
-        )
-        return foreign[0] ?? null
-      }
+      if (!target) return null
       const { ids, truncated } = await ancestorIdsOf(
         targetId,
         userId,

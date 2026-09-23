@@ -534,6 +534,51 @@ export const ROUTING_MATRIX = [
     why: 'The network-map pin test (#1478) spans backend, sdk and signer sources, so it must run every job that would have caught the drift. The sdk flag then fans out, which is why connect/mcp/mcp_server (and qa_agent since #3005) appear without being named by the rule.',
   },
 
+  // ─── Guard data and shared vitest/frontend helpers, one entry each (#3229) ─
+  // Five files a gated job reads that routed NOWHERE before #3229 (quality scan
+  // 2026-09-22, candidate C4): the two ratchet baselines, the vitest global
+  // setup that three gated suites share, the escape-marker helper the frontend
+  // gates share, and the env-example mirror the backend suite pins. Each row's
+  // `expect` is decided by the same two mechanisms as the rows above: the
+  // manifest entry names the jobs that read the file, and the dependency table
+  // fans out from there (mcp/connect/qa_agent follow from the four baseline
+  // jobs; nothing else has dependents to fan out to).
+  {
+    files: ['.env.example'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why:
+      'The configuration mirror that packages/backend/src/docs-drift/env-example-drift.test.ts pins in BOTH directions — every variable the backend reads must be documented here, every documented key must be read. That test runs only in backend_checks, so before #3229 a PR editing only this file routed nowhere and the drift test never ran on the edit it exists to catch.',
+  },
+  {
+    files: ['scripts/lint-request-schemas-baseline.json'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why:
+      'The committed baseline the request-schema ratchet (#3029) compares against. Lowering a count here without the code change that earns it is exactly the weakening the ratchet refuses, and lint:request-schemas runs only in backend_checks — the ratchet and its self-test were registered but the data they read was not, so a baseline-only edit routed nowhere.',
+  },
+  {
+    files: ['scripts/lint-next-steps-baseline.json'],
+    expect: ['code', 'backend', 'mcp_server', 'signer', 'mcp', 'connect', 'qa_agent'],
+    kind: CONTRACT,
+    why:
+      'The committed baseline of the typed next-step ratchet (#3104), read by lint:next-steps in the same four jobs as the ratchet itself — backend_checks beside the request-schema ratchet, then mcp_server/signer/mcp where the policed packages live. Lowering a count weakens the same contract; connect and qa_agent follow from the dependency table, as in the ratchet row above.',
+  },
+  {
+    files: ['scripts/vitest/assert-fresh-dist.mjs'],
+    expect: ['code', 'connect', 'mcp_server', 'qa_agent'],
+    kind: CONTRACT,
+    why:
+      'The vitest global-setup hook refusing to run a suite against a stale build of sdk, mcp or signer. Three gated suites import it (connect, mcp-server, qa-agent) and each runs it only in its own job, so a weakening that makes the check vacuous is caught only if every consumer\'s job re-runs — the #3046 shape, with no dependents fan-out reaching any of the three.',
+  },
+  {
+    files: ['scripts/lib/lint-escapes.mjs'],
+    expect: ['code', 'frontend'],
+    kind: CONTRACT,
+    why:
+      'The shared escape-marker helper: design-lint and the copy lint both import isEscaped from it. The copy lint runs unconditionally (frontend-copy-lint.yml), but design:lint runs inside the gated frontend_checks job, so before #3229 a PR weakening escape recognition skipped the one gated job that consumes it.',
+  },
+
   // ─── Retained: routes nowhere today, and that is arguable ──────────────────
   {
     files: ['.github/labeler.yml'],

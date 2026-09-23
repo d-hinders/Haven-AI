@@ -24,7 +24,7 @@ covers:
   - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
-last-verified: "2026-09-21"
+last-verified: "2026-09-23"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -46,6 +46,19 @@ backend's connector handout), [#2423](https://github.com/d-hinders/Haven-AI/issu
 unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
+
+> **Re-verification (#3251, tombstone ledger follows the credential root,
+> 2026-09-23):** this doc is coupled through `packages/connect/src/{cli,
+> runtime,doctor}.ts`. The change: the retirement record that `--tombstone`,
+> `--unwire` and `--replace` mirror now lands in `tombstones/` beside the
+> credential root that held the retired directory, and `--doctor` reads the
+> ledger beside the root it scans. For the default root that is
+> `~/.haven/tombstones`, as before. Re-read against the diff: the `--replace`
+> guidance in step 2 (it retires that agent's local key files; `--doctor`
+> enumerates every agent regardless of name) and the override passage
+> (`~/.haven/signer-runtime/override-<hash>`) are unchanged, and no channel,
+> dist-tag, version-order or publish behaviour moves. Scope of this note: those
+> passages — nothing else in this document was re-verified.
 
 > **Re-verification (0.2.1-alpha.0 release, 2026-09-16):** this doc is coupled
 > to the release because the bump rewrites `CONNECTOR_VERSION`

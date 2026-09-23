@@ -587,7 +587,37 @@ async function openUserMenuByKeyboard(page: Page) {
  * eleven other specs, and a paused or archived agent added there would change
  * what `/agents` renders for all of them.
  */
+/**
+ * #3222 re-review: a card offers Move only when the user HAS an organization.
+ * This spec captures the focus ring on every operational control, Move
+ * included, so it seeds one; the shared fixture keeps `organizations: []` for
+ * the product-route captures. Registered per test, so it takes precedence over
+ * the shared handler (reverse registration order, as for `seedAgents`).
+ */
+async function seedOneOrganization(page: Page) {
+  await page.route('**/api/organizations', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        organizations: [
+          {
+            id: 'org-focus',
+            parent_organization_id: null,
+            name: 'Operations',
+            created_at: '2026-05-01T00:00:00Z',
+            updated_at: '2026-05-01T00:00:00Z',
+            agent_count: 0,
+          },
+        ],
+      }),
+    })
+  })
+}
+
 async function seedAgents(page: Page, agents: ReadonlyArray<Record<string, unknown>>) {
+  await seedOneOrganization(page)
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
@@ -596,29 +626,6 @@ async function seedAgents(page: Page, agents: ReadonlyArray<Record<string, unkno
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ agents }),
-      })
-      return
-    }
-    // #3222 re-review: a card offers Move only when the user HAS an
-    // organization. This spec captures the focus ring on every operational
-    // control, Move included, so it seeds one; the shared fixture keeps
-    // `organizations: []` for the product-route captures.
-    if (request.method() === 'GET' && path === '/organizations') {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          organizations: [
-            {
-              id: 'org-focus',
-              parent_organization_id: null,
-              name: 'Operations',
-              created_at: '2026-05-01T00:00:00Z',
-              updated_at: '2026-05-01T00:00:00Z',
-              agent_count: 0,
-            },
-          ],
-        }),
       })
       return
     }
@@ -792,6 +799,7 @@ test.describe('driven focus-state visual regression', () => {
 
   for (const control of rowControls) {
     test(`agent card action row — ${control.label} focus indicator (${control.tone})`, async ({ page }) => {
+      await seedOneOrganization(page)
       await gotoDesktop(page, '/agents')
 
       const target = page.locator(`button[aria-label="${control.label} ${testAgent.name}"]`)

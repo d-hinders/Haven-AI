@@ -31,7 +31,7 @@ test('a `git pull origin dev` resync counts the same as `git merge dev`', () => 
   )
 })
 
-test('MUTATION PROOF: `main` into a branch is NOT a stale-under-dev resync', () => {
+test('classify(): `main` into a branch is not a resync SUBJECT (the count itself is pinned below, #3228)', () => {
   // The script's first bug: an unanchored source made every main-into-branch
   // merge a "resync" — 89 of them in this repo — and put `dev` itself in a
   // table of work branches that outlived their PR. Merging main is release
@@ -87,8 +87,8 @@ const commit = (oid, subject, parents) => ({ oid, subject, parents })
 
 test('a merge whose parent is dev history is a resync, whatever its subject says', () => {
   // Hand-written subjects are common in PR commits ("Merge origin/dev into x",
-  // "merge dev (73a7beaa) into x"); a subject regex missed 14 of them over
-  // 2026-09-08 → 09-23. The parent is the fact.
+  // "merge dev (73a7beaa) into x"); a subject regex missed them over
+  // 2026-09-08 → 09-23 (19 of 48). The parent is the fact.
   const report = summarizePullRequests(
     [
       pr(1, 'feat/a', [
@@ -127,16 +127,37 @@ test('the same-name subject wins over the parent test — a branch reused across
   assert.equal(report.resyncs, 0)
 })
 
-test('a sync-back from main is release reconciliation, not a stale work branch', () => {
+test('MUTATION PROOF: a sync-back is recognised by its content, whatever the branch is called', () => {
+  // 6 of 9 real sync-backs had names no pattern listed (#1965
+  // codex/sync-main-20260824, #1268 chore/sync-main-after-1267, …); each
+  // carries main's promotion merge, one parent of which is on dev.
   const report = summarizePullRequests(
     [
-      pr(3, 'codex/sync-2634-main', [commit('s1', "Merge branch 'main' into codex/sync-2634-main", ['x', DEV_TIP])]),
-      pr(4, 'sync/main-0.4', [commit('s2', 'merge', ['y', DEV_TIP])]),
+      pr(1965, 'codex/sync-main-20260824', [
+        commit('s1', 'Merge pull request #1964 from d-hinders/dev', ['main-before', DEV_TIP]),
+        commit('s2', "Merge branch 'main' into codex/sync-main-20260824", ['s1', DEV_TIP]),
+      ]),
+      pr(5, 'main', [commit('s3', 'anything', ['x', DEV_TIP])]),
     ],
-    () => true,
+    (oid) => oid === DEV_TIP,
   )
   assert.equal(report.prs, 0)
+  assert.equal(report.syncBacks, 2)
   assert.equal(report.resyncs, 0)
+})
+
+test('MUTATION PROOF: `main` merged into a work branch is not counted as a resync', () => {
+  // main's tip is on dev and outside the PR, so the parent test alone would
+  // count it — the subject decides this one.
+  const report = summarizePullRequests(
+    [pr(6, 'feature/thing', [
+      commit('t1', 'feat: x', ['base']),
+      commit('t2', "Merge remote-tracking branch 'origin/main' into feature/thing", ['t1', DEV_TIP]),
+    ])],
+    (oid) => oid === DEV_TIP,
+  )
+  assert.equal(report.resyncs, 0)
+  assert.equal(report.mainMerges, 1)
 })
 
 test('the entry point counts a fixture resync and names the PR', () => {
@@ -201,4 +222,24 @@ test('a clean window reports zero and lists no branches — the #1500 target sta
   assert.equal(report.resyncs, 0)
   assert.equal(report.divergences, 0)
   assert.deepEqual(report.branches, [])
+})
+
+test('MUTATION PROOF: without a resolvable origin/dev the report refuses instead of reading every resync as "other"', () => {
+  // Outside a clone (or with no origin/dev) every ancestry check fails, and
+  // the first cut of #3228 then printed the target state over 0 resyncs.
+  const dir = mkdtempSync(join(tmpdir(), 'branch-hygiene-nogit-'))
+  const out = spawnSync(process.execPath, [SCRIPT, '--since=2026-09-16'], { encoding: 'utf8', cwd: dir })
+  assert.equal(out.status, 2)
+  assert.match(out.stderr, /origin\/dev does not resolve/)
+  assert.doesNotMatch(out.stdout, /target state/)
+})
+
+test('merges it cannot classify withhold the target-state verdict', () => {
+  const out = runOnFixture({
+    prs: [pr(3107, 'wip', [commit('w1', 'x', ['base']), commit('w2', "Merge commit '58e181d6' into wip-remote-tip", ['w1', 'elsewhere'])])],
+    onDev: [],
+  })
+  assert.equal(out.status, 0, out.stderr)
+  assert.doesNotMatch(out.stdout, /target state/)
+  assert.match(out.stdout, /could not be classified — no verdict/)
 })

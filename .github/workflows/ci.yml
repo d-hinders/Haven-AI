@@ -132,12 +132,11 @@ jobs:
 
       # #1500: the branch-hygiene report is NOT run in CI — it reports on
       # the PRs merged into `dev` (#3228), not on this PR, and needs the GitHub
-      # API; the contributor whose PR it would
-      # block is never the one who can change how sessions are launched. Only
-      # its self-test runs here, for the reason every other lint on this job
-      # is self-tested: a report nobody tests can start answering "clean"
-      # vacuously, which is worse than no report. Run the report itself with
-      # `npm run branch-hygiene`.
+      # API; the contributor whose PR it would block is never the one who can
+      # change how sessions are launched. Only its self-test runs here, for
+      # the reason every other lint on this job is self-tested: a report
+      # nobody tests can start answering "clean" vacuously, which is worse
+      # than no report. Run the report itself with `npm run branch-hygiene`.
       - name: Branch-hygiene report self-test
         run: node --test scripts/branch-hygiene.test.mjs
 

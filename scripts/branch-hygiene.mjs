@@ -103,15 +103,15 @@ export function classify(subject) {
  * Since the squash-only "Dev merge" ruleset (2026-09-07) a PR's commits are
  * squashed into one before they reach `dev`, so `dev`'s history no longer
  * carries the resync merges this report exists to count: over 2026-09-08 →
- * 09-23 it read 0 across 259 commits and printed the target state, while 29
- * resync commits sat inside 23 of the 259 PRs merged in that window. The PR's
- * commit list survives the squash, so that is what this reads.
+ * 09-23 it read 0 across 259 commits and printed the target state, while 48
+ * resync merges sat inside the 259 PRs merged in that window. The PR's commit
+ * list survives the squash, so that is what this reads.
  *
  * A merge commit is a resync when one of its parents is a commit from
  * outside the PR that is in `origin/dev`'s history — whatever its subject
  * says. Subjects in PR commits
  * are often hand-written ("Merge origin/dev into x", "merge dev (73a7beaa)
- * into x"), and a subject regex missed 14 of them on that window. The subject
+ * into x"), and a subject regex missed 19 of the 48 on that window. The subject
  * classifier above still decides the two-writers case, where neither parent
  * is on `dev`. Anything else is reported as an other merge, never dropped.
  *
@@ -123,13 +123,22 @@ export function summarizePullRequests(prs, isOnDev) {
   let resyncs = 0
   let divergences = 0
   let otherMerges = 0
+  let mainMerges = 0
+  let syncBacks = 0
   let commits = 0
   let considered = 0
   for (const pr of prs) {
     // A sync-back from `main` is MERGE-merged onto `dev` on purpose
     // (branch-and-release-flow § After every promotion); its merges are
     // release reconciliation, not a work branch going stale.
-    if (pr.headRefName === 'main' || /^sync\//.test(pr.headRefName) || /(^|\/)sync-\d+-main$/.test(pr.headRefName)) continue
+    // Detected by content, not only by name: a sync-back carries main's own
+    // promotion merges (`Merge pull request #N from <owner>/dev`), whatever
+    // its branch is called — 6 of 9 real sync-backs had names no pattern
+    // listed (codex/sync-main-20260824, chore/sync-main-after-1267, …).
+    if (isSyncBack(pr)) {
+      syncBacks += 1
+      continue
+    }
     considered += 1
     // A parent that is one of the PR's OWN commits is the branch side of the
     // merge, even when it is on `dev` today: before the squash-only ruleset a
@@ -145,6 +154,12 @@ export function summarizePullRequests(prs, isOnDev) {
       // The same-name subject wins over the parent test: a branch reused
       // across PRs (#1500's own case, #1417) merges `origin/<b>` whose tip is
       // an EARLIER PR's commit, already on `dev` and outside this PR.
+      if (MAIN_MERGE.test(commit.subject)) {
+        // `main` into a branch is release reconciliation, never a resync —
+        // even though main's tip, as a parent, is on dev and outside the PR.
+        mainMerges += 1
+        continue
+      }
       if (classify(commit.subject)?.kind === 'divergence') kind = 'divergence'
       else if (commit.parents.some((oid) => !own.has(oid) && isOnDev(oid))) kind = 'resync'
       else kind = 'other'
@@ -166,11 +181,22 @@ export function summarizePullRequests(prs, isOnDev) {
     resyncs,
     divergences,
     otherMerges,
+    mainMerges,
+    syncBacks,
     branches: [...byBranch.entries()]
       .map(([branch, { resync, divergence, prs: numbers }]) => ({ branch, resync, divergence, prs: [...numbers].sort((a, b) => a - b) }))
       .sort((a, b) => b.resync + b.divergence - (a.resync + a.divergence)),
   }
 }
+
+/** A PR that brings `main` back into `dev`: it carries main's promotion merges. */
+const PROMOTION_MERGE = /^Merge pull request #\d+ from \S+\/dev\b/
+export function isSyncBack(pr) {
+  return pr.headRefName === 'main' || pr.commits.some((c) => PROMOTION_MERGE.test(c.subject))
+}
+
+/** `main` (or `origin/main`) merged into a work branch — reconciliation, not staleness. */
+const MAIN_MERGE = /^Merge (?:remote-tracking )?branch '(?:origin\/)?main'/
 
 /** Reads `--name=value`; a bare `--name value` is refused rather than ignored. */
 export function parseArgs(argv, now = Date.now()) {
@@ -208,7 +234,12 @@ function gh(args) {
 
 /** Every PR merged into `dev` in the window, with its own commits. */
 export function fetchMergedPullRequests({ repo, since, until }) {
-  const q = `repo:${repo} is:pr is:merged base:dev merged:>=${since}`
+  // Bounded on both sides in the query, not only filtered afterwards: an
+  // open-ended `merged:>=` over an old window ran into search's 1000-result
+  // cap (899 PRs matched `merged:>=2026-08-14` on 2026-09-23) and cost ~36
+  // pages where the bounded query costs one.
+  const last = until ? new Date(Date.parse(`${until}T00:00:00Z`) - 86400000).toISOString().slice(0, 10) : ''
+  const q = `repo:${repo} is:pr is:merged base:dev merged:${last ? `${since}..${last}` : `>=${since}`}`
   const prs = []
   let after = null
   for (;;) {
@@ -220,7 +251,7 @@ export function fetchMergedPullRequests({ repo, since, until }) {
       throw new Error(`${data.search.issueCount} PRs match; GitHub search returns at most 1000 — narrow the window`)
     }
     for (const node of data.search.nodes) {
-      if (!node.number) continue
+      if (!node?.number) continue
       if (until && node.mergedAt.slice(0, 10) >= until) continue
       let commits = node.commits.nodes.map(({ commit }) => ({
         oid: commit.oid,
@@ -235,6 +266,11 @@ export function fetchMergedPullRequests({ repo, since, until }) {
         commits = JSON.parse(gh(['api', `repos/${repo}/pulls/${node.number}/commits`, '--paginate', '--slurp']))
           .flat()
           .map((c) => ({ oid: c.sha, subject: c.commit.message.split('\n')[0], parents: c.parents.map((p) => p.sha) }))
+        if (commits.length < node.commits.totalCount) {
+          throw new Error(
+            `PR #${node.number} has ${node.commits.totalCount} commits and the API returns ${commits.length} — it cannot be counted in full`,
+          )
+        }
       }
       prs.push({ number: node.number, headRefName: node.headRefName, commits })
     }
@@ -274,6 +310,15 @@ function main() {
     const onDev = new Set(fixture.onDev ?? [])
     isOnDev = (oid) => onDev.has(oid)
   } else {
+    // Without a resolvable origin/dev every parent reads "not on dev", every
+    // resync becomes an other merge, and the report would print the target
+    // state over a false zero — the defect #3228 exists to remove.
+    try {
+      execFileSync('git', ['rev-parse', '--verify', '--quiet', 'origin/dev^{commit}'], { stdio: 'ignore' })
+    } catch {
+      console.error('branch-hygiene: origin/dev does not resolve here — run it inside a clone with origin/dev fetched. No verdict.')
+      process.exit(2)
+    }
     try {
       prs = fetchMergedPullRequests({ repo, since, until })
     } catch (err) {
@@ -303,6 +348,16 @@ function main() {
   console.log(`  stale-branch resyncs:      ${report.resyncs}`)
   console.log(`  local/remote divergences:  ${report.divergences}`)
   if (report.otherMerges) console.log(`  other merge commits:       ${report.otherMerges} (neither parent on dev, not a same-name merge)`)
+  if (report.mainMerges || report.syncBacks) {
+    console.log(`  not counted:               ${report.mainMerges} main-into-branch merge(s), ${report.syncBacks} sync-back PR(s)`)
+  }
+
+  if (report.branches.length === 0 && report.otherMerges > 0) {
+    // No resync found, but some merges could not be classified: say so instead
+    // of claiming the target state over them.
+    console.log(`\n  No resync or divergence found, but ${report.otherMerges} merge(s) could not be classified — no verdict.`)
+    return
+  }
 
   if (report.branches.length === 0) {
     console.log(`\n✓ One branch per PR, each cut fresh, across ${report.prs} PRs. This is the target state (#1500).`)

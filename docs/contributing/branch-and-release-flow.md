@@ -131,9 +131,11 @@ the target state for 2026-09-08 → 09-23 while 48 resync merges sat inside the
 parents is a commit from outside the PR that `dev` already had, whatever its
 subject says (PR-commit subjects are often hand-written); a same-name
 `origin/<b>` into `<b>` merge is a divergence. It deliberately does not count
-`main` into a branch, or a `main` sync-back PR: that is release
-reconciliation, a different act with a different cause. Zero of both is the
-target state. It REPORTS rather than gates on purpose: these commits are
+`main` merged into a branch, or a sync-back PR (recognised by the promotion
+merges it carries, `Merge pull request #N from <owner>/dev`, whatever the
+branch is called): that is release reconciliation, a different act with a
+different cause, and the report lists both as "not counted". Zero of both is
+the target state, and it is printed only when every merge was classified. It REPORTS rather than gates on purpose: these commits are
 evidence of a launch configuration, and the contributor who would trip a gate
 is never the one who can change it.
 
@@ -141,9 +143,11 @@ Measure a specific window with `--since=` / `--until=` (merge dates,
 `YYYY-MM-DD`, `--until` exclusive; the `=` form only — a space-separated
 value is refused rather than silently defaulted), or `--json` for a
 machine-readable summary. A window with no merged PR refuses (exit 1) instead
-of printing the target state over nothing; a failed GitHub read exits 2. It
+of printing the target state over nothing; a failed GitHub read, a PR whose
+commits the API cannot list in full, or an `origin/dev` that does not resolve
+exits 2 — without `origin/dev` every resync would read as unclassified. It
 needs an authenticated `gh` and a fetched `origin/dev`, and it spends GraphQL
-quota: about 1,200 points for the two windows below together.
+quota: about 300 points for the two windows below together.
 
 Against #1500's original evidence window (2026-08-14 → 08-15) the old
 dev-history reading reproduced that issue's table — 6 resyncs and 1

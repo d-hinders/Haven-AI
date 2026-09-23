@@ -335,8 +335,11 @@ describe('openapiSpec', () => {
     const searchParam = catalogGet.parameters?.find((param) => param.name === 'search')
 
     expect(catalogGet.description).toMatch(/case-insensitive/i)
-    expect(catalogGet.description).toMatch(/search matches product name, description, or category/i)
+    expect(catalogGet.description).toMatch(
+      /every whitespace-separated search word must match the product name, description, or category/i,
+    )
     expect(catalogGet.description).toMatch(/blank search is rejected after trimming/i)
+    expect(catalogGet.description).toMatch(/searches with more than 8 words return 400/i)
     expect(catalogGet.description).toMatch(/nothing here creates payments or signatures/i)
     expect(catalogGet.parameters).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'category', in: 'query', schema: { type: 'string' } }),

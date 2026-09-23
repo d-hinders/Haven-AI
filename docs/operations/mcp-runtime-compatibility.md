@@ -741,9 +741,12 @@ startup; setup preinstalls a tested runtime and writes a stable wrapper:
 `haven_discover_tools` remains skew-flat across the local and hosted MCP
 topologies: since #1350 it accepts the same optional `search` argument on both
 surfaces, alongside the existing `category` and `rail` filters. `category`
-matching is case-insensitive after trim, `search` matches catalog `name`,
-`description`, or `category`, and omitting the new field preserves the older
-request shape exactly. Since #1716 both surfaces also accept the same optional
+matching is case-insensitive after trim. `search` normalizes whitespace,
+accepts at most eight words, and requires every word to match the product
+`name`, `description`, or `category`; merchant name is deliberately excluded
+because it belongs to the separate merchant table. More than eight words
+returns 400, while omitting `search` preserves the older request shape exactly.
+Since #1716 both surfaces also accept the same optional
 `verified` filter (`any` | `verified` | `operator`) and return the `source` /
 `domain_verified` / `verified_payable` badge fields on each entry — added to
 BOTH surfaces together, so the skew-flat claim holds unchanged. Since #2978,

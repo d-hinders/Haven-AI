@@ -284,14 +284,16 @@ describe('catalog routes', () => {
       .slice()
       .reverse()
       .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
-    expect(String(catalogCall?.[0])).toContain(
-      `(mc.name ILIKE '%' || $2 || '%' OR mc.description ILIKE '%' || $2 || '%' OR mc.category ILIKE '%' || $2 || '%')`,
-    )
+    for (const parameter of [2, 3, 4]) {
+      expect(String(catalogCall?.[0])).toContain(
+        `(mc.name ILIKE '%' || $${parameter} || '%' OR mc.description ILIKE '%' || $${parameter} || '%' OR mc.category ILIKE '%' || $${parameter} || '%')`,
+      )
+    }
     expect(String(catalogCall?.[0])).toContain(`rail = $1`)
-    expect(String(catalogCall?.[0])).toContain(`mc.network = $3`)
+    expect(String(catalogCall?.[0])).toContain(`mc.network = $5`)
     expect(String(catalogCall?.[0])).toContain(`status != 'delisted'`)
     expect(String(catalogCall?.[0])).toContain('ORDER BY mc.status = \'active\' DESC, mc.category ASC, mc.name ASC, mc.id ASC')
-    expect(catalogCall?.[1]).toEqual(['x402', 'NordShield VPN Basic', 'eip155:8453'])
+    expect(catalogCall?.[1]).toEqual(['x402', 'NordShield', 'VPN', 'Basic', 'eip155:8453'])
   })
 
   it('finds a product from a category term search', async () => {
@@ -317,6 +319,39 @@ describe('catalog routes', () => {
       `(mc.name ILIKE '%' || $1 || '%' OR mc.description ILIKE '%' || $1 || '%' OR mc.category ILIKE '%' || $1 || '%')`,
     )
     expect(values).toEqual(['VPN'])
+  })
+
+  it('applies every search word to ingestion names and descriptions too', async () => {
+    mockCatalogWithIngestion([], [
+      {
+        id: '00000000-0000-4000-8000-000000000003',
+        resource_url: 'https://ingestion.example/mcp',
+        name: 'Ampersend service',
+        description: 'A joke on demand',
+        entrypoint: 'joke',
+        last_verified_at: '2026-08-23T10:00:00.000Z',
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000004',
+        resource_url: 'https://ingestion.example/weather',
+        name: 'Ampersend weather',
+        description: 'Forecasts on demand',
+        entrypoint: 'weather',
+        last_verified_at: '2026-08-23T10:00:00.000Z',
+      },
+    ])
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/catalog?search=%20Ampersend%20%20joke%20api%20',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries).toEqual([
+      expect.objectContaining({ id: '00000000-0000-4000-8000-000000000003', source: 'ingestion' }),
+    ])
   })
 
   it('returns an empty result for an unmatched search', async () => {
@@ -379,6 +414,38 @@ describe('catalog routes', () => {
     expect(long.statusCode).toBe(400)
     expect(long.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
     expect(long.json().details).toContain('querystring/search')
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  it('accepts up to eight search words and the existing 120-character limit, then explicitly refuses a ninth word', async () => {
+    mockCatalogWithIngestion([])
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const eight = await app.inject({
+      method: 'GET',
+      url: '/catalog?search=one%20two%20three%20four%20five%20six%20seven%20eight',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(eight.statusCode).toBe(200)
+    expect(mockQuery.mock.calls[0][1]).toEqual(['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'])
+
+    mockQuery.mockClear()
+    const maxLength = await app.inject({
+      method: 'GET',
+      url: `/catalog?search=${'x'.repeat(120)}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(maxLength.statusCode).toBe(200)
+    expect(mockQuery.mock.calls[0][1]).toEqual(['x'.repeat(120)])
+
+    mockQuery.mockClear()
+    const nine = await app.inject({
+      method: 'GET',
+      url: '/catalog?search=one%20two%20three%20four%20five%20six%20seven%20eight%20nine',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(nine.statusCode).toBe(400)
+    expect(nine.json()).toEqual({ error: 'Search must contain at most 8 words' })
     expect(mockQuery).not.toHaveBeenCalled()
   })
 

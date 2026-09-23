@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { scanSource, balancedBlock } from './lint-next-steps.mjs'
+import { scanSource, balancedBlock, scan, SCAN_TARGETS, BASELINE_PATH } from './lint-next-steps.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const CLI = join(ROOT, 'scripts/lint-next-steps.mjs')
@@ -76,12 +76,131 @@ describe('the gate', () => {
     const { tmpdir } = await import('node:os')
     const root = await mkdtemp(join(tmpdir(), 'lint-next-steps-'))
     try {
+      // Placeholder files at the four targets the violation does not live in:
+      // since #3230 the gate refuses when ANY target matches no files, so a
+      // fixture touching one target must still read all five for the growth
+      // verdict to be the thing that fires.
+      for (const target of SCAN_TARGETS) {
+        const abs = join(root, target)
+        if (target.endsWith('.ts')) {
+          await mkdir(dirname(abs), { recursive: true })
+          await writeFile(abs, '')
+        } else {
+          await mkdir(abs, { recursive: true })
+          await writeFile(join(abs, 'placeholder.ts'), '')
+        }
+      }
       await mkdir(join(root, 'packages/mcp-server/src/tools/support'), { recursive: true })
       await writeFile(join(root, 'packages/mcp-server/src/tools/support/cap-price.ts'),
         "throw new HostedToolError({ code: 'X', message: 'm', nextAction: AgentPaymentNextAction.StopAndTellUser })\n")
       const r = spawnSync(process.execPath, [CLI, `--root=${root}`], { cwd: ROOT, encoding: 'utf8' })
       assert.equal(r.status, 1)
       assert.match(r.stderr, /cap-price\.ts unnamed: 1 \(baseline allows 0\)/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('a target matching no files is REFUSED, naming it (#3230)', async () => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    // The exact measured defect: EVERY target moved aside — the gate read
+    // nothing and still printed a clean verdict.
+    const root = await mkdtemp(join(tmpdir(), 'lint-next-steps-'))
+    try {
+      const r = spawnSync(process.execPath, [CLI, `--root=${root}`], { cwd: ROOT, encoding: 'utf8' })
+      assert.equal(r.status, 1)
+      assert.match(r.stderr, /matched no source files/)
+      for (const target of SCAN_TARGETS) assert.match(r.stderr, new RegExp(target.replace(/[.\\]/g, '\\$&')))
+      assert.doesNotMatch(r.stdout, /✓/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('ONE missing target refuses too — the check is per target, not only on a total zero', async () => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const root = await mkdtemp(join(tmpdir(), 'lint-next-steps-'))
+    try {
+      // Four targets populated, the fifth missing: the scan is non-empty, so
+      // only the per-target census catches this.
+      for (const target of SCAN_TARGETS) {
+        if (target === 'packages/signer/src/sign-context.ts') continue
+        const abs = join(root, target)
+        if (target.endsWith('.ts')) {
+          await mkdir(dirname(abs), { recursive: true })
+          await writeFile(abs, '')
+        } else {
+          await mkdir(abs, { recursive: true })
+          await writeFile(join(abs, 'placeholder.ts'), '')
+        }
+      }
+      const r = spawnSync(process.execPath, [CLI, `--root=${root}`], { cwd: ROOT, encoding: 'utf8' })
+      assert.equal(r.status, 1)
+      assert.match(r.stderr, /matched no source files/)
+      assert.match(r.stderr, /sign-context\.ts/)
+      assert.doesNotMatch(r.stdout, /✓/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('the refusal gates --update: a zero-file scan writes NO baseline (#3230)', async () => {
+    const { mkdtemp, mkdir, writeFile, rm, readFile } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    // `scan` is pure of the refusal (it must stay usable as a census), and the
+    // write refusal lives in main. Rather than spawn a second COPY of the
+    // script, run the real CLI in a fixture where scripts/ holds the shipped
+    // gate and the baseline path points inside the fixture via --root (the
+    // baseline is read/written relative to THIS repo, so --update against a
+    // starved root must fail here before touching the committed file).
+    const root = await mkdtemp(join(tmpdir(), 'lint-next-steps-'))
+    try {
+      const before = await readFile(BASELINE_PATH, 'utf8')
+      const r = spawnSync(process.execPath, [CLI, '--update', `--root=${root}`], { cwd: ROOT, encoding: 'utf8' })
+      assert.equal(r.status, 1)
+      assert.match(r.stderr, /matched no source files/)
+      assert.equal(await readFile(BASELINE_PATH, 'utf8'), before, 'committed baseline must be untouched')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('scan() reports the census: every target read on this repo, fileCount > 0', async () => {
+    const { fileCount, readByTarget } = await scan(ROOT)
+    assert.ok(fileCount > 0, 'the real tree reads a non-zero number of files')
+    for (const target of SCAN_TARGETS) {
+      assert.ok((readByTarget.get(target) ?? 0) > 0, `${target} matched no files in the census`)
+    }
+  })
+
+  test('scan() counts files actually read, per target, on a fixture tree', async () => {
+    const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const root = await mkdtemp(join(tmpdir(), 'lint-next-steps-'))
+    try {
+      // tools/ gets two readable .ts files (one nested), one .test.ts the
+      // gate's own filter excludes, and one .md the extension filter ignores —
+      // the census counts READS, not directory entries, so it must say 2 here.
+      await mkdir(join(root, 'packages/mcp-server/src/tools/nested'), { recursive: true })
+      await writeFile(join(root, 'packages/mcp-server/src/tools/a.ts'), '')
+      await writeFile(join(root, 'packages/mcp-server/src/tools/a.test.ts'), '')
+      await writeFile(join(root, 'packages/mcp-server/src/tools/nested/b.ts'), '')
+      await writeFile(join(root, 'packages/mcp-server/src/tools/notes.md'), '')
+      await writeFile(join(root, 'packages/mcp-server/src/tools.ts'), '')
+      await mkdir(join(root, 'packages/signer/src'), { recursive: true })
+      await writeFile(join(root, 'packages/signer/src/sign-context.ts'), '')
+      await writeFile(join(root, 'packages/signer/src/tools.ts'), '')
+      await mkdir(join(root, 'packages/mcp/src'), { recursive: true })
+      await writeFile(join(root, 'packages/mcp/src/tools.ts'), '')
+      const { fileCount, readByTarget } = await scan(root)
+      assert.equal(readByTarget.get('packages/mcp-server/src/tools'), 2)
+      assert.equal(readByTarget.get('packages/mcp-server/src/tools.ts'), 1)
+      assert.equal(readByTarget.get('packages/signer/src/sign-context.ts'), 1)
+      assert.equal(readByTarget.get('packages/signer/src/tools.ts'), 1)
+      assert.equal(readByTarget.get('packages/mcp/src/tools.ts'), 1)
+      assert.equal(fileCount, 6)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

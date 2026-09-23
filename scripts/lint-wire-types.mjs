@@ -56,6 +56,7 @@ import {
   writeBaseline,
   loadBaseline,
   updateRefusals,
+  zeroScanEntries,
   ACCEPT_NEW_BASELINE_FLAG,
   firstRunRefusalMessage,
   runGate,
@@ -63,7 +64,8 @@ import {
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const BASELINE_PATH = join(REPO_ROOT, 'packages', 'frontend', 'wire-type-baseline.json')
-const SCAN_DIRS = [
+/** Exported so the self-test reads the same list the gate scans (as lint-next-steps exports SCAN_TARGETS). */
+export const SCAN_DIRS = [
   join(REPO_ROOT, 'packages', 'frontend', 'src', 'hooks'),
   join(REPO_ROOT, 'packages', 'frontend', 'src', 'types'),
 ]
@@ -156,7 +158,7 @@ async function* walk(dir) {
   try {
     entries = await readdir(dir, { withFileTypes: true })
   } catch {
-    return // a scan dir that does not exist yet is not an error
+    return // an unreadable dir yields nothing; scanAll's census fails the run
   }
   for (const entry of entries) {
     const p = join(dir, entry.name)
@@ -169,16 +171,35 @@ async function* walk(dir) {
   }
 }
 
+/**
+ * Scan both dirs and return `{ counts, fileCount, readByDir }`.
+ *
+ * `readByDir` is the census the zero-scan refusal reads (#3230): per SCAN_DIRS
+ * entry, how many files the scan actually READ. The old walker swallowed a
+ * missing directory as "not an error yet" — which read, over an emptied tree,
+ * as `0 … across 0 file(s)` plus a ✓ and an `--update` recommendation. Both
+ * targets exist today, so a missing one is a defect (a moved or deleted
+ * directory), not a pending one, and the caller refuses on it; the census is
+ * what makes that check honest for the empty-directory case too (readdir
+ * succeeds, the walk yields nothing, the count is still 0). Exported for the
+ * self-test, which asserts the census rather than trusting it.
+ */
 export async function scanAll() {
   const counts = {}
+  const readByDir = new Map()
+  let fileCount = 0
   for (const dir of SCAN_DIRS) {
+    let readHere = 0
     for await (const file of walk(dir)) {
       const rel = relative(REPO_ROOT, file).split(sep).join('/')
       const fileCounts = scanSource(await readFile(file, 'utf8'))
       if (Object.keys(fileCounts).length > 0) counts[rel] = fileCounts
+      readHere += 1
+      fileCount += 1
     }
+    readByDir.set(dir, readHere)
   }
-  return counts
+  return { counts, fileCount, readByDir }
 }
 
 function total(counts) {
@@ -206,12 +227,31 @@ const REMEDY =
 export { updateRefusals }
 
 async function main() {
-  const counts = await scanAll()
+  const { counts, fileCount, readByDir } = await scanAll()
+  // The zero-scan refusal (#3230): a SCAN_DIRS entry matching no files means
+  // the gate is scanning less than it claims, and over an emptied tree it
+  // used to print a clean verdict and advise --update — which would lock the
+  // zero in as the baseline. Refuse before any verdict or write, naming every
+  // starved dir, the way copy-lint refuses a SCAN_DIRS entry that matched
+  // nothing (#2317).
+  const zeroDirs = zeroScanEntries(SCAN_DIRS, readByDir)
+  if (zeroDirs.length > 0) {
+    console.error(
+      `✗ lint-wire-types — ${zeroDirs.length} of ${SCAN_DIRS.length} scan dir(s) matched no source files:`,
+    )
+    for (const d of zeroDirs) console.error(`  ${relative(REPO_ROOT, d) || d}`)
+    console.error(
+      '\nThe gate read no files there — a moved or deleted directory is a defect, ' +
+        'not a pending one, and the verdict (or --update write) over an empty scan ' +
+        'would hide it. Repoint SCAN_DIRS; do not leave an entry matching nothing.',
+    )
+    process.exit(1)
+  }
   const { baseline, firstRun } = loadBaseline(BASELINE_PATH)
   const acceptNew = process.argv.includes(ACCEPT_NEW_BASELINE_FLAG)
   const t = total(counts)
   console.log(
-    `wire-type gauge: ${t.types} hand-written wire shape(s) across ${t.files} file(s).`,
+    `wire-type gauge: ${t.types} hand-written wire shape(s) across ${t.files} file(s), ${fileCount} file(s) read.`,
   )
 
   if (process.argv.includes('--update')) {
@@ -224,7 +264,7 @@ async function main() {
       process.exit(1)
     }
     writeBaseline(BASELINE_PATH, counts)
-    console.log(`✓ baseline written (${BASELINE_PATH}).`)
+    console.log(`✓ baseline written (${BASELINE_PATH}) from ${fileCount} file(s).`)
     return
   }
 

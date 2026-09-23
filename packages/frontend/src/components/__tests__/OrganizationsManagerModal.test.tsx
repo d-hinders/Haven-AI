@@ -259,9 +259,10 @@ describe('OrganizationsManagerModal — errors stay where they happened (#3236 r
     expect(within(screen.getByTestId('organization-manager-list')).queryByRole('alert')).toBeNull()
   })
 
-  it('a delete that 404s (already gone) closes the dialog and refetches instead of offering a retry', async () => {
+  it('a delete that 404s (already gone) closes the dialog, refetches and tells the page, instead of offering a retry', async () => {
     mockDelete.mockRejectedValueOnce(Object.assign(new Error('Organization not found'), { status: 404 }))
-    renderModal()
+    const onOrganizationsChanged = vi.fn()
+    render(<OrganizationsManagerModal open onClose={vi.fn()} onOrganizationsChanged={onOrganizationsChanged} />)
     await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
     const fetchesBefore = mockGet.mock.calls.length
     fireEvent.click(
@@ -272,6 +273,8 @@ describe('OrganizationsManagerModal — errors stay where they happened (#3236 r
     fireEvent.click(await screen.findByRole('button', { name: 'Delete organization' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete organization' })).toBeNull())
     expect(mockGet.mock.calls.length).toBeGreaterThan(fetchesBefore)
+    // The page's tree refreshes too — not only the manager's own list.
+    expect(onOrganizationsChanged).toHaveBeenCalled()
     expect(screen.queryByText('Organization not found')).toBeNull()
   })
 })

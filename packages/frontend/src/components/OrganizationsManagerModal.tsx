@@ -166,13 +166,17 @@ export default function OrganizationsManagerModal({
       if (httpStatusOf(err) === 404) {
         setDeleteTarget(null)
         void fetchOrganizations()
+        // The page's own tree holds its own copy of the list: tell it too,
+        // exactly as a successful delete does through `onChanged` (#3236
+        // round 2 — the tree kept listing the folder that was already gone).
+        onOrganizationsChanged?.()
       } else {
         setDeleteError(`${deleteTarget.name} was not deleted. Try again.`)
       }
     } finally {
       setDeleting(false)
     }
-  }, [deleteTarget, deleteOrganization, fetchOrganizations])
+  }, [deleteTarget, deleteOrganization, fetchOrganizations, onOrganizationsChanged])
 
   /** Move options: every organization except the one being moved. */
   const moveOptions = useMemo(

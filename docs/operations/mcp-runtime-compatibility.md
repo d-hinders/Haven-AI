@@ -2858,3 +2858,19 @@ to call next in structured fields, and those fields are typed end to end
 > history. No step, job, trigger, publish path or runtime check changes.
 > Scope of this note: that comment. Nothing else in this document was
 > re-verified.
+
+> **Re-verified #3253 (2026-09-23, hosted instructions name the plain-HTTP
+> x402 path):** this diff touches `packages/mcp-server/src/server.ts`, a
+> covered file, in `HOSTED_INSTRUCTIONS` only. The instructions gain one
+> paragraph naming the plain-HTTP sequence the per-tool guidance already
+> drives — `haven_quote_x402` → `haven_pay_x402_quote` with `url` set to the
+> quote's `request_url`, then the EIP-3009 branch (`haven_sign_x402` →
+> `haven_submit` → the agent's own merchant retry → `haven_report_x402_outcome`)
+> or the erc7710 branch (`haven_sign` → `haven_submit` with
+> `settlement_scheme: "erc7710"` → the agent's retry, no outcome report) — and
+> the session bootstrap now says `haven_get_agent` runs at the start of every
+> session, with `haven_discover_tools` allowed in parallel when discovery is
+> needed. No tool, schema key, `next_tool` value, expected-context version or
+> signer contract changes; the local runtime's instructions
+> (`packages/mcp/src/server.ts`) are untouched. Scope of this note: that
+> text. Nothing else in this document was re-verified.

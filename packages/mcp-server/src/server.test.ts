@@ -8,6 +8,7 @@ import {
   HOSTED_INSTRUCTIONS,
   HOSTED_SERVER_VERSION,
 } from './server.js'
+import { toolSchemas } from './tools.js'
 
 describe('createHostedHavenClient', () => {
   it('builds a keyless client (no delegate address, no signing path)', () => {
@@ -280,6 +281,74 @@ describe('buildHostedMcpServer', () => {
     // literal or the package's own version constant would.
     expect(HOSTED_INSTRUCTIONS).not.toMatch(/\d+\.\d+\.\d+/)
     expect(HOSTED_INSTRUCTIONS).not.toContain(HOSTED_SERVER_VERSION)
+  })
+
+  // #3253: the plain-HTTP x402 path had header rules but no sequence, and an
+  // agent spent most of a run working it out. Cheap literal and ordering
+  // guards over the one paragraph that names it; nothing interprets prose.
+  describe('plain-HTTP x402 happy path (#3253)', () => {
+    const paragraph =
+      HOSTED_INSTRUCTIONS.split('\n\n').find((p) => p.startsWith('For a plain-HTTP x402 merchant')) ?? ''
+    const eip3009 = paragraph.slice(
+      paragraph.indexOf('EIP-3009 (funding leg):'),
+      paragraph.indexOf('erc7710: haven_sign,'),
+    )
+    const erc7710 = paragraph.slice(paragraph.indexOf('erc7710: haven_sign,'))
+    const order = (text: string, names: string[]) => names.map((name) => text.indexOf(name))
+
+    it('names the quote → pay handoff with url: request_url, never resource_url', () => {
+      expect(paragraph).not.toBe('')
+      expect(paragraph).toContain('haven_quote_x402, then haven_pay_x402_quote')
+      expect(paragraph).toContain('{ payment_required, url: request_url, max_amount_human | max_amount }')
+      // #3097: passing the merchant's declared resource_url as url was the downgrade.
+      expect(HOSTED_INSTRUCTIONS).not.toMatch(/url:\s*resource_url/)
+    })
+
+    it('EIP-3009 branch: haven_sign_x402 → haven_submit → retry → ends in haven_report_x402_outcome', () => {
+      expect(eip3009).not.toBe('')
+      const idx = order(eip3009, ['haven_sign_x402', 'haven_submit', 'payment_header', 'haven_report_x402_outcome'])
+      expect(idx.every((i) => i >= 0)).toBe(true)
+      expect(idx).toEqual([...idx].sort((a, b) => a - b))
+      // The chain ENDS in the report: no other tool is named after it.
+      const tools = eip3009.match(/haven_\w+/g) ?? []
+      expect(tools.at(-1)).toBe('haven_report_x402_outcome')
+    })
+
+    it('erc7710 branch: haven_sign → haven_submit with settlement_scheme erc7710, PAYMENT-SIGNATURE only, no report', () => {
+      expect(erc7710).not.toBe('')
+      const idx = order(erc7710, ['haven_sign,', 'haven_submit', 'settlement_scheme "erc7710"', 'PAYMENT-SIGNATURE'])
+      expect(idx.every((i) => i >= 0)).toBe(true)
+      expect(idx).toEqual([...idx].sort((a, b) => a - b))
+      expect(erc7710).toContain('there is no outcome report on this path')
+      expect(erc7710).not.toContain('haven_report_x402_outcome')
+      expect(paragraph).toContain('The outcome report is EIP-3009-only.')
+    })
+
+    it('keeps the #2292 perimeter: the agent retries the merchant, not Haven', () => {
+      expect(eip3009).toContain('retry the merchant yourself')
+      expect(erc7710).toContain('retry the merchant yourself')
+    })
+  })
+
+  it('states the session bootstrap without a serial "first, every session" requirement (#3253)', () => {
+    expect(HOSTED_INSTRUCTIONS).not.toContain('first, every session')
+    expect(HOSTED_INSTRUCTIONS).not.toMatch(/haven_get_agent\s+first/)
+    expect(HOSTED_INSTRUCTIONS).toContain('Call haven_get_agent at the start of every session')
+    expect(HOSTED_INSTRUCTIONS).toContain('When catalog discovery is needed, haven_discover_tools can run in')
+  })
+
+  it('names only tools that exist on the hosted registry or the local signer (#3253)', async () => {
+    const { toolSchemas: signerSchemas } = await import('@haven_ai/signer')
+    const known = new Set([...Object.keys(toolSchemas), ...Object.keys(signerSchemas)])
+    // Two haven_* tokens are not tools: the npm scope (@haven_ai/…) and Codex's
+    // signer config key (haven_signer).
+    const notTools = new Set(['haven_ai', 'haven_signer'])
+    const named = [...new Set(HOSTED_INSTRUCTIONS.match(/\bhaven_[a-z0-9_]+/g) ?? [])].filter(
+      (name) => !notTools.has(name),
+    )
+    // Positive control: the instrument sees the tools the new paragraph names.
+    expect(named).toEqual(expect.arrayContaining(['haven_quote_x402', 'haven_sign', 'haven_report_x402_outcome']))
+    expect(named.filter((name) => !known.has(name))).toEqual([])
   })
 })
 

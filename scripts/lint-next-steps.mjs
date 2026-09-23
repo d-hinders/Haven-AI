@@ -43,6 +43,7 @@ import {
   writeBaseline,
   loadBaseline,
   updateRefusals,
+  zeroScanEntries,
   ACCEPT_NEW_BASELINE_FLAG,
   firstRunRefusalMessage,
   runGate,
@@ -208,13 +209,32 @@ async function listFiles(root, target) {
     }
     return out
   } catch {
+    // A target that is not a directory may be a single FILE (sign-context.ts
+    // is); readdir failing on it is not evidence it is missing.
+    try {
+      await readFile(abs, 'utf8')
+    } catch {
+      return [] // genuinely absent — the zero-scan census must see it as 0
+    }
     return [target]
   }
 }
 
+/**
+ * Scan every target and return `{ counts, fileCount, readByTarget }`.
+ *
+ * `readByTarget` is the census the zero-scan refusal reads (#3230): per
+ * SCAN_TARGETS entry, how many files the scan actually READ. Moving the
+ * targets aside used to yield a clean verdict over 0 files; now the caller
+ * refuses before any verdict (see main). Exported for the self-test, which
+ * asserts the census rather than trusting it.
+ */
 export async function scan(root = DEFAULT_ROOT) {
   const counts = {}
+  const readByTarget = new Map()
+  let fileCount = 0
   for (const target of SCAN_TARGETS) {
+    let readHere = 0
     for (const file of await listFiles(root, target)) {
       let source
       try {
@@ -222,11 +242,14 @@ export async function scan(root = DEFAULT_ROOT) {
       } catch {
         continue
       }
+      readHere += 1
+      fileCount += 1
       const c = scanSource(source)
       if (c.unnamed || c.discovery_without_arguments) counts[file] = c
     }
+    readByTarget.set(target, readHere)
   }
-  return counts
+  return { counts, fileCount, readByTarget }
 }
 
 const REMEDY =
@@ -238,7 +261,26 @@ async function main() {
   const args = process.argv.slice(2)
   const rootFlag = args.find((a) => a.startsWith('--root='))
   const root = rootFlag ? rootFlag.slice('--root='.length) : DEFAULT_ROOT
-  const counts = await scan(root)
+  const { counts, fileCount, readByTarget } = await scan(root)
+  // The zero-scan refusal (#3230): a target matching no files means the gate
+  // is scanning less than it claims, and over an emptied tree it prints a
+  // clean verdict — `--update` would then write that zero in as the baseline.
+  // Refuse before ANY verdict or write, naming every starved target, the way
+  // copy-lint refuses a SCAN_DIRS entry that matched nothing (#2317).
+  const zeroTargets = zeroScanEntries(SCAN_TARGETS, readByTarget)
+  if (zeroTargets.length > 0) {
+    console.error(
+      `✗ lint:next-steps — ${zeroTargets.length} of ${SCAN_TARGETS.length} scan target(s) matched no source files:`,
+    )
+    for (const t of zeroTargets) console.error(`  ${t}`)
+    console.error(
+      '\nThe gate read no files there — a clean verdict over an empty scan would hide the ' +
+        'hole, and --update would lock the zero in as the baseline. ' +
+        'A target that moved must be repointed, not left matching nothing.',
+    )
+    process.exitCode = 1
+    return
+  }
   const total = Object.values(counts).reduce((n, c) => n + c.unnamed + c.discovery_without_arguments, 0)
   if (args.includes('--update')) {
     const { firstRun, refusal } = updateRefusals(BASELINE_PATH, counts, args.includes(ACCEPT_NEW_BASELINE_FLAG))
@@ -248,7 +290,7 @@ async function main() {
       return
     }
     writeBaseline(BASELINE_PATH, counts)
-    console.log(`lint:next-steps baseline ${firstRun ? 'initialized' : 'updated'}: ${total} unnamed/argument-less emission(s) across ${Object.keys(counts).length} file(s)`)
+    console.log(`lint:next-steps baseline ${firstRun ? 'initialized' : 'updated'}: ${total} unnamed/argument-less emission(s) across ${Object.keys(counts).length} file(s) (read ${fileCount})`)
     return
   }
   const baseline = loadBaseline(BASELINE_PATH)
@@ -266,7 +308,7 @@ async function main() {
     return
   }
   const shrunk = hasShrunk(counts, baseline)
-  console.log(`✓ lint:next-steps — every next-step emission names a tool or a reason (${total} allowed by baseline${shrunk ? '; baseline can shrink, run --update' : ''}) at ${relative(process.cwd(), root) || '.'}`)
+  console.log(`✓ lint:next-steps — every next-step emission names a tool or a reason (${total} allowed by baseline, ${fileCount} file(s) read${shrunk ? '; baseline can shrink, run --update' : ''}) at ${relative(process.cwd(), root) || '.'}`)
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) runGate('lint:next-steps', main)

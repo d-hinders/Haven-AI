@@ -48,17 +48,24 @@ export default function OrganizationsManagerModal({
   const [newName, setNewName] = useState('')
   const [newParentId, setNewParentId] = useState('')
   const [rowError, setRowError] = useState<string | null>(null)
+  // #3236 review: the create form has its OWN error. Sharing `rowError` put a
+  // rename or move failure under the create form, and a create failure into an
+  // open rename row — the same alert twice, in the wrong place.
+  const [createError, setCreateError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Organization | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) {
       setEditingId(null)
       setMovingId(null)
       setRowError(null)
+      setCreateError(null)
       setNewName('')
       setNewParentId('')
+      setDeleteError(null)
       void fetchOrganizations()
     }
   }, [open, fetchOrganizations])
@@ -125,28 +132,51 @@ export default function OrganizationsManagerModal({
     const name = newName.trim()
     if (!name) return
     setSaving(true)
-    setRowError(null)
+    setCreateError(null)
     try {
       await createOrganization(name, newParentId || null)
       setNewName('')
       setNewParentId('')
     } catch (err) {
-      setRowError(err instanceof Error ? err.message : 'The organization could not be created.')
+      setCreateError(err instanceof Error ? err.message : 'The organization could not be created.')
     } finally {
       setSaving(false)
     }
   }, [createOrganization, newParentId, newName])
 
+  const startDelete = useCallback((org: Organization) => {
+    setDeleteError(null)
+    setDeleteTarget(org)
+  }, [])
+
+  // #3236: the catch is the point — without it a rejected DELETE escapes past
+  // the `void confirmDelete()` call site as an unhandled rejection and the
+  // dialog sits silent. A 404 means it is already gone (a lost race): close
+  // and refetch, since retrying could never succeed. Anything else says the
+  // organization was NOT deleted, in our words rather than the server's, and
+  // the dialog stays open for a retry.
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return
     setDeleting(true)
+    setDeleteError(null)
     try {
       await deleteOrganization(deleteTarget.id)
       setDeleteTarget(null)
+    } catch (err) {
+      if (httpStatusOf(err) === 404) {
+        setDeleteTarget(null)
+        void fetchOrganizations()
+        // The page's own tree holds its own copy of the list: tell it too,
+        // exactly as a successful delete does through `onChanged` (#3236
+        // round 2 — the tree kept listing the folder that was already gone).
+        onOrganizationsChanged?.()
+      } else {
+        setDeleteError(`${deleteTarget.name} was not deleted. Try again.`)
+      }
     } finally {
       setDeleting(false)
     }
-  }, [deleteTarget, deleteOrganization])
+  }, [deleteTarget, deleteOrganization, fetchOrganizations, onOrganizationsChanged])
 
   /** Move options: every organization except the one being moved. */
   const moveOptions = useMemo(
@@ -186,7 +216,7 @@ export default function OrganizationsManagerModal({
 
         <div className="p-6">
           {/* Create */}
-          <div className="mb-4">
+          <div className="mb-4" data-testid="organization-create-form">
             <p className="mb-1.5 text-xs font-medium text-[var(--v2-ink-3)]">Add an organization</p>
             <div className="flex gap-2">
               <Input
@@ -226,6 +256,14 @@ export default function OrganizationsManagerModal({
                 ))}
               </Select>
             )}
+            {/* #3236: a rejected POST (409 sibling-name collision is the common
+                case) used to show nothing. Its own state, rendered below the
+                "place inside" select the message refers to ("in that place"). */}
+            {createError ? (
+              <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
+                {createError}
+              </p>
+            ) : null}
           </div>
 
           {loading ? (
@@ -304,7 +342,15 @@ export default function OrganizationsManagerModal({
                         ))}
                       </Select>
                       <div className="flex gap-2">
-                        <Button variant="ghost" size="sm" onClick={() => setMovingId(null)} className="flex-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setMovingId(null)
+                            setRowError(null)
+                          }}
+                          className="flex-1"
+                        >
                           Cancel
                         </Button>
                         <Button size="sm" onClick={() => void saveMove(org)} disabled={saving} className="flex-1">
@@ -364,7 +410,7 @@ export default function OrganizationsManagerModal({
                         <Button
                           variant="tertiary"
                           size="sm"
-                          onClick={() => setDeleteTarget(org)}
+                          onClick={() => startDelete(org)}
                           aria-label={`Delete ${org.name}`}
                         >
                           Delete
@@ -384,12 +430,23 @@ export default function OrganizationsManagerModal({
         onCancel={() => (deleting ? undefined : setDeleteTarget(null))}
         onConfirm={() => void confirmDelete()}
         title={deleteTarget ? `Delete ${deleteTarget.name}?` : 'Delete organization?'}
-        body={orgDeleteBody(
-          deleteTarget
-            ? organizations.filter((o) => o.parent_organization_id === deleteTarget.id).length
-            : 0,
-          deleteTarget?.agent_count ?? 0,
-        )}
+        body={
+          <>
+            <p>
+              {orgDeleteBody(
+                deleteTarget
+                  ? organizations.filter((o) => o.parent_organization_id === deleteTarget.id).length
+                  : 0,
+                deleteTarget?.agent_count ?? 0,
+              )}
+            </p>
+            {deleteError ? (
+              <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
+                {deleteError}
+              </p>
+            ) : null}
+          </>
+        }
         confirmLabel="Delete organization"
         tone="danger"
         loading={deleting}
@@ -413,4 +470,13 @@ function OrgAgentCount({ total, direct }: { total: number; direct: number }) {
       ) : null}
     </>
   )
+}
+
+/** The HTTP status an API failure carries (`ApiRequestError.status`), if any. */
+function httpStatusOf(err: unknown): number | undefined {
+  if (typeof err === 'object' && err !== null && 'status' in err) {
+    const status = (err as { status: unknown }).status
+    return typeof status === 'number' ? status : undefined
+  }
+  return undefined
 }

@@ -70,3 +70,45 @@ describe('AgentOrganizationTree (#3222 re-review)', () => {
     expect(rowsEl.querySelectorAll('.lucide-folder').length).toBeGreaterThan(0)
   })
 })
+
+// #3236 (built by @PhilipEriksson; reworked on the #3222 tree): the
+// loading/error states used to render only while `organizations.length === 0`,
+// so a refetch with organizations present showed neither. They now show in
+// place — the tree stays, because the panel refetches after every move and
+// swapping the tree for a status panel made the page below jump each time.
+describe('AgentOrganizationTree (#3236 refetch states)', () => {
+  it('says "Updating…" during a refetch with organizations present, and keeps the rows', () => {
+    renderTree({ loading: true })
+
+    // Quiet on purpose: not a live region (it fires after every move).
+    expect(screen.getByText('Updating…')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).toBeNull()
+    const tree = screen.getByTestId('organization-tree')
+    expect(tree).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('button', { name: /Company A/ })).toBeInTheDocument()
+  })
+
+  it('shows the error with a working Try again after a failed refetch, above the last-known rows', () => {
+    const onRetry = vi.fn()
+    renderTree({ error: 'We could not load your organizations. Try again in a moment.', onRetry })
+
+    const alert = screen.getByRole('alert')
+    // The rows below ARE loaded: the copy says the refresh failed.
+    expect(alert).toHaveTextContent('We could not refresh your organizations — the list below may be out of date.')
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    expect(onRetry).toHaveBeenCalledOnce()
+    expect(screen.getByTestId('organization-tree')).toBeInTheDocument()
+  })
+
+  it('first load with no rows yet is still the status panel', () => {
+    renderTree({ organizations: [], loading: true })
+    expect(screen.getByRole('status')).toHaveTextContent('Loading organizations…')
+    expect(screen.queryByTestId('organization-tree')).toBeNull()
+  })
+
+  it('renders no status once loading settles', () => {
+    renderTree()
+    expect(screen.getByTestId('organization-tree')).not.toHaveAttribute('aria-busy')
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+})

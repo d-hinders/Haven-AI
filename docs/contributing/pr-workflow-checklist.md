@@ -74,12 +74,6 @@ Good split examples:
 ## Before Requesting Review
 
 - Merge or rebase the latest `dev` into the branch.
-- Put every finding the PR does not fix under the template's **Not filed** (one
-  line: what, where, why it does not carry its weight) or **Filed** (with its
-  repro link) list. Fixed / dropped / filed-above-the-bar are the only three
-  dispositions, a reviewer never files, and the five-check bar is stated once in
-  [`ship-next` § *Filing bar*](../../.agents/skills/ship-next/SKILL.md#filing-bar-2767)
-  (#2767).
 - Confirm the branch still builds locally.
 - Run the relevant local checks from the command guide below.
 - Confirm the PR target is `dev` (or `main` only for a `hotfix/*`).

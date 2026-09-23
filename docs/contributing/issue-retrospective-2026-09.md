@@ -196,9 +196,9 @@ see it is enforced rather than merely written down.
 
 | | Guideline | Landed in |
 |---|---|---|
-| **C1** | A removal PR ships with a claim sweep, and the sweep's commands are in the body. The sweep's hits are finished in the PR that triggered it — fixed or dropped under **Not filed**, not filed as a follow-up (#2767). | `ship-next` *Implement*, `doc-reviewer` §2 |
+| **C1** | A removal PR ships with a claim sweep, and the sweep's commands are in the body. | `ship-next` *Implement*, `doc-reviewer` §2 |
 | **C2** | Schedule the residue at the start, and gate the retired vocabulary in CI so the epic can finish. | `quality-scan` block 4 |
-| **C3** | When a title says "still", widen the net — do not just fix the instance. The widened net is swept in the PR that triggered it, and a "still" of an open issue widens that issue rather than filing a sibling (#2767). | `ship-next` *Implement* (#2512), *Filing bar* (#2767). Not landed when this document was written; the row said so and named the issue, which is why it exists. |
+| **C3** | When a title says "still", widen the net — do not just fix the instance. | `ship-next` *Implement* (#2512). Not landed when this document was written; the row said so and named the issue, which is why it exists. |
 
 ### D — Reviews
 

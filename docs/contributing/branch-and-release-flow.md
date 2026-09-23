@@ -145,8 +145,9 @@ can change it.
 Measure a specific window with `--since=` / `--until=` (merge dates,
 `YYYY-MM-DD`, `--until` exclusive; the `=` form only — a space-separated
 value is refused rather than silently defaulted), or `--json` for a
-machine-readable summary. A window with no merged PR, or with merges it cannot
-classify, gives no verdict and exits 1 instead of printing the target state;
+machine-readable summary. A window with no merged PR, or with no resync found but
+merges it cannot classify, gives no verdict and exits 1 instead of printing
+the target state;
 a failed GitHub read, a PR whose commits the API cannot list in full, or an
 `origin/dev` that does not resolve exits 2 — without `origin/dev` every
 resync would read as unclassified. It needs an authenticated `gh` and a

@@ -166,9 +166,10 @@ test('MUTATION PROOF: `main` merged into a work branch is not counted as a resyn
   )
   assert.equal(report.resyncs, 0)
   assert.equal(report.mainMerges, 2)
-  // A branch merely NAMED like main-ish is not main.
+  // A branch merely NAMED like main-ish is not main: 'maintenance' merged in
+  // is not a main merge, so its dev-side parent still makes it a resync.
   assert.equal(
-    summarizePullRequests([pr(7, 'feat/x', [commit('u1', 'x', ['b']), commit('u2', "Merge branch 'dev' into maintenance", ['u1', DEV_TIP])])], (o) => o === DEV_TIP).resyncs,
+    summarizePullRequests([pr(7, 'feat/x', [commit('u1', 'x', ['b']), commit('u2', "Merge branch 'maintenance' into feat/x", ['u1', DEV_TIP])])], (o) => o === DEV_TIP).resyncs,
     1,
   )
 })

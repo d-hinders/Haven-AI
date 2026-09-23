@@ -96,10 +96,16 @@ describe('DELETE /user/accounts/:safeId', () => {
   it('a concurrent second unlink by the owner (the DELETE matched nothing) answers 200, not a false 409 (#3227)', async () => {
     // Ownership passes, then the row is gone by the time the tenant-scoped
     // DELETE runs: the first request of a double click already removed it.
-    mockPoolQuery
-      .mockResolvedValueOnce({ rows: [{ id: SAFE_ID, is_default: false }] })
-      .mockResolvedValueOnce({ rows: [] })
-    mockClientQuery.mockResolvedValue({ rows: [], rowCount: 0 })
+    // The row is there for the ownership check and gone once a DELETE has run
+    // (the other request's), so this request's DELETE matches nothing.
+    let deleteRan = false
+    mockPoolQuery.mockImplementation(async () =>
+      deleteRan ? { rows: [] } : { rows: [{ id: SAFE_ID, is_default: false }] },
+    )
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (/DELETE FROM smart_accounts/.test(String(sql))) deleteRan = true
+      return { rows: [], rowCount: 0 }
+    })
 
     const response = await app.inject({
       method: 'DELETE',

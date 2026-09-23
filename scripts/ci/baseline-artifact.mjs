@@ -15,13 +15,14 @@
  *   after/<path>   the regenerated file on disk
  *   base/<path>    `dev`'s version, only when it differs from `before`
  *                  (a branch that already moved the baseline once)
- *   diff/<path>    a pixel diff, when ImageMagick's `compare` is on the
- *                  runner and both sides exist with the same dimensions
+ *   diff/<path>    a pixel diff, when ImageMagick's `compare` is available
+ *                  and both sides exist with the same dimensions
  *
- * No new dependency: ImageMagick ships on GitHub's ubuntu runners, and a
- * missing `compare` or a size mismatch is reported, never fatal. A PNG
- * library would have changed package-lock.json and with it the Playwright
- * cache key both visual workflows share.
+ * No new npm dependency: the workflow installs ImageMagick with apt only when
+ * a baseline moved (`ubuntu-latest` does not ship it — measured on the #3234
+ * probe run), and a missing `compare` or a size mismatch is reported, never
+ * fatal. A PNG library would have changed package-lock.json and with it the
+ * Playwright cache key both visual workflows share.
  *
  * Input: `MOVED_BASELINES`, the audit step's `moved` output
  * (`[{ name, path, status }]`). It is written even when the audit REFUSES

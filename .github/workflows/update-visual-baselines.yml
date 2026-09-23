@@ -219,6 +219,15 @@ jobs:
       # version when it differs, and a pixel diff, for every baseline the audit
       # reports as moved. `always()`: the audit writes its `moved` list even
       # when it REFUSES the commit, and that is the run whose images matter most.
+      # `ubuntu-latest` does NOT ship ImageMagick (measured on the #3234 probe
+      # dispatch, run 35831434982: "`compare` is not on this runner"). Install
+      # it only when something moved; a failed install costs the diff image,
+      # never the run.
+      - name: Install ImageMagick for the pixel diff
+        if: always() && steps.audit.outputs.moved != '' && steps.audit.outputs.moved != '[]'
+        continue-on-error: true
+        run: command -v compare || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends imagemagick)
+
       - name: Collect before/after images of every rewritten baseline
         id: baseline_images
         if: always() && steps.audit.outcome != 'skipped'

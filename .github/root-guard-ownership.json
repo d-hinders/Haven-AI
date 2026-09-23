@@ -341,6 +341,63 @@
         "test -w packages/mcp-server"
       ],
       "reason": "The only module x402-binding-signer.ts reaches inside the backend (#3046). It must stay dependency-free so the binding signer stays importable without the backend runtime env; an import added here re-creates the #3046 trap in the mcp-server job, so a change routes that job too."
+    },
+    {
+      "path": ".env.example",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "test -w packages/backend"
+      ],
+      "reason": "The configuration mirror the backend suite pins in BOTH directions: packages/backend/src/docs-drift/env-example-drift.test.ts asserts every variable the backend reads is documented here and every documented key is read somewhere. Its only gated runner is backend_checks' own vitest, so before this entry a PR editing only .env.example routed nowhere and skipped the drift test on exactly the edit it exists to catch (quality scan 2026-09-22, candidate C4)."
+    },
+    {
+      "path": "scripts/lint-request-schemas-baseline.json",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:request-schemas"
+      ],
+      "reason": "The committed baseline the request-schema ratchet (#3029, epic #3028) compares packages/backend route counts against. Lowering a count without the code change that earns it is the exact weakening the ratchet refuses, and the gate runs only in backend_checks — the ratchet and its self-test were registered but the data they compare against was not, so a baseline-only edit routed nowhere (quality scan 2026-09-22, candidate C4)."
+    },
+    {
+      "path": "scripts/lint-next-steps-baseline.json",
+      "jobs": [
+        "backend",
+        "mcp_server",
+        "signer",
+        "mcp"
+      ],
+      "runsVia": [
+        "lint:next-steps"
+      ],
+      "reason": "The committed baseline of the typed next-step ratchet (#3104, epic #3105), read by lint:next-steps everywhere that lint runs — the same four jobs as the ratchet itself, because lowering a count here weakens the same contract the ratchet polices. The ratchet and its self-test were registered while the data they compare against was not, so a baseline-only edit routed nowhere (quality scan 2026-09-22, candidate C4)."
+    },
+    {
+      "path": "scripts/vitest/assert-fresh-dist.mjs",
+      "jobs": [
+        "connect",
+        "mcp_server",
+        "qa_agent"
+      ],
+      "runsVia": [
+        "test -w packages/connect",
+        "test -w packages/mcp-server",
+        "test -w packages/qa-agent"
+      ],
+      "reason": "The vitest global-setup hook that refuses to run a package's suite against a stale build of @haven_ai/sdk, mcp or signer. Three packages' suites import it and each runs it inside its own gated job, so a weakening that made the check vacuous is caught only if every consumer's job re-runs — the #3046 shape, and no dependents fan-out reaches any of the three packages (quality scan 2026-09-22, candidate C4)."
+    },
+    {
+      "path": "scripts/lib/lint-escapes.mjs",
+      "jobs": [
+        "frontend"
+      ],
+      "runsVia": [
+        "design:lint -w packages/frontend"
+      ],
+      "reason": "The shared escape-marker helper for the frontend line-scanning gates: design-lint and the copy lint both import isEscaped from it. The copy lint runs unconditionally, but design:lint runs inside the gated frontend_checks job, so a PR that only weakens escape recognition skipped the one gated job that consumes it (quality scan 2026-09-22, candidate C4)."
     }
   ]
 }

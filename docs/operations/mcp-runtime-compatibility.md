@@ -2798,6 +2798,23 @@ to call next in structured fields, and those fields are typed end to end
 > shapes before the change, plus the per-branch ratchet cases. Scope of this
 > note: those fields. Nothing else in this document was re-verified.
 
+> **Re-verification (#3230, the next-step ratchet refuses an empty scan,
+> 2026-09-23):** this diff touches `scripts/lint-next-steps.mjs` (listed in
+> `covers:` above). The gate's NUMERATOR is untouched — what counts as an
+> unnamed emission or an argument-less discovery entry, the block-parsing
+> rules, the baseline shape and the `--update` growth refusal are all
+> byte-identical. What changed is when the gate is allowed to speak at all:
+> `scan()` additionally returns a per-target read census, and `main` refuses
+> (exit 1) when any `SCAN_TARGETS` entry matched no files, so the ✓ verdict
+> and the `--update` write can no longer be produced over a zero-file scan
+> (the quality scan 2026-09-22 measured both passing with all five targets
+> moved aside). Nothing this document states about the contract moves: the
+> same emissions are still demanded to name a tool or an omitted-reason, the
+> baseline stays at zero, and the extra refusal only fires on a broken scan
+> configuration, never on a scanned one. The success line now also prints
+> the number of files read. Scope of this note: the lint gate itself.
+> Nothing else in this document was re-verified.
+
 > **Re-verified #3228 (2026-09-23, branch-hygiene source):** this diff
 > touches `.github/workflows/ci.yml`, a covered file, in one comment only —
 > the branch-hygiene report reads merged PRs' commits now, not `dev`'s

@@ -20,9 +20,11 @@
  *     (#1533);
  *   - no `webSocket(` transport exists.
  *
- * Accepted gaps: a call split as `http\n(` (whitespace before the paren) and
- * a transport built from `viem/_esm` or a re-export under another name. The
- * import check narrows the second to files already on the allow-list.
+ * Accepted gaps: a call split as `http\n(` (whitespace before the paren); a
+ * namespace import (`import * as viem from 'viem'` then `viem.http(url)`),
+ * which neither the call pattern (it skips `.http(`) nor the named-import
+ * check sees; a transport built with `custom(` or a local `fallback(`; and a
+ * transport from `viem/_esm` or a re-export under another name.
  */
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
@@ -101,6 +103,16 @@ describe('every backend viem RPC transport goes through rpcTransport (#3255)', (
     const offenders = matchingLines(JSON_RPC_PROVIDER).filter((m) => m.rel !== RELAYER)
     expect(offenders).toEqual([])
     expect(matchingLines(JSON_RPC_PROVIDER).filter((m) => m.rel === RELAYER)).toHaveLength(1)
+  })
+
+  it('the disabledDelegations heal reader stays on the dedicated endpoint only', () => {
+    // A false heal marks a row revoked without an owner signature (the kill
+    // switch), so no failover node may answer it. Literal pin on the one call.
+    const rail = files.find((f) => f.rel === 'rails/delegation-rail.ts')?.text ?? ''
+    const reader = rail.slice(rail.indexOf('function makeDisabledDelegationReader'))
+    expect(reader.length).toBeGreaterThan(0)
+    const firstTransport = reader.match(/transport: rpcTransport\([^)]*\)/)?.[0]
+    expect(firstTransport).toBe('transport: rpcTransport(chainId, { dedicatedOnly: true })')
   })
 
   it('no webSocket transport', () => {

@@ -256,9 +256,11 @@ Isolation rules that are non-negotiable for a payments product:
   `RPC_URL_BASE_FALLBACK` / `RPC_URL_BASE_SEPOLIA_FALLBACK` (a second provider
   account), then the public node. A transport failure (HTTP 429/5xx, a quota
   error in an HTTP 200 body, a timeout) moves to the next endpoint; an
-  `eth_call` revert does not. The relayer's ethers provider, and the log
-  scanners and settlement verifier behind it, stay on `RPC_URL_BASE*` alone:
-  the signing wallet's nonce view must stay on one node (#1533). The QA
+  `eth_call` revert does not. Three things stay on `RPC_URL_BASE*` alone:
+  the `disabledDelegations` heal read, because a lying node could fake a
+  revoke; the relayer's ethers provider, because the signing wallet's nonce
+  view must stay on one node (#1533); and the log scanners and settlement
+  verifier behind that provider. The QA
   observer (`QA_RPC_URL_BASE_SEPOLIA`) is unaffected, and still needs its own
   endpoint, distinct from the backend's.
 

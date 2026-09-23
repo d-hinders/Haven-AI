@@ -233,6 +233,20 @@ describe('an eth_call revert is terminal — never asked of the next node (#3255
   })
 })
 
+describe('dedicatedOnly — no failover for a read that is not fail-safe (#3255)', () => {
+  it('a failing dedicated endpoint fails the read; no other node is asked', async () => {
+    primary.mode = 'http429'
+    const client = createPublicClient({
+      chain: baseSepolia,
+      transport: rpcTransport(84532, { dedicatedOnly: true, retryCount: 0 }),
+    })
+    await expect(client.getCode({ address: ACCOUNT })).rejects.toThrow()
+    expect(primary.calls).toEqual(['eth_getCode'])
+    expect(secondary.calls).toEqual([])
+    expect(publicNode.calls).toEqual([])
+  })
+})
+
 describe('per-caller timeout and retryCount (#3255)', () => {
   it('a hanging leg times out after the per-leg timeout and the next leg answers', async () => {
     primary.mode = 'hang'

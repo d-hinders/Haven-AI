@@ -218,7 +218,10 @@ function makeDisabledDelegationReader(chainId: number): (hash: Hex) => Promise<b
   // aggregate3 round trips instead of N parallel eth_calls.
   const publicClient = createPublicClient({
     chain: chainForId(chainId),
-    transport: rpcTransport(chainId),
+    // #3255: dedicated endpoint ONLY. A false positive here heals a row to
+    // revoked without an owner signature, so no fallback node may answer it;
+    // a failed read degrades to the full batch, as before.
+    transport: rpcTransport(chainId, { dedicatedOnly: true }),
     batch: { multicall: true },
   })
   return (hash) =>

@@ -181,15 +181,18 @@ describe('the optional *_FALLBACK second provider (#3255)', () => {
     process.env.RPC_URL_BASE_FALLBACK = 'https://second-mainnet.example'
     process.env.RPC_URL_BASE_SEPOLIA_FALLBACK = 'https://second-sepolia.example'
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.resetModules()
-    const { config } = await import('../config.js')
-    expect(config.rpcUrlBaseFallback).toBe('https://second-mainnet.example')
-    expect(config.rpcUrlBaseSepoliaFallback).toBe('https://second-sepolia.example')
-    if (saved[0] === undefined) delete process.env.RPC_URL_BASE_FALLBACK
-    else process.env.RPC_URL_BASE_FALLBACK = saved[0]
-    if (saved[1] === undefined) delete process.env.RPC_URL_BASE_SEPOLIA_FALLBACK
-    else process.env.RPC_URL_BASE_SEPOLIA_FALLBACK = saved[1]
-    vi.restoreAllMocks()
+    try {
+      vi.resetModules()
+      const { config } = await import('../config.js')
+      expect(config.rpcUrlBaseFallback).toBe('https://second-mainnet.example')
+      expect(config.rpcUrlBaseSepoliaFallback).toBe('https://second-sepolia.example')
+    } finally {
+      if (saved[0] === undefined) delete process.env.RPC_URL_BASE_FALLBACK
+      else process.env.RPC_URL_BASE_FALLBACK = saved[0]
+      if (saved[1] === undefined) delete process.env.RPC_URL_BASE_SEPOLIA_FALLBACK
+      else process.env.RPC_URL_BASE_SEPOLIA_FALLBACK = saved[1]
+      vi.restoreAllMocks()
+    }
   })
 })
 

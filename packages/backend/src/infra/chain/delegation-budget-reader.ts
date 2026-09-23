@@ -48,7 +48,9 @@
  * So the per-leg timeout is the total divided by the number of legs
  * (`remainingReadLegTimeoutMs`), and the fallback's own `retryCount` is 0:
  * the worst case stays `REMAINING_READ_TIMEOUT_MS` for the whole read, not
- * per endpoint. `delegation-budget-reader.test.ts` pins both halves.
+ * per endpoint. `delegation-budget-reader.test.ts` pins both halves. The cost:
+ * with three legs the dedicated endpoint gets 666 ms, not 2 s, so a slow but
+ * working primary sends budget reads to the next node.
  */
 
 /**

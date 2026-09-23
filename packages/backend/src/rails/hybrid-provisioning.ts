@@ -184,8 +184,10 @@ export async function ensureHybridDeployed(
   if (expectedAddress) {
     // Through the failover transport (#3255): a lagging fallback node can
     // answer a freshly deployed account with `0x`. That is fail-open by
-    // design: the deploy below then reverts on-chain, which spends relayer
-    // gas but moves no funds and deploys nothing twice.
+    // design, and costs relayer gas but moves no funds: the deploy below
+    // either reverts, or (when the signer set changed since provisioning,
+    // #891) deploys a spurious account at the address the CURRENT signers
+    // derive, and activation then refuses on the address mismatch.
     const client = createPublicClient({
       chain: chainForId(chainId),
       transport: rpcTransport(chainId),

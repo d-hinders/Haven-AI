@@ -37,13 +37,29 @@
  *
  * Endpoints are tried per REQUEST, not per pass. A lagging fallback node
  * answers a fresh deploy's `getCode` with `0x` and a nonce read with the
- * pre-inclusion value rather than failing. Both are fail-safe here:
- * `ensureHybridDeployed`'s deploy against an already-deployed account reverts
- * (spending relayer gas), and a stale nonce is refused by the bundler.
- * `disabledDelegations` reads at `blockTag: 'finalized'`. The ethers relayer
- * provider and its log scanners are deliberately NOT routed through this
- * (see `infra/relayer.ts`): the signing wallet's nonce view must stay on one
- * node (#1533).
+ * pre-inclusion value rather than failing. Both fail safe, at a cost in
+ * relayer gas and never in funds: a stale nonce is refused by the bundler, and
+ * `ensureHybridDeployed`'s deploy either reverts or, when the signer set has
+ * changed since provisioning (#891), deploys a spurious account at the address
+ * the current signers derive, after which activation refuses on the address
+ * mismatch.
+ *
+ * The `disabledDelegations` heal is the exception: a false positive marks a
+ * row revoked without an owner signature, so it is not fail-safe against a
+ * LYING node. It passes `dedicatedOnly` and keeps its pre-#3255 trust set; a
+ * failed heal read already degrades to the full revoke batch. The ethers
+ * relayer provider and its log scanners are deliberately NOT routed through
+ * this (see `infra/relayer.ts`): the signing wallet's nonce view must stay on
+ * one node (#1533).
+ *
+ * ## Residual risk
+ *
+ * No circuit breaker or ranking: a quota-dead primary is asked first on every
+ * request (one fast refusal), and a SLOW primary costs a full per-leg timeout
+ * (viem default 10 s) on every request before failover. With every node
+ * hanging, a default caller's worst case is 4 passes × legs × 10 s plus
+ * backoff, against 4 × 10 s on one node before. Callers that need a bound pass
+ * `timeout` and `retryCount` (the budget reader does).
  *
  * Endpoint URLs can carry provider API keys: this module never logs them.
  */
@@ -81,6 +97,13 @@ export function havenShouldThrow(error: Error): boolean {
 }
 
 export interface RpcTransportOptions {
+  /**
+   * Use ONLY the dedicated endpoint, with no failover. For a read that is not
+   * fail-safe when a node lies: the `disabledDelegations` heal marks a row
+   * revoked without an owner signature, so widening the set of nodes that can
+   * answer it would widen the set that can defeat the kill switch.
+   */
+  dedicatedOnly?: boolean
   /** Per-LEG timeout in ms (viem `http` default 10_000). */
   timeout?: number
   /** Retries of the WHOLE chain after every leg failed (viem default 3). */
@@ -88,7 +111,8 @@ export interface RpcTransportOptions {
 }
 
 export function rpcTransport(chainId: number, opts: RpcTransportOptions = {}): Transport {
-  const legs = rpcEndpoints(chainId).map((url) =>
+  const urls = opts.dedicatedOnly ? rpcEndpoints(chainId).slice(0, 1) : rpcEndpoints(chainId)
+  const legs = urls.map((url) =>
     http(url, opts.timeout === undefined ? {} : { timeout: opts.timeout }),
   )
   return fallback(legs, {

@@ -27,7 +27,7 @@
  * Input: `MOVED_BASELINES`, the audit step's `moved` output
  * (`[{ name, path, status }]`). It is written even when the audit REFUSES
  * the commit — the run whose images matter most — so the workflow runs this
- * step `if: always()`.
+ * step under `!cancelled()`, with `continue-on-error`.
  *
  * Output (GITHUB_OUTPUT): `count` (files collected for) and `dir`. A run that
  * rewrote nothing collects nothing and says so.

@@ -217,7 +217,7 @@ jobs:
       # image, so the reviewer had nothing to look at. Collect before (the
       # branch tip — read HERE, before the commit step moves HEAD), after, dev's
       # version when it differs, and a pixel diff, for every baseline the audit
-      # reports as moved. `always()`: the audit writes its `moved` list even
+      # reports as moved. `!cancelled()`: the audit writes its `moved` list even
       # when it REFUSES the commit, and that is the run whose images matter most.
       # `ubuntu-latest` does NOT ship ImageMagick (measured on the #3234 probe
       # dispatch, run 35831434982: "`compare` is not on this runner"). Install

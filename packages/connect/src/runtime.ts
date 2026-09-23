@@ -836,8 +836,8 @@ async function executeConnect(
             agentId: entry.agentId,
             reason: 'replaced by a new setup (--replace)',
             replacedBy: registration.agent_id,
-            // #3251: the ledger follows this run's credential root, not the
-            // ambient ~/.haven (default root → ~/.haven/tombstones, as before).
+            // #3251: the ledger follows this run's credential root (default
+            // root → ~/.haven/tombstones, as before; any other → <root>/.tombstones).
             tombstonesDir: tombstonesDirForCredentialRoot(options.credentialsDir),
           })
           await teardownLocalKeyMaterial(entry.directory, await readIdentityFile(entry.directory))

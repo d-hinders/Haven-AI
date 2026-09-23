@@ -159,7 +159,7 @@ minutes. Two rules follow:
    This replaces the directory's signer wrapper with a diagnostic that logs the
    retirement (agent id, date, reason, restart guidance) to the host's MCP
    stderr log on every probe, and records it in `TOMBSTONE.json` for
-   `--doctor` — with a copy in `~/.haven/tombstones/` (or `tombstones/` beside
+   `--doctor` — with a copy in `~/.haven/tombstones/` (or `.tombstones/` inside
    a custom credentials root), so the retirement stays visible after the
    directory is deleted. It touches no key material and revokes nothing — revoke the
    agent on the Haven agent page yourself. Delete the tombstone only once every

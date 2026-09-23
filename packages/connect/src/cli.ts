@@ -125,9 +125,9 @@ export async function runCli(
         agentId,
         reason: parsed.tombstone.reason ?? 'retired by operator via --tombstone',
         replacedBy: parsed.tombstone.replacedBy,
-        // #3251: the ledger sits beside the root that holds the retired
-        // directory — ~/.haven/agents/<x> → ~/.haven/tombstones, exactly as
-        // before; a directory under any other root keeps its ledger there.
+        // #3251: the ledger of the root that holds the retired directory —
+        // ~/.haven/agents/<x> → ~/.haven/tombstones, exactly as before; a
+        // directory under any other root → <root>/.tombstones.
         tombstonesDir: tombstonesDirForAgentDirectory(parsed.tombstone.directory),
       })
       if (parsed.json) {
@@ -178,12 +178,13 @@ export async function runCli(
         replacedBy: parsed.unwire.replacedBy,
         destroyKeyMaterial: parsed.unwire.destroyKeyMaterial,
         homeDir,
-        // #3251: the ledger sits beside the root that holds the directory
-        // being retired. Derived from the RESOLVED directory, not from
+        // #3251: the ledger of the root that holds the directory being
+        // retired. Derived from the RESOLVED directory, not from
         // --credentials-dir: `--unwire --credentials-dir <path>` names the agent
         // directory itself, not a root. ~/.haven/agents/<slug> →
-        // ~/.haven/tombstones, exactly as before.
-        tombstonesDir: tombstonesDirForAgentDirectory(directory),
+        // ~/.haven/tombstones, exactly as before; any other root →
+        // <root>/.tombstones.
+        tombstonesDir: tombstonesDirForAgentDirectory(directory, homeDir),
       })
       const failures = result.runtimes.filter((r) => r.status === 'refused' || r.status === 'unreadable')
       // #3123: a retained teardown is a refusal too — the wiring is gone, the

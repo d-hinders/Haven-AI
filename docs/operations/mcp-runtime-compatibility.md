@@ -2460,9 +2460,9 @@ to call next in structured fields, and those fields are typed end to end
   place — replaces its `bin/haven-signer.mjs` with a self-contained diagnostic
   that logs a `HAVEN-TOMBSTONE`-marked retirement notice (agent id, date,
   reason, restart-every-long-lived-host guidance) to the host's MCP stderr log
-  and exits 1, and records `TOMBSTONE.json` for `--doctor`, mirrored into a
-  ledger beside the credential root (`~/.haven/tombstones/<agent_id>.json` for
-  the default root; `<root>/../tombstones` for any other — #3251) so the
+  and exits 1, and records `TOMBSTONE.json` for `--doctor`, mirrored into the
+  credential root's ledger (`~/.haven/tombstones/<agent_id>.json` for the
+  default root; `<root>/.tombstones/` inside any other — #3251) so the
   retirement stays listed after the directory is deleted. Touches NO key
   material and revokes nothing (connect reports; the user revokes). Exists
   because long-lived MCP hosts load wiring at startup: after an agent is
@@ -2881,11 +2881,11 @@ to call next in structured fields, and those fields are typed end to end
 > **Re-verified #3251 (2026-09-23, the tombstone ledger follows the
 > credential root):** this diff touches `packages/connect/src/{tombstone,
 > runtime,cli,doctor}.ts` and the connect test setup. The `--tombstone`,
-> `--unwire` and `--replace` writers now mirror a retirement record into
-> `tombstones/` beside the root that holds the retired directory, and
-> `--doctor` reads the ledger beside the root it scans. For the default root
-> that is `~/.haven/tombstones`, unchanged; a custom root no longer mirrors
-> into the ambient home. The record's fields, its redaction and its no-key
+> `--unwire` and `--replace` writers now mirror a retirement record into the
+> ledger of the root that holds the retired directory, and `--doctor` reads
+> the ledger of the root it scans. For the default root that is
+> `~/.haven/tombstones`, unchanged; any other root keeps it inside itself at
+> `<root>/.tombstones/` and no longer mirrors into the ambient home. The record's fields, its redaction and its no-key
 > boundary are unchanged, and nothing is revoked. The connect test suite now
 > runs against a scratch `HOME` and `TMPDIR`. The `--tombstone` entry above
 > gains the ledger-location sentence. Scope of this note: those files.

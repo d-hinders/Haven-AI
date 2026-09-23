@@ -2223,10 +2223,7 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
   }))
 
   async function runWithPriorDir(seedPrior: boolean, replaceExistingWiring?: boolean) {
-    // Nested under its own parent: the #3251 ledger lands beside the root,
-    // so a unique parent keeps another test's agent-old record out of reach.
-    const credentialsDir = join(await mkdtemp(join(tmpdir(), 'haven-1688-')), 'agents')
-    await mkdir(credentialsDir, { recursive: true })
+    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1688-'))
     const oldDir = join(credentialsDir, 'agent-old-uuid')
     if (seedPrior) {
       await mkdir(oldDir, { recursive: true })
@@ -2285,7 +2282,7 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     expect(JSON.parse(await readFile(join(oldDir, 'identity.json'), 'utf8'))).toEqual({ agent_id: 'agent-old' })
     // #3251: the ledger record follows this run's credential root, not the
     // ambient ~/.haven/tombstones.
-    const ledger = JSON.parse(await readFile(join(dirname(dirname(oldDir)), 'tombstones', 'agent-old.json'), 'utf8'))
+    const ledger = JSON.parse(await readFile(join(dirname(oldDir), '.tombstones', 'agent-old.json'), 'utf8'))
     expect(ledger).toMatchObject({ agent_id: 'agent-old', replaced_by: 'agent-new' })
   })
 

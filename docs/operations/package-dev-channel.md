@@ -50,10 +50,10 @@ and the `release` skill.
 > **Re-verification (#3251, tombstone ledger follows the credential root,
 > 2026-09-23):** this doc is coupled through `packages/connect/src/{cli,
 > runtime,doctor}.ts`. The change: the retirement record that `--tombstone`,
-> `--unwire` and `--replace` mirror now lands in `tombstones/` beside the
-> credential root that held the retired directory, and `--doctor` reads the
-> ledger beside the root it scans. For the default root that is
-> `~/.haven/tombstones`, as before. Re-read against the diff: the `--replace`
+> `--unwire` and `--replace` mirror now lands in the ledger of the credential
+> root that held the retired directory, and `--doctor` reads the ledger of the
+> root it scans. For the default root that is `~/.haven/tombstones`, as
+> before; any other root keeps it at `<root>/.tombstones/`. Re-read against the diff: the `--replace`
 > guidance in step 2 (it retires that agent's local key files; `--doctor`
 > enumerates every agent regardless of name) and the override passage
 > (`~/.haven/signer-runtime/override-<hash>`) are unchanged, and no channel,

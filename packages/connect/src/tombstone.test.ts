@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest'
 import { ConnectError, isConnectError } from './connect-error.js'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -249,11 +249,41 @@ describe('the ledger follows the credential root (#3251)', () => {
     expect(tombstonesDirForAgentDirectory(join(homedir(), '.haven', 'agents', 'research'))).toBe(defaultTombstonesDir())
   })
 
-  it('a custom root keeps its ledger beside it, never under ~/.haven', () => {
-    expect(tombstonesDirForCredentialRoot('/srv/ci/agents')).toBe('/srv/ci/tombstones')
-    expect(tombstonesDirForAgentDirectory('/srv/ci/agents/agent-old')).toBe('/srv/ci/tombstones')
+  it('a custom root keeps its ledger INSIDE itself, never beside it and never under ~/.haven', () => {
+    expect(tombstonesDirForCredentialRoot('/srv/ci/agents')).toBe('/srv/ci/agents/.tombstones')
+    expect(tombstonesDirForAgentDirectory('/srv/ci/agents/agent-old')).toBe('/srv/ci/agents/.tombstones')
+    // #3251 review: a root at the top of the filesystem must not reach for `/`'s parent.
+    expect(tombstonesDirForCredentialRoot('/agents')).toBe('/agents/.tombstones')
     // Relative roots resolve against cwd, so the answer never depends on who reads it later.
-    expect(tombstonesDirForCredentialRoot('rel/agents')).toBe(join(process.cwd(), 'rel', 'tombstones'))
+    expect(tombstonesDirForCredentialRoot('rel/agents')).toBe(join(process.cwd(), 'rel', 'agents', '.tombstones'))
+  })
+
+  it('the default root is judged against the home it is given, not the ambient one', () => {
+    expect(tombstonesDirForCredentialRoot('/home/u/.haven/agents', '/home/u')).toBe('/home/u/.haven/tombstones')
+    expect(tombstonesDirForAgentDirectory('/home/u/.haven/agents/research', '/home/u')).toBe('/home/u/.haven/tombstones')
+    expect(tombstonesDirForCredentialRoot(undefined, '/home/u')).toBe('/home/u/.haven/tombstones')
+    expect(tombstonesDirForCredentialRoot('/home/u/.haven/agents', '/home/other')).toBe('/home/u/.haven/agents/.tombstones')
+  })
+
+  it('REGRESSION (#3251 review): a retirement succeeds when the root\'s PARENT is not writable', async () => {
+    // Beside-the-root put the ledger in the parent — `/private/tombstones`
+    // → EACCES, after the wrapper and TOMBSTONE.json were already written.
+    if (process.getuid?.() === 0 || process.platform === 'win32') return
+    const base = await mkdtemp(join(tmpdir(), 'haven-3251-ro-parent-'))
+    const root = join(base, 'root')
+    const dir = join(root, 'agent-x')
+    await mkdir(join(dir, 'bin'), { recursive: true })
+    await writeFile(join(dir, 'bin', 'haven-signer.mjs'), '// the real wrapper')
+    await chmod(base, 0o500)
+    try {
+      const info = await writeAgentTombstone({
+        directory: dir, agentId: AGENT, reason: 'reset', tombstonesDir: tombstonesDirForAgentDirectory(dir),
+      })
+      expect(info.recordPath).toBe(join(root, '.tombstones', `${AGENT}.json`))
+    } finally {
+      await chmod(base, 0o700)
+      await rm(base, { recursive: true, force: true })
+    }
   })
 
   it('the connect suite runs against a scratch HOME, never the real one', () => {

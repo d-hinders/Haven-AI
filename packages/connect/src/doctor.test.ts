@@ -814,7 +814,22 @@ describe('per-agent inventory (#1697)', () => {
     expect(report.checks.find((c) => c.id === 'superseded_agents')?.detail).toContain('retired records (dir removed): agent-gone (reset)')
   })
 
-  it('#3251: under an explicit --credentials-dir the ledger is read beside THAT root, never from the home ledger', async () => {
+  it('#3251: an explicit --credentials-dir under the doctor\'s own ~/.haven/agents still reads ~/.haven/tombstones', async () => {
+    const { homeDir } = await homeWithTwoWiredAgents()
+    const goneDir = join(homeDir, '.haven', 'agents', 'gone')
+    await mkdir(goneDir, { recursive: true })
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    await writeAgentTombstone({ directory: goneDir, agentId: 'agent-gone', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+    await rm(goneDir, { recursive: true, force: true })
+
+    const report = await runDoctor(
+      { runtime: 'codex-cli', credentialsDir: join(homeDir, '.haven', 'agents', 'agent-1') },
+      { homeDir, ...depsForTwo() },
+    )
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.detail).toContain('retired records (dir removed): agent-gone (reset)')
+  })
+
+  it('#3251: under an explicit --credentials-dir the ledger is read inside THAT root, never from the home ledger', async () => {
     const { homeDir } = await homeWithTwoWiredAgents()
     // The same two agents, moved to a custom root.
     const customRoot = join(homeDir, 'custom', 'agents')
@@ -823,7 +838,7 @@ describe('per-agent inventory (#1697)', () => {
     const { writeAgentTombstone } = await import('./tombstone.js')
     const goneDir = join(customRoot, 'gone')
     await mkdir(goneDir, { recursive: true })
-    await writeAgentTombstone({ directory: goneDir, agentId: 'agent-gone', reason: 'reset', tombstonesDir: join(homeDir, 'custom', 'tombstones') })
+    await writeAgentTombstone({ directory: goneDir, agentId: 'agent-gone', reason: 'reset', tombstonesDir: join(customRoot, '.tombstones') })
     await rm(goneDir, { recursive: true, force: true })
     // A record in the home ledger belongs to another root and must not surface.
     const decoyDir = join(homeDir, 'decoy')
@@ -831,6 +846,8 @@ describe('per-agent inventory (#1697)', () => {
     await writeAgentTombstone({ directory: decoyDir, agentId: 'agent-decoy', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
 
     const report = await runDoctor({ runtime: 'codex-cli', credentialsDir: join(customRoot, 'agent-1') }, { homeDir, ...depsForTwo() })
+    // The ledger dir inside the root is never enumerated as an agent.
+    expect(report.agents.map((a) => a.directory)).not.toContain(join(customRoot, '.tombstones'))
     const detail = report.checks.find((c) => c.id === 'superseded_agents')?.detail ?? ''
     expect(detail).toContain('retired records (dir removed): agent-gone (reset)')
     expect(detail).not.toContain('agent-decoy')

@@ -3,7 +3,7 @@
  * its named repair, secret-hygiene, and repair-then-doctor recovery — all via
  * injected deps, no network, no real signer spawn.
  */
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -75,6 +75,34 @@ async function seedCodexConfig(homeDir: string, wrapperPath: string) {
     '[mcp_servers.haven_signer]',
     `command = "${wrapperPath}"`,
   ].join('\n'))
+}
+
+/**
+ * #3241 — deterministic primary selection for multi-directory fixtures.
+ *
+ * `discoverCredentialDirectory` picks the primary credential directory by
+ * `identity.json` mtime, newest wins (doctor.ts `candidates.sort`), and the
+ * fixtures below seed several directories in quick succession. Adjacent
+ * writes land with the SAME `mtimeMs` on the kernel's coarse clock, and the
+ * stable-sort tie-break then follows `readdir` order — the FIRST-created
+ * directory — the opposite of what the fixture intended. Which cell observed
+ * the flipped selection depended on scheduling, so a different mutation-proof
+ * cell failed per run: the fixtures share no state at all (each builds a
+ * fresh mkdtemp home), so the reported "state bleed between cells" was
+ * really selection-order nondeterminism inside one fixture.
+ *
+ * Re-stamping every seeded `identity.json` to strictly increasing
+ * millisecond timestamps, in `<homeDir>/.haven/agents/<dirNames>` order and
+ * far from the coarse-clock floor, makes "newest wins" fully deterministic:
+ * call it right after the fixture seeds its directories, listing them
+ * oldest-first.
+ */
+async function stampAgentMtimes(homeDir: string, dirNames: string[]) {
+  const base = 1_700_000_000_000
+  for (const [index, name] of dirNames.entries()) {
+    const stamp = new Date(base + index * 1_000)
+    await utimes(join(homeDir, '.haven', 'agents', name, 'identity.json'), stamp, stamp)
+  }
 }
 
 function healthyDeps(): DoctorDeps & {
@@ -679,6 +707,11 @@ describe('per-agent inventory (#1697)', () => {
       '[mcp_servers.haven-ops]', `url = "${HOSTED}"`,
       '[mcp_servers.haven-signer-ops]', `command = "${namedWrapper}"`,
     ].join('\n'))
+    // #3241: agent-1 was seeded first and must read OLDER than ops — see
+    // stampAgentMtimes. Adjacent writes tie on the coarse clock, and the
+    // readdir tie-break would keep agent-1 primary, flipping the inventory
+    // this describe block exists to pin.
+    await stampAgentMtimes(homeDir, ['agent-1', 'ops'])
     return { homeDir, dir, namedDir }
   }
 
@@ -858,6 +891,15 @@ describe('classification correctness (#1697 review)', () => {
       '[mcp_servers.haven-ops]', `url = "${HOSTED}"`,
       '[mcp_servers.haven-signer-ops]', `command = "${opsWrapper}"`,
     ].join('\n'))
+
+    // #3241: the seeding order must also be the mtime order — see
+    // stampAgentMtimes. healthyHome's agent-1 directory participates in the
+    // same discovery scan, so it is stamped too: with any coarse-clock tie,
+    // readdir order puts the first-created directory first and the doctor's
+    // stable mtime sort reads THAT one as newest — the bare-pair wiring flips
+    // to it and 'agent-1' comes back 'wired' instead of 'superseded', exactly
+    // the cell this proof guards. agent-main must be strictly newest.
+    await stampAgentMtimes(homeDir, ['agent-1', 'ops', 'stray', 'agent-main'])
 
     const deps = healthyDeps()
     deps.probeHosted.mockImplementation(async () => ({ status: 'ok' as const }))
@@ -1809,6 +1851,10 @@ describe('runtime resolution when --runtime is absent (#3120)', () => {
     await seedCodexConfig(homeDir, otherRuntime.wrapperPath)
     await writeFile(join(other, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'hermes' }))
     await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
+    // #3241: agent-2 was seeded second and must read NEWER than agent-1 — see
+    // stampAgentMtimes. A coarse-clock tie would leave agent-1 (first-created)
+    // as the discovered primary and resolve 'cursor' instead of 'hermes'.
+    await stampAgentMtimes(homeDir, ['agent-1', 'agent-2'])
 
     const newest = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
     expect(newest.credentialDirectory).toBe(other)

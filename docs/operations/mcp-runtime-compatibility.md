@@ -53,7 +53,7 @@ covers:
   - scripts/lint-next-steps.mjs
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
-last-verified: "2026-09-21"
+last-verified: "2026-09-23"
 ---
 
 # MCP Runtime Compatibility
@@ -61,6 +61,15 @@ last-verified: "2026-09-21"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Re-verified unchanged (#3241):** the change is test-only in
+> `packages/connect/src/doctor.test.ts` (+47/−1) — a `stampAgentMtimes()`
+> helper stamping the seeded `identity.json` files with synthetic,
+> strictly-increasing utimes so `discoverCredentialDirectory`'s newest-wins
+> selection is deterministic under the kernel's coarse-clock ties. No runtime,
+> tool, schema, description or wire change: nothing in this document moves,
+> and the doctor's selection contract itself is unchanged — the fix only makes
+> the fixtures honor it deterministically.
 >
 > **Re-verified unchanged (#3131, and again for #3133):** this doc is coupled to
 > `.github/workflows/ci.yml`. #3131 added one dependency-free step to the

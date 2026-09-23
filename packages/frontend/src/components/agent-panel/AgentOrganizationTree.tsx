@@ -45,8 +45,12 @@ export function AgentOrganizationTree({
   counts,
 }: {
   organizations: Organization[]
-  /** The organization facet's per-option counts (option value → agents), from `useAgentListFilters`. */
-  counts?: Record<string, number>
+  /**
+   * The organization facet's per-option counts (option value → agents), from
+   * `useAgentListFilters`. Required: without it the tree fell back to direct
+   * members and contradicted the filter (#3222 re-review S6).
+   */
+  counts: Record<string, number> | undefined
   loading: boolean
   error: string | null
   /** The facet's current organization value (null = all agents; 'top_level' = unfiled). */
@@ -68,7 +72,12 @@ export function AgentOrganizationTree({
       : selectedId === TOP_LEVEL_OPTION
         ? 'Top level'
         : (organizations.find((o) => o.id === selectedId)?.name ?? 'All agents')
-  const countFor = (value: string, fallback: number | undefined) => (counts ? (counts[value] ?? 0) : fallback)
+  const countFor = (value: string) => (counts ? (counts[value] ?? 0) : undefined)
+  // On mobile, picking a row folds the tree again so the filtered list is in view.
+  const select = (orgId: string | null) => {
+    setExpanded(false)
+    onSelect(orgId)
+  }
 
   if (loading && organizations.length === 0) {
     return (
@@ -146,7 +155,7 @@ export function AgentOrganizationTree({
             label="All agents"
             depth={0}
             selected={selectedId === null}
-            onSelect={() => onSelect(null)}
+            onSelect={() => select(null)}
             count={undefined}
             folder={false}
           />
@@ -154,8 +163,8 @@ export function AgentOrganizationTree({
             label="Top level"
             depth={0}
             selected={selectedId === 'top_level'}
-            onSelect={() => onSelect(TOP_LEVEL_OPTION)}
-            count={countFor(TOP_LEVEL_OPTION, undefined)}
+            onSelect={() => select(TOP_LEVEL_OPTION)}
+            count={countFor(TOP_LEVEL_OPTION)}
             folder={false}
           />
           {rows.map((node) => (
@@ -164,8 +173,8 @@ export function AgentOrganizationTree({
               label={node.org.name}
               depth={node.depth}
               selected={selectedId === node.org.id}
-              onSelect={() => onSelect(node.org.id)}
-              count={countFor(node.org.id, node.org.agent_count)}
+              onSelect={() => select(node.org.id)}
+              count={countFor(node.org.id)}
               folder
             />
           ))}

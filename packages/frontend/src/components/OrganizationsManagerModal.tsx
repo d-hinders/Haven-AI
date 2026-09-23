@@ -6,7 +6,7 @@ import { Icon } from '@/components/ui/Icon'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useOrganizations, type Organization } from '@/hooks/useOrganizations'
-import { organizationPath } from '@/lib/agent-organizations'
+import { organizationPath, subtreeAgentCount } from '@/lib/agent-organizations'
 import { orgDeleteBody } from '@/lib/organization-copy'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
@@ -288,9 +288,11 @@ export default function OrganizationsManagerModal({
                       <label htmlFor={`move-target-${org.id}`} className="block text-xs font-medium text-[var(--v2-ink-2)]">
                         Move inside
                       </label>
+                      {/* No aria-label: the visible "Move inside" label names
+                          it, so the accessible name contains the visible text
+                          (WCAG 2.5.3). */}
                       <Select
                         id={`move-target-${org.id}`}
-                        aria-label={`Move ${org.name} inside`}
                         value={moveTarget}
                         onChange={(event) => setMoveTarget(event.target.value)}
                       >
@@ -324,8 +326,10 @@ export default function OrganizationsManagerModal({
                             ? organizationPath(organizations, org.parent_organization_id)
                             : 'Top level'}
                           {' · '}
-                          <span className="v2-tabular">{org.agent_count}</span>
-                          {org.agent_count === 1 ? ' agent' : ' agents'}
+                          {/* The subtree count — the number the tree and the
+                              filter show — with the direct count beside it
+                              when they differ (#3222 re-review). */}
+                          <OrgAgentCount total={subtreeAgentCount(organizations, org.id)} direct={org.agent_count} />
                         </p>
                       </div>
                       {/* Round-3 review (NB3): the name takes the FULL row
@@ -391,5 +395,22 @@ export default function OrganizationsManagerModal({
         loading={deleting}
       />
     </div>
+  )
+}
+
+/** "3 agents", or "3 agents (1 directly)" when the subtree holds more than the folder itself. */
+function OrgAgentCount({ total, direct }: { total: number; direct: number }) {
+  return (
+    <>
+      <span className="v2-tabular">{total}</span>
+      {total === 1 ? ' agent' : ' agents'}
+      {direct !== total ? (
+        <>
+          {' ('}
+          <span className="v2-tabular">{direct}</span>
+          {' directly)'}
+        </>
+      ) : null}
+    </>
   )
 }

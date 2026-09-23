@@ -54,8 +54,6 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
 last-verified: "2026-09-23"
-
-last-verified: "2026-09-22"
 ---
 
 # MCP Runtime Compatibility

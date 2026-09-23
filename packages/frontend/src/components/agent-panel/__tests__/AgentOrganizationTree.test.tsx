@@ -21,6 +21,7 @@ function renderTree(props: Partial<Parameters<typeof AgentOrganizationTree>[0]> 
       onCreate={vi.fn()}
       onManage={vi.fn()}
       onRetry={vi.fn()}
+      counts={undefined}
       {...props}
     />,
   )
@@ -49,6 +50,17 @@ describe('AgentOrganizationTree (#3222 re-review)', () => {
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(rows.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+  })
+
+  it('folds again after a row is picked, so the filtered list is in view', () => {
+    const onSelect = vi.fn()
+    const { container } = renderTree({ onSelect })
+    const toggle = container.querySelector('[aria-controls="organization-tree-rows"]') as HTMLElement
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(screen.getByRole('button', { name: /Tech Agents/ }))
+    expect(onSelect).toHaveBeenCalledWith('tech')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('draws no chevron on the rows — nothing there expands or collapses', () => {

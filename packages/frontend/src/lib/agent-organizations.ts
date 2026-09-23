@@ -98,6 +98,17 @@ export function flattenOrganizationTree(nodes: OrganizationNode[]): Organization
   return out
 }
 
+/**
+ * Agents filed anywhere in `orgId`'s subtree — the folder's own plus every
+ * descendant's `agent_count` (direct members). The count the tree and the
+ * toolbar filter show, so the manager can show the same number (#3222
+ * re-review: "Company A · 0 agents" beside a tree saying "Company A 1").
+ */
+export function subtreeAgentCount(organizations: Organization[], orgId: string): number {
+  const ids = new Set(subtreeIds(organizations, orgId))
+  return organizations.reduce((sum, org) => (ids.has(org.id) ? sum + org.agent_count : sum), 0)
+}
+
 /** Every id in the subtree rooted at `orgId`, inclusive — one option per org. */
 export function subtreeIds(organizations: Organization[], orgId: string): string[] {
   const childrenByParent = new Map<string | null, string[]>()

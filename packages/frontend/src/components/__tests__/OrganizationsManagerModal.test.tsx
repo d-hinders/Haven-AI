@@ -115,3 +115,21 @@ describe('OrganizationsManagerModal — move mode and delete weight (#3222 re-re
     expect(del.className).not.toMatch(/bg-\[var\(--v2-danger\)\]/)
   })
 })
+
+describe('OrganizationsManagerModal — counts agree with the tree (#3222 re-review)', () => {
+  it('shows the subtree count, and the direct count beside it when they differ', async () => {
+    mockGet.mockResolvedValue({
+      organizations: [
+        { id: 'root', parent_organization_id: null, name: 'Company A', created_at: '', updated_at: '', agent_count: 0 },
+        { id: 'tech', parent_organization_id: 'root', name: 'Tech Agents', created_at: '', updated_at: '', agent_count: 1 },
+      ],
+    })
+    renderModal()
+    await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
+    const list = screen.getByTestId('organization-manager-list')
+    // Company A holds no agent itself but one through Tech Agents.
+    expect(list.textContent).toMatch(/Top level · 1 agent \(0 directly\)/)
+    // Tech Agents: subtree equals direct, so no parenthetical.
+    expect(list.textContent).toMatch(/Company A · 1 agent(?! \()/)
+  })
+})

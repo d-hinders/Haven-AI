@@ -599,6 +599,29 @@ async function seedAgents(page: Page, agents: ReadonlyArray<Record<string, unkno
       })
       return
     }
+    // #3222 re-review: a card offers Move only when the user HAS an
+    // organization. This spec captures the focus ring on every operational
+    // control, Move included, so it seeds one; the shared fixture keeps
+    // `organizations: []` for the product-route captures.
+    if (request.method() === 'GET' && path === '/organizations') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          organizations: [
+            {
+              id: 'org-focus',
+              parent_organization_id: null,
+              name: 'Operations',
+              created_at: '2026-05-01T00:00:00Z',
+              updated_at: '2026-05-01T00:00:00Z',
+              agent_count: 0,
+            },
+          ],
+        }),
+      })
+      return
+    }
     await route.fallback()
   })
 }

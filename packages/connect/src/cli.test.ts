@@ -316,6 +316,29 @@ describe('--tombstone (#1681)', () => {
     expect(out).not.toContain('sk_agent_x')
   })
 
+  it('#3259: an unwritable ledger still exits 0 with tombstoned:true, recordPath null and the mirror error — matching the disk', async () => {
+    const dir = await agentDir()
+    // A FILE where the root's ledger directory goes.
+    await writeFile(join(tempDir, '.tombstones'), 'x')
+    const stdout: string[] = []
+    const exitCode = await runCli(['--tombstone', dir, '--json'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+    expect(exitCode).toBe(0)
+    const record = JSON.parse(stdout[0])
+    expect(record).toMatchObject({ tombstoned: true, agent_id: 'agent-old', recordPath: null })
+    // The errno code only — never the raw OS message with its local path (#2175).
+    expect(record.mirrorError).toMatch(/^(ENOTDIR|EEXIST)$/)
+    expect(stdout[0]).not.toContain(join(tempDir, '.tombstones', 'agent-old.json'))
+    const { readFile } = await import('node:fs/promises')
+    expect(await readFile(join(dir, 'TOMBSTONE.json'), 'utf8')).toContain('agent-old')
+
+    const text: string[] = []
+    const dir2 = join(tempDir, 'agent-old-2')
+    await mkdir(join(dir2, 'bin'), { recursive: true })
+    expect(await runCli(['--tombstone', dir2], { stdout: (m) => text.push(m), stderr: () => undefined })).toBe(0)
+    expect(text.join('')).toMatch(/surviving tombstone record could NOT be written/)
+    expect(text.join('')).not.toMatch(/was mirrored to/)
+  })
+
   it('--json emits one secret-free record', async () => {
     const dir = await agentDir()
     const stdout: string[] = []
@@ -998,6 +1021,26 @@ describe('--unwire teardown outcome and --prune-signer-runtimes (#3123)', () => 
       const record = JSON.parse(json[0])
       expect(record.unwired).toBe(true)
       expect(record.teardown).toEqual({ status: 'retained', probe: 'unauthorized', detail: 'A stranded delegate balance MAY still exist and the connector CANNOT check.', remedy: 'Recover first, then --destroy-key-material.' })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('#3259: a mirror failure is surfaced additively — mirror_error in --json, a "!" line in text — and never changes the exit code', async () => {
+    const base = unwireResult({ status: 'destroyed', probe: 'ok', detail: 'Key material destroyed (probe: ok).' })
+    const spy = vi.spyOn(unwireModule, 'unwireAgent').mockResolvedValue({ ...base, mirrorError: 'ENOTDIR' })
+    try {
+      const json: string[] = []
+      expect(await runCli(['--unwire', '/home/u/.haven/agents/research', '--json'], { stdout: (m) => json.push(m), stderr: () => undefined })).toBe(0)
+      expect(JSON.parse(json[0]).mirror_error).toBe('ENOTDIR')
+      const text: string[] = []
+      expect(await runCli(['--unwire', '/home/u/.haven/agents/research'], { stdout: (m) => text.push(m), stderr: () => undefined })).toBe(0)
+      expect(text.join('')).toContain('! Surviving tombstone record: NOT written to /home/u/.haven/agents/.tombstones (ENOTDIR)')
+
+      spy.mockResolvedValue(base)
+      const clean: string[] = []
+      await runCli(['--unwire', '/home/u/.haven/agents/research', '--json'], { stdout: (m) => clean.push(m), stderr: () => undefined })
+      expect(JSON.parse(clean[0])).not.toHaveProperty('mirror_error')
     } finally {
       spy.mockRestore()
     }

@@ -175,7 +175,11 @@ minutes. Two rules follow:
    and a refusal is `{"tombstoned": false, "error": {"code", "next_action"}}`
    with exit 1 — so check the result rather than assuming silence means success
    (#2175). The `message` field is present only for connector-authored refusals;
-   an unexpected filesystem error keeps its raw text on stderr alone.
+   an unexpected filesystem error keeps its raw text on stderr alone. If only the
+   surviving copy fails — the directory IS tombstoned — the run still succeeds
+   with `"recordPath": null` and `"mirrorError": "<errno code>"`, and `--unwire
+   --json` carries the same as `mirror_error`; `--replace` still removes the old
+   directory's key files (#3259).
 
 ### Unwiring an agent (`--unwire`, #2169)
 

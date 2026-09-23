@@ -296,3 +296,30 @@ describe('the ledger follows the credential root (#3251)', () => {
     expect(tmpdir().startsWith(homedir())).toBe(true)
   })
 })
+
+/**
+ * #3259 — the mirror is best-effort. TOMBSTONE.json is written first and is the
+ * authoritative record, so a mirror failure must not surface as "not
+ * retired": that is what let --replace skip the key teardown.
+ */
+describe('a failed mirror never undoes the in-place retirement (#3259)', () => {
+  it('returns recordPath null + mirrorError, with the wrapper and TOMBSTONE.json on disk', async () => {
+    const dir = await retiredDirectory()
+    const blocker = join(await mkdtemp(join(tmpdir(), 'haven-3259-')), 'a-file')
+    await writeFile(blocker, 'x')
+    const info = await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset', tombstonesDir: join(blocker, 'ledger') })
+    expect(info.recordPath).toBeNull()
+    expect(info.mirrorError).toMatch(/^(ENOTDIR|EEXIST)$/)
+    expect(await readAgentTombstone(dir)).toMatchObject({ agent_id: AGENT, reason: 'reset' })
+    expect(await readFile(join(dir, 'bin', 'haven-signer.mjs'), 'utf8')).toContain(TOMBSTONE_MARKER)
+    // Key material is still not this function's business.
+    expect(await readFile(join(dir, 'signer.json'), 'utf8')).toContain(PRIVATE_KEY)
+  })
+
+  it('a successful mirror carries no mirrorError', async () => {
+    const dir = await retiredDirectory()
+    const info = await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset', tombstonesDir: await tempTombstonesDir() })
+    expect(info.recordPath).not.toBeNull()
+    expect(info).not.toHaveProperty('mirrorError')
+  })
+})

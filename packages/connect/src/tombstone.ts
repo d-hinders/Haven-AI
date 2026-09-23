@@ -182,10 +182,17 @@ function tombstoneScript(info: TombstoneInfo): string {
  *
  * Returns the tombstone info plus the MIRROR path (`recordPath`), so callers
  * can point at the record that outlives the directory.
+ *
+ * The mirror is BEST-EFFORT (#3259). The in-place TOMBSTONE.json is the
+ * authoritative record and is already on disk when the mirror is written, so
+ * a mirror failure must not read as "not retired": it used to throw here,
+ * and `--replace` then skipped the key teardown, leaving a directory that
+ * looked retired and could still spend. A failed mirror returns
+ * `recordPath: null` and `mirrorError`, and every caller reports it.
  */
 export async function writeAgentTombstone(
   input: WriteTombstoneInput,
-): Promise<TombstoneInfo & { recordPath: string }> {
+): Promise<WrittenTombstone> {
   // The directory must already exist: a mistyped path would otherwise be
   // silently created and reported as a successful retirement. (#1681 review)
   const dirStat = await stat(input.directory).catch(() => null)
@@ -227,11 +234,26 @@ export async function writeAgentTombstone(
   // tombstoned twice) overwrite — latest retirement wins, in-place records
   // remain authoritative.
   const root = input.tombstonesDir ?? defaultTombstonesDir()
-  await mkdir(root, { recursive: true, mode: 0o700 })
   const recordPath = join(root, `${info.agent_id}.json`)
-  await writeFile(recordPath, record, { mode: MIRROR_MODE })
+  try {
+    await mkdir(root, { recursive: true, mode: 0o700 })
+    await writeFile(recordPath, record, { mode: MIRROR_MODE })
+  } catch (err) {
+    // The errno CODE only — never the raw OS message, which carries local
+    // path detail and would reach `--json` stdout (#2175 discipline).
+    const code = (err as NodeJS.ErrnoException | null)?.code
+    return { ...info, recordPath: null, mirrorError: typeof code === 'string' && /^E[A-Z]+$/.test(code) ? code : 'mirror_write_failed' }
+  }
   return { ...info, recordPath }
 }
+
+/**
+ * A written tombstone. `recordPath` is the surviving mirror, or `null` when the
+ * mirror could not be written — then `mirrorError` is the errno code (e.g.
+ * `EACCES`, or `mirror_write_failed` when there is none), and the
+ * retirement still stands on the in-place TOMBSTONE.json (#3259).
+ */
+export type WrittenTombstone = TombstoneInfo & { recordPath: string | null; mirrorError?: string }
 
 /** The tombstone record for a directory, or null when it is not tombstoned. */
 export async function readAgentTombstone(directory: string): Promise<TombstoneInfo | null> {

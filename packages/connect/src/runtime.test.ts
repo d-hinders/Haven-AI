@@ -2222,8 +2222,11 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     messages: [],
   }))
 
-  async function runWithPriorDir(seedPrior: boolean, replaceExistingWiring?: boolean) {
+  async function runWithPriorDir(seedPrior: boolean, replaceExistingWiring?: boolean, blockLedger = false) {
     const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1688-'))
+    // #3259: a FILE where the root's ledger directory goes — the mirror write
+    // fails for any user, after TOMBSTONE.json is already in place.
+    if (blockLedger) await writeFile(join(credentialsDir, '.tombstones'), 'x')
     const oldDir = join(credentialsDir, 'agent-old-uuid')
     if (seedPrior) {
       await mkdir(oldDir, { recursive: true })
@@ -2284,6 +2287,18 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     // ambient ~/.haven/tombstones.
     const ledger = JSON.parse(await readFile(join(dirname(oldDir), '.tombstones', 'agent-old.json'), 'utf8'))
     expect(ledger).toMatchObject({ agent_id: 'agent-old', replaced_by: 'agent-new' })
+  })
+
+  it('REGRESSION (#3259): a failed ledger mirror still tears the prior directory down to key-less', async () => {
+    const { output, oldDir } = await runWithPriorDir(true, true, true)
+    // Tombstoned in place AND key-less — never "retired" with a spendable key.
+    await expect(stat(join(oldDir, 'TOMBSTONE.json'))).resolves.toBeDefined()
+    await expect(stat(join(oldDir, 'signer.json'))).rejects.toThrow()
+    expect(JSON.parse(await readFile(join(oldDir, 'identity.json'), 'utf8'))).toEqual({ agent_id: 'agent-old' })
+    expect(output).toContain('Retired previous agent agent-old locally')
+    expect(output).not.toContain('Could not retire previous agent')
+    // The mirror failure is said, not swallowed.
+    expect(output).toMatch(/surviving tombstone record for agent-old could not be written/)
   })
 
   it('#2551: the same prior dir WITHOUT --replace is refused before anything is minted', async () => {

@@ -283,6 +283,23 @@ describe('unwireAgent end-to-end (#2169)', () => {
     expect(entry?.classification).toBe('retired')
   })
 
+  it('#3259: an unwritable ledger still tears down the key material and reports mirrorError', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-unwire-mirror-fail-'))
+    // A FILE where the ledger directory would go: mkdir fails as any user.
+    const blocker = join(homeDir, 'not-a-dir')
+    await writeFile(blocker, 'x')
+    const wrapper = join(homeDir, '.haven', 'agents', 'agent-1', 'bin', 'haven-signer.mjs')
+    const dir = await seedAgent(homeDir, { agentId: 'agent-1', apiKey: 'sk_1', hostedUrl: HOSTED_URL, wrapperPath: wrapper })
+    await seedHermes(homeDir, HOSTED_URL, 'sk_1', wrapper, BARE)
+
+    const result = await unwireAgent({ directory: dir, homeDir, tombstonesDir: join(blocker, 'tombstones') })
+    expect(result.tombstoned).toBe(true)
+    expect(result.mirrorError).toMatch(/^(ENOTDIR|EEXIST)$/)
+    expect(await readFile(join(dir, 'TOMBSTONE.json'), 'utf8')).toContain('agent-1')
+    await expect(readFile(join(dir, 'signer.json'), 'utf8')).rejects.toThrow()
+    expect(JSON.parse(await readFile(join(dir, 'identity.json'), 'utf8'))).not.toHaveProperty('api_key')
+  })
+
   it('is idempotent: a second run does not double-write the tombstone', async () => {
     const homeDir = await mkdtemp(join(tmpdir(), 'haven-unwire-idem-'))
     const tombstonesDir = join(homeDir, '.haven', 'tombstones')
@@ -293,6 +310,7 @@ describe('unwireAgent end-to-end (#2169)', () => {
     const first = await unwireAgent({ directory: dir, homeDir, tombstonesDir })
     const second = await unwireAgent({ directory: dir, homeDir, tombstonesDir })
     expect(first.tombstoned).toBe(true)
+    expect(first).not.toHaveProperty('mirrorError')
     expect(second.tombstoned).toBe(false)
     expect(second.runtimes.filter((r) => r.status === 'removed')).toEqual([])
   })

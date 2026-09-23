@@ -2493,7 +2493,15 @@ to call next in structured fields, and those fields are typed end to end
   a connector-authored `ConnectError`. The directory guard is not the only
   thing that can throw (the `mkdir`/`chmod`/`writeFile` calls after it are all
   bare), and a plain `Error`'s raw OS text can carry arbitrary local path
-  detail, so that text stays on stderr and never enters the JSON record. This closed a real field failure — a `haven-reset` agent
+  detail, so that text stays on stderr and never enters the JSON record.
+  **A failed surviving copy is not a failed retirement (#3259):** the ledger
+  mirror is written after `TOMBSTONE.json`, and it used to throw, so `--replace`
+  skipped the key teardown and left a directory that read `retired` with a key
+  that could still spend. The mirror is now best-effort. `--tombstone --json`
+  succeeds with `"recordPath": null` and `"mirrorError"` set to the errno code
+  only (never the OS message), `--unwire --json` gains `mirror_error`, text
+  output says the record was not written and where, and `--replace` logs a
+  warning and still removes the key files. This closed a real field failure — a `haven-reset` agent
   reported "the tombstone command did not create `TOMBSTONE.json`" with no error
   to show for it, having built the path from an agent id. The reset skill now
   enumerates directories and verifies the result before deleting key material.
@@ -2890,3 +2898,14 @@ to call next in structured fields, and those fields are typed end to end
 > runs against a scratch `HOME` and `TMPDIR`. The `--tombstone` entry above
 > gains the ledger-location sentence. Scope of this note: those files.
 > Nothing else in this document was re-verified.
+
+> **Re-verified #3259 (2026-09-23, a failed tombstone mirror no longer skips
+> the `--replace` key teardown):** this diff touches
+> `packages/connect/src/{tombstone,unwire,runtime,cli}.ts`. `writeAgentTombstone`
+> now catches a failed ledger mirror and returns `recordPath: null` plus
+> `mirrorError` (errno code only), and every caller reports it. `--replace`
+> still runs `teardownLocalKeyMaterial`, `--tombstone` still exits 0, and
+> `--unwire --json` gains an additive `mirror_error`. The `--tombstone --json`
+> entry above gains the mirror-failure sentence. The record's fields,
+> redaction and no-key boundary are unchanged, and nothing is revoked. Scope of
+> this note: those files. Nothing else in this document was re-verified.

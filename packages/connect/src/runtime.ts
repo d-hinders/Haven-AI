@@ -831,7 +831,7 @@ async function executeConnect(
       supersededAgentsRetiredLocally = true
       for (const entry of replacing.superseded) {
         try {
-          await tombstoneDirectoryIfAbsent({
+          const { mirrorError } = await tombstoneDirectoryIfAbsent({
             directory: entry.directory,
             agentId: entry.agentId,
             reason: 'replaced by a new setup (--replace)',
@@ -840,6 +840,16 @@ async function executeConnect(
             // root → ~/.haven/tombstones, as before; any other → <root>/.tombstones).
             tombstonesDir: tombstonesDirForCredentialRoot(options.credentialsDir),
           })
+          // #3259: a mirror failure no longer throws — the in-place tombstone
+          // is written, so the key teardown below MUST still run, or the
+          // directory reads retired while its key can still spend.
+          if (mirrorError !== undefined) {
+            log(
+              `Warning: the surviving tombstone record for ${entry.agentId} could not be written to ` +
+                `${tombstonesDirForCredentialRoot(options.credentialsDir)} (${mirrorError}). ` +
+                'The in-place TOMBSTONE.json stands; --doctor will not list this retirement once the directory is deleted.',
+            )
+          }
           await teardownLocalKeyMaterial(entry.directory, await readIdentityFile(entry.directory))
           // #3122: a retired directory releases its server-name binding.
           await clearMcpServerBinding(entry.directory)

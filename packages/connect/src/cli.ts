@@ -120,6 +120,7 @@ export async function runCli(
         // A directory whose identity no longer parses can still be retired —
         // the tombstone then names it as unknown, which is honest.
       }
+      const ledgerDir = tombstonesDirForAgentDirectory(parsed.tombstone.directory)
       const info = await writeAgentTombstone({
         directory: parsed.tombstone.directory,
         agentId,
@@ -128,7 +129,7 @@ export async function runCli(
         // #3251: the ledger of the root that holds the retired directory —
         // ~/.haven/agents/<x> → ~/.haven/tombstones, exactly as before; a
         // directory under any other root → <root>/.tombstones.
-        tombstonesDir: tombstonesDirForAgentDirectory(parsed.tombstone.directory),
+        tombstonesDir: ledgerDir,
       })
       if (parsed.json) {
         io.stdout(`${redactSecrets(JSON.stringify({ tombstoned: true, ...info }))}\n`)
@@ -139,7 +140,13 @@ export async function runCli(
             'agent page if you have not already.\n',
         )
         io.stdout(
-          `A surviving tombstone record was mirrored to ${redactSecrets(info.recordPath)}\n`,
+          info.recordPath !== null
+            ? `A surviving tombstone record was mirrored to ${redactSecrets(info.recordPath)}\n`
+            : // #3259: the directory IS tombstoned; only the surviving copy failed.
+              redactSecrets(
+                `! The surviving tombstone record could NOT be written to ${ledgerDir} (${info.mirrorError}). The in-place ` +
+                  'TOMBSTONE.json stands, but --doctor will not list this retirement once the directory is deleted.\n',
+              ),
         )
         io.stdout(
           'Restart EVERY long-lived MCP host (gateway, TUI workers, editors): each holds the ' +
@@ -170,6 +177,7 @@ export async function runCli(
     const root = parsed.options.credentialsDir ?? join(homeDir, '.haven', 'agents')
     const directory =
       parsed.unwireDir ?? (parsed.options.serverName ? join(root, parsed.options.serverName) : root)
+    const ledgerDir = tombstonesDirForAgentDirectory(directory, homeDir)
     try {
       const result = await unwireAgent({
         directory,
@@ -184,7 +192,7 @@ export async function runCli(
         // directory itself, not a root. ~/.haven/agents/<slug> →
         // ~/.haven/tombstones, exactly as before; any other root →
         // <root>/.tombstones.
-        tombstonesDir: tombstonesDirForAgentDirectory(directory, homeDir),
+        tombstonesDir: ledgerDir,
       })
       const failures = result.runtimes.filter((r) => r.status === 'refused' || r.status === 'unreadable')
       // #3123: a retained teardown is a refusal too — the wiring is gone, the
@@ -199,6 +207,8 @@ export async function runCli(
               slug: result.slug ?? null,
               directory: result.directory,
               tombstoned: result.tombstoned,
+              // #3259: additive — present only when the surviving ledger record failed.
+              ...(result.mirrorError !== undefined ? { mirror_error: result.mirrorError } : {}),
               runtimes: result.runtimes.map((r) => ({
                 runtime: r.runtime,
                 label: r.label,
@@ -224,6 +234,12 @@ export async function runCli(
             ? '  · Tombstoned first: any long-lived host still resolving the old wrapper gets the HAVEN-TOMBSTONE diagnosis.\n'
             : '  · Directory was already tombstoned.\n',
         )
+        if (result.mirrorError !== undefined) {
+          io.stdout(redactSecrets(
+            `  ! Surviving tombstone record: NOT written to ${ledgerDir} (${result.mirrorError}) — the in-place tombstone stands; ` +
+              '--doctor will not list this retirement once the directory is deleted.\n',
+          ))
+        }
         for (const r of result.runtimes) {
           const mark = r.status === 'removed' ? '✓' : r.status === 'clean' ? '–' : '✗'
           io.stdout(redactSecrets(`  ${mark} ${r.label}: ${r.status}${r.detail ? ` — ${r.detail}` : ''}\n`))

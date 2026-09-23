@@ -1,15 +1,19 @@
 'use client'
 
-import { ChevronRight, CircleAlert, Clock, LoaderCircle, Plus, Tag } from 'lucide-react'
+import { ChevronRight, CircleAlert, Clock, LoaderCircle, Network, Plus, Tag } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { setupIdFromSearch } from '@/lib/discovery'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import { useAgentListFilters } from '@/hooks/useAgentListFilters'
+import { BUILT_IN_FACETS } from '@/lib/agent-list-filters'
+import { organizationFacet } from '@/lib/agent-organizations'
 import { AgentListToolbar } from './agent-panel/AgentListToolbar'
+import { AgentOrganizationTree } from './agent-panel/AgentOrganizationTree'
 import ConnectAgentModal from './ConnectAgentModal'
 import LabelsManagerModal from './LabelsManagerModal'
+import OrganizationsManagerModal from './OrganizationsManagerModal'
 import { AgentCard } from './agent-panel/AgentCard'
 import { MCP_NOT_RECORDED_NOTE, hasUnrecordedMcpServerName } from './agent-panel/McpServerName'
 import { BotIcon } from './agent-panel/agent-display'
@@ -43,7 +47,33 @@ export default function AgentPanel() {
 
   // #3165: search / facets / sort over the managed list, state in the URL.
   // Reads `visibleAgents` only; removed agents stay behind their own toggle.
-  const listFilters = useAgentListFilters(visibleAgents)
+  // #3164 registers the organization facet (a plain data value over the
+  // fetched tree) ALONGSIDE the built-ins — the toolbar, the URL codec and
+  // the counts pick it up without any of them knowing what an org is.
+  // Round-3 review (NB2): the second argument REPLACES the hook's
+  // `BUILT_IN_FACETS` default (a default fires only on `undefined`, so
+  // `[]` counted as a real answer and org-less users lost Status/Budget
+  // entirely, while a shared `?status=active` link was silently ignored).
+  // The spread below is the hook doc's prescribed shape.
+  const orgFacets = useMemo(
+    () => (panel.organizations.length > 0 ? [organizationFacet(panel.organizations)] : []),
+    [panel.organizations],
+  )
+  const allFacets = useMemo(() => [...BUILT_IN_FACETS, ...orgFacets], [orgFacets])
+  const listFilters = useAgentListFilters(visibleAgents, allFacets)
+
+  // The tree's selected row IS the organization facet's selection (one
+  // source of truth, URL-mirrored by the filter state).
+  const selectedOrgId = listFilters.state.facets.organization?.[0] ?? null
+  const selectOrganization = useCallback(
+    (orgId: string | null) => {
+      listFilters.setState({
+        ...listFilters.state,
+        facets: { ...listFilters.state.facets, organization: orgId ? [orgId] : [] },
+      })
+    },
+    [listFilters],
+  )
 
   /**
    * `/agents?setup=<id>` — the budget-approval hand-off link (#2522).
@@ -121,7 +151,23 @@ export default function AgentPanel() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      {/* #3164 review: this row WRAPS. Adding the header's Organizations
+          button (#3164) grew the action cluster (Labels · Organizations ·
+          Connect agent) to ~335px, which no longer shares one
+          `justify-between` line with the count chip inside the ~345px
+          content box a 393px viewport leaves — measured as
+          `contentScrollWidth` 435 vs 393 on the `navigation.mobile` gate
+          (42px overflow, deterministic). The card action rows were NOT the
+          offender: the widest of them measures ~255px here and fits with
+          room to spare. `flex-wrap` drops the cluster to its own line below
+          the chip instead of overflowing, and the cluster itself wraps at
+          the narrowest supported width (320) for the same reason — its
+          natural width exceeds a 320px screen's content box. Desktop is
+          untouched: the two clusters fit one line there with hundreds of px
+          to spare, so nothing ever wraps at `lg` and up. `gap-y-2` spaces
+          the wrapped lines; without it the cluster sits flush under the
+          chip. */}
+      <div className="flex flex-wrap items-center justify-between gap-y-2 mb-4">
         <div className="flex items-center gap-1">
           <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--v2-surface-2)] text-[var(--v2-ink)]">
             Agents
@@ -130,10 +176,16 @@ export default function AgentPanel() {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => panel.setLabelsManagerOpen(true)} size="sm" variant="tertiary">
             <Icon icon={Tag} className="h-3.5 w-3.5" />
             Labels
+          </Button>
+          {/* #3164: the organization manager — create/rename/move/delete. The
+              tree above the list appears once at least one organization exists. */}
+          <Button onClick={() => panel.setOrganizationsManagerOpen(true)} size="sm" variant="tertiary">
+            <Icon icon={Network} className="h-3.5 w-3.5" />
+            Organizations
           </Button>
           <Button onClick={() => panel.setConnectAgentOpen(true)} size="sm">
             <Icon icon={Plus} className="h-3.5 w-3.5" />
@@ -141,6 +193,25 @@ export default function AgentPanel() {
           </Button>
         </div>
       </div>
+
+      {/* #3164: the organization tree above the list — only when the user HAS
+          organizations. An empty tree would be a permanent empty management
+          panel on every org-less /agents visit (product README, First-Run
+          Simplicity); the header's Organizations button is the entry point
+          until one exists. */}
+      {panel.organizations.length > 0 && (
+        <AgentOrganizationTree
+          organizations={panel.organizations}
+          loading={panel.organizationsLoading}
+          error={panel.organizationsError}
+          selectedId={selectedOrgId}
+          onSelect={selectOrganization}
+          onCreate={() => panel.setOrganizationsManagerOpen(true)}
+          onManage={() => panel.setOrganizationsManagerOpen(true)}
+          onRetry={() => void panel.fetchOrganizations()}
+          counts={listFilters.counts.organization}
+        />
+      )}
 
       {visibleAgents.length > 0 && (
         <AgentListToolbar
@@ -351,8 +422,10 @@ export default function AgentPanel() {
                     onRevokeCredential={panel.revokeAgentCredential}
                     onArchive={panel.handleArchive}
                     onRestore={panel.handleRestore}
+                    onMoveToOrganization={panel.handleAgentMoved}
                     busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
                     chainId={agentChainId}
+                    organizations={panel.organizations}
                   />
                 )
               })}
@@ -397,8 +470,10 @@ export default function AgentPanel() {
                 onRevokeCredential={panel.revokeAgentCredential}
                 onArchive={panel.handleArchive}
                 onRestore={panel.handleRestore}
+                onMoveToOrganization={panel.handleAgentMoved}
                 busyAction={panel.busyAgentId === agent.id ? panel.busyAction : null}
                 chainId={agent.account_chain_id ?? chainId}
+                organizations={panel.organizations}
               />
             ))}
           </div>
@@ -421,6 +496,13 @@ export default function AgentPanel() {
         open={panel.labelsManagerOpen}
         onClose={() => panel.setLabelsManagerOpen(false)}
         onLabelsChanged={panel.handleAgentEdited}
+      />
+
+      {/* Manage organizations (#3164): the tree — create, rename, move, delete. */}
+      <OrganizationsManagerModal
+        open={panel.organizationsManagerOpen}
+        onClose={() => panel.setOrganizationsManagerOpen(false)}
+        onOrganizationsChanged={panel.handleOrganizationsChanged}
       />
     </div>
   )

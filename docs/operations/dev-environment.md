@@ -15,6 +15,8 @@ covers:
   - scripts/ci/shadow-reading.mjs
   - packages/backend/src/routes/health.ts
   - packages/backend/src/openapi/route-modules.generated.ts
+  - packages/backend/src/routes/agent-organizations.ts
+  - packages/frontend/src/hooks/useOrganizations.ts
   - packages/backend/scripts/generate-route-modules.ts
   - packages/backend/src/index.ts
   - packages/backend/src/modules/accounting/api-key-flow.ts
@@ -344,7 +346,10 @@ Isolation rules that are non-negotiable for a payments product:
   `packages/backend/src/openapi/route-modules.generated.ts`; regenerate it with
   `npm run generate:route-modules` after adding, moving or renaming a route
   (`npm run check:route-modules` and the backend suite both fail on a stale
-  table). The `lint:request-schemas` gate keys its baseline entries with the
+  table). New modules are born ENFORCED with their own `enforcedModules`
+  entry — #3164's `routes/agent-organizations.ts` (its own `/organizations`
+  prefix) followed the #3167 precedent exactly. The `lint:request-schemas`
+  gate keys its baseline entries with the
   same string, so the gate and the runtime agree about which modules are
   still shadowed — with one stated limit, closed in #3030: the gate reads a
   module's mount prefix from `index.ts`, and until #3030 it read only the

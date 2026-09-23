@@ -5,11 +5,13 @@ import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanne
 import { LabelChipRow } from '@/components/haven/LabelChip'
 import { useState } from 'react'
 import { type Agent } from '@/hooks/useAgents'
+import type { Organization } from '@/hooks/useOrganizations'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
 import ConfirmDialog from '../ConfirmDialog'
+import MoveAgentModal from '../MoveAgentModal'
 import { RemoveAgentDialog } from './RemoveAgentDialog'
 import { entityCardClassName } from '../ui/entityCardStyles'
 import { ConfiguredAllowanceRow } from './ConfiguredAllowanceRow'
@@ -20,6 +22,12 @@ const ACTION_BUTTON_CLASS =
   'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-1 text-xs text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] disabled:opacity-50'
 const DANGER_ACTION_BUTTON_CLASS =
   'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-1 text-xs text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] disabled:opacity-50'
+/**
+ * The `|` between the operational card's actions. Hidden below `lg`, where the
+ * row wraps and a separator could only land at a line's start or end (#3222
+ * re-review S9); visible from `lg` up, where the row never wraps.
+ */
+const SEPARATOR_CLASS = 'hidden text-[var(--v2-border-strong)] lg:inline'
 
 export function AgentCard({
   agent,
@@ -29,8 +37,10 @@ export function AgentCard({
   onRevokeCredential,
   onArchive,
   onRestore,
+  onMoveToOrganization,
   busyAction,
   chainId = DEFAULT_CHAIN_ID,
+  organizations = [],
 }: {
   agent: Agent
   onViewDetails: (agent: Agent) => void
@@ -41,11 +51,18 @@ export function AgentCard({
   /** RemoveAgentDialog step 3: archive (#1401), throws on failure. */
   onArchive: (agent: Agent) => Promise<void>
   onRestore: (agent: Agent) => void
+  /** #3164: the card hosts the Move modal; this delivers the saved agent back. */
+  onMoveToOrganization: (agent: Agent) => void
   busyAction: AgentBusyAction
   chainId?: number
+  /** #3164: the user's organization tree, for the card's Move picker. */
+  organizations?: Organization[]
 }) {
   const [pauseModalOpen, setPauseModalOpen] = useState(false)
   const [removeModalOpen, setRemoveModalOpen] = useState(false)
+  // #3164: mounted only while open (the per-agent modal, same pattern as
+  // RemoveAgentDialog below).
+  const [moveModalOpen, setMoveModalOpen] = useState(false)
 
   const isActive = agent.status === 'active'
   const isPaused = agent.status === 'paused'
@@ -347,7 +364,32 @@ export function AgentCard({
           `text-xs` would equalise the band at 16px and make all five branches
           4px, but it also resizes a visible glyph, so it is a design change
           rather than this fix. */}
-      <div className="flex items-center gap-2 pt-3 pb-1 border-t border-[var(--v2-border)]">
+      <div
+        data-testid="agent-card-actions"
+        className={`flex flex-wrap lg:flex-nowrap items-center ${isOperational ? 'gap-x-4 gap-y-2 lg:gap-2' : 'gap-2'} pt-3 pb-1 border-t border-[var(--v2-border)]`}
+      >
+        {/* #3222 re-review S9: below `lg` the row wraps, and a `|` could only
+            ever land at a line's start or end — round 3 moved it from one to
+            the other. The operational separators are hidden below `lg`
+            (SEPARATOR_CLASS) and `gap-x-4` spaces the actions instead — on the
+            operational row only, so the revoked and archived rows keep `gap-2`; from
+            `lg` up the row is nowrap with `gap-2` and the separators, so the
+            desktop render is unchanged. */}
+        {/* #3164 review: `flex-wrap` — the row holds four `min-w-11` text
+            actions plus separators, and below `lg` a card is the full grid
+            column (one column at 390, `minmax(0,1fr)` track at 768). At the
+            narrowest supported width (320) the operational row's actions
+            (~270px natural) exceed the card's content box (~288px), so the
+            row MUST be allowed to wrap between controls; `gap-2` is the
+            wrapped lines' row-gap too. The Mobile-shell gate asserts the
+            ARCHIVED row's own 390px no-overflow budget
+            (`focus-visible.visual.spec.ts`), and the /agents card row was
+            measured fitting 393 with ~50px to spare — this wrap is the
+            320-hardening, not a fix for a 393 overflow. `lg:flex-nowrap`
+            keeps every desktop render byte-identical: the desktop captures
+            in this file (438px rows with 9px of slack on the widest branch)
+            were taken with the row on one line, and font-metric drift is the
+            one thing a baseline cannot absorb. */}
         {isOperational && (
           <>
             {/* #3168: "Details" is the first action on EVERY operational card.
@@ -365,40 +407,65 @@ export function AgentCard({
             >
               Details
             </button>
-            <span className="text-[var(--v2-border-strong)]">|</span>
-            {isActive ? (
-                  <button
-                    onClick={() => setPauseModalOpen(true)}
-                    disabled={isBusy}
-                    aria-label={`Pause ${agent.name}`}
-                    className={ACTION_BUTTON_CLASS}
-                  >
-                    {busyAction === 'pause' ? 'Pausing…' : 'Pause'}
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => onResume(agent)}
-                    disabled={isBusy}
-                    aria-label={`Resume ${agent.name}`}
-                    className={ACTION_BUTTON_CLASS}
-                  >
-                {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
-              </button>
+            {/* #3164: file the agent under an organization. Placement only —
+                the modal's note says so, and nothing here touches authority. */}
+            {/* Round-3 review (S9): each `|` travels WITH the button it
+                introduces — on a wrapped line below `lg` the row used to
+                strand a pipe at the previous line's end (a dangling `|`
+                followed by a lone "Remove"). At `lg`+ the row is nowrap and
+                renders byte-identically to the committed close-up baselines. */}
+            {/* #3222 re-review: Move only when there is somewhere to move
+                to — with no organizations the picker offered only "Top level",
+                a dead end that also made the mobile row wrap. */}
+            {organizations.length > 0 && (
+              <span className="flex items-center gap-2">
+                <span className={SEPARATOR_CLASS}>|</span>
+                <button
+                  onClick={() => setMoveModalOpen(true)}
+                  disabled={isBusy}
+                  aria-label={`Move ${agent.name} to an organization`}
+                  className={ACTION_BUTTON_CLASS}
+                >
+                  Move
+                </button>
+              </span>
             )}
+            <span className={SEPARATOR_CLASS}>|</span>
+            <span className="flex items-center gap-2">
+              {isActive ? (
+                <button
+                  onClick={() => setPauseModalOpen(true)}
+                  disabled={isBusy}
+                  aria-label={`Pause ${agent.name}`}
+                  className={ACTION_BUTTON_CLASS}
+                >
+                  {busyAction === 'pause' ? 'Pausing…' : 'Pause'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => onResume(agent)}
+                  disabled={isBusy}
+                  aria-label={`Resume ${agent.name}`}
+                  className={ACTION_BUTTON_CLASS}
+                >
+                  {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
+                </button>
+              )}
+            </span>
             {/* #1402: Remove stops the live delegation and archives its
                 credential. #2413 dropped the legacy "Unlink" variant with the
                 records it named. */}
-            <>
-                <span className="text-[var(--v2-border-strong)]">|</span>
-                <button
-                  onClick={() => setRemoveModalOpen(true)}
-                  disabled={isBusy}
-                  aria-label={`Remove ${agent.name}`}
-                  className={DANGER_ACTION_BUTTON_CLASS}
-                >
-                  Remove
-                </button>
-            </>
+            <span className="flex items-center gap-2">
+              <span className={SEPARATOR_CLASS}>|</span>
+              <button
+                onClick={() => setRemoveModalOpen(true)}
+                disabled={isBusy}
+                aria-label={`Remove ${agent.name}`}
+                className={DANGER_ACTION_BUTTON_CLASS}
+              >
+                Remove
+              </button>
+            </span>
           </>
         )}
         {isRevoked && !isArchived && (
@@ -503,6 +570,18 @@ export function AgentCard({
         onRevokeCredential={() => onRevokeCredential(agent.id)}
         onArchive={() => onArchive(agent)}
         onClose={() => setRemoveModalOpen(false)}
+      />
+    )}
+
+    {/* #3164: the org picker for THIS agent, mounted only while open. The
+        vocabulary comes from the panel (one fetch serves every card). */}
+    {moveModalOpen && (
+      <MoveAgentModal
+        open={moveModalOpen}
+        onClose={() => setMoveModalOpen(false)}
+        agent={agent}
+        organizations={organizations}
+        onMoved={onMoveToOrganization}
       />
     )}
     </>

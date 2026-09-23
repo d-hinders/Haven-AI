@@ -36,11 +36,21 @@ function agentFixture(overrides: Partial<Agent> = {}): Agent {
     created_at: '2026-05-01T00:00:00Z',
     allowances: [],
     labels: [],
+    organization_id: null,
     ...overrides,
   } as Agent
 }
 
-function renderCard(agent: Agent, { busyAction = null }: { busyAction?: import('@/hooks/useAgentPanelState').AgentBusyAction } = {}) {
+function renderCard(
+  agent: Agent,
+  {
+    busyAction = null,
+    organizations = [],
+  }: {
+    busyAction?: import('@/hooks/useAgentPanelState').AgentBusyAction
+    organizations?: import('@/hooks/useOrganizations').Organization[]
+  } = {},
+) {
   const onRestore = vi.fn()
   const onViewDetails = vi.fn()
   const { container } = render(
@@ -52,7 +62,9 @@ function renderCard(agent: Agent, { busyAction = null }: { busyAction?: import('
       onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
       onArchive={vi.fn().mockResolvedValue(undefined)}
       onRestore={onRestore}
+      onMoveToOrganization={vi.fn()}
       busyAction={busyAction}
+      organizations={organizations}
     />,
   )
   return { onRestore, onViewDetails, container }
@@ -369,5 +381,39 @@ describe('AgentCard label chips (#3167, #3197)', () => {
     )
     expect(screen.getByTestId('agent-label-chips')).toBeTruthy()
     expect(screen.getByText('finance')).toBeTruthy()
+  })
+})
+
+describe('AgentCard organization actions (#3222 re-review)', () => {
+  const ORG = {
+    id: 'org-1',
+    parent_organization_id: null,
+    name: 'Tech Agents',
+    created_at: '2026-05-01T00:00:00Z',
+    updated_at: '2026-05-01T00:00:00Z',
+    agent_count: 1,
+  }
+
+  it('offers Move only when the user has an organization to move to', () => {
+    renderCard(agentFixture())
+    expect(screen.queryByRole('button', { name: 'Move Research agent to an organization' })).toBeNull()
+  })
+
+  it('offers Move once an organization exists', () => {
+    renderCard(agentFixture(), { organizations: [ORG] })
+    expect(screen.getByRole('button', { name: 'Move Research agent to an organization' })).toBeInTheDocument()
+  })
+
+  it('hides the operational separators below lg, where a wrapped row stranded them (S9)', () => {
+    const { container } = renderCard(agentFixture({ status: 'paused' }), { organizations: [ORG] })
+    const row = container.querySelector('[data-testid="agent-card-actions"]') as HTMLElement
+    const pipes = [...row.querySelectorAll('span')].filter((el) => el.textContent === '|')
+    expect(pipes.length).toBe(3)
+    for (const pipe of pipes) {
+      expect(pipe.className).toMatch(/(^|\s)hidden(\s|$)/)
+      expect(pipe.className).toMatch(/(^|\s)lg:inline(\s|$)/)
+    }
+    expect(row.className).toMatch(/gap-x-4/)
+    expect(row.className).toMatch(/lg:gap-2/)
   })
 })

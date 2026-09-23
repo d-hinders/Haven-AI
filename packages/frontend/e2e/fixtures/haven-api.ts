@@ -97,6 +97,9 @@ export const testAgent = {
   // #3167: labels ride on every agent read. The e2e default agent carries
   // none — the label UI's own e2e coverage labels it explicitly.
   labels: [],
+  // #3164: placement on the agents read. The default agent sits at the top
+  // level, outside every organization.
+  organization_id: null,
   // #2264: the DERIVED delegation-budget projection, which is what fills this
   // array on the live rail (`rails/delegation-budget-view.ts`): 250 USDC per
   // 30 days, `allowance_amount` HUMAN-formatted and `reset_period_min` in
@@ -462,6 +465,15 @@ export async function mockHavenApi(page: Page) {
 
     if (method === 'GET' && path === '/agents') {
       await fulfillJson(route, { agents: [testAgent] })
+      return
+    }
+
+    // #3164: the org tree read behind the /agents panel. The e2e default
+    // session holds no organizations, so the tree does not render and the
+    // committed resting-state baselines stay valid; specs that seed orgs
+    // route this explicitly.
+    if (method === 'GET' && path === '/organizations') {
+      await fulfillJson(route, { organizations: [] })
       return
     }
 

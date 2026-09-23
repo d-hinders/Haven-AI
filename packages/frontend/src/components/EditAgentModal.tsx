@@ -6,11 +6,15 @@ import { Icon } from '@/components/ui/Icon'
 import { api } from '@/lib/api'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useLabels } from '@/hooks/useLabels'
+import { useOrganizations } from '@/hooks/useOrganizations'
 import type { Agent } from '@/hooks/useAgents'
 import { LabelOptionRow, LabelChip } from '@/components/haven/LabelChip'
 import { LABEL_EDITOR_NOTE } from '@/lib/label-copy'
+import { organizationPath } from '@/lib/agent-organizations'
+import { ORG_PICKER_LABEL, ORG_PICKER_NOTE } from '@/lib/organization-copy'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
+import { Select } from './ui/Select'
 import { Textarea } from './ui/Textarea'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
@@ -59,6 +63,19 @@ export default function EditAgentModal({
   const [newLabelError, setNewLabelError] = useState<string | null>(null)
   const checkedSet = new Set(checkedLabelIds)
 
+  // ── Organization (#3164) ───────────────────────────────────────────────────
+  // Same review+save flow as the identity fields and the labels: the picker
+  // starts from the agent's current placement, and the save is one PUT that
+  // carries organization_id (absent = keep, null = top level). Fetched with
+  // the labels on open — one modal, one open, both vocabularies.
+  const { organizations, fetchOrganizations } = useOrganizations()
+  const [orgChoice, setOrgChoice] = useState(agent.organization_id ?? '')
+
+  useEffect(() => {
+    if (!open) return
+    void fetchOrganizations()
+  }, [open, fetchOrganizations])
+
   const toggleLabel = useCallback((id: string) => {
     setCheckedLabelIds((prev) =>
       prev.includes(id) ? prev.filter((l) => l !== id) : [...prev, id],
@@ -101,7 +118,8 @@ export default function EditAgentModal({
     setCheckedLabelIds(agent.labels.map((l) => l.id))
     setNewLabelName('')
     setNewLabelError(null)
-  }, [agent.description, agent.labels, agent.name])
+    setOrgChoice(agent.organization_id ?? '')
+  }, [agent.description, agent.labels, agent.name, agent.organization_id])
 
   useEffect(() => {
     if (open) resetForm()
@@ -122,17 +140,19 @@ export default function EditAgentModal({
   const labelsChanged =
     checkedLabelIds.length !== agent.labels.length ||
     agent.labels.some((l) => !checkedSet.has(l.id))
-  const canReview = (trimmedName.length > 0 && detailsChanged) || labelsChanged
+  // #3164: '' means top level, an id means filed under that organization.
+  const orgChanged = (agent.organization_id ?? '') !== orgChoice
+  const canReview = (trimmedName.length > 0 && detailsChanged) || labelsChanged || orgChanged
 
   async function saveDetails() {
     if (!canReview) return
     setStep('saving')
     setError(null)
     try {
-      if (detailsChanged) {
+      if (detailsChanged || orgChanged) {
         await api.put(`/agents/${agent.id}`, {
-          name: trimmedName,
-          description: trimmedDescription,
+          ...(detailsChanged ? { name: trimmedName, description: trimmedDescription } : {}),
+          ...(orgChanged ? { organization_id: orgChoice || null } : {}),
         })
       }
       if (labelsChanged) {
@@ -166,7 +186,7 @@ export default function EditAgentModal({
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-5">
           <div>
             <h2 className="text-lg font-semibold text-[var(--v2-ink)]">Edit agent</h2>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">Update the name, description and labels shown in Haven.</p>
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">Update the name, description, labels and organization shown in Haven.</p>
           </div>
           <button
             type="button"
@@ -259,6 +279,33 @@ export default function EditAgentModal({
                 ) : null}
                 <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{LABEL_EDITOR_NOTE}</p>
               </div>
+              {/*
+                #3164: the organization picker — placement alongside identity
+                and labels, the same review+save flow. Top level is the
+                explicit choice; the note says what the choice changes
+                (placement, nothing else).
+              */}
+              <div>
+                <label
+                  htmlFor="edit-agent-organization"
+                  className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-3)]"
+                >
+                  {ORG_PICKER_LABEL}
+                </label>
+                <Select
+                  id="edit-agent-organization"
+                  value={orgChoice}
+                  onChange={(event) => setOrgChoice(event.target.value)}
+                >
+                  <option value="">Top level</option>
+                  {organizations.map((org) => (
+                    <option key={org.id} value={org.id}>
+                      {organizationPath(organizations, org.id)}
+                    </option>
+                  ))}
+                </Select>
+                <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{ORG_PICKER_NOTE}</p>
+              </div>
               {!canReview ? (
                 <p className="text-xs text-[var(--v2-ink-3)]">Edit the name, description or labels to continue.</p>
               ) : null}
@@ -295,6 +342,18 @@ export default function EditAgentModal({
                         <span className="text-sm text-[var(--v2-ink-2)]">No labels</span>
                       ) : null}
                     </div>
+                  ) : (
+                    <p className="text-sm text-[var(--v2-ink-2)]">Unchanged</p>
+                  )}
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">{ORG_PICKER_LABEL}</p>
+                  {orgChanged ? (
+                    <p className="text-sm text-[var(--v2-ink)]" data-testid="review-organization">
+                      {orgChoice
+                        ? organizationPath(organizations, orgChoice)
+                        : 'Top level'}
+                    </p>
                   ) : (
                     <p className="text-sm text-[var(--v2-ink-2)]">Unchanged</p>
                   )}
@@ -337,7 +396,7 @@ export default function EditAgentModal({
                   <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
                 </div>
                 <p className="text-sm font-medium text-[var(--v2-ink)]">Agent updated</p>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Details and labels saved</p>
+                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Details, labels and organization saved</p>
               </div>
               <Button variant="ghost" onClick={handleClose} className="w-full">Done</Button>
             </div>

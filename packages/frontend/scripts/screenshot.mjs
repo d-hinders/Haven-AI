@@ -892,6 +892,9 @@ export const FIXTURE_AGENTS = [
       { id: 'lbl-research', name: 'prod', color: 'brand', created_at: '2026-09-01T09:00:00.000Z' },
       { id: 'lbl-x402', name: 'x402', color: 'success', created_at: '2026-09-01T09:05:00.000Z' },
     ],
+    // #3164: the showcase agent is unfiled (top level) — the screenshot
+    // dataset carries no organizations, so the tree does not render here.
+    organization_id: null,
   },
   {
     id: 'agent-retired', name: 'Data-feed agent',
@@ -923,6 +926,37 @@ export const FIXTURE_AGENTS = [
     }],
     // #3167: the paused agent is unlabelled — the empty state photographs too.
     labels: [],
+    // #3164: the paused agent is filed under DevOps (a sub-organization), so
+    // the /agents screenshot photographs a tree with two depths and a
+    // mid-tree count.
+    organization_id: 'org-devops',
+  },
+]
+
+// #3164: the organization tree behind the /agents screenshot — "Company A →
+// Tech Agents / Marketing, Tech Agents → DevOps", the issue's own example.
+// The showcase agent (above) stays top level so the tree's "Top level" row
+// and the unfiled card photograph together.
+export const FIXTURE_ORGANIZATIONS = [
+  {
+    id: 'org-company', parent_organization_id: null, name: 'Company A',
+    created_at: '2026-09-01T09:00:00.000Z', updated_at: '2026-09-01T09:00:00.000Z',
+    agent_count: 0,
+  },
+  {
+    id: 'org-tech', parent_organization_id: 'org-company', name: 'Tech Agents',
+    created_at: '2026-09-01T09:00:00.000Z', updated_at: '2026-09-01T09:00:00.000Z',
+    agent_count: 0,
+  },
+  {
+    id: 'org-devops', parent_organization_id: 'org-tech', name: 'DevOps',
+    created_at: '2026-09-01T09:00:00.000Z', updated_at: '2026-09-01T09:00:00.000Z',
+    agent_count: 1,
+  },
+  {
+    id: 'org-marketing', parent_organization_id: 'org-company', name: 'Marketing',
+    created_at: '2026-09-01T09:00:00.000Z', updated_at: '2026-09-01T09:00:00.000Z',
+    agent_count: 0,
   },
 ]
 
@@ -1699,7 +1733,15 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
   if (pathname.startsWith('/balances/')) return FIXTURE_BALANCES
-  if (pathname === '/agents') return { agents: FIXTURE_AGENTS }
+  if (pathname === '/agents') {
+    return { agents: FIXTURE_AGENTS, organizations: FIXTURE_ORGANIZATIONS }
+  }
+  // #3164: the org tree is its own read (`useOrganizations` → GET
+  // /organizations) — without this case it falls through to the fallback and
+  // the tree never renders in captures.
+  if (pathname === '/organizations') {
+    return { organizations: FIXTURE_ORGANIZATIONS }
+  }
   // `/approvals` is NOT keyed here. #1989 deleted the route and #2055
   // deregistered the backend endpoint outright — the "still a live, READABLE
   // endpoint" this fixture used to claim stopped being true with the table

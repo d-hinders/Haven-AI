@@ -587,7 +587,37 @@ async function openUserMenuByKeyboard(page: Page) {
  * eleven other specs, and a paused or archived agent added there would change
  * what `/agents` renders for all of them.
  */
+/**
+ * #3222 re-review: a card offers Move only when the user HAS an organization.
+ * This spec captures the focus ring on every operational control, Move
+ * included, so it seeds one; the shared fixture keeps `organizations: []` for
+ * the product-route captures. Registered per test, so it takes precedence over
+ * the shared handler (reverse registration order, as for `seedAgents`).
+ */
+async function seedOneOrganization(page: Page) {
+  await page.route('**/api/organizations', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        organizations: [
+          {
+            id: 'org-focus',
+            parent_organization_id: null,
+            name: 'Operations',
+            created_at: '2026-05-01T00:00:00Z',
+            updated_at: '2026-05-01T00:00:00Z',
+            agent_count: 0,
+          },
+        ],
+      }),
+    })
+  })
+}
+
 async function seedAgents(page: Page, agents: ReadonlyArray<Record<string, unknown>>) {
+  await seedOneOrganization(page)
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
@@ -769,16 +799,21 @@ test.describe('driven focus-state visual regression', () => {
 
   for (const control of rowControls) {
     test(`agent card action row — ${control.label} focus indicator (${control.tone})`, async ({ page }) => {
+      await seedOneOrganization(page)
       await gotoDesktop(page, '/agents')
 
       const target = page.locator(`button[aria-label="${control.label} ${testAgent.name}"]`)
       await expect(target).toHaveCount(1)
       await expect(target).toBeVisible()
 
-      // The action row, located as the control's own parent rather than by its
-      // class string — same rule as the popover above. Asserting the count
-      // keeps "the row moved" from silently becoming "some other div".
-      const actionRow = target.locator('xpath=..')
+      // The action row, located by its stable testid rather than the
+      // control's parent: the round-3 rework (#3164) wraps each `|` with the
+      // button it introduces below `lg` (S9, no dangling pipes on a wrapped
+      // line), so a button's parent is a grouping span, not the row. The
+      // testid survives such re-groupings; the old "own parent" walk did not
+      // (measured: the resume/remove-delegation driven captures failed their
+      // control-set assertions against a span in the round-3 baseline run).
+      const actionRow = page.getByTestId('agent-card-actions')
       await expect(actionRow).toHaveCount(1)
       await expectRowControlsUnwrapped(actionRow, `AgentCard action row · ${control.label}`)
 
@@ -823,9 +858,11 @@ test.describe('driven focus-state visual regression', () => {
       // Details behind `canUseWalletActions` (and nothing else — `Revoke` is
       // gone since #2258), but Remove is not gated at all: it renders
       // unconditionally inside `isOperational` (#2413 deleted
-      // `isDelegationAgent`) — so this branch is three controls.
+      // `isDelegationAgent`). #3164 adds `Move` between Details and the
+      // pause/resume control on every operational card — four controls.
       rowControls: [
         'Open details for Ledger agent',
+        'Move Ledger agent to an organization',
         'Pause Ledger agent',
         'Remove Ledger agent',
       ],
@@ -838,7 +875,13 @@ test.describe('driven focus-state visual regression', () => {
       control: 'Resume Paused agent',
       // #2264: Remove, not Revoke — same rail branch as the row above.
       // #3168: the first control is now Details, not Edit.
-      rowControls: ['Open details for Paused agent', 'Resume Paused agent', 'Remove Paused agent'],
+      // #3164: Move joins every operational row, Details first.
+      rowControls: [
+        'Open details for Paused agent',
+        'Move Paused agent to an organization',
+        'Resume Paused agent',
+        'Remove Paused agent',
+      ],
       tone: 'brand',
       label: 'Resume from pause',
     },
@@ -868,7 +911,13 @@ test.describe('driven focus-state visual regression', () => {
       control: 'Remove Delegation agent',
       // #3168: the first control is now Details, not Edit — same substitution
       // as the paused branch above.
-      rowControls: ['Open details for Delegation agent', 'Pause Delegation agent', 'Remove Delegation agent'],
+      // #3164: Move joins every operational row, Details first.
+      rowControls: [
+        'Open details for Delegation agent',
+        'Move Delegation agent to an organization',
+        'Pause Delegation agent',
+        'Remove Delegation agent',
+      ],
       tone: 'danger',
       label: 'Remove (delegation)',
     },
@@ -928,7 +977,9 @@ test.describe('driven focus-state visual regression', () => {
       await expect(target).toHaveCount(1)
       await expect(target).toBeVisible()
 
-      const actionRow = target.locator('xpath=..')
+      // Stable testid — see the pause loop above for why the parent walk
+      // cannot be used anymore (the S9 pipe-grouping spans).
+      const actionRow = page.getByTestId('agent-card-actions')
       await expect(actionRow).toHaveCount(1)
       await expectRowControls(
         actionRow,
@@ -989,7 +1040,9 @@ test.describe('driven focus-state visual regression', () => {
     await expect(target).toHaveCount(1)
     await expect(target).toBeVisible()
 
-    const actionRow = target.locator('xpath=..')
+    // Same stable testid as the desktop captures — the parent walk broke
+    // when the S9 pipe-grouping spans landed (see the pause loop above).
+    const actionRow = page.getByTestId('agent-card-actions')
     await expect(actionRow).toHaveCount(1)
 
     // The label is atomic at this width too — the whole point of pinning it.

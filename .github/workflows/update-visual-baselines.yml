@@ -224,20 +224,23 @@ jobs:
       # it only when something moved; a failed install costs the diff image,
       # never the run.
       - name: Install ImageMagick for the pixel diff
-        if: always() && steps.audit.outputs.moved != '' && steps.audit.outputs.moved != '[]'
+        if: "!cancelled() && steps.audit.outputs.moved != '' && steps.audit.outputs.moved != '[]'"
         continue-on-error: true
         run: command -v compare || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends imagemagick)
 
       - name: Collect before/after images of every rewritten baseline
         id: baseline_images
-        if: always() && steps.audit.outcome != 'skipped'
+        if: "!cancelled() && steps.audit.outcome != 'skipped'"
+        # An image failure must never cost the baseline push below (#3234 review).
+        continue-on-error: true
         env:
           MOVED_BASELINES: ${{ steps.audit.outputs.moved }}
         run: node scripts/ci/baseline-artifact.mjs
 
       - name: Upload the before/after images
         id: baseline_artifact
-        if: always() && steps.baseline_images.outputs.count != '' && steps.baseline_images.outputs.count != '0'
+        if: "!cancelled() && steps.baseline_images.outputs.count != '' && steps.baseline_images.outputs.count != '0'"
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: baseline-before-after
@@ -245,7 +248,8 @@ jobs:
           retention-days: 7
 
       - name: Link the images in the run summary
-        if: always() && steps.baseline_artifact.outputs.artifact-url != ''
+        if: "!cancelled() && steps.baseline_artifact.outputs.artifact-url != ''"
+        continue-on-error: true
         env:
           ARTIFACT_URL: ${{ steps.baseline_artifact.outputs.artifact-url }}
         run: echo "**Before/after images:** [baseline-before-after]($ARTIFACT_URL) (kept 7 days)" >> "$GITHUB_STEP_SUMMARY"

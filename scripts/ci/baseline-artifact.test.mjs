@@ -152,6 +152,16 @@ describe('baseline-artifact — the real entry point (#3234)', () => {
     fs.rmSync(root, { recursive: true, force: true })
   })
 
+  test('a failure while collecting warns, reports count=0 and exits 0 — it never costs the push', () => {
+    const root = repo()
+    // An `added` entry whose file is not on disk makes the copy throw.
+    const { res, output } = run(root, JSON.stringify([{ name: 'ghost.png', path: `${DIR}/ghost.png`, status: 'added' }]))
+    assert.equal(res.status, 0, res.stdout + res.stderr)
+    assert.match(res.stdout, /::warning::Could not collect before\/after images/)
+    assert.match(output, /^count=0$/m)
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+
   test('an unreadable moved list warns and collects nothing — it does not fail the run', () => {
     const root = repo()
     const { res, output } = run(root, '')

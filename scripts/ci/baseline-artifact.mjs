@@ -167,4 +167,13 @@ function main() {
   setOutput(entries.length)
 }
 
-if (process.argv[1] && process.argv[1].endsWith('baseline-artifact.mjs')) main()
+if (process.argv[1] && process.argv[1].endsWith('baseline-artifact.mjs')) {
+  try {
+    main()
+  } catch (err) {
+    // The images are a convenience for the reviewer; losing them must never
+    // cost the baseline push that follows (#3234 review). Say so and move on.
+    console.log(`::warning::Could not collect before/after images: ${err.message}`)
+    if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, 'count=0\n')
+  }
+}

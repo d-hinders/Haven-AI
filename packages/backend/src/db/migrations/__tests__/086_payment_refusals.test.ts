@@ -145,7 +145,7 @@ describeDb('migration 086: payment_refusals ledger (#2945)', () => {
     const userId = await seedUser()
     const accountId = await insertAccount(userId, 510)
     const agentId = await seedAgent(userId)
-    await db.query(ORPHAN_AGENTS_FOR_ACCOUNT_SQL, [accountId])
+    await db.query(ORPHAN_AGENTS_FOR_ACCOUNT_SQL, [accountId, userId])
 
     const { id: refusalId } = await recordPaymentRefusal({
       userId,
@@ -170,8 +170,10 @@ describeDb('migration 086: payment_refusals ledger (#2945)', () => {
 
     // The write half of the real unlink transaction. This DELETE is where the
     // NO ACTION FK raised 23503; with SET NULL it must simply succeed.
-    await expect(db.query(ORPHAN_AGENTS_FOR_ACCOUNT_SQL, [accountId])).resolves.toBeTruthy()
-    await expect(db.query(DELETE_USER_ACCOUNT_SQL, [accountId])).resolves.toBeTruthy()
+    await expect(db.query(ORPHAN_AGENTS_FOR_ACCOUNT_SQL, [accountId, userId])).resolves.toBeTruthy()
+    // rowCount, not just resolution: since #3227 the DELETE is tenant-scoped, so
+    // a wrong user id would resolve with 0 rows and the unlink would not happen.
+    await expect(db.query(DELETE_USER_ACCOUNT_SQL, [accountId, userId])).resolves.toMatchObject({ rowCount: 1 })
 
     // The audit trail outlives the account: row retained, account_id cleared.
     const after = await db.query<{ account_id: string | null }>(

@@ -80,12 +80,19 @@ export const LIST_LABELS_FOR_AGENT_SQL = `
   WHERE a.agent_id = ANY($1::uuid[])
   ORDER BY lower(l.name), l.id`
 
+// Both assignment writes join through an agent `userId` owns (#3227). Before
+// that, these two statements broke the header's rule ("every statement filters
+// on it (or joins through an agent the user owns)"): they checked the labels'
+// owner but not the agent's. This note covers the assignment writes only.
 export const REPLACE_LABELS_FOR_AGENT_SQL = `
-  DELETE FROM agent_label_assignments WHERE agent_id = $1`
+  DELETE FROM agent_label_assignments
+  WHERE agent_id = $1
+    AND EXISTS (SELECT 1 FROM agents WHERE agents.id = $1 AND agents.user_id = $2)`
 
 export const INSERT_LABEL_ASSIGNMENT_SQL = `
   INSERT INTO agent_label_assignments (agent_id, label_id)
-  VALUES ($1, $2)
+  SELECT $1, $2
+  WHERE EXISTS (SELECT 1 FROM agents WHERE agents.id = $1 AND agents.user_id = $3)
   ON CONFLICT (agent_id, label_id) DO NOTHING`
 
 export const LABELS_EXIST_FOR_USER_SQL = `
@@ -221,9 +228,9 @@ export async function replaceAgentLabels(
         throw new LabelNotFoundError('One of the labels was not found')
       }
     }
-    await client.query(REPLACE_LABELS_FOR_AGENT_SQL, [agentId])
+    await client.query(REPLACE_LABELS_FOR_AGENT_SQL, [agentId, userId])
     for (const labelId of uniqueLabelIds) {
-      await client.query(INSERT_LABEL_ASSIGNMENT_SQL, [agentId, labelId])
+      await client.query(INSERT_LABEL_ASSIGNMENT_SQL, [agentId, labelId, userId])
     }
   })
 }

@@ -417,6 +417,18 @@ chain.
 > `account_type = 'delegator_hybrid'` filter value the list queries above
 > compare against.
 
+> **Re-verified #3227 (repository tenant scope):** this diff touched
+> `infra/repositories/smart-accounts.ts`, a file this document covers. The
+> unlink transaction's orphan and delete, and the re-default's set, used to
+> match rows by id alone and relied on the route's ownership check. Now each
+> is also scoped to the caller in SQL (`AND user_id = $2`). A cross-tenant
+> call matches no row: the unlink returns `false` and promotes nothing, and
+> the re-default leaves every row, and the legacy mirror, unchanged. The
+> guards this section describes run first and are untouched: live
+> delegation, open sweep, in-flight re-key. No permission, signer set or
+> chain state changes. Scope of this note: the unlink and re-default writes.
+> Nothing else in this document was re-verified.
+
 The unlink guard also refuses while an agent re-key is in flight, so the Safe
 binding cannot disappear between re-key stages. This is a database
 serialization guard only: it grants nothing, signs nothing, and touches no

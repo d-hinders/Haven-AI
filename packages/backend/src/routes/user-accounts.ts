@@ -120,6 +120,14 @@ export default async function userAccountsRoutes(app: FastifyInstance): Promise<
 
       const deleted = await deleteAccountForUser(accountId, sub, owned.is_default)
       if (!deleted) {
+        // `false` has two causes since #3227: a live delegation/sweep/re-key
+        // kept the account, or the tenant-scoped DELETE matched no row —
+        // which, past the ownership check above, means a concurrent unlink by
+        // the same owner (a double click) removed it first. The account is
+        // gone, which is what was asked for: answer as before the change.
+        if (!(await findOwnedAccountDefaultFlag(accountId, sub))) {
+          return { success: true }
+        }
         return reply.code(409).send({
           error: 'Cannot unlink this Haven wallet while an agent has a pending or active budget delegation or recovery is in progress',
         })

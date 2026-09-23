@@ -54,6 +54,13 @@ setups.ts` (#985) generalised it.
    A repository function callable without its scope is a privilege-escalation
    bug waiting for its first careless caller. If a query needs `user_id`, the
    function takes `userId: string` in a position the caller cannot skip.
+   **And every statement uses it.** Taking `userId` is not scoping. Each
+   mutating statement filters on it, or joins through a row the user owns,
+   even when the route has already checked ownership. #3227 found three
+   functions that took `userId` while five of their writes matched by row id
+   alone, so the route's pre-check was the only guard. Pin it with a
+   cross-tenant case on the real database (`cross-tenant-writes.test.ts`); a
+   mock executor cannot tell a scoped statement from an unscoped one.
 
 4. **SQL lives in exported constants**, so `db-schema-smoke.ts` can import it.
    Add the new constants to that script in the same change — **by import, never

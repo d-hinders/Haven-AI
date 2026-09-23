@@ -375,7 +375,8 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
 
     it('DELETE /user/accounts/:accountId still unlinks an existing account', async () => {
       mockPoolQuery.mockResolvedValue({ rows: [{ is_default: false }] })
-      mockClientQuery.mockResolvedValue({ rows: [] })
+      // The tenant-scoped DELETE matches the owned row, as on a real database (#3227).
+      mockClientQuery.mockResolvedValue({ rows: [], rowCount: 1 })
 
       const res = await app.inject({
         method: 'DELETE',

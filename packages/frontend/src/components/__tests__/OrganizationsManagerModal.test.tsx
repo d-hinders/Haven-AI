@@ -93,3 +93,25 @@ describe('OrganizationsManagerModal', () => {
     expect(actions?.className).toContain('sm:shrink-0')
   })
 })
+
+describe('OrganizationsManagerModal — move mode and delete weight (#3222 re-review)', () => {
+  it('keeps the folder being moved named, with a visible "Move inside" label', async () => {
+    renderModal()
+    await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
+    const list = within(screen.getByTestId('organization-manager-list'))
+    list.getByRole('button', { name: 'Move Company A very long organization name' }).click()
+    await waitFor(() => expect(list.getByText('Move inside')).toBeInTheDocument())
+    // The row's own name is still on screen next to the picker.
+    expect(list.getByText('Company A very long organization name')).toBeInTheDocument()
+    const select = list.getByLabelText('Move inside')
+    expect(select.tagName).toBe('SELECT')
+  })
+
+  it('the per-row Delete is not the solid danger button — the confirmation dialog is', async () => {
+    renderModal()
+    await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
+    const list = within(screen.getByTestId('organization-manager-list'))
+    const del = list.getByRole('button', { name: 'Delete Company A very long organization name' })
+    expect(del.className).not.toMatch(/bg-\[var\(--v2-danger\)\]/)
+  })
+})

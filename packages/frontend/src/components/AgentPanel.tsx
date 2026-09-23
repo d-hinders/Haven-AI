@@ -209,6 +209,7 @@ export default function AgentPanel() {
           onCreate={() => panel.setOrganizationsManagerOpen(true)}
           onManage={() => panel.setOrganizationsManagerOpen(true)}
           onRetry={() => void panel.fetchOrganizations()}
+          counts={listFilters.counts.organization}
         />
       )}
 

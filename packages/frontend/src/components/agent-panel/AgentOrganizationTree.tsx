@@ -1,18 +1,28 @@
 'use client'
 
-import { useMemo } from 'react'
-import { ChevronRight, Network, Plus } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ChevronDown, Folder, Network, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
 import type { Organization } from '@/hooks/useOrganizations'
-import { buildOrganizationTree, flattenOrganizationTree } from '@/lib/agent-organizations'
+import { buildOrganizationTree, flattenOrganizationTree, TOP_LEVEL_OPTION } from '@/lib/agent-organizations'
 
 /**
  * The organization tree above the agents grid (#3164).
  *
- * One row per organization, depth-indented, with the folder's direct agent
- * count, always fully expanded — organization trees are small (folders, not
- * transactions) and a collapsed branch is one more thing to hunt through.
+ * One row per organization, depth-indented. Each row's count is the SAME
+ * number the toolbar's Organization filter shows for that option — the
+ * facet's per-option count (`counts`, the whole subtree, with the other
+ * filters applied) — so the two controls never contradict each other on one
+ * screen (#3222 re-review S6: the tree showed direct members, "Tech Agents
+ * 0", beside a dropdown saying "Tech Agents 1"). Rows carry a static folder
+ * icon, not a chevron: nothing here expands or collapses per branch, and a
+ * chevron read as a toggle that did nothing.
+ *
+ * Below `lg` the rows fold behind one toggle that names the current
+ * selection, collapsed by default: at 390px the always-open tree pushed the
+ * first agent card below the fold (y ≈ 1045 of 844, re-review S8). From `lg`
+ * up it is always open, as before.
  * Selecting a row filters the list to that subtree through the #3165 facet;
  * the selection lives in the toolbar's URL-mirrored state, so a shared link
  * keeps it. "All agents" is the unfiltered rest state, "Top level" the
@@ -32,8 +42,11 @@ export function AgentOrganizationTree({
   onCreate,
   onManage,
   onRetry,
+  counts,
 }: {
   organizations: Organization[]
+  /** The organization facet's per-option counts (option value → agents), from `useAgentListFilters`. */
+  counts?: Record<string, number>
   loading: boolean
   error: string | null
   /** The facet's current organization value (null = all agents; 'top_level' = unfiled). */
@@ -47,6 +60,15 @@ export function AgentOrganizationTree({
     () => flattenOrganizationTree(buildOrganizationTree(organizations)),
     [organizations],
   )
+  // Below `lg` only; `lg:block` keeps the rows open on desktop regardless.
+  const [expanded, setExpanded] = useState(false)
+  const selectedLabel =
+    selectedId === null
+      ? 'All agents'
+      : selectedId === TOP_LEVEL_OPTION
+        ? 'Top level'
+        : (organizations.find((o) => o.id === selectedId)?.name ?? 'All agents')
+  const countFor = (value: string, fallback: number | undefined) => (counts ? (counts[value] ?? 0) : fallback)
 
   if (loading && organizations.length === 0) {
     return (
@@ -83,19 +105,42 @@ export function AgentOrganizationTree({
           <Button onClick={onManage} size="sm" variant="tertiary">
             Manage
           </Button>
-          <Button onClick={onCreate} size="sm" variant="tertiary">
+          {/* The label hides below `sm` so the header stays one line at 390. */}
+          <Button onClick={onCreate} size="sm" variant="tertiary" aria-label="Add organization">
             <Icon icon={Plus} className="h-3.5 w-3.5" />
-            Add organization
+            <span className="hidden sm:inline">Add organization</span>
           </Button>
         </div>
       </div>
+
+      {organizations.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((open) => !open)}
+          aria-expanded={expanded}
+          aria-controls="organization-tree-rows"
+          className="mt-2 flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] lg:hidden"
+        >
+          <span className="min-w-0 flex-1 truncate">
+            <span className="text-[var(--v2-ink-3)]">Showing: </span>
+            {selectedLabel}
+          </span>
+          <Icon
+            icon={ChevronDown}
+            className={`h-4 w-4 shrink-0 text-[var(--v2-ink-3)] transition-transform ${expanded ? 'rotate-180' : ''}`}
+          />
+        </button>
+      ) : null}
 
       {organizations.length === 0 ? (
         <p className="mt-2 text-sm text-[var(--v2-ink-3)]">
           No organizations yet. Add one to start grouping your agents.
         </p>
       ) : (
-        <div className="mt-2 space-y-0.5">
+        <div
+          id="organization-tree-rows"
+          className={`mt-2 space-y-0.5 ${expanded ? 'block' : 'hidden'} lg:block`}
+        >
           {/* All agents — the unfiltered rest state. */}
           <TreeRow
             label="All agents"
@@ -103,15 +148,15 @@ export function AgentOrganizationTree({
             selected={selectedId === null}
             onSelect={() => onSelect(null)}
             count={undefined}
-            hasChildren={false}
+            folder={false}
           />
           <TreeRow
             label="Top level"
             depth={0}
             selected={selectedId === 'top_level'}
-            onSelect={() => onSelect('top_level')}
-            count={undefined}
-            hasChildren={false}
+            onSelect={() => onSelect(TOP_LEVEL_OPTION)}
+            count={countFor(TOP_LEVEL_OPTION, undefined)}
+            folder={false}
           />
           {rows.map((node) => (
             <TreeRow
@@ -120,8 +165,8 @@ export function AgentOrganizationTree({
               depth={node.depth}
               selected={selectedId === node.org.id}
               onSelect={() => onSelect(node.org.id)}
-              count={node.org.agent_count}
-              hasChildren={node.children.length > 0}
+              count={countFor(node.org.id, node.org.agent_count)}
+              folder
             />
           ))}
         </div>
@@ -136,14 +181,15 @@ function TreeRow({
   selected,
   onSelect,
   count,
-  hasChildren,
+  folder,
 }: {
   label: string
   depth: number
   selected: boolean
   onSelect: () => void
   count: number | undefined
-  hasChildren: boolean
+  /** A static folder icon for organization rows; a same-width spacer otherwise. */
+  folder: boolean
 }) {
   return (
     <button
@@ -158,8 +204,9 @@ function TreeRow({
       style={{ paddingLeft: `calc(0.5rem + ${Math.min(depth, 6)}rem)` }}
     >
       <Icon
-        icon={ChevronRight}
-        className={`h-3 w-3 shrink-0 text-[var(--v2-ink-3)] ${hasChildren ? 'rotate-90' : 'opacity-0'}`}
+        icon={Folder}
+        aria-hidden="true"
+        className={`h-3.5 w-3.5 shrink-0 text-[var(--v2-ink-3)] ${folder ? '' : 'opacity-0'}`}
       />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {count !== undefined && (

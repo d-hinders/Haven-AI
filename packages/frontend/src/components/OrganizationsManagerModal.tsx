@@ -274,7 +274,22 @@ export default function OrganizationsManagerModal({
                     </div>
                   ) : movingId === org.id ? (
                     <div className="space-y-2">
+                      {/* #3222 re-review: the row's own name stays visible
+                          while moving — the Select's value used to read as if
+                          it were the folder being moved. */}
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-[var(--v2-ink)] [overflow-wrap:anywhere]">{org.name}</p>
+                        <p className="text-xs text-[var(--v2-ink-3)] [overflow-wrap:anywhere]">
+                          {org.parent_organization_id
+                            ? organizationPath(organizations, org.parent_organization_id)
+                            : 'Top level'}
+                        </p>
+                      </div>
+                      <label htmlFor={`move-target-${org.id}`} className="block text-xs font-medium text-[var(--v2-ink-2)]">
+                        Move inside
+                      </label>
                       <Select
+                        id={`move-target-${org.id}`}
                         aria-label={`Move ${org.name} inside`}
                         value={moveTarget}
                         onChange={(event) => setMoveTarget(event.target.value)}
@@ -302,7 +317,9 @@ export default function OrganizationsManagerModal({
                     <div className="sm:flex sm:items-center sm:gap-2">
                       <div className="min-w-0 sm:flex-1">
                         <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{org.name}</p>
-                        <p className="truncate text-xs text-[var(--v2-ink-3)]">
+                        {/* Wraps rather than truncating: a deep path used to
+                            cut off the agent count a user needs before deleting. */}
+                        <p className="text-xs text-[var(--v2-ink-3)] [overflow-wrap:anywhere]">
                           {org.parent_organization_id
                             ? organizationPath(organizations, org.parent_organization_id)
                             : 'Top level'}
@@ -336,8 +353,12 @@ export default function OrganizationsManagerModal({
                         >
                           Move
                         </Button>
+                        {/* Tertiary, not `danger`: a solid red button on every
+                            row made the destructive action the heaviest thing in
+                            the modal. design-system.md keeps `danger` for the
+                            destructive CONFIRMATION, which the dialog below has. */}
                         <Button
-                          variant="danger"
+                          variant="tertiary"
                           size="sm"
                           onClick={() => setDeleteTarget(org)}
                           aria-label={`Delete ${org.name}`}

@@ -47,6 +47,7 @@ import {
   type WiringCollisionResolution,
 } from './wiring-collision.js'
 import { readIdentityFile, teardownLocalKeyMaterial, tombstoneDirectoryIfAbsent } from './unwire.js'
+import { tombstonesDirForCredentialRoot } from './tombstone.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
@@ -835,6 +836,9 @@ async function executeConnect(
             agentId: entry.agentId,
             reason: 'replaced by a new setup (--replace)',
             replacedBy: registration.agent_id,
+            // #3251: the ledger follows this run's credential root, not the
+            // ambient ~/.haven (default root → ~/.haven/tombstones, as before).
+            tombstonesDir: tombstonesDirForCredentialRoot(options.credentialsDir),
           })
           await teardownLocalKeyMaterial(entry.directory, await readIdentityFile(entry.directory))
           // #3122: a retired directory releases its server-name binding.

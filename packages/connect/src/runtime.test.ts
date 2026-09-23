@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import type { WiringCollision, WiringCollisionResolution } from './wiring-collision.js'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { ConnectRequestError } from './api.js'
 import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, ResolvedSetup, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
@@ -2223,7 +2223,10 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
   }))
 
   async function runWithPriorDir(seedPrior: boolean, replaceExistingWiring?: boolean) {
-    const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1688-'))
+    // Nested under its own parent: the #3251 ledger lands beside the root,
+    // so a unique parent keeps another test's agent-old record out of reach.
+    const credentialsDir = join(await mkdtemp(join(tmpdir(), 'haven-1688-')), 'agents')
+    await mkdir(credentialsDir, { recursive: true })
     const oldDir = join(credentialsDir, 'agent-old-uuid')
     if (seedPrior) {
       await mkdir(oldDir, { recursive: true })
@@ -2280,6 +2283,10 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     await expect(stat(join(oldDir, 'TOMBSTONE.json'))).resolves.toBeDefined()
     await expect(stat(join(oldDir, 'signer.json'))).rejects.toThrow()
     expect(JSON.parse(await readFile(join(oldDir, 'identity.json'), 'utf8'))).toEqual({ agent_id: 'agent-old' })
+    // #3251: the ledger record follows this run's credential root, not the
+    // ambient ~/.haven/tombstones.
+    const ledger = JSON.parse(await readFile(join(dirname(dirname(oldDir)), 'tombstones', 'agent-old.json'), 'utf8'))
+    expect(ledger).toMatchObject({ agent_id: 'agent-old', replaced_by: 'agent-new' })
   })
 
   it('#2551: the same prior dir WITHOUT --replace is refused before anything is minted', async () => {

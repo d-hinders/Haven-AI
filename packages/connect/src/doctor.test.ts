@@ -3,9 +3,9 @@
  * its named repair, secret-hygiene, and repair-then-doctor recovery — all via
  * injected deps, no network, no real signer spawn.
  */
-import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { acknowledgeLocalSignerConsent } from './signer-consent.js'
@@ -800,6 +800,40 @@ describe('per-agent inventory (#1697)', () => {
     const dead = report.agents.find((a) => a.agentId === 'agent-dead')
     expect(dead?.classification).toBe('retired')
     expect(dead?.checks).toEqual([])
+  })
+
+  it('#2155/#3251: a retiree whose directory was deleted is still listed from the ledger beside the default root', async () => {
+    const { homeDir } = await homeWithTwoWiredAgents()
+    const goneDir = join(homeDir, '.haven', 'agents', 'gone')
+    await mkdir(goneDir, { recursive: true })
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    await writeAgentTombstone({ directory: goneDir, agentId: 'agent-gone', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+    await rm(goneDir, { recursive: true, force: true })
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsForTwo() })
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.detail).toContain('retired records (dir removed): agent-gone (reset)')
+  })
+
+  it('#3251: under an explicit --credentials-dir the ledger is read beside THAT root, never from the home ledger', async () => {
+    const { homeDir } = await homeWithTwoWiredAgents()
+    // The same two agents, moved to a custom root.
+    const customRoot = join(homeDir, 'custom', 'agents')
+    await mkdir(dirname(customRoot), { recursive: true })
+    await rename(join(homeDir, '.haven', 'agents'), customRoot)
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    const goneDir = join(customRoot, 'gone')
+    await mkdir(goneDir, { recursive: true })
+    await writeAgentTombstone({ directory: goneDir, agentId: 'agent-gone', reason: 'reset', tombstonesDir: join(homeDir, 'custom', 'tombstones') })
+    await rm(goneDir, { recursive: true, force: true })
+    // A record in the home ledger belongs to another root and must not surface.
+    const decoyDir = join(homeDir, 'decoy')
+    await mkdir(decoyDir, { recursive: true })
+    await writeAgentTombstone({ directory: decoyDir, agentId: 'agent-decoy', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+
+    const report = await runDoctor({ runtime: 'codex-cli', credentialsDir: join(customRoot, 'agent-1') }, { homeDir, ...depsForTwo() })
+    const detail = report.checks.find((c) => c.id === 'superseded_agents')?.detail ?? ''
+    expect(detail).toContain('retired records (dir removed): agent-gone (reset)')
+    expect(detail).not.toContain('agent-decoy')
   })
 })
 

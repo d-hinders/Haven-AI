@@ -106,7 +106,7 @@ export async function runCli(
     // identity for the agent id, replaces the wrapper with a truth-telling
     // tombstone, touches NO key material, and tells the user what the
     // tombstone cannot do for them: restart every long-lived host.
-    const { writeAgentTombstone } = await import('./tombstone.js')
+    const { writeAgentTombstone, tombstonesDirForAgentDirectory } = await import('./tombstone.js')
     const { readFile } = await import('node:fs/promises')
     const { join } = await import('node:path')
     try {
@@ -125,6 +125,10 @@ export async function runCli(
         agentId,
         reason: parsed.tombstone.reason ?? 'retired by operator via --tombstone',
         replacedBy: parsed.tombstone.replacedBy,
+        // #3251: the ledger sits beside the root that holds the retired
+        // directory — ~/.haven/agents/<x> → ~/.haven/tombstones, exactly as
+        // before; a directory under any other root keeps its ledger there.
+        tombstonesDir: tombstonesDirForAgentDirectory(parsed.tombstone.directory),
       })
       if (parsed.json) {
         io.stdout(`${redactSecrets(JSON.stringify({ tombstoned: true, ...info }))}\n`)
@@ -159,6 +163,7 @@ export async function runCli(
     // config it appears in + the Hermes dotenv key. Refuses — never guesses —
     // when the bare pair is provably another agent's.
     const { unwireAgent } = await import('./unwire.js')
+    const { tombstonesDirForAgentDirectory } = await import('./tombstone.js')
     const { homedir } = await import('node:os')
     const { join } = await import('node:path')
     const homeDir = homedir()
@@ -173,6 +178,12 @@ export async function runCli(
         replacedBy: parsed.unwire.replacedBy,
         destroyKeyMaterial: parsed.unwire.destroyKeyMaterial,
         homeDir,
+        // #3251: the ledger sits beside the root that holds the directory
+        // being retired. Derived from the RESOLVED directory, not from
+        // --credentials-dir: `--unwire --credentials-dir <path>` names the agent
+        // directory itself, not a root. ~/.haven/agents/<slug> →
+        // ~/.haven/tombstones, exactly as before.
+        tombstonesDir: tombstonesDirForAgentDirectory(directory),
       })
       const failures = result.runtimes.filter((r) => r.status === 'refused' || r.status === 'unreadable')
       // #3123: a retained teardown is a refusal too — the wiring is gone, the

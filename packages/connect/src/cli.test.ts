@@ -282,7 +282,9 @@ describe('CLI entrypoint detection (#1379)', () => {
 describe('--tombstone (#1681)', () => {
   async function agentDir() {
     tempDir = await mkdtemp(join(tmpdir(), 'haven-cli-tombstone-'))
-    const dir = join(tempDir, 'agent-old')
+    // Nested under its own root so the #3251 ledger (beside the root) stays
+    // inside tempDir and is cleaned up with it.
+    const dir = join(tempDir, 'agents', 'agent-old')
     await mkdir(join(dir, 'bin'), { recursive: true })
     await writeFile(join(dir, 'identity.json'), JSON.stringify({ agent_id: 'agent-old', api_key: 'sk_agent_x' }))
     await writeFile(join(dir, 'bin', 'haven-signer.mjs'), '// real wrapper')
@@ -303,6 +305,10 @@ describe('--tombstone (#1681)', () => {
     expect(script).toContain('HAVEN-TOMBSTONE')
     const record = JSON.parse(await readFile(join(dir, 'TOMBSTONE.json'), 'utf8'))
     expect(record).toMatchObject({ agent_id: 'agent-old', reason: 'superseded', replaced_by: 'agent-new' })
+    // #3251: the ledger record lands beside THIS directory's root, not in the
+    // ambient ~/.haven/tombstones.
+    const ledger = JSON.parse(await readFile(join(tempDir, 'tombstones', 'agent-old.json'), 'utf8'))
+    expect(ledger).toMatchObject({ agent_id: 'agent-old', replaced_by: 'agent-new' })
     // identity.json survives byte-for-byte — connect never revokes or deletes.
     expect(await readFile(join(dir, 'identity.json'), 'utf8')).toContain('sk_agent_x')
     const out = stdout.join('')
@@ -1006,6 +1012,8 @@ describe('--unwire teardown outcome and --prune-signer-runtimes (#3123)', () => 
       const exitCode = await runCli(['--unwire', '/home/u/.haven/agents/research', '--destroy-key-material'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
       expect(exitCode).toBe(0)
       expect(spy).toHaveBeenCalledWith(expect.objectContaining({ destroyKeyMaterial: true }))
+      // #3251: the ledger follows the resolved directory's root.
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ tombstonesDir: '/home/u/.haven/tombstones' }))
       const out = stdout.join('')
       expect(out).toContain('! Key material: forced (probe: ok)')
       expect(out).toContain('Local recovery of a stranded delegate balance ends')

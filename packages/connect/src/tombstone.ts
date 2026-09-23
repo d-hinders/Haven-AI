@@ -35,7 +35,7 @@
 import { chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { connectorRerunCommand } from '@haven_ai/sdk'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { redactSecrets } from './redact.js'
 import { ConnectError } from './connect-error.js'
 
@@ -76,6 +76,24 @@ export interface WriteTombstoneInput {
  */
 export function defaultTombstonesDir(baseDir?: string): string {
   return join(baseDir ?? join(homedir(), '.haven'), 'tombstones')
+}
+
+/**
+ * The ledger for a credential ROOT — the directory that holds the agent
+ * directories (`--credentials-dir`, default `~/.haven/agents`). It sits beside
+ * the root, the way `~/.haven/tombstones` sits beside `~/.haven/agents`, so
+ * the default is unchanged and a run with its own root keeps its ledger in
+ * the same tree as the directories it speaks for (#3251: the `--tombstone`
+ * and `--replace` writers never passed a ledger and always mirrored into the
+ * real `~/.haven/tombstones`, from tests too).
+ */
+export function tombstonesDirForCredentialRoot(credentialRoot?: string): string {
+  return credentialRoot ? join(dirname(resolve(credentialRoot)), 'tombstones') : defaultTombstonesDir()
+}
+
+/** The ledger for an agent DIRECTORY: its parent is its credential root. */
+export function tombstonesDirForAgentDirectory(directory: string): string {
+  return tombstonesDirForCredentialRoot(dirname(resolve(directory)))
 }
 
 const MIRROR_MODE = 0o600

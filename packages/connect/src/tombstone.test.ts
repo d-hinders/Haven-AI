@@ -21,8 +21,11 @@ import {
   defaultTombstonesDir,
   readAgentTombstone,
   readTombstoneRecords,
+  tombstonesDirForAgentDirectory,
+  tombstonesDirForCredentialRoot,
   writeAgentTombstone,
 } from './tombstone.js'
+import { homedir } from 'node:os'
 
 const run = promisify(execFile)
 
@@ -229,5 +232,37 @@ describe('tombstone mirror (#1681 follow-up — record survives OUTSIDE the reti
 
   it('defaultTombstonesDir lives outside the per-agent dirs, under ~/.haven', () => {
     expect(defaultTombstonesDir()).toMatch(/\.haven[/\\]tombstones$/)
+  })
+})
+
+/**
+ * #3251 — the ledger follows the run's credential root. The `--tombstone`,
+ * `--unwire` and `--replace` writers never passed a ledger, so every
+ * retirement — tests included — mirrored into the real ~/.haven/tombstones.
+ */
+describe('the ledger follows the credential root (#3251)', () => {
+  it('the default root keeps the ledger at ~/.haven/tombstones', () => {
+    expect(tombstonesDirForCredentialRoot()).toBe(defaultTombstonesDir())
+    expect(tombstonesDirForCredentialRoot()).toBe(join(homedir(), '.haven', 'tombstones'))
+    // ~/.haven/agents IS the default root; naming it explicitly changes nothing.
+    expect(tombstonesDirForCredentialRoot(join(homedir(), '.haven', 'agents'))).toBe(defaultTombstonesDir())
+    expect(tombstonesDirForAgentDirectory(join(homedir(), '.haven', 'agents', 'research'))).toBe(defaultTombstonesDir())
+  })
+
+  it('a custom root keeps its ledger beside it, never under ~/.haven', () => {
+    expect(tombstonesDirForCredentialRoot('/srv/ci/agents')).toBe('/srv/ci/tombstones')
+    expect(tombstonesDirForAgentDirectory('/srv/ci/agents/agent-old')).toBe('/srv/ci/tombstones')
+    // Relative roots resolve against cwd, so the answer never depends on who reads it later.
+    expect(tombstonesDirForCredentialRoot('rel/agents')).toBe(join(process.cwd(), 'rel', 'tombstones'))
+  })
+
+  it('the connect suite runs against a scratch HOME, never the real one', () => {
+    const realHome = process.env.HAVEN_CONNECT_TEST_REAL_HOME
+    expect(realHome).toBeTruthy()
+    expect(homedir()).not.toBe(realHome)
+    expect(defaultTombstonesDir().startsWith(homedir())).toBe(true)
+    // tmpdir() moved under the scratch home too, so a ledger beside a
+    // mkdtemp() root is per worker, never shared across runs.
+    expect(tmpdir().startsWith(homedir())).toBe(true)
   })
 })

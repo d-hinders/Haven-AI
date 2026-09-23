@@ -47,6 +47,17 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
+> **Re-verification (#3259, failed tombstone mirror, 2026-09-23):** this doc is
+> coupled through `packages/connect/src/{cli,runtime}.ts`. The change: a failed
+> ledger mirror no longer aborts a retirement, so `--replace` still removes the
+> superseded directory's key files and logs a warning, and `--tombstone` /
+> `--unwire` report the failure additively. Re-read against the diff: the
+> `--replace` guidance in step 2 ("it retires that agent's local key files") is
+> now true in the one case where it used to be false, and no channel,
+> dist-tag, version-order or publish behaviour moves. `last-verified` already
+> reads 2026-09-23. Scope of this note: that passage — nothing else in this
+> document was re-verified.
+
 > **Re-verification (#3251, tombstone ledger follows the credential root,
 > 2026-09-23):** this doc is coupled through `packages/connect/src/{cli,
 > runtime,doctor}.ts`. The change: the retirement record that `--tombstone`,

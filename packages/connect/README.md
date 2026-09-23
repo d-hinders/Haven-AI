@@ -175,7 +175,12 @@ minutes. Two rules follow:
    and a refusal is `{"tombstoned": false, "error": {"code", "next_action"}}`
    with exit 1 — so check the result rather than assuming silence means success
    (#2175). The `message` field is present only for connector-authored refusals;
-   an unexpected filesystem error keeps its raw text on stderr alone.
+   an unexpected filesystem error keeps its raw text on stderr alone. If only the
+   surviving copy fails — the directory IS tombstoned — the run still succeeds
+   with `"recordPath": null` and `"mirrorError"` set to the errno code (or
+   `mirror_write_failed` when there is none), and `--unwire --json` carries the
+   same as `mirror_error`; `--replace` still removes the old directory's key
+   files and names the failure in `retirement_mirror_errors` (#3259).
 
 ### Unwiring an agent (`--unwire`, #2169)
 
@@ -352,7 +357,8 @@ read-only verification tools, `hosted_mcp_url`, `superseded_agent_ids`,
 `existing_agents_before_write` (#3122 — the other live-keyed directories named
 before the first write, each with the account it spends from), and — on a run
 that replaced existing wiring — `superseded_agents_retired_locally` with
-`retired_agent_ids`; `server_name_rebound_from` (#3122) appears only when the
+`retired_agent_ids`, plus `retirement_mirror_errors` (#3259) only when a retired
+directory's surviving ledger record could not be written; `server_name_rebound_from` (#3122) appears only when the
 run took a server name over from another directory's local binding record. It
 contains no API key, private key, credential
 contents, full credential paths, or full delegate address. The same redacted

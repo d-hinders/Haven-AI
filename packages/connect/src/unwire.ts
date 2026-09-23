@@ -94,6 +94,8 @@ export interface UnwireOutcome {
   teardown: TeardownOutcome
   /** #3122: whether a local `mcp-server-binding.json` was removed (false when there was none). */
   bindingReleased: boolean
+  /** #3259: set when the surviving ledger record could not be written; the in-place tombstone stands. */
+  mirrorError?: string
 }
 
 export interface UnwireInput {
@@ -193,7 +195,7 @@ export async function unwireAgent(input: UnwireInput): Promise<UnwireOutcome> {
 
   // ── Tombstone first (#1681 ordering): the long-lived host that still
   //    references this wrapper must hear "retired", never "ENOENT". ─────────
-  const tombstoned = await tombstoneDirectoryIfAbsent({
+  const { written: tombstoned, mirrorError } = await tombstoneDirectoryIfAbsent({
     directory: input.directory,
     agentId,
     reason: input.reason ?? 'unwired via --unwire',
@@ -323,7 +325,10 @@ export async function unwireAgent(input: UnwireInput): Promise<UnwireOutcome> {
   const teardown = await decideTeardown(identity, input)
   if (teardown.status !== 'retained') await teardownLocalKeyMaterial(input.directory, identity)
 
-  return { directory: input.directory, agentId, slug, tombstoned, runtimes, teardown, bindingReleased }
+  return {
+    directory: input.directory, agentId, slug, tombstoned, runtimes, teardown, bindingReleased,
+    ...(mirrorError === undefined ? {} : { mirrorError }),
+  }
 }
 
 const DESTROY_FLAG = '--destroy-key-material'
@@ -394,8 +399,11 @@ async function decideTeardown(identity: IdentityFile | null, input: UnwireInput)
 
 /**
  * Write the #1681 tombstone unless the directory already carries one.
- * Returns whether THIS call wrote it. Shared with the #2551 replace path,
- * which retires a superseded directory after the new wiring is written.
+ * Returns whether THIS call wrote it, and — #3259 — the mirror failure when
+ * the surviving ledger record could not be written (the in-place tombstone
+ * still stands, so callers carry on and report it). Shared with the #2551
+ * replace path, which retires a superseded directory after the new wiring is
+ * written.
  */
 export async function tombstoneDirectoryIfAbsent(input: {
   directory: string
@@ -403,10 +411,10 @@ export async function tombstoneDirectoryIfAbsent(input: {
   reason: string
   replacedBy?: string
   tombstonesDir?: string
-}): Promise<boolean> {
-  if ((await readOptionalText(join(input.directory, TOMBSTONE_FILENAME))) !== null) return false
-  await writeAgentTombstone(input)
-  return true
+}): Promise<{ written: boolean; mirrorError?: string }> {
+  if ((await readOptionalText(join(input.directory, TOMBSTONE_FILENAME))) !== null) return { written: false }
+  const { mirrorError } = await writeAgentTombstone(input)
+  return mirrorError === undefined ? { written: true } : { written: true, mirrorError }
 }
 
 /**

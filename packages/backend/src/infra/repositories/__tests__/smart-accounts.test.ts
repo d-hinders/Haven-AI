@@ -8,7 +8,10 @@ import {
   FIND_OWNED_ACCOUNT_ADDRESS_SQL,
   FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL,
   CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL,
+  DELETE_USER_ACCOUNT_SQL,
   LIST_ACCOUNTS_FOR_USER_SQL,
+  ORPHAN_AGENTS_FOR_ACCOUNT_SQL,
+  SET_ACCOUNT_DEFAULT_SQL,
   RENAME_ACCOUNT_FOR_USER_SQL,
   SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL,
   deleteAccountForUser,
@@ -40,6 +43,10 @@ describe('tenant scoping is required and effective — cross-tenant access retur
       RENAME_ACCOUNT_FOR_USER_SQL,
       CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL,
       FIND_OLDEST_ACCOUNT_FOR_USER_SQL,
+      // #3227: the three writes that used to scope by row id alone.
+      SET_ACCOUNT_DEFAULT_SQL,
+      ORPHAN_AGENTS_FOR_ACCOUNT_SQL,
+      DELETE_USER_ACCOUNT_SQL,
     ]) {
       expect(sql).toMatch(/user_id = \$\d/)
     }
@@ -84,23 +91,35 @@ describe('transaction functions keep their statement order and scope', () => {
   // A plain executor (no `connect`) runs withTransaction inline — the
   // statements and their parameters are observable without BEGIN/COMMIT noise.
 
-  it('setDefaultAccountForUser: clear is scoped to the user, set is by id, mirror is scoped to the user', async () => {
+  it('setDefaultAccountForUser: clear, set and mirror are all scoped to the user (#3227)', async () => {
     const calls: Array<[string, unknown[] | undefined]> = []
     const db = {
       query: async (sql: string, values?: unknown[]) => {
         calls.push([sql, values])
-        return { rows: [], rowCount: 0 }
+        return sql === SET_ACCOUNT_DEFAULT_SQL ? { rows: [], rowCount: 1 } : { rows: [], rowCount: 0 }
       },
     } as unknown as Executor
     await setDefaultAccountForUser('safe-1', '0xabc', OWNER, db)
     expect(calls.map(([sql]) => sql)).toEqual([
       CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL,
-      expect.stringContaining('SET is_default = true'),
+      SET_ACCOUNT_DEFAULT_SQL,
       SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL,
     ])
-    expect(calls[0][1]).toEqual([OWNER])
-    expect(calls[1][1]).toEqual(['safe-1'])
+    expect(calls[0][1]).toEqual([OWNER, 'safe-1'])
+    expect(calls[1][1]).toEqual(['safe-1', OWNER])
     expect(calls[2][1]).toEqual(['0xabc', OWNER])
+  })
+
+  it('setDefaultAccountForUser: when the set matches no row, the legacy mirror is not written (#3227)', async () => {
+    const sqls: string[] = []
+    const db = {
+      query: async (sql: string) => {
+        sqls.push(sql)
+        return { rows: [], rowCount: 0 }
+      },
+    } as unknown as Executor
+    await setDefaultAccountForUser('safe-1', '0xabc', ATTACKER, db)
+    expect(sqls).toEqual([CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL, SET_ACCOUNT_DEFAULT_SQL])
   })
 
   it('deleteAccountForUser: promotion looks up the oldest safe of the CALLER, never another tenant', async () => {
@@ -111,10 +130,14 @@ describe('transaction functions keep their statement order and scope', () => {
         if (sql === FIND_OLDEST_ACCOUNT_FOR_USER_SQL) {
           return { rows: [{ id: 'safe-2', account_address: '0xnext' }], rowCount: 1 }
         }
+        if (sql === DELETE_USER_ACCOUNT_SQL) return { rows: [], rowCount: 1 }
         return { rows: [], rowCount: 0 }
       },
     } as unknown as Executor
-    await deleteAccountForUser('safe-1', OWNER, true, db)
+    expect(await deleteAccountForUser('safe-1', OWNER, true, db)).toBe(true)
+    // #3227: the orphan and the delete carry the caller, not just the row id.
+    expect(calls.find(([sql]) => sql === ORPHAN_AGENTS_FOR_ACCOUNT_SQL)?.[1]).toEqual(['safe-1', OWNER])
+    expect(calls.find(([sql]) => sql === DELETE_USER_ACCOUNT_SQL)?.[1]).toEqual(['safe-1', OWNER])
     const promote = calls.find(([sql]) => sql === FIND_OLDEST_ACCOUNT_FOR_USER_SQL)
     expect(promote?.[1]).toEqual([OWNER])
     const mirror = calls.find(([sql]) => sql === SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL)
@@ -125,6 +148,20 @@ describe('transaction functions keep their statement order and scope', () => {
     // again — not merely reordered, absent.
     const sqls = calls.map(([sql]) => sql)
     expect(sqls.some((s) => s.includes('self_sign_agents'))).toBe(false)
+  })
+
+  it('deleteAccountForUser: when the delete matches no row it returns false and promotes nothing (#3227)', async () => {
+    const sqls: string[] = []
+    const db = {
+      query: async (sql: string) => {
+        sqls.push(sql)
+        if (sql === FIND_OLDEST_ACCOUNT_FOR_USER_SQL) return { rows: [{ id: 'safe-2', account_address: '0xnext' }], rowCount: 1 }
+        return { rows: [], rowCount: 0 }
+      },
+    } as unknown as Executor
+    expect(await deleteAccountForUser('safe-1', ATTACKER, true, db)).toBe(false)
+    expect(sqls.at(-1)).toBe(DELETE_USER_ACCOUNT_SQL)
+    expect(sqls).not.toContain(FIND_OLDEST_ACCOUNT_FOR_USER_SQL)
   })
 
   it('deleteAccountForUser: keeps a Safe linked when an agent still has live delegation authority', async () => {

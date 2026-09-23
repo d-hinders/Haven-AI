@@ -2814,3 +2814,15 @@ to call next in structured fields, and those fields are typed end to end
 > configuration, never on a scanned one. The success line now also prints
 > the number of files read. Scope of this note: the lint gate itself.
 > Nothing else in this document was re-verified.
+
+> **Re-verified #3227 (2026-09-23, repository tenant scope):** this diff
+> touches `routes/user-accounts.ts`, a covered file, in its unlink handler
+> only. When the now tenant-scoped delete matches no row, the handler re-reads
+> ownership and answers 200 if the account is already gone, the way a
+> concurrent second unlink by the same owner answered before this change.
+> The set of statuses the route returns (200, 404, 409) and every response
+> body are unchanged. No published CLI, SDK, MCP or connector version calls
+> the unlink or re-default routes; only the dashboard does
+> (`git grep -n "user/accounts" packages/{cli,sdk,mcp,mcp-server,connect}/src`
+> finds only the account list, the funding read and the rename). Scope of this note: that
+> handler. Nothing else in this document was re-verified.

@@ -93,6 +93,25 @@ describe('DELETE /user/accounts/:safeId', () => {
     expect(mockClientQuery).not.toHaveBeenCalled()
   })
 
+  it('a concurrent second unlink by the owner (the DELETE matched nothing) answers 200, not a false 409 (#3227)', async () => {
+    // Ownership passes, then the row is gone by the time the tenant-scoped
+    // DELETE runs: the first request of a double click already removed it.
+    mockPoolQuery
+      .mockResolvedValueOnce({ rows: [{ id: SAFE_ID, is_default: false }] })
+      .mockResolvedValueOnce({ rows: [] })
+    mockClientQuery.mockResolvedValue({ rows: [], rowCount: 0 })
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/user/accounts/${SAFE_ID}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ success: true })
+    expect(mockPoolQuery).toHaveBeenCalledTimes(2)
+  })
+
   it('returns 409 and leaves the Safe linked while a delegation is pending or active', async () => {
     mockPoolQuery.mockResolvedValue({ rows: [{ id: SAFE_ID, is_default: false }] })
     mockClientQuery.mockImplementation(async (sql: string) => {

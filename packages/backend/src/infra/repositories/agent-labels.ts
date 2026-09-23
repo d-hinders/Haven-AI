@@ -80,9 +80,10 @@ export const LIST_LABELS_FOR_AGENT_SQL = `
   WHERE a.agent_id = ANY($1::uuid[])
   ORDER BY lower(l.name), l.id`
 
-// Both assignment writes join through an agent `userId` owns (#3227): the
-// header's rule "every statement filters on it (or joins through an agent the
-// user owns)" held for the labels but not for the agent until then.
+// Both assignment writes join through an agent `userId` owns (#3227). Before
+// that, these two statements broke the header's rule ("every statement filters
+// on it (or joins through an agent the user owns)"): they checked the labels'
+// owner but not the agent's. This note covers the assignment writes only.
 export const REPLACE_LABELS_FOR_AGENT_SQL = `
   DELETE FROM agent_label_assignments
   WHERE agent_id = $1

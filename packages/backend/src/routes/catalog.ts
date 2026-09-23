@@ -42,6 +42,13 @@ import { CATALOG_ROW_WITH_MERCHANT_SELECT, type CatalogRowWithMerchant } from '.
 export const VALID_RAILS = new Set(['x402', 'mpp'])
 
 /**
+ * Each search word adds one three-column ILIKE predicate. Bound that SQL work
+ * independently of the 120-character request limit so a search cannot grow
+ * an arbitrarily wide WHERE clause through many one-character words.
+ */
+const MAX_SEARCH_WORDS = 8
+
+/**
  * Accept either an agent API key or a dashboard JWT. Agent keys are
  * recognizable by prefix, so requests carrying one are routed through the
  * full agent auth (which also feeds liveness + audit hooks); everything else
@@ -267,6 +274,10 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
       if (search !== undefined && !normalizedSearch) {
         return reply.code(400).send({ error: 'Search must not be empty' })
       }
+      const searchWords = normalizedSearch?.split(' ') ?? []
+      if (searchWords.length > MAX_SEARCH_WORDS) {
+        return reply.code(400).send({ error: `Search must contain at most ${MAX_SEARCH_WORDS} words` })
+      }
 
       const conditions = [`mc.status != 'delisted'`]
       const values: unknown[] = []
@@ -279,8 +290,8 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
         values.push(rail)
         conditions.push(`mc.rail = $${values.length}`)
       }
-      if (normalizedSearch) {
-        values.push(normalizedSearch)
+      for (const word of searchWords) {
+        values.push(word)
         conditions.push(
           `(mc.name ILIKE '%' || $${values.length} || '%' OR ` +
             `mc.description ILIKE '%' || $${values.length} || '%' OR ` +
@@ -329,9 +340,12 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
           .filter((row) => {
             if (normalizedCategory && normalizedCategory.toLowerCase() !== 'api') return false
             if (rail !== undefined && rail !== 'x402') return false
-            if (normalizedSearch) {
-              const haystack = `${row.name ?? ''} ${row.description ?? ''}`.toLowerCase()
-              if (!haystack.includes(normalizedSearch.toLowerCase())) return false
+            if (searchWords.length > 0) {
+              // Ingestion serializes every listing with the synthetic `api`
+              // category, so include it in the same three-field search surface
+              // used by operator rows.
+              const haystack = `${row.name ?? ''} ${row.description ?? ''} api`.toLowerCase()
+              if (!searchWords.every((word) => haystack.includes(word.toLowerCase()))) return false
             }
             return true
           })

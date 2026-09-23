@@ -2698,7 +2698,7 @@ export type paths = {
         };
         /**
          * List curated payable services agents can discover and pay.
-         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.
+         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and every whitespace-separated search word must match the product name, description, or category. Blank search is rejected after trimming, non-empty search is capped at 120 characters, and searches with more than 8 words return 400; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.
          */
         get: operations["listCatalog"];
         put?: never;
@@ -16556,7 +16556,7 @@ export interface operations {
         parameters: {
             query?: {
                 category?: string;
-                /** @description Whitespace is trimmed/collapsed. Blank search after trimming returns 400. */
+                /** @description Whitespace is trimmed/collapsed. Every word must match the product name, description, or category. Blank search after trimming returns 400; searches over 8 words also return 400. */
                 search?: string;
                 rail?: "x402" | "mpp";
             };

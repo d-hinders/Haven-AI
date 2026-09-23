@@ -267,7 +267,8 @@ export function renderReport({ mode, expected, result }) {
  * trailer, which is prose for humans.
  */
 export function movedOutput(result) {
-  return JSON.stringify(result.moved.map((c) => ({ name: baselineName(c.path), status: c.status })))
+  // `path` since #3234: the before/after artifact needs to find each file.
+  return JSON.stringify(result.moved.map((c) => ({ name: baselineName(c.path), path: c.path, status: c.status })))
 }
 
 /** One line for the commit message trailer, so the delta survives in git history. */

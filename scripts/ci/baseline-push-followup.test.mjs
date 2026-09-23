@@ -225,6 +225,14 @@ describe('moved baselines — the comment lists what was regenerated (#3233)', (
     assert.match(body, /- `new-desktop\.png` \(added\)/)
   })
 
+  test('links the before/after artifact when the workflow passes one, and only an https URL (#3234)', () => {
+    const url = 'https://github.com/o/r/actions/runs/1/artifacts/2'
+    const body = buildComment({ ...base, moved: [{ name: 'a.png', status: 'modified' }], artifactUrl: url })
+    assert.match(body, /Before\/after images of each: \[baseline-before-after\]\(https:\/\/github\.com\/o\/r\/actions\/runs\/1\/artifacts\/2\)/)
+    assert.doesNotMatch(buildComment({ ...base, moved: [], artifactUrl: '' }), /Before\/after images/)
+    assert.doesNotMatch(buildComment({ ...base, moved: [], artifactUrl: 'javascript:alert(1)' }), /Before\/after images/)
+  })
+
   test('an unreadable list says so and points at the run — it never reads as "nothing to review"', () => {
     const text = renderMovedSection({ moved: null, runUrl: 'https://example.invalid/run/1' })
     assert.match(text, /could not be read here/)

@@ -605,6 +605,18 @@ export const ROUTING_MATRIX = [
     why: 'The classifier does not route itself. Correct today only because ci_config_checks is unconditional and collects scripts/ci/*.test.mjs — the moment that job gains a surface filter, the router stops testing its own changes.',
   },
   {
+    files: ['scripts/ci/baseline-verdict-gate.mjs'],
+    expect: [],
+    kind: RETAINED,
+    why: 'The baseline change gate (#3232) does not route itself, for the same two reasons as the classifier above: its self-test is collected by the unconditional ci_config_checks glob, and the gate itself runs from the DEFAULT branch inside its own pull_request_target workflow (baseline-verdict-gate.yml) — the PR copy is never executed, so routing it anywhere would run code a gated PR could have edited. The workflow file beside it routes ALL under the generic .github/workflows arm.',
+  },
+  {
+    files: ['scripts/ci/baseline-verdict-gate.test.mjs'],
+    expect: [],
+    kind: RETAINED,
+    why: 'The gate’s self-test, same reason as its script above: it is reachable only through the unconditional scripts/ci/*.test.mjs glob in ci_config_checks. If that job ever gains a surface filter, this row is the one that turns wrong.',
+  },
+  {
     files: ['.github/root-guard-ownership.json'],
     expect: [],
     kind: RETAINED,

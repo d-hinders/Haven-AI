@@ -52,7 +52,7 @@ import {
 import { runtimeConfigPathFor, writeRuntimeConfig } from './config-writers.js'
 import { normalizeRuntimeName, restartRequiredForRuntime, RUNTIME_FLAG_VALUE_LIST, type RuntimeId } from './runtime-registry.js'
 import { getLocalSignerConsentStatus } from './signer-consent.js'
-import { TOMBSTONE_FILENAME, readAgentTombstone, readTombstoneRecords } from './tombstone.js'
+import { TOMBSTONE_FILENAME, readAgentTombstone, readTombstoneRecords, tombstonesDirForAgentDirectory } from './tombstone.js'
 import { serverNamesFor, type ServerNames } from './server-names.js'
 import { CONNECT_OUTCOME_FILENAME, readConnectOutcomeRuntime, readMcpServerBinding, REKEY_PENDING_FILENAME, inspectRekeyPending, type RekeyPendingStatus } from './storage.js'
 import { shortAddress, withoutUserinfo } from './redact.js'
@@ -1225,8 +1225,15 @@ export async function runDoctor(
     // this check. Reads the SAME home the doctor scans (deps.homeDir), never
     // the ambient process home — an explicit --credentials-dir run must not
     // consult the machine-wide default root (REGRESSION B2 discipline).
+    // #3251: the writers keep a record in the ledger of the root that held
+    // the retired directory, so the reader follows the root this run scans —
+    // an explicit --credentials-dir names an agent directory, whose parent is
+    // that root. Resolved against the doctor's own homeDir.
     const knownIds = new Set([...inventory].map((e) => e.agentId ?? basename(e.directory)))
-    const ghostRecords = (await readTombstoneRecords(join(homeDir, '.haven', 'tombstones'))).filter(
+    const ledgerDir = input.credentialsDir
+      ? tombstonesDirForAgentDirectory(input.credentialsDir, homeDir)
+      : join(homeDir, '.haven', 'tombstones')
+    const ghostRecords = (await readTombstoneRecords(ledgerDir)).filter(
       (rec) => !knownIds.has(rec.agent_id),
     )
     if (ghostRecords.length > 0) {

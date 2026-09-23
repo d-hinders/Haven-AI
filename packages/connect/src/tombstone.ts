@@ -35,7 +35,7 @@
 import { chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { connectorRerunCommand } from '@haven_ai/sdk'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { redactSecrets } from './redact.js'
 import { ConnectError } from './connect-error.js'
 
@@ -76,6 +76,34 @@ export interface WriteTombstoneInput {
  */
 export function defaultTombstonesDir(baseDir?: string): string {
   return join(baseDir ?? join(homedir(), '.haven'), 'tombstones')
+}
+
+/** The ledger directory name used INSIDE a custom credential root. */
+export const ROOT_TOMBSTONES_DIRNAME = '.tombstones'
+
+/**
+ * The ledger for a credential ROOT — the directory that holds the agent
+ * directories (`--credentials-dir`, default `~/.haven/agents`). The default
+ * root keeps `~/.haven/tombstones`, unchanged. Any other root keeps its ledger
+ * INSIDE itself, at `<root>/.tombstones` — never beside it: the parent of a
+ * root the user named may be `/`, their home, or read-only, and the mirror
+ * write is fatal to a retirement (#3251 review). Every enumerator over a root
+ * gates on files inside an agent directory (`identity.json`, a sidecar, a
+ * parked key), so the ledger directory is never mistaken for an agent.
+ *
+ * `homeDir` names the home whose `.haven/agents` is the default root — the
+ * doctor passes its own, never the ambient one.
+ */
+export function tombstonesDirForCredentialRoot(credentialRoot?: string, homeDir: string = homedir()): string {
+  if (!credentialRoot) return defaultTombstonesDir(join(homeDir, '.haven'))
+  const root = resolve(credentialRoot)
+  if (root === resolve(homeDir, '.haven', 'agents')) return defaultTombstonesDir(join(homeDir, '.haven'))
+  return join(root, ROOT_TOMBSTONES_DIRNAME)
+}
+
+/** The ledger for an agent DIRECTORY: its parent is its credential root. */
+export function tombstonesDirForAgentDirectory(directory: string, homeDir: string = homedir()): string {
+  return tombstonesDirForCredentialRoot(dirname(resolve(directory)), homeDir)
 }
 
 const MIRROR_MODE = 0o600

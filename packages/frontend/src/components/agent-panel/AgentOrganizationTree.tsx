@@ -21,7 +21,8 @@ import { buildOrganizationTree, flattenOrganizationTree } from '@/lib/agent-orga
  * Creating the first organization happens from here; managing (rename, move,
  * delete) lives in the manager modal. Empty state: a single quiet line with
  * the create action, not a competing panel — the agents list above stays the
- * primary content. Loading and error states stay inline for the same reason.
+ * primary content. Loading and error states stay inline for the same reason,
+ * and render during refetches too, not only on an empty first load (#3236).
  */
 export function AgentOrganizationTree({
   organizations,
@@ -48,7 +49,12 @@ export function AgentOrganizationTree({
     [organizations],
   )
 
-  if (loading && organizations.length === 0) {
+  // #3236: these states used to render only while the list was empty, so a
+  // refetch with organizations present showed nothing and a failed refetch
+  // left a stale-looking tree. During a refetch the tree still cannot be
+  // trusted (rows are being replaced), so it swaps to the status panel; a
+  // failed refetch offers Try again whether or not rows were present.
+  if (loading) {
     return (
       <div className="mb-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card">
         <p className="text-sm text-[var(--v2-ink-3)]" role="status" aria-busy="true" aria-live="polite">
@@ -58,7 +64,7 @@ export function AgentOrganizationTree({
     )
   }
 
-  if (error && organizations.length === 0) {
+  if (error) {
     return (
       <div className="mb-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card">
         <p className="text-sm text-[var(--v2-ink-2)]">{error}</p>

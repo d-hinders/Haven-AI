@@ -51,6 +51,7 @@ export default function OrganizationsManagerModal({
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Organization | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) {
@@ -59,6 +60,7 @@ export default function OrganizationsManagerModal({
       setRowError(null)
       setNewName('')
       setNewParentId('')
+      setDeleteError(null)
       void fetchOrganizations()
     }
   }, [open, fetchOrganizations])
@@ -137,12 +139,24 @@ export default function OrganizationsManagerModal({
     }
   }, [createOrganization, newParentId, newName])
 
+  const startDelete = useCallback((org: Organization) => {
+    setDeleteError(null)
+    setDeleteTarget(org)
+  }, [])
+
+  // #3236: the catch is the point — without it a rejected DELETE escapes past
+  // the `void confirmDelete()` call site as an unhandled rejection and the
+  // dialog sits silent. The error renders inside the confirm dialog, which
+  // stays open (the organization was not deleted).
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return
     setDeleting(true)
+    setDeleteError(null)
     try {
       await deleteOrganization(deleteTarget.id)
       setDeleteTarget(null)
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'The organization could not be deleted.')
     } finally {
       setDeleting(false)
     }
@@ -186,7 +200,7 @@ export default function OrganizationsManagerModal({
 
         <div className="p-6">
           {/* Create */}
-          <div className="mb-4">
+          <div className="mb-4" data-testid="organization-create-form">
             <p className="mb-1.5 text-xs font-medium text-[var(--v2-ink-3)]">Add an organization</p>
             <div className="flex gap-2">
               <Input
@@ -211,6 +225,14 @@ export default function OrganizationsManagerModal({
                 Add
               </Button>
             </div>
+            {/* #3236: rowError had no render site on the create form — a
+                rejected POST (409 sibling-name collision is the common case)
+                did nothing visible. It renders here, next to the form. */}
+            {rowError ? (
+              <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
+                {rowError}
+              </p>
+            ) : null}
             {organizations.length > 0 && (
               <Select
                 aria-label="Place the new organization inside"
@@ -339,7 +361,7 @@ export default function OrganizationsManagerModal({
                         <Button
                           variant="danger"
                           size="sm"
-                          onClick={() => setDeleteTarget(org)}
+                          onClick={() => startDelete(org)}
                           aria-label={`Delete ${org.name}`}
                         >
                           Delete
@@ -359,12 +381,23 @@ export default function OrganizationsManagerModal({
         onCancel={() => (deleting ? undefined : setDeleteTarget(null))}
         onConfirm={() => void confirmDelete()}
         title={deleteTarget ? `Delete ${deleteTarget.name}?` : 'Delete organization?'}
-        body={orgDeleteBody(
-          deleteTarget
-            ? organizations.filter((o) => o.parent_organization_id === deleteTarget.id).length
-            : 0,
-          deleteTarget?.agent_count ?? 0,
-        )}
+        body={
+          <>
+            <p>
+              {orgDeleteBody(
+                deleteTarget
+                  ? organizations.filter((o) => o.parent_organization_id === deleteTarget.id).length
+                  : 0,
+                deleteTarget?.agent_count ?? 0,
+              )}
+            </p>
+            {deleteError ? (
+              <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
+                {deleteError}
+              </p>
+            ) : null}
+          </>
+        }
         confirmLabel="Delete organization"
         tone="danger"
         loading={deleting}

@@ -146,8 +146,16 @@ function delivery(input: {
   return { payload, headers }
 }
 
-async function post(body: string, headers: Record<string, string>, path = `${BASE}/${TOKEN}`) {
-  return app!.inject({ method: 'POST', url: path, payload: body, headers })
+/**
+ * `path` replaces the default callback path (the unknown-token tests); the
+ * `suffix` twin is what the no-3xx enumeration threads through EVERY
+ * scenario — the trailing-slash spelling must be REQUESTED, not merely named
+ * in a title (quality scan 2026-09-22 candidate C2, owner finding on #3019:
+ * the loop's `suffix` reached only the test title, so the `'/'` spelling was
+ * never sent and deleting the trailing-slash route stayed green).
+ */
+async function post(body: string, headers: Record<string, string>, suffix: '' | '/' = '', path?: string) {
+  return app!.inject({ method: 'POST', url: `${path ?? `${BASE}/${TOKEN}`}${suffix}`, payload: body, headers })
 }
 
 describe('POST /accounting/webhooks/accounted/:token — the answer matrix', () => {
@@ -199,8 +207,11 @@ describe('POST /accounting/webhooks/accounted/:token — the answer matrix', () 
   it('unknown token → 404 and nothing else runs', async () => {
     connectionRepo.getConnectionByWebhookToken.mockResolvedValue(null)
     const d = delivery({ deliveryId: 'evt_unk' })
-    const res = await post(d.payload, d.headers, `${BASE}/no-such-token`)
+    const res = await post(d.payload, d.headers, '', `${BASE}/no-such-token`)
     expect(res.statusCode).toBe(404)
+    // The status body, not a bare route miss: the enumeration below admits
+    // 404 as a legitimate answer, so this pin is what keeps a deleted route
+    // (a miss also answers 404) from passing as the token verdict (C2).
     expect(res.json()).toEqual({ status: 'unknown-token' })
     expect(countedNames()).toEqual(['received', 'unknown_token'])
   })
@@ -316,110 +327,117 @@ describe('POST /accounting/webhooks/accounted/:token — the answer matrix', () 
 })
 
 describe('the no-410 / no-3xx invariant — every path, both path spellings', () => {
-  /** Every scenario the route can answer with, signed where the matrix says so. */
-  function scenarios(): { name: string; fn: () => Promise<number> }[] {
-    const cases: { name: string; fn: () => Promise<number> }[] = []
+  /** Every scenario the route can answer with, signed where the matrix says so; each requests the given path spelling. */
+  function scenarios(): { name: string; fn: (suffix: '' | '/') => Promise<number> }[] {
+    const cases: { name: string; fn: (suffix: '' | '/') => Promise<number> }[] = []
     cases.push({
       name: 'valid first delivery',
-      fn: async () => {
+      fn: async (suffix) => {
         connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
         deliveriesRepo.recordWebhookDelivery.mockResolvedValue({ inserted: true })
         const d = delivery({ deliveryId: `evt_m_${randomBytes(4).toString('hex')}` })
-        return (await post(d.payload, d.headers)).statusCode
+        return (await post(d.payload, d.headers, suffix)).statusCode
       },
     })
     cases.push({
       name: 'duplicate',
-      fn: async () => {
+      fn: async (suffix) => {
         connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
         deliveriesRepo.recordWebhookDelivery.mockResolvedValue({ inserted: false })
         const d = delivery({ deliveryId: `evt_d_${randomBytes(4).toString('hex')}` })
-        return (await post(d.payload, d.headers)).statusCode
+        return (await post(d.payload, d.headers, suffix)).statusCode
       },
     })
     cases.push({
       name: 'bad signature',
-      fn: async () => {
+      fn: async (suffix) => {
         connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
         const d = delivery({ deliveryId: null, event: null })
-        return (await post(d.payload, d.headers)).statusCode
+        return (await post(d.payload, d.headers, suffix)).statusCode
       },
     })
     cases.push({
       name: 'stale timestamp',
-      fn: async () => {
+      fn: async (suffix) => {
         connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
         const d = delivery({ deliveryId: null, event: null, tSeconds: Math.floor((Date.now() - 6 * 60_000) / 1000) })
-        return (await post(d.payload, d.headers)).statusCode
+        return (await post(d.payload, d.headers, suffix)).statusCode
       },
     })
     cases.push({
       name: 'malformed signature header',
-      fn: async () => {
+      fn: async (suffix) => {
         connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
         const d = delivery({ deliveryId: null, event: null, header: 'garbage' })
-        return (await post(d.payload, d.headers)).statusCode
+        return (await post(d.payload, d.headers, suffix)).statusCode
       },
     })
     cases.push({
       name: 'unknown token',
-      fn: async () => {
+      // The unknown-token scenario swaps the WHOLE path (the token is wrong,
+      // not spelled differently), so the suffix twin is irrelevant here —
+      // underscore-prefixed on purpose.
+      fn: async (_suffix) => {
         connectionRepo.getConnectionByWebhookToken.mockResolvedValue(null)
         const d = delivery({ deliveryId: null, event: null })
-        return (await post(d.payload, d.headers, `${BASE}/missing`)).statusCode
+        const res = await post(d.payload, d.headers, '', `${BASE}/missing`)
+        // A route miss answers the same CODE — the BODY is the token verdict
+        // (C2: without this, deleting the route passes the enumeration).
+        expect(res.json()).toEqual({ status: 'unknown-token' })
+        return res.statusCode
       },
     })
     cases.push({
       name: 'feature off',
-      fn: async () => {
+      fn: async (suffix) => {
         configMock.accountingEnabled = false
         connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
         const d = delivery({ deliveryId: null, event: null })
-        return (await post(d.payload, d.headers)).statusCode
+        return (await post(d.payload, d.headers, suffix)).statusCode
       },
     })
     cases.push({
       name: 'webhook.test',
-      fn: async () => {
+      fn: async (suffix) => {
         configMock.accountingEnabled = true
         connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
         deliveriesRepo.recordWebhookDelivery.mockResolvedValue({ inserted: true })
         const body = JSON.stringify({ id: `evt_t_${randomBytes(4).toString('hex')}`, type: 'webhook.test', data: {} })
         const d = delivery({ body, deliveryId: `evt_t_${randomBytes(4).toString('hex')}`, event: 'webhook.test' })
-        return (await post(d.payload, d.headers)).statusCode
+        return (await post(d.payload, d.headers, suffix)).statusCode
       },
     })
     cases.push({
       name: 'unknown event type',
-      fn: async () => {
+      fn: async (suffix) => {
         configMock.accountingEnabled = true
         connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
         deliveriesRepo.recordWebhookDelivery.mockResolvedValue({ inserted: true })
         const body = JSON.stringify({ id: `evt_u_${randomBytes(4).toString('hex')}`, type: 'future.thing', data: {} })
         const d = delivery({ body, deliveryId: `evt_u_${randomBytes(4).toString('hex')}`, event: 'future.thing' })
-        return (await post(d.payload, d.headers)).statusCode
+        return (await post(d.payload, d.headers, suffix)).statusCode
       },
     })
     cases.push({
       name: 'unparseable but signed body',
-      fn: async () => {
+      fn: async (suffix) => {
         configMock.accountingEnabled = true
         connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
         const garbage = '}<not json'
         const d = delivery({ body: garbage, deliveryId: null, event: null })
-        return (await post(d.payload, d.headers)).statusCode
+        return (await post(d.payload, d.headers, suffix)).statusCode
       },
     })
     cases.push({
       name: 'document.uploaded confirmed',
-      fn: async () => {
+      fn: async (suffix) => {
         configMock.accountingEnabled = true
         connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
         syncRepo.confirmAccountedDocumentDelivery.mockResolvedValue(true)
         deliveriesRepo.recordWebhookDelivery.mockResolvedValue({ inserted: true })
         const body = JSON.stringify({ id: `evt_c_${randomBytes(4).toString('hex')}`, type: 'document.uploaded', data: { object: { document_id: 'doc' } } })
         const d = delivery({ body, deliveryId: `evt_c_${randomBytes(4).toString('hex')}`, event: 'document.uploaded' })
-        return (await post(d.payload, d.headers)).statusCode
+        return (await post(d.payload, d.headers, suffix)).statusCode
       },
     })
     return cases
@@ -433,7 +451,7 @@ describe('the no-410 / no-3xx invariant — every path, both path spellings', ()
         syncRepo.confirmAccountedDocumentDelivery.mockReset().mockResolvedValue(false)
         deliveriesRepo.recordWebhookDelivery.mockReset().mockResolvedValue({ inserted: true })
         configMock.accountingEnabled = true
-        const code = await s.fn()
+        const code = await s.fn(suffix)
         seen.push({ scenario: s.name, code })
         expect(code, `${s.name} answered ${code}`).toBeOneOf([200, 400, 404])
         expect(code).not.toBe(410)

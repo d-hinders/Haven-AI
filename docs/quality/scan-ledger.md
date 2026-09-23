@@ -1045,3 +1045,25 @@ covered docs implicated" for a non-existent path; the block-3 `any` regex
 counts prose; the branch-hygiene meter reads only `--since=` and silently
 falls back to 7 days on `--since <date>`; a `git grep` pathspec of
 `packages/*/src` matches no file.
+
+**Disposition (owner, 2026-09-22): file all; C2 as a comment on #3019.**
+F1 → epic #3231 (`epic`, `area:frontend`, `area:ci`, `area:docs`) with
+slices #3232 (trailer and verdict gate), #3233 (follow-up comment wording),
+#3234 (before/after artifact) and #3235 (design-reviewer brief); the epic's
+spec review was posted on it (38 claims re-run, 4 wrong and fixed). C1 →
+#3227 (`area:backend`, `money-path` by file; owner decisions: a cross-tenant
+call is a silent no-op, and a census ratchet for the class is filed
+separately later). C2 → a comment on #3019, no new issue. C3 → #3228,
+C4 → #3229, C5 → #3230 (`area:ci`). Notes: not filed. Filed to the backlog
+(no `code-quality`).
+
+**Shipped 2026-09-23** (squash on `dev`):
+- C1 → #3227: `shipped` — PR #3237, `79592c11`.
+- C3 → #3228: `shipped` — PR #3239, `a98c7903`.
+- C4 → #3229: `shipped` — PR #3238, `62b1e8da`.
+- C5 → #3230: `shipped` — PR #3242, `257b0553`.
+- F1 slice #3232: `shipped` — PR #3243, `4fd4ec07`.
+- F1 slice #3233: `shipped` — PR #3240, `ef6ba51b`.
+
+F1 (#3231) stays open until #3234 and #3235 have landed and its promotion
+checklist is ticked.

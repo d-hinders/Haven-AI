@@ -289,11 +289,10 @@ describe('buildHostedMcpServer', () => {
   describe('plain-HTTP x402 happy path (#3253)', () => {
     const paragraph =
       HOSTED_INSTRUCTIONS.split('\n\n').find((p) => p.startsWith('For a plain-HTTP x402 merchant')) ?? ''
-    const eip3009 = paragraph.slice(
-      paragraph.indexOf('EIP-3009 (funding leg):'),
-      paragraph.indexOf('erc7710: haven_sign,'),
-    )
-    const erc7710 = paragraph.slice(paragraph.indexOf('erc7710: haven_sign,'))
+    const eip3009Start = paragraph.indexOf('EIP-3009 (funding leg):')
+    const erc7710Start = paragraph.indexOf('erc7710: haven_sign,')
+    const eip3009 = paragraph.slice(eip3009Start, erc7710Start)
+    const erc7710 = paragraph.slice(erc7710Start)
     const order = (text: string, names: string[]) => names.map((name) => text.indexOf(name))
 
     it('names the quote → pay handoff with url: request_url, never resource_url', () => {
@@ -305,7 +304,8 @@ describe('buildHostedMcpServer', () => {
     })
 
     it('EIP-3009 branch: haven_sign_x402 → haven_submit → retry → ends in haven_report_x402_outcome', () => {
-      expect(eip3009).not.toBe('')
+      expect(eip3009Start).toBeGreaterThanOrEqual(0)
+      expect(erc7710Start).toBeGreaterThan(eip3009Start)
       const idx = order(eip3009, ['haven_sign_x402', 'haven_submit', 'payment_header', 'haven_report_x402_outcome'])
       expect(idx.every((i) => i >= 0)).toBe(true)
       expect(idx).toEqual([...idx].sort((a, b) => a - b))
@@ -315,7 +315,7 @@ describe('buildHostedMcpServer', () => {
     })
 
     it('erc7710 branch: haven_sign → haven_submit with settlement_scheme erc7710, PAYMENT-SIGNATURE only, no report', () => {
-      expect(erc7710).not.toBe('')
+      expect(erc7710Start).toBeGreaterThanOrEqual(0)
       const idx = order(erc7710, ['haven_sign,', 'haven_submit', 'settlement_scheme "erc7710"', 'PAYMENT-SIGNATURE'])
       expect(idx.every((i) => i >= 0)).toBe(true)
       expect(idx).toEqual([...idx].sort((a, b) => a - b))

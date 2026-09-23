@@ -34,7 +34,7 @@ covers:
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-09-19"
+last-verified: "2026-09-23"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -188,11 +188,13 @@ unchanged), but the SDK no longer exposes a client method that consumes it —
 
 For catalog discovery specifically, the published `GET /catalog` contract now
 includes three read-only query parameters: `category`, `search`, and `rail`.
-`category` is matched case-insensitively after trim; `search` matches product
-`name`, `description`, or `category`; `rail` keeps its existing filter. This
-surface only returns curated metadata and may yield zero or multiple entries.
-It never quotes, signs, or authorizes a payment, and catalog prices remain
-indicative rather than authoritative.
+`category` is matched case-insensitively after trim. `search` normalizes
+whitespace, accepts at most eight words, and requires every word to match the
+product `name`, `description`, or `category`; merchant name is deliberately
+excluded because it belongs to the separate merchant table. `rail` keeps its
+existing filter. This surface only returns curated metadata and may yield zero
+or multiple entries. It never quotes, signs, or authorizes a payment, and
+catalog prices remain indicative rather than authoritative.
 
 The sibling `POST /catalog/submit` is a public, unauthenticated self-service
 submission endpoint (epic #1717, #1711): it writes a queue row and returns an

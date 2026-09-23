@@ -54,7 +54,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-22"
+last-verified: "2026-09-23"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -660,11 +660,14 @@ resends the SAME header on the new session on exactly that shape; a bare
 
 Before this guided path, the agent can read the curated catalog through
 `GET /catalog` or `haven_discover_tools`. That discovery surface is still
-strictly read-only: `category` is matched case-insensitively after trim, the
-optional `search` term matches `name`, `description`, or `category`, and the
-existing `rail` plus agent-chain scoping still apply. Results stay
-deterministically ordered and may be empty or multi-row; they never authorize
-payment, and any catalog price remains indicative until the live quote below.
+strictly read-only: `category` is matched case-insensitively after trim, while
+optional `search` normalizes whitespace, accepts at most eight words, and
+requires every word to match the product `name`, `description`, or `category`.
+Merchant name is deliberately excluded because it belongs to the separate
+merchant table. The existing `rail` plus agent-chain scoping still apply.
+Results stay deterministically ordered and may be empty or multi-row; they
+never authorize payment, and any catalog price remains indicative until the
+live quote below.
 Since #3100 each entry carries `suggested_tool` **and** `suggested_arguments`,
 spelled in that tool's own vocabulary and accepted by it verbatim — on the
 hosted surface an MCP entry points at the cap-free `haven_quote_catalog_purchase`

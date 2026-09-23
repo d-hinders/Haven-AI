@@ -189,14 +189,29 @@ export function summarizePullRequests(prs, isOnDev) {
   }
 }
 
-/** A PR that brings `main` back into `dev`: it carries main's promotion merges. */
-const PROMOTION_MERGE = /^Merge pull request #\d+ from \S+\/dev\b/
+/**
+ * A PR that brings `main` back into `dev`. Recognised by its name OR by the
+ * promotion it carries — either main's merge of `dev`
+ * (`Merge pull request #N from <owner>/dev`) or a promotion landed as one
+ * commit (`promote: dev → main (…)`, #2162; `Promote dev → main: …`, #1785).
+ * Name alone missed 6 of 9 real sync-backs; content alone missed #2162/#1785.
+ */
+const SYNC_BACK_NAME = /^(?:main|sync\/.+|.*sync[-/]main.*|.*sync-\d+-main)$/
+const PROMOTION_MERGE = /^Merge pull request #\d+ from \S+\/dev$/
+const PROMOTION_SQUASH = /^promote\b.*\bdev\s*(?:→|->)\s*main\b/i
 export function isSyncBack(pr) {
-  return pr.headRefName === 'main' || pr.commits.some((c) => PROMOTION_MERGE.test(c.subject))
+  return (
+    SYNC_BACK_NAME.test(pr.headRefName) ||
+    pr.commits.some((c) => PROMOTION_MERGE.test(c.subject) || PROMOTION_SQUASH.test(c.subject))
+  )
 }
 
-/** `main` (or `origin/main`) merged into a work branch — reconciliation, not staleness. */
-const MAIN_MERGE = /^Merge (?:remote-tracking )?branch '(?:origin\/)?main'/
+/**
+ * `main` (or `origin/main`) merged into a work branch — reconciliation, not
+ * staleness. Matches hand-written forms too ("merge origin/main into x"),
+ * for the same reason a resync is decided by its parent, not its subject.
+ */
+const MAIN_MERGE = /^merge (?:remote-tracking )?(?:branch )?'?(?:origin\/)?main'?(?=[\s(]|$)/i
 
 /** Reads `--name=value`; a bare `--name value` is refused rather than ignored. */
 export function parseArgs(argv, now = Date.now()) {
@@ -356,7 +371,7 @@ function main() {
     // No resync found, but some merges could not be classified: say so instead
     // of claiming the target state over them.
     console.log(`\n  No resync or divergence found, but ${report.otherMerges} merge(s) could not be classified — no verdict.`)
-    return
+    process.exit(1)
   }
 
   if (report.branches.length === 0) {

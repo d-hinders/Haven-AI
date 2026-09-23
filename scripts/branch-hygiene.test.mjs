@@ -138,11 +138,18 @@ test('MUTATION PROOF: a sync-back is recognised by its content, whatever the bra
         commit('s2', "Merge branch 'main' into codex/sync-main-20260824", ['s1', DEV_TIP]),
       ]),
       pr(5, 'main', [commit('s3', 'anything', ['x', DEV_TIP])]),
+      // #2162: named sync/…, and its promotion landed as ONE commit.
+      pr(2162, 'sync/main-into-dev-0.1.31', [commit('s4', "Merge branch 'dev' into sync/main-into-dev-0.1.31", ['x', DEV_TIP])]),
+      // #1785: an unlisted name, carrying a single-commit promotion.
+      pr(1785, 'claude/ship-next-1719-8mj5i4', [
+        commit('s5', 'Promote dev → main: release 0.1.29-alpha.0 + 63 commits', ['m']),
+        commit('s6', 'merge', ['s5', DEV_TIP]),
+      ]),
     ],
     (oid) => oid === DEV_TIP,
   )
   assert.equal(report.prs, 0)
-  assert.equal(report.syncBacks, 2)
+  assert.equal(report.syncBacks, 4)
   assert.equal(report.resyncs, 0)
 })
 
@@ -153,11 +160,17 @@ test('MUTATION PROOF: `main` merged into a work branch is not counted as a resyn
     [pr(6, 'feature/thing', [
       commit('t1', 'feat: x', ['base']),
       commit('t2', "Merge remote-tracking branch 'origin/main' into feature/thing", ['t1', DEV_TIP]),
+      commit('t3', 'merge origin/main into feature/thing', ['t2', DEV_TIP]),
     ])],
     (oid) => oid === DEV_TIP,
   )
   assert.equal(report.resyncs, 0)
-  assert.equal(report.mainMerges, 1)
+  assert.equal(report.mainMerges, 2)
+  // A branch merely NAMED like main-ish is not main.
+  assert.equal(
+    summarizePullRequests([pr(7, 'feat/x', [commit('u1', 'x', ['b']), commit('u2', "Merge branch 'dev' into maintenance", ['u1', DEV_TIP])])], (o) => o === DEV_TIP).resyncs,
+    1,
+  )
 })
 
 test('the entry point counts a fixture resync and names the PR', () => {
@@ -239,7 +252,8 @@ test('merges it cannot classify withhold the target-state verdict', () => {
     prs: [pr(3107, 'wip', [commit('w1', 'x', ['base']), commit('w2', "Merge commit '58e181d6' into wip-remote-tip", ['w1', 'elsewhere'])])],
     onDev: [],
   })
-  assert.equal(out.status, 0, out.stderr)
+  // No verdict is not a clean result, so it must not exit 0 (#3228 round 2).
+  assert.equal(out.status, 1, out.stderr)
   assert.doesNotMatch(out.stdout, /target state/)
   assert.match(out.stdout, /could not be classified — no verdict/)
 })

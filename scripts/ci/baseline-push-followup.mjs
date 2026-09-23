@@ -204,7 +204,14 @@ export function parseMoved(raw) {
 }
 
 /** The regenerated set, as the comment lists it. */
-export function renderMovedSection({ moved, runUrl }) {
+export function renderMovedSection({ moved, runUrl, artifactUrl = '' }) {
+  const images = /^https:\/\//.test(String(artifactUrl))
+    ? `\n\nBefore/after images of each: [baseline-before-after](${artifactUrl}) (kept 7 days).`
+    : ''
+  return renderMovedList({ moved, runUrl }) + images
+}
+
+function renderMovedList({ moved, runUrl }) {
   if (moved === null || moved === undefined) {
     return `The list of regenerated baselines could not be read here; the [run's audit summary](${runUrl}) has it.`
   }
@@ -218,7 +225,7 @@ export function renderMovedSection({ moved, runUrl }) {
  * reader knowing this failure mode already, because not knowing it is the
  * entire cost being paid (#1777: four sessions, a step each).
  */
-export function buildComment({ repo, branch, sha, runUrl, parked = [], moved = null }) {
+export function buildComment({ repo, branch, sha, runUrl, parked = [], moved = null, artifactUrl = '' }) {
   const short = String(sha ?? '').slice(0, 9) || '(unknown)'
   // #3233: this comment used to say the baselines were "correct" and that
   // "nothing about the images is wrong". The workflow cannot know that: a
@@ -229,7 +236,7 @@ export function buildComment({ repo, branch, sha, runUrl, parked = [], moved = n
 
 The Linux-rendered visual baselines were regenerated and pushed as \`${short}\`.
 
-${renderMovedSection({ moved, runUrl })}
+${renderMovedSection({ moved, runUrl, artifactUrl })}
 
 **Regenerated is not reviewed.** A regeneration writes whatever rendered: it proves the new images match the current render, not that the render is right. Each baseline above still needs a design review before merge — its old and new image, where both exist — [frontend playbook §4](https://github.com/${repo}/blob/dev/docs/contributing/ship-playbooks/frontend.md#4-verification).
 
@@ -462,7 +469,7 @@ async function main() {
     })
     console.log(`Parked runs found: ${parked.length}`)
     const moved = parseMoved(process.env.MOVED_BASELINES)
-    const body = buildComment({ repo, branch, sha, runUrl, parked, moved })
+    const body = buildComment({ repo, branch, sha, runUrl, parked, moved, artifactUrl: process.env.BASELINE_ARTIFACT_URL ?? '' })
     for (const pr of prs) {
       if (pr.number == null) continue
       try {

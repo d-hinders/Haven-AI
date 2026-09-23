@@ -185,7 +185,7 @@ test('the moved output is one line of JSON naming each baseline and its status (
   const result = auditBaselines({ mode: 'all', expected: ['*'], changes: [INTENDED, COLLATERAL] })
   const parsed = JSON.parse(movedOutput(result))
   assert.equal(parsed.length, 2)
-  assert.ok(parsed.every((m) => typeof m.name === 'string' && typeof m.status === 'string'))
+  assert.ok(parsed.every((m) => typeof m.name === 'string' && typeof m.status === 'string' && typeof m.path === 'string'))
   assert.ok(parsed.some((m) => m.name === 'agentcard-banner-stranded-desktop.png'))
   assert.doesNotMatch(movedOutput(result), /\n/)
   assert.equal(movedOutput(auditBaselines({ mode: 'changed', expected: [], changes: [] })), '[]')
@@ -322,7 +322,10 @@ test('CLI: an undeclared full refresh exits non-zero and says so (#2722)', () =>
   assert.match(wrote['summary.md'] ?? '', /undeclared-full-refresh|Mode `all` rewrites a baseline/)
   assert.match(wrote['output.txt'] ?? '', /^trailer=/m)
   // #3233: the follow-up step reads this to list what was regenerated.
-  assert.match(wrote['output.txt'] ?? '', /^moved=\[\{"name":"dashboard\.png","status":"(?:added|modified)"\}\]$/m)
+  assert.match(
+    wrote['output.txt'] ?? '',
+    /^moved=\[\{"name":"dashboard\.png","path":"packages\/frontend\/e2e\/__screenshots__\/dashboard\.png","status":"(?:added|modified)"\}\]$/m,
+  )
 })
 
 test('CLI: the same moved baseline under `changed` is reported and exits 0 (#2722)', () => {

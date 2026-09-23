@@ -23,7 +23,6 @@ import {
   removeAccountPasskey,
   setAccountOwnerAddress,
 } from '../infra/repositories/hybrid-signers.js'
-import { getChain } from '../domain/chains.js'
 import type { HybridOwnerConfig } from './hybrid-provisioning.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
 import { redactVendorSecrets } from './execution-rail.js'
@@ -238,7 +237,6 @@ export async function prepareSignerChange(
       accountAddress: account.accountAddress,
       chainId: account.chainId,
       bundlerUrl: delegationRailBundlerUrl(account.chainId),
-      rpcUrl: getChain(account.chainId).rpcUrl,
       sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
       signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
     })
@@ -311,7 +309,6 @@ export async function submitSignerChange(
       accountAddress: account.accountAddress,
       chainId: account.chainId,
       bundlerUrl: delegationRailBundlerUrl(account.chainId),
-      rpcUrl: getChain(account.chainId).rpcUrl,
       sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
     })
     const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>

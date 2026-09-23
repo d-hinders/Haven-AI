@@ -32,7 +32,6 @@ import type { Hex, Address } from '../domain/chain-client.js'
 import pool from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
-import { getChain } from '../domain/chains.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../rails/hybrid-provisioning.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
@@ -679,7 +678,6 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     try {
       const disabled = await readDisabledDelegationHashes(
         agent.chain_id,
-        getChain(agent.chain_id).rpcUrl,
         targets.map((t) => t.delegation_hash as Hex),
       )
       if (disabled.size > 0) {
@@ -727,7 +725,6 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
-        rpcUrl: getChain(agent.chain_id).rpcUrl,
         sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
         signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
       })
@@ -793,7 +790,6 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
-        rpcUrl: getChain(agent.chain_id).rpcUrl,
         sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
       })
       const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>
@@ -842,7 +838,6 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       try {
         const disabled = await readDisabledDelegationHashes(
           agent.chain_id,
-          getChain(agent.chain_id).rpcUrl,
           [request.params.hash as Hex],
         )
         if (disabled.size > 0) {
@@ -880,7 +875,6 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
-          rpcUrl: getChain(agent.chain_id).rpcUrl,
           sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
           signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
         })
@@ -947,7 +941,6 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
-        rpcUrl: getChain(agent.chain_id).rpcUrl,
         sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
       })
       const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>

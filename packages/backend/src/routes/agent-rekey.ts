@@ -64,7 +64,6 @@ import crypto from 'crypto'
 import type { Address, Hex } from '../domain/chain-client.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
-import { getChain } from '../domain/chains.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { loadHybridOwnerConfig } from '../rails/hybrid-account-config.js'
@@ -516,7 +515,6 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
           accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
-          rpcUrl: getChain(agent.chain_id).rpcUrl,
           sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
           signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
         })
@@ -614,7 +612,6 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
-        rpcUrl: getChain(agent.chain_id).rpcUrl,
         sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
       })
       const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>

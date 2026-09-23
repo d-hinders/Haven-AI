@@ -41,10 +41,21 @@
  * than the 2s this file claimed. Found in review of the promotion batch; the
  * claim had been written without checking viem's defaults. Both options are
  * load-bearing, so neither may be dropped.
+ *
+ * **Behind the failover transport (#3255) the bound is the SUM over legs.**
+ * `rpcTransport` tries the dedicated endpoint, the optional second provider
+ * and the public node in turn, and a timed-out leg falls through to the next.
+ * So the per-leg timeout is the total divided by the number of legs
+ * (`remainingReadLegTimeoutMs`), and the fallback's own `retryCount` is 0:
+ * the worst case stays `REMAINING_READ_TIMEOUT_MS` for the whole read, not
+ * per endpoint. `delegation-budget-reader.test.ts` pins both halves. The cost:
+ * with three legs the dedicated endpoint gets 666 ms, not 2 s, so a slow but
+ * working primary sends budget reads to the next node.
  */
 
 /**
- * Deliberately short. The fallback is the pre-#1145 answer, so waiting longer
+ * The TOTAL time budget for one read, across every failover leg. Deliberately
+ * short. The fallback is the pre-#1145 answer, so waiting longer
  * buys accuracy that the caller can get on its next poll anyway.
  *
  * `allowances.ts` reads every one of an agent's budgets through a
@@ -62,11 +73,16 @@ export const REMAINING_READ_TIMEOUT_MS = 2_000
  */
 export const REMAINING_READ_RETRY_COUNT = 0
 
-import { createPublicClient, http } from 'viem'
+import { createPublicClient } from 'viem'
 import { createCaveatEnforcerClient, type Delegation } from '@metamask/smart-accounts-kit'
-import { getChain } from '../../domain/chains.js'
+import { rpcEndpoints, rpcTransport } from './rpc-transport.js'
 import { chainForId } from '../../rails/delegation-contracts.js'
 import { getDelegationEnvironment } from '../../rails/delegation-policy.js'
+
+/** Each failover leg's equal share of `REMAINING_READ_TIMEOUT_MS` (#3255). */
+export function remainingReadLegTimeoutMs(chainId: number): number {
+  return Math.floor(REMAINING_READ_TIMEOUT_MS / Math.max(1, rpcEndpoints(chainId).length))
+}
 
 export interface RemainingBudget {
   /** Atomic units the chain will still allow this period. */
@@ -88,8 +104,8 @@ export async function readRemainingBudget(
   try {
     const client = createPublicClient({
       chain: chainForId(chainId),
-      transport: http(getChain(chainId).rpcUrl, {
-        timeout: REMAINING_READ_TIMEOUT_MS,
+      transport: rpcTransport(chainId, {
+        timeout: remainingReadLegTimeoutMs(chainId),
         retryCount: REMAINING_READ_RETRY_COUNT,
       }),
     })

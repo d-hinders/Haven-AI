@@ -204,9 +204,12 @@ full batch rather than blocking revocation. A heal marks a row revoked
 WITHOUT an owner signature, so a false positive would defeat the kill switch
 — therefore reads are pinned to `finalized` (no reorg transients), a hash
 counts as disabled only when TWO consecutive reads agree, and every heal is
-logged distinctly from an owner-signed revoke. A persistently lying RPC
-endpoint remains outside this control's threat model — the same endpoint
-already sits under gas estimation and submission on this rail. The same
+logged distinctly from an owner-signed revoke. The heal reads the dedicated
+endpoint (`RPC_URL_BASE*`) ONLY, never the failover nodes the rail's other
+reads use (#3255): lag cannot cause a false heal (the flag only goes
+false→true and nothing here calls `enableDelegation`), but a lying node can,
+so the set of nodes trusted with it is kept to one. A persistently lying
+dedicated endpoint remains outside this control's threat model. The same
 heal-or-prepare check guards the per-hash revoke route (409 "Already
 revoked … reconciled" instead of an eternal 502). Batches are capped at 25
 calls (422 pointing at per-hash revocation beyond it), with a coarse
@@ -1273,3 +1276,22 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > `renameAccountForUser`), none of which this diff touches. Scope of this
 > note: those three files' request-shape edits and the hook order. Nothing
 > else in this document was re-verified.
+
+> **Re-verified #3255 (2026-09-23, backend RPC failover):** this diff touches
+> the rail's viem clients in `rails/delegation-rail.ts`,
+> `rails/hybrid-provisioning.ts` and the `createTreasuryOps` callers. Each now
+> reads through `infra/chain/rpc-transport.ts`, a viem `fallback()` over the
+> dedicated endpoint, an optional second provider and the public node, so a
+> quota-dead provider no longer fails prepare. What enforces a spend is
+> unchanged: budget, recipient pin and expiry still revert in
+> `eth_estimateUserOperationGas` on the bundler, which this diff does not
+> touch, and every UserOp still needs the account signer's signature. An
+> `eth_call` revert is terminal and is never retried on the next node. The
+> `disabledDelegations` heal is the exception: it stays on the dedicated
+> endpoint only (`dedicatedOnly`, pinned by `rpc-transport-guard.test.ts`),
+> keeps its `finalized` tag and two-read rule, and the sentence on lying RPC
+> endpoints above now says why. A lagging fallback node can make
+> `ensureHybridDeployed` spend relayer gas on a reverting or spurious deploy,
+> never move funds. The relayer's ethers provider stays on one node (#1533).
+> Scope of this note: those RPC reads. Nothing else in this document was
+> re-verified.

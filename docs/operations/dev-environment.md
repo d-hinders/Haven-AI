@@ -250,6 +250,19 @@ Isolation rules that are non-negotiable for a payments product:
   wrote through proves only that the backend agrees with itself. The backend
   logs a boot warning when its variable is unset, and the harness prints which
   endpoint CLASS it is observing through (never the URL) in its run preamble.
+- **RPC failover (#3255)** — the backend's viem clients (delegation-rail
+  prepare, account deploy checks, caveat-enforcer and budget reads) fail over
+  in order: `RPC_URL_BASE` / `RPC_URL_BASE_SEPOLIA`, then the optional
+  `RPC_URL_BASE_FALLBACK` / `RPC_URL_BASE_SEPOLIA_FALLBACK` (a second provider
+  account), then the public node. A transport failure (HTTP 429/5xx, a quota
+  error in an HTTP 200 body, a timeout) moves to the next endpoint; an
+  `eth_call` revert does not. Three things stay on `RPC_URL_BASE*` alone:
+  the `disabledDelegations` heal read, because a lying node could fake a
+  revoke; the relayer's ethers provider, because the signing wallet's nonce
+  view must stay on one node (#1533); and the log scanners and settlement
+  verifier behind that provider. The QA
+  observer (`QA_RPC_URL_BASE_SEPOLIA`) is unaffected, and still needs its own
+  endpoint, distinct from the backend's.
 
 - **Marketplace chains and prospects (#3078, epic #3077)** —
   `HAVEN_MARKETPLACE_CHAIN_IDS=84532,8453` on dev (owner decision 11: the demo

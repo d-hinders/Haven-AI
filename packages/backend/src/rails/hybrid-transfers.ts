@@ -26,7 +26,6 @@
 import { encodeFunctionData } from 'viem'
 import type { Address, Hex } from 'viem'
 import { isAddress as isValidAddress } from '@haven_ai/core'
-import { getChain } from '../domain/chains.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
 import { redactVendorSecrets } from './execution-rail.js'
 import {
@@ -108,7 +107,6 @@ export async function prepareTransfer(
       accountAddress: account.accountAddress,
       chainId: account.chainId,
       bundlerUrl: delegationRailBundlerUrl(account.chainId),
-      rpcUrl: getChain(account.chainId).rpcUrl,
       sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
       signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
     })
@@ -173,7 +171,6 @@ export async function submitTransfer(
       accountAddress: account.accountAddress,
       chainId: account.chainId,
       bundlerUrl: delegationRailBundlerUrl(account.chainId),
-      rpcUrl: getChain(account.chainId).rpcUrl,
       sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
     })
     const revived = JSON.parse(JSON.stringify(body.user_operation), (_k, v) =>

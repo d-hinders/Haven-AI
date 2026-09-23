@@ -1,8 +1,8 @@
 /**
  * `ChainClient` implementation for the delegation rail (#994).
  *
- * Wraps the SAME `createPublicClient` + `chainForId` + RPC-URL construction
- * `lib/hybrid-provisioning.ts` already uses for the delegation rail's own
+ * Wraps the SAME `createPublicClient` + `chainForId` + `rpcTransport` (#3255)
+ * construction `rails/hybrid-provisioning.ts` already uses for the delegation rail's own
  * reads — no new client-construction pattern introduced here.
  *
  * Nothing on the delegation rail reaches for a plain balance read or address
@@ -18,16 +18,16 @@
  * drifted — this file used to answer a zero token address with the NATIVE
  * balance while `ethers-client.ts` built a contract at `0x0`.
  */
-import { createPublicClient, http, getAddress as viemGetAddress, erc20Abi, type Address as ViemAddress } from 'viem'
-import { getChain } from '../../domain/chains.js'
+import { createPublicClient, getAddress as viemGetAddress, erc20Abi, type Address as ViemAddress } from 'viem'
 import { chainForId } from '../../rails/delegation-contracts.js'
 import type { ChainClient } from '../../domain/chain-client.js'
 import { assertErc20TokenAddress } from './token-address-guard.js'
+import { rpcTransport } from './rpc-transport.js'
 
 function publicClientFor(chainId: number) {
   return createPublicClient({
     chain: chainForId(chainId),
-    transport: http(getChain(chainId).rpcUrl),
+    transport: rpcTransport(chainId),
   })
 }
 

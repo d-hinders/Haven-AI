@@ -73,6 +73,13 @@ export async function getRelayerFeeOverrides(
  * observe their own traffic. The wallet bound to one drifted six nonces
  * behind the chain while the other kept submitting. A lock cannot fix nonce
  * provenance; a single view can.
+ *
+ * #3255 deliberately left this provider OFF the failover transport the viem
+ * clients use (`infra/chain/rpc-transport.ts`): a pending transaction
+ * broadcast to one node is invisible to a second, and the log scanners and
+ * receipt verifier behind `relayer-reads.ts` would read "no log" from a
+ * lagging fallback rather than fail. A quota-dead `RPC_URL_BASE*` still fails
+ * the ethers side; configuring a healthy endpoint is the remedy there.
  */
 export function getProvider(chainId: number): JsonRpcProvider {
   let provider = providers.get(chainId)

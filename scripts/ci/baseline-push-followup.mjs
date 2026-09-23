@@ -231,7 +231,7 @@ The Linux-rendered visual baselines were regenerated and pushed as \`${short}\`.
 
 ${renderMovedSection({ moved, runUrl })}
 
-**Regenerated is not reviewed.** A regeneration writes whatever rendered: it proves the new images match the current render, not that the render is right. Each baseline above still needs a design review of its old and new image before merge — [frontend playbook §4](https://github.com/${repo}/blob/dev/docs/contributing/ship-playbooks/frontend.md#4-verification).
+**Regenerated is not reviewed.** A regeneration writes whatever rendered: it proves the new images match the current render, not that the render is right. Each baseline above still needs a design review before merge — its old and new image, where both exist — [frontend playbook §4](https://github.com/${repo}/blob/dev/docs/contributing/ship-playbooks/frontend.md#4-verification).
 
 Separately, and certainly: **this PR's checks will never start on their own**, so every required check will sit at *"Expected — waiting for status"* indefinitely.
 

@@ -142,7 +142,7 @@ describe('buildComment — carries what a first-time reader needs', () => {
     assert.doesNotMatch(body, /Nothing about the images is wrong/i)
     assert.doesNotMatch(body, /baselines are \*\*correct/i)
     assert.match(body, /Regenerated is not reviewed/)
-    assert.match(body, /still needs a design review of its old and new image/)
+    assert.match(body, /still needs a design review before merge — its old and new image, where both exist/)
     assert.match(body, /ship-playbooks\/frontend\.md#4-verification/)
   })
 
@@ -211,6 +211,8 @@ describe('moved baselines — the comment lists what was regenerated (#3233)', (
   test('parseMoved reads the audit output and refuses anything else as null', () => {
     assert.deepEqual(parseMoved('[{"name":"a-desktop.png","status":"modified"}]'), [{ name: 'a-desktop.png', status: 'modified' }])
     assert.deepEqual(parseMoved('[]'), [])
+    // An entry without a name is dropped, never rendered as `undefined`.
+    assert.deepEqual(parseMoved('[{"status":"modified"},null,{"name":"a.png"}]'), [{ name: 'a.png', status: 'changed' }])
     for (const raw of [undefined, '', 'not json', '{"name":"x"}', 'null']) {
       assert.equal(parseMoved(raw), null, `expected null for ${JSON.stringify(raw)}`)
     }

@@ -186,7 +186,7 @@ jobs:
       # what was on disk). A first dispatch with no dark baselines committed
       # writes them (Playwright's `changed` mode writes what it cannot
       # compare), and the audit step below sees them as new files.
-      - name: Regenerate dark baselines (design system)
+      - name: Regenerate dark baselines
         run: npm run test:visual:dark -w packages/frontend -- --update-snapshots="$UPDATE_MODE"
         env:
           UPDATE_MODE: ${{ inputs.mode }}

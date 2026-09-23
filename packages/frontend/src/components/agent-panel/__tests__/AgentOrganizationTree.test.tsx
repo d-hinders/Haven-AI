@@ -80,8 +80,9 @@ describe('AgentOrganizationTree (#3236 refetch states)', () => {
   it('says "Updating…" during a refetch with organizations present, and keeps the rows', () => {
     renderTree({ loading: true })
 
-    const status = screen.getByRole('status')
-    expect(status).toHaveTextContent('Updating…')
+    // Quiet on purpose: not a live region (it fires after every move).
+    expect(screen.getByText('Updating…')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).toBeNull()
     const tree = screen.getByTestId('organization-tree')
     expect(tree).toHaveAttribute('aria-busy', 'true')
     expect(screen.getByRole('button', { name: /Company A/ })).toBeInTheDocument()
@@ -92,7 +93,8 @@ describe('AgentOrganizationTree (#3236 refetch states)', () => {
     renderTree({ error: 'We could not load your organizations. Try again in a moment.', onRetry })
 
     const alert = screen.getByRole('alert')
-    expect(alert).toHaveTextContent('We could not load your organizations. Try again in a moment.')
+    // The rows below ARE loaded: the copy says the refresh failed.
+    expect(alert).toHaveTextContent('We could not refresh your organizations — the list below may be out of date.')
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
     expect(onRetry).toHaveBeenCalledOnce()
     expect(screen.getByTestId('organization-tree')).toBeInTheDocument()

@@ -48,6 +48,10 @@ export default function OrganizationsManagerModal({
   const [newName, setNewName] = useState('')
   const [newParentId, setNewParentId] = useState('')
   const [rowError, setRowError] = useState<string | null>(null)
+  // #3236 review: the create form has its OWN error. Sharing `rowError` put a
+  // rename or move failure under the create form, and a create failure into an
+  // open rename row — the same alert twice, in the wrong place.
+  const [createError, setCreateError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Organization | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -58,6 +62,7 @@ export default function OrganizationsManagerModal({
       setEditingId(null)
       setMovingId(null)
       setRowError(null)
+      setCreateError(null)
       setNewName('')
       setNewParentId('')
       setDeleteError(null)
@@ -127,13 +132,13 @@ export default function OrganizationsManagerModal({
     const name = newName.trim()
     if (!name) return
     setSaving(true)
-    setRowError(null)
+    setCreateError(null)
     try {
       await createOrganization(name, newParentId || null)
       setNewName('')
       setNewParentId('')
     } catch (err) {
-      setRowError(err instanceof Error ? err.message : 'The organization could not be created.')
+      setCreateError(err instanceof Error ? err.message : 'The organization could not be created.')
     } finally {
       setSaving(false)
     }
@@ -146,8 +151,10 @@ export default function OrganizationsManagerModal({
 
   // #3236: the catch is the point — without it a rejected DELETE escapes past
   // the `void confirmDelete()` call site as an unhandled rejection and the
-  // dialog sits silent. The error renders inside the confirm dialog, which
-  // stays open (the organization was not deleted).
+  // dialog sits silent. A 404 means it is already gone (a lost race): close
+  // and refetch, since retrying could never succeed. Anything else says the
+  // organization was NOT deleted, in our words rather than the server's, and
+  // the dialog stays open for a retry.
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return
     setDeleting(true)
@@ -156,11 +163,16 @@ export default function OrganizationsManagerModal({
       await deleteOrganization(deleteTarget.id)
       setDeleteTarget(null)
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'The organization could not be deleted.')
+      if (httpStatusOf(err) === 404) {
+        setDeleteTarget(null)
+        void fetchOrganizations()
+      } else {
+        setDeleteError(`${deleteTarget.name} was not deleted. Try again.`)
+      }
     } finally {
       setDeleting(false)
     }
-  }, [deleteTarget, deleteOrganization])
+  }, [deleteTarget, deleteOrganization, fetchOrganizations])
 
   /** Move options: every organization except the one being moved. */
   const moveOptions = useMemo(
@@ -225,14 +237,6 @@ export default function OrganizationsManagerModal({
                 Add
               </Button>
             </div>
-            {/* #3236: rowError had no render site on the create form — a
-                rejected POST (409 sibling-name collision is the common case)
-                did nothing visible. It renders here, next to the form. */}
-            {rowError ? (
-              <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
-                {rowError}
-              </p>
-            ) : null}
             {organizations.length > 0 && (
               <Select
                 aria-label="Place the new organization inside"
@@ -248,6 +252,14 @@ export default function OrganizationsManagerModal({
                 ))}
               </Select>
             )}
+            {/* #3236: a rejected POST (409 sibling-name collision is the common
+                case) used to show nothing. Its own state, rendered below the
+                "place inside" select the message refers to ("in that place"). */}
+            {createError ? (
+              <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
+                {createError}
+              </p>
+            ) : null}
           </div>
 
           {loading ? (
@@ -326,7 +338,15 @@ export default function OrganizationsManagerModal({
                         ))}
                       </Select>
                       <div className="flex gap-2">
-                        <Button variant="ghost" size="sm" onClick={() => setMovingId(null)} className="flex-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setMovingId(null)
+                            setRowError(null)
+                          }}
+                          className="flex-1"
+                        >
                           Cancel
                         </Button>
                         <Button size="sm" onClick={() => void saveMove(org)} disabled={saving} className="flex-1">
@@ -446,4 +466,13 @@ function OrgAgentCount({ total, direct }: { total: number; direct: number }) {
       ) : null}
     </>
   )
+}
+
+/** The HTTP status an API failure carries (`ApiRequestError.status`), if any. */
+function httpStatusOf(err: unknown): number | undefined {
+  if (typeof err === 'object' && err !== null && 'status' in err) {
+    const status = (err as { status: unknown }).status
+    return typeof status === 'number' ? status : undefined
+  }
+  return undefined
 }

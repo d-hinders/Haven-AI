@@ -134,7 +134,7 @@ describe('OrganizationsManagerModal', () => {
     }
     process.on('unhandledRejection', onUnhandled)
     try {
-      mockDelete.mockRejectedValueOnce(new Error('The organization could not be deleted.'))
+      mockDelete.mockRejectedValueOnce(Object.assign(new Error('An unexpected error occurred'), { status: 500 }))
       renderModal()
       await vi.waitFor(() =>
         expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument(),
@@ -144,7 +144,14 @@ describe('OrganizationsManagerModal', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Delete organization' }))
 
       const dialog = await screen.findByRole('dialog', { name: 'Delete Company A very long organization name?' })
-      await waitFor(() => expect(within(dialog).getByRole('alert')).toHaveTextContent('The organization could not be deleted.'))
+      // Our words, naming the organization, not the server's raw message
+      // (#3236 review: "An unexpected error occurred" said nothing useful).
+      await waitFor(() =>
+        expect(within(dialog).getByRole('alert')).toHaveTextContent(
+          'Company A very long organization name was not deleted. Try again.',
+        ),
+      )
+      expect(within(dialog).getByRole('alert')).not.toHaveTextContent('An unexpected error occurred')
       // The dialog stays open (the organization was not deleted) with the
       // destructive action re-enabled for a retry.
       expect(screen.getByRole('button', { name: 'Delete organization' })).toBeEnabled()
@@ -168,7 +175,7 @@ describe('OrganizationsManagerModal', () => {
     await waitFor(async () =>
       expect(
         within(await screen.findByRole('dialog', { name: 'Delete Company A very long organization name?' })).getByRole('alert'),
-      ).toHaveTextContent('The organization could not be deleted.'),
+      ).toHaveTextContent('Company A very long organization name was not deleted. Try again.'),
     )
 
     // Cancel the failed delete, then open the dialog again: the stale error
@@ -223,5 +230,48 @@ describe('OrganizationsManagerModal — counts agree with the tree (#3222 re-rev
     expect(list.textContent).toMatch(/Top level · 1 agent \(0 directly\)/)
     // Tech Agents: subtree equals direct, so no parenthetical.
     expect(list.textContent).toMatch(/Company A · 1 agent(?! \()/)
+  })
+})
+
+describe('OrganizationsManagerModal — errors stay where they happened (#3236 review)', () => {
+  it('a failed rename shows in the rename row only, never under the create form', async () => {
+    mockPut.mockRejectedValueOnce(new Error('RENAME-409'))
+    renderModal()
+    await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
+    const list = within(screen.getByTestId('organization-manager-list'))
+    fireEvent.click(list.getByRole('button', { name: 'Rename Company A very long organization name' }))
+    const input = list.getByLabelText('Organization name')
+    fireEvent.change(input, { target: { value: 'Clash' } })
+    fireEvent.click(list.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(list.getByRole('alert')).toHaveTextContent('RENAME-409'))
+    expect(within(screen.getByTestId('organization-create-form')).queryByRole('alert')).toBeNull()
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+  })
+
+  it('a failed create shows under the create form only', async () => {
+    mockPost.mockRejectedValueOnce(new Error('CREATE-409'))
+    renderModal()
+    await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('New organization name'), { target: { value: 'Dup' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    const form = within(screen.getByTestId('organization-create-form'))
+    await waitFor(() => expect(form.getByRole('alert')).toHaveTextContent('CREATE-409'))
+    expect(within(screen.getByTestId('organization-manager-list')).queryByRole('alert')).toBeNull()
+  })
+
+  it('a delete that 404s (already gone) closes the dialog and refetches instead of offering a retry', async () => {
+    mockDelete.mockRejectedValueOnce(Object.assign(new Error('Organization not found'), { status: 404 }))
+    renderModal()
+    await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
+    const fetchesBefore = mockGet.mock.calls.length
+    fireEvent.click(
+      within(screen.getByTestId('organization-manager-list')).getByRole('button', {
+        name: 'Delete Company A very long organization name',
+      }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete organization' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete organization' })).toBeNull())
+    expect(mockGet.mock.calls.length).toBeGreaterThan(fetchesBefore)
+    expect(screen.queryByText('Organization not found')).toBeNull()
   })
 })

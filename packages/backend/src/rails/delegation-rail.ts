@@ -41,9 +41,9 @@ import {
   type Delegation,
 } from '@metamask/smart-accounts-kit'
 import { encodeFunctionData, parseAbi } from 'viem'
-import { getChain } from '../domain/chains.js'
 
 import { getDelegationContracts, DELEGATION_RAIL_CHAIN_IDS, chainForId } from './delegation-contracts.js'
+import { rpcTransport } from '../infra/chain/rpc-transport.js'
 
 // Re-exported so route handlers can name the delegation type without importing
 // the chain SDK directly (the `chain-sdk-not-in-routes` boundary, #2539).
@@ -100,7 +100,6 @@ export interface DelegationRailConfig {
   delegateOwnerAddress: Address
   chainId: number
   bundlerUrl: string
-  rpcUrl: string
   /** Pimlico sponsorship-policy id (per-request binding — the #738 lesson). */
   sponsorshipPolicyId?: string
 }
@@ -201,12 +200,11 @@ const DISABLED_DELEGATIONS_ABI = parseAbi([
  */
 export async function readDisabledDelegationHashes(
   chainId: number,
-  rpcUrl: string,
   hashes: readonly Hex[],
   readFlag?: (hash: Hex) => Promise<boolean>,
 ): Promise<Set<Hex>> {
   if (hashes.length === 0) return new Set()
-  const read = readFlag ?? makeDisabledDelegationReader(chainId, rpcUrl)
+  const read = readFlag ?? makeDisabledDelegationReader(chainId)
   const first = await Promise.all(hashes.map((hash) => read(hash)))
   const candidates = hashes.filter((_, i) => first[i])
   if (candidates.length === 0) return new Set()
@@ -214,13 +212,13 @@ export async function readDisabledDelegationHashes(
   return new Set(candidates.filter((_, i) => confirmed[i]))
 }
 
-function makeDisabledDelegationReader(chainId: number, rpcUrl: string): (hash: Hex) => Promise<boolean> {
+function makeDisabledDelegationReader(chainId: number): (hash: Hex) => Promise<boolean> {
   const pins = getDelegationContracts(chainId)
   // multicall batching: viem coalesces the per-hash reads into single
   // aggregate3 round trips instead of N parallel eth_calls.
   const publicClient = createPublicClient({
     chain: chainForId(chainId),
-    transport: http(rpcUrl),
+    transport: rpcTransport(chainId),
     batch: { multicall: true },
   })
   return (hash) =>
@@ -236,7 +234,7 @@ function makeDisabledDelegationReader(chainId: number, rpcUrl: string): (hash: H
 export async function createDelegationRail(cfg: DelegationRailConfig): Promise<DelegationRail> {
   getDelegationContracts(cfg.chainId) // fail-closed on unpinned chains
   const chain = chainForId(cfg.chainId)
-  const publicClient = createPublicClient({ chain, transport: http(cfg.rpcUrl) })
+  const publicClient = createPublicClient({ chain, transport: rpcTransport(cfg.chainId) })
   const account = await toMetaMaskSmartAccount({
     client: publicClient as never, // viem type-graph seam (runtime-identical)
     implementation: Implementation.Hybrid,
@@ -346,7 +344,6 @@ export interface TreasuryOpsConfig {
   accountAddress?: Address
   chainId: number
   bundlerUrl: string
-  rpcUrl: string
   sponsorshipPolicyId?: string
   /**
    * Which of the account's signers the CLIENT intends to sign with. A Hybrid
@@ -387,7 +384,7 @@ export interface TreasuryOps {
 export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<TreasuryOps> {
   getDelegationContracts(cfg.chainId)
   const chain = chainForId(cfg.chainId)
-  const publicClient = createPublicClient({ chain, transport: http(cfg.rpcUrl) })
+  const publicClient = createPublicClient({ chain, transport: rpcTransport(cfg.chainId) })
   const passkeys = cfg.passkeys ?? []
   if (cfg.signWith === 'passkey' && passkeys.length === 0) {
     throw new Error('treasury ops: signWith=passkey but the account has no passkeys')
@@ -537,7 +534,6 @@ export async function getDelegationRailFor(
     delegateOwnerAddress,
     chainId,
     bundlerUrl: delegationRailBundlerUrl(chainId),
-    rpcUrl: getChain(chainId).rpcUrl,
     sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
   })
 }

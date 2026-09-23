@@ -205,8 +205,9 @@ WITHOUT an owner signature, so a false positive would defeat the kill switch
 — therefore reads are pinned to `finalized` (no reorg transients), a hash
 counts as disabled only when TWO consecutive reads agree, and every heal is
 logged distinctly from an owner-signed revoke. A persistently lying RPC
-endpoint remains outside this control's threat model — the same endpoint
-already sits under gas estimation and submission on this rail. The same
+endpoint remains outside this control's threat model — the same failover
+endpoints (dedicated, optional second provider, public node; #3255) already
+answer this rail's prepare-time nonce and deploy reads. The same
 heal-or-prepare check guards the per-hash revoke route (409 "Already
 revoked … reconciled" instead of an eternal 502). Batches are capped at 25
 calls (422 pointing at per-hash revocation beyond it), with a coarse
@@ -1273,3 +1274,19 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > `renameAccountForUser`), none of which this diff touches. Scope of this
 > note: those three files' request-shape edits and the hook order. Nothing
 > else in this document was re-verified.
+
+> **Re-verified #3255 (2026-09-23, backend RPC failover):** this diff touches
+> the rail's viem clients in `rails/delegation-rail.ts`,
+> `rails/hybrid-provisioning.ts` and the `createTreasuryOps` callers. Each now
+> reads through `infra/chain/rpc-transport.ts`, a viem `fallback()` over the
+> dedicated endpoint, an optional second provider and the public node, so a
+> quota-dead provider no longer fails prepare. What enforces a spend is
+> unchanged: budget, recipient pin and expiry still revert in
+> `eth_estimateUserOperationGas` on the bundler, which this diff does not
+> touch, and every UserOp still needs the account signer's signature. An
+> `eth_call` revert is terminal and is never retried on the next node. The
+> `disabledDelegations` heal keeps its `finalized` tag and two-read rule; the
+> two reads may now be answered by different endpoints when the first fails,
+> which the sentence on lying RPC endpoints above now says. The relayer's
+> ethers provider stays on one node (#1533). Scope of this note: those RPC
+> reads. Nothing else in this document was re-verified.

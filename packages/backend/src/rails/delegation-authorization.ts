@@ -24,7 +24,6 @@ import {
   type DelegationForPaymentRow,
 } from '../infra/repositories/delegation-budgets.js'
 import type { Address, Hex } from 'viem'
-import { getChain } from '../domain/chains.js'
 import { computeHybridAccountAddress } from './hybrid-provisioning.js'
 import {
   createDelegationRail,
@@ -72,7 +71,6 @@ export async function prepareDelegationPayment(
     delegateOwnerAddress: agent.delegate_address as Address,
     chainId: agent.chain_id,
     bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
-    rpcUrl: getChain(agent.chain_id).rpcUrl,
     sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
   })
   if (rail.delegateAccountAddress.toLowerCase() !== delegateAccountAddress.toLowerCase()) {
@@ -99,7 +97,6 @@ export async function submitDelegationPayment(
     delegateOwnerAddress: agent.delegate_address as Address,
     chainId: agent.chain_id,
     bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
-    rpcUrl: getChain(agent.chain_id).rpcUrl,
     sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
   })
   const result = await rail.submitRedemption(

@@ -162,6 +162,37 @@ describe('config wires the mainnet RPC through the warning (#2615)', () => {
   })
 })
 
+describe('the optional *_FALLBACK second provider (#3255)', () => {
+  it('trims, treats unset/blank as "no secondary", and never warns', async () => {
+    const { parseRpcFallbackUrl } = await import('../config.js')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseRpcFallbackUrl(undefined)).toBe('')
+    expect(parseRpcFallbackUrl('')).toBe('')
+    expect(parseRpcFallbackUrl('   ')).toBe('')
+    expect(parseRpcFallbackUrl('  https://second.provider.example/rpc  ')).toBe(
+      'https://second.provider.example/rpc',
+    )
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('wires RPC_URL_BASE_FALLBACK and RPC_URL_BASE_SEPOLIA_FALLBACK into config', async () => {
+    const saved = [process.env.RPC_URL_BASE_FALLBACK, process.env.RPC_URL_BASE_SEPOLIA_FALLBACK]
+    process.env.RPC_URL_BASE_FALLBACK = 'https://second-mainnet.example'
+    process.env.RPC_URL_BASE_SEPOLIA_FALLBACK = 'https://second-sepolia.example'
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.resetModules()
+    const { config } = await import('../config.js')
+    expect(config.rpcUrlBaseFallback).toBe('https://second-mainnet.example')
+    expect(config.rpcUrlBaseSepoliaFallback).toBe('https://second-sepolia.example')
+    if (saved[0] === undefined) delete process.env.RPC_URL_BASE_FALLBACK
+    else process.env.RPC_URL_BASE_FALLBACK = saved[0]
+    if (saved[1] === undefined) delete process.env.RPC_URL_BASE_SEPOLIA_FALLBACK
+    else process.env.RPC_URL_BASE_SEPOLIA_FALLBACK = saved[1]
+    vi.restoreAllMocks()
+  })
+})
+
 /**
  * The trim, pinned because it is a BEHAVIOUR CHANGE (#2615, found by review).
  *

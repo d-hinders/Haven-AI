@@ -318,6 +318,14 @@ untouched, `connectorChannel` and `/discovery` are untouched, so no claim in
 this document moved and `last-verified` is left where it is — the
 comment-only rule above.
 
+Re-verified again 2026-09-23 against #3255 (backend RPC failover):
+`config.ts` gains `PUBLIC_RPC_BASE` / `PUBLIC_RPC_BASE_SEPOLIA` (the two
+public-node literals `warnPublicRpc` already used, now named once) and
+`rpcUrlBaseFallback` / `rpcUrlBaseSepoliaFallback` (the optional
+`RPC_URL_BASE*_FALLBACK` second provider, trimmed by `parseRpcFallbackUrl`).
+`connectorChannel`, its parser and `/discovery` are untouched, so no claim in
+this document moved and `last-verified` is left where it is.
+
 Re-verified again 2026-09-20 against PR #3202 (epic #3077 decision 14):
 the only `config.ts` change is the comment above `marketplaceProspectsEnabled`,
 which now states the prospects gate as "the explicit marketplace list names a

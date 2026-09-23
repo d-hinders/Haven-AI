@@ -1,4 +1,5 @@
-# Regenerate the /design-system visual baselines (#897) on a branch.
+# Regenerate the visual baselines (#897) on a branch — every `*.visual.spec.ts`,
+# not only /design-system (#3233).
 #
 # Baselines MUST be Linux-rendered (CI is the judge; macOS fonts differ), so
 # intended visual changes are accepted by dispatching this workflow on the PR
@@ -72,7 +73,7 @@ permissions:
 
 jobs:
   update:
-    name: Regenerate /design-system baselines
+    name: Regenerate visual baselines
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -227,7 +228,7 @@ jobs:
             # The audit's one-line delta rides in the commit message, so the
             # answer to "which baselines did this dispatch move, and from which
             # blobs" outlives the run's log-retention window.
-            git commit -m "chore: regenerate /design-system visual baselines (Linux-rendered)" -m "$AUDIT_TRAILER"
+            git commit -m "chore: regenerate visual baselines (Linux-rendered)" -m "$AUDIT_TRAILER"
             git push
             echo "committed=true" >> "$GITHUB_OUTPUT"
             echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -241,8 +242,9 @@ jobs:
       # So the condition is reported where the person is actually looking (a
       # sticky comment on the PR) and the run goes RED. A green run that leaves
       # the PR unmergeable is the least useful of the three possible outcomes.
-      # The red does NOT mean the baselines are bad: they are committed and
-      # pushed by the step above, before this one runs.
+      # The red is about the parked checks, not the images: the baselines are
+      # committed and pushed by the step above, before this one runs. Whether
+      # the images are RIGHT is a design review's call, not this step's (#3233).
       #
       # The decision itself is a tested pure function rather than inline bash —
       # inline YAML only proves itself in production, which is precisely how the
@@ -262,4 +264,7 @@ jobs:
           HAS_PUSH_TOKEN: ${{ secrets.BASELINE_PUSH_TOKEN != '' }}
           BASELINES_COMMITTED: ${{ steps.commit.outputs.committed }}
           PUSHED_SHA: ${{ steps.commit.outputs.sha }}
+          # #3233: the audited moved set, so the comment lists what was
+          # regenerated instead of vouching for it.
+          MOVED_BASELINES: ${{ steps.audit.outputs.moved }}
         run: node scripts/ci/baseline-push-followup.mjs

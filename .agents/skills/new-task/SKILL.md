@@ -28,9 +28,7 @@ Turn a freeform request into a loop-ready GitHub issue without implementing it.
    deliberately; this skill files to the backlog unless shipping was asked for,
    per *Backlog And Shipping*. Same template, opposite default, and only the
    filer knows which one applies.
-5. Check GitHub for a materially duplicate open issue — and for an open issue this
-   would be a "still" of. A "still" reopens or widens that issue; it never files a
-   sibling ([ship-next § *Filing bar*](../ship-next/SKILL.md#filing-bar-2767)).
+5. Check GitHub for a materially duplicate open issue.
    **GitHub is the source of truth for what is filed. It is not the only place a
    finding sits.** Also sweep [`docs/quality/scan-ledger.md`](../../../docs/quality/scan-ledger.md)
    and `docs/bug-reports/` for the same surface —
@@ -43,17 +41,9 @@ Turn a freeform request into a loop-ready GitHub issue without implementing it.
    citing the report and its identifier (`F2`, `B5` live in the report, not in the
    ledger entry), and record the issue on the ledger's **disposition line** — the
    entry itself is append-only history and is never edited.
-6. **A defect-type task carries a reproduction before it is queued (#2767).** When
-   the task reports something broken — a product defect, missing product behaviour,
-   or a required check that is red for a false reason or green over a real defect —
-   the body names a repro at a SHA: a command, a failing test, or a screenshot. No
-   repro, no issue: ask the requester for one, or record the task as **Not filed**
-   in whatever PR or session surfaced it. Feature and epic tasks are unaffected;
-   the full five-check bar is stated once, in ship-next, and applies to every
-   filed defect whatever route files it.
-7. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
-8. Apply every inferred `area:*` label and `money-path` when applicable. **Leave the issue unassigned** unless the requester asks to own it — both issue templates ship `assignees: []`, and a queue of unassigned issues is what the loop expects to read. Assignment records ownership; a `🔒 CLAIM` comment, never an assignee, records that someone is building right now. A PR that closes the issue clears every assignee on merge (#3177), so an assignee used for tracking does not survive the close.
-9. Return the issue link and applied labels.
+6. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
+7. Apply every inferred `area:*` label and `money-path` when applicable. **Leave the issue unassigned** unless the requester asks to own it — both issue templates ship `assignees: []`, and a queue of unassigned issues is what the loop expects to read. Assignment records ownership; a `🔒 CLAIM` comment, never an assignee, records that someone is building right now. A PR that closes the issue clears every assignee on merge (#3177), so an assignee used for tracking does not survive the close.
+8. Return the issue link and applied labels.
 
 ## Epics
 

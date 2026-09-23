@@ -182,9 +182,8 @@ PR go through before handing it the whole queue.
   if the design-review / haven-reviewer UI pass raises a **`blocking`** or
   **`should-fix`** UX, copy, or design-system finding, the loop **pauses** even if
   CI is green. A **`nit`** does not pause since [#2636](https://github.com/d-hinders/Haven-AI/issues/2636)
-  — it is fixed in place when it is a one-line change, or dropped under **Not filed**
-  with its screenshot (#2767); the severity table and the reasoning are in that
-  playbook, not here.
+  — it is fixed in place when it is a one-line change, or filed as a follow-up with
+  its screenshot; the severity table and the reasoning are in that playbook, not here.
 
   Clearing that pause is the reviewer's call, not the user's (#1968) —
   fix, re-capture the screenshots, re-run the pass that raised it, and a clean
@@ -208,18 +207,6 @@ PR go through before handing it the whole queue.
   (migrations are irreversible in prod; `__tests__/` is not a schema change).
 - Auto-merge does not bypass anything: GitHub still requires all configured
   status checks. If CI fails, the merge simply doesn't happen.
-
-**What happens to a finding (#2767).** Every finding a session makes — its own,
-a reviewer's, a sweep's, a guard's — ends in one of three dispositions: **fixed in
-the PR**, **dropped with a reason** under the PR body's **Not filed** list, or
-**filed** only when it clears the five-check filing bar in
-[`ship-next` § *Filing bar*](../../.agents/skills/ship-next/SKILL.md#filing-bar-2767)
-— the bar is stated there once and not restated here. Filing is not a way to
-finish a round: #2767's hand count over the issues API on 2026-09-08 (not
-re-derivable from `git log`) was 195 issues filed against 199 PRs merged in the
-week to 2026-09-08, 141 of the 195 citing another issue filed the same week, and
-the promotion digest now prints the filed-per-closed ratio and the
-product share of merges every run so the trend is visible.
 
 ## Money-path safety model (read this)
 

@@ -347,13 +347,6 @@ would flatten away exactly the commit being synced. First done as #1231.
   a new number. It's **pinned** rather than recreated — a bot-maintained tracker
   wants a stable identity, and pinning is what keeps it visible. Leave it open.
 
-  Since [#2767](https://github.com/d-hinders/Haven-AI/issues/2767) the same body
-  ends with a **Filing bar** section: two figures over the trailing seven days,
-  each followed by the command that reproduces it — issues filed per issue
-  closed (target < 0.3) and product PRs as a share of merges to `dev` (target
-  > 60 %). They are the trend line for `ship-next` § *Filing bar*; the rule
-  lives there, the digest only measures it.
-
 ## Workflows in this flow
 
 | Workflow | Trigger | Does |

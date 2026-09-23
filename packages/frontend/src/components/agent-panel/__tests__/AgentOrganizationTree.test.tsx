@@ -71,40 +71,42 @@ describe('AgentOrganizationTree (#3222 re-review)', () => {
   })
 })
 
-// #3236 (built by @PhilipEriksson; merged onto the #3222 tree tests): the
+// #3236 (built by @PhilipEriksson; reworked on the #3222 tree): the
 // loading/error states used to render only while `organizations.length === 0`,
-// so a refetch with organizations present showed neither. Mutation: reverting
-// either condition to the old `… && organizations.length === 0` shape fails
-// the first two tests — the tree renders instead of the status panel.
+// so a refetch with organizations present showed neither. They now show in
+// place — the tree stays, because the panel refetches after every move and
+// swapping the tree for a status panel made the page below jump each time.
 describe('AgentOrganizationTree (#3236 refetch states)', () => {
-  it('shows the loading state during a refetch with organizations present', () => {
+  it('says "Updating…" during a refetch with organizations present, and keeps the rows', () => {
     renderTree({ loading: true })
 
     const status = screen.getByRole('status')
-    expect(status).toHaveAttribute('aria-busy', 'true')
-    expect(status).toHaveTextContent('Loading organizations…')
-    // The status panel REPLACES the tree — the stale rows cannot be read or
-    // clicked while the fetch that replaces them is in flight.
-    expect(screen.queryByTestId('organization-tree')).toBeNull()
+    expect(status).toHaveTextContent('Updating…')
+    const tree = screen.getByTestId('organization-tree')
+    expect(tree).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('button', { name: /Company A/ })).toBeInTheDocument()
   })
 
-  it('shows the error state with a working Try again after a failed refetch with organizations present', () => {
+  it('shows the error with a working Try again after a failed refetch, above the last-known rows', () => {
     const onRetry = vi.fn()
     renderTree({ error: 'We could not load your organizations. Try again in a moment.', onRetry })
 
-    expect(
-      screen.getByText('We could not load your organizations. Try again in a moment.'),
-    ).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('We could not load your organizations. Try again in a moment.')
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
     expect(onRetry).toHaveBeenCalledOnce()
+    expect(screen.getByTestId('organization-tree')).toBeInTheDocument()
+  })
+
+  it('first load with no rows yet is still the status panel', () => {
+    renderTree({ organizations: [], loading: true })
+    expect(screen.getByRole('status')).toHaveTextContent('Loading organizations…')
     expect(screen.queryByTestId('organization-tree')).toBeNull()
   })
 
-  it('renders the tree once loading settles with organizations present', () => {
+  it('renders no status once loading settles', () => {
     renderTree()
-
-    expect(screen.getByTestId('organization-tree')).toBeInTheDocument()
-    expect(screen.getByText('Company A')).toBeInTheDocument()
+    expect(screen.getByTestId('organization-tree')).not.toHaveAttribute('aria-busy')
     expect(screen.queryByRole('status')).toBeNull()
   })
 })

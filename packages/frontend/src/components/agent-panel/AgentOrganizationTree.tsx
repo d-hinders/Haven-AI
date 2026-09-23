@@ -32,7 +32,12 @@ import { buildOrganizationTree, flattenOrganizationTree, TOP_LEVEL_OPTION } from
  * delete) lives in the manager modal. Empty state: a single quiet line with
  * the create action, not a competing panel — the agents list above stays the
  * primary content. Loading and error states stay inline for the same reason,
- * and render during refetches too, not only on an empty first load (#3236).
+ * and render during refetches too, not only on an empty first load (#3236):
+ * with no rows yet they are the panel; with rows present the tree STAYS, with
+ * a quiet "Updating…" status or an error line and Try again above the
+ * last-known rows. The panel refetches after every agent move and folder
+ * change, so swapping the whole tree for a status panel made everything
+ * below it jump on each move.
  */
 export function AgentOrganizationTree({
   organizations,
@@ -80,12 +85,9 @@ export function AgentOrganizationTree({
     onSelect(orgId)
   }
 
-  // #3236: these states used to render only while the list was empty, so a
-  // refetch with organizations present showed nothing and a failed refetch
-  // left a stale-looking tree. During a refetch the tree still cannot be
-  // trusted (rows are being replaced), so it swaps to the status panel; a
-  // failed refetch offers Try again whether or not rows were present.
-  if (loading) {
+  // #3236: first load (no rows yet) → the status panel. A refetch with rows
+  // present keeps the tree and says so in place (see `refetchStatus` below).
+  if (loading && organizations.length === 0) {
     return (
       <div className="mb-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card">
         <p className="text-sm text-[var(--v2-ink-3)]" role="status" aria-busy="true" aria-live="polite">
@@ -95,7 +97,7 @@ export function AgentOrganizationTree({
     )
   }
 
-  if (error) {
+  if (error && organizations.length === 0) {
     return (
       <div className="mb-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card">
         <p className="text-sm text-[var(--v2-ink-2)]">{error}</p>
@@ -109,12 +111,20 @@ export function AgentOrganizationTree({
   return (
     <div
       data-testid="organization-tree"
+      aria-busy={loading || undefined}
       className="mb-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card"
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Icon icon={Network} className="h-3.5 w-3.5 text-[var(--v2-ink-3)]" />
           <span className="text-xs font-medium text-[var(--v2-ink-3)]">Organizations</span>
+          {/* #3236: a refetch with rows present says so in place — the rows
+              stay, so nothing below the tree moves. */}
+          {loading ? (
+            <span className="text-xs text-[var(--v2-ink-3)]" role="status" aria-live="polite">
+              Updating…
+            </span>
+          ) : null}
         </div>
         <div className="flex items-center gap-1">
           <Button onClick={onManage} size="sm" variant="tertiary">
@@ -127,6 +137,17 @@ export function AgentOrganizationTree({
           </Button>
         </div>
       </div>
+
+      {error ? (
+        // A failed refetch: the last-known rows stay below, with the error
+        // and a retry above them (#3236).
+        <div className="mt-2 flex flex-wrap items-center gap-2" role="alert">
+          <p className="text-sm text-[var(--v2-ink-2)]">{error}</p>
+          <Button size="sm" variant="tertiary" onClick={onRetry}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
 
       {organizations.length > 0 ? (
         <button

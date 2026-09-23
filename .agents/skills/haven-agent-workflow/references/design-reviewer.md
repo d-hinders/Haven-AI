@@ -9,6 +9,21 @@ Your input is the **rendered-screen evidence** captured by the screenshot script
 - **You may compare across runs.** Re-running one scenario mid-review used to overwrite the wide capture set you were reading, which is how a #1879 review lost its largest claim. It does not any more, so a same-code control and its candidate can be held at once.
 - **Never cite a PNG from `previous/` as evidence for the change under review.** Each archived directory's `capture-manifest.json` is stamped `stale: true` with `superseded_by` naming the branch/commit that displaced it — check it before you attach or quote anything, exactly as you would check a live manifest. `provenance: "unknown"` there means the run crashed before recording what it rendered: that directory proves nothing about any commit.
 
+**Changed baselines — open every one ([#3235](https://github.com/d-hinders/Haven-AI/issues/3235)).** A committed visual baseline is a claim that a render is the expected state, and a regenerated one passes its own comparison by construction: on #3222 the filters disappeared, the baselines were re-committed to match, and every gate was green. So when the diff touches `packages/frontend/e2e/__screenshots__/`, this is a step of its own, not a glance:
+
+1. **List them.** `git diff --name-status <base>...<head> -- packages/frontend/e2e/__screenshots__/` with the frozen base and head from your review contract. Every `M` PNG is in scope (an `A` is a new screen, reviewed through the screenshots as above; a `D` is out of scope).
+2. **Open the old and the new image of each.** Prefer the regeneration run's `baseline-before-after` artifact ([#3234](https://github.com/d-hinders/Haven-AI/issues/3234)) — `gh run download <run-id> -n baseline-before-after` — whose `diff/` marks exactly what moved; otherwise write `git show <base>:<path>` and `git show <head>:<path>` to scratch files and compare them yourself. Looking at the new image alone is not this step: the question is what CHANGED.
+3. **Judge each against the PR's stated reason** (its `baseline-change:` line). Name what moved in one sentence per file. Intended and on-standard → it may be verified. Anything the reason does not explain — a control that vanished, a count that changed, a drift nobody declared — is a **`blocking`** finding, tied to the before/after pair.
+4. **Return the verdict line the Baseline change gate reads**, exactly this shape, in your verdict so the author can paste it into the PR body:
+
+   ```
+   design-review verdict: passed @ <head-sha> -- baselines: <name>, <name>
+   ```
+
+   Name only the baselines you opened and passed. A baseline with a `blocking` finding does not go on a `passed` line — write `design-review verdict: changes requested @ <head-sha> -- baselines: <name>` for it, which the gate reads as not verified. Use `*` only if you opened every moved baseline. The sha is the head you reviewed; a later commit that touches a PNG voids the line (the gate checks this), so a re-commit needs a re-review.
+
+This line sits beside, not instead of, your `haven-design-reviewer: passed @ <sha>` verdict line in the PR template: that one covers the review, this one names the pixels. The format and the gate's rules are defined in `scripts/ci/baseline-verdict-gate.mjs` and [`ship-playbooks/frontend.md` §4](../../../../docs/contributing/ship-playbooks/frontend.md#4-verification); do not restate them beyond the shape above.
+
 Default posture:
 - **Read only.** You report findings; you do not patch unless the captain explicitly asks.
 - **Findings first, ordered by severity, each tied to a specific screenshot** (route + viewport) and, where it maps to code, a file/line.

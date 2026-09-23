@@ -380,6 +380,8 @@ baseline-change: topbar-desktop.png -- sidebar copy moved 4px under the new labe
 design-review verdict: passed @ <sha> -- baselines: topbar-desktop.png
 ```
 
+  The design reviewer produces the second line: its brief's *Changed baselines* step ([`design-reviewer.md`](../../../.agents/skills/haven-agent-workflow/references/design-reviewer.md), #3235) opens the old and new image of every modified baseline — from the regeneration run's `baseline-before-after` artifact when there is one — and returns the line naming only the baselines it passed; an unintended change is a `blocking` finding and gets a `changes requested` line instead.
+
   - **Names** are base names (or full paths, or a comma/space list); `*` is the mass re-bless form for a font or Playwright bump that moves all of them at once — the same convention the regeneration workflow's `expected` input uses. Matching is on the base name; the 85 committed baselines share no duplicates today.
   - **The reason** must be at least 20 non-whitespace characters — a label is not a reason, the same bar an inline `// ui-local:` marker has to clear.
   - **The verdict sha** is verified, not just read: the last commit that touched the PNG must sit at or before the verdict's commit, and that commit at or before the PR head. A verdict given before the baseline was re-committed does not verify it — the #3222 shape, where the review happened and the pixels moved after. `passed` and `approved` verify; `skipped` and `n/a` do not.

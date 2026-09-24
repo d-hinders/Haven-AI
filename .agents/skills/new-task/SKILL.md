@@ -233,8 +233,10 @@ The captain then has three obligations before the issue is queued or announced:
 2. **Resolve or state** every named lever and scope gap: settle it in the body,
    or record it as an open question for the requester or partners.
 3. **Post the verdict comment** on the issue (for an epic, on the tracking
-   issue): the verdict SHA, the corrections applied, and the open questions
-   (shape in § *Epics* above). The comment is the record that the review ran.
+   issue): it opens with the words `Spec-review verdict on` and the reviewed SHA,
+   lists the corrections applied and the open questions, and ends with
+   `Corrections: <n>.` (the full shape and an example are in § *Epics* above).
+   The comment is the record that the review ran, and *Re-measure* counts it.
 
 A body with no code claims still gets the pass — the claim re-run is empty, but
 completeness, criteria and gaps are not.
@@ -246,25 +248,41 @@ carries a number checked afterwards, the same way #2781 checked the filing bar
 (reverted by #3248 when it did not move). Agreed **before** the result is
 known:
 
-- **Window:** the 14 days after the rule merges to `dev`; re-measure on the
-  15th day.
-- **Metric:** the share of verdict comments with `Corrections:` ≥ 1 — how often
-  the mandatory pass changes the issue it reviewed. Baseline is 3 of 3 (#3264,
+- **Window:** `FROM` = the day after the rule merges to `dev`; `END` = `FROM`
+  + 14 days, exclusive (14 whole days). Re-measure on `END` or later.
+- **Metric:** among verdict comments *created* in the window on issues **not**
+  labelled `epic` (epic reviews were already mandatory, so they are not what is
+  under test), the share whose `Corrections:` line is ≥ 1 — how often the newly
+  mandatory pass changes the issue it reviewed. Baseline is 3 of 3 (#3264,
   #3266, #3267, 2026-09-24), a favourable sample: three issues filed fast, in an
   unfamiliar area, by one session.
-- **Decision rule:** fewer than **1 in 4** verdicts with a correction, or fewer
-  than 8 verdicts in the window (the rule was not followed, so it measured
-  nothing) → the "did not move" arm: single tasks go back to optional review,
-  epics keep theirs, and no other rule is added in its place. Otherwise the rule
-  stays.
+- **Decision rule:** fewer than **1 in 4** single-task verdicts with a
+  correction, **or** fewer than 8 single-task verdicts in the window (the rule
+  was not followed, so it measured nothing) → the "did not move" arm: single
+  tasks go back to optional review, epics keep theirs, and no other rule is
+  added in its place. Otherwise the rule stays. Verdicts reported as
+  `missing` (no `Corrections:` line) count as verdicts **without** a
+  correction.
 - **Instrument** — run exactly this; a changed instrument is a new baseline:
 
 ```bash
-# new-task issue-review re-measure: FROM=YYYY-MM-DD TO=YYYY-MM-DD
+# new-task issue-review re-measure. FROM=YYYY-MM-DD END=YYYY-MM-DD (exclusive)
+export FROM END
 gh api --paginate "repos/{owner}/{repo}/issues/comments?since=${FROM}T00:00:00Z&per_page=100" \
-  --jq ".[] | select(.created_at < \"${TO}T23:59:59Z\") | .body | select(startswith(\"Spec-review verdict\"))" \
-| grep -oE 'Corrections: [0-9]+' | awk '{n++; if ($2>0) c++} END {printf "verdicts: %d, with corrections: %d (%d%%)\n", n, c, n ? 100*c/n : 0}'
+  --jq '.[] | select(.created_at >= ($ENV.FROM + "T00:00:00Z") and .created_at < ($ENV.END + "T00:00:00Z"))
+        | select(.body | test("^[#* ]*Spec-review verdict"))
+        | [.issue_url, ([.body | scan("Corrections: ([0-9]+)")] | last // ["missing"])[0]] | @tsv' \
+| while IFS=$'\t' read -r url c; do
+    gh api "$url" --jq "if any(.labels[]; .name == \"epic\") then empty else \"$c\" end"
+  done \
+| awk '{n++; if ($1 == "missing") m++; else if ($1 > 0) c++}
+       END {printf "single-task verdicts: %d, with corrections: %d (%d%%), missing line: %d\n", n, c, n ? 100*c/n : 0, m}'
 ```
+
+`since` filters on `updated_at`, so it only narrows the fetch; the `created_at`
+bounds are what define the window, and a verdict edited later is still counted
+once, in the window it was created in. One value per comment: the last
+`Corrections:` line in the body.
 
 ## Backlog And Shipping
 

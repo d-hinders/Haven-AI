@@ -566,11 +566,12 @@ function assertExpectedShape(expected: X402ExpectedPayment): void {
  * version arrives *here* instead of dying at the schema boundary with a raw
  * validation string.
  *
- * **Adding a version here is not sufficient to support it.** The mode rules in
+ * **Adding a version here is not sufficient to support it.** The rules in
  * `assertExpectedBinding` derive the expected version from the context's
- * *contents* (`typedDataHash` present ⇒ 2), not from `auth.version`, so a v3
- * that carries anything new needs that derivation extended in the same change.
- * Widening this array alone would admit a v3 context to the v1/v2 rule set:
+ * *contents* (`payerDelegate` present ⇒ 3, else 2 — `typedDataHash` is
+ * required unconditionally, #3272), not from `auth.version`, so a v4 that
+ * carries anything new needs that derivation extended in the same change.
+ * Widening this array alone would admit a v4 context to the v2/v3 rule set:
  * the array announces what this signer can evaluate, it does not define it.
  */
 export const SUPPORTED_X402_EXPECTED_VERSIONS: readonly number[] = [2, 3]

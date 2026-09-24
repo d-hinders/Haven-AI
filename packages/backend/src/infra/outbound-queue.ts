@@ -17,9 +17,13 @@
  * choosing is the layering: policy at the call site, authority in the data
  * layer.
  *
- * NOTE for #1557/#1559: when the sweep (money-path) and then the dispatcher
- * land, revisit this policy per site — a queue that has become the only lane
- * must not fail open.
+ * Revisited 2026-09-24, after #1557/#1559 made the queue the only lane: KEPT
+ * fail-open at every site, by owner decision. A failed open leaves the send
+ * unstamped (nonce guarded only by the in-process lock) and unrecorded (the
+ * bump worker cannot see it if it sticks), but it moves no funds — the relayer
+ * is gas-only — and the decision assumes a single backend replica. Revisit
+ * before running more than one (`docs/operations/backend-scaling.md`
+ * § Multi-replica CORRECTNESS).
  */
 
 import { Transaction, type TransactionResponse } from 'ethers'

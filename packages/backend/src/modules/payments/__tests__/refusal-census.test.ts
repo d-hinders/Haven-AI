@@ -55,7 +55,7 @@
  *
  * ## Positive control
  *
- * Proven for #3053 by mutation: remove the `payments.ts:781` wrapped
+ * Proven for #3053 by mutation: remove the `payments.ts:785` wrapped
  * allowlist entry AND unwrap that site's `refuse(..., null)` back to a bare
  * `reply.code(502).send(...)` → this suite reddens on both the raw-site and
  * the refuse-count direction; restoring the file returns it to green,
@@ -97,10 +97,13 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // branch now shares `buildDirectSignData` (`modules/payments/
     // direct-sign-context.ts`) with the new GET /:id/sign-context route,
     // and its doc comment grew by three lines to say so.
-    { line: 441, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
-    { line: 465, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
-    { line: 757, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 784, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
+    // #3031 shifted the 502/403 pair back by −2 (the hand-rolled shape
+    // rungs above them in the prepare handler are the request schema's) and
+    // the 429/skipped pair by +1 (the same collapse inside replayIntentBody).
+    { line: 439, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
+    { line: 463, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
+    { line: 758, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 785, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
   ],
 }
 
@@ -136,7 +139,7 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
   ],
   'src/routes/payments.ts': [
     {
-      line: 784,
+      line: 785,
       reason: 'on-chain execution failed after claim — bundler/chain failure booked on the intent row by failSubmittedIntent, not a policy refusal',
     },
   ],

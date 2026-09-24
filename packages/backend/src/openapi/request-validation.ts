@@ -433,7 +433,24 @@ export function requestSchemaForOperation(
   const bodySchema = (requestBody?.content as Record<string, Json> | undefined)?.[
     'application/json'
   ]?.schema as Json | undefined
-  if (bodySchema) schema.body = bodySchema
+  if (bodySchema) {
+    // OpenAPI: `requestBody.required: false` means the request may carry NO
+    // body at all. Fastify hands the body validator `null` for an absent
+    // body (lib/validation.js `isUndefined ? null : request.body`), and a
+    // plain `{ type: 'object' }` refuses that — measured when #3031 enforced
+    // `routes/agent-delegations.ts`: every body-less `POST .../revoke`
+    // (revoke step 1 prepares, it does not sign) flipped from 200 to a 400
+    // "body must be object", a characterization break on an accepted shape.
+    // The schema the plugin ATTACHES therefore states what the operation
+    // declares: an optional body is the declared shape OR absent. The wrap
+    // lives here, not in `spec.ts` — the served spec document keeps
+    // describing the body's shape, and a REQUIRED body keeps refusing an
+    // absent one. (An explicit JSON `null` body also passes the wrap; dev
+    // accepted any body on these routes, so nothing newly-accepted is
+    // created and garbage non-object bodies still refuse.)
+    schema.body =
+      requestBody?.required === true ? bodySchema : { anyOf: [bodySchema, { type: 'null' }] }
+  }
 
   // OpenAPI resolution order: path-item parameters first, operation parameters
   // overriding by `name`+`in`.

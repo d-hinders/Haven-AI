@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
+// #3031: production wiring for the enforced module (see beforeAll).
+import { installRequestValidation } from '../../openapi/request-validation.js'
 // #1444: validate the real payload against the spec's own schema.
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 // #1987 (epic #1440 slice #1987): `modules/mpp/authorize.ts` — and its
@@ -265,6 +267,11 @@ describe('machine payment routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring — every money-path module is in
+    // `enforcedModules`, so the request schema refuses off-spec shapes
+    // before the handler (and the rungs that used to make those refusals
+    // are gone).
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/machine-payments.ts'] })
     await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
   })
 
@@ -730,7 +737,14 @@ describe('machine payment routes', () => {
       headers: { authorization: 'Bearer sk_agent_test' },
     })
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toMatch(/next_cursor/)
+    // #3031: the cursor's uuid SHAPE is the enforced request schema's
+    // (`format: uuid` on the `cursor` query parameter) — the rung that
+    // answered "next_cursor" wording is gone, and the schema refuses before
+    // any query, which is the #3128 property this test pins. The OWNERSHIP
+    // half (a well-formed uuid naming no receipt of this agent) stays a 400
+    // from `listReceipts`.
+    expect(response.json().error).toBe('Request does not match the API spec')
+    expect(response.json().details).toMatch(/cursor/)
     expect(findCall(/FROM machine_payment_evidence e/)).toBeUndefined()
     expect(findCall(/SELECT 1 AS found FROM machine_payment_evidence/)).toBeUndefined()
   })
@@ -1529,7 +1543,10 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toBe('txHash must be a 0x-prefixed transaction hash')
+    // #3031: txHash's 0x-hex-64 shape is the enforced schema's; the handler
+    // rung is gone and the refusal names the field via `details`.
+    expect(response.json().error).toBe('Request does not match the API spec')
+    expect(response.json().details).toMatch(/txHash/)
     expect(mockQuery).toHaveBeenCalledTimes(1)
   })
 
@@ -1549,7 +1566,10 @@ describe('machine payment routes', () => {
     })
 
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toBe('merchantStatus must be an HTTP status code')
+    // #3031: the 100–599 HTTP status range is the enforced schema's
+    // (`merchantStatus` integer minimum/maximum); the handler rung is gone.
+    expect(response.json().error).toBe('Request does not match the API spec')
+    expect(response.json().details).toMatch(/merchantStatus/)
     expect(mockQuery).toHaveBeenCalledTimes(1)
   })
 
@@ -1855,7 +1875,10 @@ describe('machine payment routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toContain('ETH, USDC')
+      // #3031: the ETH|USDC enum is the enforced schema's — the rung that
+      // echoed the supported list is gone; the refusal names the field.
+      expect(response.json().error).toBe('Request does not match the API spec')
+      expect(response.json().details).toMatch(/asset/)
     })
 
     it('rejects invalid recipient address with 400', async () => {
@@ -1869,7 +1892,10 @@ describe('machine payment routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toContain('recipient')
+      // #3031: the recipient address pattern is the enforced schema's; the
+      // refusal names the field.
+      expect(response.json().error).toBe('Request does not match the API spec')
+      expect(response.json().details).toMatch(/recipient/)
     })
 
     it('rejects missing amount with 400', async () => {
@@ -1883,7 +1909,10 @@ describe('machine payment routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toContain('amount')
+      // #3031: `amount` is required on the enforced schema; the refusal
+      // names the field.
+      expect(response.json().error).toBe('Request does not match the API spec')
+      expect(response.json().details).toMatch(/amount/)
     })
 
     // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is
@@ -2019,7 +2048,10 @@ describe('machine payment routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toContain('idempotency_key')
+      // #3031: the 1–128 idempotency_key length is the enforced schema's
+      // (minLength/maxLength); the refusal names the field.
+      expect(response.json().error).toBe('Request does not match the API spec')
+      expect(response.json().details).toMatch(/idempotency_key/)
     })
 
     // #1986 (epic #1440 slice 3): the legacy AllowanceModule rail is

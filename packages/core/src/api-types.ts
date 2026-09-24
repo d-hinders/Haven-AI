@@ -3589,8 +3589,6 @@ export type components = {
             to: string;
             /** @description Optional dedupe key (#1207): a retried request with the same key returns the first request's result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer is a 409. Same contract as /machine-payments/send. */
             idempotency_key?: string;
-        } & {
-            [key: string]: unknown;
         };
         SignablePaymentIntent: {
             /** Format: uuid */
@@ -3996,9 +3994,7 @@ export type components = {
             };
         };
         MachinePaymentAuthorizeRequest: {
-            challenge: components["schemas"]["MachinePaymentChallenge"];
-            idempotencyKey: string;
-            signature?: string;
+            [key: string]: unknown;
         };
         MachinePaymentAuthorizeResponse: components["schemas"]["AgentPaymentStatus"] | components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"];
         MppResumeState: {
@@ -4174,7 +4170,6 @@ export type components = {
             paymentId: string;
             rail: string;
             txHash: string;
-            /** Format: uri */
             resourceUrl?: string;
             merchantStatus?: number;
             challengePayload?: {
@@ -15405,7 +15400,12 @@ export interface operations {
     };
     getMachinePaymentBalanceCoverage: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description The ERC-20 contract address to check holdings of. */
+                token: string;
+                /** @description The amount the coverage question is asked about, in ATOMIC units, as a decimal string. Zero passes the schema and is refused by the handler (a sufficiency question about nothing has no honest answer). */
+                amount_atomic: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

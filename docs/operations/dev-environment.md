@@ -337,14 +337,16 @@ Isolation rules that are non-negotiable for a payments product:
   `passport-verify`, `portfolio`, `safe-deploy`, `transactions`, `user`,
   `user-accounts*`, plus `accounting-webhooks`, which #3196 landed in the
   slice's base commit) and the bare `'index.ts'` for the inline `GET /` and
-  `GET /chains`. `routes/x402.ts` joined them in slice 3
-  (#3031) — the first money-path module, and the only one the 2026-09-22
-  shadow reading proved conformant on every operation. Eight money-path
-  modules are still shadowed (`payments`, `machine-payments`, `agents`,
-  `agent-delegations`, `agent-rekey`, `agent-passports`,
-  `agent-connection-setups`, `hybrid-accounts` — the rest of slices 3–4,
-  #3031/#3032). The reading printed NOT PROVEN for 48 of their operations —
-  15 in slice 3's three remaining modules, 33 in slice 4's five — so on dev an off-spec request to any
+  `GET /chains`. Slice 3 (#3031) then flipped the MONEY-PATH remainder:
+  `routes/payments.ts`, `routes/agent-delegations.ts` and
+  `routes/machine-payments.ts` join `routes/x402.ts` (flipped by #3221, the
+  only module the 2026-09-22 shadow reading proved conformant on every
+  operation) — so every money-path module is now enforced, on the route
+  suites assembled production-style plus that reading. Five modules are
+  still shadowed (`agents`, `agent-rekey`, `agent-passports`,
+  `agent-connection-setups`, `hybrid-accounts` — slice 4, #3032). The
+  reading printed NOT PROVEN for 33 of slice 4's operations, so on dev an
+  off-spec request to any
   other route answers the 400 envelope. Slice 2 flipped on the epic's
   fallback (owner decision 2026-09-21 on #3028): the in-process shadow
   counter resets on every deploy and carried no per-route traffic (until

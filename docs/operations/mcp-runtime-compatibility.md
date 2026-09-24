@@ -154,6 +154,20 @@ last-verified: "2026-09-24"
 > endpoint and the tool that calls it deploy in the same train. Nothing else
 > in this document was re-verified in this pass.
 >
+> **Recent re-verification (#3031):** `routes/machine-payments.ts` joined the
+> request-validation `enforcedModules`, so its wire contract now refuses an
+> off-spec REQUEST SHAPE with the plugin's 400 envelope before the handler —
+> including on the routes the hosted MCP tools call (`/receipts`' uuid
+> `cursor`, `/evidence`'s field shapes, `/sweep/submit`'s full
+> `SweepAuthorization`, which the shipped SDK already sends). Every body the
+> current `@haven_ai/sdk` and the hosted MCP send passes byte-identically
+> (the suites assemble the app the production way and prove it), and the
+> refusals a CONFORMANT caller can still get are unchanged: same handlers,
+> same semantic gates, no tool added, renamed or re-described. An older
+> runtime sees the same success shapes; only a caller already sending an
+> off-spec body — which no shipped client does — gets the new 400. The skew
+> dimension is unchanged: route and tools deploy in the same train.
+>
 > **Recent re-verification (#3132):** `haven_list_receipts`'s `selectionGuidance`
 > prose changed on BOTH runtimes (one shared fragment,
 > `packages/sdk/src/tool-descriptions.ts` `listReceipts`): it now says "This

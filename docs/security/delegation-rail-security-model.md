@@ -351,6 +351,22 @@ chain.
 > `ANY(...)` — the same ownership property, written differently. An earlier
 > draft of this note said `WHERE user_id = $1` flatly; review measured it.
 
+> **Re-verified #3031 (edit budget limits in place):** the diff touched one
+> covered backend file, `routes/agent-delegations.ts`, and the change is the
+> request-SCHEMA layer only: the file joined the request-validation
+> `enforcedModules`, so a body or path parameter whose shape the OpenAPI spec
+> does not declare (required `signature`, the `budget_atomic` digits-only
+> and uint96 shapes, uuid path params) is refused with the plugin's 400
+> envelope BEFORE the handler — the hand-rolled shape rungs are deleted.
+> Every authority claim in this document is untouched: the Owner-Signature
+> Invariant holds verbatim (a delegation activates, revokes or rekeys only
+> after the OWNER's signature is verified — the schema never substitutes for
+> it, it only refuses malformed input earlier); budget, expiry, rail and
+> delegate-identity checks stay semantic in the handlers; no route, role or
+> ceremony was added or reordered. The body-less revoke-prepare shape dev
+> always accepted is preserved (an optional requestBody validates declared
+> shape OR absent). Nothing else in this document was re-read.
+
 > **Re-verified #3166 (edit budget limits in place):** this diff touched one
 > file in this document's coverage list, `hooks/useDelegationBudget.ts` — it
 > gains `editBudget`, a frontend composition of the EXISTING lifecycle routes

@@ -1,84 +1,42 @@
 /**
- * #3271: a synthetic-but-STRUCTURALLY-VALID `PackedUserOperation` sign_data
- * for tests that only care about the funding-leg / direct-payment control
- * flow, not the exact bytes of a real UserOp. Every field the #3271 binding
- * check (`assertUserOpTypedDataBinding`) inspects is well-formed and
- * self-consistent — domain name/version, sender === verifyingContract, the
- * v0.7 EntryPoint, the full 9-field `PackedUserOperation` type list, and a
- * `payload_hash` recomputed from the same message — so tests built before
- * #3271 keep exercising their own scenario (funding, retries, receipts,
- * MCP handshakes) instead of tripping the new corruption check on a toy
- * 3-field fixture that was never a real UserOp shape.
+ * #3271 / #3283: a structurally valid AND guard-valid `PackedUserOperation`
+ * sign_data for tests that only care about the funding-leg / direct-payment
+ * control flow, not the exact bytes of a real UserOp.
+ *
+ * Since #3283 `HavenClient.signForData` runs the direct-payment allowlist
+ * (`assertBoundDirectPaymentUserOp`) after the #3271 binding check, so a
+ * fixture must be what Haven actually emits: `sender` is the counterfactual
+ * delegate account of the client's own delegate key, and `callData` is
+ * `execute(DelegationManager, 0, redeemDelegations(...))` redeeming one real
+ * delegation. Built by the ONE shared builder
+ * (`test-support/direct-userop.ts`, `@haven_ai/sdk/test-support`) rather than
+ * a second copy — never loosen the guard to keep a toy fixture green.
  *
  * Not a real, on-chain-recorded payload (that role is
  * `direct-payment-userop.json`) — use this where the test's point is NOT the
- * binding check itself.
+ * guard itself.
  */
-import {
-  ENTRY_POINT_V07,
-  HYBRID_DELEGATOR_DOMAIN_NAME,
-  HYBRID_DELEGATOR_DOMAIN_VERSION,
-  PACKED_USER_OPERATION_FIELDS,
-  packedUserOperationHash,
-} from '../userop-binding.js'
+import { addressFromKey } from '../edge-signing.js'
+import { buildBoundDirectUserOp } from '../test-support/direct-userop.js'
+
+/** The delegate key every toy-fixture test file in this package constructs its client with. */
+export const DEFAULT_TEST_DELEGATE_KEY = `0x${'01'.repeat(32)}`
 
 export interface ValidUserOpOverrides {
-  sender?: `0x${string}`
-  nonce?: bigint | string
+  /** The client's delegate key; the UserOp's `sender` is derived from it. */
+  delegateKey?: string
   chainId?: number
-  callData?: `0x${string}`
 }
 
 export interface ValidUserOpSignData {
   hash: `0x${string}`
   signature_scheme: 'eip712_userop'
-  typed_data: {
-    domain: { chainId: number; name: string; version: string; verifyingContract: `0x${string}` }
-    types: { PackedUserOperation: Array<{ name: string; type: string }> }
-    primaryType: 'PackedUserOperation'
-    message: {
-      sender: `0x${string}`
-      nonce: string
-      initCode: `0x${string}`
-      callData: `0x${string}`
-      accountGasLimits: `0x${string}`
-      preVerificationGas: string
-      gasFees: `0x${string}`
-      paymasterAndData: `0x${string}`
-      entryPoint: `0x${string}`
-    }
-  }
+  typed_data: ReturnType<typeof buildBoundDirectUserOp>['typedData']
 }
 
-const ZERO_BYTES32 = `0x${'00'.repeat(32)}` as const
-
-/** Builds a self-consistent `eip712_userop` sign_data payload for test fixtures. */
+/** Builds a self-consistent, guard-valid `eip712_userop` sign_data payload for test fixtures. */
 export function buildValidUserOpSignData(overrides: ValidUserOpOverrides = {}): ValidUserOpSignData {
-  const sender = overrides.sender ?? '0x1111111111111111111111111111111111111111'
-  const chainId = overrides.chainId ?? 8453
-  const typedData = {
-    domain: {
-      chainId,
-      name: HYBRID_DELEGATOR_DOMAIN_NAME,
-      version: HYBRID_DELEGATOR_DOMAIN_VERSION,
-      verifyingContract: sender,
-    },
-    types: {
-      PackedUserOperation: PACKED_USER_OPERATION_FIELDS.map((field) => ({ ...field })),
-    },
-    primaryType: 'PackedUserOperation' as const,
-    message: {
-      sender,
-      nonce: (overrides.nonce ?? 0n).toString(),
-      initCode: '0x' as const,
-      callData: overrides.callData ?? ('0x' as const),
-      accountGasLimits: ZERO_BYTES32,
-      preVerificationGas: '0',
-      gasFees: ZERO_BYTES32,
-      paymasterAndData: '0x' as const,
-      entryPoint: ENTRY_POINT_V07 as `0x${string}`,
-    },
-  }
-  const hash = packedUserOperationHash(typedData)
-  return { hash, signature_scheme: 'eip712_userop', typed_data: typedData }
+  const delegate = addressFromKey(overrides.delegateKey ?? DEFAULT_TEST_DELEGATE_KEY) as `0x${string}`
+  const { typedData, payloadHash } = buildBoundDirectUserOp({ delegate, chainId: overrides.chainId ?? 8453 })
+  return { hash: payloadHash, signature_scheme: 'eip712_userop', typed_data: typedData }
 }

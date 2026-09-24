@@ -30,7 +30,7 @@ covers:
   - packages/mcp/src/consent.ts
   - packages/mcp/src/server.ts
   - packages/signer/src/core.ts
-  - packages/signer/src/settlement-child.ts
+  - packages/sdk/src/settlement-child.ts
   - packages/signer/src/next-step-characterization.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/sdk/src/agent-guidance.ts

@@ -29,6 +29,16 @@
         "types": "./dist/edge.d.cts",
         "default": "./dist/edge.cjs"
       }
+    },
+    "./test-support": {
+      "import": {
+        "types": "./dist/test-support.d.ts",
+        "default": "./dist/test-support.js"
+      },
+      "require": {
+        "types": "./dist/test-support.d.cts",
+        "default": "./dist/test-support.cjs"
+      }
     }
   },
   "files": [

@@ -1683,7 +1683,8 @@ the scheme: `selectX402SettlementScheme` is the single place the preference
 rule lives, and `selectStandardPaymentOption` now skips erc7710-tagged entries
 instead of returning them positionally. [#1454](https://github.com/d-hinders/Haven-AI/issues/1454)
 joins them into `HavenClient.settleX402Erc7710()` — authorize (`payTo` = the
-merchant) → sign the child → settle → the backend-assembled `X-PAYMENT` header,
+merchant) → verify the child against the merchant's 402 and sign it (#3283) →
+settle → the backend-assembled `X-PAYMENT` header,
 which the caller replays on the merchant retry. As of
 [#1456](https://github.com/d-hinders/Haven-AI/issues/1456) the same flow is
 reachable from the **hosted MCP tool surface**, which is the topology a normal

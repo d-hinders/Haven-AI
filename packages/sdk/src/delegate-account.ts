@@ -1,7 +1,9 @@
 /**
  * The counterfactual HybridDeleGator account address for an owner EOA (#3272).
  *
- * `haven_sign`'s unbound branch (`tools.ts`) signs a `PackedUserOperation`
+ * `haven_sign`'s unbound branch (`@haven_ai/signer`'s `tools.ts`) and, since
+ * #3283, `HavenClient.signForData` (`direct-payment-guard.ts`) sign a
+ * `PackedUserOperation`
  * only when its `sender` (== `domain.verifyingContract`) is THIS SIGNER'S OWN
  * delegate account — never any other HybridDeleGator, and never a third
  * party's. Haven provisions that account counterfactually at signup (#970):
@@ -23,7 +25,7 @@
  * kit's pinned environment / `@metamask/delegation-abis`' bytecode export,
  * exactly like `settlement-child.ts` vendors the DelegationManager and caveat
  * enforcer addresses for the same reason. Cross-checked against the kit by
- * `delegate-account.pins.test.ts`, including against the real, on-chain
+ * `packages/signer/src/delegate-account.pins.test.ts`, including against the real, on-chain
  * `direct-payment-userop.json` fixture.
  */
 import {
@@ -97,7 +99,7 @@ const DEPLOY_SALT = pad('0x', { size: 32 })
  * (#970). Pure and offline: no RPC call, no dependency on the account having
  * been deployed. Verified byte-for-byte against
  * `@metamask/smart-accounts-kit`'s `getCounterfactualAccountData` by
- * `delegate-account.pins.test.ts`, including against a real Base Sepolia payload served by the dev backend
+ * `packages/signer/src/delegate-account.pins.test.ts`, including against a real Base Sepolia payload served by the dev backend
  * (`direct-payment-userop.json`).
  */
 export function deriveDelegateAccountAddress(owner: Address): Address {

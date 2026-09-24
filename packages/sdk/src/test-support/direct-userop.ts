@@ -12,17 +12,29 @@
  * bypass, `buildEmptyPermissionContextRedemption` below, kept ONLY to
  * reproduce that exact refusal in a test).
  *
- * Test-only: not reachable from `index.ts` / `cli.ts`, so `tsup` never bundles
- * it into the published package.
+ * Moved here from `@haven_ai/signer` by #3283 so the SDK, the signer,
+ * `@haven_ai/mcp` and `mcp-server` share ONE guard-valid builder. Published
+ * as the `@haven_ai/sdk/test-support` subpath only because a sibling
+ * package's tests cannot import this file by relative path (each package's
+ * `tsc` `rootDir` is its own `src`). Test fixtures, not a signing API:
+ * nothing here signs, and nothing the SDK or signer runs imports it.
  */
-import { encodeAbiParameters, encodeFunctionData, encodePacked, type Address, type Hex } from 'viem'
+import {
+  decodeAbiParameters,
+  decodeFunctionData,
+  encodeAbiParameters,
+  encodeFunctionData,
+  encodePacked,
+  type Address,
+  type Hex,
+} from 'viem'
 import {
   ENTRY_POINT_V07,
   HYBRID_DELEGATOR_DOMAIN_NAME,
   HYBRID_DELEGATOR_DOMAIN_VERSION,
   PACKED_USER_OPERATION_FIELDS,
   packedUserOperationHash,
-} from '@haven_ai/sdk'
+} from '../userop-binding.js'
 import { DELEGATION_MANAGER } from '../settlement-child.js'
 import { deriveDelegateAccountAddress } from '../delegate-account.js'
 import { DELEGATION_TUPLE_COMPONENTS, REDEEM_DELEGATIONS_ABI, SINGLE_DEFAULT_MODE } from '../redemption-guard.js'
@@ -262,4 +274,56 @@ export function buildSelfCallCallData(sender: Address): Hex {
     args: ['0x000000000000000000000000000000000000dEaD' as Address],
   })
   return buildExecuteCallData(sender, 0n, inner)
+}
+
+/**
+ * Re-target a REAL captured direct-payment UserOp (for example
+ * `__fixtures__/direct-payment-userop.json`) at `newSender`: the UserOp's
+ * `sender` / `verifyingContract` and the redeemed delegation's `delegate`
+ * become `newSender`; the delegator, caveats, mode and execution stay the
+ * production bytes. The captured fixture is bound to a delegate whose key is
+ * not in the repository, so a test signs this rebuilt copy with a test key
+ * whose derived account is `newSender` — proving the guard accepts the actual
+ * production shape, not only this file's synthetic one.
+ */
+export function rebuildDirectUserOpForSender(
+  fixtureTypedData: {
+    domain: Record<string, unknown>
+    types: Record<string, unknown>
+    primaryType: string
+    message: Record<string, unknown>
+  },
+  newSender: Address,
+) {
+  const originalCallData = fixtureTypedData.message.callData as Hex
+  const { args: executeArgs } = decodeFunctionData({ abi: EXECUTE_ABI, data: originalCallData })
+  const execution = executeArgs[0] as { target: Address; value: bigint; callData: Hex }
+  const { args: redeemArgs } = decodeFunctionData({ abi: REDEEM_DELEGATIONS_ABI, data: execution.callData })
+  const [permissionContexts, modes, executionCallDatas] = redeemArgs as unknown as [
+    readonly Hex[],
+    readonly Hex[],
+    readonly Hex[],
+  ]
+  const [delegations] = decodeAbiParameters(DELEGATION_ARRAY_PARAM, permissionContexts[0])
+  const adjustedDelegations = (delegations as unknown as Array<Record<string, unknown>>).map((d, i) =>
+    i === 0 ? { ...d, delegate: newSender } : d,
+  )
+  const adjustedPermissionContext = encodeAbiParameters(DELEGATION_ARRAY_PARAM, [adjustedDelegations as never])
+  const adjustedRedeemCallData = encodeFunctionData({
+    abi: REDEEM_DELEGATIONS_ABI,
+    functionName: 'redeemDelegations',
+    args: [[adjustedPermissionContext], modes as Hex[], executionCallDatas as Hex[]],
+  })
+  const adjustedCallData = encodeFunctionData({
+    abi: EXECUTE_ABI,
+    functionName: 'execute',
+    args: [{ target: execution.target, value: execution.value, callData: adjustedRedeemCallData }],
+  })
+  const typedData = {
+    ...fixtureTypedData,
+    domain: { ...fixtureTypedData.domain, verifyingContract: newSender },
+    message: { ...fixtureTypedData.message, sender: newSender, callData: adjustedCallData },
+  }
+  const payloadHash = packedUserOperationHash(typedData as never) as Hex
+  return { typedData, payloadHash }
 }

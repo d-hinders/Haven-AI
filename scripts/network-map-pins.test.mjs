@@ -83,7 +83,7 @@ const sdkClient = bareAliasesFromConditionals(
   'function chainIdFromNetwork',
 )
 const signer = bareAliasesFromConditionals(
-  read('packages/signer/src/settlement-child.ts'),
+  read('packages/sdk/src/settlement-child.ts'),
   'function chainIdForNetwork',
 )
 const supportedKeys = bareKeysFromObjectLiteral(

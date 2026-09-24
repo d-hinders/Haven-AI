@@ -2,12 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { hashMessage, hashTypedData, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import {
+  addressFromKey,
   chainIdForNetwork,
   isSettlementChildTypedData,
   verifySettlementChild,
-} from './settlement-child.js'
-import {
-  addressFromKey,
   buildX402ExpectedMessage,
   buildSweepAuthorizationMessage,
   buildSweepTypedData,
@@ -601,7 +599,7 @@ export const SUPPORTED_SWEEP_BINDING_VERSIONS: readonly number[] = [1]
  *
  * #2347: that word was "authorised" until this change, and the reading was
  * always the correct one — Haven does sign this message. It is now "declared",
- * the word `settlement-child.ts` already uses for this exact binding ("proves
+ * the word the settlement-child verifier (`@haven_ai/sdk`'s `settlement-child.ts`) already uses for this exact binding ("proves
  * Haven *declared* a payload … it says nothing about what the payload MEANS"),
  * because on an agent-facing refusal inside a payment flow the broader word
  * invites the #2334 misreading that Haven is what authorises the spend. It is

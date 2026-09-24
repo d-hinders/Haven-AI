@@ -4,6 +4,10 @@ status: current
 covers:
   - packages/signer/**
   - packages/sdk/src/userop-binding.ts
+  - packages/sdk/src/direct-payment-guard.ts
+  - packages/sdk/src/redemption-guard.ts
+  - packages/sdk/src/delegate-account.ts
+  - packages/sdk/src/settlement-child.ts
   - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/mcp-server/src/boot.ts
   - packages/mcp-server/src/auth.ts
@@ -278,7 +282,10 @@ TO this account by a different account, in `SingleDefault` mode, canonically enc
 empty chain would make the DelegationManager execute as the account itself.
 Anything else is refused with
 `TYPED_DATA_NOT_ALLOWED`. The core's `signDelegationTypedData` itself signs
-verbatim; the allowlist is in the tool layer.
+verbatim; the allowlist is in the tool layer. Since #3283 that allowlist, the
+redemption guard, the account derivation and the settlement-child verifier
+are one implementation in `@haven_ai/sdk` (imported here from
+`@haven_ai/sdk/edge`), which the SDK's own `HavenClient.signForData` runs too.
 
 **An over-budget direct payment is DECLINED, not queued** (#2130). The old text
 here said the result carries `payload_hash: null` and told the agent to "wait

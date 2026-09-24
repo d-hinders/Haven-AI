@@ -17,7 +17,7 @@ export {
  * offline, without depending on `@metamask/smart-accounts-kit` (a
  * devDependency here) at runtime.
  */
-export { deriveDelegateAccountAddress } from './delegate-account.js'
+export { deriveDelegateAccountAddress } from '@haven_ai/sdk/edge'
 
 export {
   signerCapabilityAdvertisement,

@@ -1,7 +1,10 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: { index: 'src/index.ts', edge: 'src/edge.ts' },
+  // #3283: `test-support` ships the ONE guard-valid direct-payment UserOp
+  // builder the signer, `@haven_ai/mcp` and `mcp-server` tests share — test
+  // fixtures, never imported by anything the SDK or signer runs.
+  entry: { index: 'src/index.ts', edge: 'src/edge.ts', 'test-support': 'src/test-support/direct-userop.ts' },
   format: ['esm', 'cjs'],
   dts: true,
   clean: true,

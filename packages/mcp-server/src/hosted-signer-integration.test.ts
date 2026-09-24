@@ -37,7 +37,12 @@ import { z } from 'zod/v3'
 import { HavenClient, buildX402ExpectedMessage, packedUserOperationHash } from '@haven_ai/sdk'
 import { privateKeyToAccount } from 'viem/accounts'
 import { hashTypedData, recoverTypedDataAddress } from 'viem'
-import { decodeAbiParameters, encodeAbiParameters, decodeFunctionData, encodeFunctionData } from 'viem'
+import { DELEGATION_MANAGER } from '@haven_ai/sdk/edge'
+import {
+  buildBoundRedeemDelegationsCallData,
+  buildExecuteCallData,
+  rebuildDirectUserOpForSender,
+} from '@haven_ai/sdk/test-support'
 import {
   createEdgeSigner,
   createToolHandlers as createSignerHandlers,
@@ -47,136 +52,38 @@ import {
 } from '@haven_ai/signer'
 import directPaymentUserOpFixture from '../../sdk/src/__fixtures__/direct-payment-userop.json' with { type: 'json' }
 
-/** DelegationManager — reused from `@haven_ai/signer`'s own pin (`settlement-child.ts`). */
-const DELEGATION_MANAGER = '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3' as const
-
-const EXECUTE_ABI = [
-  {
-    type: 'function', name: 'execute',
-    inputs: [{ name: '_execution', type: 'tuple', components: [
-      { name: 'target', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'callData', type: 'bytes' },
-    ] }],
-    outputs: [], stateMutability: 'payable',
-  },
-] as const
-
-const REDEEM_DELEGATIONS_ABI = [
-  {
-    type: 'function', name: 'redeemDelegations',
-    inputs: [
-      { name: '_permissionContexts', type: 'bytes[]' },
-      { name: '_modes', type: 'bytes32[]' },
-      { name: '_executionCallDatas', type: 'bytes[]' },
-    ],
-    outputs: [], stateMutability: 'nonpayable',
-  },
-] as const
-
 /**
- * #3272 (B1): the `Delegation`/`Caveat` ABI tuple, vendored the same way
- * `@haven_ai/signer`'s `redemption-guard.ts` does (`@metamask/delegation-abis`
- * `IDelegationManager`, a devDependency there — not a dependency of this
- * package at all; these fixtures only need the SHAPE, never the kit).
- */
-const DELEGATION_TUPLE_COMPONENTS = [
-  { name: 'delegate', type: 'address' },
-  { name: 'delegator', type: 'address' },
-  { name: 'authority', type: 'bytes32' },
-  { name: 'caveats', type: 'tuple[]', components: [
-    { name: 'enforcer', type: 'address' },
-    { name: 'terms', type: 'bytes' },
-    { name: 'args', type: 'bytes' },
-  ] },
-  { name: 'salt', type: 'uint256' },
-  { name: 'signature', type: 'bytes' },
-] as const
-const DELEGATION_ARRAY_PARAM = [{ type: 'tuple[]', components: DELEGATION_TUPLE_COMPONENTS }] as const
-/** `ExecutionMode.SingleDefault` — all-zero `bytes32`. */
-const SINGLE_DEFAULT_MODE = `0x${'00'.repeat(32)}` as const
-
-/**
- * #3272 (B1): a real-shaped, BOUND `execute(DelegationManager, 0,
+ * #3272 (B1) / #3283: a real-shaped, BOUND `execute(DelegationManager, 0,
  * redeemDelegations([permissionContext], [SingleDefault], [execution]))` —
  * ONE non-empty `Delegation` (`delegate` = `sender`, `delegator` a distinct
  * treasury address), the only shape `haven_sign`'s unbound branch allows
- * through since the B1 fix (an EMPTY permission context is exactly the
- * bypass that fix closes — MetaMask's DelegationManager treats it as
- * self-authorised). `bigBlob` inside the caveat's `terms` keeps this the same
+ * through. `bigBlob` inside the caveat's `terms` keeps this the same
  * multi-KB size class REALISTIC_TYPED_DATA existed to exercise (#1255),
  * carried inside a well-formed field instead of raw bytes with no shape.
+ * Built by the ONE shared builder (`@haven_ai/sdk/test-support`).
  */
 function buildRealisticBoundCallData(sender: `0x${string}`): `0x${string}` {
   const bigBlob = (`0x${'ab'.repeat(4000)}`) as `0x${string}`
-  const delegation = {
-    delegate: sender,
-    delegator: '0x98989898989898989898989898989898989898De' as `0x${string}`,
-    authority: `0x${'ff'.repeat(32)}` as `0x${string}`,
-    caveats: [{ enforcer: '0x1046bb45C8d673d4ea75321280DB34899413c069' as `0x${string}`, terms: bigBlob, args: '0x' as `0x${string}` }],
-    salt: 1n,
-    signature: (`0x${'ab'.repeat(65)}`) as `0x${string}`,
-  }
-  const permissionContext = encodeAbiParameters(DELEGATION_ARRAY_PARAM, [[delegation]])
-  const executionCallData = encodeFunctionData({
-    abi: [{ type: 'function', name: 'transfer', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }], stateMutability: 'nonpayable' }] as const,
-    functionName: 'transfer',
-    args: ['0x98ffBf30459a98FD80fAce18f519967769641F76', 10000n],
-  })
-  const inner = encodeFunctionData({
-    abi: REDEEM_DELEGATIONS_ABI,
-    functionName: 'redeemDelegations',
-    args: [[permissionContext], [SINGLE_DEFAULT_MODE], [executionCallData]],
-  })
-  return encodeFunctionData({
-    abi: EXECUTE_ABI,
-    functionName: 'execute',
-    args: [{ target: DELEGATION_MANAGER, value: 0n, callData: inner }],
-  })
+  return buildExecuteCallData(
+    DELEGATION_MANAGER as `0x${string}`,
+    0n,
+    buildBoundRedeemDelegationsCallData({
+      delegate: sender,
+      caveats: [{ enforcer: '0x1046bb45C8d673d4ea75321280DB34899413c069', terms: bigBlob, args: '0x' }],
+    }),
+  )
 }
 
 /**
  * #3272 (S2): re-derive the REAL captured fixture
  * (`packages/sdk/src/__fixtures__/direct-payment-userop.json`, a dev-backend
- * redemption on Base Sepolia) for a DIFFERENT sender — swapping `sender` /
- * `domain.verifyingContract` and the leaf delegation's `delegate` field to
- * `newSender`, and leaving every other real byte (the delegator, caveats,
- * salt, signature, the ERC-20 transfer execution) untouched. Proves the
+ * redemption on Base Sepolia) for a DIFFERENT sender, leaving every other
+ * real byte untouched — the shared `rebuildDirectUserOpForSender`. Proves the
  * allowlist accepts the actual production shape, not just this file's own
  * synthetic one.
  */
 function rebuildRealFixtureForSender(newSender: `0x${string}`) {
-  const fixtureTypedData = directPaymentUserOpFixture.typed_data as {
-    domain: Record<string, unknown>
-    types: Record<string, unknown>
-    primaryType: string
-    message: Record<string, unknown>
-  }
-  const originalCallData = fixtureTypedData.message.callData as `0x${string}`
-  const { args: executeArgs } = decodeFunctionData({ abi: EXECUTE_ABI, data: originalCallData })
-  const execution = executeArgs[0] as { target: `0x${string}`; value: bigint; callData: `0x${string}` }
-  const { args: redeemArgs } = decodeFunctionData({ abi: REDEEM_DELEGATIONS_ABI, data: execution.callData })
-  const [permissionContexts, modes, executionCallDatas] = redeemArgs as [readonly `0x${string}`[], readonly `0x${string}`[], readonly `0x${string}`[]]
-  const [delegations] = decodeAbiParameters(DELEGATION_ARRAY_PARAM, permissionContexts[0])
-  const adjustedDelegations = (delegations as unknown as Array<Record<string, unknown>>).map((d, i) =>
-    i === 0 ? { ...d, delegate: newSender } : d,
-  )
-  const adjustedPermissionContext = encodeAbiParameters(DELEGATION_ARRAY_PARAM, [adjustedDelegations as never])
-  const adjustedRedeemCallData = encodeFunctionData({
-    abi: REDEEM_DELEGATIONS_ABI,
-    functionName: 'redeemDelegations',
-    args: [[adjustedPermissionContext], modes as `0x${string}`[], executionCallDatas as `0x${string}`[]],
-  })
-  const adjustedCallData = encodeFunctionData({
-    abi: EXECUTE_ABI,
-    functionName: 'execute',
-    args: [{ target: execution.target, value: execution.value, callData: adjustedRedeemCallData }],
-  })
-  const typedData = {
-    ...fixtureTypedData,
-    domain: { ...fixtureTypedData.domain, verifyingContract: newSender },
-    message: { ...fixtureTypedData.message, sender: newSender, callData: adjustedCallData },
-  }
-  const payloadHash = packedUserOperationHash(typedData)
-  return { typedData, payloadHash }
+  return rebuildDirectUserOpForSender(directPaymentUserOpFixture.typed_data, newSender)
 }
 import { createToolHandlers as createHostedHandlers, type ToolPayload } from './tools.js'
 import { createHostedHavenClient } from './server.js'

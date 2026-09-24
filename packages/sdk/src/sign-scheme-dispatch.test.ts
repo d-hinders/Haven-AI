@@ -3,11 +3,14 @@
  * so a caller never has to know which rail an account is on. Tests the dispatch
  * in isolation against the two real signers.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ethers } from 'ethers'
 import { HavenClient } from './client.js'
-import { signHash } from './signer.js'
+import { signHash, signSettlementDelegationTypedData } from './signer.js'
 import { HavenSigningError } from './types.js'
+import { deriveDelegateAccountAddress } from './delegate-account.js'
+import { HavenTypedDataRefusedError } from './direct-payment-guard.js'
+import { CAVEAT_ENFORCERS, ROOT_AUTHORITY, type SettlementChildExpectation } from './settlement-child.js'
 // #1452: a REAL buildSettlementDelegation payload, not a hand-written object.
 // Generated from packages/backend/src/modules/x402/x402-delegation.ts — see the
 // fixture's own README note. A hand-written fixture that drifted from the
@@ -28,9 +31,43 @@ function client() {
 function signFor(
   c: HavenClient,
   signData: { hash: string; signature_scheme?: string; typed_data?: unknown },
+  expectation?: SettlementChildExpectation,
 ) {
-  return (c as unknown as { signForData(d: unknown): Promise<string> }).signForData(signData)
+  return (
+    c as unknown as { signForData(d: unknown, e?: SettlementChildExpectation): Promise<string> }
+  ).signForData(signData, expectation)
 }
+
+/**
+ * #3283: the fixture child re-delegated FROM this test key's own account —
+ * the only child `signForData` will now sign. The real fixture's delegator is
+ * a stand-in (`0x1111…`), which the new delegator check correctly refuses.
+ */
+const OWN_ACCOUNT = deriveDelegateAccountAddress(DELEGATE.address as `0x${string}`)
+function ownChild(): typeof SETTLEMENT_PAYLOAD {
+  const td = JSON.parse(JSON.stringify(SETTLEMENT_PAYLOAD)) as typeof SETTLEMENT_PAYLOAD
+  td.message.delegator = OWN_ACCOUNT
+  return td
+}
+
+/** What the merchant's 402 asked for — the fixture's own values, not invented ones. */
+const EXPECTATION: SettlementChildExpectation = {
+  merchantTo: '0x3333333333333333333333333333333333333333',
+  amount: '1000',
+  asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+  chainId: 84532,
+  redeemers: ['0x4444444444444444444444444444444444444444'],
+}
+
+/** The fixture's expiry is a fixed timestamp (2026-08-27); freeze the clock inside its window. */
+const FIXTURE_EXPIRY_SEC = 0x6a80709b
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime((FIXTURE_EXPIRY_SEC - 60) * 1000)
+})
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('sign_data.signature_scheme dispatch (#776)', () => {
   // The legacy AllowanceModule rail — raw ECDSA over the bare hash when no
@@ -56,24 +93,22 @@ describe('sign_data.signature_scheme dispatch (#776)', () => {
   })
 
   it("'eip712_delegation' signs the settlement child, recovering to the delegate", async () => {
-    const sig = await signFor(client(), {
-      hash: HASH,
-      signature_scheme: 'eip712_delegation',
-      typed_data: SETTLEMENT_PAYLOAD,
-    })
+    const child = ownChild()
+    const sig = await signFor(
+      client(),
+      { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: child },
+      EXPECTATION,
+    )
 
-    // The signature must recover over the FIXTURE's domain/types/message — not
+    // The signature must recover over the CHILD's domain/types/message — not
     // over `hash`. If the dispatch quietly fell through to signHash, this is
     // the assertion that catches it.
-    const types = { ...(SETTLEMENT_PAYLOAD.types as Record<string, unknown>) }
+    const types = { ...(child.types as Record<string, unknown>) }
     delete types.EIP712Domain
-    const recovered = ethers.verifyTypedData(
-      SETTLEMENT_PAYLOAD.domain as never,
-      types as never,
-      SETTLEMENT_PAYLOAD.message as never,
-      sig,
-    )
+    const recovered = ethers.verifyTypedData(child.domain as never, types as never, child.message as never, sig)
     expect(recovered.toLowerCase()).toBe(DELEGATE.address.toLowerCase())
+    // …and it is exactly the settlement primitive's signature over that child.
+    expect(sig).toBe(await signSettlementDelegationTypedData(DELEGATE_KEY, child as never))
   })
 
   it("'eip712_delegation' produces the exact expected signature (golden value)", async () => {
@@ -102,11 +137,34 @@ describe('sign_data.signature_scheme dispatch (#776)', () => {
       ),
     ).toBe(EXPECTED_DIGEST)
 
-    const sig = await signFor(client(), {
-      hash: HASH,
-      signature_scheme: 'eip712_delegation',
-      typed_data: SETTLEMENT_PAYLOAD,
-    })
+    // #3283: signForData now signs only a child delegated by this key's own
+    // account, which the real fixture (delegator `0x1111…`) is not, so the
+    // golden anchor pins the settlement primitive signForData dispatches to
+    // (asserted equal to it in the test above) over the unchanged fixture.
+    const sig = await signSettlementDelegationTypedData(DELEGATE_KEY, SETTLEMENT_PAYLOAD as never)
+    expect(sig).toBe(EXPECTED_SIGNATURE)
+  })
+
+  it("'eip712_delegation' through signForData produces the exact expected signature over the own-account child (golden value, #3283)", async () => {
+    // The end-to-end anchor for the dispatch path the test above reaches only
+    // by equality with the primitive: digest and signature for ownChild()
+    // under this key, computed once with ethers (independently of the SDK's
+    // viem signer, which agreed) and pinned here.
+    const EXPECTED_DIGEST = '0x0e3948f2f898994805ed052d9995be8cd36f434a8fe56214cee2596497c30025'
+    const EXPECTED_SIGNATURE =
+      '0xa73e91c21fe2895598a00cf14d7d20057282dc5bfeb62910162017c94849a8f4' +
+      '6a0285ff545f668f2e63867fedecb730814ef452cb40c9031e922ee3f96089141c'
+    const child = ownChild()
+    const types = { ...(child.types as Record<string, unknown>) }
+    delete types.EIP712Domain
+    expect(ethers.TypedDataEncoder.hash(child.domain as never, types as never, child.message as never)).toBe(
+      EXPECTED_DIGEST,
+    )
+    const sig = await signFor(
+      client(),
+      { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: child },
+      EXPECTATION,
+    )
     expect(sig).toBe(EXPECTED_SIGNATURE)
   })
 
@@ -116,12 +174,83 @@ describe('sign_data.signature_scheme dispatch (#776)', () => {
     // NOT the raw-ECDSA one (computed here with the live EIP-3009 signer)
     // rather than only that it recovers somewhere.
     const bare = signHash(DELEGATE_KEY, HASH)
-    const delegated = await signFor(client(), {
-      hash: HASH,
-      signature_scheme: 'eip712_delegation',
-      typed_data: SETTLEMENT_PAYLOAD,
-    })
+    const delegated = await signFor(
+      client(),
+      { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: ownChild() },
+      EXPECTATION,
+    )
     expect(delegated).not.toBe(bare)
+  })
+
+  // ── #3283 (epic #3284): the child is verified before it is signed ─────────
+
+  it("'eip712_delegation' without an independent expectation is refused — nothing to verify it against", async () => {
+    const attempt = () =>
+      signFor(client(), { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: ownChild() })
+    await expect(attempt()).rejects.toBeInstanceOf(HavenTypedDataRefusedError)
+    await expect(attempt()).rejects.toThrow(/without an independent expectation/)
+  })
+
+  it('refuses a ROOT-authority, caveat-free child delegated by the agent\'s own account (capture test)', async () => {
+    // The capture the issue names: a root grant from the agent's account, no
+    // caveats — whoever redeems it acts as that account. Today it signs.
+    const td = ownChild()
+    td.message.authority = ROOT_AUTHORITY
+    td.message.caveats = []
+    const attempt = () =>
+      signFor(client(), { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: td }, EXPECTATION)
+    await expect(attempt()).rejects.toThrow(/ROOT delegation/)
+    await expect(attempt()).rejects.toBeInstanceOf(HavenTypedDataRefusedError)
+    await expect(attempt()).rejects.toMatchObject({ code: 'TYPED_DATA_NOT_ALLOWED' })
+  })
+
+  it('refuses a ROOT-authority child even when every caveat matches the 402', async () => {
+    const td = ownChild()
+    td.message.authority = ROOT_AUTHORITY
+    await expect(
+      signFor(client(), { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: td }, EXPECTATION),
+    ).rejects.toThrow(/ROOT delegation/)
+  })
+
+  it("refuses a child delegated by an account other than this key's own", async () => {
+    // The unmodified fixture: delegator 0x1111…, not this key's derived account.
+    await expect(
+      signFor(
+        client(),
+        { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: SETTLEMENT_PAYLOAD },
+        EXPECTATION,
+      ),
+    ).rejects.toThrow(/delegated by an account other than this agent's own/)
+  })
+
+  it("refuses a child that pays someone other than the merchant's 402 payTo", async () => {
+    await expect(
+      signFor(
+        client(),
+        { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: ownChild() },
+        { ...EXPECTATION, merchantTo: '0x9999999999999999999999999999999999999999' },
+      ),
+    ).rejects.toThrow(/pays a different address/)
+  })
+
+  it('refuses a child redeemable by facilitators the merchant did not advertise', async () => {
+    await expect(
+      signFor(
+        client(),
+        { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: ownChild() },
+        { ...EXPECTATION, redeemers: ['0x5555555555555555555555555555555555555555'] },
+      ),
+    ).rejects.toThrow(/different facilitators/)
+  })
+
+  it('refuses a child with no facilitator pin when the merchant advertised facilitators', async () => {
+    const td = ownChild()
+    td.message.caveats = td.message.caveats.filter(
+      (c) => c.enforcer.toLowerCase() !== CAVEAT_ENFORCERS.redeemer.toLowerCase(),
+    )
+    await expect(
+      signFor(client(), { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: td }, EXPECTATION),
+    ).rejects.toThrow(/no facilitator pin/)
   })
 
   it("'eip712_delegation' without typed_data throws — never signs the bare hash", async () => {

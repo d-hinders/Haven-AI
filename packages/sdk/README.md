@@ -21,11 +21,16 @@ and managing the account from the shell with `@haven_ai/cli`.
 npm install @haven_ai/sdk@alpha
 ```
 
-The package has two entries. `@haven_ai/sdk` is the full client. `@haven_ai/sdk/edge`
+The package has three entries. `@haven_ai/sdk` is the full client. `@haven_ai/sdk/edge`
 (#3173) is the ethers-free subset the local signer imports — error classes, the
-typed-next-step builder, the x402 message builders, viem-based key helpers — and
-loads in about a third of the time; use it when you need those helpers without
-the HTTP client. A class imported from either entry is the same class.
+typed-next-step builder, the x402 message builders, viem-based key helpers, and
+(#3283) the signing-surface guard: `assertBoundDirectPaymentUserOp`, the
+redemption guard, `deriveDelegateAccountAddress` and `verifySettlementChild` —
+and loads in about a third of the time; use it when you need those helpers
+without the HTTP client. A class imported from either entry is the same class.
+`@haven_ai/sdk/test-support` (#3283) holds test fixture builders shared by
+Haven's own packages; it is not a signing API, nothing at runtime imports it,
+and it carries no semver guarantee.
 
 ## Quick Start
 
@@ -116,9 +121,13 @@ const intent = await haven.createIntent({
 // the account validates the EIP-712 typed data in intent.signData.typed_data,
 // never the bare hash — a signature over signData.hash is rejected on-chain
 // (AA24). Sign that typed data with your delegate key (viem signTypedData),
-// after checking it with assertUserOpTypedDataBinding(typed_data, hash).
-// There is no public HavenClient method for this step yet; pay() does it
-// for you.
+// after checking it with assertUserOpTypedDataBinding(typed_data, hash) AND
+// assertBoundDirectPaymentUserOp(typed_data, yourDelegateAddress) — the
+// first proves the typed data matches the hash, the second that it is your
+// own account redeeming your budget delegation, not a self-call (#3283).
+// There is no public HavenClient method for this step yet; pay() does both
+// for you. HavenClient.sign(hash) and signUserOpTypedDataForDelegation are
+// verbatim primitives: they check nothing.
 const signature = await signTypedDataWithYourDelegateKey(intent.signData.typed_data)
 
 // Step 3: Submit the signature

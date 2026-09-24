@@ -131,6 +131,7 @@ const boundary: ClientBoundary = {
   localImports: [
     './account-reads.js',
     './delegate-sweep.js',
+    './direct-payment-guard.js', // #3283: the signing-surface allowlist signForData runs
     './haven-api-transport.js',
     './mcp-merchant-transport.js',
     './merchant-completion.js',
@@ -446,6 +447,7 @@ describe('HavenClient structural boundary', () => {
       'HavenPaymentStateError',
       'HavenSigningError',
       'HavenTimeoutError',
+      'HavenTypedDataRefusedError', // #3283
       'HavenUnsupportedSignerVersionError',
       'HavenUserOpBindingError', // #3271
       'HavenZeroSettlementHashError',
@@ -456,6 +458,7 @@ describe('HavenClient structural boundary', () => {
       'NEXT_TOOL_SERVER_ROLES', // #3101
       'PACKED_USER_OPERATION_FIELDS', // #3271
       'RECEIPT_VERSION',
+      'ROOT_AUTHORITY', // #3283
       'SIGNER_UPDATE_FALLBACK',
       'SKILL_FOLDER_NAME',
       'SWEEP_BASE_CHAIN_ID',
@@ -464,6 +467,7 @@ describe('HavenClient structural boundary', () => {
       'SWEEP_BASE_USDC_ADDRESS',
       'SignerRefusalCode',
       'TRANSFER_WITH_AUTHORIZATION_TYPES',
+      'TYPED_DATA_NOT_ALLOWED', // #3283
       'X402AlreadySettledError',
       'X402PaymentHeaderValidationError',
       'X402UnexpectedStatusError',
@@ -475,6 +479,7 @@ describe('HavenClient structural boundary', () => {
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
       'addressFromKey',
+      'assertBoundDirectPaymentUserOp', // #3283
       'assertSecureX402RetryTarget', // #3097
       'assertUserOpTypedDataBinding', // #3271
       'buildSweepAuthorizationMessage',
@@ -488,6 +493,7 @@ describe('HavenClient structural boundary', () => {
       'decodeBase64Json',
       'decodeBase64Utf8',
       'defaultNextToolFor', // #3101
+      'deriveDelegateAccountAddress', // #3283
       'discoverMerchantMcpUrl',
       'encodeBase64Json',
       'encodeBase64Utf8',
@@ -525,6 +531,7 @@ describe('HavenClient structural boundary', () => {
       'unsupportedNodeVersionMessage',
       'validateStandardX402PaymentHeader',
       'verifyPaymentReceipt',
+      'verifySettlementChild', // #3283
       'verifySignature',
       'x402AssetTransferMethod',
       'x402AuthorizationAmount',
@@ -600,6 +607,7 @@ describe('HavenClient structural boundary', () => {
       'ReceiptVerification',
       'ResumeAuthorizedX402Input',
       'ResumeX402PaymentInput',
+      'SettlementChildExpectation', // #3283
       'SharedToolKey',
       'SignData',
       'SweepAuthorization',

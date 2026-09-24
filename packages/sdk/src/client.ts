@@ -7,6 +7,12 @@ import {
   verifySignature,
 } from './signer.js'
 import { assertUserOpTypedDataBinding } from './userop-binding.js'
+import {
+  assertBoundDirectPaymentUserOp,
+  assertOwnSettlementChild,
+  HavenTypedDataRefusedError,
+  type SettlementChildExpectation,
+} from './direct-payment-guard.js'
 import type { PaymentReceipt, ReceiptVerification } from './receipt.js'
 import type {
   HavenClientConfig,
@@ -262,7 +268,8 @@ export class HavenClient {
     this.erc7710 = new X402Erc7710({
       delegateKey: this.delegateKey,
       post: (path, body) => this.post(path, body),
-      signForData: (signData) => this.signForData(signData),
+      signForData: (signData, settlementExpectation) =>
+        this.signForData(signData, settlementExpectation),
       getAgent: () => this.getAgent(),
     })
   }
@@ -502,11 +509,14 @@ export class HavenClient {
    * (#834) — the backend refuses those intents with HTTP 410 before any
    * sign_data reaches a client, so encountering it here is a hard error too.
    */
-  private async signForData(signData: {
-    hash: string
-    signature_scheme?: string
-    typed_data?: unknown
-  }): Promise<string> {
+  private async signForData(
+    signData: {
+      hash: string
+      signature_scheme?: string
+      typed_data?: unknown
+    },
+    settlementExpectation?: SettlementChildExpectation,
+  ): Promise<string> {
     if (!this.delegateKey) {
       throw new HavenSigningError(
         'Cannot sign without a delegateKey. Pass the private key in HavenClient config, or sign externally.',
@@ -529,6 +539,16 @@ export class HavenClient {
       // sender, against the v0.7 EntryPoint — a corrupted typed-data payload
       // used to produce a valid-looking signature over the wrong digest.
       assertUserOpTypedDataBinding(signData.typed_data, signData.hash)
+      // #3283 (epic #3284): the binding proves the typed data and hash agree,
+      // but the Haven API response supplies both. Sign only the ONE shape a
+      // direct payment or funding leg is — this key's own account redeeming a
+      // single budget delegation through the DelegationManager — so a
+      // compromised API cannot get a self-call or an empty-context
+      // redemption (account capture) signed. Same check as `haven_sign`.
+      assertBoundDirectPaymentUserOp(
+        signData.typed_data as Record<string, unknown>,
+        this.delegateAddress!,
+      )
       return signUserOpTypedDataForDelegation(this.delegateKey, signData.typed_data as never)
     }
     if (scheme === 'eip712_delegation') {
@@ -543,6 +563,20 @@ export class HavenClient {
           'sign_data.signature_scheme is eip712_delegation but typed_data is missing — refusing to sign the bare hash (the settlement would be rejected on redemption).',
         )
       }
+      // #3283: this signature lets a facilitator pull from the treasury, so
+      // verify the child means what the MERCHANT'S 402 asked for — payee,
+      // amount, token, chain, facilitators, a bounded expiry — and that it is
+      // a re-delegation of this agent's own budget (delegator = this key's
+      // account, never a ROOT grant). Without an expectation there is nothing
+      // Haven did not also write to verify it against, so refuse.
+      if (!settlementExpectation) {
+        throw new HavenTypedDataRefusedError(
+          'Refusing to sign an x402 settlement child without an independent expectation of what ' +
+            "it must pay (the merchant's 402). Pay erc7710 merchants through " +
+            'settleX402Erc7710(), which supplies it.',
+        )
+      }
+      assertOwnSettlementChild(signData.typed_data, settlementExpectation, this.delegateAddress!)
       return signSettlementDelegationTypedData(this.delegateKey, signData.typed_data as never)
     }
     if (scheme === undefined) {

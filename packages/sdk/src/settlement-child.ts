@@ -1,6 +1,11 @@
 /**
  * Independent verification of an erc7710 x402 settlement child (#1455).
  *
+ * Moved from `@haven_ai/signer` into the SDK by #3283 (epic #3284) so the
+ * signer and `HavenClient.signForData` run ONE verifier. The signer checks the
+ * child against the Haven-signed expected context; the SDK checks it against
+ * the merchant's own 402, which Haven does not produce.
+ *
  * WHY THIS EXISTS. `assertExpectedBinding` proves Haven *declared* a payload:
  * the expected context is signed by `HAVEN_X402_BINDING_SIGNER` and commits to
  * the digest of the exact bytes being signed. That is a real property, and it
@@ -20,7 +25,7 @@
  * `@metamask/smart-accounts-kit` as a runtime dependency was the other option
  * and was rejected — this package installs on users' machines. The constants
  * below are snapshot-pinned and cross-checked against the kit by a test
- * (`settlement-child.pins.test.ts`), the same pattern
+ * (`packages/signer/src/settlement-child.pins.test.ts`), the same pattern
  * `packages/core/src/chains.ts` uses against its registry.
  *
  * EXTRA CAVEATS ARE ALLOWED, and that is deliberate — verified, not assumed
@@ -47,7 +52,7 @@
  * is the correct outcome and is pinned by a test.
  */
 
-import { HavenSigningError } from '@haven_ai/sdk/edge'
+import { HavenSigningError } from './types.js'
 
 /** DelegationManager, the EIP-712 `verifyingContract` for a delegation. */
 export const DELEGATION_MANAGER = '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3'
@@ -111,7 +116,7 @@ function refuse(what: string, detail: string): never {
   throw new HavenSigningError(
     `Refusing to sign the x402 settlement child: ${what}. ${detail} ` +
       'The signature on this child is what lets a merchant pull from the treasury, so it is ' +
-      'verified locally against the Haven-signed expected context rather than trusted.',
+      'verified locally against an expectation Haven cannot rewrite, rather than trusted.',
   )
 }
 
@@ -142,7 +147,24 @@ export interface SettlementChildExpectation {
   chainId: number
   /** ISO timestamp; the child must not outlive it. */
   expiresAt?: string
+  /**
+   * #3283 / #3281 criterion 8: the signer's OWN derived delegate account.
+   * When set, the child's `delegator` must be exactly this account — the
+   * child is a re-delegation of this agent's budget, never a grant from some
+   * other account the key happens to control.
+   */
+  delegatorAccount?: string
+  /**
+   * #3283: the facilitator addresses the merchant's 402 advertised
+   * (`extra.facilitatorAddresses`). When non-empty, the child must carry a
+   * `RedeemerEnforcer` caveat pinning exactly this set — otherwise the child
+   * is a bearer instrument any party could redeem within its bounds.
+   */
+  redeemers?: readonly string[]
 }
+
+/** `@metamask/delegation-core`'s `ROOT_AUTHORITY` — a delegation chained to nothing. */
+export const ROOT_AUTHORITY = `0x${'ff'.repeat(32)}`
 
 /**
  * Verify a settlement child implements what the expected context declares.
@@ -173,6 +195,37 @@ export function verifySettlementChild(
       'it is scoped to the wrong chain',
       `The expected context says chain ${expected.chainId}; the child says ${typedData.domain?.chainId}.`,
     )
+  }
+
+  // ── Authority: a re-delegation of the budget, never a root grant ──────────
+  // A settlement child's `authority` is the hash of the agent's budget
+  // delegation (`parentDelegation` in the backend's builder), so the
+  // DelegationManager meters the spend through that budget's enforcers. A
+  // ROOT authority would instead make the child a grant straight from its
+  // `delegator` — the agent's own account — to whoever redeems it (#3283 /
+  // #3281 criterion 8). Any non-ROOT authority must resolve on-chain to a
+  // delegation made TO this account, which only the account owner can sign,
+  // so the budget's caveats still bound it; the exact parent hash is not
+  // knowable here without trusting Haven for it, and is not needed for that.
+  const authority = typedData.message?.authority
+  if (typeof authority !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(authority)) {
+    refuse('its authority is not a 32-byte delegation hash', `Got ${String(authority)}.`)
+  }
+  if (authority.toLowerCase() === ROOT_AUTHORITY) {
+    refuse(
+      'it is a ROOT delegation, not a re-delegation of the agent budget',
+      "A root child would grant its redeemer authority over the agent's own account instead " +
+        "of spending through the budget delegation's enforcers.",
+    )
+  }
+  if (expected.delegatorAccount !== undefined) {
+    const delegator = typedData.message?.delegator
+    if (typeof delegator !== 'string' || !same(delegator, expected.delegatorAccount)) {
+      refuse(
+        "it is delegated by an account other than this agent's own",
+        `Expected delegator ${expected.delegatorAccount}; the child names ${String(delegator)}.`,
+      )
+    }
   }
 
   const caveats = (typedData.message?.caveats as Caveat[] | undefined) ?? []
@@ -253,6 +306,31 @@ export function verifySettlementChild(
       `Expiry is ${beforeThreshold - nowSec}s out; the ceiling is ${MAX_SETTLEMENT_WINDOW_SECONDS}s.`,
     )
   }
+  // ── Facilitator pin: `RedeemerEnforcer` ───────────────────────────────────
+  // terms = the allowed redeemers, 20 bytes each, packed.
+  if (expected.redeemers && expected.redeemers.length > 0) {
+    const redeemer = findCaveat(caveats, CAVEAT_ENFORCERS.redeemer)
+    if (!redeemer) {
+      refuse(
+        'it has no facilitator pin',
+        'The merchant advertised facilitators, so the child must be redeemable only by them.',
+      )
+    }
+    const body = hex(redeemer.terms)
+    if (body.length === 0 || body.length % 40 !== 0) {
+      refuse('its facilitator pin is malformed', 'The redeemer terms are not a list of addresses.')
+    }
+    const pinned = new Set<string>()
+    for (let i = 0; i < body.length; i += 40) pinned.add(body.slice(i, i + 40))
+    const wanted = new Set(expected.redeemers.map((a) => hex(a)))
+    if (pinned.size !== wanted.size || [...wanted].some((a) => !pinned.has(a))) {
+      refuse(
+        'it is redeemable by different facilitators than the merchant advertised',
+        `Expected ${[...wanted].map((a) => `0x${a}`).join(', ')}; the child pins ${[...pinned].map((a) => `0x${a}`).join(', ')}.`,
+      )
+    }
+  }
+
   if (expected.expiresAt) {
     const declared = Math.floor(Date.parse(expected.expiresAt) / 1000)
     if (Number.isFinite(declared) && beforeThreshold > declared) {

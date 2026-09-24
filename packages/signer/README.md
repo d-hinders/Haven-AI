@@ -115,9 +115,9 @@ signature and no audit entry (`TYPED_DATA_NOT_ALLOWED`, or
 refusal for an unbound `Delegation`): the primary type is
 `PackedUserOperation`; it passes the #3271 binding check below; its chain has pinned delegation contracts (Base, Base Sepolia); its
 sender is THIS signer's own delegate account (the counterfactual
-HybridDeleGator for the delegate key, derived offline — `src/delegate-account.ts`);
+HybridDeleGator for the delegate key, derived offline — `delegate-account.ts` in `@haven_ai/sdk`);
 and its `callData` is a single `execute` to the DelegationManager calling
-`redeemDelegations`, whose arguments are decoded too (`src/redemption-guard.ts`):
+`redeemDelegations`, whose arguments are decoded too (`redemption-guard.ts` in `@haven_ai/sdk`):
 exactly one delegation (a single grant, never an empty or multi-link chain)
 made to this signer's own account by a different account, `SingleDefault` mode, and canonical
 encoding at every level. The argument check matters: an EMPTY permission
@@ -126,7 +126,10 @@ which would reach `transferOwnership`. A delegate-wallet `TransferWithAuthorizat
 a UserOp that calls the account itself (`transferOwnership`, `updateSigners`,
 `upgradeToAndCall`), a UserOp for another account, and arbitrary typed data are
 all refused. The audit log records the EIP-712 digest actually signed, not the
-caller's `payload_hash`.
+caller's `payload_hash`. Since #3283 the check itself is `@haven_ai/sdk`'s
+`assertBoundDirectPaymentUserOp` (with the redemption guard, the account
+derivation and the settlement-child verifier), which this signer imports and
+which `HavenClient.signForData` runs as well — one implementation.
 
 **Direct payments (#3271).** A direct payment (`POST /payments`, surfaced as
 `haven_send` / `haven_pay`) is signed as the account's EIP-712

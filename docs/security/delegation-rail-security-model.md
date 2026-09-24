@@ -4,9 +4,13 @@ status: current
 contract: true
 covers:
   - packages/backend/src/middleware/owner-cli.ts
-  - packages/signer/src/delegate-account.ts
+  - packages/sdk/src/delegate-account.ts
+  - packages/sdk/src/redemption-guard.ts
+  - packages/sdk/src/direct-payment-guard.ts
+  - packages/sdk/src/settlement-child.ts
+  - packages/sdk/src/client.ts
+  - packages/sdk/src/x402-erc7710.ts
   - packages/signer/src/tools.ts
-  - packages/signer/src/redemption-guard.ts
   - packages/signer/src/core.ts
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/routes/auth.ts
@@ -1339,7 +1343,7 @@ layer signs only these shapes, and refuses everything else with
   - its chain has pinned delegation contracts (Base, Base Sepolia);
   - its sender is the signer's OWN delegate account: the counterfactual
     HybridDeleGator for the delegate key, derived offline by CREATE2 in
-    `packages/signer/src/delegate-account.ts` and pinned to the MetaMask kit;
+    `packages/sdk/src/delegate-account.ts` and pinned to the MetaMask kit;
   - its `callData` is a single `execute` to the DelegationManager calling
     `redeemDelegations`, with exactly one delegation: a single grant made to
     this account by a different account, in
@@ -1353,6 +1357,26 @@ layer signs only these shapes, and refuses everything else with
 The core's `signDelegationTypedData` remains a verbatim primitive for embedders.
 The allowlist lives in the tool layer, and an embedder calling the core
 directly owns that check.
+
+**The SDK runs the same check (#3283, epic #3284).** The allowlist, the
+redemption guard, the delegate-account derivation and the settlement-child
+verifier now live in `@haven_ai/sdk` (`direct-payment-guard.ts`,
+`redemption-guard.ts`, `delegate-account.ts`, `settlement-child.ts`), and the
+signer imports them, so there is one implementation. `HavenClient.signForData`,
+the SDK's in-process signing used by `pay()`, the x402 funding leg and erc7710
+settlement, now refuses:
+- any UserOp outside the direct-payment shape above;
+- a settlement child that fails verification against the merchant's own 402:
+  payee, amount, token, chain, the advertised facilitators, and a bounded
+  expiry;
+- a ROOT-authority child, or one delegated by any account other than the key's
+  own;
+- a child it has no such expectation for.
+
+Before this, a compromised Haven API alone could get an SDK-embedded agent to
+sign an account-capturing payload. `HavenClient.sign(hash)` and the exported
+signing primitives stay verbatim, for embedders. The epic rewrites this section
+once, against its fixed threat model, when its last slice lands.
 
 **The blast-radius questions #3272 asked, and where each now stands:**
 

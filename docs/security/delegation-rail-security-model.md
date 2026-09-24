@@ -1426,3 +1426,26 @@ once, against its fixed threat model, when its last slice lands.
 > **Scope of this section:** written for #3272 against the signer at that
 > change. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
+> this diff renames backend-internal identifiers to account vocabulary in the
+> files this document covers: `userSafeId` → `accountId`
+> (`routes/agent-delegations.ts`, `routes/hybrid-accounts.ts`,
+> `infra/repositories/{hybrid-signers}.ts`,
+> `rails/{hybrid-signer-actions,hybrid-account-config}.ts`), `safes` /
+> `allSafes` / `ownedSafes` and the singular `safe` loop local → account
+> vocabulary (`routes/transactions.ts`, one comment in
+> `routes/user-accounts.ts`, prose and locals in
+> `infra/repositories/{smart-accounts,transaction-history}.ts`,
+> comments in `modules/accounts/mainnet-gate.ts`), the `has_bound_safe` →
+> `has_bound_account` SQL ALIAS and `AgentAuthRow` field
+> (`infra/repositories/agents.ts`, `middleware/agentAuth.ts`), and
+> `safeExecutionRail` → `executionRail` (the `routes/payments.ts` comment).
+> Re-read against the diff: every query keeps its predicates and tenant scope,
+> no statement changes target, no route, handler or signing path moves, the
+> `=== false` fail-closed check on the bound-account alias and the `?? true`
+> legacy fallback keep their semantics, and the retired-name refusals plus the
+> `/user/safes*` tombstone contract are untouched. Nothing this document
+> claims about authority, custody or signing moves. Scope of this note: those
+> identifier renames in the files named. Nothing else in this document was
+> re-verified.

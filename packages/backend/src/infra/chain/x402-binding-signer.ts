@@ -61,14 +61,28 @@ if (EMIT_PAYER_CONTEXT) {
 }
 
 /**
+ * #3272 (owner decision): Haven's x402 expected-context v1 — a bare-hash
+ * binding format from the retired Safe rail, with no typed-data commitment —
+ * is dropped. The signer accepts only versions [2, 3]. `X402ExpectedContext`
+ * (from `@haven_ai/sdk`) still types `typedDataHash` as optional for wire
+ * compatibility with older stored rows the SDK's own shape still describes,
+ * but nothing that reaches `signX402ExpectedContext` may omit it: this local
+ * type re-requires the field, so a v1-shaped call site fails to type-check
+ * here even though the shared SDK type would allow it.
+ */
+type X402ExpectedContextV2Plus = Omit<X402ExpectedContext, 'typedDataHash'> & {
+  typedDataHash: string
+}
+
+/**
  * Sign an x402 "expected context" with the dedicated binding-signer key, so
  * the edge signer can verify it against `HAVEN_X402_BINDING_SIGNER`.
  *
  * Deliberately never falls back to `RELAYER_PRIVATE_KEY` — the binding
  * signer must be a dedicated key, not the relayer's.
  */
-export async function signX402ExpectedContext(context: X402ExpectedContext): Promise<{
-  version: 1 | 2 | 3
+export async function signX402ExpectedContext(context: X402ExpectedContextV2Plus): Promise<{
+  version: 2 | 3
   message: string
   signature: string
   signer: string
@@ -81,13 +95,24 @@ export async function signX402ExpectedContext(context: X402ExpectedContext): Pro
         'so that the edge signer can verify it against HAVEN_X402_BINDING_SIGNER.',
     )
   }
+  // #3272: runtime refusal alongside the type-level requirement above — a
+  // caller that reaches in with `as` or plain JS still cannot mint a version-1
+  // (bare-hash) context. Haven never emits that shape again.
+  if (!context.typedDataHash) {
+    throw new Error(
+      'signX402ExpectedContext requires typedDataHash (#3272): the x402 expected-context v1 ' +
+        'format — a bare-hash binding with no typed-data commitment — is retired. The signer ' +
+        'accepts only versions 2 and 3, both of which commit to a typed-data digest.',
+    )
+  }
   const wallet = new ethers.Wallet(privateKey)
   const message = buildX402ExpectedMessage(context)
   return {
-    // Derived from the context, never chosen here: a v2 context carries a
-    // typed-data commitment and a v1 one does not. Announcing a version the
-    // message does not match is precisely the downgrade the signer rejects.
-    version: (context.payerDelegate ? 3 : context.typedDataHash ? 2 : 1) as 1 | 2 | 3,
+    // Derived from the context, never chosen here: a v3 context also carries
+    // the payer identity, a v2 one only the typed-data commitment above.
+    // Announcing a version the message does not match is precisely the
+    // downgrade the signer rejects.
+    version: context.payerDelegate ? 3 : 2,
     message,
     signature: await wallet.signMessage(message),
     signer: wallet.address,

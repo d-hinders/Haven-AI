@@ -428,3 +428,27 @@ export function typedDataDigest(typedData: unknown): string | undefined {
     )
   }
 }
+
+/**
+ * `typedDataDigest` above returns `undefined` only for a falsy/non-object
+ * input — defensive against a caller mistake, never expected once real typed
+ * data has been built. Every delegation-rail x402 expected-context builder
+ * (#3272: Haven's internal expected-context v1, a bare-hash binding format
+ * from the retired Safe rail, is dropped — the signer accepts only versions
+ * [2, 3]) needs a committed digest, not a maybe. Asserting it here, at the one
+ * seam all three builders (the erc7710 settlement leg, the EIP-3009 funding
+ * leg, and idempotent-replay/sign-context rebuild) share, turns a
+ * hypothetical missing digest into a loud failure instead of a silent
+ * downgrade to the retired v1 shape at `signX402ExpectedContext`.
+ */
+export function requireTypedDataDigest(typedData: unknown, label: string): string {
+  const digest = typedDataDigest(typedData)
+  if (!digest) {
+    throw new Error(
+      `Failed to compute the typed-data digest for the ${label} x402 expected context — ` +
+        'no signable EIP-712 payload was available. Refusing to sign a version-1 ' +
+        '(bare-hash, no typedDataHash) expected context: that format is retired (#3272).',
+    )
+  }
+  return digest
+}

@@ -13,7 +13,7 @@ import { delegationSigningPayload } from '../../rails/delegation-policy.js'
 import { userOpTypedData } from '../../rails/delegation-rail.js'
 import { computeHybridAccountAddress } from '../../rails/hybrid-provisioning.js'
 import { deserializeUserOp } from '../../rails/execution-rail.js'
-import { typedDataDigest } from './x402-delegation.js'
+import { requireTypedDataDigest } from './x402-delegation.js'
 import { existingX402IntentMismatch, x402MetadataNetwork } from './helpers.js'
 import type { X402HandlerResult } from './types.js'
 
@@ -201,7 +201,7 @@ export async function rebuildDelegationSignContext(
   // #1138: a replay re-issues the SAME sign_data, so it must re-issue
   // the same commitment — otherwise a replayed delegation-rail intent
   // would hand back a v1 binding the signer refuses to sign under.
-  const typedDataHash = typedDataDigest(sign_data.typed_data)
+  const typedDataHash = requireTypedDataDigest(sign_data.typed_data, 'replay/sign-context rebuild')
   const replayExpectedAuth = await signX402ExpectedContext({
     paymentId: existing.id as string,
     payloadHash: existing.sign_hash as string,

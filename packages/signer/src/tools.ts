@@ -11,10 +11,11 @@ import {
   isPackedUserOperationTypedData,
   type X402PaymentRequired,
 } from '@haven_ai/sdk/edge'
-import { decodeFunctionData, hashTypedData } from 'viem'
+import { decodeFunctionData, encodeFunctionData, hashTypedData } from 'viem'
 import { z } from 'zod/v3'
 import { DELEGATION_MANAGER, isSettlementChildTypedData } from './settlement-child.js'
 import { deriveDelegateAccountAddress } from './delegate-account.js'
+import { assertRedeemsOwnBudgetDelegation } from './redemption-guard.js'
 import { HavenBareHashRefusedError } from './bare-hash.js'
 import {
   appendSigningAuditEntry,
@@ -140,21 +141,6 @@ const EXECUTE_ABI = [
   },
 ] as const
 
-/** `DelegationManager.redeemDelegations(bytes[],bytes32[],bytes[])` — selector `0xcef6d209`. */
-const REDEEM_DELEGATIONS_ABI = [
-  {
-    type: 'function',
-    name: 'redeemDelegations',
-    inputs: [
-      { name: '_permissionContexts', type: 'bytes[]' },
-      { name: '_modes', type: 'bytes32[]' },
-      { name: '_executionCallDatas', type: 'bytes[]' },
-    ],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-] as const
-
 /**
  * The content + provenance allowlist (#3272 criteria 1–2). Call ONLY after
  * `assertUserOpTypedDataBinding` has already proven `typedData` is a
@@ -168,6 +154,20 @@ function assertBoundDirectPaymentUserOp(
 ): void {
   const domain = (typedData.domain ?? {}) as Record<string, unknown>
   const message = (typedData.message ?? {}) as Record<string, unknown>
+
+  // (N1) chainId must already be a number/bigint. `Number(domain.chainId)`
+  // below would happily parse a numeric STRING, but viem's own EIP-712
+  // domain encoding does not accept a string chainId the same way — passing
+  // one through to `signDelegationTypedData` can silently drop it from the
+  // domain the digest actually covers, producing a different signed payload
+  // than this check evaluated. Refuse before that gap can matter.
+  if (typeof domain.chainId !== 'number' && typeof domain.chainId !== 'bigint') {
+    throw new HavenTypedDataNotAllowedError(
+      `This UserOperation's domain.chainId is ${typeof domain.chainId} (${String(domain.chainId)}), ` +
+        'not a number — refusing rather than risk signing a different EIP-712 domain than this ' +
+        'check evaluated.',
+    )
+  }
 
   // (c) chain: only where the delegation rail has pinned contracts.
   const chainId = Number(domain.chainId)
@@ -192,13 +192,15 @@ function assertBoundDirectPaymentUserOp(
   }
 
   // (e) callData: a single execute(DelegationManager, 0, redeemDelegations(...)) —
-  // never a batch execute, an executeFromExecutor, a self-call, or a call to
-  // any other contract.
-  let decoded: { target: string; value: bigint; callData: `0x${string}` }
+  // never a batch execute (ERC-7579 `execute(bytes32,bytes)`, selector
+  // `0xe9ae5c53`), an executeFromExecutor, a self-call, or a call to any
+  // other contract.
+  const callData = message.callData as `0x${string}`
+  let decoded: { target: `0x${string}`; value: bigint; callData: `0x${string}` }
   try {
     const { args } = decodeFunctionData({
       abi: EXECUTE_ABI,
-      data: message.callData as `0x${string}`,
+      data: callData,
     })
     decoded = args[0] as unknown as typeof decoded
   } catch {
@@ -206,6 +208,20 @@ function assertBoundDirectPaymentUserOp(
       "This UserOperation's callData is not a single execute((address,uint256,bytes)) call " +
         '— a batch execute, executeFromExecutor, or any other selector is refused. This ' +
         'signer only signs direct payments.',
+    )
+  }
+  // Canonical encoding: re-encoding the decoded call must reproduce the EXACT
+  // bytes, or `decodeFunctionData`'s tolerance of trailing/non-canonical
+  // padding would let calldata smuggle bytes past every check below.
+  const reEncodedExecute = encodeFunctionData({
+    abi: EXECUTE_ABI,
+    functionName: 'execute',
+    args: [decoded],
+  })
+  if (reEncodedExecute.toLowerCase() !== callData.toLowerCase()) {
+    throw new HavenTypedDataNotAllowedError(
+      "This UserOperation's execute() call does not re-encode to the exact callData bytes " +
+        '(trailing or non-canonical bytes). Refusing.',
     )
   }
   if (decoded.target.toLowerCase() !== DELEGATION_MANAGER.toLowerCase()) {
@@ -222,12 +238,16 @@ function assertBoundDirectPaymentUserOp(
         'DelegationManager call — a direct payment never does. Refusing.',
     )
   }
+  // #3272 (B1): decode the redemption ARGUMENTS, not just the selector — an
+  // empty (or otherwise not-this-signer's) delegation chain is a capture
+  // vector, not a shape the redeemDelegations selector alone rules out. Any
+  // HavenSigningError this throws is a refusal like the others; converted
+  // below via the same `try`.
   try {
-    decodeFunctionData({ abi: REDEEM_DELEGATIONS_ABI, data: decoded.callData })
-  } catch {
+    assertRedeemsOwnBudgetDelegation(decoded.callData, ownAccount as `0x${string}`)
+  } catch (err) {
     throw new HavenTypedDataNotAllowedError(
-      "This UserOperation's call to the DelegationManager is not redeemDelegations — the only " +
-        'call a direct payment ever makes there. Refusing.',
+      err instanceof Error ? err.message : String(err),
     )
   }
 }

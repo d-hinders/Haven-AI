@@ -1,5 +1,5 @@
 /**
- * Real-DB tests for the session safes projection (#1205, harness #1220).
+ * Real-DB tests for the session accounts projection (#1205, harness #1220).
  *
  * The session payload now carries the raw signer-set inputs
  * (`owner_address`, `passkey_count`) that `sessionAccountPayload` maps through
@@ -17,38 +17,39 @@ let n = 0
 async function seedUser(): Promise<string> {
   const user = await db.query<{ id: string }>(
     `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
-    [`session-safes-${++n}-${Date.now()}@test.example`],
+    [`session-accounts-${++n}-${Date.now()}@test.example`],
   )
   return user.rows[0].id
 }
 
-async function seedSafe(
+async function seedAccount(
   userId: string,
   fields: { accountType?: string | null; ownerAddress?: string | null; chainId?: number } = {},
 ): Promise<string> {
-  const safe = await db.query<{ id: string }>(
+  const account = await db.query<{ id: string }>(
     `INSERT INTO smart_accounts (user_id, account_address, name, chain_id, account_type, owner_address)
-     VALUES ($1, $2, 'Test safe', $3, $4, $5) RETURNING id`,
+     VALUES ($1, $2, 'Test account', $3, $4, $5) RETURNING id`,
     [
       userId,
       `0x${String(++n).padStart(40, '0')}`,
       fields.chainId ?? 8453,
       // #2413: the default is the DELEGATION rail, because the query now
       // filters retired-rail rows out. These cases are about the passkey-count
-      // projection and tenant scoping, not the rail — seeding 'safe' here
-      // would make them assert the filter rather than their own subject.
+      // projection and tenant scoping, not the rail — seeding a retired-rail
+      // account here would make them assert the filter rather than their own
+      // subject.
       fields.accountType ?? 'delegator_hybrid',
       fields.ownerAddress ?? null,
     ],
   )
-  return safe.rows[0].id
+  return account.rows[0].id
 }
 
-async function seedPasskey(userSafeId: string, keyId: string): Promise<void> {
+async function seedPasskey(accountId: string, keyId: string): Promise<void> {
   await db.query(
     `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y)
      VALUES ($1, $2, '0x1', '0x2')`,
-    [userSafeId, keyId],
+    [accountId, keyId],
   )
 }
 
@@ -62,12 +63,12 @@ describeDb('listSessionAccountsForUser signer-set projection (#1205)', () => {
     await resetDb()
   })
 
-  it('counts hybrid_account_passkeys per safe and carries owner_address', async () => {
+  it('counts hybrid_account_passkeys per account and carries owner_address', async () => {
     const userId = await seedUser()
-    const hybridId = await seedSafe(userId, { accountType: 'delegator_hybrid' })
+    const hybridId = await seedAccount(userId, { accountType: 'delegator_hybrid' })
     await seedPasskey(hybridId, 'key-a')
     await seedPasskey(hybridId, 'key-b')
-    const legacyId = await seedSafe(userId, { ownerAddress: '0x' + 'ab'.repeat(20) })
+    const legacyId = await seedAccount(userId, { ownerAddress: '0x' + 'ab'.repeat(20) })
 
     const rows = await listSessionAccountsForUser(userId)
     const hybrid = rows.find((r) => r.id === hybridId)
@@ -83,7 +84,7 @@ describeDb('listSessionAccountsForUser signer-set projection (#1205)', () => {
   it('stays tenant-scoped: another user sees none of it', async () => {
     const owner = await seedUser()
     const other = await seedUser()
-    const accountId = await seedSafe(owner, { accountType: 'delegator_hybrid' })
+    const accountId = await seedAccount(owner, { accountType: 'delegator_hybrid' })
     await seedPasskey(accountId, 'key-a')
 
     expect(await listSessionAccountsForUser(other)).toEqual([])

@@ -49,8 +49,8 @@ vi.mock('../../modules/transactions/index.js', () => transactionMocks)
 
 import dashboardRoutes from '../dashboard.js'
 
-const SAFE = {
-  id: 'safe-1',
+const ACCOUNT = {
+  id: 'account-1',
   account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 8453,
   name: 'Main account',
@@ -61,9 +61,9 @@ const AGENT = {
   id: 'agent-1',
   name: 'Research agent',
   status: 'active',
-  account_id: SAFE.id,
-  account_name: SAFE.name,
-  account_chain_id: SAFE.chain_id,
+  account_id: ACCOUNT.id,
+  account_name: ACCOUNT.name,
+  account_chain_id: ACCOUNT.chain_id,
   account_type: null,
 }
 
@@ -79,7 +79,7 @@ function snapshotDate(offsetDays = 0): string {
  * everything else answers empty, matching the route's happy path.
  */
 function installQueryMock(overrides: {
-  safes?: unknown[]
+  accounts?: unknown[]
   agents?: unknown[]
   snapshots?: unknown[]
   paymentSpend?: unknown[]
@@ -89,7 +89,7 @@ function installQueryMock(overrides: {
       return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
     }
     if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
-      return Promise.resolve({ rows: overrides.safes ?? [SAFE] })
+      return Promise.resolve({ rows: overrides.accounts ?? [ACCOUNT] })
     }
     if (sql.includes('FROM agents a')) {
       return Promise.resolve({ rows: overrides.agents ?? [] })

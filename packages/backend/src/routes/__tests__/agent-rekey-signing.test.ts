@@ -169,7 +169,7 @@ function ownerConfig(kind: 'multiSigner' | 'passkeyOnly' | 'ownerOnly') {
       ownerAddress: kind === 'passkeyOnly' ? undefined : (OWNER as `0x${string}`),
       passkeys: kind === 'ownerOnly' ? [] : [PASSKEY],
     },
-    userSafeId: 'safe-1',
+    accountId: 'account-1',
     singleSignerWaiverAt: null,
   }
 }

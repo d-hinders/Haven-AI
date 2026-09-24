@@ -93,7 +93,7 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
   // as a second boundary because an account can be unlinked between auth and
   // handler execution, and never construct a transfer to a mutable fallback
   // wallet address.
-  if (agent.has_bound_safe === false) {
+  if (agent.has_bound_account === false) {
     return {
       statusCode: 422,
       body: { error: 'Agent is no longer linked to a Haven wallet; recovery is unavailable.' },

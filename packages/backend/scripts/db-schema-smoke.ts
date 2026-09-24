@@ -377,8 +377,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'setup: find agent status during cancel', sql: FIND_AGENT_STATUS_SQL },
   { name: 'setup: activate agent on approval', sql: ACTIVATE_AGENT_SQL },
   { name: 'setup: find by agent API key (install status)', sql: FIND_SETUP_BY_AGENT_API_KEY_SQL },
-  { name: 'setup: find user safe by id', sql: FIND_USER_ACCOUNT_BY_ID_SQL },
-  { name: 'setup: find default user safe', sql: FIND_DEFAULT_USER_ACCOUNT_SQL },
+  { name: 'setup: find user account by id', sql: FIND_USER_ACCOUNT_BY_ID_SQL },
+  { name: 'setup: find default user account', sql: FIND_DEFAULT_USER_ACCOUNT_SQL },
   { name: 'setup: list allowances', sql: LIST_SETUP_ALLOWANCES_SQL },
   { name: 'setup: list active delegations for budget approval', sql: LIST_ACTIVE_DELEGATIONS_SQL },
   { name: 'setup: find active agent by delegate', sql: FIND_ACTIVE_AGENT_BY_DELEGATE_SQL },
@@ -397,13 +397,13 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agents: list for user, ALL statuses (#1069)', sql: LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL },
   { name: 'agents: find for user, ALL statuses (#1069)', sql: FIND_AGENT_FOR_USER_ALL_STATUSES_SQL },
   { name: 'agents: delegate-balance read (status-agnostic, #1403)', sql: FIND_DELEGATE_AGENT_FOR_USER_SQL },
-  { name: 'agents: safe ownership check on create', sql: FIND_USER_ACCOUNT_ID_FOR_USER_SQL },
-  { name: 'agents: default safe fallback on create', sql: FIND_DEFAULT_USER_ACCOUNT_ID_SQL },
+  { name: 'agents: account ownership check on create', sql: FIND_USER_ACCOUNT_ID_FOR_USER_SQL },
+  { name: 'agents: default account fallback on create', sql: FIND_DEFAULT_USER_ACCOUNT_ID_SQL },
   { name: 'agents: duplicate-delegate pre-check', sql: FIND_NON_REVOKED_AGENT_BY_DELEGATE_SQL },
   { name: 'agents: existence check (tenant-scoped)', sql: FIND_AGENT_ID_FOR_USER_SQL },
   { name: 'agents: id+status gate (tenant-scoped)', sql: FIND_AGENT_ID_STATUS_FOR_USER_SQL },
   { name: 'agents: insert with API key', sql: INSERT_AGENT_WITH_KEY_SQL },
-  { name: 'agents: safe info inside create tx', sql: FIND_ACCOUNT_INFO_SQL },
+  { name: 'agents: account info inside create tx', sql: FIND_ACCOUNT_INFO_SQL },
   { name: 'agents: profile update (CTE, tenant-scoped)', sql: UPDATE_AGENT_PROFILE_SQL },
   { name: 'agents: archive revoked agent (#1401)', sql: ARCHIVE_AGENT_SQL },
   { name: 'agents: live-delegation guard for archive (#1436)', sql: AGENT_HAS_LIVE_DELEGATIONS_SQL },
@@ -434,8 +434,8 @@ const QUERIES: SmokeQuery[] = [
   // removed here (#2851): self_sign_agents no longer exists as of migration
   // 083_drop_dead_safe_rail_tables.ts.
   { name: 'smart-accounts: delete row', sql: DELETE_USER_ACCOUNT_SQL },
-  { name: 'smart-accounts: oldest remaining safe for promotion', sql: FIND_OLDEST_ACCOUNT_FOR_USER_SQL },
-  { name: 'smart-accounts: promote safe to default in delete tx', sql: PROMOTE_ACCOUNT_TO_DEFAULT_SQL },
+  { name: 'smart-accounts: oldest remaining account for promotion', sql: FIND_OLDEST_ACCOUNT_FOR_USER_SQL },
+  { name: 'smart-accounts: promote account to default in delete tx', sql: PROMOTE_ACCOUNT_TO_DEFAULT_SQL },
   { name: 'smart-accounts: owner-directory list (account_type)', sql: LIST_ACCOUNTS_WITH_TYPE_FOR_USER_SQL },
   // Users aggregate (#1167). IMPORTED from the repository — verbatim from
   // routes/user.ts.
@@ -450,7 +450,7 @@ const QUERIES: SmokeQuery[] = [
   { name: 'auth: signup insert', sql: INSERT_USER_SQL },
   { name: 'auth: login credentials read by email', sql: FIND_USER_CREDENTIALS_BY_EMAIL_SQL },
   { name: 'auth: /me profile read by id', sql: FIND_USER_PROFILE_BY_ID_SQL },
-  { name: 'auth: session safes payload (carries account_type, #1069)', sql: LIST_SESSION_ACCOUNTS_FOR_USER_SQL },
+  { name: 'auth: session accounts payload (carries account_type, #1069)', sql: LIST_SESSION_ACCOUNTS_FOR_USER_SQL },
   { name: 'outbound: enqueue a tx', sql: ENQUEUE_OUTBOUND_TX_SQL },
   { name: 'outbound: claim next per chain', sql: CLAIM_NEXT_OUTBOUND_TX_SQL },
   { name: 'outbound: mark broadcast', sql: MARK_OUTBOUND_TX_BROADCAST_SQL },
@@ -466,7 +466,7 @@ const QUERIES: SmokeQuery[] = [
   // Dashboard overview aggregate (#1167). IMPORTED — verbatim from
   // routes/dashboard.ts.
   { name: 'dashboard: account list', sql: LIST_DASHBOARD_ACCOUNTS_SQL },
-  { name: 'dashboard: agent preview (safe join)', sql: LIST_DASHBOARD_AGENTS_SQL },
+  { name: 'dashboard: agent preview (account join)', sql: LIST_DASHBOARD_AGENTS_SQL },
   { name: 'dashboard: first-agent-payment milestone', sql: HAS_FIRST_AGENT_PAYMENT_SQL },
   { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
   { name: 'dashboard: portfolio snapshot upsert', sql: INSERT_PORTFOLIO_SNAPSHOT_SQL },
@@ -523,7 +523,7 @@ const QUERIES: SmokeQuery[] = [
   // are worse than none: they green-light a query nobody runs.
   {
     // IMPORTED since #999 — was a pasted copy.
-    name: 'delegate monitor: active delegates joined to their Safe chain',
+    name: 'delegate monitor: active delegates joined to their account chain',
     sql: LIST_MONITORED_DELEGATES_SQL,
   },
   {
@@ -614,11 +614,11 @@ const QUERIES: SmokeQuery[] = [
     sql: HAS_IN_FLIGHT_REKEY_FOR_AGENT_SQL,
   },
   {
-    name: 'safes: refuse unlink during in-flight re-key',
+    name: 'accounts: refuse unlink during in-flight re-key',
     sql: HAS_IN_FLIGHT_REKEYS_FOR_ACCOUNT_SQL,
   },
   // Repository extractions landed by #999 (baseline-to-zero): fee ledger,
-  // Fortnox connection, accounting-feed dedup ledger, user passkeys, safe
+  // Fortnox connection, accounting-feed dedup ledger, user passkeys, account
   // ownership-with-type, receipt underlag. All IMPORTED.
   { name: 'fees: idempotent settled-fee insert (#386)', sql: INSERT_PAYMENT_FEE_SQL },
   { name: 'fees: recorded-fee read (#386)', sql: GET_RECORDED_FEE_SQL },
@@ -658,9 +658,9 @@ const QUERIES: SmokeQuery[] = [
   { name: 'accounting connections: /health/ops needs-attention counter (#2872)', sql: COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL },
   { name: 'passkeys: enrollment insert', sql: INSERT_USER_PASSKEY_SQL },
   { name: 'passkeys: per-user listing', sql: LIST_USER_PASSKEYS_SQL },
-  { name: 'passkeys: safe-exec ownership read', sql: FIND_PASSKEY_FOR_ACCOUNT_SQL },
-  { name: 'safes: details ownership check (any chain)', sql: FIND_OWNED_ACCOUNT_WITH_TYPE_ANY_CHAIN_SQL },
-  { name: 'safes: details ownership check (for chain)', sql: FIND_OWNED_ACCOUNT_WITH_TYPE_FOR_CHAIN_SQL },
+  { name: 'passkeys: account-exec ownership read', sql: FIND_PASSKEY_FOR_ACCOUNT_SQL },
+  { name: 'accounts: details ownership check (any chain)', sql: FIND_OWNED_ACCOUNT_WITH_TYPE_ANY_CHAIN_SQL },
+  { name: 'accounts: details ownership check (for chain)', sql: FIND_OWNED_ACCOUNT_WITH_TYPE_FOR_CHAIN_SQL },
   { name: 'reporting: receipt underlag source join (#498)', sql: LOAD_RECEIPT_UNDERLAG_SOURCE_SQL },
   { name: 'contacts: per-user listing', sql: LIST_CONTACTS_FOR_USER_SQL },
   { name: 'contacts: insert (23505 → 409 in the route)', sql: INSERT_CONTACT_SQL },
@@ -825,10 +825,10 @@ const QUERIES: SmokeQuery[] = [
   // money-path tables (payment_intents, delegate_sweeps,
   // machine_payment_evidence) even though the route itself is read-only.
   // `approval_requests` left this list with the table itself (#2055).
-  { name: 'tx-history: basic safes list driving aggregation', sql: LIST_BASIC_ACCOUNTS_FOR_USER_SQL },
+  { name: 'tx-history: basic accounts list driving aggregation', sql: LIST_BASIC_ACCOUNTS_FOR_USER_SQL },
   { name: 'tx-history: agent picklist for /filters', sql: LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL },
-  { name: 'tx-history: Safe ownership, any chain', sql: FIND_ACCOUNT_OWNERSHIP_ANY_CHAIN_SQL },
-  { name: 'tx-history: Safe ownership, pinned chain', sql: FIND_ACCOUNT_OWNERSHIP_FOR_CHAIN_SQL },
+  { name: 'tx-history: account ownership, any chain', sql: FIND_ACCOUNT_OWNERSHIP_ANY_CHAIN_SQL },
+  { name: 'tx-history: account ownership, pinned chain', sql: FIND_ACCOUNT_OWNERSHIP_FOR_CHAIN_SQL },
   { name: 'tx-history: payment_intents agent attribution', sql: FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL },
   { name: 'tx-history: delegate_sweeps agent attribution', sql: FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL },
   { name: 'tx-history: confirmed x402 payment_intents funding', sql: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL },

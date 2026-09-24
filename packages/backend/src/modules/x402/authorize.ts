@@ -85,7 +85,7 @@ export async function authorizeX402(input: AuthorizeX402Input): Promise<X402Hand
   // the same bound `POST /payments` keeps, and the same one
   // `agentAuthMiddleware`'s 401 already holds.
   const railDecision = resolveExecutionRail({
-    safeExecutionRail: agent.execution_rail ?? null,
+    executionRail: agent.execution_rail ?? null,
     chainId: agent.chain_id,
   })
   if (railDecision.rail === 'retired_session') {

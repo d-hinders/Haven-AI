@@ -407,7 +407,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // agent is asked for a signature. No coverage arithmetic, no approval
     // queue, no schedule machinery: the chain rules.
     // ── Delegation rail — the ONLY live rail (#1987) ─────────────────────
-    // This used to be `if (railState.safeExecutionRail === 'delegation')` with
+    // This used to be `if (railState.executionRail === 'delegation')` with
     // the legacy AllowanceModule flow below it. `resolveExecutionRail` returns
     // exactly `delegation | retired_session | retired_allowance` and the early
     // gate above returns for both retired answers, so reaching here IS the

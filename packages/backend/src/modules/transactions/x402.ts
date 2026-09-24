@@ -18,11 +18,11 @@ function x402FundingIdentityKey(tx: EnrichedTransaction): string {
 
 export async function fetchConfirmedX402Transactions(
   userId: string,
-  safes: SmartAccountRow[],
+  accounts: SmartAccountRow[],
 ): Promise<EnrichedTransaction[]> {
-  if (safes.length === 0) return []
+  if (accounts.length === 0) return []
 
-  const accountIds = safes.map((safe) => safe.id)
+  const accountIds = accounts.map((account) => account.id)
   const paymentIntentRows = await findConfirmedX402PaymentIntents(userId, accountIds)
   // #2055: the approval-request half of x402 history is gone with the table
   // (queue-history readability waived, owner decision on #2021).
@@ -110,10 +110,10 @@ export async function fetchConfirmedX402Transactions(
 
 export async function mergeX402Transactions(
   userId: string,
-  safes: SmartAccountRow[],
+  accounts: SmartAccountRow[],
   transactions: EnrichedTransaction[],
 ): Promise<EnrichedTransaction[]> {
-  const x402Transactions = await fetchConfirmedX402Transactions(userId, safes)
+  const x402Transactions = await fetchConfirmedX402Transactions(userId, accounts)
   if (x402Transactions.length === 0) return transactions
 
   const x402FundingKeys = new Set(

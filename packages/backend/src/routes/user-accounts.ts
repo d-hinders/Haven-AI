@@ -39,8 +39,8 @@ export default async function userAccountsRoutes(app: FastifyInstance): Promise<
   app.addHook('onRequest', authMiddleware)
 
   // GET /user/accounts — list all linked accounts for the authenticated user.
-  // One address name (`account_address`) and now ONE envelope key. The `safes`
-  // twin outlived #2914 by exactly one release, because `@haven_ai/cli` on
+  // One address name (`account_address`) and now ONE envelope key. The retired
+  // `safes` twin outlived #2914 by exactly one release, because `@haven_ai/cli` on
   // `latest` destructured it at five call sites and cannot dual-read the way
   // it can dual-send; `latest` is 0.3.0-alpha.0 now and reads `accounts`.
   app.get('/', async (request) => {

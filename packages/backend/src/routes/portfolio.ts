@@ -33,15 +33,15 @@ export default async function portfolioRoutes(
 
       // Verify ownership and get chain_id (repository query, #999 — the same
       // ownership check the transaction-history route runs).
-      const ownedSafes = await findAccountOwnership(sub, accountAddress, requestedChainId)
-      if (ownedSafes.length === 0) {
+      const ownedAccounts = await findAccountOwnership(sub, accountAddress, requestedChainId)
+      if (ownedAccounts.length === 0) {
         return reply.code(403).send({ error: 'Not your Safe' })
       }
-      if (requestedChainId === null && ownedSafes.length > 1) {
+      if (requestedChainId === null && ownedAccounts.length > 1) {
         return reply.code(400).send({ error: 'chain_id required' })
       }
 
-      const chainId = requestedChainId ?? ownedSafes[0].chain_id
+      const chainId = requestedChainId ?? ownedAccounts[0].chain_id
       return fetchPortfolioForAccount(chainId, accountAddress)
     },
   )

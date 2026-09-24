@@ -92,7 +92,7 @@ export async function handleBalanceCoverage(
   // retired rails fail closed before anything is read, and only the
   // delegation rail has a budget (and an account this surface can describe).
   const railDecision = resolveExecutionRail({
-    safeExecutionRail: agent.execution_rail ?? null,
+    executionRail: agent.execution_rail ?? null,
     chainId: agent.chain_id,
   })
   if (railDecision.rail === 'retired_session') {

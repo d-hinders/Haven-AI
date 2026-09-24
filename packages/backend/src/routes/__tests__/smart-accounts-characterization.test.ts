@@ -3,13 +3,13 @@ import fastifyJwt from '@fastify/jwt'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * Characterization coverage for the user-safes route paths #988 extracts into
- * `infra/repositories/user-safes.ts` (per the #985 convention). Landed BEFORE
+ * Characterization coverage for the user-accounts route paths #988 extracts into
+ * `infra/repositories/smart-accounts.ts` (per the #985 convention). Landed BEFORE
  * the extraction commit; must pass unchanged on both sides of it.
  *
  * The previously uncovered query paths pinned here: POST / (import, including
- * the first-Safe-becomes-default rule and the legacy users.account_address
- * mirror), PUT /:safeId (rename), PUT /:safeId/default (transaction sequence),
+ * the first-account-becomes-default rule and the legacy users.account_address
+ * mirror), PUT /:accountId (rename), PUT /:accountId/default (transaction sequence),
  * the DELETE default-promotion branches, and the approver metadata
  * upsert/delete pair.
  */
@@ -42,7 +42,7 @@ const SAFE_ID = '11111111-1111-1111-1111-111111111111'
 const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
 const USER = 'user-1'
 
-describe('user-safes characterization (#988)', () => {
+describe('user-accounts characterization (#988)', () => {
   let app: FastifyInstance
   let token: string
 
@@ -72,10 +72,10 @@ describe('user-safes characterization (#988)', () => {
   }
 
   // The import path is CLOSED (#1984, epic #1440). The three characterization
-  // cases that used to sit here — first-Safe-becomes-default, the legacy
+  // cases that used to sit here — first-account-becomes-default, the legacy
   // users.account_address mirror, and the duplicate 409 — all described a handler
   // that can no longer run. They are not deleted for tidiness: keeping them
-  // would assert that Haven still imports Safes. The refusal and its no-write
+  // would assert that Haven still imports accounts. The refusal and its no-write
   // guarantee are pinned in `safe-inflow-retired.test.ts`; the half that must
   // KEEP working for existing accounts is the rename/default/delete/approver
   // coverage below, deliberately untouched.
@@ -110,7 +110,7 @@ describe('user-safes characterization (#988)', () => {
   })
 
   describe('PUT /user/accounts/:safeId — rename', () => {
-    it('renames a Safe scoped to the caller', async () => {
+    it('renames an account scoped to the caller', async () => {
       mockPoolQuery.mockResolvedValueOnce({
         rows: [{ id: SAFE_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Treasury', is_default: true, created_at: '2026-08-05T00:00:00.000Z' }],
       })
@@ -127,7 +127,7 @@ describe('user-safes characterization (#988)', () => {
       expect(mockPoolQuery.mock.calls[0][1]).toEqual(['Treasury', SAFE_ID, USER])
     })
 
-    it('404s when the Safe is not the caller’s', async () => {
+    it('404s when the account is not the caller’s', async () => {
       mockPoolQuery.mockResolvedValueOnce({ rows: [] })
 
       const res = await app.inject({
@@ -181,7 +181,7 @@ describe('user-safes characterization (#988)', () => {
       expect(mockRelease).toHaveBeenCalledTimes(1)
     })
 
-    it('404s (and opens no transaction) when the Safe is not the caller’s', async () => {
+    it('404s (and opens no transaction) when the account is not the caller’s', async () => {
       mockPoolQuery.mockResolvedValueOnce({ rows: [] })
 
       const res = await app.inject({
@@ -196,7 +196,7 @@ describe('user-safes characterization (#988)', () => {
   })
 
   describe('DELETE /user/accounts/:safeId — default promotion branches', () => {
-    it('promotes the oldest remaining Safe when the default is deleted', async () => {
+    it('promotes the oldest remaining account when the default is deleted', async () => {
       const NEXT = { id: 'safe-2', account_address: '0x2222222222222222222222222222222222222222' }
       mockPoolQuery.mockResolvedValue({ rows: [{ id: SAFE_ID, is_default: true }] })
       mockClientQuery.mockImplementation(async (sql: string) => {
@@ -223,9 +223,9 @@ describe('user-safes characterization (#988)', () => {
       expect(calls[legacyIdx][1]).toEqual([NEXT.account_address, USER])
     })
 
-    it('clears legacy users.account_address when the last Safe is deleted', async () => {
+    it('clears legacy users.account_address when the last account is deleted', async () => {
       mockPoolQuery.mockResolvedValue({ rows: [{ id: SAFE_ID, is_default: true }] })
-      // No remaining Safe; the tenant-scoped DELETE matches the owned row (#3227).
+      // No remaining account; the tenant-scoped DELETE matches the owned row (#3227).
       mockClientQuery.mockImplementation(async (sql: string) =>
         /DELETE FROM smart_accounts/.test(String(sql)) ? { rows: [], rowCount: 1 } : { rows: [] },
       )

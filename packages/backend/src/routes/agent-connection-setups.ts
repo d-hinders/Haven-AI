@@ -704,7 +704,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         status: 'active',
         approvalStatus: 'confirmed',
         txHash: null,
-        safeTxHash: null,
+        accountTxHash: null,
         failureReason: null,
         activateAgent: true,
       })

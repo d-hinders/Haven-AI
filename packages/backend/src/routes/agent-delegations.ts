@@ -178,7 +178,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     // read in hybrid-accounts.ts — this twin can hydrate the same stored
     // signer set the UI labels ("Passkey · added {date}"), so the two reads
     // must carry the same shape.
-    const createdByKey = passkeyEnrollmentDates(await listAccountPasskeys(owner.userSafeId))
+    const createdByKey = passkeyEnrollmentDates(await listAccountPasskeys(owner.accountId))
     return {
       account_address: agent.treasury_address,
       chain_id: agent.chain_id,
@@ -215,7 +215,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         {
           accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
-          userSafeId: owner.userSafeId,
+          accountId: owner.accountId,
           config: owner.config,
           singleSignerWaiverAt: owner.singleSignerWaiverAt,
         },
@@ -248,7 +248,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         {
           accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
-          userSafeId: owner.userSafeId,
+          accountId: owner.accountId,
           config: owner.config,
           singleSignerWaiverAt: owner.singleSignerWaiverAt,
         },

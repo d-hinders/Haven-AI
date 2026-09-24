@@ -93,7 +93,7 @@ export default async function dashboardRoutes(
     const { sub } = request.user as { sub: string }
 
     const [
-      safes,
+      accounts,
       agents,
       firstAgentPayment,
     ] = await Promise.all([
@@ -120,7 +120,7 @@ export default async function dashboardRoutes(
     }
 
     const currentPortfolio = await Promise.all(
-      safes.map((safe) => fetchPortfolioForAccount(safe.chain_id, safe.account_address)),
+      accounts.map((account) => fetchPortfolioForAccount(account.chain_id, account.account_address)),
     )
 
     const totalUsd = currentPortfolio.reduce((sum, item) => sum + item.totalUsd, 0)
@@ -157,20 +157,20 @@ export default async function dashboardRoutes(
 
     const mergedTransactions: EnrichedTransaction[] = []
     const transactionResults = await Promise.allSettled(
-      safes.map(async (safe) => {
+      accounts.map(async (account) => {
         const { transactions } = await fetchAccountTransactions({
-          accountId: safe.id,
-          accountAddress: safe.account_address,
-          chainId: safe.chain_id,
+          accountId: account.id,
+          accountAddress: account.account_address,
+          chainId: account.chain_id,
           log: request.log,
         })
 
         return transactions.map((tx) => ({
           ...tx,
-          chainId: safe.chain_id,
-          accountId: safe.id,
-          accountAddress: safe.account_address,
-          accountName: safe.name,
+          chainId: account.chain_id,
+          accountId: account.id,
+          accountAddress: account.account_address,
+          accountName: account.name,
         }))
       }),
     )
@@ -181,16 +181,16 @@ export default async function dashboardRoutes(
         return
       }
 
-      const safe = safes[index]
+      const account = accounts[index]
       request.log.warn(
-        { err: result.reason, accountId: safe.id, chainId: safe.chain_id },
+        { err: result.reason, accountId: account.id, chainId: account.chain_id },
         'Dashboard transaction aggregation failed',
       )
     })
 
     const visibleTransactions = await mergeX402Transactions(
       sub,
-      safes,
+      accounts,
       mergedTransactions,
     )
 
@@ -244,7 +244,7 @@ export default async function dashboardRoutes(
         monthlyAgentSpendEur: monthlySpendEur,
         monthlyAgentSpendSek: monthlySpendSek,
         successfulTransactions,
-        activeAccounts: safes.length,
+        activeAccounts: accounts.length,
       },
       actionableApprovals,
       pendingApprovals: actionableApprovals,

@@ -86,13 +86,13 @@ export function needsBackupSignerRecommendation(check: SignerFloorCheck): boolea
 }
 
 /**
- * Map a session safes row to the payload the dashboard reads (#1205).
+ * Map a session accounts row to the payload the dashboard reads (#1205).
  *
  * This is the production call site the predicate was missing: the session
  * payload carries the ANSWER (`needs_backup_recommendation`) computed here,
  * next to `isValueBearingChain`, so the frontend never re-derives chain
- * classification. Delegation-rail accounts get the full predicate over their
- * DB signer set (passkeys + optional EOA owner). Legacy-rail safes get null —
+ * Delegation-rail accounts get the full predicate over their
+ * DB signer set (passkeys + optional EOA owner). Legacy-rail accounts get null —
  * their signer truth is the on-chain owner list, which only the client reads
  * (via approvers); they still get `value_bearing_chain` so that surface can
  * apply the same classification to its own count.

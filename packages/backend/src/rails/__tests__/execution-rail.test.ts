@@ -22,7 +22,7 @@ describe('resolveExecutionRail — retirement decided in the seam (#993)', () =>
   // claim is unchanged: the marking alone decides, whatever else is or is not
   // known about the account.
   const full = {
-    safeExecutionRail: 'session_key',
+    executionRail: 'session_key',
     chainId: CHAIN,
   }
 
@@ -46,9 +46,9 @@ describe('resolveExecutionRail — retirement decided in the seam (#993)', () =>
   // and any unknown value reached the same AllowanceModule executor. Closing
   // the string alone would have left a spend path open.
   it.each([
-    ['default legacy safe', { ...full, safeExecutionRail: 'allowance_module' }],
-    ['missing safe row', { ...full, safeExecutionRail: null }],
-    ['unknown safe rail value', { ...full, safeExecutionRail: 'something_else' }],
+    ['default legacy rail', { ...full, executionRail: 'allowance_module' }],
+    ['missing account row', { ...full, executionRail: null }],
+    ['unknown rail value', { ...full, executionRail: 'something_else' }],
   ])('everything not session-marked and not delegation is RETIRED when %s', (_label, state) => {
     expect(resolveExecutionRail(state)).toEqual({ rail: 'retired_allowance' })
   })
@@ -56,14 +56,14 @@ describe('resolveExecutionRail — retirement decided in the seam (#993)', () =>
   // The positive control at the seam: the one live rail keeps its own answer,
   // and it is named — a guard against a fork has to say which branch it is on.
   it('the delegation rail is NOT retired — it gets its own decision', () => {
-    expect(resolveExecutionRail({ ...full, safeExecutionRail: 'delegation' })).toEqual({
+    expect(resolveExecutionRail({ ...full, executionRail: 'delegation' })).toEqual({
       rail: 'delegation',
     })
   })
 
   // Both tombstones coexist: #1986 must not swallow #834's message.
   it('a session-marked account still answers retired_session, not retired_allowance', () => {
-    expect(resolveExecutionRail({ ...full, safeExecutionRail: 'session_key' })).toEqual({
+    expect(resolveExecutionRail({ ...full, executionRail: 'session_key' })).toEqual({
       rail: 'retired_session',
     })
   })

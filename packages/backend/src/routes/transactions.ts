@@ -127,11 +127,11 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'Invalid tokenKey' })
     }
 
-    let safes = await listBasicAccountsForUser(sub)
+    let accounts = await listBasicAccountsForUser(sub)
 
     if (accountFilterId) {
-      safes = safes.filter((safe) => safe.id === accountFilterId)
-      if (safes.length === 0) {
+      accounts = accounts.filter((account) => account.id === accountFilterId)
+      if (accounts.length === 0) {
         return reply.code(400).send({ error: 'Invalid accountId' })
       }
     }
@@ -143,7 +143,7 @@ export default async function transactionRoutes(
       }
     }
 
-    if (safes.length === 0) {
+    if (accounts.length === 0) {
       return {
         transactions: [],
         total: 0,
@@ -161,9 +161,9 @@ export default async function transactionRoutes(
     // One preference read per request, alongside the account read.
     const [currency, aggregate] = await Promise.all([
       resolveTransactionCurrency(sub),
-      aggregateAccountTransactions(safes, request.log, fresh),
+      aggregateAccountTransactions(accounts, request.log, fresh),
     ])
-    const enriched = await mergeSortDedupeAndEnrich(sub, safes, aggregate.merged, currency)
+    const enriched = await mergeSortDedupeAndEnrich(sub, accounts, aggregate.merged, currency)
     const filtered = filterEnrichedTransactions(enriched, {
       agentId: request.query.agentId,
       tokenFilter,
@@ -278,12 +278,12 @@ export default async function transactionRoutes(
     // Kept unfiltered for name resolution below: a transfer between two of
     // the user's own accounts must still name the far side when the export is
     // scoped to one of them, exactly as the dashboard table does.
-    const allSafes = await listBasicAccountsForUser(sub)
-    let safes = allSafes
+    const allAccounts = await listBasicAccountsForUser(sub)
+    let accounts = allAccounts
 
     if (accountFilterId) {
-      safes = safes.filter((safe) => safe.id === accountFilterId)
-      if (safes.length === 0) {
+      accounts = accounts.filter((account) => account.id === accountFilterId)
+      if (accounts.length === 0) {
         return reply.code(400).send({ error: 'Invalid accountId' })
       }
     }
@@ -296,16 +296,16 @@ export default async function transactionRoutes(
     }
 
     let filtered: Awaited<ReturnType<typeof mergeSortDedupeAndEnrich>> = []
-    if (safes.length > 0) {
+    if (accounts.length > 0) {
       // #3127: the export reads the preference too — the file's
       // `converted_currency` column names the currency the user's dashboard
       // feed converts in. The AMOUNTS stay the fixed-SEK branch (below);
       // this read names that column, nothing more.
       const [currency, aggregateResult] = await Promise.all([
         resolveTransactionCurrency(sub),
-        aggregateAccountTransactions(safes, request.log, fresh),
+        aggregateAccountTransactions(accounts, request.log, fresh),
       ])
-      const enriched = await mergeSortDedupeAndEnrich(sub, safes, aggregateResult.merged, currency)
+      const enriched = await mergeSortDedupeAndEnrich(sub, accounts, aggregateResult.merged, currency)
       filtered = filterEnrichedTransactions(enriched, {
         agentId: request.query.agentId,
         tokenFilter,
@@ -334,7 +334,7 @@ export default async function transactionRoutes(
     const contacts = await listContactsForUser(sub)
     const contactNames = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
     const accountNames = new Map(
-      allSafes.map((safe) => [accountNameKey(safe.account_address, safe.chain_id), safe.name]),
+      allAccounts.map((account) => [accountNameKey(account.account_address, account.chain_id), account.name]),
     )
 
     const csv = transactionsToCsv(filtered, {
@@ -368,13 +368,13 @@ export default async function transactionRoutes(
     const { sub } = request.user as { sub: string }
     const fresh = parseFreshFlag(request.query.fresh)
 
-    const { safes, agents, tokens } = await resolveTransactionFilters(sub, request.log, fresh)
+    const { accounts, agents, tokens } = await resolveTransactionFilters(sub, request.log, fresh)
 
     return {
       // #2914's last retired RESPONSE name. It was not twinned like the other
       // two and no published package ever read it — the dashboard is the only
       // consumer, and it ships from the same promotion as this backend.
-      accounts: safes.map((account) => ({
+      accounts: accounts.map((account) => ({
         id: account.id,
         name: account.name,
         address: account.account_address,

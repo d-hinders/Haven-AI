@@ -11,7 +11,6 @@ import {
   buildX402ExpectedMessage,
   buildSweepAuthorizationMessage,
   buildSweepTypedData,
-  signHash,
   verifySignature,
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
@@ -222,17 +221,6 @@ export function createEdgeSigner(
     }
   }
 
-  function signAndVerify(hash: string): string {
-    const signature = signHash(delegateKey, hash)
-    // Verify locally before handing the signature back, mirroring the SDK.
-    if (!verifySignature(hash, signature, delegateAddress)) {
-      throw new HavenSigningError(
-        'Local signature verification failed — recovered address does not match the delegate key.',
-      )
-    }
-    return signature
-  }
-
   return {
     delegateAddress,
 
@@ -244,35 +232,20 @@ export function createEdgeSigner(
       return account.signTypedData(typedData as Parameters<typeof account.signTypedData>[0])
     },
 
-    signX402FundingHash(hash: string, expected: X402ExpectedPayment): X402FundingSignatureResult {
-      assertExpectedBinding(hash, expected, options.x402BindingSigner, 'hash')
-      assertPayerMatchesDelegate(expected, delegateAddress, options.agentId)
-      const signature = signAndVerify(hash)
-      const x402Binding = randomUUID()
-      x402Bindings.set(x402Binding, { ...expected })
-      return { signature, x402Binding }
-    },
-
     async signX402FundingTypedData(
       typedData: X402FundingTypedData,
       expected: X402ExpectedPayment,
     ): Promise<X402FundingSignatureResult> {
-      assertExpectedBinding(expected.payloadHash, expected, options.x402BindingSigner, 'typed-data')
-      assertPayerMatchesDelegate(expected, delegateAddress, options.agentId)
-      // Recompute the digest from the typed data actually in hand and require it
-      // to equal Haven's commitment. Everything upstream is untrusted input; this
-      // equality is what makes the binding cover the bytes being signed rather
-      // than a hash that merely travels alongside them.
+      // Recompute the digest from the typed data actually in hand — everything
+      // upstream is untrusted input. `assertExpectedBinding` requires this
+      // EXACT digest to equal Haven's `typedDataHash` commitment (#3272: it
+      // used to be handed `expected.payloadHash` here, comparing that value
+      // to itself inside the check — vacuous, binding nothing; the recomputed
+      // digest is the real comparand, since it is literally what gets signed
+      // below).
       const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
-      if (digest.toLowerCase() !== expected.typedDataHash?.toLowerCase()) {
-        throw new HavenSigningError(
-          'x402 typed data does not match the digest Haven committed to in the expected context. ' +
-            'Refusing to sign — the payload was altered in transit or Haven declared a different one. ' +
-            'The most common cause is the typed data being truncated or reshaped while being copied ' +
-            'between tool calls (#1255): re-run the hosted quote and pass its typed_data_b64 string ' +
-            'through UNCHANGED instead of re-emitting the nested JSON.',
-        )
-      }
+      assertExpectedBinding(digest, expected, options.x402BindingSigner)
+      assertPayerMatchesDelegate(expected, delegateAddress, options.agentId)
       // #1455: the digest check above proves Haven DECLARED these bytes. It
       // says nothing about what they mean. When the payload is a delegation —
       // the erc7710 settlement child, whose signature lets a merchant pull from

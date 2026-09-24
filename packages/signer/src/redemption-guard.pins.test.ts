@@ -2,7 +2,7 @@
  * #3272 (B1) — the vendored `Delegation`/`Caveat` ABI tuple and
  * `ExecutionMode.SingleDefault` must keep meaning what the kit's own encoder
  * says they mean. The kit is a devDependency only (see `package.json`),
- * cross-checked here, never imported at runtime by `redemption-guard.ts`.
+ * cross-checked here, never imported at runtime by `@haven_ai/sdk`'s `redemption-guard.ts`.
  */
 import { describe, expect, it } from 'vitest'
 import { decodeAbiParameters, encodeAbiParameters, getAddress, type Address } from 'viem'

@@ -1,7 +1,7 @@
 /**
  * #1455 — the pinned enforcer addresses must keep meaning what they say.
  *
- * `settlement-child.ts` hardcodes the DelegationManager and the caveat
+ * `@haven_ai/sdk`'s `settlement-child.ts` (in this package until #3283) hardcodes the DelegationManager and the caveat
  * enforcers rather than reading them from Haven, because a verifier that lets
  * the thing it verifies choose the yardstick verifies nothing. The cost of
  * pinning is drift, and this is what pays it: the constants are cross-checked

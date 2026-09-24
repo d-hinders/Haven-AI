@@ -2,7 +2,8 @@
  * #3272 (B1 follow-up) — what `DelegationManager.redeemDelegations` actually
  * does with the bytes `haven_sign`'s unbound branch allows through.
  *
- * `assertBoundDirectPaymentUserOp` (`tools.ts`) used to stop at "the inner
+ * `assertBoundDirectPaymentUserOp` (then in the signer's `tools.ts`, now
+ * `direct-payment-guard.ts`) used to stop at "the inner
  * call decodes as `redeemDelegations`" — it never looked at the ARGUMENTS.
  * MetaMask's DelegationManager (v1.3.0) treats an EMPTY permission context
  * (an ABI-encoded `Delegation[]` of length 0) as self-authorised: with no
@@ -25,8 +26,8 @@
  *
  * The `Delegation`/`Caveat` tuple shape is vendored from
  * `@metamask/delegation-abis`' `IDelegationManager` ABI (a devDependency
- * only, see `package.json`) and pinned against the kit's own encoder by
- * `redemption-guard.pins.test.ts`.
+ * only, in `@haven_ai/signer`'s `package.json`) and pinned against the kit's
+ * own encoder by `packages/signer/src/redemption-guard.pins.test.ts`.
  */
 import {
   decodeAbiParameters,

@@ -25,7 +25,7 @@
  * `@metamask/smart-accounts-kit` as a runtime dependency was the other option
  * and was rejected — this package installs on users' machines. The constants
  * below are snapshot-pinned and cross-checked against the kit by a test
- * (`settlement-child.pins.test.ts`), the same pattern
+ * (`packages/signer/src/settlement-child.pins.test.ts`), the same pattern
  * `packages/core/src/chains.ts` uses against its registry.
  *
  * EXTRA CAVEATS ARE ALLOWED, and that is deliberate — verified, not assumed

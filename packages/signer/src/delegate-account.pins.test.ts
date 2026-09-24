@@ -2,7 +2,7 @@
  * #3272 — the vendored counterfactual-address derivation must keep computing
  * what the kit computes. Same pattern as `settlement-child.pins.test.ts`: the
  * kit is a devDependency only, cross-checked here, never imported at runtime
- * by `delegate-account.ts`.
+ * by `@haven_ai/sdk`'s `delegate-account.ts`.
  */
 import { describe, expect, it } from 'vitest'
 import { getCounterfactualAccountData } from '@metamask/smart-accounts-kit/utils'

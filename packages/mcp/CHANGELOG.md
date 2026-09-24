@@ -8,7 +8,7 @@ alone.
 
 ## Unreleased
 
-- **Behaviour change, via `@haven_ai/sdk` (#3283):** `haven_send`, `haven_pay` and the x402 payment tools now refuse, before anything is signed or submitted, a served UserOp that is not this delegate key's own direct-payment shape, and an erc7710 settlement child that does not match the merchant's 402 or is a root grant. The refusal is the SDK's `HavenTypedDataRefusedError` (code `TYPED_DATA_NOT_ALLOWED`). No tool, argument, schema or description changed on this package.
+- **Behaviour change, via `@haven_ai/sdk` (#3283):** `haven_send` and the x402 payment tools (`haven_pay_x402`, `haven_pay_x402_quote`, `haven_pay_mcp_tool`) now refuse, before anything is signed or submitted, a served UserOp that is not this delegate key's own direct-payment shape. That refusal is the SDK's `HavenTypedDataRefusedError` (code `TYPED_DATA_NOT_ALLOWED`). A settlement child the SDK verifies is refused with `HavenSigningError` when it does not match the merchant's 402 or is a root grant or a foreign delegator's; a child with no expectation to check it against gets `HavenTypedDataRefusedError`. No tool, argument, schema or description changed on this package.
 - `haven_list_receipts` rows gain `source`, `paymentProofStatus`, `x402ResourceUrl` and `x402MerchantAddress` (#3134, via `@haven_ai/sdk`'s `mapPaymentReceipt`) beside the deprecated `rail`, `proofStatus`, `resourceUrl`, `merchantAddress`, which stay for one full release (removal condition in the SDK CHANGELOG entry). No tool, argument, schema or description changed on this package; the change is carried by the SDK dependency.
 
 ## 0.4.0-alpha.0 — 2026-09-19

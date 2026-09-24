@@ -8,6 +8,8 @@ covers:
   - packages/sdk/src/redemption-guard.ts
   - packages/sdk/src/direct-payment-guard.ts
   - packages/sdk/src/settlement-child.ts
+  - packages/sdk/src/client.ts
+  - packages/sdk/src/x402-erc7710.ts
   - packages/signer/src/tools.ts
   - packages/signer/src/core.ts
   - packages/backend/src/middleware/auth.ts

@@ -58,16 +58,13 @@ async function signedContext(overrides: Record<string, unknown> = {}) {
 }
 
 describe('pre-#1690 characterization: payer-less contexts sign', () => {
-  it('a v1 (hash-mode) context with NO payer identity signs successfully', async () => {
-    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const expected = await signedContext()
-
-    const result = signer.signX402FundingHash(FUNDING_HASH, expected as never)
-
-    expect(result.signature).toMatch(/^0x[0-9a-fA-F]{130}$/)
-    expect(result.x402Binding).toBeTruthy()
-  })
-
+  // #3272 (criterion 8, owner decision 2026-09-24): v1 (hash-mode) is retired
+  // outright — an unrelated, later, deliberate change from the #1690 payer
+  // guard this file characterizes. The v1 test that used to live here is now
+  // exactly the criterion-8 refusal test (`version-skew.test.ts` and
+  // `core.test.ts` pin it); what remains true of THIS file's property is that
+  // a payer-LESS (v2) context still signs, with or without local agent
+  // identity configured.
   it('a v2 (typed-data-mode) context with NO payer identity signs successfully', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
     const typedDataHash = hashTypedData(TYPED_DATA as never)
@@ -78,9 +75,9 @@ describe('pre-#1690 characterization: payer-less contexts sign', () => {
     expect(result.signature).toMatch(/^0x/)
   })
 
-  it('the same contexts sign on a signer that HAS a local agent identity configured', async () => {
+  it('the same v2 context signs on a signer that HAS a local agent identity configured', async () => {
     // After #1690 the signer may know its own agent id. Knowing who it is must
-    // never make it refuse a context that claims nothing — v1/v2 carry no
+    // never make it refuse a context that claims nothing — v2 carries no
     // payer, so there is nothing to mismatch.
     const signer = createEdgeSigner(TEST_KEY, {
       x402BindingSigner: BINDING_SIGNER,
@@ -88,15 +85,18 @@ describe('pre-#1690 characterization: payer-less contexts sign', () => {
       // options is a bag), and honour it after #1690.
       ...( { agentId: 'agent-local' } as object),
     })
-    const expected = await signedContext()
+    const typedDataHash = hashTypedData(TYPED_DATA as never)
+    const expected = await signedContext({ typedDataHash })
 
-    expect(() => signer.signX402FundingHash(FUNDING_HASH, expected as never)).not.toThrow()
+    const result = await signer.signX402FundingTypedData(TYPED_DATA as never, expected as never)
+    expect(result.signature).toMatch(/^0x/)
   })
 
-  it('v3 is now claimed alongside v1/v2 — the deliberate #1690 widening', () => {
-    // Written as [1, 2] in the characterization commit and updated HERE by
-    // #1690 itself, so the widening is a visible, deliberate edit in the diff
-    // rather than a side effect nobody reviewed.
-    expect([...SUPPORTED_X402_EXPECTED_VERSIONS]).toEqual([1, 2, 3])
+  it('claims [2, 3] — v1 retired by #3272 (unrelated to the #1690 v3 widening this file characterizes)', () => {
+    // Written as [1, 2] in the characterization commit, widened to [1, 2, 3]
+    // by #1690, and narrowed to [2, 3] by #3272 (criterion 8) — each a
+    // visible, deliberate edit in its own diff rather than a side effect
+    // nobody reviewed.
+    expect([...SUPPORTED_X402_EXPECTED_VERSIONS]).toEqual([2, 3])
   })
 })

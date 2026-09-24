@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { getCounterfactualAccountData } from '@metamask/smart-accounts-kit/utils'
-import { getSmartAccountsEnvironment } from '@metamask/smart-accounts-kit'
+import { getSmartAccountsEnvironment, Implementation } from '@metamask/smart-accounts-kit'
 import directPaymentUserOp from '../../sdk/src/__fixtures__/direct-payment-userop.json' with { type: 'json' }
 import {
   deriveDelegateAccountAddress,
@@ -48,7 +48,7 @@ describe('deriveDelegateAccountAddress (#3272)', () => {
         const fromKit = await getCounterfactualAccountData({
           factory: env.SimpleFactory,
           implementations: env.implementations,
-          implementation: 'Hybrid',
+          implementation: Implementation.Hybrid,
           deployParams: [owner, [], [], []],
           deploySalt: '0x',
         })

@@ -16,7 +16,7 @@ import { describe, it, expect } from 'vitest'
 import { x402ResourceServer } from '@x402/core/server'
 import type { PaymentPayload, PaymentRequirements } from '@x402/core/types'
 import { privateKeyToAccount } from 'viem/accounts'
-import { recoverTypedDataAddress } from 'viem'
+import { hashTypedData, recoverTypedDataAddress } from 'viem'
 import {
   buildX402ExpectedMessage,
   normalizePaymentRequired,
@@ -88,6 +88,18 @@ function decodeHeader(header: string): DecodedHeader {
   return JSON.parse(Buffer.from(header, 'base64').toString('utf8')) as DecodedHeader
 }
 
+// #3272 (criterion 8): every x402 funding intent is delegation-rail typed
+// data now — the shape below stands in for the real UserOp/settlement typed
+// data these wire-format tests don't otherwise care about; only its digest
+// matters (it is what `expectedX402`'s `typedDataHash` commits to).
+const FUNDING_TYPED_DATA = {
+  domain: { name: 'HavenX402Funding', version: '1', chainId: 8453, verifyingContract: BASE_USDC },
+  types: { Funding: [{ name: 'note', type: 'string' }] },
+  primaryType: 'Funding',
+  message: { note: 'x402 funding leg (#3272 test fixture)' },
+}
+const FUNDING_DIGEST = hashTypedData(FUNDING_TYPED_DATA as Parameters<typeof hashTypedData>[0])
+
 async function expectedX402() {
   const context = {
     paymentId: 'pay_x402_wire',
@@ -97,13 +109,14 @@ async function expectedX402() {
     amount: ACCEPTED.amount,
     asset: ACCEPTED.asset,
     network: ACCEPTED.network,
+    typedDataHash: FUNDING_DIGEST,
   }
   const message = buildX402ExpectedMessage(context)
   const account = privateKeyToAccount(BINDING_KEY)
   return {
     ...context,
     auth: {
-      version: 1 as const,
+      version: 2 as const,
       message,
       signature: await account.signMessage({ message }),
       signer: account.address,
@@ -113,7 +126,7 @@ async function expectedX402() {
 
 async function buildHeader(paymentRequired = PAYMENT_REQUIRED): Promise<{ header: DecodedHeader; delegateAddress: string }> {
   const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-  const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+  const funding = await signer.signX402FundingTypedData(FUNDING_TYPED_DATA as never, await expectedX402())
   const result = await signer.buildX402PaymentHeader(paymentRequired, funding.x402Binding)
   return { header: decodeHeader(result.paymentHeader), delegateAddress: signer.delegateAddress }
 }

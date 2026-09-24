@@ -1382,7 +1382,7 @@ directly owns that check.
   level canonically encoded. An empty chain, a multi-link chain, a
   self-granted delegation and a delegation to another account are each
   refused, and each case is pinned by a test. The
-treasury was never exposed beyond the caveats either way: budget, recipient
+  treasury was never exposed beyond the caveats either way: budget, recipient
   pin and expiry are enforced by the DelegationManager on redemption. A
   captured delegate account would still have been able to redeem the budget
   every period until the owner revoked it.

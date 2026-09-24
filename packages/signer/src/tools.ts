@@ -809,8 +809,8 @@ export function createToolHandlers(
             if (resolved?.kind !== 'direct' && !isPackedUserOperationTypedData(typedData)) {
               throw new HavenTypedDataNotAllowedError(
                 'This signer signs only Haven-prepared payloads: a direct-payment ' +
-                  'PackedUserOperation from your own account that redeems a delegation granted to it ' +
-                  'account, or a Haven-signed x402 context. Call haven_sign with payment_id ' +
+                  'PackedUserOperation from your own account that redeems a delegation granted to it, ' +
+                  'or a Haven-signed x402 context. Call haven_sign with payment_id ' +
                   '(preferred), or pass x402_expected for an x402 funding leg.',
               )
             }

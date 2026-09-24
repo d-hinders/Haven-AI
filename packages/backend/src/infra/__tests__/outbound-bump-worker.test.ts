@@ -5,6 +5,7 @@
  * the replacement minimum, a hot lane becomes an incident instead of a gas
  * furnace, and a non-idempotent orphan is never blindly re-broadcast.
  */
+import { makeError } from 'ethers'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   MAX_BUMPS_PER_NONCE,
@@ -236,6 +237,56 @@ describe('runOutboundBumpTick — orphaned queued rows', () => {
     // No nonce in the send: this is a NEW submission, not a replacement.
     expect(d.sendRaw).toHaveBeenCalledWith(84532, expect.not.objectContaining({ nonce: expect.anything() }))
     expect(d.markBroadcast).toHaveBeenCalledWith('orphan-1', expect.objectContaining({ nonce: 99n }))
+  })
+
+  // #3263: 388 reverting passport_revoke orphans were re-sent every lease on dev.
+  const reverting = () =>
+    makeError('execution reverted (unknown custom error)', 'CALL_EXCEPTION', {
+      action: 'estimateGas', data: '0xc5723b51', reason: null, transaction: { to: null, data: '0x' }, invocation: null, revert: null,
+    })
+
+  it('#3263: an orphan whose payload REVERTS is closed failed, and the loop moves on to the next orphan', async () => {
+    const orphanQueue = [
+      row({ id: 'orphan-rev', status: 'queued', tx_hash: null, nonce: null, submitter: 'passport_revoke' }),
+      row({ id: 'orphan-ok', status: 'queued', tx_hash: null, nonce: null, submitter: 'sweep' }),
+    ]
+    const d = deps({
+      claimOrphan: vi.fn<BumpDeps['claimOrphan']>(async () => orphanQueue.shift() ?? null),
+      sendRaw: vi.fn<BumpDeps['sendRaw']>()
+        .mockRejectedValueOnce(reverting())
+        .mockResolvedValueOnce({ hash: '0x' + 'ff'.repeat(32), nonce: 7 }),
+    })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markFailed).toHaveBeenCalledWith('orphan-rev', 'orphan re-broadcast reverted in estimateGas (revert data 0xc5723b51)')
+    expect(result.failedOrphans).toBe(1)
+    expect(result.rebroadcastOrphans).toBe(1)
+    expect(d.markBroadcast).toHaveBeenCalledWith('orphan-ok', expect.objectContaining({ nonce: 7n }))
+  })
+
+  it('#3263: a TRANSIENT orphan failure is left for the next lease — never closed', async () => {
+    const orphanQueue = [row({ id: 'orphan-t', status: 'queued', tx_hash: null, nonce: null, submitter: 'sweep' })]
+    const d = deps({
+      claimOrphan: vi.fn<BumpDeps['claimOrphan']>(async () => orphanQueue.shift() ?? null),
+      sendRaw: vi.fn<BumpDeps['sendRaw']>().mockRejectedValue(
+        makeError('could not coalesce error', 'UNKNOWN_ERROR', { error: { code: 30, message: 'Request timeout on the free plan' } }),
+      ),
+    })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markFailed).not.toHaveBeenCalled()
+    expect(result.failedOrphans).toBe(0)
+    expect(result.rebroadcastOrphans).toBe(0)
+  })
+
+  it('#3263: a failing close is logged, never thrown out of the tick', async () => {
+    const orphanQueue = [row({ id: 'orphan-rev', status: 'queued', tx_hash: null, nonce: null, submitter: 'passport_revoke' })]
+    const d = deps({
+      claimOrphan: vi.fn<BumpDeps['claimOrphan']>(async () => orphanQueue.shift() ?? null),
+      sendRaw: vi.fn<BumpDeps['sendRaw']>().mockRejectedValue(reverting()),
+      markFailed: vi.fn<BumpDeps['markFailed']>().mockRejectedValue(new Error('db down')),
+    })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.failedOrphans).toBe(0)
+    expect(log.warn).toHaveBeenCalledWith(expect.anything(), 'outbound-bump: could not close a reverting orphan')
   })
 
   it('NEVER blindly re-broadcasts a passport attest — a second broadcast mints a second attestation', async () => {

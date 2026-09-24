@@ -1070,3 +1070,245 @@ describe('#3272: haven_sign refuses everything except a bound direct-payment Use
     expect((result.data as { signature: string }).signature).toMatch(/^0x[0-9a-f]+$/i)
   })
 })
+
+/**
+ * #3272 (B1) — `assertRedeemsOwnBudgetDelegation` decodes the redemption
+ * ARGUMENTS, not just the `redeemDelegations` selector. Each test below
+ * signed on this branch before that fix (verified by temporarily reverting
+ * `tools.ts` — see the PR's mutation table).
+ */
+describe('#3272 (B1): the redeemDelegations ARGUMENTS are verified, not just the selector', () => {
+  const SENDER = deriveDelegateAccountAddress(TEST_DELEGATE_ADDRESS)
+
+  async function expectNoSignatureNoAudit(callData: `0x${string}`): Promise<{ code?: string; message?: string }> {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-3272-b1-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer, {
+        audit: { auditPath, delegateAddress: signer.delegateAddress },
+      })
+      const { typedData, payloadHash } = buildBoundDirectUserOp({
+        delegate: TEST_DELEGATE_ADDRESS,
+        callData: buildExecuteCallData(
+          '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+          0n,
+          callData,
+        ),
+      })
+      const result = await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData })
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected a refusal')
+      expect('signature' in result).toBe(false)
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+      return result
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('B1 EXACT REGRESSION: an empty permission context paired with a self-call executes as self-authorised — refused', async () => {
+    // The exact live bypass shape: a self-call execution, packed the way
+    // ExecutionMode.SingleDefault expects (encodePacked, not ABI-encoded).
+    const selfCallSingleExecution = buildSingleExecutionCallData(
+      SENDER,
+      0n,
+      encodeFunctionData({
+        abi: [{ type: 'function', name: 'transferOwnership', inputs: [{ name: 'newOwner', type: 'address' }], outputs: [], stateMutability: 'nonpayable' }] as const,
+        functionName: 'transferOwnership',
+        args: ['0x000000000000000000000000000000000000dEaD'],
+      }),
+    )
+    const redeemCallData = buildEmptyPermissionContextRedemption(selfCallSingleExecution)
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/self-authorised|EMPTY/i)
+  })
+
+  it('refuses execute() value !== 0', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-3272-value-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer, { audit: { auditPath, delegateAddress: signer.delegateAddress } })
+      const { typedData, payloadHash } = buildBoundDirectUserOp({
+        delegate: TEST_DELEGATE_ADDRESS,
+        callData: buildExecuteCallData(
+          '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+          1n,
+          buildBoundRedeemDelegationsCallData({ delegate: SENDER }),
+        ),
+      })
+      const result = await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData })
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected a refusal')
+      expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a malformed inner call that is not a well-formed redeemDelegations(bytes[],bytes32[],bytes[])', async () => {
+    const result = await expectNoSignatureNoAudit('0xcef6d209deadbeef')
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+  })
+
+  it('refuses an ERC-7579 batch execute(bytes32,bytes) — selector 0xe9ae5c53 — at the OUTER call', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-3272-erc7579-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer, { audit: { auditPath, delegateAddress: signer.delegateAddress } })
+      const batchExecuteAbi = [
+        { type: 'function', name: 'execute', inputs: [{ name: '_mode', type: 'bytes32' }, { name: '_executionCalldata', type: 'bytes' }], outputs: [], stateMutability: 'payable' },
+      ] as const
+      const callData = encodeFunctionData({
+        abi: batchExecuteAbi,
+        functionName: 'execute',
+        args: [SINGLE_DEFAULT_MODE, buildBoundRedeemDelegationsCallData({ delegate: SENDER })],
+      })
+      const { typedData, payloadHash } = buildBoundDirectUserOp({ delegate: TEST_DELEGATE_ADDRESS, callData })
+      const result = await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData })
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected a refusal')
+      expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses execute() calldata with trailing bytes appended after a valid encoding', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-3272-trailing-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer, { audit: { auditPath, delegateAddress: signer.delegateAddress } })
+      const validCallData = buildExecuteCallData(
+        '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+        0n,
+        buildBoundRedeemDelegationsCallData({ delegate: SENDER }),
+      )
+      const withTrailingBytes = (validCallData + 'deadbeef') as `0x${string}`
+      const { typedData, payloadHash } = buildBoundDirectUserOp({ delegate: TEST_DELEGATE_ADDRESS, callData: withTrailingBytes })
+      const result = await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData })
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected a refusal')
+      expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+      expect(result.message).toMatch(/re-encode/)
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses redeemDelegations calldata with trailing bytes appended after a valid encoding (inner canonical check)', async () => {
+    // Distinct from the OUTER execute() trailing-bytes test above: this
+    // corrupts the INNER redeemDelegations call specifically, wrapped by an
+    // outer execute() that re-encodes canonically around the corrupted
+    // bytes — so only `assertRedeemsOwnBudgetDelegation`'s own re-encoding
+    // check can catch it.
+    const validRedeem = buildBoundRedeemDelegationsCallData({ delegate: SENDER })
+    const withTrailingBytes = (validRedeem + 'deadbeef') as `0x${string}`
+    const result = await expectNoSignatureNoAudit(withTrailingBytes)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/re-encode/)
+  })
+
+  it('refuses a permission context with trailing bytes appended after a valid Delegation[] encoding', async () => {
+    const delegation = buildDelegation({ delegate: SENDER, delegator: DEFAULT_DELEGATOR })
+    const validContext = buildPermissionContext(delegation)
+    const corruptedContext = (validContext + 'deadbeef') as `0x${string}`
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [[corruptedContext], [SINGLE_DEFAULT_MODE], [buildSingleExecutionCallData(SENDER, 0n, '0x')]],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/trailing or non-canonical bytes/)
+  })
+
+  it('refuses when the LEAF delegation\'s delegate is not this signer\'s own account (sender IS its own account)', async () => {
+    const someoneElse = '0x1234567890123456789012345678901234567890' as const
+    const redeemCallData = buildBoundRedeemDelegationsCallData({ delegate: someoneElse })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/not this signer's own account/)
+  })
+
+  it('refuses when the root delegation\'s delegator IS this signer\'s own account (self-to-self delegation)', async () => {
+    const redeemCallData = buildBoundRedeemDelegationsCallData({ delegate: SENDER, delegator: SENDER })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/root delegation granted by this signer/)
+  })
+
+  it('refuses mismatched permissionContexts/modes/executionCallDatas array lengths (one context, TWO modes — isolates the length-equality check from the exactly-one check below)', async () => {
+    const delegation = buildDelegation({ delegate: SENDER, delegator: DEFAULT_DELEGATOR })
+    const permissionContext = buildPermissionContext(delegation)
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [
+        [permissionContext],
+        [SINGLE_DEFAULT_MODE, SINGLE_DEFAULT_MODE],
+        [buildSingleExecutionCallData(SENDER, 0n, '0x')],
+      ],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/mismatched or empty argument arrays/)
+  })
+
+  it('refuses redeeming TWO delegation chains at once — equal-length arrays, but not exactly one', async () => {
+    const delegation = buildDelegation({ delegate: SENDER, delegator: DEFAULT_DELEGATOR })
+    const permissionContext = buildPermissionContext(delegation)
+    const execution = buildSingleExecutionCallData(SENDER, 0n, '0x')
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [
+        [permissionContext, permissionContext],
+        [SINGLE_DEFAULT_MODE, SINGLE_DEFAULT_MODE],
+        [execution, execution],
+      ],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/redeems 2 delegation chains at once/)
+  })
+
+  it('refuses a non-SingleDefault execution mode', async () => {
+    const delegation = buildDelegation({ delegate: SENDER, delegator: DEFAULT_DELEGATOR })
+    const permissionContext = buildPermissionContext(delegation)
+    const BATCH_DEFAULT_MODE = `0x01${'00'.repeat(31)}` as const
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [[permissionContext], [BATCH_DEFAULT_MODE], [buildSingleExecutionCallData(SENDER, 0n, '0x')]],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/ExecutionMode.SingleDefault/)
+  })
+
+  it('N1: refuses a domain.chainId that is a numeric STRING, not a number', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-3272-string-chainid-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer, { audit: { auditPath, delegateAddress: signer.delegateAddress } })
+      const { typedData, payloadHash } = buildBoundDirectUserOp({ delegate: TEST_DELEGATE_ADDRESS, chainId: '84532' })
+      const result = await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData })
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected a refusal')
+      expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+      expect(result.message).toMatch(/not a number/)
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

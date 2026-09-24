@@ -30,7 +30,7 @@ describe('vendored Delegation/Caveat ABI (#3272 B1)', () => {
         delegator: DELEGATOR,
         authority: `0x${'ff'.repeat(32)}` as `0x${string}`,
         caveats: [{ enforcer: getAddress(`0x${'33'.repeat(20)}`), terms: '0xdead', args: '0x' }],
-        salt: 7n,
+        salt: `0x07` as `0x${string}`,
         signature: '0xbeef',
       },
     ])

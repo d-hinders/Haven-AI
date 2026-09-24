@@ -43,7 +43,7 @@ export interface HavenClientConfig {
    * JSON-RPC RPC URLs keyed by EIP-155 chain ID.
    *
    * When provided for a chain, the SDK waits for ≥1 on-chain confirmation of
-   * the AllowanceModule funding tx before retrying the merchant. This prevents
+   * the funding tx (account → delegate EOA) before retrying the merchant. This prevents
    * the race where the merchant's `balanceOf(delegate)` call runs before the
    * funding block has propagated to the merchant's RPC node.
    *
@@ -319,7 +319,7 @@ export interface X402AuthorizationOptions {
  * It carries the unsigned funding payload (`signData`, account → delegate EOA)
  * plus everything the *edge* needs to build and sign the EIP-3009 merchant
  * header itself. The construct path never signs; both delegate signatures
- * (funding hash + merchant header) happen on the machine that holds the key.
+ * (funding payload + merchant header) happen on the machine that holds the key.
  */
 export interface X402Intent {
   /** Haven payment id for the funding transfer. */
@@ -744,12 +744,12 @@ export interface RawHavenBalanceCoverage {
 /**
  * Affirmative spend-readiness for the authenticated agent, derived from the raw
  * agent status plus the remaining spend authority the backend reports per rail
- * (the on-chain AllowanceModule on the legacy rail; the active budget
- * delegation on the delegation rail — #1135):
+ * (the active budget delegation on the delegation rail — #1135; the retired
+ * AllowanceModule rail used an on-chain allowance instead):
  * - `ready`         — active and at least one token has remaining spend authority.
  * - `needs_approval`— active but no remaining spend authority to auto-spend.
- *                     The over-budget outcome differs by rail: on the legacy
- *                     AllowanceModule rail the payment is queued for the wallet
+ *                     The over-budget outcome differs by rail: on the retired
+ *                     AllowanceModule rail the payment was queued for the wallet
  *                     owner to approve in Haven; on the delegation rail there is
  *                     NO approval queue — an over-budget redemption reverts
  *                     on-chain, so the owner must grant or raise the budget in

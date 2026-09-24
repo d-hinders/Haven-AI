@@ -623,7 +623,7 @@ export class HavenClient {
    * The delegate key held by this client signs and submits the transfer transactions
    * directly — Haven's backend never handles the key or constructs signed txs
    * (CASP/MiCA Red Line #2). Funds always go to the Haven account linked to this agent
-   * (`accountAddress` from the agent summary).
+   * (`accountAddress` from `getAgent()`).
    *
    * Requires `chainRpcs` to be set for the agent's chain in `HavenClientConfig`.
    */

@@ -153,7 +153,14 @@ Measured on `origin/dev` @ `3d056b8f`.
 Spec-review verdict on `origin/dev` @ `3d056b8f`: 9 claims re-run, 8 reproduce,
 1 wrong (fixed): "27 `-rgb` twins" measures 20 (`grep -rc "rgb(" packages/frontend/src/app`).
 Open questions: whether refusal caps belong on the ledger or the agent card.
+Corrections: 1.
 ````
+
+The comment **starts** with `Spec-review verdict` and **ends** with
+`Corrections: <n>.` — the number of body edits the review caused (wrong claims
+fixed, scope gaps settled, criteria rewritten; `0` when the body stood). That
+last line is what § *Issue review* → *Re-measure* counts, so it is written on
+every verdict, `0` included.
 
 ## Issue review
 
@@ -231,6 +238,33 @@ The captain then has three obligations before the issue is queued or announced:
 
 A body with no code claims still gets the pass — the claim re-run is empty, but
 completeness, criteria and gaps are not.
+
+### Re-measure (registered 2026-09-24, #2781 discipline)
+
+Making this pass mandatory for single tasks is a rule agents must follow, so it
+carries a number checked afterwards, the same way #2781 checked the filing bar
+(reverted by #3248 when it did not move). Agreed **before** the result is
+known:
+
+- **Window:** the 14 days after the rule merges to `dev`; re-measure on the
+  15th day.
+- **Metric:** the share of verdict comments with `Corrections:` ≥ 1 — how often
+  the mandatory pass changes the issue it reviewed. Baseline is 3 of 3 (#3264,
+  #3266, #3267, 2026-09-24), a favourable sample: three issues filed fast, in an
+  unfamiliar area, by one session.
+- **Decision rule:** fewer than **1 in 4** verdicts with a correction, or fewer
+  than 8 verdicts in the window (the rule was not followed, so it measured
+  nothing) → the "did not move" arm: single tasks go back to optional review,
+  epics keep theirs, and no other rule is added in its place. Otherwise the rule
+  stays.
+- **Instrument** — run exactly this; a changed instrument is a new baseline:
+
+```bash
+# new-task issue-review re-measure: FROM=YYYY-MM-DD TO=YYYY-MM-DD
+gh api --paginate "repos/{owner}/{repo}/issues/comments?since=${FROM}T00:00:00Z&per_page=100" \
+  --jq ".[] | select(.created_at < \"${TO}T23:59:59Z\") | .body | select(startswith(\"Spec-review verdict\"))" \
+| grep -oE 'Corrections: [0-9]+' | awk '{n++; if ($2>0) c++} END {printf "verdicts: %d, with corrections: %d (%d%%)\n", n, c, n ? 100*c/n : 0}'
+```
 
 ## Backlog And Shipping
 

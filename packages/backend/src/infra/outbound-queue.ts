@@ -130,6 +130,10 @@ const defaultChainDeps: SubmitChainDeps = { getRelayer, withRelayerSendLock }
  * A throw BEFORE the stamp (gas estimation, lane-attempt exhaustion) leaves
  * the row `queued`: the orphan path owns it after its age gate — same
  * resolution the pre-#1559 pre-broadcast-throw had, now with a durable row.
+ * Except (#3263) a DETERMINISTIC revert in gas estimation: that payload can
+ * never be sent as it stands, so the record is closed `failed` before the
+ * error propagates, instead of becoming an orphan re-sent every lease. Any
+ * later success goes through the submitter's own retry, on a fresh record.
  */
 export async function submitRecorded(
   params: {
@@ -175,7 +179,16 @@ export async function submitRecorded(
         // A transient populate failure leaves the record as it was.
         if (params.recordId && isDeterministicRevert(err)) {
           try {
-            await repo.markOutboundTxFailed(params.recordId, `pre-broadcast ${describeRevert(err)}`)
+            // The nonce only when it was EXPLICIT (a same-nonce lane cancel or
+            // replacement), so the lane cap still counts that attempt; never
+            // the pending nonce just read, which would charge this failure to
+            // whatever transaction later lands at that nonce.
+            await repo.markOutboundTxFailed(
+              params.recordId,
+              `pre-broadcast ${describeRevert(err)}`,
+              undefined,
+              params.nonce !== undefined ? BigInt(params.nonce) : undefined,
+            )
           } catch (markErr) {
             warn('mark pre-broadcast revert failed', markErr)
           }

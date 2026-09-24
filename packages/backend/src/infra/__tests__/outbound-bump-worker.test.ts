@@ -246,21 +246,43 @@ describe('runOutboundBumpTick — orphaned queued rows', () => {
     })
 
   it('#3263: an orphan whose payload REVERTS is closed failed, and the loop moves on to the next orphan', async () => {
+    // Keyed on the PAYLOAD, not call order: the revoke's calldata reverts, the
+    // sweep's sends — whichever the loop claims first.
+    const REVOKE_DATA = '0x46926267' + '00'.repeat(32)
     const orphanQueue = [
-      row({ id: 'orphan-rev', status: 'queued', tx_hash: null, nonce: null, submitter: 'passport_revoke' }),
+      row({ id: 'orphan-rev', status: 'queued', tx_hash: null, nonce: null, submitter: 'passport_revoke', data: REVOKE_DATA }),
       row({ id: 'orphan-ok', status: 'queued', tx_hash: null, nonce: null, submitter: 'sweep' }),
     ]
     const d = deps({
       claimOrphan: vi.fn<BumpDeps['claimOrphan']>(async () => orphanQueue.shift() ?? null),
-      sendRaw: vi.fn<BumpDeps['sendRaw']>()
-        .mockRejectedValueOnce(reverting())
-        .mockResolvedValueOnce({ hash: '0x' + 'ff'.repeat(32), nonce: 7 }),
+      sendRaw: vi.fn<BumpDeps['sendRaw']>(async (_chainId, tx) => {
+        if (tx.data === REVOKE_DATA) throw reverting()
+        return { hash: '0x' + 'ff'.repeat(32), nonce: 7 }
+      }),
     })
     const result = await runOutboundBumpTick(84532, d, log)
     expect(d.markFailed).toHaveBeenCalledWith('orphan-rev', 'orphan re-broadcast reverted in estimateGas (revert data 0xc5723b51)')
     expect(result.failedOrphans).toBe(1)
     expect(result.rebroadcastOrphans).toBe(1)
     expect(d.markBroadcast).toHaveBeenCalledWith('orphan-ok', expect.objectContaining({ nonce: 7n }))
+    // Closed, not ALSO reported as a retryable failure.
+    expect(log.warn).not.toHaveBeenCalledWith(expect.anything(), 'outbound-bump: orphan re-broadcast failed')
+  })
+
+  it('#3263: a gas-estimation TIMEOUT (real ethers shape: CALL_EXCEPTION, data null) is left for the next lease', async () => {
+    const orphanQueue = [row({ id: 'orphan-t2', status: 'queued', tx_hash: null, nonce: null, submitter: 'sweep' })]
+    const d = deps({
+      claimOrphan: vi.fn<BumpDeps['claimOrphan']>(async () => orphanQueue.shift() ?? null),
+      sendRaw: vi.fn<BumpDeps['sendRaw']>().mockRejectedValue(
+        makeError('missing revert data', 'CALL_EXCEPTION', {
+          action: 'estimateGas', data: null, reason: null, transaction: { to: null, data: '0x' }, invocation: null, revert: null,
+        }),
+      ),
+    })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markFailed).not.toHaveBeenCalled()
+    expect(result.failedOrphans).toBe(0)
+    expect(log.warn).toHaveBeenCalledWith(expect.anything(), 'outbound-bump: orphan re-broadcast failed')
   })
 
   it('#3263: a TRANSIENT orphan failure is left for the next lease — never closed', async () => {

@@ -20,6 +20,10 @@ describe('isDeterministicRevert (#3263)', () => {
   it('a CALL_EXCEPTION with no or empty revert data is NOT — some providers produce that for their own failures', () => {
     expect(isDeterministicRevert(callException(null))).toBe(false)
     expect(isDeterministicRevert(callException('0x'))).toBe(false)
+    // Under four bytes is not a selector — the {8,} bound decides here.
+    expect(isDeterministicRevert(callException('0x12'))).toBe(false)
+    expect(isDeterministicRevert(callException('0x123456'))).toBe(false)
+    expect(isDeterministicRevert(callException('0x12345678'))).toBe(true)
   })
 
   it('transport failures are never deterministic', () => {

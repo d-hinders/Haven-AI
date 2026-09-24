@@ -258,6 +258,24 @@ describeDb('openOutboundRecord (#1556)', () => {
     expect((await rowsFor(CHAIN))[0].status).toBe('queued')
   })
 
+  it('#3263 review: the close carries the nonce only when it was EXPLICIT — never the pending nonce just read', async () => {
+    const revert = () => {
+      throw makeError('execution reverted', 'CALL_EXCEPTION', {
+        action: 'estimateGas', data: '0xc5723b51', reason: null, transaction: { to: TO, data: DATA }, invocation: null, revert: null,
+      })
+    }
+    const { chain } = revertingChain(async () => revert())
+    const implicit = await openOutboundRecord({ chainId: CHAIN, submitter: 'passport_revoke', to: TO, data: DATA })
+    await expect(submitRecorded({ chainId: CHAIN, recordId: implicit.id, to: TO, data: DATA }, undefined, chain)).rejects.toThrow()
+    const explicit = await openOutboundRecord({ chainId: CHAIN, submitter: 'lane_cancel', to: TO, data: DATA })
+    await expect(
+      submitRecorded({ chainId: CHAIN, recordId: explicit.id, to: TO, data: DATA, nonce: 12 }, undefined, chain),
+    ).rejects.toThrow()
+    const rows = await rowsFor(CHAIN)
+    expect(rows.find((r) => r.id === implicit.id)).toMatchObject({ status: 'failed', nonce: null })
+    expect(rows.find((r) => r.id === explicit.id)).toMatchObject({ status: 'failed', nonce: '12' })
+  })
+
   it('#3263: a CALL_EXCEPTION with NO revert data is not treated as deterministic', async () => {
     const { chain } = revertingChain(async () => {
       throw makeError('missing revert data', 'CALL_EXCEPTION', {

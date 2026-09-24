@@ -22,6 +22,10 @@
  *     on-chain (see {@link REBROADCAST_SAFE_SUBMITTERS}); a passport attest
  *     is NOT (a second broadcast mints a second attestation), so it is
  *     alerted instead — its own #1043 receipt-recovery owns that retry.
+ *     An orphan whose re-broadcast REVERTS with revert data is closed
+ *     `failed` (#3263) rather than released to the claim lease: re-sending
+ *     it unchanged every two minutes cannot succeed and only burns the
+ *     relayer node's quota. A transient failure keeps the lease-and-retry.
  *     RESIDUAL RISK (review, owned by #1559): a crash BETWEEN broadcast and
  *     stamp leaves a queued-looking row whose tx is actually in flight — the
  *     orphan resend then takes a fresh nonce and, if the invisible original

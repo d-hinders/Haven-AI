@@ -805,6 +805,10 @@ you need the reasoning. Never edit one without the other — CI will not let you
   authority — the SDK entry point was listed; the edge-signer package that
   actually holds the delegate key material was on no list at all, and is the
   stronger case of the two — #1896);
+- `packages/sdk/src/delegate-account.ts`, `direct-payment-guard.ts`,
+  `redemption-guard.ts` and `settlement-child.ts` (the delegate key's
+  signing-surface guard, moved out of `packages/signer/` into the SDK by #3283 —
+  its location changed, its authority did not);
 - `packages/core/src/machine-payment-lifecycle.ts` (the machine-payment domain
   actually lives here since #987 — the `domain/machine-payment-lifecycle.ts` line
   above guards the backend re-export shim, not the code — #1905);

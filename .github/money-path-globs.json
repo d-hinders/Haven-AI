@@ -254,7 +254,9 @@
     "money-path.test.mjs now also reads the fourth copy the OTHER way: every",
     "package-wide glob in the guardrails doc's covers: is on this list or named",
     "doc-only with its reason (sdk, cli, connect, mcp -- client packages the",
-    "deployed harness never runs; widening them is an owner decision)."
+    "deployed harness never runs; widening them is an owner decision).",
+    "",
+    "2026-09-24 (#3283, epic #3284): packages/sdk/src/{delegate-account,direct-payment-guard,redemption-guard,settlement-child}.ts added to globs -- the delegate key's signing-surface guard MOVED here from packages/signer/** (already listed), so the move would otherwise have taken it off the perimeter. The same accident-of-location rule as #1892: which package the guard lives in is not what makes it spend authority."
   ],
   "globs": [
     "packages/backend/src/db/migrations/**",
@@ -289,6 +291,10 @@
     "packages/core/src/machine-payment-lifecycle.ts",
     "packages/demo-merchant-mcp/src/**",
     "packages/mcp-server/src/**",
+    "packages/sdk/src/delegate-account.ts",
+    "packages/sdk/src/direct-payment-guard.ts",
+    "packages/sdk/src/redemption-guard.ts",
+    "packages/sdk/src/settlement-child.ts",
     "packages/sdk/src/signer.ts",
     "packages/signer/**"
   ],

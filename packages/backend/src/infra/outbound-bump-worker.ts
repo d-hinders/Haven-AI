@@ -22,6 +22,10 @@
  *     on-chain (see {@link REBROADCAST_SAFE_SUBMITTERS}); a passport attest
  *     is NOT (a second broadcast mints a second attestation), so it is
  *     alerted instead — its own #1043 receipt-recovery owns that retry.
+ *     An orphan whose re-broadcast REVERTS with revert data is closed
+ *     `failed` (#3263) rather than released to the claim lease: re-sending
+ *     it unchanged every two minutes cannot succeed and only burns the
+ *     relayer node's quota. A transient failure keeps the lease-and-retry.
  *     RESIDUAL RISK (review, owned by #1559): a crash BETWEEN broadcast and
  *     stamp leaves a queued-looking row whose tx is actually in flight — the
  *     orphan resend then takes a fresh nonce and, if the invisible original
@@ -39,6 +43,7 @@
  */
 
 import type { OutboundTxRow } from './repositories/outbound-txs.js'
+import { describeRevert, isDeterministicRevert } from './deterministic-revert.js'
 
 /** Broadcast rows untouched for this long are scanned against the chain. */
 export const STALE_BROADCAST_SECONDS = 180
@@ -137,6 +142,8 @@ export interface BumpTickResult {
   closedFailed: number
   bumped: number
   rebroadcastOrphans: number
+  /** #3263: orphans closed `failed` because their payload reverts deterministically. */
+  failedOrphans: number
   alerted: number
 }
 
@@ -151,6 +158,7 @@ export async function runOutboundBumpTick(
     closedFailed: 0,
     bumped: 0,
     rebroadcastOrphans: 0,
+    failedOrphans: 0,
     alerted: 0,
   }
 
@@ -325,6 +333,23 @@ export async function runOutboundBumpTick(
         'outbound-bump: re-broadcast an orphaned queued tx',
       )
     } catch (err) {
+      // #3263: a payload that REVERTS will revert on every later claim too —
+      // close it instead of re-sending it every lease forever (388 such
+      // orphans were burning the dev relayer's RPC quota). A transient
+      // failure (timeout, rate limit, 5xx) keeps the lease-and-retry path.
+      if (isDeterministicRevert(err)) {
+        try {
+          await deps.markFailed(orphan.id, `orphan re-broadcast ${describeRevert(err)}`)
+          result.failedOrphans += 1
+          log.warn(
+            { chainId, id: orphan.id, submitter: orphan.submitter, reason: describeRevert(err) },
+            'outbound-bump: orphan payload reverts — closed failed, not retried',
+          )
+        } catch (markErr) {
+          log.warn({ err: markErr, chainId, id: orphan.id }, 'outbound-bump: could not close a reverting orphan')
+        }
+        continue
+      }
       log.warn({ err, chainId, id: orphan.id }, 'outbound-bump: orphan re-broadcast failed')
     }
   }

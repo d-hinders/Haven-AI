@@ -30,6 +30,7 @@ import {
   markOutboundTxMined,
 } from './repositories/outbound-txs.js'
 import { getRelayer, withRelayerSendLock } from './relayer.js'
+import { describeRevert, isDeterministicRevert } from './deterministic-revert.js'
 
 export interface OutboundBroadcastStamp {
   hash: string
@@ -129,6 +130,10 @@ const defaultChainDeps: SubmitChainDeps = { getRelayer, withRelayerSendLock }
  * A throw BEFORE the stamp (gas estimation, lane-attempt exhaustion) leaves
  * the row `queued`: the orphan path owns it after its age gate — same
  * resolution the pre-#1559 pre-broadcast-throw had, now with a durable row.
+ * Except (#3263) a DETERMINISTIC revert in gas estimation: that payload can
+ * never be sent as it stands, so the record is closed `failed` before the
+ * error propagates, instead of becoming an orphan re-sent every lease. Any
+ * later success goes through the submitter's own retry, on a fresh record.
  */
 export async function submitRecorded(
   params: {
@@ -154,16 +159,42 @@ export async function submitRecorded(
     const MAX_LANE_ATTEMPTS = 3
     for (let attempt = 0; attempt < MAX_LANE_ATTEMPTS; attempt++) {
       const nonce = params.nonce ?? (await relayer.getNonce('pending'))
-      const populated = await relayer.populateTransaction({
-        to: params.to,
-        data: params.data,
-        value: params.valueAtomic ?? 0n,
-        nonce,
-        ...(params.maxFeePerGas !== undefined ? { maxFeePerGas: params.maxFeePerGas } : {}),
-        ...(params.maxPriorityFeePerGas !== undefined
-          ? { maxPriorityFeePerGas: params.maxPriorityFeePerGas }
-          : {}),
-      })
+      let populated
+      try {
+        populated = await relayer.populateTransaction({
+          to: params.to,
+          data: params.data,
+          value: params.valueAtomic ?? 0n,
+          nonce,
+          ...(params.maxFeePerGas !== undefined ? { maxFeePerGas: params.maxFeePerGas } : {}),
+          ...(params.maxPriorityFeePerGas !== undefined
+            ? { maxPriorityFeePerGas: params.maxPriorityFeePerGas }
+            : {}),
+        })
+      } catch (err) {
+        // #3263: the payload reverted in gas estimation — nothing was signed
+        // or broadcast, and nothing ever will be for this record. Close it
+        // `failed` so it cannot become a `queued` orphan the bump worker
+        // re-sends forever; the submitter's own retry opens a fresh record.
+        // A transient populate failure leaves the record as it was.
+        if (params.recordId && isDeterministicRevert(err)) {
+          try {
+            // The nonce only when it was EXPLICIT (a same-nonce lane cancel or
+            // replacement), so the lane cap still counts that attempt; never
+            // the pending nonce just read, which would charge this failure to
+            // whatever transaction later lands at that nonce.
+            await repo.markOutboundTxFailed(
+              params.recordId,
+              `pre-broadcast ${describeRevert(err)}`,
+              undefined,
+              params.nonce !== undefined ? BigInt(params.nonce) : undefined,
+            )
+          } catch (markErr) {
+            warn('mark pre-broadcast revert failed', markErr)
+          }
+        }
+        throw err
+      }
       const raw = await relayer.signTransaction(populated)
       const hash = Transaction.from(raw).hash
       if (!hash) throw new Error('outbound-queue: signed transaction has no hash')

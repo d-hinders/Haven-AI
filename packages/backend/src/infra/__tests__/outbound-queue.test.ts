@@ -7,7 +7,7 @@
  * probing the database at the moment the "broadcast" would run — not by
  * trusting call order in a mock.
  */
-import { Wallet } from 'ethers'
+import { Wallet, makeError } from 'ethers'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from './helpers/db-harness.js'
@@ -205,5 +205,87 @@ describeDb('openOutboundRecord (#1556)', () => {
     )
     expect(halfOpen.id).not.toBeNull()
     await expect(halfOpen.broadcast({ hash: TX, nonce: 1 })).resolves.toBeUndefined()
+  })
+
+  // ── #3263: a payload that reverts in gas estimation never becomes an orphan ──
+  function revertingChain(estimateGas: () => Promise<bigint>) {
+    let broadcastCalls = 0
+    const provider = {
+      getNetwork: async () => ({ chainId: BigInt(CHAIN), name: 'test' }),
+      getFeeData: async () => ({ maxFeePerGas: 200n, maxPriorityFeePerGas: 10n, gasPrice: 200n }),
+      estimateGas,
+      getTransactionCount: async () => 3,
+      broadcastTransaction: async () => {
+        broadcastCalls += 1
+        return {} as never
+      },
+    }
+    const wallet = new Wallet('0x' + '44'.repeat(32), provider as never)
+    const chain: SubmitChainDeps = {
+      getRelayer: (() => wallet) as never,
+      withRelayerSendLock: async (_chainId, fn) => fn(),
+    }
+    return { chain, broadcasts: () => broadcastCalls }
+  }
+
+  it('#3263: a DETERMINISTIC revert in gas estimation closes the record failed — it can never become a queued orphan', async () => {
+    // The production shape (dev logs, 2026-09-24): EAS revoke of a missing UID.
+    const { chain, broadcasts } = revertingChain(async () => {
+      throw makeError('execution reverted (unknown custom error)', 'CALL_EXCEPTION', {
+        action: 'estimateGas', data: '0xc5723b51', reason: null, transaction: { to: TO, data: DATA }, invocation: null, revert: null,
+      })
+    })
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'passport_revoke', to: TO, data: DATA })
+    await expect(
+      submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain),
+    ).rejects.toMatchObject({ code: 'CALL_EXCEPTION' })
+    const [row] = await rowsFor(CHAIN)
+    expect(row.status).toBe('failed')
+    expect(row.error).toBe('pre-broadcast reverted in estimateGas (revert data 0xc5723b51)')
+    expect(broadcasts()).toBe(0)
+  })
+
+  it('#3263: a TRANSIENT populate failure leaves the record queued for the orphan path — and still propagates', async () => {
+    const { chain } = revertingChain(async () => {
+      throw makeError('could not coalesce error', 'UNKNOWN_ERROR', {
+        error: { code: 30, message: 'Request timeout on the free plan, please upgrade to paid plan' },
+      })
+    })
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    await expect(
+      submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain),
+    ).rejects.toMatchObject({ code: 'UNKNOWN_ERROR' })
+    expect((await rowsFor(CHAIN))[0].status).toBe('queued')
+  })
+
+  it('#3263 review: the close carries the nonce only when it was EXPLICIT — never the pending nonce just read', async () => {
+    const revert = () => {
+      throw makeError('execution reverted', 'CALL_EXCEPTION', {
+        action: 'estimateGas', data: '0xc5723b51', reason: null, transaction: { to: TO, data: DATA }, invocation: null, revert: null,
+      })
+    }
+    const { chain } = revertingChain(async () => revert())
+    const implicit = await openOutboundRecord({ chainId: CHAIN, submitter: 'passport_revoke', to: TO, data: DATA })
+    await expect(submitRecorded({ chainId: CHAIN, recordId: implicit.id, to: TO, data: DATA }, undefined, chain)).rejects.toThrow()
+    const explicit = await openOutboundRecord({ chainId: CHAIN, submitter: 'lane_cancel', to: TO, data: DATA })
+    await expect(
+      submitRecorded({ chainId: CHAIN, recordId: explicit.id, to: TO, data: DATA, nonce: 12 }, undefined, chain),
+    ).rejects.toThrow()
+    const rows = await rowsFor(CHAIN)
+    expect(rows.find((r) => r.id === implicit.id)).toMatchObject({ status: 'failed', nonce: null })
+    expect(rows.find((r) => r.id === explicit.id)).toMatchObject({ status: 'failed', nonce: '12' })
+  })
+
+  it('#3263: a CALL_EXCEPTION with NO revert data is not treated as deterministic', async () => {
+    const { chain } = revertingChain(async () => {
+      throw makeError('missing revert data', 'CALL_EXCEPTION', {
+        action: 'estimateGas', data: null, reason: null, transaction: { to: TO, data: DATA }, invocation: null, revert: null,
+      })
+    })
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    await expect(
+      submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain),
+    ).rejects.toMatchObject({ code: 'CALL_EXCEPTION' })
+    expect((await rowsFor(CHAIN))[0].status).toBe('queued')
   })
 })

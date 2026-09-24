@@ -22,8 +22,9 @@ name: Pending promotion digest
 # Since #2767 the digest also prints two figures over the trailing 7 days, each
 # with the command that reproduces it (scripts/ci/promotion-digest-metrics.mjs):
 # issues filed per issue closed (target < 0.3) and product PRs as a share of
-# merges to dev (target > 60 %). They are the trend line for the filing bar
-# ship-next § Filing bar introduced; the rule is there, not here.
+# merges to dev (target > 60 %). They were the trend line for the filing bar
+# (#2767), which #3248 reverted under #2781's re-measure; the figures stay as
+# machinery the revert deliberately kept, and no rule now stands behind them.
 
 on:
   push:

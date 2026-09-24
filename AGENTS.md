@@ -161,10 +161,6 @@ When opening or reviewing a non-trivial PR, report merge readiness explicitly in
 - risk level: low, medium, or high
 - why it is safe to merge
 - residual risk or follow-up
-- every finding not fixed in the PR, under **Not filed** (dropped, one line with
-  the reason) or **Filed** (with its repro link) — filing is the hard one; the
-  three dispositions and the five-check bar are in `ship-next` § *Filing bar*
-  (#2767), and a reviewer never files
 - recommended merge order when multiple PRs are open
 
 Green CI is necessary but not sufficient for changes that touch money movement, agent authority, generated credential artifacts, SDK payment APIs, x402/MPP flows, or shared contracts.

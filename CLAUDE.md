@@ -383,14 +383,5 @@ per pull request is not a rule.
 pass, but it is **opt-in** and enforces nothing until wired; **the rule does not
 depend on the hook.**
 
-**A finding has three dispositions, and filing is the hard one (#2767).** Every
-finding a session makes — its own, a reviewer's, a sweep's, a guard's — is **fixed
-in the PR**, **dropped with a reason** under the PR body's **Not filed** list, or
-**filed** only when it clears the five-check filing bar in
-[`ship-next` § *Filing bar*](.agents/skills/ship-next/SKILL.md#filing-bar-2767).
-Not fewer checks — fewer tickets filed too easily, and slightly larger PRs instead.
-Reviewers never file; an issue filed to end a round is a finding against the
-session, not a deliverable.
-
 Deliberately **not** built: a check asking whether `ship-next` was used —
 enforce outcomes, never tooling.

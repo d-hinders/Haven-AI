@@ -220,7 +220,7 @@ last-verified: "2026-09-24"
 > the x402 fetch first and, ONLY on its 409 `sign_context_unavailable`, fetches
 > the direct context. Every direct-payment UserOp `haven_sign` signs — fetched
 > or relayed — is re-hashed and refused with `USEROP_BINDING_MISMATCH` when it
-> disagrees with its `payload_hash`; the x402 funding leg keeps its #1263
+> disagrees with its `payload_hash`; the x402 funding leg keeps its #1138
 > digest check against the Haven-signed expected context. Additive on the
 > wire: the hosted direct-payment result is UNCHANGED in this change (it still
 > names the `payload_hash` + `typed_data_b64` relay); the capability-gated

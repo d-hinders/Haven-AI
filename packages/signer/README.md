@@ -70,7 +70,8 @@ The `initialize` handshake advertises which binding versions this signer
 understands, under `capabilities.experimental['haven/signer-compatibility']`
 and in the MCP `instructions` string. Both are **derived** from
 `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS` in
-`src/core.ts` — the same constants the signing path enforces — so this README
+`src/core.ts` and `SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS` in
+`src/sign-context.ts` (#3271) — the same constants the signing path enforces — so this README
 deliberately does not restate the numbers. Read them from the handshake, or
 from those constants.
 
@@ -303,11 +304,14 @@ carries no x402 context to fund a merchant retry with, so it surfaces the
 | `USEROP_BINDING_MISMATCH` | A direct payment's `PackedUserOperation` typed data (from the direct fetch, or a tool argument) does not recompute to its own `payload_hash`, or a fetched direct context is not a `PackedUserOperation` — see [Two ways to use it](#two-ways-to-use-it) above | `stop_and_tell_user` | — | no `http_status` — this is a local recomputation, not a backend refusal |
 
 `fallback: 'typed_data_b64'` appears only where signing OTHER bytes is a
-remedy — a transport failure or a body this signer could not read. It is
-**not** in the default quote result since #1272: obtain it by re-running the
-SAME quote tool with the SAME `idempotency_key` plus
-`include_signing_payload: true`, then pass `typed_data_b64` (plus
-`payload_hash` / `x402_expected`) instead of `payment_id`. A backend REFUSAL
+remedy — a transport failure or a body this signer could not read, plus one
+backend refusal: a 404 from the direct-payment fetch (an older backend with
+no direct route, #3271). For x402 it is **not** in the default quote result
+since #1272: obtain it by re-running the SAME quote tool with the SAME
+`idempotency_key` plus `include_signing_payload: true`, then pass
+`typed_data_b64` (plus `payload_hash` / `x402_expected`) instead of
+`payment_id`. A direct payment's `haven_send` / `haven_pay` result always
+carries `payload_hash` + `typed_data_b64`. Any other backend REFUSAL
 carries no fallback: an expired, executed or unsignable intent cannot be
 rescued by re-signing its bytes — an expired one is re-quoted (the same
 `payment_window_expired` + `retry_with_new_quote` the signer emits for

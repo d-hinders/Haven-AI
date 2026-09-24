@@ -314,6 +314,36 @@ describe('direct sign-context refusals name direct-payment remedies (#3271)', ()
     expect(JSON.stringify(result)).toMatch(/haven_send \/ haven_pay/)
   })
 
+  it('a bare 410 from the direct route (a retired-rail tombstone) stops and tells the user, never "re-send"', async () => {
+    const result = await handlersWith(
+      () => new Response(JSON.stringify({ error: 'This rail is retired' }), { status: 410 }),
+    ).haven_sign({ payment_id: 'pay_retired' })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.next_action).toBe('stop_and_tell_user')
+    expect('retry_with_new_quote' in result).toBe(false)
+    expect(JSON.stringify(result)).not.toMatch(/quote|same idempotency_key/)
+  })
+
+  it('a transport failure on the direct fetch names the typed_data_b64 relay, never a quote re-run', async () => {
+    const signer = createEdgeSigner(TEST_KEY)
+    const handlers = createToolHandlers(signer, {
+      signContext: {
+        loadIdentity: async () => IDENTITY,
+        fetchImpl: (async (url: unknown) => {
+          if (String(url).includes('/x402/')) return x402Unavailable()
+          throw new TypeError('fetch failed')
+        }) as typeof fetch,
+      },
+    })
+    const result = await handlers.haven_sign({ payment_id: 'pay_unreachable' })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).toBe('SIGN_CONTEXT_UNREACHABLE')
+    expect((result as { next_tool_omitted_reason?: string }).next_tool_omitted_reason).toMatch(/typed_data_b64 from the haven_send \/ haven_pay result/)
+    expect(JSON.stringify(result)).not.toMatch(/quote/)
+  })
+
   it('an x402 row the x402 route cannot serve keeps the x402 refusal instead of the direct route\'s', async () => {
     const x402Refusal = () =>
       new Response(

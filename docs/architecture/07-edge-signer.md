@@ -192,9 +192,9 @@ agent runtime drives the sequence.
 **Regular payment**
 
 ```
-hosted:  haven_pay        -> { payment_id, payload_hash, signature_scheme?, typed_data?, typed_data_b64?,
-                               next_tool: haven_sign, next_arguments: { payment_id }, signer_compatibility }
-local:   haven_sign { payment_id } -> { signature }   (fetches the exact bytes; delegate key never leaves)
+hosted:  haven_pay        -> { payment_id, payload_hash, signature_scheme?, typed_data?, typed_data_b64? }
+local:   haven_sign { payload_hash, typed_data_b64 } -> { signature }   (delegate key never leaves)
+         (or, on a current signer, haven_sign { payment_id }: it fetches the exact bytes itself)
 hosted:  haven_submit     -> { status, tx_hash }
 ```
 

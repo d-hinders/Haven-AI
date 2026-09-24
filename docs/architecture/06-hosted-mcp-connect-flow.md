@@ -287,8 +287,9 @@ The edge signer exposes four local, sign-only tools. Three of the four never
 reach the network; the exception is the `{ payment_id }` form of `haven_sign`
 and `haven_sign_x402`, which since #1263 fetches that payment's exact signing
 context from Haven over an authenticated, read-only
-`GET /x402/:payment_id/sign-context` (or, for a direct payment since #3271,
-`GET /payments/:payment_id/sign-context`). The delegate key is never part of that
+`GET /x402/:payment_id/sign-context` — and, for a direct payment via
+`haven_sign` only (since #3271), then `GET /payments/:payment_id/sign-context`
+after the x402 read answers 409. The delegate key is never part of that
 request or its response, and nothing here relays, submits, or broadcasts:
 
 | Tool | Purpose |

@@ -137,7 +137,10 @@ export class HavenSignContextError extends HavenSigningError {
           nextTool: null,
           nextToolOmittedReason: DIRECT_RELAY_FALLBACK,
         })
-      } else if (flow === 'direct' && (refusal?.httpStatus === 410 || refusal?.errorCode === 'expired')) {
+      } else if (flow === 'direct' && refusal?.errorCode === 'expired') {
+        // Keyed on the backend's `expired` code, never a bare 410: the direct
+        // route also answers 410 for a retired-rail row (no error_code), and a
+        // re-send cannot help there, so that falls through to stop-and-tell.
         this.next_action = AgentPaymentNextAction.PaymentWindowExpired
         step = signerRefusalStep({
           nextAction: AgentPaymentNextAction.PaymentWindowExpired,
@@ -145,7 +148,7 @@ export class HavenSignContextError extends HavenSigningError {
           nextToolOmittedReason:
             'call haven_send / haven_pay again with the same idempotency_key — the expired payment frees it',
         })
-      } else if (refusal?.httpStatus === 410 || refusal?.errorCode === 'expired') {
+      } else if (flow === 'x402' && (refusal?.httpStatus === 410 || refusal?.errorCode === 'expired')) {
         this.next_action = AgentPaymentNextAction.PaymentWindowExpired
         this.retry_with_new_quote = true
         step = signerRefusalStep({
@@ -379,10 +382,10 @@ export async function fetchDirectSignContext(
     throw new HavenSignContextError(
       timedOut
         ? `Haven did not answer the direct-payment signing-context fetch for ${paymentId} within ${timeoutMs} ms. ` +
-          'Retry, or pass typed_data from the payment result instead.'
+          'Retry, or pass typed_data_b64 from the payment result instead.'
         : `Could not reach Haven to fetch the direct-payment signing context for ${paymentId}: ` +
           `${err instanceof Error ? err.message : String(err)}. ` +
-          'Retry, or pass typed_data from the payment result instead.',
+          'Retry, or pass typed_data_b64 from the payment result instead.',
       timedOut ? 'SIGN_CONTEXT_TIMEOUT' : 'SIGN_CONTEXT_UNREACHABLE',
       undefined,
       paymentId,
@@ -396,7 +399,7 @@ export async function fetchDirectSignContext(
     if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
       throw new HavenSignContextError(
         `Haven did not finish sending the direct-payment signing context for ${paymentId} within ${timeoutMs} ms. ` +
-          'Retry, or pass typed_data from the payment result instead.',
+          'Retry, or pass typed_data_b64 from the payment result instead.',
         'SIGN_CONTEXT_TIMEOUT',
         undefined,
         paymentId,
@@ -414,7 +417,7 @@ export async function fetchDirectSignContext(
           ? ' — either the payment_id is not from this agent’s own POST /payments call, or this ' +
             'Haven backend predates #3271. Pass payload_hash and typed_data_b64 from the ' +
             'haven_send / haven_pay result, unchanged, instead.'
-          : response.status === 410
+          : body.error_code === 'expired'
             ? ' The payment window has expired; call haven_send / haven_pay again with the same idempotency_key.'
             : ''),
       'SIGN_CONTEXT_REFUSED',
@@ -440,7 +443,7 @@ export async function fetchDirectSignContext(
           `does not support (supported: ${SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS.join(', ')}). ` +
           'Update @haven_ai/signer.'
         : 'The Haven direct-payment sign-context response is missing sign_data.typed_data, or its ' +
-          "signature_scheme is not 'eip712_userop' — the backend may predate #3271. Pass typed_data " +
+          "signature_scheme is not 'eip712_userop' — the backend may predate #3271. Pass typed_data_b64 " +
           'from the payment result instead.',
       'SIGN_CONTEXT_MALFORMED',
       undefined,

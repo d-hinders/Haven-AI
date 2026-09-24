@@ -596,7 +596,7 @@ function isPayableStandardOption(opt: X402PaymentOption): boolean {
  * positional match and never look at `extra.assetTransferMethod`, so a merchant
  * that listed its erc7710 entry first made a Haven client echo that option
  * while signing a standard EIP-3009 authorization. The merchant rejects the
- * mismatch cleanly — but on the legacy two-leg the Safe→delegate funding
+ * mismatch cleanly — but on the two-leg bridge the account→delegate funding
  * transfer has already executed, so the visible result is a stranded delegate
  * balance for the sweep to reclaim. Only our own demo merchant's ordering was
  * holding that shut, and that pin binds our merchant, not the ones we do not

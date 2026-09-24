@@ -43,7 +43,7 @@ export interface HavenClientConfig {
    * JSON-RPC RPC URLs keyed by EIP-155 chain ID.
    *
    * When provided for a chain, the SDK waits for ≥1 on-chain confirmation of
-   * the AllowanceModule funding tx before retrying the merchant. This prevents
+   * the funding tx (account → delegate EOA) before retrying the merchant. This prevents
    * the race where the merchant's `balanceOf(delegate)` call runs before the
    * funding block has propagated to the merchant's RPC node.
    *
@@ -316,10 +316,10 @@ export interface X402AuthorizationOptions {
  * Keyless x402 construct result.
  *
  * Returned by `createX402Intent` — the non-custodial half of an x402 payment.
- * It carries the unsigned funding hash (`signData.hash`, Safe → delegate EOA)
+ * It carries the unsigned funding payload (`signData`, account → delegate EOA)
  * plus everything the *edge* needs to build and sign the EIP-3009 merchant
  * header itself. The construct path never signs; both delegate signatures
- * (funding hash + merchant header) happen on the machine that holds the key.
+ * (funding payload + merchant header) happen on the machine that holds the key.
  */
 export interface X402Intent {
   /** Haven payment id for the funding transfer. */
@@ -329,7 +329,7 @@ export interface X402Intent {
   status: 'pending_signature'
   /** ISO 8601 expiry of the funding intent, if returned. */
   expiresAt?: string
-  /** The unsigned funding hash to sign with the delegate key (Safe → delegate EOA). */
+  /** The unsigned funding payload to sign with the delegate key (account → delegate EOA). */
   signData: SignData
   /** The selected x402 option — the edge needs this to build the EIP-3009 header. */
   accepted: X402PaymentOption
@@ -744,12 +744,12 @@ export interface RawHavenBalanceCoverage {
 /**
  * Affirmative spend-readiness for the authenticated agent, derived from the raw
  * agent status plus the remaining spend authority the backend reports per rail
- * (the on-chain AllowanceModule on the legacy rail; the active budget
- * delegation on the delegation rail — #1135):
+ * (the active budget delegation on the delegation rail — #1135; the retired
+ * AllowanceModule rail used an on-chain allowance instead):
  * - `ready`         — active and at least one token has remaining spend authority.
  * - `needs_approval`— active but no remaining spend authority to auto-spend.
- *                     The over-budget outcome differs by rail: on the legacy
- *                     AllowanceModule rail the payment is queued for the wallet
+ *                     The over-budget outcome differs by rail: on the retired
+ *                     AllowanceModule rail the payment was queued for the wallet
  *                     owner to approve in Haven; on the delegation rail there is
  *                     NO approval queue — an over-budget redemption reverts
  *                     on-chain, so the owner must grant or raise the budget in
@@ -971,7 +971,7 @@ export const DEFAULT_CONFIRMATION_TIMEOUT_MS = 90_000
  * done, or as failed, are the same defect in opposite directions.
  */
 export type SweepConfirmation =
-  /** A receipt was observed. The funds are in the Safe. */
+  /** A receipt was observed. The funds are in the agent's Haven account. */
   | 'confirmed'
   /**
    * Broadcast, but no receipt within `DEFAULT_CONFIRMATION_TIMEOUT_MS` (or the
@@ -1014,7 +1014,7 @@ export interface SweepEntry {
 export interface SweepResult {
   /** Address funds were swept FROM */
   fromAddress: string
-  /** Address funds were swept TO (always the originating Safe) */
+  /** Address funds were swept TO (always the agent's Haven account) */
   toAddress: string
   /** Chain the sweep occurred on */
   chainId: number
@@ -1129,9 +1129,9 @@ export const AgentPaymentNextAction = {
    */
   FundAccountOrRaiseAllowance: 'fund_account_or_raise_allowance',
   /**
-   * The delegate wallet may hold funds that were sent from the Safe but never
-   * settled to the merchant. The wallet owner should initiate a sweep to
-   * return those funds to the originating Safe.
+   * The delegate wallet may hold funds that were sent from the agent's Haven
+   * account but never settled to the merchant. The wallet owner should initiate
+   * a sweep to return those funds to that account.
    */
   SweepStrandedFunds: 'sweep_stranded_funds',
   /**
@@ -1231,7 +1231,7 @@ export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typ
  * historical `mpp_demo` rows, which remain readable.
  */
 export const AgentPaymentRail = {
-  /** Standard Haven payment from the user's Safe through an approved delegate allowance. */
+  /** Standard Haven payment from the user's account, redeemed through the agent's budget delegation. */
   Direct: 'direct',
   /** x402 HTTP 402 payment flow with a Haven funding leg and merchant retry leg. */
   X402: 'x402',

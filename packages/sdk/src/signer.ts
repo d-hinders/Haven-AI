@@ -4,7 +4,7 @@ import { HavenSigningError } from './types.js'
 /**
  * Sign a hash using raw ECDSA (no Ethereum message prefix).
  *
- * This matches what Safe's AllowanceModule `checkSignature` expects —
+ * This matches what the retired Safe AllowanceModule rail's `checkSignature` expected —
  * a direct ecrecover over the hash, NOT the "\x19Ethereum Signed Message" variant.
  *
  * Uses ethers.SigningKey.sign() instead of wallet.signMessage() to avoid the prefix.

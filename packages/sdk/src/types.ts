@@ -402,8 +402,9 @@ export interface X402ExpectedContext {
 
 export interface X402ExpectedAuth {
   /**
-   * 1 = hash-only (legacy rail). 2 = carries `typedDataHash` (delegation rail,
-   * #1138).
+   * 2 = carries `typedDataHash` (delegation rail, #1138). 3 = additionally binds
+   * the payer identity (#1690). 1 (hash-only, retired Safe rail) is never
+   * emitted since #3272 and the signer refuses it.
    *
    * Deliberately `number`, not a literal union (#1143). This is an **inbound**
    * value: a signer parses a context Haven produced, and a signer older than the

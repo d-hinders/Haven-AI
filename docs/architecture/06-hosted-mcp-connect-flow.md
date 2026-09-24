@@ -294,7 +294,7 @@ request or its response, and nothing here relays, submits, or broadcasts:
 
 | Tool | Purpose |
 |---|---|
-| `haven_sign` | Sign a Haven-prepared payment: a direct-payment UserOp that only redeems the agent's budget delegation, or an x402 payload against a Haven-signed context; anything else is refused (#3272) |
+| `haven_sign` | Sign a Haven-prepared payment: a direct-payment UserOp from the agent's own account whose only call redeems a delegation made to it, or an x402 payload against a Haven-signed context; anything else is refused (#3272) |
 | `haven_x402_sign_header` | Sign the decomposed merchant authorization |
 | `haven_sign_x402` | Sign the recommended paid-MCP funding and merchant contexts |
 | `haven_sign_sweep_delegate` | Sign a gasless delegate-to-wallet USDC sweep |

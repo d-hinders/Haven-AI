@@ -165,7 +165,7 @@ export interface X402HeaderResult {
 }
 
 export interface X402FundingSignatureResult {
-  /** Raw ECDSA signature over the Haven funding hash. */
+  /** EIP-712 signature over the Haven-committed funding typed data. */
   signature: string
   /** Opaque process-local binding for the later merchant header signing step. */
   x402Binding: string
@@ -262,11 +262,10 @@ export function createEdgeSigner(
       }
       // Recompute the digest from the typed data actually in hand — everything
       // upstream is untrusted input. `assertExpectedBinding` requires this
-      // EXACT digest to equal Haven's `typedDataHash` commitment (#3272: it
-      // used to be handed `expected.payloadHash` here, comparing that value
-      // to itself inside the check — vacuous, binding nothing; the recomputed
-      // digest is the real comparand, since it is literally what gets signed
-      // below).
+      // EXACT digest to equal Haven's `typedDataHash` commitment. (#3272 moved
+      // the digest-equality check that used to follow this call into
+      // `assertExpectedBinding`, and dropped a redundant comparison of
+      // `expected.payloadHash` with itself; what gets signed is unchanged.)
       const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
       assertExpectedBinding(digest, expected, options.x402BindingSigner)
       assertPayerMatchesDelegate(expected, delegateAddress, options.agentId)
@@ -343,7 +342,7 @@ export function createEdgeSigner(
         }
         throw new HavenSigningError(
           'x402 funding binding is required before signing a merchant header. Sign the ' +
-            'hosted funding hash with x402_expected first (haven_sign returns a binding this ' +
+            'hosted funding payload with x402_expected first (haven_sign returns a binding this ' +
             'tool can use). A binding is also lost when the signer process restarts, since ' +
             'bindings live in memory only — re-sign to mint a fresh one.',
         )
@@ -670,9 +669,10 @@ export function assertSupportedBindingVersion(
  * SIGNED, recomputed by the caller from the actual bytes in hand — never a
  * value taken from `expected` itself. That equality is what makes the
  * binding cover the bytes being signed, rather than a hash that merely
- * travels alongside them (#3272 criterion 4: this parameter used to be
- * `expected.payloadHash`, which made the check below compare that field to
- * itself and bind nothing).
+ * travels alongside them. (#3272: this parameter used to be
+ * `expected.payloadHash`, compared with itself — redundant, because the
+ * digest-equality check that bound the typed data ran separately in
+ * `signX402FundingTypedData`; that check now lives here.)
  *
  * The version is derived from the context inside `buildX402ExpectedMessage`, so
  * a tampered `auth.version` cannot select a different rule than the signed
@@ -686,7 +686,7 @@ function assertExpectedBinding(
   assertExpectedShape(expected)
   if (!trustedSigner) {
     throw new HavenSigningError(
-      'x402 expected-context verifier is not configured. Set HAVEN_X402_BINDING_SIGNER before signing x402 funding hashes.',
+      'x402 expected-context verifier is not configured. Set HAVEN_X402_BINDING_SIGNER before signing x402 funding payloads.',
     )
   }
   // Skew check first (#1143). Every content check below — the digest
@@ -734,8 +734,10 @@ function assertExpectedBinding(
   })
   // Contents-derived, mirroring the builder (#1138, #1690): a tampered
   // auth.version cannot select a different rule than the signed message
-  // encodes — the recomputed message simply stops matching.
-  const expectedVersion = expected.payerDelegate ? 3 : expected.typedDataHash ? 2 : 1
+  // encodes — the recomputed message simply stops matching. No `: 1` branch:
+  // `expected.typedDataHash` is unconditionally required above (#3272 —
+  // v1 is retired), so it is always truthy by this line.
+  const expectedVersion = expected.payerDelegate ? 3 : 2
   if (expected.auth?.version !== expectedVersion || expected.auth.message !== message) {
     throw new HavenSigningError('x402 expected context authentication message is invalid.')
   }

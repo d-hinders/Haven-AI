@@ -5,6 +5,8 @@ contract: true
 covers:
   - packages/backend/src/middleware/owner-cli.ts
   - packages/signer/src/delegate-account.ts
+  - packages/signer/src/tools.ts
+  - packages/signer/src/core.ts
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/routes/auth.ts
   - packages/backend/src/infra/repositories/device-authorizations.ts
@@ -1357,14 +1359,29 @@ directly owns that check.
   also have covered every future funding leg. **Closed for an updated signer:**
   neither is a `PackedUserOperation`, so both are refused (pinned by the signer's
   tests).
-- **Capture of the delegate account.** The HybridDeleGator ABI exposes
-  `transferOwnership`, `updateSigners`, `addKey` and `upgradeToAndCall`.
-  Whether they can be reached as a self-call from a UserOp is **not verified in
-  this repository**: only ABIs ship, not Solidity source. **Moot for an updated
-  signer:** a UserOp whose call is anything but `execute` → DelegationManager →
-  `redeemDelegations` is refused, a self-call included (pinned by test). The
+- **Capture of the delegate account.** `transferOwnership`, `updateSigners`
+  and `addKey` on the HybridDeleGator are `onlyEntryPointOrSelf` (upstream
+  MetaMask delegation-framework v1.3.0, read against the source, not the
+  deployed bytecode), so a UserOp the account executes on itself reaches
+  them. That can happen two ways, and an updated signer refuses both:
+  - A direct self-call (`execute` targeting the account itself) is refused,
+    because the only permitted target is the DelegationManager.
+  - A self-call smuggled through `redeemDelegations` is refused too. In
+    v1.3.0, a redemption with an EMPTY permission context is self-authorised:
+    the DelegationManager calls `executeFromExecutor` on the caller, which runs
+    any execution as the account. The #3272 review reproduced exactly that
+    capture against an early version of the allowlist, which checked only the
+    function selector.
+
+  The allowlist therefore decodes the redemption. Every permission context
+  must be a non-empty `Delegation[]` whose leaf delegate is this signer's own
+  account and whose root delegator is not. The three argument arrays must be
+  the same non-zero length, every mode must be `SingleDefault`, and the
+  calldata must be canonically encoded. Each of these is pinned by a test. The
   treasury was never exposed beyond the caveats either way: budget, recipient
-  pin and expiry are enforced by the DelegationManager on redemption.
+  pin and expiry are enforced by the DelegationManager on redemption. A
+  captured delegate account would still have been able to redeem the budget
+  every period until the owner revoked it.
 - **ERC-1271.** `isValidSignature` is on the ABI. Whether the account accepts a
   plain owner ECDSA signature over a raw digest, without ERC-7739 wrapping, is
   **not verified in this repository**. **Reduced for an updated signer:** it

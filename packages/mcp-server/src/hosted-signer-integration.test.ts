@@ -194,7 +194,7 @@ const REALISTIC_TYPED_DATA = {
  * requires (same as what haven_pay_x402_quote returns in x402.expected).
  */
 async function makeX402ExpectedAuth(
-  rail: 'legacy' | 'delegation' = 'legacy',
+  rail: 'legacy' | 'delegation' = 'delegation',
   typedData: Record<string, unknown> = TYPED_DATA,
 ) {
   // camelCase keys for SDK's buildX402ExpectedMessage
@@ -265,13 +265,14 @@ interface CapturedCall {
 let capturedCalls: CapturedCall[]
 
 function stubHavenApi(
-  rail: 'legacy' | 'delegation' = 'legacy',
+  rail: 'legacy' | 'delegation' = 'delegation',
   typedData: Record<string, unknown> = TYPED_DATA,
 ) {
   capturedCalls = []
   // The 201 body is a placeholder for the FLOW assertions; the message-level
   // contract is the sibling file's job. What matters here is the sign_data
-  // SHAPE, which is what routes the signer down the v1 or v2 path.
+  // SHAPE. Since #3272 the signer supports only v2/v3, so 'delegation' is the
+  // default; 'legacy' (v1) survives only to pin the refusal.
   const x402ExpectedAuth = {
     version: rail === 'delegation' ? 2 : 1,
     message: `Haven x402 expected context v${rail === 'delegation' ? 2 : 1}`,

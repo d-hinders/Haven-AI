@@ -61,7 +61,7 @@ It exposes four stdio MCP tools, all sign-only:
 
 | Tool | Does | Emits |
 |---|---|---|
-| `haven_sign` | Sign one payment. Preferred form is `{ payment_id }` alone — the signer fetches the exact payload itself. Signs only Haven-prepared payloads (#3272): a direct-payment `PackedUserOperation` for this signer's own delegate account that only redeems its budget delegation, an erc7710 settlement child or EIP-3009 funding leg against a Haven-signed context (which it records and binds); anything else is refused with `TYPED_DATA_NOT_ALLOWED` | `{ signature }` or `{ signature, x402_binding }` |
+| `haven_sign` | Sign one payment. Preferred form is `{ payment_id }` alone — the signer fetches the exact payload itself. Signs only Haven-prepared payloads (#3272): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account, an erc7710 settlement child or EIP-3009 funding leg against a Haven-signed context (which it records and binds); other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }` or `{ signature, x402_binding }` |
 | `haven_sign_x402` | One-shot x402: funding signature **and** the merchant header in a single local call (`haven_sign` + `haven_x402_sign_header`). `{ payment_id }` alone is the preferred call | `{ signature, x402_binding, payment_header, accepted }` |
 | `haven_x402_sign_header` | Build + sign the EIP-3009 merchant payment header, only when the fresh merchant `payment_required` matches the recorded `x402_binding` | `{ payment_header, accepted }` |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless EIP-3009 sweep that recovers stranded funds from the delegate wallet back to your own account. Never broadcasts | `{ signature }` |
@@ -109,10 +109,11 @@ refuses anything else with `TYPED_DATA_NOT_ALLOWED`, and answers a bare
 directly owns that check itself.
 
 **The unbound-branch allowlist (#3272).** Without an x402 context, `haven_sign`
-signs typed data only when ALL of these hold, and otherwise refuses with
-`TYPED_DATA_NOT_ALLOWED` (`stop_and_tell_user`, no signature, no audit entry):
-the primary type is `PackedUserOperation`; it passes the #3271 binding check
-below; its chain has pinned delegation contracts (Base, Base Sepolia); its
+signs typed data only when ALL of these hold; otherwise it refuses, with no
+signature and no audit entry (`TYPED_DATA_NOT_ALLOWED`, or
+`USEROP_BINDING_MISMATCH` when the #3271 binding check fails, or the #1476
+refusal for an unbound `Delegation`): the primary type is
+`PackedUserOperation`; it passes the #3271 binding check below; its chain has pinned delegation contracts (Base, Base Sepolia); its
 sender is THIS signer's own delegate account (the counterfactual
 HybridDeleGator for the delegate key, derived offline — `src/delegate-account.ts`);
 and its `callData` is a single `execute` to the DelegationManager calling
@@ -248,9 +249,9 @@ what a payload means; they re-derive it.
   `x402_binding_signer` in the credential file) so the signer can reject
   locally invented or tampered contexts before signing anything.
 - **Wrong signing mode.** The *context* selects the path, never the caller's
-  arguments: a context that commits to a typed-data digest requires the typed
-  data, one that does not requires the bare hash. A mismatch is refused rather
-  than signed into an on-chain failure.
+  arguments: a context commits to a typed-data digest and requires exactly that
+  typed data. A context without one (the retired version 1) is refused as an
+  unsupported version since #3272 — there is no bare-hash signing path.
 - **Another agent's quote.** A context naming a `payer_delegate` that is not
   this signer's own delegate is refused.
 - **An unbound delegation payload.** Typed data with `primaryType: "Delegation"`
@@ -321,6 +322,7 @@ carries no x402 context to fund a merchant retry with, so it surfaces the
 | `SIGN_CONTEXT_REFUSED` (404, direct fetch) | The `payment_id` is not this agent's, or the backend predates #3271 and has no direct route | `stop_and_tell_user` | `typed_data_b64` | `http_status`, `backend_error_code` |
 | `SIGN_CONTEXT_REFUSED` (other) | Unknown `payment_id` (404, x402 fetch), `already_executed` / `not_signable` (409), a bare 410 retired-rail tombstone (direct fetch) — or `sign_context_unavailable` (409): always on `haven_sign_x402`; on `haven_sign` only when neither route can serve the row | `stop_and_tell_user` | — | `http_status`, `backend_error_code` |
 | `USEROP_BINDING_MISMATCH` | A direct payment's `PackedUserOperation` typed data (from the direct fetch, or a tool argument) does not recompute to its own `payload_hash`, or a fetched direct context is not a `PackedUserOperation` — see [Two ways to use it](#two-ways-to-use-it) above | `stop_and_tell_user` | — | no `http_status` — this is a local recomputation, not a backend refusal |
+| `TYPED_DATA_NOT_ALLOWED` | Typed data without an x402 context that is not a bound direct-payment `PackedUserOperation` (#3272): wrong chain, not this signer's own account, a call other than `execute` → DelegationManager → `redeemDelegations`, or a redemption whose delegations are empty, not made to this account, or in a non-default mode — see the allowlist paragraph above. Reachable by `payment_id` when Haven serves such a payload | `stop_and_tell_user` | — | no `http_status` — a local shape check, not a backend refusal |
 
 `fallback: 'typed_data_b64'` appears only where signing OTHER bytes is a
 remedy — a transport failure or a body this signer could not read, plus one

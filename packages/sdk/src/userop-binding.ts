@@ -30,6 +30,14 @@ import { HavenError } from './types.js'
 /** Version of the direct-payment sign context (`GET /payments/:id/sign-context`). */
 export const DIRECT_SIGN_CONTEXT_VERSION = 1
 
+/** The HybridDeleGator EIP-712 domain, in the canonical EIP-712 field order. */
+const EIP712_DOMAIN_FIELDS = [
+  { name: 'name', type: 'string' },
+  { name: 'version', type: 'string' },
+  { name: 'chainId', type: 'uint256' },
+  { name: 'verifyingContract', type: 'address' },
+] as const
+
 /** The ERC-4337 v0.7 EntryPoint — the only one the delegation rail submits to. */
 export const ENTRY_POINT_V07 = '0x0000000071727De22E5E9d8BAf0edAc6f37da032'
 
@@ -54,7 +62,7 @@ export const PACKED_USER_OPERATION_FIELDS: ReadonlyArray<{ name: string; type: s
   { name: 'entryPoint', type: 'address' },
 ]
 
-/** Refusal raised when direct-payment typed data does not match its `payload_hash`. */
+/** Refusal raised when UserOperation typed data (a direct payment, or the SDK's x402 funding leg) does not match its `payload_hash`. */
 export class HavenUserOpBindingError extends HavenError {
   constructor(message: string) {
     super(message, 'USEROP_BINDING_MISMATCH')
@@ -76,7 +84,7 @@ const BYTES32 = /^0x[0-9a-fA-F]{64}$/
 
 function refuse(detail: string): never {
   throw new HavenUserOpBindingError(
-    `Refusing to sign: this direct-payment typed data does not match its payload_hash (${detail}). ` +
+    `Refusing to sign: this UserOperation typed data does not match its payload_hash (${detail}). ` +
       'The payload was altered between the Haven result and this call — sign by payment_id so the ' +
       'signer fetches the exact bytes, or pass typed_data_b64 from the result unchanged.',
   )
@@ -189,6 +197,28 @@ export function assertUserOpTypedDataBinding(typedData: unknown, payloadHash: st
   }
   const extraTypes = Object.keys(td.types ?? {}).filter((k) => k !== 'PackedUserOperation' && k !== 'EIP712Domain')
   if (extraTypes.length > 0) refuse(`unexpected types: ${extraTypes.join(', ')}`)
+  // The domain separator is not covered by payload_hash, and viem honours a
+  // supplied `types.EIP712Domain` and any extra domain key (e.g. `salt`) when
+  // it builds the digest — so both are pinned exactly, or a corrupted domain
+  // would pass this check and still sign over the wrong digest.
+  const domainKeys = Object.keys(domain).sort()
+  if (domainKeys.join(',') !== [...EIP712_DOMAIN_FIELDS.map((f) => f.name)].sort().join(',')) {
+    refuse(`domain keys are not exactly ${EIP712_DOMAIN_FIELDS.map((f) => f.name).join(', ')}`)
+  }
+  const declaredDomain = (td.types ?? {}).EIP712Domain
+  if (
+    declaredDomain !== undefined &&
+    (!Array.isArray(declaredDomain) ||
+      declaredDomain.length !== EIP712_DOMAIN_FIELDS.length ||
+      declaredDomain.some(
+        (f, i) =>
+          !f ||
+          (f as { name?: unknown }).name !== EIP712_DOMAIN_FIELDS[i].name ||
+          (f as { type?: unknown }).type !== EIP712_DOMAIN_FIELDS[i].type,
+      ))
+  ) {
+    refuse('types.EIP712Domain is not the canonical name/version/chainId/verifyingContract list')
+  }
   const recomputed = packedUserOperationHash(typedData)
   if (recomputed.toLowerCase() !== payloadHash.toLowerCase()) refuse('recomputed UserOperation hash differs')
   return recomputed

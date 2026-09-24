@@ -672,8 +672,8 @@ describe('Hosted MCP + Edge Signer integration', () => {
           JSON.stringify({
             error:
               'Not an x402 intent — sign-context serves the x402 signing handoff only. ' +
-              'For a direct payment, fetch GET /payments/:id/sign-context instead (haven_sign with ' +
-              'payment_id does this), or sign the typed_data_b64 from the haven_pay/haven_send result.',
+              'For a direct payment, sign the typed_data_b64 from the haven_pay/haven_send result instead; ' +
+              'a current @haven_ai/signer fetches GET /payments/:id/sign-context itself.',
             error_code: 'sign_context_unavailable',
           }),
           { status: 409 },

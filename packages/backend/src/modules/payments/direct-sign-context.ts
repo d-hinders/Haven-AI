@@ -6,8 +6,9 @@
  * signer could fetch exact bytes by `payment_id` instead of an agent
  * relaying a multi-KB EIP-712 payload by hand. `POST /payments` never had a
  * sibling: the old signer refused every non-x402 `payment_id`
- * (`sign_context_unavailable`, still served byte-identically by
- * `modules/x402/sign-context.ts` for old signers), which forced the hand
+ * (`sign_context_unavailable`, still served with the same code and the same
+ * typed_data_b64 instruction by `modules/x402/sign-context.ts` for old
+ * signers), which forced the hand
  * relay this issue traces to a live `AA24 signature error` — one corrupted
  * character in the relayed blob produced a valid-looking signature over the
  * wrong digest.

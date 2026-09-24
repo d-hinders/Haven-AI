@@ -8,8 +8,9 @@
  * Also covers the #3271 binding-mismatch structured refusal reached through
  * this fetch path: a fetched direct sign-context whose typed data does not
  * recompute to its own payload_hash is refused with USEROP_BINDING_MISMATCH,
- * no signature, no audit entry — mirroring the caller-supplied-typed-data
- * case `server.test.ts` covers for the corrupted-in-transit failure mode.
+ * no signature, no audit entry. The caller-relayed case (the #3271
+ * reproduction itself) and a fetched non-UserOp shape are covered at the end
+ * of this file.
  */
 import { describe, it, expect } from 'vitest'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -192,5 +193,141 @@ describe('the #3271 binding check refuses a fetched direct sign-context whose ty
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+/**
+ * Runs `haven_sign` with an audit log and asserts the #3271 refusal shape:
+ * `USEROP_BINDING_MISMATCH`, no signature, and nothing written to the audit.
+ */
+async function expectBindingRefusal(
+  args: Record<string, unknown>,
+  fetchImpl?: typeof fetch,
+): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'haven-signer-direct-binding-'))
+  const auditPath = join(dir, 'audit.jsonl')
+  try {
+    const signer = createEdgeSigner(TEST_KEY)
+    const handlers = createToolHandlers(signer, {
+      audit: { auditPath, delegateAddress: signer.delegateAddress },
+      ...(fetchImpl ? { signContext: { loadIdentity: async () => IDENTITY, fetchImpl } } : {}),
+    })
+    const result = await handlers.haven_sign(args as Parameters<typeof handlers.haven_sign>[0])
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).toBe('USEROP_BINDING_MISMATCH')
+    expect('signature' in result).toBe(false)
+    await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+describe('the #3271 binding check on a fetched non-UserOp shape', () => {
+  it('refuses a fetched eip712_userop context whose typed data is not a PackedUserOperation', async () => {
+    const permit = {
+      domain: { name: 'USD Coin', version: '2', chainId: 84532, verifyingContract: `0x${'22'.repeat(20)}` },
+      types: { Permit: [{ name: 'owner', type: 'address' }, { name: 'value', type: 'uint256' }] },
+      primaryType: 'Permit',
+      message: { owner: `0x${'33'.repeat(20)}`, value: '1000000' },
+    }
+    await expectBindingRefusal(
+      { payment_id: 'pay_direct_permit' },
+      fetchImplFor({
+        x402: x402Unavailable,
+        direct: () =>
+          new Response(
+            JSON.stringify({
+              payment_id: 'pay_direct_permit',
+              status: 'pending_signature',
+              direct_sign_context_version: SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS[0],
+              sign_data: { hash: `0x${'44'.repeat(32)}`, signature_scheme: 'eip712_userop', typed_data: permit },
+            }),
+            { status: 200 },
+          ),
+      }),
+    )
+  })
+})
+
+// Criteria 3 and 7: the RELAY branch — the exact #3271 reproduction, where
+// the agent hand-copied the payload — runs the same check as the fetch.
+describe('the #3271 binding check on a caller-relayed direct payload', () => {
+  it('refuses a relayed typed_data with one callData byte flipped', async () => {
+    const { typedData, payloadHash } = buildDirectUserOp()
+    const corrupted = { ...typedData, message: { ...typedData.message, callData: '0x00' } }
+    await expectBindingRefusal({ payload_hash: payloadHash, typed_data: corrupted })
+  })
+
+  it('refuses a relayed typed_data_b64 with a corrupted domain.verifyingContract', async () => {
+    const { typedData, payloadHash } = buildDirectUserOp()
+    const corrupted = { ...typedData, domain: { ...typedData.domain, verifyingContract: `0x${'de'.repeat(20)}` } }
+    await expectBindingRefusal({
+      payload_hash: payloadHash,
+      typed_data_b64: Buffer.from(JSON.stringify(corrupted)).toString('base64'),
+    })
+  })
+
+  it('still signs an unaltered relayed payload (positive control)', async () => {
+    const { typedData, payloadHash } = buildDirectUserOp()
+    const signer = createEdgeSigner(TEST_KEY)
+    const handlers = createToolHandlers(signer)
+    const result = await handlers.haven_sign({
+      payload_hash: payloadHash,
+      typed_data_b64: Buffer.from(JSON.stringify(typedData)).toString('base64'),
+    })
+    expect(result.success).toBe(true)
+  })
+})
+
+// Review round 1: a direct-fetch refusal must name DIRECT remedies — there is
+// no quote tool to re-run, and the payment result carries the relay fields.
+describe('direct sign-context refusals name direct-payment remedies (#3271)', () => {
+  function handlersWith(direct: () => Response, x402: () => Response = x402Unavailable) {
+    const signer = createEdgeSigner(TEST_KEY)
+    return createToolHandlers(signer, {
+      signContext: { loadIdentity: async () => IDENTITY, fetchImpl: fetchImplFor({ x402, direct }) },
+    })
+  }
+
+  it('a 404 from the direct route (old backend, or not this agent\'s payment) points at the typed_data_b64 relay', async () => {
+    const result = await handlersWith(
+      () => new Response(JSON.stringify({ message: 'Route GET:/payments/x/sign-context not found' }), { status: 404 }),
+    ).haven_sign({ payment_id: 'pay_old_backend' })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).toBe('SIGN_CONTEXT_REFUSED')
+    expect((result as { fallback?: string }).fallback).toBe('typed_data_b64')
+    expect(result.message).toMatch(/typed_data_b64/)
+    expect(JSON.stringify(result)).not.toMatch(/quote/)
+  })
+
+  it('a 410 from the direct route says to re-send the payment, never to re-run a quote', async () => {
+    const result = await handlersWith(
+      () => new Response(JSON.stringify({ error: 'Payment window expired', error_code: 'expired' }), { status: 410 }),
+    ).haven_sign({ payment_id: 'pay_expired' })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.next_action).toBe('payment_window_expired')
+    expect('retry_with_new_quote' in result).toBe(false)
+    expect(JSON.stringify(result)).not.toMatch(/quote/)
+    expect(JSON.stringify(result)).toMatch(/haven_send \/ haven_pay/)
+  })
+
+  it('an x402 row the x402 route cannot serve keeps the x402 refusal instead of the direct route\'s', async () => {
+    const x402Refusal = () =>
+      new Response(
+        JSON.stringify({ error: 'legacy-rail x402 intent has no stored signing payload', error_code: 'sign_context_unavailable' }),
+        { status: 409 },
+      )
+    const directRefusal = () =>
+      new Response(
+        JSON.stringify({ error: 'This is an x402/machine payment intent', error_code: 'sign_context_unavailable' }),
+        { status: 409 },
+      )
+    const result = await handlersWith(directRefusal, x402Refusal).haven_sign({ payment_id: 'pay_legacy_x402' })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.message).toMatch(/legacy-rail x402 intent/)
   })
 })

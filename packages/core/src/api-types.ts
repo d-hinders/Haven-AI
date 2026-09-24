@@ -2179,7 +2179,7 @@ export type paths = {
         };
         /**
          * Fetch the exact signing payload for a pending DIRECT delegation-rail payment.
-         * @description Read-only byte-free signing handoff (#3271, the direct sibling of GET /x402/{id}/sign-context from #1263): re-serves the stored delegation-rail sign_data.typed_data for a plain POST /payments intent, byte-identical to what the original create / idempotent replay returned, so a LOCAL SIGNER can fetch exact bytes by payment_id instead of an agent re-emitting a multi-KB EIP-712 payload. Constructs and signs nothing new. An x402/MPP intent id is refused here (fetch GET /x402/{id}/sign-context instead), and a direct intent id is refused there — each surface serves only its own rail's shape.
+         * @description Read-only byte-free signing handoff (#3271, the direct sibling of GET /x402/{id}/sign-context from #1263): re-serves the stored delegation-rail sign_data.typed_data for a plain POST /payments intent, rebuilt from the stored UserOperation exactly as the idempotent replay of the create rebuilds it, so a LOCAL SIGNER can fetch exact bytes by payment_id instead of an agent re-emitting a multi-KB EIP-712 payload. Constructs and signs nothing new. An x402/MPP intent id is refused here (fetch GET /x402/{id}/sign-context instead), and a direct intent id is refused there — each surface serves only its own rail's shape.
          */
         get: operations["getDirectPaymentSignContext"];
         put?: never;
@@ -14274,7 +14274,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The rebuilt direct sign_data — byte-identical to the original create/replay. */
+            /** @description The rebuilt direct sign_data — identical to what the idempotent replay serves. */
             200: {
                 headers: {
                     [name: string]: unknown;

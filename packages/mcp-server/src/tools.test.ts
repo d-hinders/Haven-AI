@@ -684,8 +684,10 @@ describe('custody invariant', () => {
 // default — the signer fetches the exact bytes from Haven by payment_id
 // (#1263) — and restore them byte-identically on include_signing_payload=true
 // (the recovery path for diagnostics and pre-#1263 signers). Direct payments
-// (haven_pay/haven_send) keep the bulk unconditionally: no fetch path exists
-// there, which the existing haven_pay/haven_send tests above already prove.
+// (haven_pay/haven_send) keep the bulk unconditionally: since #3271 they also
+// have a fetch path (GET /payments/:id/sign-context), but an older signer
+// without it still needs the relay fields, which the haven_pay/haven_send
+// tests above prove are always present.
 
 describe('compact x402 signing payload (#1272)', () => {
   const TYPED_DATA = {

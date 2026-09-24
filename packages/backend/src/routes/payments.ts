@@ -800,9 +800,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
   // Read-only: re-serves the stored delegation-rail signing payload so the
   // LOCAL SIGNER can fetch exact bytes by payment_id instead of the agent
   // re-emitting a multi-KB EIP-712 payload by hand. `GET /x402/:id/
-  // sign-context` keeps answering its 409 byte-for-byte for a request naming
-  // an x402/MPP intent here (and vice versa) — old signers still get exactly
-  // today's refusal. All checks and the rebuild live in the module
+  // sign-context` keeps answering its 409 for a direct payment_id with the
+  // same error_code and the same typed_data_b64 instruction (it only gains a
+  // pointer to this route), and this route 409s an x402/MPP intent the same
+  // way — old signers still get the refusal they key on. All checks and the rebuild live in the module
   // (`getDirectSignContext`).
   app.get<{ Params: { id: string } }>(
     '/:id/sign-context',

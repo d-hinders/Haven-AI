@@ -24,7 +24,7 @@ covers:
   - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
-last-verified: "2026-09-23"
+last-verified: "2026-09-24"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -47,6 +47,15 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
+> **Re-verification (#3271, lockfile refresh, 2026-09-24):** this doc is
+> coupled through `package-lock.json`. The change: `@haven_ai/sdk` gains
+> `@metamask/smart-accounts-kit` as a devDependency (already a hoisted
+> workspace dependency), and the refreshed lock only adds `"dev": true` /
+> `"peer": true` flags to existing entries — no package added, removed or
+> re-versioned. No version, dist-tag, channel or publish behaviour
+> moves. `last-verified` re-stamped to 2026-09-24 for this note only; nothing
+> else in this document was re-verified.
+>
 > **Re-verification (#3259, failed tombstone mirror, 2026-09-23):** this doc is
 > coupled through `packages/connect/src/{cli,runtime}.ts`. The change: a failed
 > ledger mirror no longer aborts a retirement, so `--replace` still removes the

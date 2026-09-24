@@ -112,8 +112,14 @@ const intent = await haven.createIntent({
   to: '0xabc...',
 })
 
-// Step 2: Sign the hash (or sign externally)
-const signature = haven.sign(intent.signData.hash)
+// Step 2: Sign externally. On the delegation rail (the only rail that pays)
+// the account validates the EIP-712 typed data in intent.signData.typed_data,
+// never the bare hash — a signature over signData.hash is rejected on-chain
+// (AA24). Sign that typed data with your delegate key (viem signTypedData),
+// after checking it with assertUserOpTypedDataBinding(typed_data, hash).
+// There is no public HavenClient method for this step yet; pay() does it
+// for you.
+const signature = await signTypedDataWithYourDelegateKey(intent.signData.typed_data)
 
 // Step 3: Submit the signature
 await haven.submitSignature(intent.paymentId, signature)

@@ -3,6 +3,9 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/signer/**
+  - packages/sdk/src/userop-binding.ts
+  - packages/mcp-server/src/tools/support/signer-compat.ts
+  - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/mcp-server/src/boot.ts
   - packages/mcp-server/src/auth.ts
   - packages/mcp-server/src/server.ts
@@ -32,7 +35,7 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-20"
+last-verified: "2026-09-24"
 ---
 
 # Haven — Edge Signer

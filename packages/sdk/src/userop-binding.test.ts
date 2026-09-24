@@ -114,6 +114,33 @@ describe('assertUserOpTypedDataBinding refuses a corrupted or mismatched payload
     expect(() => assertUserOpTypedDataBinding(typedData, fixture.payload_hash)).toThrow(HavenUserOpBindingError)
   })
 
+  it('refuses an extra domain key (salt) the hash does not cover', () => {
+    const typedData = clone()
+    ;(typedData.domain as Record<string, unknown>).salt = `0x${'00'.repeat(32)}`
+    expect(() => assertUserOpTypedDataBinding(typedData, fixture.payload_hash)).toThrow(/domain keys/)
+  })
+
+  it('refuses a truncated types.EIP712Domain', () => {
+    const typedData = clone()
+    ;(typedData.types as Record<string, unknown>).EIP712Domain = [
+      { name: 'name', type: 'string' },
+      { name: 'version', type: 'string' },
+      { name: 'chainId', type: 'uint256' },
+    ]
+    expect(() => assertUserOpTypedDataBinding(typedData, fixture.payload_hash)).toThrow(/EIP712Domain/)
+  })
+
+  it('accepts the canonical types.EIP712Domain when a client declares it', () => {
+    const typedData = clone()
+    ;(typedData.types as Record<string, unknown>).EIP712Domain = [
+      { name: 'name', type: 'string' },
+      { name: 'version', type: 'string' },
+      { name: 'chainId', type: 'uint256' },
+      { name: 'verifyingContract', type: 'address' },
+    ]
+    expect(() => assertUserOpTypedDataBinding(typedData, fixture.payload_hash)).not.toThrow()
+  })
+
   it('refuses a changed domain.name', () => {
     const typedData = clone()
     ;(typedData.domain as { name: string }).name = 'NotAHybridDeleGator'

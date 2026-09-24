@@ -16,9 +16,10 @@ import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
  *
  * **The check is necessarily agent-mediated.** The signer and the hosted Haven
  * MCP are two separate servers connected to the same client; neither can
- * introspect the other. The signer's single Haven call (#1263, the read-only
- * `GET /x402/:payment_id/sign-context` in `sign-context.ts`) does not help
- * here: it fetches one payment's signing bytes, not the hosted server's
+ * introspect the other. The signer's Haven reads (#1263's read-only
+ * `GET /x402/:payment_id/sign-context` and #3271's direct-payment
+ * `GET /payments/:payment_id/sign-context`, both in `sign-context.ts`) do not help
+ * here: each fetches one payment's signing bytes, not the hosted server's
  * handshake, and it happens at signing time — after the quote this module
  * exists to get ahead of. So only the agent sees both handshakes, and what
  * ships here is the *information* plus the prompt to compare it — never a

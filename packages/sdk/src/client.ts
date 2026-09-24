@@ -291,7 +291,8 @@ export class HavenClient {
   /**
    * Send a payment in one call.
    *
-   * Creates the intent, signs the hash, submits the signature,
+   * Creates the intent, signs its `sign_data` (a delegation-rail intent's
+   * EIP-712 typed data, after the #3271 UserOp binding check), submits the signature,
    * and polls until confirmed (or throws on failure/timeout).
    *
    * Requires `delegateKey` to be set in the client config.

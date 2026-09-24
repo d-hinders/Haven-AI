@@ -244,7 +244,8 @@ const SIGN_DESCRIPTION = [
   'payload_hash from Haven and checks them against each other before signing, so a payload corrupted',
   'in transit is refused (USEROP_BINDING_MISMATCH) instead of producing a bad signature. Fallback for',
   'either flow: pass typed_data_b64 through UNCHANGED (never re-type the nested typed_data JSON); the',
-  'account validates that EIP-712 payload, not payload_hash, and the same binding check runs on it too.',
+  'account validates that EIP-712 payload, not payload_hash. On a direct payment the same binding',
+  'check runs on the relayed payload too.',
   'Next: call mcp__haven__haven_submit with signature, then pass x402_binding',
   'to mcp__haven-signer__haven_x402_sign_header. A bare payload_hash with no payment_id, typed_data',
   'or x402_expected is REFUSED (BARE_HASH_REFUSED): a hash carries nothing this signer can verify.',
@@ -551,7 +552,23 @@ export function createToolHandlers(
         err.http_status === 409 &&
         err.backend_error_code === 'sign_context_unavailable'
       ) {
-        const ctx = await fetchDirectSignContext(identity, args.payment_id, options.signContext?.fetchImpl)
+        let ctx: FetchedDirectSignContext
+        try {
+          ctx = await fetchDirectSignContext(identity, args.payment_id, options.signContext?.fetchImpl)
+        } catch (directErr) {
+          // The x402 route also answers 409 `sign_context_unavailable` for an
+          // x402 row it cannot serve (legacy rail). The direct route then
+          // 409s back with the same code, pointing at the x402 route: the
+          // x402 refusal is the real reason, so surface that one.
+          if (
+            directErr instanceof HavenSignContextError &&
+            directErr.http_status === 409 &&
+            directErr.backend_error_code === 'sign_context_unavailable'
+          ) {
+            throw err
+          }
+          throw directErr
+        }
         checkPayloadHashMatch(args.payload_hash, ctx.payloadHash, args.payment_id)
         return { kind: 'direct', ctx }
       }
@@ -621,7 +638,10 @@ export function createToolHandlers(
             // EntryPoint. Runs whether the bytes arrived by tool argument or
             // by the payment_id fetch above; a corrupted payload is refused
             // here, before a signature over the wrong digest is produced.
-            if (isPackedUserOperationTypedData(typedData)) {
+            // A FETCHED direct context is served as `eip712_userop`, so it
+            // must BE a PackedUserOperation: any other shape there is refused
+            // by the same check rather than signed unchecked.
+            if (resolved?.kind === 'direct' || isPackedUserOperationTypedData(typedData)) {
               try {
                 assertUserOpTypedDataBinding(typedData, payloadHash)
               } catch (err) {

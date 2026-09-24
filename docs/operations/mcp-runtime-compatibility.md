@@ -213,6 +213,27 @@ last-verified: "2026-09-24"
 > delivered head); no tool added or renamed, no version-skew or consent-hash
 > change. Nothing else in this document was re-verified in this pass.
 >
+> **Recent re-verification (#3272):** the edge signer's `haven_sign` now signs
+> typed data without an x402 context ONLY when it is a direct-payment
+> `PackedUserOperation` for the signer's own derived delegate account, on a
+> chain with pinned delegation contracts (Base, Base Sepolia), whose `callData`
+> is a single `execute` to the DelegationManager calling `redeemDelegations`.
+> Anything else answers the new structured `TYPED_DATA_NOT_ALLOWED` refusal
+> (`next_action: stop_and_tell_user`, no signature, no audit entry), the same
+> envelope shape as `BARE_HASH_REFUSED` (#3169). Separately, the signer's
+> `SUPPORTED_X402_EXPECTED_VERSIONS` is now `[2, 3]`: a v1 (bare-hash) expected
+> context answers the existing version-mismatch refusal, and the backend can
+> no longer emit one (`signX402ExpectedContext` requires `typedDataHash`). The
+> handshake advertises the new set automatically. Skew: an old signer against
+> a new backend is unaffected, because no v1 context is emitted and a v2/v3
+> context signs as before. A new signer against an old backend that still
+> emitted v1 is not a live case, since every backend site already passed
+> `typedDataHash`. No tool was added or renamed and no argument changed, so the
+> consent hash (identity + tool names + surface version) does not move.
+> Installed signers keep the pre-#3272 behaviour until upgraded, and Haven
+> cannot gate that. Nothing else in this document was re-verified in this
+> pass.
+>
 > **Recent re-verification (#3279, SDK wording):** documentation-only edits in
 > `@haven_ai/sdk` source comments (`client.ts`, `sweep.ts`, `types.ts`,
 > `x402.ts`, `x402-funding-leg.ts`), the README and the CHANGELOG. They name the

@@ -61,7 +61,7 @@ It exposes four stdio MCP tools, all sign-only:
 
 | Tool | Does | Emits |
 |---|---|---|
-| `haven_sign` | Sign one payment. Preferred form is `{ payment_id }` alone — the signer fetches the exact payload itself. Signs an EIP-712 typed-data payload on the delegation rail (a redemption, or an erc7710 settlement child), or a bare `payload_hash` on a v1 context; for the EIP-3009 x402 bridge it also records the funding context and returns a binding | `{ signature }` or `{ signature, x402_binding }` |
+| `haven_sign` | Sign one payment. Preferred form is `{ payment_id }` alone — the signer fetches the exact payload itself. Signs only Haven-prepared payloads (#3272): a direct-payment `PackedUserOperation` for this signer's own delegate account that only redeems its budget delegation, an erc7710 settlement child or EIP-3009 funding leg against a Haven-signed context (which it records and binds); anything else is refused with `TYPED_DATA_NOT_ALLOWED` | `{ signature }` or `{ signature, x402_binding }` |
 | `haven_sign_x402` | One-shot x402: funding signature **and** the merchant header in a single local call (`haven_sign` + `haven_x402_sign_header`). `{ payment_id }` alone is the preferred call | `{ signature, x402_binding, payment_header, accepted }` |
 | `haven_x402_sign_header` | Build + sign the EIP-3009 merchant payment header, only when the fresh merchant `payment_required` matches the recorded `x402_binding` | `{ payment_header, accepted }` |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless EIP-3009 sweep that recovers stranded funds from the delegate wallet back to your own account. Never broadcasts | `{ signature }` |
@@ -94,14 +94,33 @@ const { paymentHeader } = await signer.buildX402PaymentHeader(
 )
 ```
 
-The signer also exposes `signX402FundingHash(hash, expected)` for v1 contexts
-and `signSweepAuthorization(input)` for the gasless sweep. All five are methods
-on the object `createEdgeSigner` returns, not standalone exports. There is NO
-raw-hash primitive: `signPaymentHash(hash)` (raw ECDSA over the retired
-AllowanceModule rail's hash) was removed in #3169 — every remaining method
-verifies something before it signs, and `haven_sign` called with a bare
-`payload_hash` answers `BARE_HASH_REFUSED` with a typed next step instead of a
-signature.
+The signer also exposes `signSweepAuthorization(input)` for the gasless sweep.
+All four are methods on the object `createEdgeSigner` returns, not standalone
+exports. There is NO raw-hash primitive: `signPaymentHash(hash)` (raw ECDSA over
+the retired AllowanceModule rail's hash) was removed in #3169, and
+`signX402FundingHash` (the expected-context v1 bare-hash path) in #3272 — the
+signer supports expected-context versions 2 and 3 only. **Library boundary
+(#3272):** `signDelegationTypedData` is a verbatim primitive for embedders —
+it signs whatever typed data it is handed. The allowlist lives in the MCP tool
+layer: `haven_sign` signs typed data only when it is a bound direct-payment
+`PackedUserOperation` (below) or an x402 payload against a Haven-signed context,
+refuses anything else with `TYPED_DATA_NOT_ALLOWED`, and answers a bare
+`payload_hash` with `BARE_HASH_REFUSED`. An embedder that calls the core
+directly owns that check itself.
+
+**The unbound-branch allowlist (#3272).** Without an x402 context, `haven_sign`
+signs typed data only when ALL of these hold, and otherwise refuses with
+`TYPED_DATA_NOT_ALLOWED` (`stop_and_tell_user`, no signature, no audit entry):
+the primary type is `PackedUserOperation`; it passes the #3271 binding check
+below; its chain has pinned delegation contracts (Base, Base Sepolia); its
+sender is THIS signer's own delegate account (the counterfactual
+HybridDeleGator for the delegate key, derived offline — `src/delegate-account.ts`);
+and its `callData` is a single `execute` to the DelegationManager calling
+`redeemDelegations`. A delegate-wallet `TransferWithAuthorization` or `Permit`,
+a UserOp that calls the account itself (`transferOwnership`, `updateSigners`,
+`upgradeToAndCall`), a UserOp for another account, and arbitrary typed data are
+all refused. The audit log records the EIP-712 digest actually signed, not the
+caller's `payload_hash`.
 
 **Direct payments (#3271).** A direct payment (`POST /payments`, surfaced as
 `haven_send` / `haven_pay`) is signed as the account's EIP-712

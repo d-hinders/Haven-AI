@@ -381,6 +381,11 @@ export interface X402ExpectedContext {
    * which is NOT what the account validates — binding it alone would leave the
    * edge signer unable to verify the payload it is being asked to sign. Binding
    * this digest makes Haven's declaration cover the real payload.
+   *
+   * Absent ⇒ the retired version-1 bare-hash context. Since #3272 the backend
+   * never emits one (`signX402ExpectedContext` requires this field) and
+   * `@haven_ai/signer` refuses it with its version-mismatch refusal; the field
+   * stays optional here only because the type also describes older payloads.
    */
   typedDataHash?: string
   /**

@@ -67,12 +67,19 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      `Delegation`, signed valid, and the #1476 shape-keyed refusal could not
      see a hash. `haven_sign` with a bare `payload_hash` now answers the
      structured `BARE_HASH_REFUSED` refusal (`next_action: stop_and_tell_user`,
-     a typed step naming the inputs the signer CAN verify) — every remaining
-     method verifies before it signs.
-   - `signX402FundingHash(hash, expected)` → verifies Haven's signature over the
-     expected context, then returns the funding signature plus a process-local
+     a typed step naming the inputs the signer CAN verify).
+   - (removed, #3272) `signX402FundingHash(hash, expected)` — the
+     expected-context v1 bare-hash funding path. The signer supports
+     expected-context versions 2 and 3 only.
+   - `signX402FundingTypedData(typedData, expected)` → verifies Haven's
+     signature over the expected context and that it commits to this typed
+     data's digest, then returns the funding signature plus a process-local
      `x402_binding` that records the authenticated funding-intent and
      merchant-header context returned by hosted MCP.
+   - `signDelegationTypedData(typedData)` → a verbatim primitive: signs
+     whatever typed data it is handed. The allowlist that decides WHAT may be
+     signed lives in the MCP tool layer (#3272, below); an embedder calling
+     the core directly owns that check.
    - `buildX402PaymentHeader(paymentRequired, x402Binding)` → the EIP-3009
      merchant payment header for the merchant leg of an x402 payment, after
      consuming the recorded binding and checking the merchant challenge against
@@ -261,9 +268,14 @@ and digest equality before signing. The **direct** leg's binding check (#3271)
 is a CORRUPTION check, not an authentication: the caller supplies both the
 typed data and `payload_hash`, so the check proves they describe the same
 operation, never that Haven prepared it. The authority boundary remains the
-account's on-chain caveat enforcers (budget/recipient/expiry); narrowing what
-the unbound branch will sign at all is #3272. Do not assume
-`signDelegationTypedData` carries the x402 leg's binding protection.
+account's on-chain caveat enforcers (budget/recipient/expiry). What the unbound
+branch will sign at all is narrowed by #3272: `haven_sign` signs typed data
+without an x402 context only when it is a `PackedUserOperation` for this
+signer's own derived delegate account, on a chain with pinned delegation
+contracts, whose `callData` is a single `execute` to the DelegationManager
+calling `redeemDelegations` — anything else is refused with
+`TYPED_DATA_NOT_ALLOWED`. The core's `signDelegationTypedData` itself signs
+verbatim; the allowlist is in the tool layer.
 
 **An over-budget direct payment is DECLINED, not queued** (#2130). The old text
 here said the result carries `payload_hash: null` and told the agent to "wait

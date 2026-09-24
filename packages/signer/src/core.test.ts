@@ -112,9 +112,9 @@ describe('createEdgeSigner', () => {
     const signer = createEdgeSigner(TEST_KEY)
     // Inverted pin: the AllowanceModule-era `signPaymentHash(hash)` is gone,
     // and #3272 (criterion 8) retired its x402 v1 successor
-    // `signX402FundingHash` too. Every remaining signing method verifies
-    // something before it signs (a Haven binding, typed data the account
-    // validates, or a sweep authorization).
+    // `signX402FundingHash` too. The x402 and sweep methods verify a Haven
+    // binding before they sign; `signDelegationTypedData` is a verbatim
+    // primitive, and the #3272 allowlist that gates it lives in tools.ts.
     expect('signPaymentHash' in signer).toBe(false)
     expect('signX402FundingHash' in signer).toBe(false)
     expect(Object.keys(signer).sort()).toEqual([

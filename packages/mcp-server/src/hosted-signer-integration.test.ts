@@ -223,7 +223,7 @@ async function makeX402ExpectedAuth(
     signer: BINDING_SIGNER,
   }
   // Return snake_case (what the signer Zod schema validates) and camelCase
-  // (what createEdgeSigner.signX402FundingHash expects).
+  // (what createEdgeSigner.signX402FundingTypedData expects).
   return {
     // snake_case for haven_sign tool input
     snake: {
@@ -238,7 +238,7 @@ async function makeX402ExpectedAuth(
       ...(context.typedDataHash ? { typed_data_hash: context.typedDataHash } : {}),
       auth,
     },
-    // camelCase for createEdgeSigner.signX402FundingHash
+    // camelCase for createEdgeSigner.signX402FundingTypedData
     camel: {
       paymentId: context.paymentId,
       payloadHash: context.payloadHash,

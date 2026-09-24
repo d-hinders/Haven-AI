@@ -683,7 +683,7 @@ export default function DashboardClient() {
 
   // #1229's legacy passkey-Safe arm of this nudge is REMOVED (#1989, epic
   // #1440). It read the Safe's on-chain owner count through
-  // `GET /user/accounts/:id/approvers` and, when it found one owner, pointed the
+  // `GET /user/safes/:id/approvers` and, when it found one owner, pointed the
   // user at Approvers in settings. #1988 deleted all five approver routes and
   // `ManageApprovers` goes with them here, so the arm had neither a signal to
   // read nor a destination to send anyone to — a nudge to do something the

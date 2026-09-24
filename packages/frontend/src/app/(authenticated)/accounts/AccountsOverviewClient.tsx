@@ -19,8 +19,8 @@ import { truncateAddress } from '@/components/haven'
 
 // The Safe-rail INFLOW IS CLOSED (#1984, epic #1440). `AddSafeModal` lived
 // here and was the dashboard's only Safe entry point: a three-mode modal
-// (choose / deploy / import) that POSTed /user/accounts/deploy and then
-// /user/accounts. Both routes now answer 410, so the modal could only ever
+// (choose / deploy / import) that POSTed /user/safes/deploy and then
+// /user/safes. Both routes now answer 410, so the modal could only ever
 // have shown the user an error — it is removed with its trigger rather than
 // left as a door into a wall. Nothing Hybrid is lost: this modal never
 // offered a delegation-rail account, and onboarding provisions one

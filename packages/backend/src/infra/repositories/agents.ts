@@ -283,7 +283,7 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
        -- unlink), which is an owner decision rather than a side effect: since
        -- #2331 such an agent gets 403 from agentAuth on every route, and the
        -- one exemption -- sweep recovery -- refuses them too, because
-       -- has_bound_safe is false. They are already dead records, not usable
+       -- has_bound_account is false. They are already dead records, not usable
        -- ones. An INNER-shaped predicate on the LEFT JOIN is what excludes
        -- them: us.account_type is NULL for an orphan, and NULL = 'x' is not
        -- true.
@@ -805,7 +805,7 @@ export const AGENT_BY_API_KEY_SQL = `
          COALESCE(us.account_address, u.account_address) as account_address,
          COALESCE(us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
          us.execution_rail, us.account_type,
-         (us.id IS NOT NULL) AS has_bound_safe
+         (us.id IS NOT NULL) AS has_bound_account
   FROM agents a
   JOIN users u ON a.user_id = u.id
   LEFT JOIN smart_accounts us ON a.account_id = us.id
@@ -822,7 +822,7 @@ export interface AgentAuthRow {
   archived_at: string | null
   execution_rail: string | null
   account_type: string | null
-  has_bound_safe: boolean
+  has_bound_account: boolean
 }
 
 /**

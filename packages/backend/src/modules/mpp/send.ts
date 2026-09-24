@@ -38,7 +38,7 @@ export async function handleSend(
   // #993 (review finding on #1120): the retired-rail refusal must hold on
   // EVERY money entry point — /send previously never consulted the seam.
   const sendRail = resolveExecutionRail({
-    safeExecutionRail: agent.execution_rail ?? null,
+    executionRail: agent.execution_rail ?? null,
     chainId: agent.chain_id,
   })
   if (sendRail.rail === 'retired_session') {

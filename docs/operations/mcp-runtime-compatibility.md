@@ -3012,3 +3012,17 @@ to call next in structured fields, and those fields are typed end to end
 > behaviour, tool schema, runtime floor or failure code moves. Scope of this
 > note: those schemas and that hook. Nothing else in this document was
 > re-verified.
+
+> **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
+> this doc is coupled through `routes/transactions.ts`,
+> `routes/user-accounts.ts` and `routes/agent-connection-setups.ts` (the
+> `middleware/retired-safe-names.ts` coverage is untouched — the file is not in
+> the diff). Each change is an internal identifier rename: the locals
+> `safes` / `allSafes` → `accounts` / `allAccounts` on the transactions feed
+> and filters with no response-shape change, one comment in
+> `user-accounts.ts`, and the internal `ApprovalStateInput.safeTxHash` →
+> `accountTxHash` input field on `agent-connection-setups.ts` — a value the
+> repo layer already wrote to the `account_tx_hash` column, not a wire input.
+> No tool, schema key, `next_tool` value, expected-context version or signer
+> contract changes. Scope of this note: those renames — nothing else in this
+> document was re-verified.

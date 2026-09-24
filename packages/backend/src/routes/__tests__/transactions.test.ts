@@ -16,8 +16,8 @@ import {
 import pool from '../../db.js'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
-const SAFE_ADDRESS = '0x135a9215604711AC70d970e12Caa812c53537EF4'
-const LOWERCASE_SAFE_ADDRESS = SAFE_ADDRESS.toLowerCase()
+const ACCOUNT_ADDRESS = '0x135a9215604711AC70d970e12Caa812c53537EF4'
+const LOWERCASE_ACCOUNT_ADDRESS = ACCOUNT_ADDRESS.toLowerCase()
 const SENDER = '0x55C9d84427756D6f82480427Bb778F6dc0cC755E'
 const TX_HASH = '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1'
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
@@ -37,10 +37,10 @@ function routeFeedQueries(rows: { payment_intents?: unknown[] } = {}) {
   )
 }
 
-/** A distinct Safe address per cache-behavior test avoids cross-test cache pollution — the
+/** A distinct account address per cache-behavior test avoids cross-test cache pollution — the
  * module-level cache persists for the lifetime of this test file (see `#992 caching` below). */
-const CACHE_TEST_SAFE_ADDRESS_1 = '0xCACE00000000000000000000000000000000CAC1'
-const CACHE_TEST_SAFE_ADDRESS_2 = '0xCACE00000000000000000000000000000000CAC2'
+const CACHE_TEST_ACCOUNT_ADDRESS_1 = '0xCACE00000000000000000000000000000000CAC1'
+const CACHE_TEST_ACCOUNT_ADDRESS_2 = '0xCACE00000000000000000000000000000000CAC2'
 
 function nativeTx(hash: string, blockNumber: number, timestamp: string) {
   return {
@@ -48,7 +48,7 @@ function nativeTx(hash: string, blockNumber: number, timestamp: string) {
     block_number: blockNumber,
     timestamp,
     from: { hash: SENDER },
-    to: { hash: SAFE_ADDRESS },
+    to: { hash: ACCOUNT_ADDRESS },
     value: '1000000000000000000',
     gas_limit: '21000',
     gas_used: '21000',
@@ -63,7 +63,7 @@ function erc20Tx(hash: string, blockNumber: number, timestamp: string, value: st
     block_number: blockNumber,
     timestamp,
     from: { hash: SENDER },
-    to: { hash: SAFE_ADDRESS },
+    to: { hash: ACCOUNT_ADDRESS },
     total: { decimals: '6', value },
     token: {
       address_hash: USDC_ADDRESS,
@@ -166,7 +166,7 @@ function stubOneNativeTransactionFetch(): ReturnType<typeof vi.fn> {
           timestamp: '2026-05-08T11:49:59Z',
           timestampSource: 'block',
           from: { hash: SENDER },
-          to: { hash: SAFE_ADDRESS },
+          to: { hash: ACCOUNT_ADDRESS },
           value: '1000000000000000000',
           gas_limit: '21000',
           gas_used: '21000',
@@ -194,7 +194,7 @@ function stubOneNativeTransactionFetch(): ReturnType<typeof vi.fn> {
           timeStamp: '1778240999',
           hash: TX_HASH,
           from: SENDER,
-          to: SAFE_ADDRESS,
+          to: ACCOUNT_ADDRESS,
           value: '1000000000000000000',
           gas: '21000',
           gasUsed: '21000',
@@ -237,7 +237,7 @@ describe('transaction routes', () => {
     return app.jwt.sign(payload, { expiresIn: '1h' })
   }
 
-  function mockSafeRows(rows: Array<{ id: string; chain_id: number }>) {
+  function mockAccountRows(rows: Array<{ id: string; chain_id: number }>) {
     return vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
       if (String(sql).includes('FROM smart_accounts')) {
         return { rows } as never
@@ -246,21 +246,21 @@ describe('transaction routes', () => {
     })
   }
 
-  it('uses the requested owned chain when fetching legacy Safe transactions', async () => {
+  it('uses the requested owned chain when fetching transactions for the users-table mirror address', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     const fetchMock = stubEmptyTransactionFetch()
-    const queryMock = mockSafeRows([{ id: 'safe-base', chain_id: 8453 }])
+    const queryMock = mockAccountRows([{ id: 'safe-base', chain_id: 8453 }])
 
     const response = await app.inject({
       method: 'GET',
-      url: `/transactions/${SAFE_ADDRESS}?page=1&limit=10&chain_id=8453&fresh=1`,
+      url: `/transactions/${ACCOUNT_ADDRESS}?page=1&limit=10&chain_id=8453&fresh=1`,
       headers: { authorization: `Bearer ${token}` },
     })
 
     expect(response.statusCode).toBe(200)
     expect(queryMock).toHaveBeenCalledWith(
       expect.stringContaining('AND chain_id = $3'),
-      ['user-1', SAFE_ADDRESS, 8453],
+      ['user-1', ACCOUNT_ADDRESS, 8453],
     )
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('https://base.blockscout.com/api/v2/addresses/'),
@@ -277,18 +277,18 @@ describe('transaction routes', () => {
   it('keeps legacy address-only transaction reads when one chain owns the address', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     const fetchMock = stubEmptyTransactionFetch()
-    const queryMock = mockSafeRows([{ id: 'safe-gnosis', chain_id: 100 }])
+    const queryMock = mockAccountRows([{ id: 'safe-gnosis', chain_id: 100 }])
 
     const response = await app.inject({
       method: 'GET',
-      url: `/transactions/${SAFE_ADDRESS}?page=1&limit=10&fresh=1`,
+      url: `/transactions/${ACCOUNT_ADDRESS}?page=1&limit=10&fresh=1`,
       headers: { authorization: `Bearer ${token}` },
     })
 
     expect(response.statusCode).toBe(200)
     expect(queryMock).toHaveBeenCalledWith(
       expect.not.stringContaining('AND chain_id = $3'),
-      ['user-1', SAFE_ADDRESS],
+      ['user-1', ACCOUNT_ADDRESS],
     )
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('https://api.etherscan.io/v2/api'),
@@ -298,14 +298,14 @@ describe('transaction routes', () => {
   it('requires chain_id for legacy transaction reads matching multiple owned chains', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     const fetchMock = stubEmptyTransactionFetch()
-    mockSafeRows([
+    mockAccountRows([
       { id: 'safe-gnosis', chain_id: 100 },
       { id: 'safe-base', chain_id: 8453 },
     ])
 
     const response = await app.inject({
       method: 'GET',
-      url: `/transactions/${SAFE_ADDRESS}?page=1&limit=10`,
+      url: `/transactions/${ACCOUNT_ADDRESS}?page=1&limit=10`,
       headers: { authorization: `Bearer ${token}` },
     })
 
@@ -321,7 +321,7 @@ describe('transaction routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/transactions/${SAFE_ADDRESS}?chain_id=8453.5`,
+      url: `/transactions/${ACCOUNT_ADDRESS}?chain_id=8453.5`,
       headers: { authorization: `Bearer ${token}` },
     })
 
@@ -355,8 +355,8 @@ describe('transaction routes', () => {
       ['/transactions/export.csv?chainId=0', 'querystring/chainId'],
       ['/transactions/payment-intents/not-a-uuid/evidence', 'params/paymentId'],
       ['/transactions/not-an-address', 'params/accountAddress'],
-      [`/transactions/${SAFE_ADDRESS}?page=0`, 'querystring/page'],
-      [`/transactions/${SAFE_ADDRESS}?chain_id=-1`, 'querystring/chain_id'],
+      [`/transactions/${ACCOUNT_ADDRESS}?page=0`, 'querystring/page'],
+      [`/transactions/${ACCOUNT_ADDRESS}?chain_id=-1`, 'querystring/chain_id'],
     ]
     for (const [url, field] of cases) {
       const response = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${token}` } })
@@ -381,7 +381,7 @@ describe('transaction routes', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: `/transactions/${SAFE_ADDRESS}?chain_id=999999`,
+      url: `/transactions/${ACCOUNT_ADDRESS}?chain_id=999999`,
       headers: { authorization: `Bearer ${token}` },
     })
 
@@ -394,11 +394,11 @@ describe('transaction routes', () => {
   it('does not fall back to another chain when requested transaction chain is not owned', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     const fetchMock = stubEmptyTransactionFetch()
-    const queryMock = mockSafeRows([])
+    const queryMock = mockAccountRows([])
 
     const response = await app.inject({
       method: 'GET',
-      url: `/transactions/${SAFE_ADDRESS}?chain_id=8453`,
+      url: `/transactions/${ACCOUNT_ADDRESS}?chain_id=8453`,
       headers: { authorization: `Bearer ${token}` },
     })
 
@@ -406,7 +406,7 @@ describe('transaction routes', () => {
     expect(response.json().error).toBe('Not your Safe')
     expect(queryMock).toHaveBeenCalledWith(
       expect.stringContaining('AND chain_id = $3'),
-      ['user-1', SAFE_ADDRESS, 8453],
+      ['user-1', ACCOUNT_ADDRESS, 8453],
     )
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -423,12 +423,12 @@ describe('transaction routes', () => {
       vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
         const text = String(sql)
         if (text.includes('FROM smart_accounts') && text.includes('ORDER BY created_at ASC')) {
-          return { rows: [{ id: ACCOUNT_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Base wallet' }] } as never
+          return { rows: [{ id: ACCOUNT_ID, account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Base wallet' }] } as never
         }
         if (text.includes("pi.source = 'x402'")) {
           return { rows: [{
             id: INTENT_ID, tx_hash: '0x' + 'cd'.repeat(32), agent_id: AGENT_ID, agent_name: 'Buyer',
-            account_id: ACCOUNT_ID, account_address: SAFE_ADDRESS, account_name: 'Base wallet', chain_id: 8453,
+            account_id: ACCOUNT_ID, account_address: ACCOUNT_ADDRESS, account_name: 'Base wallet', chain_id: 8453,
             token_symbol: 'USDC', token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', to_address: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
             amount_raw: '20000', amount_human: '0.02', x402_merchant_address: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
             x402_resource_url: 'https://merchant.example/paid', payment_proof_status: null, payment_reconciliation_event_type: null,
@@ -493,7 +493,7 @@ describe('transaction routes', () => {
     })
   })
 
-  it('keeps aggregate transactions separate for the same Safe address on different chains', async () => {
+  it('keeps aggregate transactions separate for the same account address on different chains', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     stubOneNativeTransactionFetch()
     vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
@@ -506,13 +506,13 @@ describe('transaction routes', () => {
               // format now — a fixture id of `'safe-gnosis'` fails it,
               // correctly (same lesson #1444 recorded for `'agent-1'`).
               id: '11111111-1111-4111-8111-111111111111',
-              account_address: SAFE_ADDRESS,
+              account_address: ACCOUNT_ADDRESS,
               chain_id: 100,
               name: 'Gnosis wallet',
             },
             {
               id: '22222222-2222-4222-8222-222222222222',
-              account_address: SAFE_ADDRESS,
+              account_address: ACCOUNT_ADDRESS,
               chain_id: 8453,
               name: 'Base wallet',
             },
@@ -541,14 +541,14 @@ describe('transaction routes', () => {
     expectMatchesSpec('GET', '/transactions', body)
   })
 
-  it('strips the aggregated-feed-only account fields from the legacy per-Safe response (#2885)', async () => {
+  it('strips the aggregated-feed-only account fields from the legacy per-address response (#2885)', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     stubOneNativeTransactionFetch()
-    const queryMock = mockSafeRows([{ id: 'safe-base', chain_id: 8453 }])
+    const queryMock = mockAccountRows([{ id: 'safe-base', chain_id: 8453 }])
 
     const response = await app.inject({
       method: 'GET',
-      url: `/transactions/${SAFE_ADDRESS}?page=1&limit=10&chain_id=8453&fresh=1`,
+      url: `/transactions/${ACCOUNT_ADDRESS}?page=1&limit=10&chain_id=8453&fresh=1`,
       headers: { authorization: `Bearer ${token}` },
     })
 
@@ -581,13 +581,13 @@ describe('mergeX402Transactions', () => {
       [
         {
           id: 'safe-gnosis',
-          account_address: SAFE_ADDRESS,
+          account_address: ACCOUNT_ADDRESS,
           chain_id: 100,
           name: 'Gnosis wallet',
         },
         {
           id: 'safe-base',
-          account_address: SAFE_ADDRESS,
+          account_address: ACCOUNT_ADDRESS,
           chain_id: 8453,
           name: 'Base wallet',
         },
@@ -617,7 +617,7 @@ describe('mergeX402Transactions', () => {
             agent_id: 'agent-id',
             agent_name: 'Research assistant',
             account_id: 'safe-id',
-            account_address: SAFE_ADDRESS,
+            account_address: ACCOUNT_ADDRESS,
             account_name: 'Main wallet',
             chain_id: 8453,
             token_symbol: 'USDC',
@@ -639,14 +639,14 @@ describe('mergeX402Transactions', () => {
       'user-id',
       [{
         id: 'safe-id',
-        account_address: SAFE_ADDRESS,
+        account_address: ACCOUNT_ADDRESS,
         chain_id: 8453,
         name: 'Main wallet',
       }],
       [{
         hash: TX_HASH,
         type: 'erc20',
-        from: SAFE_ADDRESS,
+        from: ACCOUNT_ADDRESS,
         to: '0x1111111111111111111111111111111111111111',
         value: '20000',
         valueFormatted: '0.02',
@@ -661,7 +661,7 @@ describe('mergeX402Transactions', () => {
         tokenSymbol: 'USDC',
         chainId: 8453,
         accountId: 'safe-id',
-        accountAddress: SAFE_ADDRESS,
+        accountAddress: ACCOUNT_ADDRESS,
         accountName: 'Main wallet',
       }],
     )
@@ -669,7 +669,7 @@ describe('mergeX402Transactions', () => {
     expect(result).toHaveLength(1)
     expect(result[0]).toMatchObject({
       hash: TX_HASH,
-      from: SAFE_ADDRESS,
+      from: ACCOUNT_ADDRESS,
       to: '0x2222222222222222222222222222222222222222',
       value: '20000',
       valueFormatted: '0.02',
@@ -699,7 +699,7 @@ describe('mergeX402Transactions', () => {
             agent_id: 'agent-id',
             agent_name: 'Research assistant',
             account_id: 'safe-id',
-            account_address: SAFE_ADDRESS,
+            account_address: ACCOUNT_ADDRESS,
             account_name: 'Base wallet',
             chain_id: 8453,
             token_symbol: 'USDC',
@@ -722,14 +722,14 @@ describe('mergeX402Transactions', () => {
       'user-id',
       [{
         id: 'safe-id',
-        account_address: SAFE_ADDRESS,
+        account_address: ACCOUNT_ADDRESS,
         chain_id: 8453,
         name: 'Base wallet',
       }],
       [{
         hash: TX_HASH,
         type: 'erc20',
-        from: SAFE_ADDRESS,
+        from: ACCOUNT_ADDRESS,
         to: '0x1111111111111111111111111111111111111111',
         value: '20000',
         valueFormatted: '0.02',
@@ -744,7 +744,7 @@ describe('mergeX402Transactions', () => {
         tokenSymbol: 'USDC',
         chainId: 100,
         accountId: 'safe-id',
-        accountAddress: SAFE_ADDRESS,
+        accountAddress: ACCOUNT_ADDRESS,
         accountName: 'Gnosis wallet',
       }],
     )
@@ -784,7 +784,7 @@ describe('mergeX402Transactions', () => {
           agent_id: 'agent-id',
           agent_name: 'Research assistant',
           account_id: 'safe-id',
-          account_address: SAFE_ADDRESS,
+          account_address: ACCOUNT_ADDRESS,
           account_name: 'Main wallet',
           chain_id: 8453,
           token_symbol: 'USDC',
@@ -805,7 +805,7 @@ describe('mergeX402Transactions', () => {
 
     const result = await mergeX402Transactions(
       'user-id',
-      [{ id: 'safe-id', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [{ id: 'safe-id', account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
       [],
     )
 
@@ -831,7 +831,7 @@ describe('mergeX402Transactions', () => {
           agent_id: 'agent-id',
           agent_name: 'Research assistant',
           account_id: 'safe-id',
-          account_address: SAFE_ADDRESS,
+          account_address: ACCOUNT_ADDRESS,
           account_name: 'Main wallet',
           chain_id: 8453,
           token_symbol: 'USDC',
@@ -852,7 +852,7 @@ describe('mergeX402Transactions', () => {
 
     const result = await mergeX402Transactions(
       'user-id',
-      [{ id: 'safe-id', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [{ id: 'safe-id', account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
       [],
     )
 
@@ -871,7 +871,7 @@ describe('mergeX402Transactions', () => {
           agent_id: 'agent-id',
           agent_name: 'Research assistant',
           account_id: 'safe-id',
-          account_address: SAFE_ADDRESS,
+          account_address: ACCOUNT_ADDRESS,
           account_name: 'Main wallet',
           chain_id: 8453,
           token_symbol: 'USDC',
@@ -891,7 +891,7 @@ describe('mergeX402Transactions', () => {
 
     const result = await mergeX402Transactions(
       'user-id',
-      [{ id: 'safe-id', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+      [{ id: 'safe-id', account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
       [],
     )
 
@@ -906,7 +906,7 @@ describe('mergeX402Transactions', () => {
       {
         hash: TX_HASH,
         type: 'erc20',
-        from: SAFE_ADDRESS,
+        from: ACCOUNT_ADDRESS,
         to: '0x1111111111111111111111111111111111111111',
         value: '20000',
         valueFormatted: '0.02',
@@ -921,7 +921,7 @@ describe('mergeX402Transactions', () => {
         tokenSymbol: 'USDC',
         chainId: 8453,
         accountId: 'safe-id',
-        accountAddress: SAFE_ADDRESS,
+        accountAddress: ACCOUNT_ADDRESS,
         accountName: 'Main wallet',
         source: 'x402',
         settlementScheme: 'eip3009',
@@ -941,7 +941,7 @@ describe('mergeX402Transactions', () => {
             agent_id: 'agent-id',
             agent_name: 'Research assistant',
             account_id: 'safe-id',
-            account_address: SAFE_ADDRESS,
+            account_address: ACCOUNT_ADDRESS,
             account_name: 'Main wallet',
             chain_id: 8453,
             token_symbol: 'USDC',
@@ -964,7 +964,7 @@ describe('mergeX402Transactions', () => {
       'user-id',
       [{
         id: 'safe-id',
-        account_address: SAFE_ADDRESS,
+        account_address: ACCOUNT_ADDRESS,
         chain_id: 8453,
         name: 'Main wallet',
       }],
@@ -987,7 +987,7 @@ describe('enrichTransactionsWithAgents', () => {
     return {
       hash: TX_HASH,
       type: 'erc20',
-      from: SAFE_ADDRESS,
+      from: ACCOUNT_ADDRESS,
       to: '0xA87300000000000000000000000000000000DD35',
       value: '10000',
       valueFormatted: '0.01',
@@ -1002,13 +1002,13 @@ describe('enrichTransactionsWithAgents', () => {
       tokenSymbol: 'USDC',
       chainId: 8453,
       accountId: 'safe-base',
-      accountAddress: SAFE_ADDRESS,
+      accountAddress: ACCOUNT_ADDRESS,
       accountName: 'Based',
       ...overrides,
     }
   }
 
-  it('scopes payment intent enrichment to the matching Safe and chain', async () => {
+  it('scopes payment intent enrichment to the matching account and chain', async () => {
     const queryMock = vi.spyOn(pool, 'query')
       .mockResolvedValueOnce({
         rows: [
@@ -1071,15 +1071,15 @@ describe('enrichTransactionsWithAgents', () => {
   })
 
   // #2055 (epic #1440, #2021 readability waiver): was "enriches raw explorer
-  // transfers from executed x402 approvals by Safe and chain" —
+  // transfers from executed x402 approvals by account and chain" —
   // `findApprovalRequestAgentMatches` is gone with `approval_requests`, and
   // with it the approval-sourced attribution pass this pinned. x402
   // attribution from a funding record survives unchanged on the
   // payment_intents pass, already proven above by "scopes payment intent
-  // enrichment to the matching Safe and chain" — deleted rather than
+  // enrichment to the matching account and chain" — deleted rather than
   // converted for the same reason as its `mergeX402Transactions` sibling.
 
-  it('labels submitted delegate sweeps with agent context by Safe and chain', async () => {
+  it('labels submitted delegate sweeps with agent context by account and chain', async () => {
     // #2055: the enrichment pipeline is payment_intents → delegate_sweeps
     // now (the approval_requests pass in between is gone), so the sweep
     // query is the SECOND call, not the third.
@@ -1095,7 +1095,7 @@ describe('enrichTransactionsWithAgents', () => {
             agent_id: 'agent-id',
             agent_name: 'Research assistant',
             from_address: '0xA87300000000000000000000000000000000DD35',
-            to_address: SAFE_ADDRESS,
+            to_address: ACCOUNT_ADDRESS,
           },
         ],
       } as never)
@@ -1103,7 +1103,7 @@ describe('enrichTransactionsWithAgents', () => {
     const result = await enrichTransactionsWithAgents('user-id', [
       explorerTransfer({
         from: '0xA87300000000000000000000000000000000DD35',
-        to: SAFE_ADDRESS,
+        to: ACCOUNT_ADDRESS,
         direction: 'in',
       }),
       explorerTransfer({
@@ -1111,7 +1111,7 @@ describe('enrichTransactionsWithAgents', () => {
         chainId: 100,
         accountName: 'Gnosis',
         from: '0xA87300000000000000000000000000000000DD35',
-        to: SAFE_ADDRESS,
+        to: ACCOUNT_ADDRESS,
         direction: 'in',
       }),
     ])
@@ -1156,15 +1156,15 @@ describe('enrichTransactionsWithAgents', () => {
 // (#985's second lesson).
 
 describe('buildTransactionCacheKey (#992 characterization — exact key pin)', () => {
-  it('is `tx:<chainId>:<lowercased safe address>`, independent of input casing', () => {
-    expect(buildTransactionCacheKey(8453, SAFE_ADDRESS)).toBe(
-      `tx:8453:${LOWERCASE_SAFE_ADDRESS}`,
+  it('is `tx:<chainId>:<lowercased account address>`, independent of input casing', () => {
+    expect(buildTransactionCacheKey(8453, ACCOUNT_ADDRESS)).toBe(
+      `tx:8453:${LOWERCASE_ACCOUNT_ADDRESS}`,
     )
-    expect(buildTransactionCacheKey(100, SAFE_ADDRESS.toUpperCase())).toBe(
-      `tx:100:${LOWERCASE_SAFE_ADDRESS}`,
+    expect(buildTransactionCacheKey(100, ACCOUNT_ADDRESS.toUpperCase())).toBe(
+      `tx:100:${LOWERCASE_ACCOUNT_ADDRESS}`,
     )
-    expect(buildTransactionCacheKey(8453, SAFE_ADDRESS)).not.toBe(
-      buildTransactionCacheKey(100, SAFE_ADDRESS),
+    expect(buildTransactionCacheKey(8453, ACCOUNT_ADDRESS)).not.toBe(
+      buildTransactionCacheKey(100, ACCOUNT_ADDRESS),
     )
   })
 })
@@ -1190,7 +1190,7 @@ describe('transaction cache hit/miss (#992 characterization)', () => {
     return app.jwt.sign(payload, { expiresIn: '1h' })
   }
 
-  function mockSafeRows(rows: Array<{ id: string; chain_id: number }>) {
+  function mockAccountRows(rows: Array<{ id: string; chain_id: number }>) {
     return vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown) => {
       if (String(sql).includes('FROM smart_accounts')) {
         return { rows } as never
@@ -1202,11 +1202,11 @@ describe('transaction cache hit/miss (#992 characterization)', () => {
   it('reuses the cached result on a second read for the same key (no fresh flag)', async () => {
     const token = signToken({ sub: 'cache-user', email: 'cache@example.com' })
     const fetchMock = stubEmptyTransactionFetch()
-    mockSafeRows([{ id: 'cache-safe-1', chain_id: 8453 }])
+    mockAccountRows([{ id: 'cache-safe-1', chain_id: 8453 }])
 
     const first = await app.inject({
       method: 'GET',
-      url: `/transactions/${CACHE_TEST_SAFE_ADDRESS_1}?chain_id=8453&fresh=1`,
+      url: `/transactions/${CACHE_TEST_ACCOUNT_ADDRESS_1}?chain_id=8453&fresh=1`,
       headers: { authorization: `Bearer ${token}` },
     })
     expect(first.statusCode).toBe(200)
@@ -1215,7 +1215,7 @@ describe('transaction cache hit/miss (#992 characterization)', () => {
 
     const second = await app.inject({
       method: 'GET',
-      url: `/transactions/${CACHE_TEST_SAFE_ADDRESS_1}?chain_id=8453`,
+      url: `/transactions/${CACHE_TEST_ACCOUNT_ADDRESS_1}?chain_id=8453`,
       headers: { authorization: `Bearer ${token}` },
     })
     expect(second.statusCode).toBe(200)
@@ -1227,11 +1227,11 @@ describe('transaction cache hit/miss (#992 characterization)', () => {
   it('bypasses the cache on both reads when fresh=1 is passed each time', async () => {
     const token = signToken({ sub: 'cache-user-2', email: 'cache2@example.com' })
     const fetchMock = stubEmptyTransactionFetch()
-    mockSafeRows([{ id: 'cache-safe-2', chain_id: 8453 }])
+    mockAccountRows([{ id: 'cache-safe-2', chain_id: 8453 }])
 
     const first = await app.inject({
       method: 'GET',
-      url: `/transactions/${CACHE_TEST_SAFE_ADDRESS_2}?chain_id=8453&fresh=1`,
+      url: `/transactions/${CACHE_TEST_ACCOUNT_ADDRESS_2}?chain_id=8453&fresh=1`,
       headers: { authorization: `Bearer ${token}` },
     })
     expect(first.statusCode).toBe(200)
@@ -1240,7 +1240,7 @@ describe('transaction cache hit/miss (#992 characterization)', () => {
 
     const second = await app.inject({
       method: 'GET',
-      url: `/transactions/${CACHE_TEST_SAFE_ADDRESS_2}?chain_id=8453&fresh=1`,
+      url: `/transactions/${CACHE_TEST_ACCOUNT_ADDRESS_2}?chain_id=8453&fresh=1`,
       headers: { authorization: `Bearer ${token}` },
     })
     expect(second.statusCode).toBe(200)
@@ -1272,13 +1272,13 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
   }
 
   function mockPoolForAggregation(
-    safes: Array<{ id: string; account_address: string; chain_id: number; name: string }>,
+    accounts: Array<{ id: string; account_address: string; chain_id: number; name: string }>,
     validAgentIds: string[] = [],
   ) {
     return vi.spyOn(pool, 'query').mockImplementation(async (sql: unknown, params?: unknown[]) => {
       const text = String(sql)
       if (text.includes('FROM smart_accounts')) {
-        return { rows: safes } as never
+        return { rows: accounts } as never
       }
       if (text.includes('FROM agents WHERE id')) {
         const agentId = (params as string[] | undefined)?.[0]
@@ -1297,7 +1297,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     const token = signToken({ sub: 'page-user', email: 'page@example.com' })
     stubMixedTransactionFetch()
     mockPoolForAggregation([
-      { id: 'safe-page', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' },
+      { id: 'safe-page', account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Main' },
     ])
 
     const page1 = await app.inject({
@@ -1343,7 +1343,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     const token = signToken({ sub: 'twin-user', email: 'twin@example.com' })
     stubMixedTransactionFetch()
     mockPoolForAggregation([
-      { id: 'safe-twin', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' },
+      { id: 'safe-twin', account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Main' },
     ])
 
     const response = await app.inject({
@@ -1373,7 +1373,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     const token = signToken({ sub: 'filter-user', email: 'filter@example.com' })
     stubMixedTransactionFetch()
     mockPoolForAggregation([
-      { id: 'safe-filter', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' },
+      { id: 'safe-filter', account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Main' },
     ])
 
     const nativeOnly = await app.inject({
@@ -1404,7 +1404,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     const SAFE_A_ID = '33333333-3333-4333-8333-333333333333'
     const SAFE_B_ID = '44444444-4444-4444-8444-444444444444'
     mockPoolForAggregation([
-      { id: SAFE_A_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'A' },
+      { id: SAFE_A_ID, account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'A' },
       { id: SAFE_B_ID, account_address: SENDER, chain_id: 100, name: 'B' },
     ])
 
@@ -1441,7 +1441,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     stubEmptyTransactionFetch()
     const SAFE_A_ID = '33333333-3333-4333-8333-333333333333'
     mockPoolForAggregation([
-      { id: SAFE_A_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'A' },
+      { id: SAFE_A_ID, account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'A' },
     ])
 
     const res = await app.inject({
@@ -1466,14 +1466,14 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     const ACCOUNT_WITH_TXS_ID = '55555555-5555-4555-8555-555555555555'
     const ACCOUNT_EMPTY_ID = '66666666-6666-4666-8666-666666666666'
 
-    // Per-address routing: SAFE_ADDRESS returns the 4-tx mixed fixture,
+    // Per-address routing: ACCOUNT_ADDRESS returns the 4-tx mixed fixture,
     // SENDER (the second account) returns nothing.
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = input.toString()
       if (url.includes('/api/v1/safes/') && url.includes('/transfers/')) {
         return jsonResponse({ count: 0, next: null, previous: null, results: [] })
       }
-      if (url.toLowerCase().includes(LOWERCASE_SAFE_ADDRESS)) {
+      if (url.toLowerCase().includes(LOWERCASE_ACCOUNT_ADDRESS)) {
         if (url.includes('/token-transfers')) {
           return jsonResponse({
             items: [erc20Tx('0xE20000000000000000000000000000000000000000000000000000000E20', 100, '2026-05-01T00:00:00Z', '5000000')],
@@ -1496,7 +1496,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     vi.stubGlobal('fetch', fetchMock)
 
     mockPoolForAggregation([
-      { id: ACCOUNT_WITH_TXS_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Has txs' },
+      { id: ACCOUNT_WITH_TXS_ID, account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Has txs' },
       { id: ACCOUNT_EMPTY_ID, account_address: SENDER, chain_id: 100, name: 'Empty' },
     ])
 
@@ -1552,7 +1552,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
 
     stubMixedTransactionFetch()
     mockPoolForAggregation([
-      { id: ACCOUNT_WITH_TXS_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Has txs' },
+      { id: ACCOUNT_WITH_TXS_ID, account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Has txs' },
       { id: ACCOUNT_EMPTY_ID, account_address: SENDER, chain_id: 100, name: 'Empty' },
     ])
 
@@ -1581,7 +1581,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
 
     stubMixedTransactionFetch()
     mockPoolForAggregation([
-      { id: ACCOUNT_ID, account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Has txs' },
+      { id: ACCOUNT_ID, account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Has txs' },
     ])
 
     const response = await app.inject({
@@ -1616,7 +1616,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
               block_number: 400,
               timestamp: '2026-05-04T00:00:00Z',
               timestampSource: 'block',
-              from: { hash: SAFE_ADDRESS },
+              from: { hash: ACCOUNT_ADDRESS },
               to: { hash: SENDER },
               value: '1000000000000000000',
               gas_limit: '21000',
@@ -1629,7 +1629,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
               block_number: 401,
               timestamp: '2026-05-04T01:00:00Z',
               timestampSource: 'block',
-              from: { hash: SAFE_ADDRESS },
+              from: { hash: ACCOUNT_ADDRESS },
               to: { hash: SENDER },
               value: '2000000000000000000',
               gas_limit: '21000',
@@ -1649,7 +1649,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
       const text = String(sql)
       if (text.includes('FROM smart_accounts')) {
         return {
-          rows: [{ id: 'safe-agentfilter', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' }],
+          rows: [{ id: 'safe-agentfilter', account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Main' }],
         } as never
       }
       if (text.includes('FROM agents WHERE id')) {
@@ -1710,7 +1710,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
     const token = signToken({ sub: 'agentreject-user', email: 'agentreject@example.com' })
     const fetchMock = stubEmptyTransactionFetch()
     mockPoolForAggregation(
-      [{ id: 'safe-agentreject', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main' }],
+      [{ id: 'safe-agentreject', account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Main' }],
       ['agent-owned'],
     )
 
@@ -1759,7 +1759,7 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
       const text = String(sql)
       if (text.includes('FROM smart_accounts')) {
         return {
-          rows: [{ id: '11111111-2222-4333-8444-555555555501', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+          rows: [{ id: '11111111-2222-4333-8444-555555555501', account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
         } as never
       }
       if (text.includes('FROM payment_intents pi') && text.includes('JOIN agents a')) {
@@ -1771,7 +1771,7 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
               agent_id: '11111111-2222-4333-8444-555555555502',
               agent_name: 'Research assistant',
               account_id: '11111111-2222-4333-8444-555555555501',
-              account_address: SAFE_ADDRESS,
+              account_address: ACCOUNT_ADDRESS,
               account_name: 'Main wallet',
               chain_id: 8453,
               token_symbol: 'USDC',
@@ -1813,7 +1813,7 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
       tokenSymbol: 'USDC',
       asset: 'USDC',
       tokenAddress: USDC_ADDRESS,
-      from: SAFE_ADDRESS,
+      from: ACCOUNT_ADDRESS,
       to: '0x2222222222222222222222222222222222222222',
       chainId: 8453,
       agentName: 'Research assistant',
@@ -1848,7 +1848,7 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
       const text = String(sql)
       if (text.includes('FROM smart_accounts')) {
         return {
-          rows: [{ id: '11111111-2222-4333-8444-555555555501', account_address: SAFE_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
+          rows: [{ id: '11111111-2222-4333-8444-555555555501', account_address: ACCOUNT_ADDRESS, chain_id: 8453, name: 'Main wallet' }],
         } as never
       }
       if (text.includes('FROM payment_intents pi') && text.includes('JOIN agents a')) {
@@ -1860,7 +1860,7 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
               agent_id: '11111111-2222-4333-8444-555555555502',
               agent_name: 'Research assistant',
               account_id: '11111111-2222-4333-8444-555555555501',
-              account_address: SAFE_ADDRESS,
+              account_address: ACCOUNT_ADDRESS,
               account_name: 'Main wallet',
               chain_id: 8453,
               token_symbol: 'USDC',

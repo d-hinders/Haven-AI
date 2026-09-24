@@ -230,7 +230,7 @@ describe('agentAuthMiddleware', () => {
         account_address: '0x3333333333333333333333333333333333333333',
         chain_id: 8453,
         status: 'active',
-        has_bound_safe: false,
+        has_bound_account: false,
       }],
     }))
 

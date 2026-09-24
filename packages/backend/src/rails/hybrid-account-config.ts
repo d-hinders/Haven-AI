@@ -27,27 +27,27 @@ export async function loadHybridOwnerConfig(
   userId: string,
   accountAddress: string,
   chainId: number,
-): Promise<{ config: HybridOwnerConfig; userSafeId: string; singleSignerWaiverAt: string | null } | null> {
+): Promise<{ config: HybridOwnerConfig; accountId: string; singleSignerWaiverAt: string | null } | null> {
   // The queries live in the repositories (#999): the account row bind is
   // chain-scoped — see FIND_HYBRID_OWNER_ACCOUNT_ROW_SQL's note on the #908
   // testnet/mainnet signer-set hazard.
-  const safe = await findHybridOwnerAccountRow(userId, accountAddress, chainId)
-  if (!safe) return null
+  const account = await findHybridOwnerAccountRow(userId, accountAddress, chainId)
+  if (!account) return null
 
-  const passkeyRows = await listAccountPasskeys(safe.id)
+  const passkeyRows = await listAccountPasskeys(account.id)
   const passkeys: StoredPasskey[] = passkeyRows.map((r) => ({
     keyId: r.key_id,
     x: BigInt(r.public_key_x),
     y: BigInt(r.public_key_y),
   }))
 
-  if (!safe.owner_address && passkeys.length === 0) return null
+  if (!account.owner_address && passkeys.length === 0) return null
 
   return {
-    userSafeId: safe.id,
-    singleSignerWaiverAt: safe.single_signer_waiver_at ?? null,
+    accountId: account.id,
+    singleSignerWaiverAt: account.single_signer_waiver_at ?? null,
     config: {
-      ownerAddress: (safe.owner_address as Address | null) ?? undefined,
+      ownerAddress: (account.owner_address as Address | null) ?? undefined,
       passkeys: passkeys.length > 0 ? passkeys : undefined,
     },
   }

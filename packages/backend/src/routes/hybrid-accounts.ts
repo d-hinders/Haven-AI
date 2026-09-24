@@ -156,7 +156,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       // passkey account has none — its config lives in hybrid_account_passkeys.
       [sub, accountAddress, chainId, name?.trim() || 'My account', isFirst, owner_address?.toLowerCase() ?? null, recordWaiver ? new Date().toISOString() : null],
     )
-    const userSafeId = result.rows[0].id
+    const accountId = result.rows[0].id
 
     // Persist the passkey signer set (#885): the account address was derived
     // from EXACTLY these coordinates, so activation (#860 deploy) and revoke
@@ -164,12 +164,12 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     for (const pk of parsedPasskeys) {
       await pool.query(
         INSERT_HYBRID_ACCOUNT_PASSKEY_SQL,
-        [userSafeId, pk.keyId, `0x${pk.x.toString(16)}`, `0x${pk.y.toString(16)}`],
+        [accountId, pk.keyId, `0x${pk.x.toString(16)}`, `0x${pk.y.toString(16)}`],
       )
     }
 
     return reply.code(201).send({
-      id: userSafeId,
+      id: accountId,
       account_address: accountAddress,
       chain_id: chainId,
       account_type: 'delegator_hybrid',
@@ -220,7 +220,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       account: {
         accountAddress: address as `0x${string}`,
         chainId,
-        userSafeId: owner.userSafeId,
+        accountId: owner.accountId,
         config: owner.config,
         singleSignerWaiverAt: owner.singleSignerWaiverAt,
       },
@@ -333,13 +333,13 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       const resolved = await resolveOwnedHybridAccount(sub, request.params.address, request.query.chain_id)
       if (!resolved.ok) return reply.code(resolved.status).send({ error: resolved.error })
 
-      const { accountAddress, chainId, config, userSafeId } = resolved.account
+      const { accountAddress, chainId, config, accountId } = resolved.account
       // #1679: enrollment dates let the UI label rows "Passkey · added {date}"
       // instead of a positional platform name. Joined by key_id rather than
       // threaded through the owner config — that config is the deploy/signing
       // shape and stays key material only. Null (never a guessed date) when a
       // row is somehow absent; the UI falls back to ordinal "Passkey N".
-      const createdByKey = passkeyEnrollmentDates(await listAccountPasskeys(userSafeId))
+      const createdByKey = passkeyEnrollmentDates(await listAccountPasskeys(accountId))
       return {
         account_address: accountAddress,
         chain_id: chainId,

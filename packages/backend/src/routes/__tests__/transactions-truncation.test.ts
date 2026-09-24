@@ -40,13 +40,13 @@ interface LegOptions {
   erc20NextPage?: boolean
 }
 
-function nativeItems(count: number, safe: string) {
+function nativeItems(count: number, address: string) {
   return Array.from({ length: count }, (_, i) => ({
     hash: `0x${(i + 1).toString(16).padStart(64, '0')}`,
     block_number: 45_000_000 + i,
     timestamp: '2026-05-08T11:49:59Z',
     from: { hash: SENDER },
-    to: { hash: safe },
+    to: { hash: address },
     value: '1000000000000000000',
     gas_limit: '21000',
     gas_used: '21000',
@@ -55,31 +55,31 @@ function nativeItems(count: number, safe: string) {
   }))
 }
 
-function erc20Items(count: number, safe: string) {
+function erc20Items(count: number, address: string) {
   return Array.from({ length: count }, (_, i) => ({
     transaction_hash: `0x${(i + 5001).toString(16).padStart(64, '0')}`,
     block_number: 46_000_000 + i,
     timestamp: '2026-05-08T11:49:59Z',
     from: { hash: SENDER },
-    to: { hash: safe },
+    to: { hash: address },
     total: { value: '1000000', decimals: '6' },
     token: { address_hash: '0xusdc', name: 'USD Coin', symbol: 'USDC', decimals: '6' },
   }))
 }
 
 /** Stubs the Base (Blockscout v2) legs for one account. */
-function stubBlockscout(safe: string, opts: LegOptions) {
+function stubBlockscout(address: string, opts: LegOptions) {
   const fetchMock = vi.fn((input: string | URL) => {
     const url = String(input)
     if (url.includes('/token-transfers')) {
       return jsonResponse({
-        items: erc20Items(opts.erc20 ?? 0, safe),
+        items: erc20Items(opts.erc20 ?? 0, address),
         next_page_params: opts.erc20NextPage ? { block_number: 1 } : null,
       })
     }
     if (url.includes('/addresses/') && url.includes('/transactions')) {
       return jsonResponse({
-        items: nativeItems(opts.native ?? 0, safe),
+        items: nativeItems(opts.native ?? 0, address),
         next_page_params: opts.nativeNextPage ? { block_number: 1 } : null,
       })
     }
@@ -98,13 +98,13 @@ function stubBlockscout(safe: string, opts: LegOptions) {
  * leave unpinned. This stub answers every page identically, so the loop
  * runs out its full budget: exactly the capped case.
  */
-function stubEtherscan(safe: string, nativeRows: number) {
+function stubEtherscan(address: string, nativeRows: number) {
   const result = Array.from({ length: nativeRows }, (_, i) => ({
     blockNumber: String(45_000_000 + i),
     timeStamp: '1778240999',
     hash: `0x${(i + 9001).toString(16).padStart(64, '0')}`,
     from: SENDER,
-    to: safe,
+    to: address,
     value: '1000000000000000000',
     gas: '21000',
     gasUsed: '21000',
@@ -124,10 +124,10 @@ function stubEtherscan(safe: string, nativeRows: number) {
   return fetchMock
 }
 
-function routeDbQueries(safes: unknown[]) {
+function routeDbQueries(accounts: unknown[]) {
   return vi.spyOn(pool, 'query').mockImplementation(
     (async (sql: unknown) => {
-      if (String(sql).includes('FROM smart_accounts')) return { rows: safes }
+      if (String(sql).includes('FROM smart_accounts')) return { rows: accounts }
       return { rows: [] }
     }) as never,
   )
@@ -156,7 +156,7 @@ describe('GET /transactions — truncation signal (#2882)', () => {
    * A distinct address per test. The per-account cache outlives each case, so
    * a shared address would let one test read another's result.
    */
-  function uniqueSafe(chainId = 8453) {
+  function uniqueAccount(chainId = 8453) {
     counter += 1
     const address = `0x${counter.toString(16).padStart(40, '0')}`
     return {
@@ -186,9 +186,9 @@ describe('GET /transactions — truncation signal (#2882)', () => {
     // route's response changes. It is also the guard that catches a fixture
     // modelling a response the server cannot emit: `truncated` is required
     // and the schema is `additionalProperties: false`.
-    const safe = uniqueSafe()
-    stubBlockscout(safe.address, { native: 10, nativeNextPage: true })
-    routeDbQueries(safe.rows)
+    const account = uniqueAccount()
+    stubBlockscout(account.address, { native: 10, nativeNextPage: true })
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
 
@@ -206,9 +206,9 @@ describe('GET /transactions — truncation signal (#2882)', () => {
   })
 
   it('reports truncated when Blockscout offers another page', async () => {
-    const safe = uniqueSafe()
-    stubBlockscout(safe.address, { native: 10, nativeNextPage: true })
-    routeDbQueries(safe.rows)
+    const account = uniqueAccount()
+    stubBlockscout(account.address, { native: 10, nativeNextPage: true })
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
 
@@ -221,9 +221,9 @@ describe('GET /transactions — truncation signal (#2882)', () => {
     // response holding exactly EXPLORER_PAGE_SIZE rows says nothing about
     // whether more exist — only the cursor does. Counting rows here would
     // measure Blockscout's default and claim a truncation that is not real.
-    const safe = uniqueSafe()
-    stubBlockscout(safe.address, { native: EXPLORER_PAGE_SIZE, nativeNextPage: false })
-    routeDbQueries(safe.rows)
+    const account = uniqueAccount()
+    stubBlockscout(account.address, { native: EXPLORER_PAGE_SIZE, nativeNextPage: false })
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
 
@@ -233,9 +233,9 @@ describe('GET /transactions — truncation signal (#2882)', () => {
   it('reports truncated from the ERC-20 leg, not just the native one', async () => {
     // On a stablecoin account this is the realistic truncation: no native
     // transfers at all, a full page of USDC.
-    const safe = uniqueSafe()
-    stubBlockscout(safe.address, { native: 2, erc20: 25, erc20NextPage: true })
-    routeDbQueries(safe.rows)
+    const account = uniqueAccount()
+    stubBlockscout(account.address, { native: 2, erc20: 25, erc20NextPage: true })
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
 
@@ -243,9 +243,9 @@ describe('GET /transactions — truncation signal (#2882)', () => {
   })
 
   it('does not report truncated for an account with no history', async () => {
-    const safe = uniqueSafe()
-    stubBlockscout(safe.address, {})
-    routeDbQueries(safe.rows)
+    const account = uniqueAccount()
+    stubBlockscout(account.address, {})
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
 
@@ -253,8 +253,8 @@ describe('GET /transactions — truncation signal (#2882)', () => {
   })
 
   it('reports truncated: false when the user has no accounts at all', async () => {
-    const safe = uniqueSafe()
-    stubBlockscout(safe.address, {})
+    const account = uniqueAccount()
+    stubBlockscout(account.address, {})
     routeDbQueries([])
 
     const response = await get('?fresh=1')
@@ -266,9 +266,9 @@ describe('GET /transactions — truncation signal (#2882)', () => {
     // The second read is served from the per-account cache. If the flag did
     // not ride with the rows, this is where a capped read would start
     // reporting itself as complete for the rest of the TTL.
-    const safe = uniqueSafe()
-    stubBlockscout(safe.address, { native: 10, nativeNextPage: true })
-    routeDbQueries(safe.rows)
+    const account = uniqueAccount()
+    stubBlockscout(account.address, { native: 10, nativeNextPage: true })
+    routeDbQueries(account.rows)
 
     const first = await get('?fresh=1')
     expect(first.json().truncated).toBe(true)
@@ -281,9 +281,9 @@ describe('GET /transactions — truncation signal (#2882)', () => {
     // Gnosis: `offset` is requested explicitly, so the loop pages until a
     // short page. This stub answers full on every page, so the budget is
     // spent with the source still holding more — the capped read, reported.
-    const safe = uniqueSafe(100)
-    stubEtherscan(safe.address, EXPLORER_PAGE_SIZE)
-    routeDbQueries(safe.rows)
+    const account = uniqueAccount(100)
+    stubEtherscan(account.address, EXPLORER_PAGE_SIZE)
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
 
@@ -295,9 +295,9 @@ describe('GET /transactions — truncation signal (#2882)', () => {
     // complete. This is the case #2882 could only hedge about (a full page
     // might have had more); with pagination, one row below the window is a
     // definite answer.
-    const safe = uniqueSafe(100)
-    stubEtherscan(safe.address, EXPLORER_PAGE_SIZE - 1)
-    routeDbQueries(safe.rows)
+    const account = uniqueAccount(100)
+    stubEtherscan(account.address, EXPLORER_PAGE_SIZE - 1)
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
 
@@ -305,9 +305,9 @@ describe('GET /transactions — truncation signal (#2882)', () => {
   })
 
   it('is independent of partialFailure', async () => {
-    const safe = uniqueSafe()
-    stubBlockscout(safe.address, { native: 10, nativeNextPage: true })
-    routeDbQueries(safe.rows)
+    const account = uniqueAccount()
+    stubBlockscout(account.address, { native: 10, nativeNextPage: true })
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
 
@@ -319,12 +319,12 @@ describe('GET /transactions — truncation signal (#2882)', () => {
     // A leg that threw is unknown, not capped. Reporting truncation from a
     // failure would tell the user their history is longer than shown when
     // the real answer is that we could not read it.
-    const safe = uniqueSafe()
+    const account = uniqueAccount()
     vi.stubGlobal(
       'fetch',
       vi.fn(() => Promise.reject(new Error('explorer down'))),
     )
-    routeDbQueries(safe.rows)
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
 

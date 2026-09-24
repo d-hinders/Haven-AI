@@ -28,13 +28,13 @@ function jsonResponse(body: unknown) {
   } as Response)
 }
 
-function nativeItems(count: number, firstBlock: number, safe: string) {
+function nativeItems(count: number, firstBlock: number, address: string) {
   return Array.from({ length: count }, (_, i) => ({
     hash: `0x${(firstBlock + i).toString(16).padStart(64, '0')}`,
     block_number: firstBlock + i,
     timestamp: '2026-05-08T11:49:59Z',
     from: { hash: SENDER },
-    to: { hash: safe },
+    to: { hash: address },
     value: '1000000000000000000',
     gas_limit: '21000',
     gas_used: '21000',
@@ -43,13 +43,13 @@ function nativeItems(count: number, firstBlock: number, safe: string) {
   }))
 }
 
-function etherscanRows(count: number, firstBlock: number, safe: string) {
+function etherscanRows(count: number, firstBlock: number, address: string) {
   return Array.from({ length: count }, (_, i) => ({
     blockNumber: String(firstBlock + i),
     timeStamp: '1778240999',
     hash: `0x${(firstBlock + i).toString(16).padStart(64, '0')}`,
     from: SENDER,
-    to: safe,
+    to: address,
     value: '1000000000000000000',
     gas: '21000',
     gasUsed: '21000',
@@ -65,7 +65,7 @@ function etherscanRows(count: number, firstBlock: number, safe: string) {
  * whose cursor is `null` ENDS the feed — the provider has no more.
  */
 function stubBlockscoutPages(
-  safe: string,
+  address: string,
   pages: Record<string, { rows: number; firstBlock: number; next: number | null }>,
 ) {
   const fetchMock = vi.fn((input: string | URL) => {
@@ -85,7 +85,7 @@ function stubBlockscoutPages(
     if (key === null) key = 'null'
     const page = pages[key]
     return jsonResponse({
-      items: nativeItems(page.rows, page.firstBlock, safe),
+      items: nativeItems(page.rows, page.firstBlock, address),
       next_page_params: page.next === null ? null : { block_number: page.next, index: 0, items_count: 50 },
     })
   })
@@ -94,7 +94,7 @@ function stubBlockscoutPages(
 }
 
 /** Etherscan-shaped fixture: `page` is honoured, one row-count per page, then exhausted. */
-function stubEtherscanPages(safe: string, pageRows: number[]) {
+function stubEtherscanPages(address: string, pageRows: number[]) {
   const fetchMock = vi.fn((input: string | URL) => {
     const url = new URL(String(input))
     const action = url.searchParams.get('action')
@@ -106,17 +106,17 @@ function stubEtherscanPages(safe: string, pageRows: number[]) {
     return jsonResponse({
       status: '1',
       message: 'OK',
-      result: rows > 0 ? etherscanRows(rows, 45_000_000 - page * 1000, safe) : [],
+      result: rows > 0 ? etherscanRows(rows, 45_000_000 - page * 1000, address) : [],
     })
   })
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }
 
-function routeDbQueries(safes: unknown[]) {
+function routeDbQueries(accounts: unknown[]) {
   return vi.spyOn(pool, 'query').mockImplementation(
     (async (sql: unknown) => {
-      if (String(sql).includes('FROM smart_accounts')) return { rows: safes }
+      if (String(sql).includes('FROM smart_accounts')) return { rows: accounts }
       return { rows: [] }
     }) as never,
   )
@@ -141,7 +141,7 @@ describe('GET /transactions — pagination past the first window (#2884)', () =>
     vi.unstubAllGlobals()
   })
 
-  function uniqueSafe(chainId = 8453) {
+  function uniqueAccount(chainId = 8453) {
     counter += 1
     const address = `0x${counter.toString(16).padStart(40, '0')}`
     return {
@@ -172,14 +172,14 @@ describe('GET /transactions — pagination past the first window (#2884)', () =>
     // page — total 50, truncated true. Now: 200 rows counted, the page the
     // caller sees paginated on top of them, truncated STILL true because the
     // source provably has more beyond the budget.
-    const safe = uniqueSafe()
-    const fetchMock = stubBlockscoutPages(safe.address, {
+    const account = uniqueAccount()
+    const fetchMock = stubBlockscoutPages(account.address, {
       null: { rows: EXPLORER_PAGE_SIZE, firstBlock: 45_000_000, next: 44_999_900 },
       44_999_900: { rows: EXPLORER_PAGE_SIZE, firstBlock: 44_999_900, next: 44_999_800 },
       44_999_800: { rows: EXPLORER_PAGE_SIZE, firstBlock: 44_999_800, next: 44_999_700 },
       44_999_700: { rows: EXPLORER_PAGE_SIZE, firstBlock: 44_999_700, next: 44_999_600 },
     })
-    routeDbQueries(safe.rows)
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
     const body = response.json()
@@ -207,13 +207,13 @@ describe('GET /transactions — pagination past the first window (#2884)', () =>
     // MIGHT have more") — with pagination the short page is a real answer,
     // so a 130-row history now reports COMPLETE instead of carrying a caveat
     // forever.
-    const safe = uniqueSafe()
-    stubBlockscoutPages(safe.address, {
+    const account = uniqueAccount()
+    stubBlockscoutPages(account.address, {
       null: { rows: EXPLORER_PAGE_SIZE, firstBlock: 45_000_000, next: 44_999_900 },
       44_999_900: { rows: EXPLORER_PAGE_SIZE, firstBlock: 44_999_900, next: 44_999_800 },
       44_999_800: { rows: 30, firstBlock: 44_999_800, next: null },
     })
-    routeDbQueries(safe.rows)
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
     const body = response.json()
@@ -223,9 +223,9 @@ describe('GET /transactions — pagination past the first window (#2884)', () =>
   })
 
   it('pages the cursorless Gnosis legs until a short page, without claiming truncation', async () => {
-    const safe = uniqueSafe(100)
-    const fetchMock = stubEtherscanPages(safe.address, [EXPLORER_PAGE_SIZE, 20])
-    routeDbQueries(safe.rows)
+    const account = uniqueAccount(100)
+    const fetchMock = stubEtherscanPages(account.address, [EXPLORER_PAGE_SIZE, 20])
+    routeDbQueries(account.rows)
 
     const response = await get('?fresh=1')
     const body = response.json()
@@ -250,13 +250,13 @@ describe('GET /transactions — pagination past the first window (#2884)', () =>
     // #2871's export over a feed that stops at the budget-with-more case:
     // 150 rows across three pages, of which #2882's one-window cap would
     // have written only the first fifty to the file.
-    const safe = uniqueSafe()
-    stubBlockscoutPages(safe.address, {
+    const account = uniqueAccount()
+    stubBlockscoutPages(account.address, {
       null: { rows: EXPLORER_PAGE_SIZE, firstBlock: 45_000_000, next: 44_999_900 },
       44_999_900: { rows: EXPLORER_PAGE_SIZE, firstBlock: 44_999_900, next: 44_999_800 },
       44_999_800: { rows: 50, firstBlock: 44_999_800, next: null },
     })
-    routeDbQueries(safe.rows)
+    routeDbQueries(account.rows)
 
     const token = app.jwt.sign({ sub: 'user-1', email: 'test@example.com' }, { expiresIn: '1h' })
     const response = await app.inject({

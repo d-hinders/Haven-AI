@@ -28,8 +28,8 @@ export interface AgentContext {
   /** The account's execution rail (#821): 'delegation' routes to the new rail. */
   execution_rail?: string | null
   account_type?: string | null
-  /** False when the agent's Safe row was removed; recovery must fail closed. */
-  has_bound_safe?: boolean
+  /** False when the agent's account row was removed; recovery must fail closed. */
+  has_bound_account?: boolean
 }
 
 // Extend Fastify request
@@ -213,7 +213,7 @@ export async function agentAuthMiddleware(
   // account unlink: the mirror may now point at a different wallet. Keep the
   // agent authenticated only when its original Safe binding still exists;
   // callers can reconnect or rebind through the supported account flow.
-  if (row.has_bound_safe === false) {
+  if (row.has_bound_account === false) {
     return reply.code(403).send({ error: 'Agent is no longer linked to a Haven wallet' })
   }
 
@@ -235,6 +235,6 @@ export async function agentAuthMiddleware(
     // Characterization fakes from before this field existed omit it; the
     // real query always returns a boolean. Treat an omitted value as bound so
     // those fakes keep exercising the legacy auth branches.
-    has_bound_safe: row.has_bound_safe ?? true,
+    has_bound_account: row.has_bound_account ?? true,
   }
 }

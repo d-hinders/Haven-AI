@@ -116,8 +116,8 @@ export const FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL = `SELECT id, is_default FROM s
  * default/unlink manage whatever the user once linked. The funding endpoint is
  * a DELEGATION-rail surface — it tells a human how to fund the account their
  * agent spends from — so it scopes like the surviving account lists
- * (`DELEGATION_RAIL_ONLY`): a legacy Safe row answers 404 exactly as it does
- * on `GET /user/safes`, rather than funding instructions for a rail nothing
+ * (`DELEGATION_RAIL_ONLY`): a legacy-rail row answers 404 exactly as it does
+ * on `GET /user/accounts`, rather than funding instructions for a rail nothing
  * new joins. `chain_id` comes back with the row so the route runs ONE query
  * instead of an ownership probe plus a list read.
  */
@@ -161,8 +161,8 @@ export async function listAccountsWithTypeForUser(
   return result.rows
 }
 
-// `findSafeIdByAddressAndChain` (import duplicate detection), `countSafesForUser`
-// (first-Safe-becomes-default) and `findOwnedSafe` (the approver routes'
+// `findAccountIdByAddressAndChain` (import duplicate detection), `countAccountsForUser`
+// (first-account-becomes-default) and `findOwnedAccount` (the approver routes'
 // ownership check) are DELETED with their callers (#1988). `findOwnedAccountAddress`
 // and `findOwnedAccountDefaultFlag` below are the ownership checks the SURVIVING
 // routes run — rename, re-default and unlink.
@@ -495,7 +495,7 @@ export async function findExecutionRailForAgent(
 }
 
 /**
- * The SESSION payload's safes projection (moved from `routes/auth.ts`, #1180).
+ * The SESSION payload's accounts projection (moved from `routes/auth.ts`, #1180).
  *
  * A third variant, and deliberately so: it is the union of the other two —
  * `is_default` and `created_at` from `LIST_ACCOUNTS_FOR_USER_SQL` plus
@@ -519,7 +519,7 @@ export const LIST_SESSION_ACCOUNTS_FOR_USER_SQL = `SELECT us.id, us.account_addr
        GROUP BY us.id
        ORDER BY us.created_at ASC`
 
-/** One row of the session payload's `safes` array. */
+/** One row of the session payload's `accounts` array. */
 export interface SessionAccountRow {
   id: string
   account_address: string
@@ -533,7 +533,7 @@ export interface SessionAccountRow {
    * repository serves FACTS; the auth route maps them through the predicate
    * (`modules/accounts/mainnet-gate.ts`) so chain classification lives in
    * exactly one place. Passkey count is the delegation-rail signer table
-   * (`hybrid_account_passkeys`); legacy-rail safes count 0 there, and their
+   * (`hybrid_account_passkeys`); legacy-rail accounts count 0 there, and their
    * signer truth stays on-chain (the dashboard reads it via approvers).
    */
   owner_address: string | null

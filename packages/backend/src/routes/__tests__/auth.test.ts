@@ -465,8 +465,8 @@ describe('Auth routes', () => {
   })
 })
 
-describe('safes payload carries the rail (#1069)', () => {
-  it('the session safes SELECT includes account_type — the modal branches on it', async () => {
+describe('accounts payload carries the rail (#1069)', () => {
+  it('the session accounts SELECT includes account_type — the modal branches on it', async () => {
     // The #1069 fix originally landed in /user's SELECT — but AuthContext
     // reads /auth/me, so the Connect modal never saw account_type and
     // delegation accounts still dead-ended at the wallet approval. Pin the

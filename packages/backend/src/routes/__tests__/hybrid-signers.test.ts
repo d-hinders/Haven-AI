@@ -55,7 +55,7 @@ describe('GET /accounts/hybrid/:address/signers (#1079)', () => {
       return Promise.resolve({ rows: [] })
     })
     mockLoadOwner.mockResolvedValueOnce({
-      userSafeId: 'safe-1',
+      accountId: 'account-1',
       config: {
         ownerAddress: null,
         passkeys: [{ keyId: '0xdeadbeef', x: 7n, y: 9n }],
@@ -84,7 +84,7 @@ describe('GET /accounts/hybrid/:address/signers (#1079)', () => {
         : Promise.resolve({ rows: [] }),
     )
     mockLoadOwner.mockResolvedValueOnce({
-      userSafeId: 'safe-1',
+      accountId: 'account-1',
       config: { ownerAddress: null, passkeys: [{ keyId: '0xdeadbeef', x: 7n, y: 9n }] },
     })
     const res = await app.inject({ method: 'GET', url: `/accounts/hybrid/${ACCOUNT}/signers?chain_id=84532` })
@@ -136,7 +136,7 @@ describe('account-scoped signer management (#1081)', () => {
         : Promise.resolve({ rows: [] }),
     )
     mockLoadOwner.mockResolvedValue({
-      userSafeId: 'safe-1',
+      accountId: 'account-1',
       config,
       singleSignerWaiverAt: opts.waiverAt ?? null,
     })
@@ -273,7 +273,7 @@ describe('account-scoped signer management (#1081)', () => {
     const insert = mockQuery.mock.calls.find(([sql]) =>
       /INSERT INTO hybrid_account_passkeys/.test(String(sql)),
     )
-    expect(insert?.[1]).toEqual(['safe-1', NEW_PK.key_id, NEW_PK.x, NEW_PK.y])
+    expect(insert?.[1]).toEqual(['account-1', NEW_PK.key_id, NEW_PK.x, NEW_PK.y])
   })
 
   it('submits a two-to-one passkey removal and syncs storage to the signed op (#1199)', async () => {
@@ -300,7 +300,7 @@ describe('account-scoped signer management (#1081)', () => {
     const removal = mockQuery.mock.calls.find(([sql]) =>
       /DELETE FROM hybrid_account_passkeys/.test(String(sql)),
     )
-    expect(removal?.[1]).toEqual(['safe-1', PK1.keyId])
+    expect(removal?.[1]).toEqual(['account-1', PK1.keyId])
   })
 
   it('a malformed envelope is a 400 before the account is even resolved', async () => {
@@ -344,7 +344,7 @@ describe('remove_owner — enrolling a wallet is not a one-way door (#1087)', ()
         : Promise.resolve({ rows: [] }),
     )
     mockLoadOwner.mockResolvedValue({
-      userSafeId: 'safe-1',
+      accountId: 'account-1',
       config,
       singleSignerWaiverAt: opts.waiverAt ?? null,
     })
@@ -444,7 +444,7 @@ describe('remove_owner — enrolling a wallet is not a one-way door (#1087)', ()
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ updated: true, tx_hash: '0x' + 'ff'.repeat(32) })
     const clear = mockQuery.mock.calls.find(([sql]) => /owner_address = NULL/.test(String(sql)))
-    expect(clear?.[1]).toEqual(['safe-1'])
+    expect(clear?.[1]).toEqual(['account-1'])
   })
 
   it('submit with mismatched calldata neither submits nor clears the owner', async () => {
@@ -488,7 +488,7 @@ describe('owner-initiated send (#1083)', () => {
         ? Promise.resolve({ rows: [{ '?column?': 1 }] })
         : Promise.resolve({ rows: [] }),
     )
-    mockLoadOwner.mockResolvedValue({ userSafeId: 'safe-1', config, singleSignerWaiverAt: null })
+    mockLoadOwner.mockResolvedValue({ accountId: 'account-1', config, singleSignerWaiverAt: null })
   }
 
   function mockPrepared() {

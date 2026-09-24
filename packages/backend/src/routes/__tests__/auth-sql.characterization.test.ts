@@ -145,7 +145,7 @@ describe('auth SQL characterization (pre-#1180)', () => {
       expect(res.json().user.currency_preference).toBe('SEK')
     })
 
-    it('does not fetch safes when the credentials are wrong', async () => {
+    it('does not fetch accounts when the credentials are wrong', async () => {
       const hash = await bcrypt.hash('the-real-password', 4)
       mockQuery.mockResolvedValueOnce({
         rows: [{ id: 'u1', name: 'Ada', email: 'ada@example.com', password_hash: hash }],
@@ -216,13 +216,13 @@ describe('auth SQL characterization (pre-#1180)', () => {
         headers: { authorization: `Bearer ${token}` },
       })
 
-      // Both the profile read and the safes read take the token's subject —
+      // Both the profile read and the accounts read take the token's subject —
       // never a client-supplied id.
       expect(paramsSent()[0]).toEqual(['u-jwt'])
       expect(paramsSent()[1]).toEqual(['u-jwt'])
     })
 
-    it('404s when the user row is gone, without reading safes', async () => {
+    it('404s when the user row is gone, without reading accounts', async () => {
       const token = app.jwt.sign({ sub: 'u-gone', email: 'ada@example.com' }, { expiresIn: '7d' })
       mockQuery.mockResolvedValueOnce({ rows: [] })
 

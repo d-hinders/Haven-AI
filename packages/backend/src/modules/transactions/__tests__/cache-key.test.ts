@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildTransactionCacheKey } from '../cache-key.js'
 
 describe('buildTransactionCacheKey (module internals, no HTTP)', () => {
-  it('is `tx:<chainId>:<lowercased safe address>`', () => {
+  it('is `tx:<chainId>:<lowercased account address>`', () => {
     expect(buildTransactionCacheKey(8453, '0xAbCd')).toBe('tx:8453:0xabcd')
   })
 

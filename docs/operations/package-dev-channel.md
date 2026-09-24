@@ -47,6 +47,20 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
+> **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
+> this doc is coupled through `routes/agent-connection-setups.ts` and
+> `middleware/retired-safe-names.ts`. The route's change is one internal
+> identifier: the `ApprovalStateInput.safeTxHash` field becomes
+> `accountTxHash` — a value the repo layer writes to the `account_tx_hash`
+> column it always wrote, not the wire input (`safe_id` stays DECLARED and
+> REFUSED with a 400 exactly as #2914 left it). The refusal machinery this
+> document depends on in `retired-safe-names.ts` is untouched (the file is not
+> in the diff). Verified against the diff: `CONNECTOR_PACKAGE`, `CLI_PACKAGE`,
+> `config.connectorChannel` and the `/discovery` response shape are unchanged,
+> and no channel, dist-tag, version-order or publish behaviour moves. Scope of
+> this note: that identifier rename — nothing else in this document was
+> re-verified.
+>
 > **Re-verification (#3271, direct sign-context, 2026-09-24):** this doc is
 > coupled through `packages/signer/src/credentials.ts`, where the only change
 > is JSDoc: it now names the signer's second read-only fetch

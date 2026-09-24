@@ -587,7 +587,7 @@ export interface ApprovalStateInput {
   status: 'approval_in_progress' | 'proposed' | 'active'
   approvalStatus: 'submitted' | 'proposed' | 'confirmed'
   txHash: string | null | undefined
-  safeTxHash: string | null | undefined
+  accountTxHash: string | null | undefined
   failureReason: string | null
   activateAgent: boolean
 }
@@ -619,8 +619,8 @@ export async function applyApprovalState(
       if (!WALLET_APPROVAL_STATES.has(locked.status)) throw new AbandonTransaction()
       if (
         locked.account_tx_hash &&
-        input.safeTxHash &&
-        locked.account_tx_hash.toLowerCase() !== input.safeTxHash.toLowerCase()
+        input.accountTxHash &&
+        locked.account_tx_hash.toLowerCase() !== input.accountTxHash.toLowerCase()
       ) {
         throw new AbandonTransaction()
       }
@@ -637,7 +637,7 @@ export async function applyApprovalState(
         status: input.status,
         approval_status: input.approvalStatus,
         tx_hash: input.txHash ?? locked.tx_hash,
-        account_tx_hash: input.safeTxHash ?? locked.account_tx_hash,
+        account_tx_hash: input.accountTxHash ?? locked.account_tx_hash,
         failure_reason: input.failureReason,
       }
       await tx.query(UPDATE_APPROVAL_STATE_SQL, [

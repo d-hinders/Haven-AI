@@ -83,7 +83,7 @@ const X402_ROW: X402PaymentIntentRow = {
   created_at: '2026-08-01T00:00:00.000Z',
 }
 
-/** Enrichment-match payment intent (matched by hash + safe + chain). */
+/** Enrichment-match payment intent (matched by hash + account + chain). */
 const PI_ROW: PaymentIntentAgentRow = {
   id: 'pi-2',
   tx_hash: '0xmatched',

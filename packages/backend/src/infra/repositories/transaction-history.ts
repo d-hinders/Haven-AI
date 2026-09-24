@@ -1,15 +1,15 @@
 /**
  * Data access for the transaction-history read model (#992, epic #980 M4):
- * the Safe list and agent list that drive aggregation, the machine-payment
+ * the account list and agent list that drive aggregation, the machine-payment
  * agent-attribution lookups (`payment_intents` / delegate sweeps /
- * `delegate_sweeps`), the confirmed x402 funding lookups, the Safe-ownership
- * check behind `/transactions/:safeAddress`, and the single-evidence-row
+ * `delegate_sweeps`), the confirmed x402 funding lookups, the account-ownership
+ * check behind `/transactions/:accountAddress`, and the single-evidence-row
  * lookup behind `/transactions/payment-intents/:paymentId/evidence`.
  *
  * This is NOT the `smart_accounts` or `agents` aggregate owner — those already
  * have their own repositories (`smart-accounts.ts` #988, `agents.ts` #988) with
  * a wider column set for their own routes. `transactions.ts` (the route)
- * only ever needed a 4-column safe projection and a 3-column agent
+ * only ever needed a 4-column account projection and a 3-column agent
  * projection, so this file keeps that projection rather than pulling in the
  * wider rows, matching the "verbatim, not improved" extraction rule.
  *
@@ -187,7 +187,7 @@ export async function listAgentsForTransactionFilters(
   return result.rows
 }
 
-// ── Safe ownership (GET /:safeAddress) ──────────────────────────────────────
+// ── Account ownership (GET /:accountAddress) ────────────────────────────────
 
 export const FIND_ACCOUNT_OWNERSHIP_ANY_CHAIN_SQL =
   'SELECT id, chain_id FROM smart_accounts WHERE user_id = $1 AND LOWER(account_address) = LOWER($2)'
@@ -196,7 +196,7 @@ export const FIND_ACCOUNT_OWNERSHIP_FOR_CHAIN_SQL =
   'SELECT id, chain_id FROM smart_accounts WHERE user_id = $1 AND LOWER(account_address) = LOWER($2) AND chain_id = $3'
 
 /**
- * `userId` is REQUIRED — this is the ownership check `/:safeAddress` runs
+ * `userId` is REQUIRED — this is the ownership check `/:accountAddress` runs
  * before ever touching an explorer API. `chainId === null` returns every
  * chain the address is owned on (the route then decides whether that's
  * ambiguous); the two SQL shapes are preserved separately per the header note.

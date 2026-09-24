@@ -400,8 +400,13 @@ passes a null `recordId` and `submitRecorded` skips the stamp. The second: the
 bump worker's orphan re-send, whose leader lock serialises bump ticks but not
 another replica's inline sends. Two replicas can collide on either path — the
 loser's broadcast fails; nothing is sent anywhere it should not go. The header
-asks for the fail-open policy to be revisited per site now that the queue is
-the only lane; until it is, those two paths are the multi-replica caveat.
+asked for the fail-open policy to be revisited per site once the queue became
+the only lane. It was, on 2026-09-24: **kept fail-open by owner decision** —
+no funds are at risk, and the decision assumes a single backend replica.
+**Revisit it before running more than one**: those two paths are the
+multi-replica caveat. The same failed open also leaves the send unrecorded, so
+a stuck one is invisible to the bump worker even on a single replica — a
+database failure and a stuck transaction at once, accepted with the rest.
 
 The throughput ceiling above is unchanged either way — one key is still one
 sequential nonce.

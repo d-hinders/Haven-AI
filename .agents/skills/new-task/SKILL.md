@@ -1,11 +1,22 @@
 ---
 name: new-task
-description: Capture a freeform Haven task as a well-scoped GitHub backlog issue with concrete acceptance criteria, likely files, surface labels, and money-path classification. Use when a user asks to create, record, file, or queue a new Haven task or issue; ship only when explicitly requested.
+description: Capture a freeform Haven task as a well-scoped GitHub backlog issue with concrete acceptance criteria, likely files, surface labels, and money-path classification, reviewed before it is announced. The default route for EVERY issue an agent files — a user request, a follow-up from a PR review, a finding deferred out of a PR — never a bare `gh issue create`. Use when a user asks to create, record, file, or queue a new Haven task or issue, or when a session is about to file one; ship only when explicitly requested.
 ---
 
 # New Task
 
 Turn a freeform request into a loop-ready GitHub issue without implementing it.
+
+**This is the default route for every issue an agent files** — a user's request,
+a follow-up out of a PR review, a finding deferred from `ship-next`, a
+quality-scan handoff. A bare `gh issue create` (or the GitHub integration's
+create call) is the *mechanism* step 6 uses, not a substitute for the skill: an
+issue filed around it skips the measurement rule, the prior-art sweep, the
+backlog default and the § *Issue review* pass, and every one of those exists
+because an issue filed without it went wrong. Exempt: issues that CI workflows
+and scripts open by themselves (for example `guard-freshness`'s `ci-health`
+issue, or the `docs-audit` and `promotion-digest` workflows), which record a
+machine's observation, not an agent's judgement.
 
 ## Workflow
 
@@ -43,7 +54,10 @@ Turn a freeform request into a loop-ready GitHub issue without implementing it.
    entry itself is append-only history and is never edited.
 6. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
 7. Apply every inferred `area:*` label and `money-path` when applicable. **Leave the issue unassigned** unless the requester asks to own it — both issue templates ship `assignees: []`, and a queue of unassigned issues is what the loop expects to read. Assignment records ownership; a `🔒 CLAIM` comment, never an assignee, records that someone is building right now. A PR that closes the issue clears every assignee on merge (#3177), so an assignee used for tracking does not survive the close.
-8. Return the issue link and applied labels.
+8. Run § *Issue review* on the created issue, apply its corrections, and post
+   the verdict comment. **Not optional, and not sized:** it runs on every issue
+   this skill files, single task or epic, whatever its size or risk.
+9. Return the issue link, applied labels, and what the review changed.
 
 ## Epics
 
@@ -132,8 +146,8 @@ Measured on `origin/dev` @ `3d056b8f`.
 ````
 
 - **Post one spec-review verdict comment on the epic before partners are
-  pinged.** For an epic whose body carries code claims, the § *Epic review* pass
-  below ends with the captain posting this shape on the tracking issue:
+  pinged.** The § *Issue review* pass below ends with the captain posting this
+  shape on the tracking issue (a single task gets the same comment on itself):
 
 ````markdown
 Spec-review verdict on `origin/dev` @ `3d056b8f`: 9 claims re-run, 8 reproduce,
@@ -141,48 +155,93 @@ Spec-review verdict on `origin/dev` @ `3d056b8f`: 9 claims re-run, 8 reproduce,
 Open questions: whether refusal caps belong on the ledger or the agent card.
 ````
 
-## Epic review
+## Issue review
 
-Once per epic, after the tracking issue and its sub-issues are created and
-**before** `pending-review` is lifted (or before the epic is announced ready,
-when no review label is used), the captain dispatches **one
-[haven-reviewer](../haven-agent-workflow/SKILL.md) pass** with the spec-review
-brief below. The role already exists
+**Every issue this skill files gets one independent review before it is
+announced, queued or shipped** — a single task and an epic alike, with no size,
+risk or "docs-only" exemption. A per-issue test of whether the review is worth
+running is the conditional the owner already rejected for pull requests
+(CLAUDE.md, 2026-08-21); this rule extends the same decision to issues.
+
+**Why it is mandatory (2026-09-24).** It used to run for epics only ("not run
+for single tasks"). On 2026-09-24 three single tasks were filed with every
+figure measured at a named commit — #3264, #3266, #3267 — and a review of each
+still found material defects in all three, none of which measurement catches:
+seven missed copies of the stale claim being fixed; an acceptance criterion that
+capped the diff at two files and so forbade the fix; a criterion whose grep also
+matched an unrelated word ("fail-safes") that nothing in the scope could remove;
+a rename that would have made three "retired names must stay gone" guard tests
+vacuous; test fixtures that already passed without exercising anything; a
+caller list that named three wrong files; and an open question with a real
+answer (a fail-open path that still gates multi-replica). The measurement rule
+in step 1 proves the figures; this pass proves the *scope* and the *criteria*.
+The three reviews ran in parallel in under two minutes each.
+
+**When.** After the issue (or the epic and its sub-issues) is created, and
+**before** any of: `code-quality` is added, a `--ship` hands off to
+[ship-next](../ship-next/SKILL.md), `pending-review` is lifted, or the issue is
+announced to partners. An issue the loop can select before its review has run
+has skipped it.
+
+**Who.** The captain dispatches **one
+[haven-reviewer](../haven-agent-workflow/SKILL.md) pass per issue** (per epic:
+one pass covering the tracking issue and every sub-issue) with the brief below.
+Several issues filed together are reviewed in parallel. The role already exists
 ([`.agents/skills/haven-agent-workflow/references/reviewer.md`](../haven-agent-workflow/references/reviewer.md),
 dispatched by `.claude/agents/haven-reviewer.md`) — no new agent file, and the
 review runs in its own isolated tree per that role's rules. The brief is fixed
 text so two sessions dispatch the same review:
 
-> Re-run every claim in the epic body and each sub-issue against `origin/dev`
-> at the commit the body names: every `file:line`, count, status list, schema
-> and mechanism claim. Report each as *reproduces* / *wrong (with the measured
-> value and command)* / *could not verify*. Then, for each sub-issue: name any
-> lever that could break an installed client (SDK, signer, connector,
-> credential file, env var), a live payment path, or a migration ordering; and
-> list what the scope does not say that a builder would have to decide.
-> Findings by severity; no edits; no issues filed.
+> Re-run every claim in the issue body (for an epic, the tracking issue and
+> each sub-issue) against `origin/dev` at the commit the body names: every
+> `file:line`, count, status list, schema and mechanism claim, reading the
+> statement that does the work, not the comment above it. Report each as
+> *reproduces* / *wrong (with the measured value and command)* / *could not
+> verify*. Then:
+> 1. **Completeness** — find every other copy of the claim or pattern the issue
+>    fixes (code, comments, env examples, docs, tests, skill text) and list the
+>    ones the scope misses; name the historical records (CASP shards, archive,
+>    ledger entries) that must stay as written.
+> 2. **Criteria** — for each acceptance criterion: is it false today, reachable
+>    when the work is done, and impossible to satisfy while the problem
+>    survives? Flag a criterion that forbids the fix, matches something
+>    unrelated, or is already true.
+> 3. **Guards** — would the change as scoped weaken a test, lint or guard (a
+>    rename inside a "must stay absent" test, a fixture or route the code no
+>    longer reads)? Name any test that already passes without exercising what
+>    its name claims.
+> 4. **Levers** — name anything that could break an installed client (SDK,
+>    signer, connector, credential file, env var, persisted browser storage), a
+>    wire field, a live payment path, or a migration ordering.
+> 5. **Gaps** — list what the scope does not say that a builder would have to
+>    decide, and answer any question the issue poses where the code answers it.
+>
+> Findings by severity (blocking / should-fix / nit); no edits; no issues filed.
 
-The captain then has three obligations before the epic goes to partners:
+The captain then has three obligations before the issue is queued or announced:
 
-1. **Fix** every *wrong* claim in the epic and sub-issue bodies.
+1. **Fix** every *wrong* claim and every blocking or should-fix finding in the
+   body — re-measured by the captain at a named SHA, never copied from the
+   reviewer's wording.
 2. **Resolve or state** every named lever and scope gap: settle it in the body,
-   or record it as an open question for the partners.
-3. **Post the verdict comment** on the epic: the verdict SHA, the corrections
-   applied, and the open questions (shape in § *Epics* above).
+   or record it as an open question for the requester or partners.
+3. **Post the verdict comment** on the issue (for an epic, on the tracking
+   issue): the verdict SHA, the corrections applied, and the open questions
+   (shape in § *Epics* above). The comment is the record that the review ran.
 
-The pass is **not** run for single tasks, and not for epics whose bodies carry
-no code claims — a pure process epic says so in its body and skips this
-section.
+A body with no code claims still gets the pass — the claim re-run is empty, but
+completeness, criteria and gaps are not.
 
 ## Backlog And Shipping
 
 - Default to backlog-only: do not add `code-quality`.
-- When the requester passes `--ship` or clearly asks to ship now, add `code-quality` and continue with [ship-next](../ship-next/SKILL.md).
+- When the requester passes `--ship` or clearly asks to ship now, run § *Issue review* first, then add `code-quality` and continue with [ship-next](../ship-next/SKILL.md).
 - To queue an existing backlog issue later, add `code-quality` or make it an epic sub-issue.
 
 ## Guardrails
 
 - Do not fabricate requirements for money-path, authentication, authorization, or schema tasks.
-- Do not write an unverified code claim into a body: every count and `file:line` comes from a command the body quotes at a named commit (step 1), and an epic goes to partners only after its one spec-review pass and verdict comment (§ *Epic review*).
+- Do not write an unverified code claim into a body: every count and `file:line` comes from a command the body quotes at a named commit (step 1), and no issue — single task or epic — is queued, shipped or announced before its § *Issue review* pass and verdict comment.
+- Do not file around this skill. Every agent-filed issue goes through it; a bare `gh issue create` is only the mechanism of step 6.
 - Keep generated and hand-written loop issues interchangeable.
 - Prefer an editable, correctly shaped issue over speculative implementation detail.

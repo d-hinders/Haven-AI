@@ -1217,7 +1217,8 @@ previous run's and A0's.
 
 A required skipped scenario makes the overall report partial/blocked even
 though the harness can exit zero. Copy the generated table into the full report
-template and file a GitHub issue for a reproducible failure. Include the Actions
+template and file a GitHub issue for a reproducible failure (an agent files it
+through the `new-task` skill). Include the Actions
 run URL and transaction/payment identifiers, but never API or private keys.
 
 ## What this session cannot see, and what to ask for

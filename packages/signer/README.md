@@ -118,8 +118,8 @@ sender is THIS signer's own delegate account (the counterfactual
 HybridDeleGator for the delegate key, derived offline — `src/delegate-account.ts`);
 and its `callData` is a single `execute` to the DelegationManager calling
 `redeemDelegations`, whose arguments are decoded too (`src/redemption-guard.ts`):
-exactly one non-empty `Delegation[]` whose leaf delegate is this signer's own
-account and whose root delegator is not, `SingleDefault` mode, and canonical
+exactly one delegation (a single grant, never an empty or multi-link chain)
+made to this signer's own account by a different account, `SingleDefault` mode, and canonical
 encoding at every level. The argument check matters: an EMPTY permission
 context makes the DelegationManager run the execution as the account itself,
 which would reach `transferOwnership`. A delegate-wallet `TransferWithAuthorization` or `Permit`,

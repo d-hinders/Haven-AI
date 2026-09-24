@@ -218,7 +218,8 @@ last-verified: "2026-09-24"
 > `PackedUserOperation` for the signer's own derived delegate account, on a
 > chain with pinned delegation contracts (Base, Base Sepolia), whose `callData`
 > is a single `execute` to the DelegationManager calling `redeemDelegations`
-> with exactly one non-empty delegation chain made to that account (not by it),
+> with exactly one delegation, a single grant made to that account by a
+> different account,
 > in `SingleDefault` mode, canonically encoded.
 > Anything else answers the new structured `TYPED_DATA_NOT_ALLOWED` refusal
 > (`next_action: stop_and_tell_user`, no signature, no audit entry), the same

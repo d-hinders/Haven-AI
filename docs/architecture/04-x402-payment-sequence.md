@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 contract: true
 covers:
+  - packages/backend/src/infra/chain/x402-binding-signer.ts
   - packages/backend/src/openapi/party-model.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
@@ -535,7 +536,7 @@ The recommended three-call fast path for an x402-protected MCP tool is:
    then `notifications/initialized`) and sends the unpaid, session-bound
    `tools/call` quote probe. It records the MCP transport context and returns
    the unsigned funding payload plus merchant/tool context.
-2. `haven_sign_x402` — the local signer signs the funding hash and creates the
+2. `haven_sign_x402` — the local signer signs the funding payload and creates the
    merchant-bound payment header.
 3. `haven_settle_mcp_tool` — hosted MCP resolves the merchant call context
    (#2282, below), relays the funding signature, waits for confirmation,

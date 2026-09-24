@@ -87,7 +87,7 @@ export const SINGLE_DEFAULT_MODE: Hex = `0x${'00'.repeat(32)}`
 function refuse(detail: string): never {
   throw new HavenSigningError(
     `Refusing to sign: this UserOperation's redeemDelegations call ${detail}. This signer only ` +
-      "signs a redemption of the agent's OWN budget delegation.",
+      "signs a redemption of a single delegation granted to the agent's own account.",
   )
 }
 
@@ -169,6 +169,13 @@ export function assertRedeemsOwnBudgetDelegation(redeemCalldata: Hex, ownAccount
       'carries an EMPTY delegation chain — DelegationManager treats this as self-authorised ' +
         "and runs the paired execution as the account, with no caveat, budget or recipient pin",
     )
+  }
+  // (2b) Exactly one link. Haven's budget delegation is a single grant from the
+  // user's account to this agent's account (`delegations: [[delegation]]` in the
+  // backend's prepareRedemption); a longer chain is never emitted, and each extra
+  // hop is a delegator this signer cannot vouch for.
+  if (delegations.length !== 1) {
+    refuse(`carries a ${delegations.length}-link delegation chain, not the single budget grant Haven emits`)
   }
 
   // (6b) Canonical encoding of the permission context itself.

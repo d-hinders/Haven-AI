@@ -104,6 +104,11 @@ export function buildPermissionContext(delegation: ReturnType<typeof buildDelega
   return encodeAbiParameters(DELEGATION_ARRAY_PARAM, [[delegation]])
 }
 
+/** `abi.encode(Delegation[])` for a MULTI-link chain (leaf first) — never emitted by Haven. */
+export function buildChainPermissionContext(chain: ReturnType<typeof buildDelegation>[]): Hex {
+  return encodeAbiParameters(DELEGATION_ARRAY_PARAM, [chain])
+}
+
 /** `abi.encode(Delegation[])` for an EMPTY chain — the exact B1 bypass shape MetaMask's DelegationManager treats as self-authorised. */
 export function buildEmptyPermissionContext(): Hex {
   return encodeAbiParameters(DELEGATION_ARRAY_PARAM, [[]])

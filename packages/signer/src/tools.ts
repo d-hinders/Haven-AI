@@ -427,7 +427,7 @@ const SIGN_DESCRIPTION = [
   'either flow: pass typed_data_b64 through UNCHANGED (never re-type the nested typed_data JSON); the',
   'account validates that EIP-712 payload, not payload_hash. On a direct payment the same binding',
   'check runs on the relayed payload too. This tool signs ONLY Haven-prepared payloads (#3272): a',
-  'direct-payment UserOp that redeems your own budget delegation for your own account, or an x402',
+  'direct-payment UserOp from your own account that redeems a delegation granted to it, or an x402',
   'intent against a Haven-signed context — never an arbitrary typed_data payload, however it is shaped.',
   'Next: call mcp__haven__haven_submit with signature, then pass x402_binding',
   'to mcp__haven-signer__haven_x402_sign_header. A bare payload_hash with no payment_id, typed_data',
@@ -451,7 +451,7 @@ const X402_SIGN_HEADER_DESCRIPTION = [
 ].join(' ')
 
 const SIGN_X402_DESCRIPTION = [
-  'One-shot x402 signing for the fast 3-call flow: sign the funding hash AND build the EIP-3009',
+  'One-shot x402 signing for the fast 3-call flow: sign the funding payload AND build the EIP-3009',
   'merchant payment header in a single local call (equivalent to haven_sign followed by',
   'haven_x402_sign_header). The delegate key never leaves this process. From the haven_pay_mcp_tool',
   'result pass JUST payment_id — PREFERRED (#1263, #1355): this signer fetches the exact signing',
@@ -809,7 +809,7 @@ export function createToolHandlers(
             if (resolved?.kind !== 'direct' && !isPackedUserOperationTypedData(typedData)) {
               throw new HavenTypedDataNotAllowedError(
                 'This signer signs only Haven-prepared payloads: a direct-payment ' +
-                  'PackedUserOperation that redeems your own budget delegation for your own ' +
+                  'PackedUserOperation from your own account that redeems a delegation granted to it ' +
                   'account, or a Haven-signed x402 context. Call haven_sign with payment_id ' +
                   '(preferred), or pass x402_expected for an x402 funding leg.',
               )
@@ -831,8 +831,8 @@ export function createToolHandlers(
               throw err
             }
             // #3272: content + provenance — the ONE operation this branch may
-            // ever sign: redeeming the agent's own budget delegation, for its
-            // own account, on a chain the delegation rail runs on.
+            // ever sign: redeeming a single delegation granted to the agent's
+            // own account, from that account, on a chain the delegation rail runs on.
             assertBoundDirectPaymentUserOp(typedData, signer.delegateAddress)
             const signature = await signer.signDelegationTypedData(typedData)
             // #3272 (criterion 4): audit the digest actually signed — the

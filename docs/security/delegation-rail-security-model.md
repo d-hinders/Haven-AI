@@ -6,6 +6,7 @@ covers:
   - packages/backend/src/middleware/owner-cli.ts
   - packages/signer/src/delegate-account.ts
   - packages/signer/src/tools.ts
+  - packages/signer/src/redemption-guard.ts
   - packages/signer/src/core.ts
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/routes/auth.ts
@@ -1340,8 +1341,8 @@ layer signs only these shapes, and refuses everything else with
     HybridDeleGator for the delegate key, derived offline by CREATE2 in
     `packages/signer/src/delegate-account.ts` and pinned to the MetaMask kit;
   - its `callData` is a single `execute` to the DelegationManager calling
-    `redeemDelegations`, with exactly one non-empty `Delegation[]` whose leaf
-    delegate is this account and whose root delegator is not, in
+    `redeemDelegations`, with exactly one delegation: a single grant made to
+    this account by a different account, in
     `SingleDefault` mode, canonically encoded (`redemption-guard.ts`).
 - **An erc7710 settlement child or an EIP-3009 funding leg**, against a
   Haven-signed expected context (versions 2 and 3 only; the bare-hash v1
@@ -1375,12 +1376,13 @@ directly owns that check.
     capture against an early version of the allowlist, which checked only the
     function selector.
 
-  The allowlist therefore decodes the redemption. Every permission context
-  must be a non-empty `Delegation[]` whose leaf delegate is this signer's own
-  account and whose root delegator is not. The three argument arrays must be
-  the same non-zero length, every mode must be `SingleDefault`, and the
-  calldata must be canonically encoded. Each of these is pinned by a test. The
-  treasury was never exposed beyond the caveats either way: budget, recipient
+  The allowlist therefore decodes the redemption. It must carry exactly one
+  permission context holding exactly one delegation: a grant to this signer's
+  own account from a different account, in `SingleDefault` mode, with every
+  level canonically encoded. An empty chain, a multi-link chain, a
+  self-granted delegation and a delegation to another account are each
+  refused, and each case is pinned by a test. The
+treasury was never exposed beyond the caveats either way: budget, recipient
   pin and expiry are enforced by the DelegationManager on redemption. A
   captured delegate account would still have been able to redeem the budget
   every period until the owner revoked it.

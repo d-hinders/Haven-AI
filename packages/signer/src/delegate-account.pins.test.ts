@@ -64,7 +64,7 @@ describe('deriveDelegateAccountAddress (#3272)', () => {
     // counterfactual HybridDeleGator address, derived offline from nothing but
     // that owner address, must equal the typed data's own
     // `domain.verifyingContract` (== `message.sender`) — proving this
-    // module's derivation against a REAL on-chain account, not just the kit.
+    // module's derivation against a real Base Sepolia payload served by the dev backend, not just the kit.
     const owner = directPaymentUserOp.delegate_address as `0x${string}`
     const sender = directPaymentUserOp.typed_data.message.sender as `0x${string}`
     expect(deriveDelegateAccountAddress(owner).toLowerCase()).toBe(sender.toLowerCase())

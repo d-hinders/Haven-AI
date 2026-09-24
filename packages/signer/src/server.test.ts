@@ -24,6 +24,7 @@ import {
   buildEmptyPermissionContextRedemption,
   buildExecuteCallData,
   buildPermissionContext,
+  buildChainPermissionContext,
   buildSelfCallCallData,
   buildSingleExecutionCallData,
   DEFAULT_DELEGATOR,
@@ -1238,6 +1239,19 @@ describe('#3272 (B1): the redeemDelegations ARGUMENTS are verified, not just the
     expect(result.message).toMatch(/not this signer's own account/)
   })
 
+  it('refuses a two-link delegation chain whose leaf is this signer\'s account (Haven emits a single grant)', async () => {
+    const leaf = buildDelegation({ delegate: SENDER, delegator: '0x5555555555555555555555555555555555555555' })
+    const root = buildDelegation({ delegate: '0x5555555555555555555555555555555555555555', delegator: DEFAULT_DELEGATOR })
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [[buildChainPermissionContext([leaf, root])], [SINGLE_DEFAULT_MODE], [buildSingleExecutionCallData(SENDER, 0n, '0x')]],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/2-link delegation chain/)
+  })
+
   it('refuses when the root delegation\'s delegator IS this signer\'s own account (self-to-self delegation)', async () => {
     const redeemCallData = buildBoundRedeemDelegationsCallData({ delegate: SENDER, delegator: SENDER })
     const result = await expectNoSignatureNoAudit(redeemCallData)
@@ -1256,6 +1270,19 @@ describe('#3272 (B1): the redeemDelegations ARGUMENTS are verified, not just the
         [SINGLE_DEFAULT_MODE, SINGLE_DEFAULT_MODE],
         [buildSingleExecutionCallData(SENDER, 0n, '0x')],
       ],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/mismatched or empty argument arrays/)
+  })
+
+  it('refuses one context and one mode paired with TWO executions (isolates the executionCallDatas length check)', async () => {
+    const delegation = buildDelegation({ delegate: SENDER, delegator: DEFAULT_DELEGATOR })
+    const execution = buildSingleExecutionCallData(SENDER, 0n, '0x')
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [[buildPermissionContext(delegation)], [SINGLE_DEFAULT_MODE], [execution, execution]],
     })
     const result = await expectNoSignatureNoAudit(redeemCallData)
     expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')

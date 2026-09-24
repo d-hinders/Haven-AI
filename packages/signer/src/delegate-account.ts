@@ -97,7 +97,7 @@ const DEPLOY_SALT = pad('0x', { size: 32 })
  * (#970). Pure and offline: no RPC call, no dependency on the account having
  * been deployed. Verified byte-for-byte against
  * `@metamask/smart-accounts-kit`'s `getCounterfactualAccountData` by
- * `delegate-account.pins.test.ts`, including against a real on-chain account
+ * `delegate-account.pins.test.ts`, including against a real Base Sepolia payload served by the dev backend
  * (`direct-payment-userop.json`).
  */
 export function deriveDelegateAccountAddress(owner: Address): Address {

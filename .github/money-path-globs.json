@@ -256,7 +256,7 @@
     "doc-only with its reason (sdk, cli, connect, mcp -- client packages the",
     "deployed harness never runs; widening them is an owner decision).",
     "",
-    "2026-09-24 (#3283, epic #3284): packages/sdk/src/{delegate-account,direct-payment-guard,redemption-guard,settlement-child}.ts added to globs -- the delegate key's signing-surface guard MOVED here from packages/signer/** (already listed), so the move would otherwise have taken it off the perimeter. The same accident-of-location rule as #1892: which package the guard lives in is not what makes it spend authority."
+    "2026-09-24 (#3283, epic #3284): packages/sdk/src/{delegate-account,direct-payment-guard,redemption-guard,settlement-child}.ts added to globs -- the delegate key's signing-surface guard MOVED here from packages/signer/** (already listed), so the move would otherwise have taken it off the perimeter. The same accident-of-location rule as #1892: which package the guard lives in is not what makes it spend authority. packages/sdk/src/userop-binding.ts (the #3271 binding check the signer also imports through /edge) joins on the same rule. Deliberately NOT listed: sdk client.ts (signForData only wires these guards in; listing it would put every SDK transport change on the runtime list), edge.ts (a re-export file) and test-support/direct-userop.ts (test fixtures, never imported at runtime)."
   ],
   "globs": [
     "packages/backend/src/db/migrations/**",
@@ -296,6 +296,7 @@
     "packages/sdk/src/redemption-guard.ts",
     "packages/sdk/src/settlement-child.ts",
     "packages/sdk/src/signer.ts",
+    "packages/sdk/src/userop-binding.ts",
     "packages/signer/**"
   ],
   "controlGlobs": [

@@ -444,17 +444,18 @@ describe('money-path list stays in one piece', () => {
       // or the user's own process, not deployed by Haven, so the money-flow
       // harness's "did the green run cover this?" has no answer for them.
       // sdk: the harness DOES build and drive it (qa-agent depends on it), but
-      // only packages/sdk/src/signer.ts (the signing schemes) and the
-      // signing-surface guard moved in by #3283 (delegate-account,
-      // direct-payment-guard, redemption-guard, settlement-child) are spend
-      // authority, and those files ARE on the runtime list; the rest is transport.
+      // only packages/sdk/src/signer.ts (the signing schemes), the #3271
+      // binding check (userop-binding) and the signing-surface guard moved in
+      // by #3283 (delegate-account, direct-payment-guard, redemption-guard,
+      // settlement-child) are spend authority, and those files ARE on the
+      // runtime list; the rest is transport.
       // The doc covers all four because the CASP perimeter question (does
       // Haven hold or move funds?) still applies to what they ship. Widening
       // any of these to `globs` is an owner decision: every SDK/connector/CLI/
       // local-runtime PR would then owe a covering QA run.
       // A DOC_ONLY entry whose files are ALL on the list is stale and fails
       // below — an exclusion must exclude something.
-      ['packages/sdk/src/**', 'client library; only signer.ts and the #3283 signing guard are on the runtime list — see #3098'],
+      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts and the #3283 signing guard are on the runtime list — see #3098'],
       ['packages/cli/src/**', 'client CLI; not deployed by Haven — see #3098'],
       ['packages/connect/src/**', 'the dashboard\'s connector, runs on the user\'s machine — see #3098'],
       ['packages/mcp/src/**', 'the local MCP runtime, runs in the agent\'s process — see #3098'],

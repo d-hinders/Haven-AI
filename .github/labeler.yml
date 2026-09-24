@@ -90,6 +90,7 @@
           - "packages/sdk/src/redemption-guard.ts"
           - "packages/sdk/src/settlement-child.ts"
           - "packages/sdk/src/signer.ts"
+          - "packages/sdk/src/userop-binding.ts"
           - "packages/signer/**"
           - ".github/workflows/docs-coupling.yml"
           - "scripts/docs/coupling-gate.mjs"

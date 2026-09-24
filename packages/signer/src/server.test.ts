@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { privateKeyToAccount } from 'viem/accounts'
-import { hashTypedData } from 'viem'
+import { encodeFunctionData, hashTypedData } from 'viem'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
@@ -17,7 +17,18 @@ import { buildSignerMcpServer, resolveEdgeSigner, runSignerConsentGate, runSigne
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 import { computeSignerConsentHash, type SignerConsentInput } from './consent.js'
 import { deriveDelegateAccountAddress } from './delegate-account.js'
-import { buildBoundDirectUserOp, buildSelfCallCallData } from './test-support/direct-userop.js'
+import {
+  buildBoundDirectUserOp,
+  buildBoundRedeemDelegationsCallData,
+  buildDelegation,
+  buildEmptyPermissionContextRedemption,
+  buildExecuteCallData,
+  buildPermissionContext,
+  buildSelfCallCallData,
+  buildSingleExecutionCallData,
+  DEFAULT_DELEGATOR,
+} from './test-support/direct-userop.js'
+import { REDEEM_DELEGATIONS_ABI, SINGLE_DEFAULT_MODE } from './redemption-guard.js'
 
 // Pinned so the #1161 Node floor cannot make these host-dependent: the
 // guard lives at the credential/client choke point, which these exercise.

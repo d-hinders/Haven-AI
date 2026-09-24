@@ -6,7 +6,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import { decodeAbiParameters, encodeAbiParameters, getAddress, type Address } from 'viem'
-import { encodeDelegations, ExecutionMode } from '@metamask/smart-accounts-kit'
+import { ExecutionMode } from '@metamask/smart-accounts-kit'
+import { encodeDelegations, DELEGATION_ABI_TYPE_COMPONENTS } from '@metamask/smart-accounts-kit/utils'
 import {
   DELEGATION_TUPLE_COMPONENTS,
   SINGLE_DEFAULT_MODE,
@@ -18,6 +19,10 @@ const DELEGATE = getAddress(`0x${'11'.repeat(20)}`) as Address
 const DELEGATOR = getAddress(`0x${'22'.repeat(20)}`) as Address
 
 describe('vendored Delegation/Caveat ABI (#3272 B1)', () => {
+  it('matches the kit\'s own DELEGATION_ABI_TYPE_COMPONENTS exactly', () => {
+    expect(DELEGATION_TUPLE_COMPONENTS).toEqual(DELEGATION_ABI_TYPE_COMPONENTS)
+  })
+
   it('decodes what the kit encodes, field for field', () => {
     const kitEncoded = encodeDelegations([
       {

@@ -56,7 +56,7 @@ export default function NetworkSwitcher() {
   const router = useRouter()
   const { user, activeAccount, setActiveAccount } = useAuth()
   const activeChainId = useActiveChainId()
-  const safes = user?.accounts ?? []
+  const accounts = user?.accounts ?? []
 
   // The chip only makes sense once an account exists (onboarding has none).
   if (!activeAccount) return null
@@ -97,12 +97,12 @@ export default function NetworkSwitcher() {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="left">
-        {safes.map((safe) => (
-          <DropdownMenuItem key={safe.id} onSelect={() => setActiveAccount(safe)}>
-            <ChainDot chainId={safe.chain_id} />
-            <span className="flex-1 truncate">{safe.name}</span>
-            <span className="text-xs text-[var(--v2-ink-3)]">{chainName(safe.chain_id)}</span>
-            {safe.id === activeAccount.id && (
+        {accounts.map((account) => (
+          <DropdownMenuItem key={account.id} onSelect={() => setActiveAccount(account)}>
+            <ChainDot chainId={account.chain_id} />
+            <span className="flex-1 truncate">{account.name}</span>
+            <span className="text-xs text-[var(--v2-ink-3)]">{chainName(account.chain_id)}</span>
+            {account.id === activeAccount.id && (
               <Icon icon={Check} className="h-3.5 w-3.5 flex-shrink-0 text-[var(--v2-brand)]" />
             )}
           </DropdownMenuItem>

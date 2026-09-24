@@ -1295,3 +1295,26 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > never move funds. The relayer's ethers provider stays on one node (#1533).
 > Scope of this note: those RPC reads. Nothing else in this document was
 > re-verified.
+
+> **Re-verified #3032 (2026-09-24, request validation slice 4, independent
+> prep):** this diff touches `routes/agent-passports.ts` and
+> `routes/agent-connection-setups.ts`, and moves no authority or custody
+> boundary. The #3030 note above records both modules as the two shadowed
+> money-path files still authenticating in a `preHandler`, and says they must
+> move to `onRequest` before slice 4 enforces them. They move in this diff:
+> `agent-passports.ts`'s module-level hook and the four owner routes of
+> `agent-connection-setups.ts` (`POST /`, `GET /:setupId`,
+> `POST /:setupId/budget-approval`, `POST /:setupId/cancel`) now authenticate in
+> `onRequest`, so an anonymous caller gets 401 before any 400 once they are
+> enforced. This is pinned by `auth-before-request-validation-3032.test.ts`,
+> which enforces both modules and includes an authenticated off-spec control
+> that must answer 400. Neither module is enforced yet: `enforcedModules` and
+> the default flip stay with the rest of #3032, after #3031. The connector
+> routes (`/resolve`, `/register`, `/:setupId/install-status`,
+> `/:setupId/connector-status`) authenticate inside their handlers by setup
+> token or by the agent API key, and are unchanged. The same diff declares the
+> four request fields today's connector and dashboard send (`local_mcp`,
+> `mcp_server_name`, `skill_installed`, `superseded_agent_ids`); they are
+> loosenings, so nothing that is accepted today is refused. Scope of this note:
+> those two files and those four fields. Nothing else in this document was
+> re-verified.

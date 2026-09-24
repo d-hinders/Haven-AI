@@ -7989,6 +7989,11 @@ export const openapiSpec = {
               'RETIRED (#2914) and REFUSED, not accepted — declared here only so the request-validation layer agrees with the handler, which applies the same reliance rule as `POST /agents`: `safe_id` alone refuses, both-and-matching is accepted, both-and-disagreeing refuses. Undeclared under `additionalProperties: false` it would be rejected by ajv before the handler ever ran.',
           },
           runtime: { type: 'string' },
+          local_mcp: {
+            type: 'boolean',
+            description:
+              'Legacy local-MCP opt-in (#3032: sent by the dashboard, `useAgentConnectionSetup.ts`, whenever the owner picked local MCP). `true` with an explicit runtime outside Claude Code / Codex / Cowork is refused with 400; otherwise it records the preference.',
+          },
           allowances: {
             type: 'array',
             items: { $ref: '#/components/schemas/AgentConnectionAllowanceInput' },
@@ -8138,6 +8143,11 @@ export const openapiSpec = {
               "#2528: how the connector was invoked — 'json' when `--json` was passed, 'prose' otherwise. The connector is the only party that can report this: the request is identical over the wire either way. Optional, because a connector older than #2528 sends nothing and registers unchanged; an unrecognised value is refused with 400 rather than stored, since this dimension segments the onboarding funnel and a value nothing recognises must not enter it silently. Case and surrounding whitespace are normalised before storage.",
           },
           connector_version: { type: 'string' },
+          mcp_server_name: {
+            type: 'string',
+            description:
+              'The MCP server name the connector wired this agent under (#3032: sent by `@haven_ai/connect`, `api.ts` `registerSetup`). Normalised server-side: trimmed, and an empty, over-64-character or otherwise malformed name is stored as null rather than refused.',
+          },
           connector_context: { $ref: '#/components/schemas/AgentConnectionConnector' },
           install_capabilities: {
             type: 'object',
@@ -8253,6 +8263,16 @@ export const openapiSpec = {
           next_user_action: { type: 'string' },
           error_code: { type: ['string', 'null'] },
           environment_label: { type: 'string' },
+          skill_installed: {
+            type: 'boolean',
+            description: 'Whether the connector installed the Haven agent skill for this runtime (#3032: sent by `@haven_ai/connect`, `api.ts`).',
+          },
+          superseded_agent_ids: {
+            type: ['array', 'null'],
+            items: { type: 'string' },
+            description:
+              'Other agent directories the connector found on this machine (#2561, #3032: sent by `@haven_ai/connect`, `api.ts` `updateInstallStatus`). A tri-state: a list (found these), `[]` (scanned, found none), `null` (the scan could not run). Not trusted beyond its shape: entries are trimmed, path- or secret-shaped strings dropped, and the list capped server-side rather than refused.',
+          },
         },
         additionalProperties: false,
       },

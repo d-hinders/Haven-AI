@@ -3337,6 +3337,8 @@ export type components = {
              */
             safe_id?: string;
             runtime?: string;
+            /** @description Legacy local-MCP opt-in (#3032: sent by the dashboard, `useAgentConnectionSetup.ts`, whenever the owner picked local MCP). `true` with an explicit runtime outside Claude Code / Codex / Cowork is refused with 400; otherwise it records the preference. */
+            local_mcp?: boolean;
             allowances?: components["schemas"]["AgentConnectionAllowanceInput"][];
             /** @description Opt in to an L0 Agent Passport for the agent this setup creates. Default false. */
             issue_passport?: boolean;
@@ -3402,6 +3404,8 @@ export type components = {
              */
             run_mode?: "json" | "prose";
             connector_version?: string;
+            /** @description The MCP server name the connector wired this agent under (#3032: sent by `@haven_ai/connect`, `api.ts` `registerSetup`). Normalised server-side: trimmed, and an empty, over-64-character or otherwise malformed name is stored as null rather than refused. */
+            mcp_server_name?: string;
             connector_context?: components["schemas"]["AgentConnectionConnector"];
             install_capabilities?: {
                 can_write_runtime_config?: boolean;
@@ -3475,6 +3479,10 @@ export type components = {
             next_user_action?: string;
             error_code?: string | null;
             environment_label?: string;
+            /** @description Whether the connector installed the Haven agent skill for this runtime (#3032: sent by `@haven_ai/connect`, `api.ts`). */
+            skill_installed?: boolean;
+            /** @description Other agent directories the connector found on this machine (#2561, #3032: sent by `@haven_ai/connect`, `api.ts` `updateInstallStatus`). A tri-state: a list (found these), `[]` (scanned, found none), `null` (the scan could not run). Not trusted beyond its shape: entries are trimmed, path- or secret-shaped strings dropped, and the list capped server-side rather than refused. */
+            superseded_agent_ids?: string[] | null;
         };
         UpdateConnectorInstallStatusResponse: {
             /** Format: uuid */

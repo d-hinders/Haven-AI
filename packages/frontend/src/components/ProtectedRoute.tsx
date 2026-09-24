@@ -24,7 +24,7 @@ export default function ProtectedRoute({
     }
   }, [loading, user, router])
 
-  const hasSafe = user && (user.accounts?.length > 0 || user.account_address)
+  const hasAccount = user && (user.accounts?.length > 0 || user.account_address)
 
   if (loading) {
     return (
@@ -37,7 +37,7 @@ export default function ProtectedRoute({
     )
   }
 
-  if (!user || !hasSafe) return null
+  if (!user || !hasAccount) return null
 
   return <>{children}</>
 }

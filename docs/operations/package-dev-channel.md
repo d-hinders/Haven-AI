@@ -56,6 +56,17 @@ and the `release` skill.
 > moves. `last-verified` re-stamped to 2026-09-24 for this note only; nothing
 > else in this document was re-verified.
 >
+> **Re-verification (#3032, connector request fields and owner-route auth
+> order, 2026-09-24):** this doc is coupled through
+> `packages/backend/src/routes/agent-connection-setups.ts`. The change moves
+> the four owner routes' auth hook from `preHandler` to `onRequest`, and
+> declares in the OpenAPI request schemas the fields the connector and
+> dashboard already send (`local_mcp`, `mcp_server_name`, `skill_installed`,
+> `superseded_agent_ids`). The setup, register and install-status flow this
+> document describes for the dev channel is unchanged, and no channel,
+> dist-tag, version-order or publish behaviour moves. Scope of this note: that
+> file — nothing else in this document was re-verified.
+>
 > **Re-verification (#3259, failed tombstone mirror, 2026-09-23):** this doc is
 > coupled through `packages/connect/src/{cli,runtime}.ts`. The change: a failed
 > ledger mirror no longer aborts a retirement, so `--replace` still removes the

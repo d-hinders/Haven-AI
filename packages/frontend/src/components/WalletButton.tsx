@@ -611,7 +611,7 @@ export function WalletPopover({
   )
 }
 
-function getSafeChainName(chainId?: number): string | undefined {
+function getAccountChainName(chainId?: number): string | undefined {
   if (chainId === undefined) return undefined
 
   try {
@@ -725,7 +725,7 @@ export default function WalletButton() {
           )
         }
 
-        const safeChainName = getSafeChainName(activeAccount?.chain_id)
+        const accountChainName = getAccountChainName(activeAccount?.chain_id)
         const openWalletConnect = () => {
           if (openConnectModalHook) {
             openConnectModalHook()
@@ -765,7 +765,7 @@ export default function WalletButton() {
                 primary={{
                   label: 'Passkey',
                   address: passkeySigner.address,
-                  chainName: safeChainName,
+                  chainName: accountChainName,
                 }}
                 secondary={connectedWallet}
                 open={popoverOpen}
@@ -839,7 +839,7 @@ export default function WalletButton() {
                 primary={{
                   label: 'Haven account',
                   address: delegatorSigner.accountAddress,
-                  chainName: safeChainName,
+                  chainName: accountChainName,
                 }}
                 signingWith={signingWith}
                 secondary={connectedWallet}

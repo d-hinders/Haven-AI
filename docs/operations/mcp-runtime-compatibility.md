@@ -2946,3 +2946,16 @@ to call next in structured fields, and those fields are typed end to end
 > entry above gains the mirror-failure sentence. The record's fields,
 > redaction and no-key boundary are unchanged, and nothing is revoked. Scope of
 > this note: those files. Nothing else in this document was re-verified.
+
+> **Re-verified #3032 (2026-09-24, connector request fields declared):** this
+> diff touches `packages/backend/src/routes/agent-connection-setups.ts`, a
+> covered file, only to move the four OWNER routes' auth hook to `onRequest`.
+> The connector's own routes (`/register`, `/:setupId/install-status`,
+> `/:setupId/connector-status`) are untouched. The OpenAPI request schemas now
+> declare the fields `@haven_ai/connect` already sends: `mcp_server_name` on
+> register, and `skill_installed` and the `superseded_agent_ids` tri-state on
+> install-status. These are loosenings, so a published connector's requests are
+> accepted exactly as before, in shadow or enforced, and no connector
+> behaviour, tool schema, runtime floor or failure code moves. Scope of this
+> note: those schemas and that hook. Nothing else in this document was
+> re-verified.

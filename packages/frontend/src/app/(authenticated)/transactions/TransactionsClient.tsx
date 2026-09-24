@@ -164,9 +164,9 @@ export default function TransactionsClient() {
   const agentNamesById = new Map(agents.map((agent) => [agent.id, agent.name]))
   const tokenSymbolsByKey = new Map(tokens.map((token) => [token.key, token.symbol]))
   const accountNamesByAddress = new Map(
-    userAccounts.map((safe) => [
-      `${safe.account_address.toLowerCase()}:${safe.chain_id}`,
-      safe.name,
+    userAccounts.map((account) => [
+      `${account.account_address.toLowerCase()}:${account.chain_id}`,
+      account.name,
     ]),
   )
   const failedAccountNames = failedAccountIds

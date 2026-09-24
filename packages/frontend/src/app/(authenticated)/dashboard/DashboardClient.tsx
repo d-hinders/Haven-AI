@@ -623,7 +623,7 @@ function TransactionsSection({
 export default function DashboardClient() {
   const { user, activeAccount, passkeys: enrolledPasskeys } = useAuth()
   const { toast } = useToast()
-  const safes = user?.accounts ?? []
+  const accounts = user?.accounts ?? []
   const { currency } = usePreferences()
   const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents, loading: agentsLoading, refetch: refetchAgents } = useAgents()
@@ -647,7 +647,7 @@ export default function DashboardClient() {
   // user can complete them in any order. The guide always renders the
   // canonical Fund → Agent → First payment ordering but a step completed
   // out of order shows as done regardless.
-  const fundingStateKnown = safes.length > 0 && !balancesLoading && !balancesError
+  const fundingStateKnown = accounts.length > 0 && !balancesLoading && !balancesError
   const dataReady = fundingStateKnown && !agentsLoading
   const hasFunds = fundingStateKnown && hasAnyBalance
 
@@ -656,15 +656,15 @@ export default function DashboardClient() {
   // enrol one teaches them to ignore the banner.
   //
   // Read from the set `AuthContext` already resolves for every delegation-rail
-  // safe on login. A plain synchronous read, so no extra request and no
+  // account on login. A plain synchronous read, so no extra request and no
   // signing-provider context — a dashboard banner has no business requiring
   // the wallet machinery `useAccountSigners` pulls in.
   // #2413: the account list is delegation-only, so "the first delegation
   // account" is just the first account.
-  const delegationSafe = safes[0]
+  const delegationAccount = accounts[0]
   const recoverySigners = getStoredHybridSigners({
-    accountAddress: delegationSafe?.account_address as Address | undefined,
-    chainId: delegationSafe?.chain_id,
+    accountAddress: delegationAccount?.account_address as Address | undefined,
+    chainId: delegationAccount?.chain_id,
   })
   // #1205: the server now answers this question — computed by
   // needsBackupSignerRecommendation next to the chain classification, so a
@@ -673,7 +673,7 @@ export default function DashboardClient() {
   // fallback for an older backend that has not sent the field yet.
   // Unknown signer set → stay silent. Nagging on a failed read is worse than
   // a late recommendation, and the next load will know.
-  const serverRecommendation = delegationSafe?.needs_backup_recommendation
+  const serverRecommendation = delegationAccount?.needs_backup_recommendation
   const missingBackup =
     serverRecommendation !== undefined && serverRecommendation !== null
       ? serverRecommendation
@@ -706,8 +706,8 @@ export default function DashboardClient() {
   // instruction to show, and the hero/`hasFunds` state already settles the
   // checklist. The hook surfaces errors instead of throwing so the card keeps
   // its general copy when the read fails, exactly as the balance read does.
-  const { funding: safeFunding } = useAccountFunding(
-    !fundingStateKnown || hasFunds ? undefined : delegationSafe?.id,
+  const { funding: fundingForOnboarding } = useAccountFunding(
+    !fundingStateKnown || hasFunds ? undefined : delegationAccount?.id,
   )
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
@@ -720,15 +720,15 @@ export default function DashboardClient() {
   const allOnboardingComplete =
     setupProgressReady && hasFunds && hasAgents && hasFirstAgentPayment
 
-  const defaultSafe = useMemo(
-    () => activeAccount ?? safes.find((safe) => safe.is_default) ?? safes[0] ?? null,
-    [activeAccount, safes],
+  const defaultAccount = useMemo(
+    () => activeAccount ?? accounts.find((account) => account.is_default) ?? accounts[0] ?? null,
+    [activeAccount, accounts],
   )
-  const hasDelegationAccounts = safes.length > 0
-  const agentSafe = useMemo(
+  const hasDelegationAccounts = accounts.length > 0
+  const agentAccount = useMemo(
     () =>
-      activeAccount ?? safes[0] ?? null,
-    [activeAccount, safes],
+      activeAccount ?? accounts[0] ?? null,
+    [activeAccount, accounts],
   )
 
   // Owner-initiated send from the DASHBOARD is gone (#1989, epic #1440). It was
@@ -749,7 +749,7 @@ export default function DashboardClient() {
   // with !hasFunds it drives the hero's "Watching for incoming deposits…"
   // hint so the user knows the dashboard is actively listening.
   const [hasOpenedReceive, setHasOpenedReceive] = useState(false)
-  const [actionSafeId, setActionSafeId] = useState<string | null>(null)
+  const [actionAccountId, setActionAccountId] = useState<string | null>(null)
   // In-progress dismissal is session-only — refreshing brings the checklist
   // back so we keep nudging the user toward completing setup.
   const [inProgressDismissed, setInProgressDismissed] = useState(false)
@@ -766,9 +766,9 @@ export default function DashboardClient() {
     : false
 
   useEffect(() => {
-    if (actionSafeId && safes.some((safe) => safe.id === actionSafeId)) return
-    setActionSafeId(defaultSafe?.id ?? null)
-  }, [actionSafeId, defaultSafe?.id, safes])
+    if (actionAccountId && accounts.some((account) => account.id === actionAccountId)) return
+    setActionAccountId(defaultAccount?.id ?? null)
+  }, [actionAccountId, defaultAccount?.id, accounts])
 
   // Read the persisted setup-complete dismissal once the user is known.
   useEffect(() => {
@@ -832,10 +832,10 @@ export default function DashboardClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
+  const selectedActionAccount = accounts.find((account) => account.id === actionAccountId) ?? defaultAccount
   const actionGate = useAccountOperationGate({
-    accountAddress: selectedActionSafe?.account_address as Address | undefined,
-    chainId: selectedActionSafe?.chain_id,
+    accountAddress: selectedActionAccount?.account_address as Address | undefined,
+    chainId: selectedActionAccount?.chain_id,
   })
   const requiresOtherDevice = actionGate.kind === 'passkey_on_other_device'
   // The per-account balance/details reads existed only to populate `SendModal`,
@@ -846,8 +846,8 @@ export default function DashboardClient() {
   const {
     refetch: refetchSelectedBalances,
   } = useBalances(
-    selectedActionSafe?.account_address ?? null,
-    { enabled: sendModalDataEnabled, chainId: selectedActionSafe?.chain_id },
+    selectedActionAccount?.account_address ?? null,
+    { enabled: sendModalDataEnabled, chainId: selectedActionAccount?.chain_id },
   )
 
   // SEK (#3127): the display side now honours the served default end to end.
@@ -879,7 +879,7 @@ export default function DashboardClient() {
       : (overview?.metrics.monthlyAgentSpendUsd ?? 0)
   const overviewUnavailable = Boolean(overviewError && !overview)
   const hasAttention = Boolean(overviewError)
-  // Render the guide whenever the user has at least one Safe and either:
+  // Render the guide whenever the user has at least one account and either:
   // (a) they have unfinished steps and haven't dismissed the checklist, OR
   // (b) they've just finished all three steps and haven't dismissed the celebration.
   const showOnboardingGuide =
@@ -903,17 +903,17 @@ export default function DashboardClient() {
   }
 
   function openHeroAction(action: 'receive' | 'add-funds') {
-    if (safes.length === 0) {
+    if (accounts.length === 0) {
       if (action === 'add-funds') setAddFundsOpen(true)
       return
     }
 
-    if (safes.length > 1) {
+    if (accounts.length > 1) {
       setPickerAction(action)
       return
     }
 
-    setActionSafeId(defaultSafe?.id ?? null)
+    setActionAccountId(defaultAccount?.id ?? null)
     if (action === 'receive') {
       setHasOpenedReceive(true)
       setReceiveOpen(true)
@@ -921,15 +921,15 @@ export default function DashboardClient() {
     if (action === 'add-funds') setAddFundsOpen(true)
   }
 
-  function openReceiveForDefaultSafe() {
-    if (!defaultSafe) return
-    setActionSafeId(defaultSafe.id)
+  function openReceiveForDefaultAccount() {
+    if (!defaultAccount) return
+    setActionAccountId(defaultAccount.id)
     setHasOpenedReceive(true)
     setReceiveOpen(true)
   }
 
-  function handleActionSafeSelected(accountId: string) {
-    setActionSafeId(accountId)
+  function handleActionAccountSelected(accountId: string) {
+    setActionAccountId(accountId)
     if (pickerAction === 'receive') setReceiveOpen(true)
     if (pickerAction === 'add-funds') setAddFundsOpen(true)
     setPickerAction(null)
@@ -956,7 +956,7 @@ export default function DashboardClient() {
       sekChangeUnavailable={sekChangeUnavailable}
       changeAmount={changeAmount}
       changePercent={changePercent}
-      hasAccounts={safes.length > 0}
+      hasAccounts={accounts.length > 0}
       hasFunds={hasFunds}
       fundingStateKnown={fundingStateKnown}
       watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
@@ -1005,7 +1005,7 @@ export default function DashboardClient() {
       />
       <MetricCard
         label="Active accounts"
-        value={String(overview?.metrics.activeAccounts ?? safes.length)}
+        value={String(overview?.metrics.activeAccounts ?? accounts.length)}
         href="/accounts"
         icon={<WalletIcon />}
         loading={false}
@@ -1025,7 +1025,7 @@ export default function DashboardClient() {
       />
       <TransactionsSection
         transactions={overview?.transactions ?? []}
-        hasAccounts={safes.length > 0}
+        hasAccounts={accounts.length > 0}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
         onRetry={refetchOverview}
@@ -1055,8 +1055,8 @@ export default function DashboardClient() {
             hasFunds={hasFunds}
             hasAgents={hasAgents}
             hasFirstAgentPayment={hasFirstAgentPayment}
-            funding={safeFunding}
-            onReceiveFunds={openReceiveForDefaultSafe}
+            funding={fundingForOnboarding}
+            onReceiveFunds={openReceiveForDefaultAccount}
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
             onDismiss={dismissInProgressGuide}
@@ -1072,14 +1072,14 @@ export default function DashboardClient() {
         // "any account" render with a funded-state trigger
         // — the owner does not want this in front of the user before they
         // have funds at risk. `hasFunds` is already fail-closed: it only
-        // goes true once `fundingStateKnown` is true (safes loaded, balance
+        // goes true once `fundingStateKnown` is true (accounts loaded, balance
         // fetch not loading, no balance error), so a transient RPC failure
         // reads as "not funded", never as "funded". Dismissible exactly as
         // before, and kept to delegation-rail accounts because "Backup &
         // recovery" is where it sends you and that only exists on those
         // accounts.
         const recoveryNudge =
-          hasFunds && delegationSafe && missingBackup ? <RecoveryNudge /> : null
+          hasFunds && delegationAccount && missingBackup ? <RecoveryNudge /> : null
 
         if (isFocusedView) {
           return (
@@ -1115,7 +1115,7 @@ export default function DashboardClient() {
         onClose={() => {
           setConnectAgentOpen(false)
         }}
-        accountId={agentSafe?.id ?? null}
+        accountId={agentAccount?.id ?? null}
         onSetupUpdated={() => {
           refreshDashboardData()
         }}
@@ -1124,23 +1124,23 @@ export default function DashboardClient() {
       <DashboardActionPickerModal
         open={pickerAction !== null}
         action={pickerAction ?? 'receive'}
-        safes={safes}
+        accounts={accounts}
         onClose={() => setPickerAction(null)}
-        onSelect={handleActionSafeSelected}
+        onSelect={handleActionAccountSelected}
       />
 
 
       <ReceiveFundsModal
         open={receiveOpen}
-        safe={selectedActionSafe}
+        account={selectedActionAccount}
         onClose={() => setReceiveOpen(false)}
       />
 
       <AddFundsModal
         open={addFundsOpen}
         onClose={() => setAddFundsOpen(false)}
-        accountAddress={selectedActionSafe?.account_address}
-        chainId={selectedActionSafe?.chain_id}
+        accountAddress={selectedActionAccount?.account_address}
+        chainId={selectedActionAccount?.chain_id}
         onReceive={() => {
           setHasOpenedReceive(true)
           setReceiveOpen(true)

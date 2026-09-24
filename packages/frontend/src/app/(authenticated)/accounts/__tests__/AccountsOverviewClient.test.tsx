@@ -39,7 +39,7 @@ vi.mock('@rainbow-me/rainbowkit', () => ({
 
 import AccountsOverviewClient from '../AccountsOverviewClient'
 
-function safe(id: string, name: string, chainId: number, isDefault = false) {
+function account(id: string, name: string, chainId: number, isDefault = false) {
   return {
     id,
     account_address: `0x${id.padEnd(40, '0')}`,
@@ -50,8 +50,8 @@ function safe(id: string, name: string, chainId: number, isDefault = false) {
   }
 }
 
-const BASE = safe('base1', 'Base account', 8453, true)
-const SEPOLIA = safe('sep1', 'Sepolia account', 84532)
+const BASE = account('base1', 'Base account', 8453, true)
+const SEPOLIA = account('sep1', 'Sepolia account', 84532)
 
 describe('AccountsOverviewClient — active account (#629)', () => {
   beforeEach(() => {
@@ -220,10 +220,10 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
  *     it also fails on the labelled `Set default` variant the decision
  *     rejected, and on a kebab item added to the card later.
  *  3. **The state where it mattered most gets its own case.** A single
- *     NON-default account: both badges are gated on `safes.length > 1`, so the
+ *     NON-default account: both badges are gated on `accounts.length > 1`, so the
  *     word `default` renders nowhere on the page, and `/accounts/<id>` hides
  *     its own set-default action in exactly this state — while the card's star
- *     was gated on `!safe.is_default` alone and rendered anyway.
+ *     was gated on `!account.is_default` alone and rendered anyway.
  *
  * The `default` BADGE is deliberately NOT swept up: it is a `span`, and the
  * chip that NAMES the state stays. Only the control that SET it from the card
@@ -272,7 +272,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
   })
 
   it('offers no set-default control for a lone NON-default account either', () => {
-    const LONE = safe('lone1', 'Lone account', 8453, false)
+    const LONE = account('lone1', 'Lone account', 8453, false)
     mockUseAccounts.mockReturnValue({ accounts: [LONE], loading: false })
     /*
       `activeAccount: null` — no account selected yet — and that is load-bearing

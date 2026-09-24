@@ -87,7 +87,7 @@ describe('useContactChains', () => {
     expect(result.current.chainsByAddress.get(ALICE.toLowerCase())).toEqual([8453])
   })
 
-  it('is empty when the user has no safes', async () => {
+  it('is empty when the user has no accounts', async () => {
     mockUseAuth.mockReturnValue({ user: { accounts: [] } })
     const { result } = renderHook(() => useContactChains())
     await waitFor(() => expect(result.current.loading).toBe(false))

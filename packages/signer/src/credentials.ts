@@ -7,10 +7,11 @@ import { warnIfFilePermissive } from './file-mode.js'
  *
  * That is a claim about this credential, not about the process, and the
  * difference matters: the sentence that used to stand here ("it does not call
- * the Haven API") was retired by #1263. The MCP server layer does make one
- * authenticated call — a read-only `GET /x402/:payment_id/sign-context` (and,
- * for a direct payment via `haven_sign` since #3271, then
- * `GET /payments/:payment_id/sign-context`), see `sign-context.ts` — and it reads the `api_url` / `api_key` for it from a
+ * the Haven API") was retired by #1263. The MCP server layer does make at
+ * most two authenticated reads per signing call — a read-only
+ * `GET /x402/:payment_id/sign-context` and, for a direct payment via
+ * `haven_sign` since #3271, then `GET /payments/:payment_id/sign-context`, see
+ * `sign-context.ts` — and it reads the `api_url` / `api_key` for them from a
  * SEPARATE `identity.json` in the same directory as the credential file
  * resolved here. That is why `sourcePath` below is load-bearing rather than
  * diagnostic, and why a key supplied through `HAVEN_DELEGATE_KEY` alone (no

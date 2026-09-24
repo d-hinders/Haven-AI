@@ -41,6 +41,7 @@ export type SignContextErrorCode =
 
 /**
  * Structured refusal for every throw site in `fetchX402SignContext` (#3001,
+ * and since #3271 `fetchDirectSignContext`, via the `flow` argument;
  * follow-up from the #2985/#2986 review). Before this, every one of these —
  * timeout, unreachable host, a non-ok backend response (404/410/…), a
  * malformed body — reached the wire as prose inside the generic
@@ -71,16 +72,20 @@ export class HavenSignContextError extends HavenSigningError {
    * body this signer could not read. `typed_data_b64` is NOT in the default
    * quote result since #1272: obtain it by re-running the SAME quote tool
    * with the SAME idempotency_key plus `include_signing_payload: true`.
-   * Absent on a backend REFUSAL: an expired, executed or unsignable intent
-   * cannot be rescued by re-signing its bytes.
+   * Absent on a backend REFUSAL (an expired, executed or unsignable intent
+   * cannot be rescued by re-signing its bytes) — with one #3271 exception: a
+   * 404 from the DIRECT fetch (an older backend with no direct route), where
+   * the `haven_send` / `haven_pay` result's relay fields still work.
    */
   readonly fallback?: 'typed_data_b64'
   /**
    * #3001: `AgentPaymentNextAction` values the signer already emits — the
    * version-mismatch refusal's `stop_and_tell_user` for the classes where
    * retrying the same call cannot help, and `payment_window_expired` (with
-   * `retry_with_new_quote`) for the backend's 410 `expired`, exactly as the
-   * plain `HavenError` branch already does for that code.
+   * `retry_with_new_quote`) for the x402 fetch's 410 / `expired`, exactly as
+   * the plain `HavenError` branch already does for that code. On the direct
+   * fetch (#3271) only `error_code: 'expired'` means an expired window, with
+   * no `retry_with_new_quote`; a bare 410 there is a retired-rail tombstone.
    */
   readonly next_action: string
   /**
@@ -88,7 +93,8 @@ export class HavenSignContextError extends HavenSigningError {
    * action. A refusal Haven made (`SIGN_CONTEXT_REFUSED`, not expired) names
    * the hosted status read with the payment id; a transport failure or a
    * malformed body names no tool — the remedy is re-running the SAME quote
-   * tool with `include_signing_payload: true` — and an expired window names
+   * tool with `include_signing_payload: true` (x402), or the payment
+   * result's `typed_data_b64` relay (direct, #3271) — and an expired window names
    * none either (which quote tool depends on the flow). Never null: a step
    * with no tool carries `next_tool_omitted_reason`. Additive: the class is
    * not exported from the package index — the published surface is the

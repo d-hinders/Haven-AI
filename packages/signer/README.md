@@ -298,9 +298,9 @@ carries no x402 context to fund a merchant retry with, so it surfaces the
 | `SIGN_CONTEXT_TIMEOUT` | The fetch (or its body read) did not finish within `SIGN_CONTEXT_TIMEOUT_MS` | `stop_and_tell_user` | `typed_data_b64` | — |
 | `SIGN_CONTEXT_UNREACHABLE` | The fetch failed before any response (DNS, connection refused, TLS, …) | `stop_and_tell_user` | `typed_data_b64` | — |
 | `SIGN_CONTEXT_MALFORMED` | The response body was missing `sign_data.typed_data` / `x402_expected` (a pre-#1263 backend), or — on the direct-payment fetch — an unsupported `direct_sign_context_version` or a `signature_scheme` other than `eip712_userop` | `stop_and_tell_user` | `typed_data_b64` | — |
-| `SIGN_CONTEXT_REFUSED` (410 / `expired`) | x402: the quote's window closed. Direct: the payment's window closed — call `haven_send` / `haven_pay` again with the same `idempotency_key` | `payment_window_expired` | — | x402 only: `retry_with_new_quote: true`; both: `http_status`, `backend_error_code: 'expired'` |
+| `SIGN_CONTEXT_REFUSED` (x402: 410 or `expired`; direct: `expired` only) | x402: the quote's window closed. Direct: the payment's window closed — call `haven_send` / `haven_pay` again with the same `idempotency_key` | `payment_window_expired` | — | x402 only: `retry_with_new_quote: true`; both: `http_status`, `backend_error_code: 'expired'` |
 | `SIGN_CONTEXT_REFUSED` (404, direct fetch) | The `payment_id` is not this agent's, or the backend predates #3271 and has no direct route | `stop_and_tell_user` | `typed_data_b64` | `http_status`, `backend_error_code` |
-| `SIGN_CONTEXT_REFUSED` (other) | Unknown `payment_id` (404, x402 fetch), `already_executed` / `not_signable` (409) — or, on `haven_sign_x402` only, `sign_context_unavailable` (409) | `stop_and_tell_user` | — | `http_status`, `backend_error_code` |
+| `SIGN_CONTEXT_REFUSED` (other) | Unknown `payment_id` (404, x402 fetch), `already_executed` / `not_signable` (409), a bare 410 retired-rail tombstone (direct fetch) — or, on `haven_sign_x402` only, `sign_context_unavailable` (409) | `stop_and_tell_user` | — | `http_status`, `backend_error_code` |
 | `USEROP_BINDING_MISMATCH` | A direct payment's `PackedUserOperation` typed data (from the direct fetch, or a tool argument) does not recompute to its own `payload_hash`, or a fetched direct context is not a `PackedUserOperation` — see [Two ways to use it](#two-ways-to-use-it) above | `stop_and_tell_user` | — | no `http_status` — this is a local recomputation, not a backend refusal |
 
 `fallback: 'typed_data_b64'` appears only where signing OTHER bytes is a
@@ -313,9 +313,10 @@ since #1272: obtain it by re-running the SAME quote tool with the SAME
 `payment_id`. A direct payment's `haven_send` / `haven_pay` result always
 carries `payload_hash` + `typed_data_b64`. Any other backend REFUSAL
 carries no fallback: an expired, executed or unsignable intent cannot be
-rescued by re-signing its bytes — an expired one is re-quoted (the same
+rescued by re-signing its bytes — an expired x402 one is re-quoted (the same
 `payment_window_expired` + `retry_with_new_quote` the signer emits for
-`PAYMENT_WINDOW_EXPIRED`), the rest stop. These codes are signer-local,
+`PAYMENT_WINDOW_EXPIRED`), an expired direct one is re-sent with the same
+`idempotency_key` (no `retry_with_new_quote`), the rest stop. These codes are signer-local,
 not part of `@haven_ai/sdk`'s `AgentPaymentFailureCode` taxonomy, since they
 describe a local fetch failure, not a payment-domain outcome, and never reach
 the backend's REST/OpenAPI surface — only this package's MCP tool responses.

@@ -433,7 +433,8 @@ export interface ToolFailure {
   fallback?: string
   /**
    * #3001: present on `SIGN_CONTEXT_REFUSED` — the HTTP status the backend
-   * answered the `/x402/:id/sign-context` fetch with (404, 410, …).
+   * answered the sign-context fetch with (404, 410, …) — the x402 fetch, or
+   * the direct `/payments/:id/sign-context` fetch since #3271.
    */
   http_status?: number
   /** #3001: the backend's own `error_code` on `SIGN_CONTEXT_REFUSED` (`expired`, `already_executed`, `not_signable`, `sign_context_unavailable`). */

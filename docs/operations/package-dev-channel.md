@@ -47,12 +47,12 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
-> **Re-verification (#3271, lockfile refresh, 2026-09-24):** this doc is
-> coupled through `package-lock.json`. The change: `@haven_ai/sdk` gains
-> `@metamask/smart-accounts-kit` as a devDependency (already a hoisted
-> workspace dependency), and the refreshed lock only adds `"dev": true` /
-> `"peer": true` flags to existing entries — no package added, removed or
-> re-versioned. No version, dist-tag, channel or publish behaviour
+> **Re-verification (#3271, direct sign-context, 2026-09-24):** this doc is
+> coupled through `packages/signer/src/credentials.ts`, where the only change
+> is JSDoc: it now names the signer's second read-only fetch
+> (`GET /payments/:payment_id/sign-context`, for a direct payment via
+> `haven_sign`). Credential resolution, file modes and the `identity.json`
+> lookup are unchanged, and no version, dist-tag, channel or publish behaviour
 > moves. `last-verified` re-stamped to 2026-09-24 for this note only; nothing
 > else in this document was re-verified.
 >

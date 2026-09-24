@@ -11,19 +11,19 @@ import type { TransactionsResponse } from '@/types/transactions'
  * Contacts are chain-agnostic — an EVM address is the same on every chain — so
  * rather than tagging a contact with one chain we surface the chains the user
  * has actually transacted with that address on, derived client-side from each
- * Safe's recent transactions. The active-chain switch never hides contacts; this
+ * account's recent transactions. The active-chain switch never hides contacts; this
  * only feeds the "Used on" badges and the optional chain filter.
  *
  * Returns a map of `address (lowercased) → sorted chain ids`.
  */
-export function useContactChains(perSafeLimit = 100): {
+export function useContactChains(perAccountLimit = 100): {
   chainsByAddress: Map<string, number[]>
   loading: boolean
 } {
   const { user } = useAuth()
-  const safes = user?.accounts ?? []
+  const accounts = user?.accounts ?? []
   // Re-derive when the set of (address, chain) pairs changes.
-  const key = safes
+  const key = accounts
     .map((s) => `${s.account_address.toLowerCase()}:${s.chain_id}`)
     .sort()
     .join('|')
@@ -31,12 +31,12 @@ export function useContactChains(perSafeLimit = 100): {
   const [chainsByAddress, setChainsByAddress] = useState<Map<string, number[]>>(new Map())
   const [loading, setLoading] = useState(true)
   const generationRef = useRef(0)
-  const safesRef = useRef(safes)
-  safesRef.current = safes
+  const accountsRef = useRef(accounts)
+  accountsRef.current = accounts
 
   const fetchAll = useCallback(async () => {
     const generation = ++generationRef.current
-    const current = safesRef.current
+    const current = accountsRef.current
     if (current.length === 0) {
       setChainsByAddress(new Map())
       setLoading(false)
@@ -46,22 +46,22 @@ export function useContactChains(perSafeLimit = 100): {
     setLoading(true)
     const acc = new Map<string, Set<number>>()
     await Promise.all(
-      current.map(async (safe) => {
+      current.map(async (account) => {
         try {
           const data = await api.get<TransactionsResponse>(
-            `/transactions/${safe.account_address}?page=1&limit=${perSafeLimit}&chain_id=${encodeURIComponent(
-              String(safe.chain_id),
+            `/transactions/${account.account_address}?page=1&limit=${perAccountLimit}&chain_id=${encodeURIComponent(
+              String(account.chain_id),
             )}`,
           )
           for (const tx of data.transactions) {
             const counterparty = (tx.direction === 'out' ? tx.to : tx.from)?.toLowerCase()
             if (!counterparty) continue
             const set = acc.get(counterparty) ?? new Set<number>()
-            set.add(safe.chain_id)
+            set.add(account.chain_id)
             acc.set(counterparty, set)
           }
         } catch {
-          // A single Safe's failure shouldn't blank the others — partial
+          // A single account's failure shouldn't blank the others — partial
           // activity is still a useful signal.
         }
       }),
@@ -74,7 +74,7 @@ export function useContactChains(perSafeLimit = 100): {
     }
     setChainsByAddress(sorted)
     setLoading(false)
-  }, [perSafeLimit])
+  }, [perAccountLimit])
 
   useEffect(() => {
     void fetchAll()

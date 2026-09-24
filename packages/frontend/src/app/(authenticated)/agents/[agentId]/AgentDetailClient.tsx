@@ -302,11 +302,11 @@ export default function AgentDetailClient({ agentId }: Props) {
     refetch,
   } = useAgents()
   const agent = agents.find((item) => item.id === agentId) ?? null
-  const safe = useMemo(
+  const account = useMemo(
     () => user?.accounts.find((item) => item.id === agent?.account_id) ?? null,
     [agent?.account_id, user?.accounts],
   )
-  const chainId = safe?.chain_id ?? agent?.account_chain_id ?? DEFAULT_CHAIN_ID
+  const chainId = account?.chain_id ?? agent?.account_chain_id ?? DEFAULT_CHAIN_ID
   const chainConfig = useMemo(() => {
     try {
       return getChainConfig(chainId)
@@ -414,7 +414,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
 
   const currentAgent = rotatedKeyPatch ? { ...agent, ...rotatedKeyPatch } : agent
-  const walletName = currentAgent.account_name ?? safe?.name ?? 'Unassigned Haven wallet'
+  const walletName = currentAgent.account_name ?? account?.name ?? 'Unassigned Haven wallet'
   const networkName = chainConfig?.name ?? 'Unknown network'
   const budgetLines = currentAgent.allowances.map((allowance) => {
     const decimals =
@@ -663,10 +663,10 @@ export default function AgentDetailClient({ agentId }: Props) {
           {/* #1089: backup & recovery moved to the account page — it's an
               account capability, not an agent one. This is a pointer, not a
               second copy of the controls. */}
-          {safe ? (
+          {account ? (
             <Card hover={false} className="mt-6 p-2">
               <Row
-                href={`/accounts/${safe.id}`}
+                href={`/accounts/${account.id}`}
                 title="Backup & recovery"
                 subtitle="Manage the ways this account can be approved"
                 trailing={<Icon icon={ArrowRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}

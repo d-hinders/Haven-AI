@@ -429,7 +429,7 @@ test('/accounts: the card offers no set-default control', async ({ page }) => {
  * ## WHAT THIS TEST LOST TO #2374, said plainly
  *
  * It used to tap the STAR, and it could assert two containment properties
- * because the star's effect (`setDefault` -> `PUT /user/safes/:id/default`)
+ * because the star's effect (`setDefault` -> `PUT /user/accounts/:id/default`)
  * was DISTINGUISHABLE from the card link's own effect (`setActiveAccount` ->
  * `localStorage['haven_active_account_id']`). With the star gone the only control
  * left is "Set active", whose handler calls `setActiveAccount(safe)` — **the
@@ -456,7 +456,7 @@ test('/accounts: the card offers no set-default control', async ({ page }) => {
  *     macrotask), because `defaultPrevented` during capture is always false
  *     and would assert nothing;
  *   - no set-default write leaves the page. Kept from the old test and
- *     repurposed: `PUT /user/safes/:id/default` is intercepted and must never
+ *     repurposed: `PUT /user/accounts/:id/default` is intercepted and must never
  *     fire, which is a second, network-level reading of #2374's removal.
  */
 test('/accounts: a real tap on the visible "Set active" switches the account and does not navigate', async ({
@@ -471,7 +471,7 @@ test('/accounts: a real tap on the visible "Set active" switches the account and
     network event rather than as a silent success.
   */
   let defaultWrite: string | null = null
-  await page.route('**/user/safes/*/default', async (route, request) => {
+  await page.route('**/user/accounts/*/default', async (route, request) => {
     defaultWrite = `${request.method()} ${new URL(request.url()).pathname}`
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
   })

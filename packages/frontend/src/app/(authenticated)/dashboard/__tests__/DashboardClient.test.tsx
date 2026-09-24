@@ -332,7 +332,7 @@ describe('DashboardClient', () => {
    * (`infra/repositories/{user-safes,agents,dashboard}.ts`), so that payload
    * can no longer occur on the wire, and DashboardClient no longer reads
    * `account_type` at all — it is rail-blind by construction and leans on the
-   * backend funnel (`delegationSafe` is just `safes[0]`). There is no
+   * backend funnel (`delegationAccount` is just `accounts[0]`). There is no
    * defensive branch left for a legacy input to exercise, so keeping one
    * would pin an unreachable state; the test is converted to the worst case
    * that still exists: the same funded account, with pending approvals, on
@@ -571,15 +571,15 @@ describe('DashboardClient', () => {
   })
 
   describe('backup-signer recovery nudge (#1153 funded-state trigger)', () => {
-    const DELEGATOR_SAFE = { ...SAFE, account_type: 'delegator_hybrid' }
+    const DELEGATOR_ACCOUNT = { ...SAFE, account_type: 'delegator_hybrid' }
 
     /** The signer set AuthContext resolves on login, as the dashboard reads it. */
     const storeSigners = (passkeys: number, owner: string | null) => {
       window.localStorage.setItem(
-        `haven_hybrid_signers_${DELEGATOR_SAFE.account_address.toLowerCase()}_${DELEGATOR_SAFE.chain_id}`,
+        `haven_hybrid_signers_${DELEGATOR_ACCOUNT.account_address.toLowerCase()}_${DELEGATOR_ACCOUNT.chain_id}`,
         JSON.stringify({
-          account_address: DELEGATOR_SAFE.account_address,
-          chain_id: DELEGATOR_SAFE.chain_id,
+          account_address: DELEGATOR_ACCOUNT.account_address,
+          chain_id: DELEGATOR_ACCOUNT.chain_id,
           owner_address: owner,
           passkeys: Array.from({ length: passkeys }, (_, i) => ({ key_id: `0x0${i}`, x: '0x1', y: '0x2' })),
         }),
@@ -593,9 +593,9 @@ describe('DashboardClient', () => {
           name: 'Ada',
           email: 'ada@example.com',
           wallet_address: '0x5555555555555555555555555555555555555555',
-          accounts: [DELEGATOR_SAFE],
+          accounts: [DELEGATOR_ACCOUNT],
         },
-        activeAccount: DELEGATOR_SAFE,
+        activeAccount: DELEGATOR_ACCOUNT,
       })
 
     it('shows the nudge for a funded, single-signer delegation-rail account', () => {
@@ -705,10 +705,16 @@ describe('DashboardClient', () => {
           name: 'Ada',
           email: 'ada@example.com',
           wallet_address: '0x5555555555555555555555555555555555555555',
-          safes: [DELEGATOR_SAFE],
+          accounts: [DELEGATOR_ACCOUNT],
         },
-        activeAccount: DELEGATOR_SAFE,
+        activeAccount: DELEGATOR_ACCOUNT,
       })
+      // The signer set must be KNOWN (here: one passkey, no owner — the
+      // nudge-worthy configuration) or the component stays silent on the
+      // unknown-signer state and this test passes whatever the funding gate
+      // does. With signers known, only the unfunded state suppresses the
+      // nudge, which is what this test's name claims.
+      storeSigners(1, null)
       mockUseAggregatedBalances.mockReturnValue({
         balances: [],
         loading: false,
@@ -728,10 +734,15 @@ describe('DashboardClient', () => {
           name: 'Ada',
           email: 'ada@example.com',
           wallet_address: '0x5555555555555555555555555555555555555555',
-          safes: [DELEGATOR_SAFE],
+          accounts: [DELEGATOR_ACCOUNT],
         },
-        activeAccount: DELEGATOR_SAFE,
+        activeAccount: DELEGATOR_ACCOUNT,
       })
+      // Known single-signer set, same as above: without it the test passes
+      // via unknown-signer silence and the error branch is load-bearing for
+      // nothing. With it, the balance-fetch error is the only reason the
+      // nudge stays off.
+      storeSigners(1, null)
       mockUseAggregatedBalances.mockReturnValue({
         balances: [],
         loading: false,

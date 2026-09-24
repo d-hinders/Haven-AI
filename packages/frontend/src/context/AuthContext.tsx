@@ -157,7 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // #1079: hybrid DeleGator accounts keep their signer set in
     // hybrid_account_passkeys, invisible to GET /passkeys — resolve each
-    // account's set so useActiveSigner can see it. Per-safe failures are
+    // account's set so useActiveSigner can see it. Per-account failures are
     // skipped silently, same as the loop above: the gate simply stays at
     // no_signer for that account until the next refresh.
     // #2413: every account the API returns is on the delegation rail, so the

@@ -17,11 +17,11 @@ import { Icon } from '@/components/ui/Icon'
 
 interface Props {
   open: boolean
-  safe: SmartAccount | null
+  account: SmartAccount | null
   onClose: () => void
 }
 
-export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
+export default function ReceiveFundsModal({ open, account, onClose }: Props) {
   const { toast } = useToast()
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
@@ -45,10 +45,10 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
   // unprovable by mutation — a guard no test can turn red is worse than none,
   // because it reads as protection while protecting nothing.
   useEffect(() => {
-    if (!open || !showQr || !safe?.account_address) return
+    if (!open || !showQr || !account?.account_address) return
 
     let cancelled = false
-    QRCode.toDataURL(safe?.account_address, {
+    QRCode.toDataURL(account?.account_address, {
       margin: 1,
       width: 220,
       color: { dark: '#1A2140', light: '#FFFFFF' }, // QR encoder needs literal hex for module colours — design-lint-disable-line
@@ -63,16 +63,16 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
     return () => {
       cancelled = true
     }
-  }, [open, showQr, safe?.account_address])
+  }, [open, showQr, account?.account_address])
 
-  if (!open || !safe) return null
+  if (!open || !account) return null
 
-  const accountAddress = safe?.account_address
-  // #1852: was `getChainConfig(safe.chain_id)`, which THROWS for any id outside
+  const accountAddress = account?.account_address
+  // #1852: was `getChainConfig(account.chain_id)`, which THROWS for any id outside
   // the registry — including `undefined` — taking the whole screen down through
   // the error boundary. Both shapes of unresolved (absent id, present-but-
   // unregistered id) now resolve to null and reach the refusal below.
-  const chainConfig = resolveChainOrNull(safe.chain_id)
+  const chainConfig = resolveChainOrNull(account.chain_id)
   const supportedTokens = chainConfig ? Object.values(chainConfig.tokens) : []
 
   function copyAddress() {
@@ -126,8 +126,8 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="truncate text-sm font-semibold text-[var(--v2-ink)]">{safe.name}</p>
-                  {safe.is_default && (
+                  <p className="truncate text-sm font-semibold text-[var(--v2-ink)]">{account.name}</p>
+                  {account.is_default && (
                     <span className="rounded-full bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-brand)]">
                       Default
                     </span>
@@ -183,7 +183,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    href={getExplorerUrl(safe.chain_id, 'address', accountAddress)}
+                    href={getExplorerUrl(account.chain_id, 'address', accountAddress)}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -203,7 +203,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
                     {qrDataUrl ? (
                       <img
                         src={qrDataUrl}
-                        alt={`QR code for ${safe.name} on ${chainConfig.name}`}
+                        alt={`QR code for ${account.name} on ${chainConfig.name}`}
                         className="h-[220px] w-[220px] rounded-lg border border-[var(--v2-border)]"
                       />
                     ) : (
@@ -269,7 +269,7 @@ export default function ReceiveFundsModal({ open, safe, onClose }: Props) {
                 A refusal still owes a next action — `design-review.md` requires
                 error copy to explain one, and "we won't help you" is not an
                 exemption. `Refresh page` is the honest one and the only one:
-                the state arrives as a safe without a usable `chain_id` at the
+                the state arrives as an account without a usable `chain_id` at the
                 `/auth/me` boundary, which is load-shaped, so re-fetching is a
                 real step. The label is `ErrorBoundary`'s (`ErrorBoundary.tsx:64`),
                 reused rather than reinvented, and it carries NO accompanying

@@ -247,7 +247,10 @@ last-verified: "2026-09-24"
 > `@haven_ai/mcp` changes behaviour: its keyed `HavenClient` now runs the same
 > allowlist in `signForData`, so a `haven_send` / x402 payment whose served
 > UserOp is not this key's own direct-payment shape is refused before
-> anything is signed or submitted.
+> anything is signed or submitted. The same holds for an erc7710 settlement
+> child that does not match the merchant's 402, is a root grant, is delegated
+> by another account, or has no 402 expectation (`TYPED_DATA_NOT_ALLOWED` in
+> every case).
 >
 > Release coupling: the signer pins `@haven_ai/sdk` exactly, so both must ship
 > together through `release-bump`. The new `@haven_ai/sdk/test-support` subpath

@@ -91,7 +91,9 @@ export class HavenSignContextError extends HavenSigningError {
   /**
    * #3103 (epic #3105, decisions 1 and 3): the typed next step beside the
    * action. A refusal Haven made (`SIGN_CONTEXT_REFUSED`, not expired) names
-   * the hosted status read with the payment id; a transport failure or a
+   * the hosted status read with the payment id — except a 404 from the direct
+   * fetch (#3271), which names none and points at the `typed_data_b64`
+   * relay; a transport failure or a
    * malformed body names no tool — the remedy is re-running the SAME quote
    * tool with `include_signing_payload: true` (x402), or the payment
    * result's `typed_data_b64` relay (direct, #3271) — and an expired window names

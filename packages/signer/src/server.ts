@@ -131,8 +131,9 @@ export function buildSignerMcpServer(
       accountAddress: options.credentials?.accountAddress,
       chainId: options.credentials?.chainId,
     },
-    // #1263: the payment_id signing path — the ONLY network call this server
-    // can make, an authenticated read of a signing context from Haven, using
+    // #1263: the payment_id signing path — the ONLY network path this server
+    // has: up to two authenticated reads of a signing context from Haven (x402,
+    // then direct for haven_sign, #3271), using
     // the agent identity the connector stores next to the signer credential.
     // The signer CORE stays network-free; fetched bytes still pass the same
     // binding verification + digest re-derivation as tool-argument bytes.

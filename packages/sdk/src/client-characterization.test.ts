@@ -4,6 +4,8 @@ import { ethers } from 'ethers'
 import { HavenClient } from './client.js'
 import type { HavenCatalogEntry, HavenCatalogMerchant } from './types.js'
 import directPaymentFixture from './__fixtures__/direct-payment-userop.json' with { type: 'json' }
+import { deriveDelegateAccountAddress } from './delegate-account.js'
+import { rebuildDirectUserOpForSender } from './test-support/direct-userop.js'
 
 // Hardhat account #0. Test-only and never used for real funds.
 const TEST_DELEGATE_KEY =
@@ -20,19 +22,22 @@ async function recoverBareHashSigner(signature: `0x${string}`, hash: `0x${string
   return recoverAddress({ hash, signature })
 }
 
-// #3271: a real direct-payment eip712_userop sign_data — domain, types and
-// message are the fixture's real HybridDeleGator PackedUserOperation, so the
-// #3271 binding check (which recomputes the UserOp hash from typed_data and
-// compares it to sign_data.hash) passes exactly as it would against a real
-// backend response. The fixture's own delegate key is not available, so
-// these tests sign it with TEST_DELEGATE_KEY instead — the binding check
-// never touches a key, only domain/types/message vs. hash, so this is a
-// faithful stand-in.
+// #3271 / #3283: a real direct-payment eip712_userop sign_data — the
+// fixture's real HybridDeleGator PackedUserOperation, re-targeted at
+// TEST_DELEGATE_KEY's own derived account. The fixture's own delegate key is
+// not available, and since #3283 signForData signs only a UserOp from this
+// key's own account (the direct-payment allowlist), so the production bytes
+// are rebuilt for this key's account and the hash recomputed: the delegator,
+// caveats, mode and execution stay exactly what the backend emitted.
 function directPaymentSignData() {
+  const { typedData, payloadHash } = rebuildDirectUserOpForSender(
+    directPaymentFixture.typed_data,
+    deriveDelegateAccountAddress(TEST_DELEGATE_ADDRESS as `0x${string}`),
+  )
   return {
-    hash: directPaymentFixture.payload_hash,
+    hash: payloadHash,
     signature_scheme: 'eip712_userop' as const,
-    typed_data: directPaymentFixture.typed_data,
+    typed_data: typedData,
   }
 }
 

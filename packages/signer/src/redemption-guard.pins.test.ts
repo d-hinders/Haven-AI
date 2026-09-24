@@ -12,8 +12,8 @@ import {
   DELEGATION_TUPLE_COMPONENTS,
   SINGLE_DEFAULT_MODE,
   assertRedeemsOwnBudgetDelegation,
-} from './redemption-guard.js'
-import { buildBoundRedeemDelegationsCallData, buildDelegation } from './test-support/direct-userop.js'
+} from '@haven_ai/sdk/edge'
+import { buildBoundRedeemDelegationsCallData, buildDelegation } from '@haven_ai/sdk/test-support'
 
 const DELEGATE = getAddress(`0x${'11'.repeat(20)}`) as Address
 const DELEGATOR = getAddress(`0x${'22'.repeat(20)}`) as Address

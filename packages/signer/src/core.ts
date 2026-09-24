@@ -2,12 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { hashMessage, hashTypedData, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import {
+  addressFromKey,
   chainIdForNetwork,
   isSettlementChildTypedData,
   verifySettlementChild,
-} from './settlement-child.js'
-import {
-  addressFromKey,
   buildX402ExpectedMessage,
   buildSweepAuthorizationMessage,
   buildSweepTypedData,

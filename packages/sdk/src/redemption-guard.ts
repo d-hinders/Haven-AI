@@ -36,7 +36,7 @@ import {
   type Address,
   type Hex,
 } from 'viem'
-import { HavenSigningError } from '@haven_ai/sdk/edge'
+import { HavenSigningError } from './types.js'
 
 /** `Caveat` — `(address enforcer, bytes terms, bytes args)`. */
 const CAVEAT_COMPONENTS = [

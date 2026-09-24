@@ -12,7 +12,7 @@ import {
   deriveDelegateAccountAddress,
   HYBRID_DELEGATOR_IMPLEMENTATION,
   SIMPLE_FACTORY_ADDRESS,
-} from './delegate-account.js'
+} from '@haven_ai/sdk/edge'
 
 const CHAINS = [
   { id: 8453, name: 'Base' },

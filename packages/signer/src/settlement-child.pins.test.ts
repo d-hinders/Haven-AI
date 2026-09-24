@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { getSmartAccountsEnvironment } from '@metamask/smart-accounts-kit'
-import { CAVEAT_ENFORCERS, DELEGATION_MANAGER } from './settlement-child.js'
+import { CAVEAT_ENFORCERS, DELEGATION_MANAGER } from '@haven_ai/sdk/edge'
 
 const CHAINS = [
   { id: 8453, name: 'Base' },

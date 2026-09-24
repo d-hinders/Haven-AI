@@ -237,6 +237,23 @@ last-verified: "2026-09-24"
 > cannot gate that. Nothing else in this document was re-verified in this
 > pass.
 >
+> **Recent re-verification (#3283):** the allowlist above moved into
+> `@haven_ai/sdk` (`assertBoundDirectPaymentUserOp` and friends, exported from
+> `@haven_ai/sdk/edge`). The signer imports it and wraps the SDK's
+> `HavenTypedDataRefusedError` into its own `TYPED_DATA_NOT_ALLOWED` refusal,
+> with the same code, message and next step. The signer's tool surface, its
+> refusal envelope and its consent hash do not change.
+>
+> `@haven_ai/mcp` changes behaviour: its keyed `HavenClient` now runs the same
+> allowlist in `signForData`, so a `haven_send` / x402 payment whose served
+> UserOp is not this key's own direct-payment shape is refused before
+> anything is signed or submitted.
+>
+> Release coupling: the signer pins `@haven_ai/sdk` exactly, so both must ship
+> together through `release-bump`. The new `@haven_ai/sdk/test-support` subpath
+> is test fixtures only, and no runtime path imports it. Nothing else in this
+> document was re-verified in this pass.
+>
 > **Recent re-verification (#3279, SDK wording):** documentation-only edits in
 > `@haven_ai/sdk` source comments (`client.ts`, `sweep.ts`, `types.ts`,
 > `x402.ts`, `x402-funding-leg.ts`), the README and the CHANGELOG. They name the
@@ -2010,7 +2027,7 @@ supported value. The version is inside the Haven-signed binding message, so
 rewriting it invalidates the signature and misrepresents what Haven declared —
 the update is the fix. ("Declared", not "authorised" (#2347): Haven signs this
 message, and that is all it does here — the word matches
-`packages/signer/src/settlement-child.ts`, which describes the same binding.
+the settlement-child verifier's own header comment (shared by the SDK and the signer since #3283), which describes the same binding.
 Spend authority is the owner-signed delegation and the on-chain caveat that
 enforces it, never Haven.) The same applies to `expected_auth.version` on the sweep
 binding, which shares the mechanism (`SUPPORTED_SWEEP_BINDING_VERSIONS`) and will

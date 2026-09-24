@@ -16,7 +16,7 @@ import { createEdgeSigner } from './core.js'
 import { buildSignerMcpServer, resolveEdgeSigner, runSignerConsentGate, runSignerStdioServer } from './server.js'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 import { computeSignerConsentHash, type SignerConsentInput } from './consent.js'
-import { deriveDelegateAccountAddress } from './delegate-account.js'
+import { deriveDelegateAccountAddress } from '@haven_ai/sdk/edge'
 import {
   buildBoundDirectUserOp,
   buildBoundRedeemDelegationsCallData,
@@ -28,8 +28,8 @@ import {
   buildSelfCallCallData,
   buildSingleExecutionCallData,
   DEFAULT_DELEGATOR,
-} from './test-support/direct-userop.js'
-import { REDEEM_DELEGATIONS_ABI, SINGLE_DEFAULT_MODE } from './redemption-guard.js'
+} from '@haven_ai/sdk/test-support'
+import { REDEEM_DELEGATIONS_ABI, SINGLE_DEFAULT_MODE } from '@haven_ai/sdk/edge'
 
 // Pinned so the #1161 Node floor cannot make these host-dependent: the
 // guard lives at the credential/client choke point, which these exercise.

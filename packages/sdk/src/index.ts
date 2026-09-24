@@ -244,6 +244,15 @@ export {
   packedUserOperationHash,
 } from './userop-binding.js'
 
+// #3283 (epic #3284): the signing-surface guard `signForData` and the signer share.
+export { deriveDelegateAccountAddress } from './delegate-account.js'
+export {
+  HavenTypedDataRefusedError,
+  TYPED_DATA_NOT_ALLOWED,
+  assertBoundDirectPaymentUserOp,
+} from './direct-payment-guard.js'
+export { ROOT_AUTHORITY, verifySettlementChild, type SettlementChildExpectation } from './settlement-child.js'
+
 // #1328: mpp.ts's demo challenge/proof helpers (parseMachinePaymentChallenge,
 // parseMachinePaymentChallengeResponse, buildMachinePaymentIdempotencyKey,
 // encodeMachinePaymentProof) are retired with the mpp_demo client surface.

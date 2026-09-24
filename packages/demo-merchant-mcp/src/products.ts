@@ -24,7 +24,7 @@ interface MerchantChainConfig {
    * trusting `spentMap` from an arbitrary caveat address lets a forged
    * enforcer return any number. Deterministically deployed, so Base and Base
    * Sepolia share it — the same address the signer pins
-   * (`packages/signer/src/settlement-child.ts`).
+   * (`packages/sdk/src/settlement-child.ts`, shared with the signer since #3283).
    */
   erc20TransferAmountEnforcer: Address
 }

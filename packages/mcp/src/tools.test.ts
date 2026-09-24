@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  ENTRY_POINT_V07,
   HavenClient,
-  PACKED_USER_OPERATION_FIELDS,
-  packedUserOperationHash,
+  addressFromKey,
   toolDescriptions as sharedDescriptions,
 } from '@haven_ai/sdk'
+import { buildBoundDirectUserOp } from '@haven_ai/sdk/test-support'
 import { z } from 'zod'
 import { createToolHandlers, toolDescriptions, toolSchemas } from './tools.js'
 import { readFileSync } from 'node:fs'
@@ -58,29 +57,13 @@ const x402PaymentRequired = {
 // carries 'eip712_userop' plus the account's typed data. Fixtures updated by
 // #2850, which retired the SDK's scheme-less bare-hash fallback — a sign_data
 // without signature_scheme is now rejected by the client. #3271: the typed
-// data must also be a real, self-consistent PackedUserOperation — the SDK's
-// binding check recomputes its hash and refuses a hand-rolled, 3-field toy —
-// so this builds one from the pinned field list and derives its own hash
-// rather than pairing an opaque literal beside it.
-function buildUserOpSignData(overrides: { sender?: `0x${string}` } = {}) {
-  const sender = overrides.sender ?? `0x${'dd'.repeat(20)}`
-  const typedData = {
-    domain: { chainId: 8453, name: 'HybridDeleGator', version: '1', verifyingContract: sender },
-    types: { PackedUserOperation: PACKED_USER_OPERATION_FIELDS.map((field) => ({ ...field })) },
-    primaryType: 'PackedUserOperation' as const,
-    message: {
-      sender,
-      nonce: '0',
-      initCode: '0x' as const,
-      callData: '0x' as const,
-      accountGasLimits: `0x${'00'.repeat(32)}` as const,
-      preVerificationGas: '0',
-      gasFees: `0x${'00'.repeat(32)}` as const,
-      paymasterAndData: '0x' as const,
-      entryPoint: ENTRY_POINT_V07 as `0x${string}`,
-    },
-  }
-  return { typedData, payloadHash: packedUserOperationHash(typedData) }
+// data must also be a real, self-consistent PackedUserOperation (the SDK's
+// binding check recomputes its hash). #3283: and it must be the one shape the
+// SDK's allowlist signs — this key's own derived account redeeming a single
+// budget delegation through the DelegationManager — so it comes from the ONE
+// shared guard-valid builder (`@haven_ai/sdk/test-support`), not a local toy.
+function buildUserOpSignData(key: string = delegateKey) {
+  return buildBoundDirectUserOp({ delegate: addressFromKey(key) as `0x${string}`, chainId: 8453 })
 }
 const { typedData: userOpTypedData, payloadHash: userOpPayloadHash } = buildUserOpSignData()
 
@@ -1006,9 +989,7 @@ describe('haven_send', () => {
   // #3271: a real, self-consistent PackedUserOperation — a bare hash with no
   // signature_scheme is no longer signable (pay() refuses a missing scheme,
   // and the client's own binding check refuses an inconsistent one).
-  const { typedData: SEND_TYPED_DATA, payloadHash: SEND_SIGN_HASH } = buildUserOpSignData({
-    sender: `0x${'44'.repeat(20)}`,
-  })
+  const { typedData: SEND_TYPED_DATA, payloadHash: SEND_SIGN_HASH } = buildUserOpSignData(SEND_DELEGATE_KEY)
 
   function sendHandlers() {
     const haven = new HavenClient({
@@ -1106,6 +1087,8 @@ describe('haven_send', () => {
 
 describe('haven_pay_mcp_tool', () => {
   const MCP_DELEGATE_KEY = '0x' + 'c'.repeat(64)
+  // #3283: the funding-leg UserOp must come from THIS block's delegate key's own account.
+  const { typedData: MCP_USEROP_TYPED_DATA, payloadHash: MCP_USEROP_HASH } = buildUserOpSignData(MCP_DELEGATE_KEY)
   const MCP_MERCHANT_URL = 'https://mcp.merchant.example/mcp'
   const SIGN_HASH = `0x${'cc'.repeat(32)}`
 
@@ -1209,9 +1192,9 @@ describe('haven_pay_mcp_tool', () => {
           status: 'pending_signature',
           expires_at: '2099-01-01T00:00:00.000Z',
           sign_data: {
-            hash: userOpPayloadHash,
+            hash: MCP_USEROP_HASH,
             signature_scheme: 'eip712_userop',
-            typed_data: userOpTypedData,
+            typed_data: MCP_USEROP_TYPED_DATA,
             components: { payer_account: '0xSafe', token: '0xToken', to: '0xTo', amount: '10000', payment_token: '0x0', payment: '0', nonce: 1 },
           },
         }, 201)
@@ -1257,6 +1240,8 @@ describe('haven_pay_mcp_tool', () => {
 
 describe('merchant MCP endpoint discovery (#1301)', () => {
   const DISCOVERY_DELEGATE_KEY = '0x' + 'e'.repeat(64)
+  // #3283: the funding-leg UserOp must come from THIS block's delegate key's own account.
+  const { typedData: DISCOVERY_USEROP_TYPED_DATA, payloadHash: DISCOVERY_USEROP_HASH } = buildUserOpSignData(DISCOVERY_DELEGATE_KEY)
   const DISCOVERY_SIGN_HASH = `0x${'ee'.repeat(32)}`
   const PAYMENT_REQUIRED_HEADER = btoa(JSON.stringify(x402PaymentRequired))
 
@@ -1323,9 +1308,9 @@ describe('merchant MCP endpoint discovery (#1301)', () => {
           status: 'pending_signature',
           expires_at: '2099-01-01T00:00:00.000Z',
           sign_data: {
-            hash: userOpPayloadHash,
+            hash: DISCOVERY_USEROP_HASH,
             signature_scheme: 'eip712_userop',
-            typed_data: userOpTypedData,
+            typed_data: DISCOVERY_USEROP_TYPED_DATA,
             components: {
               payer_account: '0xSafe',
               token: '0xToken',

@@ -20,8 +20,10 @@ import { HavenError } from './types.js'
  * typed data the hash does NOT cover (domain name/version/verifyingContract,
  * the field list, the EntryPoint). It is a CORRUPTION check: the caller supplies
  * both values, so it proves they describe the same operation, never that Haven
- * prepared it. Provenance is the byte-free sign context (`payment_id`); what the
- * signer will sign at all is #3272.
+ * prepared it. Provenance is the byte-free sign context (`payment_id`); what a
+ * delegate key will sign at all is `assertBoundDirectPaymentUserOp`
+ * (`direct-payment-guard.ts`, #3272 / #3283), which every caller of this check
+ * — `HavenClient.signForData` and the signer's `haven_sign` — runs next.
  *
  * Pure viem, no ethers: `@haven_ai/sdk/edge` re-exports it for the edge signer,
  * and `edge-imports.test.ts` pins that graph.

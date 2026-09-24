@@ -20,7 +20,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { createEdgeSigner } from './core.js'
 import { createToolHandlers } from './tools.js'
 import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
-import { buildBoundDirectUserOp } from './test-support/direct-userop.js'
+import { buildBoundDirectUserOp } from '@haven_ai/sdk/test-support'
 
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const TEST_DELEGATE_ADDRESS = privateKeyToAccount(TEST_KEY).address

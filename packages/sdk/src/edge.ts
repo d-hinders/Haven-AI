@@ -50,3 +50,29 @@ export {
   isPackedUserOperationTypedData,
   packedUserOperationHash,
 } from './userop-binding.js'
+// #3283 (epic #3284): ONE signing-surface guard for the signer and the SDK.
+export { deriveDelegateAccountAddress, SIMPLE_FACTORY_ADDRESS, HYBRID_DELEGATOR_IMPLEMENTATION } from './delegate-account.js'
+export {
+  DELEGATION_TUPLE_COMPONENTS,
+  REDEEM_DELEGATIONS_ABI,
+  SINGLE_DEFAULT_MODE,
+  assertRedeemsOwnBudgetDelegation,
+} from './redemption-guard.js'
+export {
+  CAVEAT_ENFORCERS,
+  DELEGATION_MANAGER,
+  MAX_SETTLEMENT_WINDOW_SECONDS,
+  ROOT_AUTHORITY,
+  chainIdForNetwork,
+  isSettlementChildTypedData,
+  verifySettlementChild,
+  type SettlementChildExpectation,
+  type SettlementChildTypedData,
+} from './settlement-child.js'
+export {
+  DIRECT_PAYMENT_CHAIN_IDS,
+  EXECUTE_ABI,
+  HavenTypedDataRefusedError,
+  TYPED_DATA_NOT_ALLOWED,
+  assertBoundDirectPaymentUserOp,
+} from './direct-payment-guard.js'

@@ -116,9 +116,13 @@ const intent = await haven.createIntent({
 // the account validates the EIP-712 typed data in intent.signData.typed_data,
 // never the bare hash — a signature over signData.hash is rejected on-chain
 // (AA24). Sign that typed data with your delegate key (viem signTypedData),
-// after checking it with assertUserOpTypedDataBinding(typed_data, hash).
-// There is no public HavenClient method for this step yet; pay() does it
-// for you.
+// after checking it with assertUserOpTypedDataBinding(typed_data, hash) AND
+// assertBoundDirectPaymentUserOp(typed_data, yourDelegateAddress) — the
+// first proves the typed data matches the hash, the second that it is your
+// own account redeeming your budget delegation, not a self-call (#3283).
+// There is no public HavenClient method for this step yet; pay() does both
+// for you. HavenClient.sign(hash) and signUserOpTypedDataForDelegation are
+// verbatim primitives: they check nothing.
 const signature = await signTypedDataWithYourDelegateKey(intent.signData.typed_data)
 
 // Step 3: Submit the signature

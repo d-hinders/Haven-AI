@@ -26,8 +26,8 @@ machine's observation, not an agent's judgement.
 2. Classify every affected surface using `area:frontend`, `area:backend`, `area:sdk`, `area:mcp`, `area:docs`, and `money-path`. Confirm money-path classification against [ship-next](../ship-next/SKILL.md).
 3. Ask one or two focused questions when scope, acceptance, or surface is ambiguous. Always ask before defining acceptance for money movement, authentication, authorization, or schema work.
 
-   **Threat model first (owner decision, 2026-09-24).** An issue whose remedy
-   narrows who can sign, move or authorise something carries a `## Threat model`
+   **Threat model first (owner decision, 2026-09-24).** A `money-path` issue whose
+   remedy narrows who can sign, move or authorise something carries a `## Threat model`
    section, confirmed by the owner before it is built. The section says:
    - which actors are trusted for the decision;
    - the invariant the fix enforces;
@@ -81,9 +81,12 @@ one tracking issue plus one issue per slice.
 **Follow-ups batch into an epic (owner decision, 2026-09-24).** A follow-up on
 a surface that already has an open epic becomes a new slice of that epic, or a
 line under its *Notes*. When one pull request, review round or spec review
-produces two or more follow-ups on the same surface, file them as one epic, not
-as separate issues. Each standalone issue is one more thing in flight for the
-owner to track, and each one's own review tends to surface the next. Approved [quality-scan](../quality-scan/SKILL.md) structural findings use
+produces two or more follow-ups on the same surface, file them as **one** issue,
+not one issue each. That one issue is an epic only when its remedy really spans
+several pull requests. Each standalone issue is one more thing in flight for the
+owner to track, and each one's own review tends to surface the next.
+
+Approved [quality-scan](../quality-scan/SKILL.md) structural findings use
 this shape when they require multiple PRs; a one-PR improvement candidate
 uses the standalone task workflow above. The scan handoff does not waive
 prior-art checks, defect reproduction, or the backlog default.
@@ -322,12 +325,14 @@ agreed before the result is known:
 - **Instrument.** Run exactly this; a changed instrument is a new baseline:
 
 ```bash
-# threat-model/batching re-measure. FROM=YYYY-MM-DD END=YYYY-MM-DD (exclusive)
+# threat-model/batching re-measure. FROM=YYYY-MM-DD LAST=YYYY-MM-DD (END - 1 day: `created:` is inclusive)
+set -o pipefail
 gh issue list --label money-path --state all --limit 200 \
-  --search "created:${FROM}..$(date -d "${END} -1 day" +%F)" --json number,labels,body \
-  --jq '.[] | [.number, (any(.labels[]; .name == "epic")), (.body | test("(?m)^## Threat model"))] | @tsv' \
+  --search "created:${FROM}..${LAST}" --json number,labels,body \
+  --jq '.[] | [.number, (any(.labels[]; .name == "epic")), (.body | test("(?m)^#{2,3} Threat model"))] | @tsv' \
 | while IFS=$'\t' read -r n epic tm; do
     parent=$(gh api "repos/{owner}/{repo}/issues/$n/parent" --jq .number 2>/dev/null || true)
+    case "$parent" in ''|*[!0-9]*) parent= ;; esac   # a 404 body lands on stdout, not stderr
     if [ "$epic" = true ] || [ "$tm" = true ] || [ -n "$parent" ]; then echo shaped; else echo standalone; fi
   done | sort | uniq -c
 ```

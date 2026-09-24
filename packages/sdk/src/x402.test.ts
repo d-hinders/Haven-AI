@@ -18,32 +18,18 @@ import {
   X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
 } from './x402.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
+import { buildValidUserOpSignData } from './__fixtures__/valid-userop.js'
 
 // The live funding-leg wire shape (#946): every sign_data the backend emits
 // carries 'eip712_userop' plus the account's typed data. Fixtures updated by
 // #2850, which retired the SDK's scheme-less bare-hash fallback — a sign_data
-// without signature_scheme is now rejected by the client.
-const userOpTypedData = {
-  domain: {
-    chainId: 8453,
-    name: 'HybridDeleGator',
-    version: '1',
-    verifyingContract: `0x${'dd'.repeat(20)}`,
-  },
-  types: {
-    PackedUserOperation: [
-      { name: 'sender', type: 'address' },
-      { name: 'nonce', type: 'uint256' },
-      { name: 'entryPoint', type: 'address' },
-    ],
-  },
-  primaryType: 'PackedUserOperation',
-  message: {
-    sender: `0x${'dd'.repeat(20)}`,
-    nonce: '1',
-    entryPoint: `0x${'ee'.repeat(20)}`,
-  },
-}
+// without signature_scheme is now rejected by the client. #3271: the typed
+// data must also be a real, self-consistent PackedUserOperation — the
+// binding check recomputes its hash and refuses anything else — so this
+// uses the shared synthetic-but-valid builder rather than a hand-rolled,
+// 3-field toy.
+const userOpSignData = buildValidUserOpSignData()
+const userOpTypedData = userOpSignData.typed_data
 
 const accepted: X402PaymentOption = {
   scheme: 'exact',
@@ -495,7 +481,7 @@ describe('x402 helpers', () => {
         to: delegateAddress,
         resource_url: resourceUrl,
         sign_data: {
-          hash: `0x${'11'.repeat(32)}`,
+          hash: userOpSignData.hash,
           signature_scheme: 'eip712_userop',
           typed_data: userOpTypedData,
           components: {
@@ -711,7 +697,7 @@ describe('x402 helpers', () => {
         to: delegateAddress,
         resource_url: resourceUrl,
         sign_data: {
-          hash: `0x${'11'.repeat(32)}`,
+          hash: userOpSignData.hash,
           signature_scheme: 'eip712_userop',
           typed_data: userOpTypedData,
           components: {
@@ -791,7 +777,7 @@ describe('x402 helpers', () => {
       to: delegateAddress,
       resource_url: resourceUrl,
       sign_data: {
-        hash: `0x${'11'.repeat(32)}`,
+        hash: userOpSignData.hash,
         signature_scheme: 'eip712_userop',
         typed_data: userOpTypedData,
         components: {
@@ -1046,27 +1032,8 @@ describe('x402 helpers', () => {
     }
 
     const txHash = `0x${'ab'.repeat(32)}`
-    const typedData = {
-      domain: {
-        chainId: 8453,
-        name: 'HybridDeleGator',
-        version: '1',
-        verifyingContract: '0x' + 'dd'.repeat(20),
-      },
-      types: {
-        PackedUserOperation: [
-          { name: 'sender', type: 'address' },
-          { name: 'nonce', type: 'uint256' },
-          { name: 'entryPoint', type: 'address' },
-        ],
-      },
-      primaryType: 'PackedUserOperation',
-      message: {
-        sender: '0x' + 'dd'.repeat(20),
-        nonce: '1',
-        entryPoint: '0x' + 'ee'.repeat(20),
-      },
-    }
+    const signData3116 = buildValidUserOpSignData()
+    const typedData = signData3116.typed_data
 
     const fetchMock = vi.spyOn(globalThis, 'fetch')
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
@@ -1081,11 +1048,7 @@ describe('x402 helpers', () => {
       to: delegateAddress,
       merchant_to: accepted.payTo,
       resource_url: paymentRequired.resource.url,
-      sign_data: {
-        hash: `0x${'56'.repeat(32)}`,
-        signature_scheme: 'eip712_userop',
-        typed_data: typedData,
-      },
+      sign_data: signData3116,
     }), { status: 201 }))
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       payment_id: 'pay_3116',
@@ -1895,27 +1858,8 @@ describe('delegation-rail 3009-mode (#946)', () => {
   it('signs eip712_userop typed data for the funding leg and completes the flow', async () => {
     const delegateKey = `0x${'01'.repeat(32)}`
     const txHash = `0x${'ab'.repeat(32)}`
-    const typedData = {
-      domain: {
-        chainId: 8453,
-        name: 'HybridDeleGator',
-        version: '1',
-        verifyingContract: '0x' + 'dd'.repeat(20),
-      },
-      types: {
-        PackedUserOperation: [
-          { name: 'sender', type: 'address' },
-          { name: 'nonce', type: 'uint256' },
-          { name: 'entryPoint', type: 'address' },
-        ],
-      },
-      primaryType: 'PackedUserOperation',
-      message: {
-        sender: '0x' + 'dd'.repeat(20),
-        nonce: '1',
-        entryPoint: '0x' + 'ee'.repeat(20),
-      },
-    }
+    const signData946 = buildValidUserOpSignData()
+    const typedData = signData946.typed_data
 
     const fetchMock = vi.spyOn(globalThis, 'fetch')
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
@@ -1931,9 +1875,7 @@ describe('delegation-rail 3009-mode (#946)', () => {
       merchant_to: accepted.payTo,
       resource_url: paymentRequired.resource.url,
       sign_data: {
-        hash: `0x${'56'.repeat(32)}`,
-        signature_scheme: 'eip712_userop',
-        typed_data: typedData,
+        ...signData946,
         components: {
           payer_account: safeAddress,
           token: accepted.asset,
@@ -2003,7 +1945,7 @@ describe('merchant receipt capture (#956)', () => {
       account_address: safeAddress,
       token: 'USDC', amount: '0.02', to: delegateAddress,
       resource_url: paymentRequired.resource.url,
-      sign_data: { hash: `0x${'11'.repeat(32)}`, signature_scheme: 'eip712_userop', typed_data: userOpTypedData, components: { payer_account: safeAddress }, instructions: 'sign' },
+      sign_data: { hash: userOpSignData.hash, signature_scheme: 'eip712_userop', typed_data: userOpTypedData, components: { payer_account: safeAddress }, instructions: 'sign' },
     }), { status: 201 }))
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       payment_id: 'pay_956', status: 'confirmed', tx_hash: txHash, chain_id: 8453,

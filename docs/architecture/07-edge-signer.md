@@ -3,6 +3,8 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/signer/**
+  - packages/sdk/src/userop-binding.ts
+  - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/mcp-server/src/boot.ts
   - packages/mcp-server/src/auth.ts
   - packages/mcp-server/src/server.ts
@@ -32,7 +34,7 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-20"
+last-verified: "2026-09-24"
 ---
 
 # Haven — Edge Signer
@@ -84,7 +86,9 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
 2. **Local stdio MCP signer** — a thin MCP server exposing sign-only tools
    backed by the core. Since #1263 this layer holds the signer's ONE network
    capability: an authenticated READ of a payment's exact signing context from
-   Haven by `payment_id` (`GET /x402/:id/sign-context`), using the agent
+   Haven by `payment_id` (`GET /x402/:id/sign-context` for an x402 intent;
+   since #3271 `GET /payments/:id/sign-context` for a direct payment, fetched
+   when the x402 route answers `409 sign_context_unavailable`), using the agent
    identity (`identity.json`) the connector stores next to the signer
    credential. This exists because the alternative byte source is a language
    model re-emitting multi-KB EIP-712 payloads between tool calls — runtimes
@@ -189,18 +193,30 @@ agent runtime drives the sequence.
 
 ```
 hosted:  haven_pay        -> { payment_id, payload_hash, signature_scheme?, typed_data?, typed_data_b64? }
-local:   haven_sign       -> { signature }     (delegate key, never leaves)
+local:   haven_sign { payload_hash, typed_data_b64 } -> { signature }   (delegate key never leaves)
+         (or, on a current signer, haven_sign { payment_id }: it fetches the exact bytes itself)
 hosted:  haven_submit     -> { status, tx_hash }
 ```
 
 On a **delegation-rail** account the `haven_pay` result also carries
 `signature_scheme: 'eip712_userop'` and the account's EIP-712 payload in TWO
 transports: `typed_data` (the object) and `typed_data_b64` (the same bytes as
-one opaque base64 string, #1255). Prefer passing `typed_data_b64` to
-`haven_sign` UNCHANGED — a redemption payload is multi-KB, and an agent
-re-emitting the nested JSON between tool calls can truncate or reshape it,
-which the signer's digest check then refuses. The Hybrid account validates
-the typed data; a bare-hash signature is rejected on-chain (AA24, #1254).
+one opaque base64 string, #1255). **Since #3271 a current signer also accepts
+`haven_sign({ payment_id })` for a direct payment**: it fetches the exact bytes
+itself (`GET /payments/:id/sign-context`), so nothing bulky crosses the agent's
+context. That fetch exists because the relay failed live: on 2026-09-24 a
+hand-relayed `typed_data_b64` arrived altered, the signer signed it without
+complaint, and the bundler rejected the operation (`AA24 signature error`).
+The hosted result does not name it yet: the capability-gated `next_tool`
+guidance ships after the signer release, so older signers are never pointed
+at a call they cannot complete. Until then the result's relay — pass
+`payload_hash` + `typed_data_b64` UNCHANGED — is the path, and every signer
+accepts it. On either path a current signer now runs the UserOp binding check before signing
+(`assertUserOpTypedDataBinding`, `@haven_ai/sdk`): it recomputes the v0.7
+UserOperation hash from the typed data and refuses (`USEROP_BINDING_MISMATCH`)
+unless it equals `payload_hash`, and pins the domain, field list and
+EntryPoint the hash does not cover. The Hybrid account validates the typed
+data; a bare-hash signature is rejected on-chain (AA24, #1254).
 Legacy-rail results omit all three fields, and since #3169 `haven_sign`
 REFUSES such a call (`BARE_HASH_REFUSED`) rather than signing `payload_hash`.
 The `haven_pay_mcp_tool` / `haven_pay_x402_quote` results are
@@ -209,8 +225,9 @@ The `haven_pay_mcp_tool` / `haven_pay_x402_quote` results are
 `include_signing_payload=true`, because the preferred signing call needs
 neither. When the full pair IS requested, `typed_data_b64` wins when both are
 supplied — silently, so a caller that supplies both must keep them in sync: on
-the direct path (no digest check) an edited `typed_data` next to a stale
-`typed_data_b64` would sign the stale one.
+a direct payment an edited `typed_data` next to a stale `typed_data_b64` signs
+the stale one only if the stale one still matches `payload_hash` (the #3271
+binding check refuses otherwise).
 
 Merchant-facing fetches on the hosted path are bounded (#1300):
 `merchantTimeout` default 300 s, calibrated to the merchant's own
@@ -235,16 +252,18 @@ re-run the quote tool with the SAME `idempotency_key` plus
 `include_signing_payload=true`: the replay returns the ORIGINAL sign_data
 (#1207 semantics), and `typed_data_b64` / `typed_data` remain the fallback
 transport for older backends and for the fully offline core. Direct payments
-(`haven_pay`/`haven_send`) always carry the full pair — no fetch path exists
-there.
+(`haven_pay`/`haven_send`) always carry the full pair as well, for older
+signers; since #3271 they also have a fetch path (`GET /payments/:id/sign-context`).
 
 Note the trust-model asymmetry: the **x402** typed-data leg
 (`signX402FundingTypedData`) verifies a Haven-authenticated expected context
-and digest equality before signing; this **direct** leg does not — like the
-legacy raw-hash path it always mirrored, the authority boundary is the
-account's on-chain caveat enforcers (budget/recipient/expiry), not a
-client-side signing gate. Do not assume `signDelegationTypedData` carries the
-x402 leg's binding protection.
+and digest equality before signing. The **direct** leg's binding check (#3271)
+is a CORRUPTION check, not an authentication: the caller supplies both the
+typed data and `payload_hash`, so the check proves they describe the same
+operation, never that Haven prepared it. The authority boundary remains the
+account's on-chain caveat enforcers (budget/recipient/expiry); narrowing what
+the unbound branch will sign at all is #3272. Do not assume
+`signDelegationTypedData` carries the x402 leg's binding protection.
 
 **An over-budget direct payment is DECLINED, not queued** (#2130). The old text
 here said the result carries `payload_hash: null` and told the agent to "wait

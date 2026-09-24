@@ -21,7 +21,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/modules/accounting/api-key-flow.ts
   - packages/backend/src/routes/accounting-webhooks.ts
-last-verified: "2026-09-22"
+last-verified: "2026-09-24"
 ---
 
 # Dev environment

@@ -8,6 +8,9 @@ covers:
   - packages/signer/**
   - packages/mcp-server/src/tools.ts
   - packages/mcp-server/src/tools/**
+  - packages/backend/src/modules/payments/direct-sign-context.ts
+  - packages/backend/src/modules/x402/sign-context.ts
+  - packages/sdk/src/userop-binding.ts
   - .github/workflows/publish.yml
   - packages/cli/src/connect-runner.ts
   - packages/backend/src/routes/machine-payments.ts
@@ -53,7 +56,7 @@ covers:
   - scripts/lint-next-steps.mjs
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
-last-verified: "2026-09-23"
+last-verified: "2026-09-24"
 ---
 
 # MCP Runtime Compatibility
@@ -209,6 +212,31 @@ last-verified: "2026-09-23"
 > #1591 mean cap (the test is the instrument: total 20,995 of 21,000 at the
 > delivered head); no tool added or renamed, no version-skew or consent-hash
 > change. Nothing else in this document was re-verified in this pass.
+>
+> **Recent re-verification (#3271):** a direct payment (`haven_send` /
+> `haven_pay`) can now be signed by `payment_id`, like delegation-rail x402. New backend
+> route `GET /payments/:id/sign-context` (versioned by `@haven_ai/sdk`'s
+> `DIRECT_SIGN_CONTEXT_VERSION = 1`) serves the exact typed data; the signer's `haven_sign({ payment_id })` tries
+> the x402 fetch first and, ONLY on its 409 `sign_context_unavailable`, fetches
+> the direct context. Every direct-payment UserOp `haven_sign` signs — fetched
+> or relayed — is re-hashed and refused with `USEROP_BINDING_MISMATCH` when it
+> disagrees with its `payload_hash`; the x402 funding leg keeps its #1138
+> digest check against the Haven-signed expected context. Additive on the
+> wire: the hosted direct-payment result is UNCHANGED in this change (it still
+> names the `payload_hash` + `typed_data_b64` relay); the capability-gated
+> `next_tool` guidance ships separately, after the signer release, per #3271's
+> sequencing. The signer's `initialize` instructions list the direct
+> sign-context versions it supports. Skew: an OLD signer with the new backend
+> sees no difference — the hosted result still hands it the relay; a NEW
+> signer against an OLD backend gets the x402 409,
+> then a 404 from the direct fetch, and the signer refuses with
+> `SIGN_CONTEXT_REFUSED` carrying `fallback: 'typed_data_b64'` and a reason
+> naming the relay, so the agent relays the same fields (pinned in
+> `packages/signer/src/direct-sign-fallback.test.ts`). No tool added or renamed and no argument removed,
+> so the consent hash (identity + tool names + surface version,
+> `packages/signer/src/consent.ts`) does not move. The `send` description
+> was re-cut under the #1591 mean cap. Nothing else in this document was
+> re-verified in this pass.
 >
 > **Recent re-verification (#3169):** the edge signer's `haven_sign` no longer
 > signs a bare `payload_hash` (no `payment_id`, no `typed_data` /

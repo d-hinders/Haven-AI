@@ -93,10 +93,14 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     { line: 719, code: 502, ledger: 'skipped' }, // delegate-account deploy failure — infrastructure, allowlisted
   ],
   'src/routes/payments.ts': [
-    { line: 438, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
-    { line: 462, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
-    { line: 754, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 781, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
+    // #3271 shifted every line below by +3: `replayIntentBody`'s delegation
+    // branch now shares `buildDirectSignData` (`modules/payments/
+    // direct-sign-context.ts`) with the new GET /:id/sign-context route,
+    // and its doc comment grew by three lines to say so.
+    { line: 441, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
+    { line: 465, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
+    { line: 757, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 784, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
   ],
 }
 
@@ -132,7 +136,7 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
   ],
   'src/routes/payments.ts': [
     {
-      line: 781,
+      line: 784,
       reason: 'on-chain execution failed after claim — bundler/chain failure booked on the intent row by failSubmittedIntent, not a policy refusal',
     },
   ],

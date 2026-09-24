@@ -3,6 +3,7 @@ import {
   SUPPORTED_SWEEP_BINDING_VERSIONS,
   SUPPORTED_X402_EXPECTED_VERSIONS,
 } from './core.js'
+import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
 
 /**
  * Pre-payment skew detection (#1155).
@@ -15,9 +16,10 @@ import {
  *
  * **The check is necessarily agent-mediated.** The signer and the hosted Haven
  * MCP are two separate servers connected to the same client; neither can
- * introspect the other. The signer's single Haven call (#1263, the read-only
- * `GET /x402/:payment_id/sign-context` in `sign-context.ts`) does not help
- * here: it fetches one payment's signing bytes, not the hosted server's
+ * introspect the other. The signer's Haven reads (#1263's read-only
+ * `GET /x402/:payment_id/sign-context` and #3271's direct-payment
+ * `GET /payments/:payment_id/sign-context`, both in `sign-context.ts`) do not help
+ * here: each fetches one payment's signing bytes, not the hosted server's
  * handshake, and it happens at signing time — after the quote this module
  * exists to get ahead of. So only the agent sees both handshakes, and what
  * ships here is the *information* plus the prompt to compare it — never a
@@ -47,6 +49,13 @@ export interface SignerCompatibility {
   x402_expected_context_versions: number[]
   /** Sweep-binding versions this signer will verify (`SUPPORTED_SWEEP_BINDING_VERSIONS`). */
   sweep_binding_versions: number[]
+  /**
+   * #3271: `direct_sign_context_version`s this signer will fetch and verify
+   * from `GET /payments/:id/sign-context` — derived from the SDK's
+   * `DIRECT_SIGN_CONTEXT_VERSION` via `SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS`,
+   * never a second literal.
+   */
+  direct_sign_context_versions: number[]
 }
 
 /** The supported sets this signer enforces, as a plain serialisable object. */
@@ -54,6 +63,7 @@ export function signerCompatibility(): SignerCompatibility {
   return {
     x402_expected_context_versions: [...SUPPORTED_X402_EXPECTED_VERSIONS],
     sweep_binding_versions: [...SUPPORTED_SWEEP_BINDING_VERSIONS],
+    direct_sign_context_versions: [...SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS],
   }
 }
 
@@ -87,12 +97,14 @@ export function signerInstructions(): string {
   return [
     'Haven edge signer: sign-only tools bound to the local delegate key. It never emits the',
     'key. Its one network capability is an authenticated READ of a signing context from',
-    'Haven by payment_id — pass payment_id to haven_sign / haven_sign_x402 (preferred for',
-    'delegation-rail x402) instead of relaying bulky typed-data payloads yourself.',
+    'Haven by payment_id — pass payment_id to haven_sign (preferred for both a direct payment,',
+    '#3271, and delegation-rail x402) or haven_sign_x402 (x402 only) instead of relaying bulky',
+    'typed-data payloads yourself.',
     '',
     'Version compatibility (check this BEFORE signing, not after):',
     `- x402 expected-context versions supported: ${compatibility.x402_expected_context_versions.join(', ')}`,
     `- sweep authorization binding versions supported: ${compatibility.sweep_binding_versions.join(', ')}`,
+    `- direct-payment (haven_send / haven_pay) sign-context versions supported: ${compatibility.direct_sign_context_versions.join(', ')} — pass payment_id alone to haven_sign; this signer fetches the exact bytes`,
     '',
     'Haven quote and prepare results report the expected-context version they will emit',
     '(signer_compatibility.x402_expected_context_version). If that version is not in the list',

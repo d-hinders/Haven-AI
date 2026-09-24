@@ -9,7 +9,10 @@ import { hashTypedData } from 'viem'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  ENTRY_POINT_V07,
+  PACKED_USER_OPERATION_FIELDS,
   buildX402ExpectedMessage,
+  packedUserOperationHash,
   verifySignature,
 } from '@haven_ai/sdk'
 import { createEdgeSigner } from './core.js'
@@ -25,13 +28,39 @@ const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
 const HASH = '0x' + 'cd'.repeat(32)
-/** #3169: a direct-payment UserOp — the account validating its OWN operation (#1254), the honest vehicle for a haven_sign signature. */
-const DIRECT_USEROP = {
-  domain: { name: 'HybridDeleGator', version: '1', chainId: 84532, verifyingContract: `0x${'11'.repeat(20)}` },
-  types: { PackedUserOperation: [{ name: 'sender', type: 'address' }, { name: 'nonce', type: 'uint256' }] },
-  primaryType: 'PackedUserOperation',
-  message: { sender: `0x${'22'.repeat(20)}`, nonce: 1 },
+
+/**
+ * #3271: a self-consistent `PackedUserOperation` — every field the binding
+ * check (`assertUserOpTypedDataBinding`) inspects is well-formed (domain
+ * name/version, sender === verifyingContract, the v0.7 EntryPoint, the full
+ * 9-field type list), so its recomputed hash is a real one rather than an
+ * opaque literal like `HASH`. Replaces the old 2-field, mismatched-sender
+ * toy that #3271 correctly refuses.
+ */
+function buildDirectUserOp(overrides: { chainId?: number; sender?: `0x${string}` } = {}) {
+  const sender = overrides.sender ?? `0x${'11'.repeat(20)}`
+  const chainId = overrides.chainId ?? 84532
+  const typedData = {
+    domain: { name: 'HybridDeleGator', version: '1', chainId, verifyingContract: sender },
+    types: { PackedUserOperation: PACKED_USER_OPERATION_FIELDS.map((field) => ({ ...field })) },
+    primaryType: 'PackedUserOperation' as const,
+    message: {
+      sender,
+      nonce: '0',
+      initCode: '0x' as const,
+      callData: '0x' as const,
+      accountGasLimits: `0x${'00'.repeat(32)}` as const,
+      preVerificationGas: '0',
+      gasFees: `0x${'00'.repeat(32)}` as const,
+      paymasterAndData: '0x' as const,
+      entryPoint: ENTRY_POINT_V07 as `0x${string}`,
+    },
+  }
+  return { typedData, payloadHash: packedUserOperationHash(typedData) }
 }
+
+/** #3169: a direct-payment UserOp — the account validating its OWN operation (#1254), the honest vehicle for a haven_sign signature. */
+const { typedData: DIRECT_USEROP, payloadHash: DIRECT_USEROP_HASH } = buildDirectUserOp()
 const PAYMENT_REQUIRED = {
   x402Version: 1,
   resource: { url: 'https://merchant.test/paid', description: 'paid data' },
@@ -206,7 +235,9 @@ describe('haven_sign tool', () => {
 
     // #3169: the vehicle is a direct-payment UserOp (typed data the account
     // validates) — the bare-hash arm this test once rode is gone.
-    const result = ok<{ signature: string }>(await handlers.haven_sign({ payload_hash: HASH, typed_data: DIRECT_USEROP }))
+    const result = ok<{ signature: string }>(
+      await handlers.haven_sign({ payload_hash: DIRECT_USEROP_HASH, typed_data: DIRECT_USEROP }),
+    )
 
     const digest = hashTypedData(DIRECT_USEROP as Parameters<typeof hashTypedData>[0])
     expect(verifySignature(digest, result.data.signature, signer.delegateAddress)).toBe(true)
@@ -371,7 +402,7 @@ describe('haven_sign tool', () => {
         const handlers = createToolHandlers(createEdgeSigner(TEST_KEY), {
           audit: { auditPath, delegateAddress: '0x000000000000000000000000000000000000dEaD' },
         })
-        const payload = (await handlers.haven_sign({ payload_hash: `0x${'ab'.repeat(32)}`, typed_data: DIRECT_USEROP })) as ToolSuccess<{ signature: string }>
+        const payload = (await handlers.haven_sign({ payload_hash: DIRECT_USEROP_HASH, typed_data: DIRECT_USEROP })) as ToolSuccess<{ signature: string }>
         expect(payload.success).toBe(true)
         expect(payload.data.signature).toMatch(/^0x[0-9a-f]+$/)
       } finally {
@@ -399,20 +430,10 @@ describe('haven_sign tool', () => {
         chainId: 8453,
       },
     })
-    const typedData = {
-      domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: `0x${'11'.repeat(20)}` },
-      types: {
-        PackedUserOperation: [
-          { name: 'sender', type: 'address' },
-          { name: 'nonce', type: 'uint256' },
-        ],
-      },
-      primaryType: 'PackedUserOperation',
-      message: { sender: `0x${'22'.repeat(20)}`, nonce: 1 },
-    }
+    const { typedData, payloadHash } = buildDirectUserOp({ chainId: 8453 })
 
     const result = ok<{ signature: string }>(
-      await handlers.haven_sign({ payload_hash: HASH, typed_data: typedData }),
+      await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData }),
     )
 
     // The signature verifies against the typed data's EIP-712 digest —
@@ -420,7 +441,7 @@ describe('haven_sign tool', () => {
     // the property that failed on-chain before this fix.
     const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
     expect(verifySignature(digest, result.data.signature, signer.delegateAddress)).toBe(true)
-    expect(verifySignature(HASH, result.data.signature, signer.delegateAddress)).toBe(false)
+    expect(verifySignature(payloadHash, result.data.signature, signer.delegateAddress)).toBe(false)
     expect(JSON.stringify(result)).not.toContain(TEST_KEY.slice(2))
 
     // The audit trail covers this branch too — a typed-data signing that
@@ -428,7 +449,7 @@ describe('haven_sign tool', () => {
     const rows = (await readFile(auditPath, 'utf8')).trim().split('\n')
     expect(rows).toHaveLength(1)
     const entry = JSON.parse(rows[0])
-    expect(entry).toMatchObject({ tool: 'haven_sign', payload_hash: HASH })
+    expect(entry).toMatchObject({ tool: 'haven_sign', payload_hash: payloadHash })
     expect(JSON.stringify(entry)).not.toContain(TEST_KEY.slice(2))
     expect(JSON.stringify(entry)).not.toContain(result.data.signature)
     await rm(dir, { recursive: true, force: true })
@@ -437,32 +458,22 @@ describe('haven_sign tool', () => {
   it('accepts typed_data_b64 as the copy-through-safe form and prefers it over typed_data (#1255)', async () => {
     const signer = createEdgeSigner(TEST_KEY)
     const handlers = createToolHandlers(signer)
-    const typedData = {
-      domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: `0x${'11'.repeat(20)}` },
-      types: {
-        PackedUserOperation: [
-          { name: 'sender', type: 'address' },
-          { name: 'nonce', type: 'uint256' },
-        ],
-      },
-      primaryType: 'PackedUserOperation',
-      message: { sender: `0x${'22'.repeat(20)}`, nonce: 1 },
-    }
+    const { typedData, payloadHash } = buildDirectUserOp({ chainId: 8453 })
     const b64 = Buffer.from(JSON.stringify(typedData)).toString('base64')
 
     // b64 alone works — the live #1255 failure was the nested-JSON copy.
     const alone = ok<{ signature: string }>(
-      await handlers.haven_sign({ payload_hash: HASH, typed_data_b64: b64 }),
+      await handlers.haven_sign({ payload_hash: payloadHash, typed_data_b64: b64 }),
     )
     const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
     expect(verifySignature(digest, alone.data.signature, signer.delegateAddress)).toBe(true)
 
     // When both are present, the OPAQUE form wins: a truncated/reshaped
     // typed_data object next to an intact b64 must not poison the signing.
-    const mangledTypedData = { ...typedData, message: { ...typedData.message, nonce: 999 } }
+    const mangledTypedData = { ...typedData, message: { ...typedData.message, nonce: '999' } }
     const both = ok<{ signature: string }>(
       await handlers.haven_sign({
-        payload_hash: HASH,
+        payload_hash: payloadHash,
         typed_data: mangledTypedData,
         typed_data_b64: b64,
       }),
@@ -499,7 +510,9 @@ describe('haven_sign tool', () => {
 
       // #3169: typed-data vehicle (the bare-hash arm is gone); the audit row
       // still records the payload_hash argument, never the key or signature.
-      const result = ok<{ signature: string }>(await handlers.haven_sign({ payload_hash: HASH, typed_data: DIRECT_USEROP }))
+      const result = ok<{ signature: string }>(
+        await handlers.haven_sign({ payload_hash: DIRECT_USEROP_HASH, typed_data: DIRECT_USEROP }),
+      )
       const rows = (await readFile(auditPath, 'utf8')).trim().split('\n')
       expect(rows).toHaveLength(1)
 
@@ -507,7 +520,7 @@ describe('haven_sign tool', () => {
       expect(entry).toMatchObject({
         version: 1,
         tool: 'haven_sign',
-        payload_hash: HASH,
+        payload_hash: DIRECT_USEROP_HASH,
         delegate_address: signer.delegateAddress,
         safe_address: '0x000000000000000000000000000000000000Cafe',
         chain_id: 100,

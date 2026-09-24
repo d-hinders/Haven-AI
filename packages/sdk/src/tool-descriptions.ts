@@ -228,9 +228,9 @@ export const toolDescriptions = {
       'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. ' +
       'Do NOT use to check whether funds are held before sending — use haven_check_funds.',
     behavior:
-      'Sends the requested amount by redeeming the agent\'s on-chain budget delegation, account to recipient with no funding leg. ' +
-      'Budget, recipient and expiry are enforced on-chain while the transfer is prepared, so a request outside them is declined before any money moves and before the agent is asked to sign — it is never queued for a human to approve later. ' +
-      'The agent\'s signing key signs the account\'s typed data; Haven never receives the key.',
+      'Sends the amount by redeeming the agent\'s on-chain budget delegation, account to recipient with no funding leg. ' +
+      'Budget, recipient and expiry are enforced on-chain while the transfer is prepared, so a request outside them is declined before any money moves or any signing — never queued for a human to approve. ' +
+      'The agent\'s signing key signs the account\'s typed data, refusing any that mismatches the payment\'s hash; Haven never receives the key.',
     nextActionGuidance:
       'On a decline, report the reason to the user and ask them to grant or raise the budget in Haven — there is nothing to poll and no approval will arrive. ' +
       'After a successful send, poll haven_get_payment_status until nextAction=none.',

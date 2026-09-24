@@ -5696,6 +5696,47 @@ export const openapiSpec = {
         },
       },
     },
+    '/payments/{id}/sign-context': {
+      get: {
+        tags: ['Payments'],
+        operationId: 'getDirectPaymentSignContext',
+        summary: 'Fetch the exact signing payload for a pending DIRECT delegation-rail payment.',
+        description:
+          'Read-only byte-free signing handoff (#3271, the direct sibling of GET /x402/{id}/' +
+          'sign-context from #1263): re-serves the stored delegation-rail sign_data.typed_data for ' +
+          'a plain POST /payments intent, rebuilt from the stored UserOperation exactly as the ' +
+          'idempotent replay of the create rebuilds it, so a LOCAL SIGNER can fetch exact bytes by payment_id instead of an ' +
+          'agent re-emitting a multi-KB EIP-712 payload. Constructs and signs nothing new. An ' +
+          'x402/MPP intent id is refused here (fetch GET /x402/{id}/sign-context instead), and a ' +
+          'direct intent id is refused there — each surface serves only its own rail\'s shape.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ $ref: '#/components/parameters/PaymentId' }],
+        responses: {
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
+          '200': {
+            description: 'The rebuilt direct sign_data — identical to what the idempotent replay serves.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DirectSignContext' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '403': agentAuthForbidden,
+          '404': errorResponse,
+          '409': errorResponse,
+          '410': {
+            ...errorResponse,
+            description:
+              'The intent is pinned to a retired rail — the AllowanceModule rail (#1986) or the ' +
+              'session rail (#834) — or it has expired (with the same lazy-expire GET /x402/{id}/' +
+              'sign-context performs). A retired-rail intent is refused whatever its status.',
+          },
+        },
+      },
+    },
     '/payments/{id}/sign': {
       post: {
         tags: ['Payments'],
@@ -8466,6 +8507,58 @@ export const openapiSpec = {
           status: { type: 'string', enum: ['pending_signature'] },
           expires_at: isoDateTime,
           sign_data: paymentSignData,
+        },
+        additionalProperties: false,
+      },
+      // #3271: the direct-payment byte-free sign-context response
+      // (`GET /payments/{id}/sign-context`). Deliberately its own schema, not
+      // a reuse of `paymentSignData` — that shape's `sign_data` also carries
+      // `components`/`instructions`, fields the intent's ORIGINAL create/
+      // replay response already gave the caller and this handoff does not
+      // repeat.
+      DirectSignContext: {
+        type: 'object',
+        required: [
+          'payment_id',
+          'status',
+          'expires_at',
+          'direct_sign_context_version',
+          'sign_data',
+        ],
+        properties: {
+          payment_id: uuid,
+          status: { type: 'string', enum: ['pending_signature'] },
+          expires_at: isoDateTime,
+          direct_sign_context_version: {
+            type: 'integer',
+            enum: [1],
+            description:
+              'DIRECT_SIGN_CONTEXT_VERSION from @haven_ai/sdk (`userop-binding.ts`) — the version ' +
+              'every client\'s assertUserOpTypedDataBinding pins against.',
+          },
+          sign_data: {
+            type: 'object',
+            required: ['hash', 'signature_scheme', 'typed_data'],
+            properties: {
+              hash: {
+                type: 'string',
+                pattern: '^0x[0-9a-fA-F]{64}$',
+                description:
+                  'The stored ERC-4337 v0.7 UserOperation hash. Present for the integrity check ' +
+                  '(#3271) — do NOT sign it directly; sign typed_data.',
+              },
+              signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+              typed_data: {
+                type: 'object',
+                additionalProperties: true,
+                description:
+                  'The EIP-712 PackedUserOperation payload to sign VERBATIM, byte-identical to the ' +
+                  'typed_data the original POST /payments (or its idempotent replay) returned for ' +
+                  'this intent.',
+              },
+            },
+            additionalProperties: false,
+          },
         },
         additionalProperties: false,
       },

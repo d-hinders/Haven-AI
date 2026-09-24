@@ -232,6 +232,17 @@ export type {
   SweepSubmitResult,
   SweepTypedData,
 } from './sweep.js'
+export {
+  DIRECT_SIGN_CONTEXT_VERSION,
+  ENTRY_POINT_V07,
+  HYBRID_DELEGATOR_DOMAIN_NAME,
+  HYBRID_DELEGATOR_DOMAIN_VERSION,
+  PACKED_USER_OPERATION_FIELDS,
+  HavenUserOpBindingError,
+  assertUserOpTypedDataBinding,
+  isPackedUserOperationTypedData,
+  packedUserOperationHash,
+} from './userop-binding.js'
 
 // #1328: mpp.ts's demo challenge/proof helpers (parseMachinePaymentChallenge,
 // parseMachinePaymentChallengeResponse, buildMachinePaymentIdempotencyKey,

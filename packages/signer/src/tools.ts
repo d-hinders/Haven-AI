@@ -5,7 +5,10 @@ import {
   HavenError,
   HavenSigningError,
   HavenUnsupportedSignerVersionError,
+  HavenUserOpBindingError,
+  assertUserOpTypedDataBinding,
   connectorRerunCommand,
+  isPackedUserOperationTypedData,
   type X402PaymentRequired,
 } from '@haven_ai/sdk/edge'
 import { z } from 'zod/v3'
@@ -24,12 +27,49 @@ import type {
   X402FundingTypedData,
 } from './core.js'
 import {
+  fetchDirectSignContext,
   fetchX402SignContext,
   HavenSignContextError,
   type HavenIdentity,
+  type FetchedDirectSignContext,
   type FetchedSignContext,
 } from './sign-context.js'
 import { nextStepWireFields, signerRefusalStep } from './next-step.js'
+
+/**
+ * #3271: structured refusal for a direct-payment `PackedUserOperation` whose
+ * typed data does not recompute to its own `payload_hash` — the payload was
+ * altered between the Haven result and this call (a language model relaying
+ * multi-KB typed data by hand is the observed cause; #3271 was found live as
+ * an `AA24 signature error` from the bundler, after a bad signature was
+ * already produced). Modelled on `HavenBareHashRefusedError` (#3169) and the
+ * `HavenSignContextError` family (#3001): a named `code`, a `next_action`,
+ * and a typed next step. No tool can fix this from inside the call — the
+ * remedy is signing by `payment_id` (this signer then fetches the exact
+ * bytes) or passing the result's typed data unchanged — so the step names
+ * none and says why. Never reaches `signer.signDelegationTypedData` and is
+ * never audited: nothing was signed.
+ */
+export const USEROP_BINDING_MISMATCH = 'USEROP_BINDING_MISMATCH' as const
+
+export class HavenUserOpBindingRefusedError extends HavenSigningError {
+  declare readonly code: typeof USEROP_BINDING_MISMATCH
+  readonly next_action = AgentPaymentNextAction.StopAndTellUser
+  readonly step: ReturnType<typeof signerRefusalStep>
+
+  /** `message`: the SDK's `HavenUserOpBindingError.message` verbatim — it already names the mismatch and the remedy. */
+  constructor(message: string) {
+    super(message)
+    ;(this as { code: string }).code = USEROP_BINDING_MISMATCH
+    this.name = 'HavenUserOpBindingRefusedError'
+    this.step = signerRefusalStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason:
+        'call haven_sign again with payment_id alone (preferred), or with typed_data copied unchanged from the payment result',
+    })
+  }
+}
 
 /**
  * Local signer tool set. These run on the agent's machine, next to the key,
@@ -199,8 +239,13 @@ const SIGN_DESCRIPTION = [
   'and returns { signature, x402_binding }. x402_expected includes expires_at; sign before that',
   'window closes. DELEGATION-RAIL x402 accounts (#1263): pass payment_id ALONE (preferred) — this',
   'signer fetches the exact signing payload and expected context from Haven itself, so nothing',
-  'bulky ever crosses your context. Fallback: pass typed_data_b64 through UNCHANGED (never re-type',
-  'the nested typed_data JSON); the account validates that EIP-712 payload, not payload_hash.',
+  'bulky ever crosses your context. DIRECT payments (#3271, haven_send / haven_pay): payment_id',
+  'ALONE also works here — the signer fetches the exact PackedUserOperation typed data and its',
+  'payload_hash from Haven and checks them against each other before signing, so a payload corrupted',
+  'in transit is refused (USEROP_BINDING_MISMATCH) instead of producing a bad signature. Fallback for',
+  'either flow: pass typed_data_b64 through UNCHANGED (never re-type the nested typed_data JSON); the',
+  'account validates that EIP-712 payload, not payload_hash. On a direct payment the same binding',
+  'check runs on the relayed payload too.',
   'Next: call mcp__haven__haven_submit with signature, then pass x402_binding',
   'to mcp__haven-signer__haven_x402_sign_header. A bare payload_hash with no payment_id, typed_data',
   'or x402_expected is REFUSED (BARE_HASH_REFUSED): a hash carries nothing this signer can verify.',
@@ -388,7 +433,8 @@ export interface ToolFailure {
   fallback?: string
   /**
    * #3001: present on `SIGN_CONTEXT_REFUSED` — the HTTP status the backend
-   * answered the `/x402/:id/sign-context` fetch with (404, 410, …).
+   * answered the sign-context fetch with (404, 410, …) — the x402 fetch, or
+   * the direct `/payments/:id/sign-context` fetch since #3271.
    */
   http_status?: number
   /** #3001: the backend's own `error_code` on `SIGN_CONTEXT_REFUSED` (`expired`, `already_executed`, `not_signable`, `sign_context_unavailable`). */
@@ -416,10 +462,15 @@ export interface ToolHandlerOptions {
  * `typed_data_b64` wins over `typed_data`: it is the copy-through-safe form —
  * one opaque string the agent relays unchanged, instead of re-emitting multi-KB
  * nested JSON (a redemption UserOp's callData) between two tool calls. The live
- * #1255 failure was exactly that: the payload arrived altered, the digest check
- * refused (correctly), and the purchase died with no defect anywhere in the
- * chain. The decoded object goes through the SAME digest verification as a
- * plain typed_data — this changes the transport, never the trust model.
+ * #1255 failure was exactly that: the payload arrived altered, the x402 digest
+ * check refused it (correctly), and the purchase died with no defect anywhere
+ * in the chain. The decoded object goes through the SAME verification as a
+ * plain typed_data downstream — this changes the transport, never the trust
+ * model. On the x402 funding leg that verification was already a digest check
+ * against the Haven-signed expected context (#1138); on the DIRECT-payment
+ * `PackedUserOperation` path it is #3271's binding check against the payment's
+ * own `payload_hash` — before #3271 that path had no digest check at all, so
+ * an altered direct-payment payload signed silently instead of refusing.
  */
 function resolveTypedData(args: {
   typed_data?: Record<string, unknown>
@@ -447,17 +498,41 @@ export function createToolHandlers(
   signer: EdgeSigner,
   options: ToolHandlerOptions = {},
 ): Record<SignerToolName, (input: unknown) => Promise<ToolPayload>> {
+  function checkPayloadHashMatch(
+    suppliedHash: string | undefined,
+    fetchedHash: string,
+    paymentId: string,
+  ): void {
+    if (suppliedHash && suppliedHash.toLowerCase() !== fetchedHash.toLowerCase()) {
+      throw new HavenSigningError(
+        'The supplied payload_hash does not match the signing context Haven serves for ' +
+          `payment ${paymentId}. Pass payment_id alone, or check which quote the ` +
+          'hash came from.',
+      )
+    }
+  }
+
   /**
-   * #1263: resolve the signing inputs for a payment_id call by fetching the
-   * exact bytes from Haven. Returns null when the caller did not use the
-   * payment_id path. The fetched payload is untrusted input like any tool
-   * argument — it still goes through the binding verification and digest
+   * #1263 / #3271: resolve the signing inputs for a payment_id call by
+   * fetching the exact bytes from Haven. Returns null when the caller did not
+   * use the payment_id path. The fetched payload is untrusted input like any
+   * tool argument — it still goes through the binding verification and digest
    * re-derivation downstream; this only changes HOW the bytes arrive.
+   *
+   * Tries the x402 sign-context first, always — x402 behaviour is unchanged.
+   * `haven_sign` (never `haven_sign_x402`) additionally falls back to the
+   * direct-payment sign-context (`GET /payments/:id/sign-context`) when the
+   * backend refuses the x402 fetch with its 409 `sign_context_unavailable` —
+   * the shape this payment_id names a direct payment, not an x402 intent.
    */
-  async function resolveSignContext(args: {
-    payment_id?: string
-    payload_hash?: string
-  }): Promise<FetchedSignContext | null> {
+  async function resolveSignContext(
+    args: { payment_id?: string; payload_hash?: string },
+    opts: { allowDirectFallback: boolean },
+  ): Promise<
+    | { kind: 'x402'; ctx: FetchedSignContext }
+    | { kind: 'direct'; ctx: FetchedDirectSignContext }
+    | null
+  > {
     if (!args.payment_id) return null
     const identity = (await options.signContext?.loadIdentity()) ?? null
     if (!identity) {
@@ -467,39 +542,64 @@ export function createToolHandlers(
           'to restore it, or pass typed_data_b64 from the quote result instead.',
       )
     }
-    const ctx = await fetchX402SignContext(
-      identity,
-      args.payment_id,
-      options.signContext?.fetchImpl,
-    )
-    if (
-      args.payload_hash &&
-      args.payload_hash.toLowerCase() !== ctx.payloadHash.toLowerCase()
-    ) {
-      throw new HavenSigningError(
-        'The supplied payload_hash does not match the signing context Haven serves for ' +
-          `payment ${args.payment_id}. Pass payment_id alone, or check which quote the ` +
-          'hash came from.',
-      )
+    try {
+      const ctx = await fetchX402SignContext(identity, args.payment_id, options.signContext?.fetchImpl)
+      checkPayloadHashMatch(args.payload_hash, ctx.payloadHash, args.payment_id)
+      return { kind: 'x402', ctx }
+    } catch (err) {
+      if (
+        opts.allowDirectFallback &&
+        err instanceof HavenSignContextError &&
+        err.http_status === 409 &&
+        err.backend_error_code === 'sign_context_unavailable'
+      ) {
+        let ctx: FetchedDirectSignContext
+        try {
+          ctx = await fetchDirectSignContext(identity, args.payment_id, options.signContext?.fetchImpl)
+        } catch (directErr) {
+          // The x402 route also answers 409 `sign_context_unavailable` for an
+          // x402 row it cannot serve (legacy rail). The direct route then
+          // 409s back with the same code, pointing at the x402 route: the
+          // x402 refusal is the real reason, so surface that one.
+          if (
+            directErr instanceof HavenSignContextError &&
+            directErr.http_status === 409 &&
+            directErr.backend_error_code === 'sign_context_unavailable'
+          ) {
+            throw err
+          }
+          throw directErr
+        }
+        checkPayloadHashMatch(args.payload_hash, ctx.payloadHash, args.payment_id)
+        return { kind: 'direct', ctx }
+      }
+      throw err
     }
-    return ctx
   }
 
   return {
     haven_sign: async (input) =>
       runTool(async () => {
         const args = parse('haven_sign', coerceX402Expected(input))
-        const fetched = await resolveSignContext(args)
-        const typedData = fetched?.typedData ?? resolveTypedData(args)
-        const payloadHash = fetched?.payloadHash ?? args.payload_hash
+        // #3271: only haven_sign falls back to the direct-payment
+        // sign-context; haven_sign_x402 never does (below).
+        const resolved = await resolveSignContext(args, { allowDirectFallback: true })
+        const typedData = resolved?.ctx.typedData ?? resolveTypedData(args)
+        const payloadHash = resolved?.ctx.payloadHash ?? args.payload_hash
         if (!payloadHash) {
           throw new HavenSigningError(
-            'Pass payment_id (preferred for delegation-rail x402) or payload_hash.',
+            'Pass payment_id (preferred for delegation-rail x402 or direct payments) or payload_hash.',
           )
         }
-        const expectedRaw = fetched
-          ? parseFetchedExpected(fetched)
-          : args.x402_expected
+        // A direct-payment fetch (`resolved.kind === 'direct'`) carries no
+        // x402 expected context at all — it must not reach
+        // parseFetchedExpected, which assumes the x402 shape.
+        const expectedRaw =
+          resolved?.kind === 'x402'
+            ? parseFetchedExpected(resolved.ctx)
+            : resolved?.kind === 'direct'
+              ? null
+              : args.x402_expected
         const x402Expected = expectedRaw ? toExpectedX402(expectedRaw) : null
         const result = x402Expected
           ? await signFundingLeg(signer, x402Expected, payloadHash, typedData)
@@ -532,6 +632,25 @@ export function createToolHandlers(
                   'verified against. Call this tool with { payment_id } instead (the signer then ' +
                   'fetches and verifies the context itself), or use haven_sign_x402.',
               )
+            }
+            // #3271: a direct-payment PackedUserOperation — the digest check
+            // that binds this exact typed data to its own payload_hash, in
+            // the HybridDeleGator domain of its own sender, against the v0.7
+            // EntryPoint. Runs whether the bytes arrived by tool argument or
+            // by the payment_id fetch above; a corrupted payload is refused
+            // here, before a signature over the wrong digest is produced.
+            // A FETCHED direct context is served as `eip712_userop`, so it
+            // must BE a PackedUserOperation: any other shape there is refused
+            // by the same check rather than signed unchecked.
+            if (resolved?.kind === 'direct' || isPackedUserOperationTypedData(typedData)) {
+              try {
+                assertUserOpTypedDataBinding(typedData, payloadHash)
+              } catch (err) {
+                if (err instanceof HavenUserOpBindingError) {
+                  throw new HavenUserOpBindingRefusedError(err.message)
+                }
+                throw err
+              }
             }
             const signature = await signer.signDelegationTypedData(typedData)
             await auditSigning('haven_sign', payloadHash)
@@ -570,7 +689,12 @@ export function createToolHandlers(
         // haven_x402_sign_header) and unwrap a whole-`x402`-object x402_expected
         // before validation.
         const args = parse('haven_sign_x402', coerceX402Expected(coercePaymentRequired(input)))
-        const fetched = await resolveSignContext(args)
+        // #3271: haven_sign_x402 NEVER falls back to the direct-payment
+        // sign-context — a payment_id that names a direct payment has no
+        // x402 context to fund a merchant retry with, so it is refused here
+        // exactly as an unreachable/malformed fetch already was.
+        const resolved = await resolveSignContext(args, { allowDirectFallback: false })
+        const fetched = resolved?.kind === 'x402' ? resolved.ctx : undefined
         const payloadHash = fetched?.payloadHash ?? args.payload_hash
         const expectedRaw = fetched ? parseFetchedExpected(fetched) : args.x402_expected
         if (!payloadHash || !expectedRaw) {
@@ -760,6 +884,18 @@ function normalizeError(err: unknown): ToolFailure {
   if (err instanceof HavenBareHashRefusedError) {
     // #3169: the bare-hash refusal, structured like the others. Checked BEFORE
     // the `HavenSigningError` branch below since this class extends it.
+    return {
+      success: false,
+      code: err.code,
+      message: err.message,
+      next_action: err.next_action,
+      ...nextStepWireFields(err.step),
+    }
+  }
+  if (err instanceof HavenUserOpBindingRefusedError) {
+    // #3271: the UserOp binding-mismatch refusal, structured like the others.
+    // Checked BEFORE the `HavenSigningError` branch below since this class
+    // extends it.
     return {
       success: false,
       code: err.code,

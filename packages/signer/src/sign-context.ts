@@ -16,7 +16,7 @@
  */
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { AgentPaymentNextAction, HavenSigningError } from '@haven_ai/sdk/edge'
+import { AgentPaymentNextAction, DIRECT_SIGN_CONTEXT_VERSION, HavenSigningError } from '@haven_ai/sdk/edge'
 import type { NextStep } from '@haven_ai/sdk/edge'
 import { nextStepWireFields, signerRefusalStep } from './next-step.js'
 
@@ -41,6 +41,7 @@ export type SignContextErrorCode =
 
 /**
  * Structured refusal for every throw site in `fetchX402SignContext` (#3001,
+ * and since #3271 `fetchDirectSignContext`, via the `flow` argument;
  * follow-up from the #2985/#2986 review). Before this, every one of these —
  * timeout, unreachable host, a non-ok backend response (404/410/…), a
  * malformed body — reached the wire as prose inside the generic
@@ -59,6 +60,10 @@ export type SignContextErrorCode =
  * signer-local, not part of the shared `@haven_ai/sdk` error taxonomy, so that
  * type does not belong there).
  */
+/** #3271: the relay remedy for a direct payment whose sign-context fetch failed. */
+const DIRECT_RELAY_FALLBACK =
+  'call haven_sign with payload_hash and typed_data_b64 from the haven_send / haven_pay result, passed through unchanged'
+
 export class HavenSignContextError extends HavenSigningError {
   declare readonly code: SignContextErrorCode
   /**
@@ -67,24 +72,31 @@ export class HavenSignContextError extends HavenSigningError {
    * body this signer could not read. `typed_data_b64` is NOT in the default
    * quote result since #1272: obtain it by re-running the SAME quote tool
    * with the SAME idempotency_key plus `include_signing_payload: true`.
-   * Absent on a backend REFUSAL: an expired, executed or unsignable intent
-   * cannot be rescued by re-signing its bytes.
+   * Absent on a backend REFUSAL (an expired, executed or unsignable intent
+   * cannot be rescued by re-signing its bytes) — with one #3271 exception: a
+   * 404 from the DIRECT fetch (an older backend with no direct route), where
+   * the `haven_send` / `haven_pay` result's relay fields still work.
    */
   readonly fallback?: 'typed_data_b64'
   /**
    * #3001: `AgentPaymentNextAction` values the signer already emits — the
    * version-mismatch refusal's `stop_and_tell_user` for the classes where
    * retrying the same call cannot help, and `payment_window_expired` (with
-   * `retry_with_new_quote`) for the backend's 410 `expired`, exactly as the
-   * plain `HavenError` branch already does for that code.
+   * `retry_with_new_quote`) for the x402 fetch's 410 / `expired`, exactly as
+   * the plain `HavenError` branch already does for that code. On the direct
+   * fetch (#3271) only `error_code: 'expired'` means an expired window, with
+   * no `retry_with_new_quote`; a bare 410 there is a retired-rail tombstone.
    */
   readonly next_action: string
   /**
    * #3103 (epic #3105, decisions 1 and 3): the typed next step beside the
    * action. A refusal Haven made (`SIGN_CONTEXT_REFUSED`, not expired) names
-   * the hosted status read with the payment id; a transport failure or a
+   * the hosted status read with the payment id — except a 404 from the direct
+   * fetch (#3271), which names none and points at the `typed_data_b64`
+   * relay; a transport failure or a
    * malformed body names no tool — the remedy is re-running the SAME quote
-   * tool with `include_signing_payload: true` — and an expired window names
+   * tool with `include_signing_payload: true` (x402), or the payment
+   * result's `typed_data_b64` relay (direct, #3271) — and an expired window names
    * none either (which quote tool depends on the flow). Never null: a step
    * with no tool carries `next_tool_omitted_reason`. Additive: the class is
    * not exported from the package index — the published surface is the
@@ -109,6 +121,11 @@ export class HavenSignContextError extends HavenSigningError {
     refusal: { httpStatus: number; errorCode?: string } | undefined,
     /** #3103: the payment the context was fetched for, so a refusal can name the status read. */
     paymentId: string,
+    /**
+     * #3271: which fetch failed. A DIRECT payment has no quote tool to re-run
+     * and its result always carries `typed_data_b64`, so its remedies differ.
+     */
+    flow: 'x402' | 'direct' = 'x402',
   ) {
     super(message)
     ;(this as { code: string }).code = code
@@ -117,7 +134,29 @@ export class HavenSignContextError extends HavenSigningError {
     if (code === 'SIGN_CONTEXT_REFUSED') {
       this.http_status = refusal?.httpStatus
       this.backend_error_code = refusal?.errorCode
-      if (refusal?.httpStatus === 410 || refusal?.errorCode === 'expired') {
+      if (flow === 'direct' && refusal?.httpStatus === 404) {
+        // Either the payment is not this agent's, or the backend predates
+        // #3271 and has no direct sign-context route at all (deploy skew). The
+        // payment result's relay fields still work whenever the payment is real.
+        this.fallback = 'typed_data_b64'
+        this.next_action = AgentPaymentNextAction.StopAndTellUser
+        step = signerRefusalStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: null,
+          nextToolOmittedReason: DIRECT_RELAY_FALLBACK,
+        })
+      } else if (flow === 'direct' && refusal?.errorCode === 'expired') {
+        // Keyed on the backend's `expired` code, never a bare 410: the direct
+        // route also answers 410 for a retired-rail row (no error_code), and a
+        // re-send cannot help there, so that falls through to stop-and-tell.
+        this.next_action = AgentPaymentNextAction.PaymentWindowExpired
+        step = signerRefusalStep({
+          nextAction: AgentPaymentNextAction.PaymentWindowExpired,
+          nextTool: null,
+          nextToolOmittedReason:
+            'call haven_send / haven_pay again with the same idempotency_key — the expired payment frees it',
+        })
+      } else if (flow === 'x402' && (refusal?.httpStatus === 410 || refusal?.errorCode === 'expired')) {
         this.next_action = AgentPaymentNextAction.PaymentWindowExpired
         this.retry_with_new_quote = true
         step = signerRefusalStep({
@@ -141,7 +180,9 @@ export class HavenSignContextError extends HavenSigningError {
         nextAction: AgentPaymentNextAction.StopAndTellUser,
         nextTool: null,
         nextToolOmittedReason:
-          're-run the SAME hosted quote tool with the same idempotency_key and include_signing_payload: true, then pass its typed_data_b64 to this signer',
+          flow === 'direct'
+            ? DIRECT_RELAY_FALLBACK
+            : 're-run the SAME hosted quote tool with the same idempotency_key and include_signing_payload: true, then pass its typed_data_b64 to this signer',
       })
     }
     Object.assign(this, nextStepWireFields(step))
@@ -195,7 +236,8 @@ export interface FetchedSignContext {
  * equality are what make it safe to use, not its provenance.
  */
 /**
- * #2985: the signer's ONLY network call is bounded. Without a signal a hung
+ * #2985: the signer's network calls (the x402 and, since #3271, the direct
+ * sign-context reads) are bounded. Without a signal a hung
  * `/sign-context` (half-open connection, stalled backend) hung the signer
  * tool call — and so the agent — indefinitely while the funding window ran
  * out, and the `typed_data_b64` fallback the error names was unreachable
@@ -294,5 +336,134 @@ export async function fetchX402SignContext(
       paymentRequired && typeof paymentRequired === 'object' && !Array.isArray(paymentRequired)
         ? (paymentRequired as Record<string, unknown>)
         : null,
+  }
+}
+
+/**
+ * #3271: `direct_sign_context_version`s this signer install understands.
+ * Derived from the SDK's `DIRECT_SIGN_CONTEXT_VERSION` — never a second
+ * hand-maintained literal, exactly like `SUPPORTED_X402_EXPECTED_VERSIONS`
+ * mirrors `core.ts`'s enforcement of the x402 versions.
+ */
+export const SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS: readonly number[] = [DIRECT_SIGN_CONTEXT_VERSION]
+
+/**
+ * The direct-payment counterpart of `FetchedSignContext`: a `POST /payments`
+ * (`haven_send` / `haven_pay`) signing payload fetched by `payment_id`, with
+ * no x402 expected context — the account is validating its OWN
+ * `PackedUserOperation`, not a grant to a third party.
+ */
+export interface FetchedDirectSignContext {
+  paymentId: string
+  payloadHash: string
+  typedData: Record<string, unknown>
+  status: string
+  expiresAt?: string
+}
+
+/**
+ * GET /payments/:id/sign-context (#3271). The direct-payment sibling of
+ * `fetchX402SignContext` — same auth header, same timeout, same
+ * refusal-structuring — for a payment that carries no x402 context at all.
+ * `resolveSignContext` in `tools.ts` calls this ONLY after
+ * `fetchX402SignContext` refuses with the backend's 409
+ * `sign_context_unavailable`, so `haven_sign_x402` (which never falls back)
+ * cannot reach it.
+ */
+export async function fetchDirectSignContext(
+  identity: HavenIdentity,
+  paymentId: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs: number = SIGN_CONTEXT_TIMEOUT_MS,
+): Promise<FetchedDirectSignContext> {
+  let response: Response
+  try {
+    response = await fetchImpl(
+      `${identity.apiUrl}/payments/${encodeURIComponent(paymentId)}/sign-context`,
+      {
+        headers: { Authorization: `Bearer ${identity.apiKey}` },
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+    )
+  } catch (err) {
+    const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+    throw new HavenSignContextError(
+      timedOut
+        ? `Haven did not answer the direct-payment signing-context fetch for ${paymentId} within ${timeoutMs} ms. ` +
+          'Retry, or pass typed_data_b64 from the payment result instead.'
+        : `Could not reach Haven to fetch the direct-payment signing context for ${paymentId}: ` +
+          `${err instanceof Error ? err.message : String(err)}. ` +
+          'Retry, or pass typed_data_b64 from the payment result instead.',
+      timedOut ? 'SIGN_CONTEXT_TIMEOUT' : 'SIGN_CONTEXT_UNREACHABLE',
+      undefined,
+      paymentId,
+      'direct',
+    )
+  }
+  let body: Record<string, unknown>
+  try {
+    body = (await response.json()) as Record<string, unknown>
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new HavenSignContextError(
+        `Haven did not finish sending the direct-payment signing context for ${paymentId} within ${timeoutMs} ms. ` +
+          'Retry, or pass typed_data_b64 from the payment result instead.',
+        'SIGN_CONTEXT_TIMEOUT',
+        undefined,
+        paymentId,
+        'direct',
+      )
+    }
+    body = {}
+  }
+  if (!response.ok) {
+    const detail =
+      typeof body.error === 'string' ? body.error : `HTTP ${response.status}`
+    throw new HavenSignContextError(
+      `Haven refused the direct-payment signing-context fetch for ${paymentId}: ${detail}` +
+        (response.status === 404
+          ? ' — either the payment_id is not from this agent’s own POST /payments call, or this ' +
+            'Haven backend predates #3271. Pass payload_hash and typed_data_b64 from the ' +
+            'haven_send / haven_pay result, unchanged, instead.'
+          : body.error_code === 'expired'
+            ? ' The payment window has expired; call haven_send / haven_pay again with the same idempotency_key.'
+            : ''),
+      'SIGN_CONTEXT_REFUSED',
+      { httpStatus: response.status, errorCode: typeof body.error_code === 'string' ? body.error_code : undefined },
+      paymentId,
+      'direct',
+    )
+  }
+  const signData = body.sign_data as Record<string, unknown> | undefined
+  const version = body.direct_sign_context_version
+  if (
+    !signData ||
+    typeof signData.hash !== 'string' ||
+    !signData.typed_data ||
+    typeof signData.typed_data !== 'object' ||
+    signData.signature_scheme !== 'eip712_userop' ||
+    typeof version !== 'number' ||
+    !SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS.includes(version)
+  ) {
+    throw new HavenSignContextError(
+      typeof version === 'number' && !SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS.includes(version)
+        ? `The Haven direct-payment sign-context response is version ${version}, which this signer ` +
+          `does not support (supported: ${SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS.join(', ')}). ` +
+          'Update @haven_ai/signer.'
+        : 'The Haven direct-payment sign-context response is missing sign_data.typed_data, or its ' +
+          "signature_scheme is not 'eip712_userop' — the backend may predate #3271. Pass typed_data_b64 " +
+          'from the payment result instead.',
+      'SIGN_CONTEXT_MALFORMED',
+      undefined,
+      paymentId,
+      'direct',
+    )
+  }
+  return {
+    paymentId: String(body.payment_id ?? paymentId),
+    payloadHash: signData.hash,
+    typedData: signData.typed_data as Record<string, unknown>,
+    status: typeof body.status === 'string' ? body.status : 'pending_signature',
+    expiresAt: typeof body.expires_at === 'string' ? body.expires_at : undefined,
   }
 }

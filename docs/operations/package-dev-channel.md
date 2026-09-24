@@ -47,6 +47,15 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
+> **Re-verification (#3271, direct sign-context, 2026-09-24):** this doc is
+> coupled through `packages/signer/src/credentials.ts`, where the only change
+> is JSDoc: it now names the signer's second read-only fetch
+> (`GET /payments/:payment_id/sign-context`, for a direct payment via
+> `haven_sign`). Credential resolution, file modes and the `identity.json`
+> lookup are unchanged, and no version, dist-tag, channel or publish behaviour
+> moves. `last-verified` re-stamped to 2026-09-24 for this note only; nothing
+> else in this document was re-verified.
+>
 > **Re-verification (#3032, connector request fields and owner-route auth
 > order, 2026-09-24):** this doc is coupled through
 > `packages/backend/src/routes/agent-connection-setups.ts`. The change moves
@@ -57,7 +66,7 @@ and the `release` skill.
 > document describes for the dev channel is unchanged, and no channel,
 > dist-tag, version-order or publish behaviour moves. Scope of this note: that
 > file — nothing else in this document was re-verified.
-
+>
 > **Re-verification (#3259, failed tombstone mirror, 2026-09-23):** this doc is
 > coupled through `packages/connect/src/{cli,runtime}.ts`. The change: a failed
 > ledger mirror no longer aborts a retirement, so `--replace` still removes the

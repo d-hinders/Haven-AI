@@ -34,9 +34,9 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { z } from 'zod/v3'
-import { HavenClient, buildX402ExpectedMessage } from '@haven_ai/sdk'
+import { HavenClient, buildX402ExpectedMessage, packedUserOperationHash } from '@haven_ai/sdk'
 import { privateKeyToAccount } from 'viem/accounts'
-import { hashTypedData } from 'viem'
+import { hashTypedData, recoverTypedDataAddress } from 'viem'
 import {
   createEdgeSigner,
   createToolHandlers as createSignerHandlers,
@@ -99,6 +99,10 @@ const TYPED_DATA = {
  */
 const REALISTIC_TYPED_DATA = {
   domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: DELEGATE_ADDR },
+  // #3271: domain.verifyingContract === message.sender is one of the four
+  // things `assertUserOpTypedDataBinding` (`@haven_ai/sdk`) pins, so this
+  // fixture (already used against the direct rail below) stays a realistic
+  // PASS under that check too, not just under the pre-#3271 signer.
   types: {
     PackedUserOperation: [
       { name: 'sender', type: 'address' },
@@ -651,17 +655,41 @@ describe('Hosted MCP + Edge Signer integration', () => {
     if (!payload.success) expect(payload.message).toContain('does not match the signing context')
   })
 
-  it('a DIRECT-payment payment_id surfaces the backend refusal with its fallback (#1263)', async () => {
-    const signContextFetch = (async () =>
-      new Response(
+  // #3271: this used to stub the OLD `/x402/:id/sign-context` 409 a direct
+  // payment_id always drew ("Not an x402 intent…"). That refusal is retired
+  // for a direct row now that `GET /payments/:id/sign-context` exists
+  // (criterion 1): `resolveSignContext` in `@haven_ai/signer`'s `tools.ts`
+  // tries the x402 fetch first, and ONLY on that exact 409
+  // (`sign_context_unavailable`) falls back to `fetchDirectSignContext`
+  // (criterion 2) — so this stub answers both routes, x402 refusing and
+  // direct succeeding, the way the real backend now does.
+  it('haven_sign({ payment_id }) on a DIRECT payment fetches the direct sign context and signs (#3271)', async () => {
+    const realisticHash = packedUserOperationHash(REALISTIC_TYPED_DATA)
+    const directPaymentId = 'pay_direct_3271'
+    const signContextFetch = (async (url: string) => {
+      if (url.includes('/x402/')) {
+        return new Response(
+          JSON.stringify({
+            error:
+              'Not an x402 intent — sign-context serves the x402 signing handoff only. ' +
+              'For a direct payment, sign the typed_data_b64 from the haven_pay/haven_send result instead; ' +
+              'a current @haven_ai/signer fetches GET /payments/:id/sign-context itself.',
+            error_code: 'sign_context_unavailable',
+          }),
+          { status: 409 },
+        )
+      }
+      return new Response(
         JSON.stringify({
-          error:
-            'Not an x402 intent — sign-context serves the x402 signing handoff only. ' +
-            'For a direct payment, sign the typed_data_b64 from the haven_pay/haven_send result instead.',
-          error_code: 'sign_context_unavailable',
+          payment_id: directPaymentId,
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          direct_sign_context_version: 1,
+          sign_data: { hash: realisticHash, signature_scheme: 'eip712_userop', typed_data: REALISTIC_TYPED_DATA },
         }),
-        { status: 409 },
-      )) as typeof fetch
+        { status: 200 },
+      )
+    }) as typeof fetch
     const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
     const signerHandlers = createSignerHandlers(edgeSigner, {
       signContext: {
@@ -669,9 +697,81 @@ describe('Hosted MCP + Edge Signer integration', () => {
         fetchImpl: signContextFetch,
       },
     })
-    const payload = await signerHandlers.haven_sign({ payment_id: FUNDING_PAYMENT_ID })
+    const signed = ok<{ signature: string }>(
+      await signerHandlers.haven_sign({ payment_id: directPaymentId }),
+    )
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    const recovered = await recoverTypedDataAddress({
+      ...(REALISTIC_TYPED_DATA as Parameters<typeof hashTypedData>[0]),
+      signature: signed.signature as `0x${string}`,
+    })
+    expect(recovered.toLowerCase()).toBe(DELEGATE_ADDR.toLowerCase())
+  })
+
+  // #3271 criterion 3: the direct fetch above is fine, but a served typed
+  // data whose recomputed v0.7 hash disagrees with the fetched payload_hash
+  // must refuse before signing — the same corruption class #1255 fixed for
+  // the copy-through relay, now caught even when Haven itself served the
+  // mismatch (or a MITM altered the fetch response in transit).
+  it('a direct sign-context whose typed data does not match its own payload_hash is refused (#3271)', async () => {
+    const directPaymentId = 'pay_direct_corrupt'
+    const corrupted = { ...REALISTIC_TYPED_DATA, message: { ...(REALISTIC_TYPED_DATA as { message: Record<string, unknown> }).message, callData: '0xdeadbeef' } }
+    const signContextFetch = (async (url: string) => {
+      if (url.includes('/x402/')) {
+        return new Response(
+          JSON.stringify({ error: 'not an x402 intent', error_code: 'sign_context_unavailable' }),
+          { status: 409 },
+        )
+      }
+      return new Response(
+        JSON.stringify({
+          payment_id: directPaymentId,
+          status: 'pending_signature',
+          // The real (uncorrupted) hash — mismatched against the corrupted typed data below.
+          direct_sign_context_version: 1,
+          sign_data: {
+            hash: packedUserOperationHash(REALISTIC_TYPED_DATA),
+            signature_scheme: 'eip712_userop',
+            typed_data: corrupted,
+          },
+        }),
+        { status: 200 },
+      )
+    }) as typeof fetch
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner, {
+      signContext: {
+        loadIdentity: async () => ({ apiUrl: 'http://haven.test', apiKey: 'sk_agent_ctx' }),
+        fetchImpl: signContextFetch,
+      },
+    })
+    const payload = await signerHandlers.haven_sign({ payment_id: directPaymentId })
     expect(payload.success).toBe(false)
-    if (!payload.success) expect(payload.message).toContain('typed_data_b64')
+    if (!payload.success) expect(payload.message).toContain('does not match')
+  })
+
+  // The OLD relay is the fallback this issue keeps working, not a path it
+  // retires: an agent (or an older @haven_ai/signer that never gained the
+  // direct fetch) that copies `payload_hash` + `typed_data_b64` from a
+  // haven_pay/haven_send result through unchanged must still get a valid
+  // signature. REALISTIC_TYPED_DATA's own hash (never a hand-picked dummy) —
+  // so this stays green after criterion 3's UserOp binding check lands too.
+  it('an OLD-style relay (payload_hash + typed_data_b64 from the hosted result) still signs (#3271)', async () => {
+    const realisticHash = packedUserOperationHash(REALISTIC_TYPED_DATA)
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner)
+    const signed = ok<{ signature: string }>(
+      await signerHandlers.haven_sign({
+        payload_hash: realisticHash,
+        typed_data_b64: Buffer.from(JSON.stringify(REALISTIC_TYPED_DATA)).toString('base64'),
+      }),
+    )
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    const recovered = await recoverTypedDataAddress({
+      ...(REALISTIC_TYPED_DATA as Parameters<typeof hashTypedData>[0]),
+      signature: signed.signature as `0x${string}`,
+    })
+    expect(recovered.toLowerCase()).toBe(DELEGATE_ADDR.toLowerCase())
   })
 
   it('payment_id without a local identity refuses with the fallback named (#1263)', async () => {

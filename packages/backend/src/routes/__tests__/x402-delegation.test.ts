@@ -2159,6 +2159,12 @@ describe('x402 sign-context by payment_id (#1263)', () => {
     expect(mockQuery.mock.calls.some((c) => /UPDATE payment_intents/i.test(String(c[0])))).toBe(true)
   })
 
+  // #3271: a direct intent now has its own byte-free handoff at
+  // `GET /payments/:id/sign-context` (`routes/__tests__/
+  // payments-direct-sign-context.test.ts`). This route's refusal for a
+  // direct payment_id keeps its error_code and its typed_data_b64 instruction
+  // (old signers key on the code, and their agents follow the instruction);
+  // it only gains a pointer to the direct route for current signers.
   it('409s a DIRECT (non-x402) payment intent with the fallback named', async () => {
     serveIntentRow([{ ...PENDING_ROW, x402_resource_url: null, payment_resource_url: null }])
     const res = await app.inject({

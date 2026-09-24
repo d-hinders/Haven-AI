@@ -6,6 +6,7 @@ import {
   addressFromKey,
   verifySignature,
 } from './signer.js'
+import { assertUserOpTypedDataBinding } from './userop-binding.js'
 import type { PaymentReceipt, ReceiptVerification } from './receipt.js'
 import type {
   HavenClientConfig,
@@ -290,7 +291,8 @@ export class HavenClient {
   /**
    * Send a payment in one call.
    *
-   * Creates the intent, signs the hash, submits the signature,
+   * Creates the intent, signs its `sign_data` (a delegation-rail intent's
+   * EIP-712 typed data, after the #3271 UserOp binding check), submits the signature,
    * and polls until confirmed (or throws on failure/timeout).
    *
    * Requires `delegateKey` to be set in the client config.
@@ -305,8 +307,10 @@ export class HavenClient {
     // Step 1: Create intent
     const intent = await this.createIntent(request)
 
-    // Step 2: Sign
-    const signature = this.sign(intent.signData.hash)
+    // Step 2: Sign — through signForData so every rail's typed-data checks
+    // (including the #3271 UserOp binding check) run before signing, rather
+    // than signing intent.signData.hash directly.
+    const signature = await this.signForData(intent.signData)
 
     // Step 3: Submit
     await this.submitSignature(intent.paymentId, signature)
@@ -520,6 +524,11 @@ export class HavenClient {
           'sign_data.signature_scheme is eip712_userop but typed_data is missing — refusing to sign the bare hash (the account would reject it).',
         )
       }
+      // #3271: refuse before signing unless the typed data recomputes to
+      // exactly signData.hash, in the HybridDeleGator domain of its own
+      // sender, against the v0.7 EntryPoint — a corrupted typed-data payload
+      // used to produce a valid-looking signature over the wrong digest.
+      assertUserOpTypedDataBinding(signData.typed_data, signData.hash)
       return signUserOpTypedDataForDelegation(this.delegateKey, signData.typed_data as never)
     }
     if (scheme === 'eip712_delegation') {

@@ -68,8 +68,9 @@ review. The regulatory guardrails are risk guidance, not a legal opinion.
 
 Local MCP keeps signing local but loads the key into the same process that
 performs orchestration. Hosted mode narrows that key surface to a dedicated
-sign-only signer, whose entire network surface is one authenticated, read-only
-sign-context fetch from Haven (#1263) that never carries the key.
+sign-only signer, whose entire network surface is an authenticated, read-only
+sign-context fetch from Haven (#1263 for x402, #3271 for direct payments) that
+never carries the key.
 
 The same boundary decides **who retires a superseded agent** (#2561). A
 connector run on a machine that already holds agents leaves those agents alive

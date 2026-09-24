@@ -12,6 +12,7 @@ import {
 } from './mcp-merchant-transport.js'
 import { X402UnexpectedStatusError } from './types.js'
 import type { X402PaymentOption } from './types.js'
+import { buildValidUserOpSignData } from './__fixtures__/valid-userop.js'
 
 // #3118: the official x402 MCP transport profile — payment-required as an
 // `isError: true` tool RESULT (HTTP 200), payment in
@@ -19,18 +20,10 @@ import type { X402PaymentOption } from './types.js'
 // `result._meta["x402/payment-response"]`. Haven's HTTP-402-over-MCP layering
 // is characterized first in each group and must keep working unchanged.
 
-const userOpTypedData = {
-  domain: { chainId: 8453, name: 'HybridDeleGator', version: '1', verifyingContract: `0x${'dd'.repeat(20)}` },
-  types: {
-    PackedUserOperation: [
-      { name: 'sender', type: 'address' },
-      { name: 'nonce', type: 'uint256' },
-      { name: 'entryPoint', type: 'address' },
-    ],
-  },
-  primaryType: 'PackedUserOperation',
-  message: { sender: `0x${'dd'.repeat(20)}`, nonce: '1', entryPoint: `0x${'ee'.repeat(20)}` },
-}
+// #3271: a real, self-consistent PackedUserOperation — the binding check
+// recomputes its hash and refuses a hand-rolled 3-field toy.
+const userOpSignData = buildValidUserOpSignData()
+const userOpTypedData = userOpSignData.typed_data
 
 const accepted: X402PaymentOption = {
   scheme: 'exact',
@@ -124,7 +117,7 @@ function fundingPendingSignature(resourceUrl: string): Response {
     to: delegateAddress,
     resource_url: resourceUrl,
     sign_data: {
-      hash: `0x${'11'.repeat(32)}`,
+      hash: userOpSignData.hash,
       signature_scheme: 'eip712_userop',
       typed_data: userOpTypedData,
       components: {

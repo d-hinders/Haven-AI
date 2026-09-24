@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   loadHavenIdentity,
+  fetchDirectSignContext,
   fetchX402SignContext,
   HavenSignContextError,
   SIGN_CONTEXT_TIMEOUT_MS,
+  SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS,
 } from './sign-context.js'
 
 const IDENTITY = { api_key: 'sk_agent_test_1263', api_url: 'https://haven.test/' }
@@ -238,4 +240,94 @@ describe('fetchX402SignContext throws HavenSignContextError with a structured re
     expect(err.next_action).toBe('stop_and_tell_user')
     expect(err.http_status).toBeUndefined()
   })
+})
+
+/**
+ * #3271: `fetchDirectSignContext` is the direct-payment sibling of
+ * `fetchX402SignContext` — `GET /payments/:id/sign-context`, same auth
+ * header/timeout/refusal-structuring, but the wire body has no x402 shape at
+ * all: `direct_sign_context_version` and `sign_data.signature_scheme` in
+ * place of `x402_expected`.
+ */
+describe('fetchDirectSignContext (#3271)', () => {
+  const identity = { apiKey: 'sk_agent_test_3271', apiUrl: 'https://haven.test' }
+  const validBody = {
+    payment_id: 'pay_3271',
+    status: 'pending_signature',
+    expires_at: '2099-01-01T00:00:00.000Z',
+    direct_sign_context_version: SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS[0],
+    sign_data: {
+      hash: `0x${'ab'.repeat(32)}`,
+      signature_scheme: 'eip712_userop',
+      typed_data: { primaryType: 'PackedUserOperation' },
+    },
+  }
+
+  it('GETs /payments/:id/sign-context with the bearer credential and returns the exact payload', async () => {
+    let seenUrl = ''
+    let seenAuth = ''
+    const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+      seenUrl = String(url)
+      seenAuth = (init?.headers as Record<string, string>).Authorization
+      return new Response(JSON.stringify(validBody), { status: 200 })
+    }) as typeof fetch
+    const ctx = await fetchDirectSignContext(identity, 'pay_3271', fetchImpl)
+    expect(seenUrl).toBe('https://haven.test/payments/pay_3271/sign-context')
+    expect(seenAuth).toBe('Bearer sk_agent_test_3271')
+    expect(ctx.payloadHash).toBe(validBody.sign_data.hash)
+    expect(ctx.typedData).toEqual({ primaryType: 'PackedUserOperation' })
+    expect(ctx.status).toBe('pending_signature')
+    expect(ctx.expiresAt).toBe('2099-01-01T00:00:00.000Z')
+  })
+
+  it('SIGN_CONTEXT_MALFORMED on an unsupported direct_sign_context_version', async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({ ...validBody, direct_sign_context_version: 999 }),
+        { status: 200 },
+      )) as typeof fetch
+    const err = await fetchDirectSignContext(identity, 'pay_3271', fetchImpl).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(HavenSignContextError)
+    expect((err as HavenSignContextError).code).toBe('SIGN_CONTEXT_MALFORMED')
+    expect((err as Error).message).toMatch(/version 999/)
+  })
+
+  it('SIGN_CONTEXT_MALFORMED when signature_scheme is not eip712_userop', async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({
+          ...validBody,
+          sign_data: { ...validBody.sign_data, signature_scheme: 'eip712_delegation' },
+        }),
+        { status: 200 },
+      )) as typeof fetch
+    const err = await fetchDirectSignContext(identity, 'pay_3271', fetchImpl).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(HavenSignContextError)
+    expect((err as HavenSignContextError).code).toBe('SIGN_CONTEXT_MALFORMED')
+  })
+
+  it('SIGN_CONTEXT_REFUSED with http_status/backend_error_code on a 409', async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({ error: 'not a direct payment', error_code: 'sign_context_unavailable' }),
+        { status: 409 },
+      )) as typeof fetch
+    const err = await fetchDirectSignContext(identity, 'pay_3271', fetchImpl).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(HavenSignContextError)
+    expect((err as HavenSignContextError).code).toBe('SIGN_CONTEXT_REFUSED')
+    expect((err as HavenSignContextError).http_status).toBe(409)
+    expect((err as HavenSignContextError).backend_error_code).toBe('sign_context_unavailable')
+  })
+
+  it('SIGN_CONTEXT_TIMEOUT on an aborted request, bounded by the same timeout as the x402 fetch', async () => {
+    const fetchImpl = ((_url: unknown, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(Object.assign(new Error('aborted'), { name: 'TimeoutError' })),
+        )
+      })) as typeof fetch
+    const err = await fetchDirectSignContext(identity, 'pay_3271', fetchImpl, 20).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(HavenSignContextError)
+    expect((err as HavenSignContextError).code).toBe('SIGN_CONTEXT_TIMEOUT')
+  }, 2_000)
 })

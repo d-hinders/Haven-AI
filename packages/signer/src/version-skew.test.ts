@@ -22,6 +22,7 @@ import {
   SIGNER_CAPABILITY_KEY,
   type SignerCompatibility,
 } from './capabilities.js'
+import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
 import { buildSignerMcpServer } from './server.js'
 import { createToolHandlers } from './tools.js'
 
@@ -507,6 +508,7 @@ describe('signer advertises its supported versions at handshake (#1155)', () => 
     expect(advertised).toEqual({
       x402_expected_context_versions: [...SUPPORTED_X402_EXPECTED_VERSIONS],
       sweep_binding_versions: [...SUPPORTED_SWEEP_BINDING_VERSIONS],
+      direct_sign_context_versions: [...SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS],
     })
   })
 

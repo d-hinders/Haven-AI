@@ -70,6 +70,7 @@
     "x402": "^1.2.0"
   },
   "devDependencies": {
+    "@metamask/smart-accounts-kit": "^1.6.0",
     "@x402/core": "2.17.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",

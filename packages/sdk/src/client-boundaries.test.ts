@@ -141,6 +141,7 @@ const boundary: ClientBoundary = {
     './sweep.js',
     './tool-adapter.js',
     './types.js',
+    './userop-binding.js',
     './x402-erc7710.js',
     './x402-funding-leg.js',
     './x402-protocol.js',
@@ -427,13 +428,17 @@ describe('HavenClient structural boundary', () => {
       // see how long the SDK waited before saying so.
       'DEFAULT_CONFIRMATION_TIMEOUT_MS',
       'DEFAULT_NEXT_TOOL_BY_ACTION', // #3101
+      'DIRECT_SIGN_CONTEXT_VERSION', // #3271
       'DISCOVERY_MAX_BYTES',
+      'ENTRY_POINT_V07', // #3271
       'ERC7710_ASSET_TRANSFER_METHOD',
       'HAVEN_AGENT_RUNBOOK_MD',
       'HAVEN_CONNECTOR_CHANNEL',
       'HAVEN_MINIMUM_NODE_VERSION',
       'HAVEN_SKILL_BODY_MD',
       'HAVEN_SKILL_MD',
+      'HYBRID_DELEGATOR_DOMAIN_NAME', // #3271
+      'HYBRID_DELEGATOR_DOMAIN_VERSION', // #3271
       'HavenApiError',
       'HavenClient',
       'HavenError',
@@ -442,12 +447,14 @@ describe('HavenClient structural boundary', () => {
       'HavenSigningError',
       'HavenTimeoutError',
       'HavenUnsupportedSignerVersionError',
+      'HavenUserOpBindingError', // #3271
       'HavenZeroSettlementHashError',
       'INSECURE_RETRY_TARGET_CODE', // #3097
       'MERCHANT_DISCOVERY_PATHS',
       'MerchantTimeoutError',
       'NEXT_TOOL_SERVER_NAMES', // #3101
       'NEXT_TOOL_SERVER_ROLES', // #3101
+      'PACKED_USER_OPERATION_FIELDS', // #3271
       'RECEIPT_VERSION',
       'SIGNER_UPDATE_FALLBACK',
       'SKILL_FOLDER_NAME',
@@ -469,6 +476,7 @@ describe('HavenClient structural boundary', () => {
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
       'addressFromKey',
       'assertSecureX402RetryTarget', // #3097
+      'assertUserOpTypedDataBinding', // #3271
       'buildSweepAuthorizationMessage',
       'buildSweepTypedData',
       'buildX402ExpectedMessage',
@@ -487,11 +495,13 @@ describe('HavenClient structural boundary', () => {
       'havenTools',
       'isConnectorChannel',
       'isErc7710Option',
+      'isPackedUserOperationTypedData', // #3271
       'isSecureX402RetryTarget', // #3097
       'isSupportedNodeVersion',
       'isSweepableChain',
       'isZeroSettlementTxHash', // #2970
       'normalizePaymentRequired',
+      'packedUserOperationHash', // #3271
       'parseNextTool', // #3101
       'parsePaymentRequired',
       'parsePaymentRequiredResponse',

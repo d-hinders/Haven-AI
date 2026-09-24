@@ -3,6 +3,7 @@ import {
   SUPPORTED_SWEEP_BINDING_VERSIONS,
   SUPPORTED_X402_EXPECTED_VERSIONS,
 } from './core.js'
+import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
 
 /**
  * Pre-payment skew detection (#1155).
@@ -47,6 +48,13 @@ export interface SignerCompatibility {
   x402_expected_context_versions: number[]
   /** Sweep-binding versions this signer will verify (`SUPPORTED_SWEEP_BINDING_VERSIONS`). */
   sweep_binding_versions: number[]
+  /**
+   * #3271: `direct_sign_context_version`s this signer will fetch and verify
+   * from `GET /payments/:id/sign-context` — derived from the SDK's
+   * `DIRECT_SIGN_CONTEXT_VERSION` via `SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS`,
+   * never a second literal.
+   */
+  direct_sign_context_versions: number[]
 }
 
 /** The supported sets this signer enforces, as a plain serialisable object. */
@@ -54,6 +62,7 @@ export function signerCompatibility(): SignerCompatibility {
   return {
     x402_expected_context_versions: [...SUPPORTED_X402_EXPECTED_VERSIONS],
     sweep_binding_versions: [...SUPPORTED_SWEEP_BINDING_VERSIONS],
+    direct_sign_context_versions: [...SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS],
   }
 }
 
@@ -87,12 +96,14 @@ export function signerInstructions(): string {
   return [
     'Haven edge signer: sign-only tools bound to the local delegate key. It never emits the',
     'key. Its one network capability is an authenticated READ of a signing context from',
-    'Haven by payment_id — pass payment_id to haven_sign / haven_sign_x402 (preferred for',
-    'delegation-rail x402) instead of relaying bulky typed-data payloads yourself.',
+    'Haven by payment_id — pass payment_id to haven_sign (preferred for both a direct payment,',
+    '#3271, and delegation-rail x402) or haven_sign_x402 (x402 only) instead of relaying bulky',
+    'typed-data payloads yourself.',
     '',
     'Version compatibility (check this BEFORE signing, not after):',
     `- x402 expected-context versions supported: ${compatibility.x402_expected_context_versions.join(', ')}`,
     `- sweep authorization binding versions supported: ${compatibility.sweep_binding_versions.join(', ')}`,
+    `- direct-payment (haven_send / haven_pay) sign-context versions supported: ${compatibility.direct_sign_context_versions.join(', ')} — pass payment_id alone to haven_sign; this signer fetches the exact bytes`,
     '',
     'Haven quote and prepare results report the expected-context version they will emit',
     '(signer_compatibility.x402_expected_context_version). If that version is not in the list',

@@ -102,6 +102,25 @@ verifies something before it signs, and `haven_sign` called with a bare
 `payload_hash` answers `BARE_HASH_REFUSED` with a typed next step instead of a
 signature.
 
+**Direct payments (#3271).** A direct payment (`POST /payments`, surfaced as
+`haven_send` / `haven_pay`) is signed as the account's EIP-712
+`PackedUserOperation`, and Haven returns both that typed data and
+`payload_hash` — the ERC-4337 v0.7 UserOperation hash of the same operation.
+Before `haven_sign` signs one, it recomputes that hash from the typed data's
+own domain, types and message and refuses (`USEROP_BINDING_MISMATCH`) unless
+it equals `payload_hash` exactly, in the HybridDeleGator domain of the typed
+data's own sender, against the v0.7 EntryPoint. This is a **corruption**
+check: the caller supplies both values, so it proves they describe the same
+operation, never that Haven prepared it — provenance is `payment_id` (below).
+It runs whether the typed data arrived as a tool argument or by the
+`payment_id` fetch, and it runs on the SAME `eip712_userop` typed data the
+x402 EIP-3009 bridge's funding leg signs, since that is also the account
+validating its own UserOperation. The check exists because this typed data is
+multi-KB and can reach the signer through a language model relaying it by
+hand: one corrupted character used to produce a valid-looking signature over
+the wrong digest, surfacing only as an opaque `AA24 signature error` from the
+bundler, after the signature was already produced.
+
 ## Startup, CLI options and the consent screen (#3173)
 
 **Startup cost.** The signer loads `@haven_ai/sdk/edge` — the ethers-free
@@ -252,13 +271,25 @@ refusal class — `fallback`, `retry_with_new_quote`, `http_status`,
 names); every other row carries `next_tool_omitted_reason` with the exact
 remedy. `message` is unchanged.
 
+**#3271: `haven_sign` (never `haven_sign_x402`) has one escape from this
+table.** When the x402 fetch answers `SIGN_CONTEXT_REFUSED` with
+`http_status: 409` and `backend_error_code: 'sign_context_unavailable'` — this
+`payment_id` names a direct payment, not an x402 intent — `haven_sign` fetches
+`GET /payments/:id/sign-context` instead, same auth header, timeout and
+refusal structuring. That second fetch's own refusals reuse the identical
+codes in the table below (a 409 there is terminal — there is no third fetch to
+fall back to). `haven_sign_x402` never takes this branch: a direct payment
+carries no x402 context to fund a merchant retry with, so it surfaces the
+409 unchanged.
+
 | `code` | When | `next_action` | `fallback` | extra |
 |---|---|---|---|---|
 | `SIGN_CONTEXT_TIMEOUT` | The fetch (or its body read) did not finish within `SIGN_CONTEXT_TIMEOUT_MS` | `stop_and_tell_user` | `typed_data_b64` | — |
 | `SIGN_CONTEXT_UNREACHABLE` | The fetch failed before any response (DNS, connection refused, TLS, …) | `stop_and_tell_user` | `typed_data_b64` | — |
-| `SIGN_CONTEXT_MALFORMED` | The response body was missing `sign_data.typed_data` or `x402_expected` (a pre-#1263 backend) | `stop_and_tell_user` | `typed_data_b64` | — |
+| `SIGN_CONTEXT_MALFORMED` | The response body was missing `sign_data.typed_data` / `x402_expected` (a pre-#1263 backend), or — on the direct-payment fetch — an unsupported `direct_sign_context_version` or a `signature_scheme` other than `eip712_userop` | `stop_and_tell_user` | `typed_data_b64` | — |
 | `SIGN_CONTEXT_REFUSED` (410 / `expired`) | The quote's window closed | `payment_window_expired` | — | `retry_with_new_quote: true`, `http_status`, `backend_error_code: 'expired'` |
-| `SIGN_CONTEXT_REFUSED` (other) | Unknown `payment_id` (404), `already_executed` / `not_signable` / `sign_context_unavailable` (409) | `stop_and_tell_user` | — | `http_status`, `backend_error_code` |
+| `SIGN_CONTEXT_REFUSED` (other) | Unknown `payment_id` (404), `already_executed` / `not_signable` (409) — or, on `haven_sign_x402` only, `sign_context_unavailable` (409) | `stop_and_tell_user` | — | `http_status`, `backend_error_code` |
+| `USEROP_BINDING_MISMATCH` | A `PackedUserOperation` typed data (from either fetch, or a tool argument) does not recompute to its own `payload_hash` — see [Two ways to use it](#two-ways-to-use-it) above | `stop_and_tell_user` | — | no `http_status` — this is a local recomputation, not a backend refusal |
 
 `fallback: 'typed_data_b64'` appears only where signing OTHER bytes is a
 remedy — a transport failure or a body this signer could not read. It is
@@ -280,19 +311,23 @@ The delegate key is read from `HAVEN_DELEGATE_KEY` or a `--credentials` file's
 `delegate_key` (with a permissive-file warning). It stays in this process, and
 is never transmitted.
 
-**The signer makes at most one kind of network call, on one path, and it is a
-read.** Since [#1263](https://github.com/d-hinders/Haven-AI/issues/1263) the
-`{ payment_id }` form of `haven_sign` and `haven_sign_x402` performs an
-authenticated, read-only `GET /x402/:payment_id/sign-context` against Haven, so
-that agents never have to relay multi-KB EIP-712 payloads through a model's
-context window. **Only the Bearer API key goes out; the delegate key is never
-part of that request or its response.** Since #2985 that read is bounded:
-it aborts after `SIGN_CONTEXT_TIMEOUT_MS` (15 s) and reports a
-`HavenSignContextError` naming the timeout and the `typed_data_b64` fallback,
-so a hung backend cannot hang the signer — and the agent — past the funding
-window. Every refusal on this fetch (timeout, unreachable host, a non-ok
-backend response, a malformed body) is structured the same way, not just
-prose — see [Sign-context refusal codes](#sign-context-refusal-codes) below.
+**The signer makes at most two kinds of network call, both reads.** Since
+[#1263](https://github.com/d-hinders/Haven-AI/issues/1263) the `{ payment_id }`
+form of `haven_sign` and `haven_sign_x402` performs an authenticated,
+read-only `GET /x402/:payment_id/sign-context` against Haven, so that agents
+never have to relay multi-KB EIP-712 payloads through a model's context
+window. Since #3271, `haven_sign` (never `haven_sign_x402`) falls back to a
+second read — `GET /payments/:payment_id/sign-context` — only when that first
+fetch answers the backend's 409 `sign_context_unavailable`, i.e. this
+`payment_id` names a direct payment rather than an x402 intent. **Only the
+Bearer API key goes out on either read; the delegate key is never part of
+either request or response.** Since #2985 both reads are bounded: each aborts
+after `SIGN_CONTEXT_TIMEOUT_MS` (15 s) and reports a `HavenSignContextError`
+naming the timeout and the `typed_data_b64` fallback, so a hung backend cannot
+hang the signer — and the agent — past the funding window. Every refusal on
+either fetch (timeout, unreachable host, a non-ok backend response, a
+malformed body) is structured the same way, not just prose — see
+[Sign-context refusal codes](#sign-context-refusal-codes) below.
 Nothing else in the package reaches the
 network: `haven_x402_sign_header` and `haven_sign_sweep_delegate` never fetch,
 the library surface above (`createEdgeSigner` and its six signing methods, over

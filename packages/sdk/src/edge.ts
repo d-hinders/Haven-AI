@@ -42,3 +42,11 @@ export {
   type SweepExpectedAuth,
 } from './sweep.js'
 export { addressFromKey, signHash, verifySignature } from './edge-signing.js'
+export {
+  DIRECT_SIGN_CONTEXT_VERSION,
+  ENTRY_POINT_V07,
+  HavenUserOpBindingError,
+  assertUserOpTypedDataBinding,
+  isPackedUserOperationTypedData,
+  packedUserOperationHash,
+} from './userop-binding.js'

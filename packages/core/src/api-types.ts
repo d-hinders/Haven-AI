@@ -2170,6 +2170,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/payments/{id}/sign-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the exact signing payload for a pending DIRECT delegation-rail payment.
+         * @description Read-only byte-free signing handoff (#3271, the direct sibling of GET /x402/{id}/sign-context from #1263): re-serves the stored delegation-rail sign_data.typed_data for a plain POST /payments intent, byte-identical to what the original create / idempotent replay returned, so a LOCAL SIGNER can fetch exact bytes by payment_id instead of an agent re-emitting a multi-KB EIP-712 payload. Constructs and signs nothing new. An x402/MPP intent id is refused here (fetch GET /x402/{id}/sign-context instead), and a direct intent id is refused there — each surface serves only its own rail's shape.
+         */
+        get: operations["getDirectPaymentSignContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/payments/{id}/sign": {
         parameters: {
             query?: never;
@@ -3602,6 +3622,29 @@ export type components = {
                     amount: string;
                 };
                 instructions: string;
+            };
+        };
+        DirectSignContext: {
+            /** Format: uuid */
+            payment_id: string;
+            /** @enum {string} */
+            status: "pending_signature";
+            /** Format: date-time */
+            expires_at: string;
+            /**
+             * @description DIRECT_SIGN_CONTEXT_VERSION from @haven_ai/sdk (`userop-binding.ts`) — the version every client's assertUserOpTypedDataBinding pins against.
+             * @enum {integer}
+             */
+            direct_sign_context_version: 1;
+            sign_data: {
+                /** @description The stored ERC-4337 v0.7 UserOperation hash. Present for the integrity check (#3271) — do NOT sign it directly; sign typed_data. */
+                hash: string;
+                /** @enum {string} */
+                signature_scheme: "eip712_userop";
+                /** @description The EIP-712 PackedUserOperation payload to sign VERBATIM, byte-identical to the typed_data the original POST /payments (or its idempotent replay) returned for this intent. */
+                typed_data: {
+                    [key: string]: unknown;
+                };
             };
         };
         PaymentIntentStatus: {
@@ -14205,6 +14248,115 @@ export interface operations {
             };
             /** @description Error response */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getDirectPaymentSignContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rebuilt direct sign_data — byte-identical to the original create/replay. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectSignContext"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The intent is pinned to a retired rail — the AllowanceModule rail (#1986) or the session rail (#834) — or it has expired (with the same lazy-expire GET /x402/{id}/sign-context performs). A retired-rail intent is refused whatever its status. */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };

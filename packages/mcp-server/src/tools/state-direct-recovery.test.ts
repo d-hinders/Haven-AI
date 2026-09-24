@@ -171,6 +171,56 @@ describe('haven_pay', () => {
     expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
     expect(JSON.stringify(recordedCalls())).not.toContain('delegate_key')
   })
+
+  // #3271: characterization — every relay field a pre-#3271 signer depends on
+  // stays exactly where it was; the new fields are additive alongside them.
+  it('keeps the relay fields byte-identical and adds the direct-payment handoff (#3271)', async () => {
+    const typedData = {
+      domain: { name: 'HybridDeleGator', chainId: 8453 },
+      types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+      primaryType: 'PackedUserOperation',
+      message: { sender: '0xabc' },
+    }
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_direct_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef', signature_scheme: 'eip712_userop', typed_data: typedData },
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_pay({ token: 'USDC', amount: '0.10', to: '0xabc' }),
+    )
+
+    // Pre-#3271 relay fields — untouched.
+    expect(result.data.payment_id).toBe('pay_direct_1')
+    expect(result.data.status).toBe('pending_signature')
+    expect(result.data.payload_hash).toBe('0xdeadbeef')
+    expect(result.data.expires_at).toBe('2099-01-01T00:00:00.000Z')
+    expect(result.data.signature_scheme).toBe('eip712_userop')
+    expect(result.data.typed_data).toEqual(typedData)
+    expect(typeof result.data.typed_data_b64).toBe('string')
+    expect(result.data.meta).toEqual({ token: 'USDC', amount: '0.10', to: '0xabc' })
+
+    // New: the byte-free handoff, named exactly as the SIGNER_HANDOFF_SHAPES contract allows.
+    expect(result.data.next_action).toBe('sign_and_submit_payment')
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign')
+    expect(result.data.next_tool_server_role).toBe('signer')
+    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_direct_1' })
+
+    // New: the agent-mediated compatibility notice.
+    const compat = result.data.signer_compatibility as Record<string, unknown>
+    expect(compat.direct_sign_context_version).toBe(1)
+    expect(compat.signer_capability).toBe('haven/signer-compatibility')
+    expect(typeof compat.check).toBe('string')
+    expect(typeof compat.fallback).toBe('string')
+    expect(String(compat.fallback)).toContain('typed_data_b64')
+  })
 })
 
 
@@ -514,6 +564,56 @@ describe('haven_send', () => {
     const result = await handlers().haven_send({ asset: 'DAI', recipient: '0xRecipient', amount: '1' })
     expect(result.success).toBe(false)
     expect(recordedCalls()).toHaveLength(0)
+  })
+
+  // #3271: same handoff as haven_pay — see the note there. Kept as its own
+  // test per the #1254 lesson quoted above: a shared behaviour dropped from
+  // only one of the two handlers still passes every OTHER test.
+  it('keeps the relay fields byte-identical and adds the direct-payment handoff (#3271)', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_direct_1',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash' },
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '5.00' }),
+    )
+
+    expect(result.data.payment_id).toBe('pay_send_direct_1')
+    expect(result.data.payload_hash).toBe('0xsendhash')
+    expect(result.data.asset).toBe('USDC')
+    expect(result.data.amount).toBe('5.00')
+    expect(result.data.recipient).toBe('0xRecipient')
+
+    expect(result.data.next_action).toBe('sign_and_submit_payment')
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign')
+    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_send_direct_1' })
+    const compat = result.data.signer_compatibility as Record<string, unknown>
+    expect(compat.direct_sign_context_version).toBe(1)
+    expect(compat.signer_capability).toBe('haven/signer-compatibility')
+  })
+
+  it('pending_approval carries no signing handoff — nothing was prepared to sign', async () => {
+    stubFetch({
+      'POST /payments': {
+        status: 202,
+        body: { payment_id: 'pay_over', status: 'pending_approval' },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_send({ asset: 'ETH', recipient: '0xRecipient', amount: '999' }),
+    )
+
+    expect('next_action' in result.data).toBe(false)
+    expect('signer_compatibility' in result.data).toBe(false)
   })
 })
 

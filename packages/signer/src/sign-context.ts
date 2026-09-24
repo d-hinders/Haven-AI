@@ -16,7 +16,7 @@
  */
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { AgentPaymentNextAction, HavenSigningError } from '@haven_ai/sdk/edge'
+import { AgentPaymentNextAction, DIRECT_SIGN_CONTEXT_VERSION, HavenSigningError } from '@haven_ai/sdk/edge'
 import type { NextStep } from '@haven_ai/sdk/edge'
 import { nextStepWireFields, signerRefusalStep } from './next-step.js'
 
@@ -294,5 +294,128 @@ export async function fetchX402SignContext(
       paymentRequired && typeof paymentRequired === 'object' && !Array.isArray(paymentRequired)
         ? (paymentRequired as Record<string, unknown>)
         : null,
+  }
+}
+
+/**
+ * #3271: `direct_sign_context_version`s this signer install understands.
+ * Derived from the SDK's `DIRECT_SIGN_CONTEXT_VERSION` — never a second
+ * hand-maintained literal, exactly like `SUPPORTED_X402_EXPECTED_VERSIONS`
+ * mirrors `core.ts`'s enforcement of the x402 versions.
+ */
+export const SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS: readonly number[] = [DIRECT_SIGN_CONTEXT_VERSION]
+
+/**
+ * The direct-payment counterpart of `FetchedSignContext`: a `POST /payments`
+ * (`haven_send` / `haven_pay`) signing payload fetched by `payment_id`, with
+ * no x402 expected context — the account is validating its OWN
+ * `PackedUserOperation`, not a grant to a third party.
+ */
+export interface FetchedDirectSignContext {
+  paymentId: string
+  payloadHash: string
+  typedData: Record<string, unknown>
+  status: string
+  expiresAt?: string
+}
+
+/**
+ * GET /payments/:id/sign-context (#3271). The direct-payment sibling of
+ * `fetchX402SignContext` — same auth header, same timeout, same
+ * refusal-structuring — for a payment that carries no x402 context at all.
+ * `resolveSignContext` in `tools.ts` calls this ONLY after
+ * `fetchX402SignContext` refuses with the backend's 409
+ * `sign_context_unavailable`, so `haven_sign_x402` (which never falls back)
+ * cannot reach it.
+ */
+export async function fetchDirectSignContext(
+  identity: HavenIdentity,
+  paymentId: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs: number = SIGN_CONTEXT_TIMEOUT_MS,
+): Promise<FetchedDirectSignContext> {
+  let response: Response
+  try {
+    response = await fetchImpl(
+      `${identity.apiUrl}/payments/${encodeURIComponent(paymentId)}/sign-context`,
+      {
+        headers: { Authorization: `Bearer ${identity.apiKey}` },
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+    )
+  } catch (err) {
+    const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+    throw new HavenSignContextError(
+      timedOut
+        ? `Haven did not answer the direct-payment signing-context fetch for ${paymentId} within ${timeoutMs} ms. ` +
+          'Retry, or pass typed_data from the payment result instead.'
+        : `Could not reach Haven to fetch the direct-payment signing context for ${paymentId}: ` +
+          `${err instanceof Error ? err.message : String(err)}. ` +
+          'Retry, or pass typed_data from the payment result instead.',
+      timedOut ? 'SIGN_CONTEXT_TIMEOUT' : 'SIGN_CONTEXT_UNREACHABLE',
+      undefined,
+      paymentId,
+    )
+  }
+  let body: Record<string, unknown>
+  try {
+    body = (await response.json()) as Record<string, unknown>
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new HavenSignContextError(
+        `Haven did not finish sending the direct-payment signing context for ${paymentId} within ${timeoutMs} ms. ` +
+          'Retry, or pass typed_data from the payment result instead.',
+        'SIGN_CONTEXT_TIMEOUT',
+        undefined,
+        paymentId,
+      )
+    }
+    body = {}
+  }
+  if (!response.ok) {
+    const detail =
+      typeof body.error === 'string' ? body.error : `HTTP ${response.status}`
+    throw new HavenSignContextError(
+      `Haven refused the direct-payment signing-context fetch for ${paymentId}: ${detail}` +
+        (response.status === 404
+          ? ' — check the payment_id came from this agent’s own POST /payments call.'
+          : response.status === 410
+            ? ' The payment window has expired; create a fresh payment.'
+            : ''),
+      'SIGN_CONTEXT_REFUSED',
+      { httpStatus: response.status, errorCode: typeof body.error_code === 'string' ? body.error_code : undefined },
+      paymentId,
+    )
+  }
+  const signData = body.sign_data as Record<string, unknown> | undefined
+  const version = body.direct_sign_context_version
+  if (
+    !signData ||
+    typeof signData.hash !== 'string' ||
+    !signData.typed_data ||
+    typeof signData.typed_data !== 'object' ||
+    signData.signature_scheme !== 'eip712_userop' ||
+    typeof version !== 'number' ||
+    !SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS.includes(version)
+  ) {
+    throw new HavenSignContextError(
+      typeof version === 'number' && !SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS.includes(version)
+        ? `The Haven direct-payment sign-context response is version ${version}, which this signer ` +
+          `does not support (supported: ${SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS.join(', ')}). ` +
+          'Update @haven_ai/signer.'
+        : 'The Haven direct-payment sign-context response is missing sign_data.typed_data, or its ' +
+          "signature_scheme is not 'eip712_userop' — the backend may predate #3271. Pass typed_data " +
+          'from the payment result instead.',
+      'SIGN_CONTEXT_MALFORMED',
+      undefined,
+      paymentId,
+    )
+  }
+  return {
+    paymentId: String(body.payment_id ?? paymentId),
+    payloadHash: signData.hash,
+    typedData: signData.typed_data as Record<string, unknown>,
+    status: typeof body.status === 'string' ? body.status : 'pending_signature',
+    expiresAt: typeof body.expires_at === 'string' ? body.expires_at : undefined,
   }
 }

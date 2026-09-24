@@ -230,7 +230,8 @@ export const toolDescriptions = {
     behavior:
       'Sends the requested amount by redeeming the agent\'s on-chain budget delegation, account to recipient with no funding leg. ' +
       'Budget, recipient and expiry are enforced on-chain while the transfer is prepared, so a request outside them is declined before any money moves and before the agent is asked to sign — it is never queued for a human to approve later. ' +
-      'The agent\'s signing key signs the account\'s typed data; Haven never receives the key.',
+      'The agent\'s signing key signs the account\'s typed data; Haven never receives the key. ' +
+      'Before signing, the exact typed data is checked against the payment\'s own hash — a corrupted payload (for example one that passed through a language model by hand) is refused rather than signed.',
     nextActionGuidance:
       'On a decline, report the reason to the user and ask them to grant or raise the budget in Haven — there is nothing to poll and no approval will arrive. ' +
       'After a successful send, poll haven_get_payment_status until nextAction=none.',

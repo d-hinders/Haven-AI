@@ -9,7 +9,7 @@
  * One-direction dependencies: imports only the SDK and the connector channel.
  * Never imports a capability module.
  */
-import { signerUpdateFallback } from '@haven_ai/sdk'
+import { DIRECT_SIGN_CONTEXT_VERSION, signerUpdateFallback } from '@haven_ai/sdk'
 import { HOSTED_CONNECTOR_CHANNEL, hostedConnectorRerunCommand } from '../../connector-channel.js'
 
 /**
@@ -91,5 +91,38 @@ export function signerCompatibilityNotice(emittedVersion: number) {
     // (#2423) rather than the SDK build's, because a hosted server is deployed
     // per environment while the signer is published per release.
     fallback: signerUpdateFallback(HOSTED_CONNECTOR_CHANNEL),
+  }
+}
+
+/**
+ * #3271: the direct-payment (`haven_send` / `haven_pay`) twin of
+ * `signerCompatibilityNotice` above. The hosted server cannot see the local
+ * signer's `initialize` handshake either way (owner decision, 2026-08-07,
+ * restated for this path), so gating which signing route to name is
+ * AGENT-MEDIATED here too: this notice rides every direct-payment success
+ * result and tells the agent to compare `direct_sign_context_version`
+ * against what its OWN local signer's instructions say it supports for
+ * direct payments, BEFORE calling `next_tool` with `next_arguments` — never
+ * after. An old `@haven_ai/signer` that does not list this version keeps
+ * working through the unconditional `typed_data_b64` relay fields this
+ * result also carries (`delegationSignFields`, #1254/#1255); this notice
+ * just tells the agent when to prefer that fallback over `next_tool`.
+ *
+ * `direct_sign_context_version` is `DIRECT_SIGN_CONTEXT_VERSION` from
+ * `@haven_ai/sdk` (`userop-binding.ts`) — the same constant the backend's
+ * `GET /payments/:id/sign-context` route is versioned against — never
+ * re-derived here.
+ */
+export function directSignerCompatibilityNotice() {
+  return {
+    direct_sign_context_version: DIRECT_SIGN_CONTEXT_VERSION,
+    signer_capability: SIGNER_CAPABILITY_KEY,
+    check:
+      'Before signing, compare direct_sign_context_version against the haven-signer instructions\' ' +
+      '"direct-payment … sign-context versions supported" line.',
+    fallback:
+      'If your signer does not list that version (an older @haven_ai/signer), call haven_sign with ' +
+      '{ payload_hash, typed_data_b64 } from this result, passed through unchanged, instead of ' +
+      `next_tool, and update the signer by rerunning \`${hostedConnectorRerunCommand()}\`.`,
   }
 }

@@ -57,10 +57,7 @@ export function delegationSignFields(signData: {
         // signed anyway and only failed on-chain (AA24, #3271's own
         // reproduction). The b64 form is copied as a single string; the
         // signer decodes it into the SAME check, so transport gets safer
-        // while the trust model is unchanged. Prefer the byte-free
-        // `payment_id` handoff (`haven_sign`, #3271) over relaying this at
-        // all when the local signer advertises support — see
-        // `directSignerCompatibilityNotice`.
+        // while the trust model is unchanged.
         ...(signData.typed_data
           ? {
               typed_data_b64: Buffer.from(JSON.stringify(signData.typed_data)).toString('base64'),

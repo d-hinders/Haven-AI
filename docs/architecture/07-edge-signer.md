@@ -4,7 +4,6 @@ status: current
 covers:
   - packages/signer/**
   - packages/sdk/src/userop-binding.ts
-  - packages/mcp-server/src/tools/support/signer-compat.ts
   - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/mcp-server/src/boot.ts
   - packages/mcp-server/src/auth.ts
@@ -202,18 +201,17 @@ hosted:  haven_submit     -> { status, tx_hash }
 On a **delegation-rail** account the `haven_pay` result also carries
 `signature_scheme: 'eip712_userop'` and the account's EIP-712 payload in TWO
 transports: `typed_data` (the object) and `typed_data_b64` (the same bytes as
-one opaque base64 string, #1255). **Since #3271 the preferred call is
-`haven_sign({ payment_id })`**, which the result names in `next_tool` /
-`next_arguments`: the signer fetches the exact bytes itself, so nothing bulky
-crosses the agent's context. That fetch exists because the relay failed live:
-on 2026-09-24 a hand-relayed `typed_data_b64` arrived altered, the signer
-signed it without complaint, and the bundler rejected the operation
-(`AA24 signature error`). The gating is agent-mediated, like the x402 notice
-(#1155): the result's `signer_compatibility.direct_sign_context_version` is
-compared against the version the local signer lists in its instructions, and
-an older signer that lists none uses `signer_compatibility.fallback` — pass
-`payload_hash` + `typed_data_b64` UNCHANGED, the relay every signer accepts.
-On either path the signer now runs the UserOp binding check before signing
+one opaque base64 string, #1255). **Since #3271 a current signer also accepts
+`haven_sign({ payment_id })` for a direct payment**: it fetches the exact bytes
+itself (`GET /payments/:id/sign-context`), so nothing bulky crosses the agent's
+context. That fetch exists because the relay failed live: on 2026-09-24 a
+hand-relayed `typed_data_b64` arrived altered, the signer signed it without
+complaint, and the bundler rejected the operation (`AA24 signature error`).
+The hosted result does not name it yet: the capability-gated `next_tool`
+guidance ships after the signer release, so older signers are never pointed
+at a call they cannot complete. Until then the result's relay — pass
+`payload_hash` + `typed_data_b64` UNCHANGED — is the path, and every signer
+accepts it. On either path a current signer now runs the UserOp binding check before signing
 (`assertUserOpTypedDataBinding`, `@haven_ai/sdk`): it recomputes the v0.7
 UserOperation hash from the typed data and refuses (`USEROP_BINDING_MISMATCH`)
 unless it equals `payload_hash`, and pins the domain, field list and

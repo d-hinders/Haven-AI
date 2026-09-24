@@ -214,22 +214,21 @@ last-verified: "2026-09-24"
 > change. Nothing else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#3271):** a direct payment (`haven_send` /
-> `haven_pay`) now signs by `payment_id`, like delegation-rail x402. New backend
+> `haven_pay`) can now be signed by `payment_id`, like delegation-rail x402. New backend
 > route `GET /payments/:id/sign-context` (versioned by `@haven_ai/sdk`'s
 > `DIRECT_SIGN_CONTEXT_VERSION = 1`) serves the exact typed data; the signer's `haven_sign({ payment_id })` tries
 > the x402 fetch first and, ONLY on its 409 `sign_context_unavailable`, fetches
 > the direct context. Every direct-payment UserOp `haven_sign` signs — fetched
 > or relayed — is re-hashed and refused with `USEROP_BINDING_MISMATCH` when it
 > disagrees with its `payload_hash`; the x402 funding leg keeps its #1263
-> digest check against the Haven-signed expected context. Additive on the wire: the hosted direct-payment result keeps
-> the `payload_hash` + `typed_data_b64` relay fields unconditionally and adds
-> `next_tool: haven_sign` with `{ payment_id }` plus
-> `signer_compatibility.direct_sign_context_version`; the signer's
-> `initialize` instructions list the versions it supports. Skew, both ways,
-> is agent-mediated (the hosted server cannot see the signer, as in #1155):
-> an OLD signer with the new hosted MCP does not list the version, so the
-> agent follows `signer_compatibility.fallback` and relays the unchanged
-> `typed_data_b64`; a NEW signer against an OLD backend gets the x402 409,
+> digest check against the Haven-signed expected context. Additive on the
+> wire: the hosted direct-payment result is UNCHANGED in this change (it still
+> names the `payload_hash` + `typed_data_b64` relay); the capability-gated
+> `next_tool` guidance ships separately, after the signer release, per #3271's
+> sequencing. The signer's `initialize` instructions list the direct
+> sign-context versions it supports. Skew: an OLD signer with the new backend
+> sees no difference — the hosted result still hands it the relay; a NEW
+> signer against an OLD backend gets the x402 409,
 > then a 404 from the direct fetch, and the signer refuses with
 > `SIGN_CONTEXT_REFUSED` carrying `fallback: 'typed_data_b64'` and a reason
 > naming the relay, so the agent relays the same fields (pinned in

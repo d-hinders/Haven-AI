@@ -48,28 +48,7 @@ import {
   submitErc7710WithExpiryMapping,
   submitSignatureWithExpiryMapping,
 } from './support/mcp-context.js'
-import { directSignerCompatibilityNotice } from './support/signer-compat.js'
 import { isPendingApproval } from './support/quote-response.js'
-
-/**
- * #3271: the next-step reason every direct-payment (`haven_send` /
- * `haven_pay`) SUCCESS result carries, via its own inline `buildAgentGuidance`
- * call (one per tool, matching the rest of this file's convention — see
- * `next-step-characterization.test.ts`'s call-site census). AGENT-MEDIATED
- * the same way the x402 `signer_compatibility` notice is (#1155): the hosted
- * server cannot see the local signer's handshake, so it always names the
- * byte-free `payment_id` handoff as `next_tool` and relies on the
- * accompanying `directSignerCompatibilityNotice` to tell the agent when to
- * prefer the `typed_data_b64` relay fields (`delegationSignFields`, kept
- * unchanged) instead. `next_arguments` stays the exact `{ payment_id }` shape
- * `SIGNER_HANDOFF_SHAPES` declares for `haven_sign` — never widened.
- */
-const DIRECT_SIGN_REASON =
-  'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer fetches the ' +
-  'exact bytes by payment_id. If the local signer does not list signer_compatibility.' +
-  'direct_sign_context_version as supported for direct payments, use signer_compatibility.' +
-  'fallback instead (payload_hash + typed_data_b64 from this result, passed through ' +
-  'unchanged). Then call haven_submit with the returned signature.'
 
 /**
  * The tools this capability owns, as a tuple so the set is data rather than a
@@ -370,22 +349,6 @@ export function createStateDirectRecoveryHandlers(
             asset: args.asset,
             amount: args.amount,
             recipient: args.recipient,
-            // #3271: the byte-free signing handoff, agent-mediated against
-            // the local signer's advertised support (see the notice below).
-            ...buildAgentGuidance({
-              nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-              nextTool: 'haven_sign',
-              nextArguments: { payment_id: intent.paymentId },
-              safeToContinue: true,
-              reason: DIRECT_SIGN_REASON,
-              summary: {
-                payment_id: intent.paymentId,
-                status: intent.status,
-                amount: args.amount,
-                token: args.asset,
-              },
-            }),
-            signer_compatibility: directSignerCompatibilityNotice(),
           }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
@@ -424,22 +387,6 @@ export function createStateDirectRecoveryHandlers(
             // live during the #908 mainnet canary.
             ...delegationSignFields(intent.signData),
             meta: { token: args.token, amount: args.amount, to: args.to },
-            // #3271: the byte-free signing handoff, agent-mediated against
-            // the local signer's advertised support (see the notice below).
-            ...buildAgentGuidance({
-              nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-              nextTool: 'haven_sign',
-              nextArguments: { payment_id: intent.paymentId },
-              safeToContinue: true,
-              reason: DIRECT_SIGN_REASON,
-              summary: {
-                payment_id: intent.paymentId,
-                status: intent.status,
-                amount: args.amount,
-                token: args.token,
-              },
-            }),
-            signer_compatibility: directSignerCompatibilityNotice(),
           }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {

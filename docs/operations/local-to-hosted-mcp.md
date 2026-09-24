@@ -240,14 +240,11 @@ Then test a tiny in-budget payment. The expected direct payment sequence is:
    **delegation-rail** account (the only rail that can pay) also
    `signature_scheme`, `typed_data` and `typed_data_b64`: the Hybrid account
    validates the EIP-712 typed data, and a bare-hash signature is rejected
-   on-chain (AA24, #1254). Since #3271 the result also names
-   `next_tool: haven_sign` with `{ payment_id }` and a `signer_compatibility`
-   notice.
-3. Agent calls local `haven_sign` — preferably with just `payment_id`, and the
-   signer fetches the payload itself (#1263 for x402, #3271 for direct
-   payments, via `GET /payments/:id/sign-context`). A signer that does not list
-   the direct sign-context version falls back to passing `payload_hash` and
-   `typed_data_b64` UNCHANGED.
+   on-chain (AA24, #1254).
+3. Agent calls local `haven_sign` — pass `payload_hash` and `typed_data_b64`
+   UNCHANGED, or just `payment_id` and let the signer fetch the payload (#1263
+   for x402; for a direct payment since #3271, via
+   `GET /payments/:id/sign-context`, on a current signer).
    The legacy rail's bare-payload-hash variant is unreachable: that rail is
    retired (#1440) and never returns a signable intent.
 4. Agent calls hosted `haven_submit` with `{ payment_id, signature }`.

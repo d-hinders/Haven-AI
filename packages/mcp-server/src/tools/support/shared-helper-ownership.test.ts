@@ -153,9 +153,6 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // tools/support/signer-compat.ts — expiry/signing context, signer half.
   SIGNER_CAPABILITY_KEY: { module: 'signer-compat', slices: ['s2810', 's2811'] },
   signerCompatibilityNotice: { module: 'signer-compat', slices: ['s2810', 's2811'] },
-  // #3271: the direct-payment (haven_send/haven_pay) twin of the notice
-  // above, called only from s2809's two success sites.
-  directSignerCompatibilityNotice: { module: 'signer-compat', slices: ['s2809'] },
   // tools/support/mcp-context.ts — transport serialization/context validation,
   // signing context, relay wrappers. The merchant delivery/context-rehydration
   // helpers that #2808 parked here moved to their owning capability module in
@@ -268,11 +265,6 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     '(s2809+s2812) and stays beside it in support until #2812 settles where the shared pattern lives. ' +
     'Moving it into the capability would fork the pattern across a module boundary on the signing path, ' +
     'which is the failure this epic exists to make impossible.',
-  directSignerCompatibilityNotice:
-    'Only the #2809 handlers (haven_send/haven_pay) call it (#3271), but it is DELIBERATE: it is the ' +
-    'direct-payment twin of signerCompatibilityNotice (s2810+s2811) and stays beside it in ' +
-    'tools/support/signer-compat.ts so the two agent-mediated compatibility notices never drift apart ' +
-    'as separate copies — the same reason signerCompatibilityNotice itself is not owned by one capability.',
   // s2811 (#2811 plain-HTTP x402 capability, to come):
   coerceJsonField:
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
@@ -392,7 +384,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'resolveResumeState',
     'settlementPredictionFields',
   ],
-  'signer-compat': ['SIGNER_CAPABILITY_KEY', 'signerCompatibilityNotice', 'directSignerCompatibilityNotice'],
+  'signer-compat': ['SIGNER_CAPABILITY_KEY', 'signerCompatibilityNotice'],
 }
 
 /**

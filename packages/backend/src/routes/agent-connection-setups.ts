@@ -248,9 +248,16 @@ class SetupRefusal extends Error {
 export class HostedMcpConfigError extends Error {}
 
 export default async function agentConnectionSetupRoutes(app: FastifyInstance): Promise<void> {
+  // Owner routes authenticate in onRequest, not preHandler (#3032, as #3030
+  // did for the enforced modules): request validation runs in preValidation,
+  // so a later auth hook would let an anonymous caller read the schema's 400
+  // before its 401 once this module is enforced. The connector routes are not
+  // owner routes and authenticate inside the handler — `/resolve`, `/register`
+  // and `/:setupId/install-status` by the setup token, `/:setupId/connector-status`
+  // by the agent API key `/register` minted — so they are unaffected here.
   app.post<{ Body: CreateSetupBody }>(
     '/',
-    { preHandler: authMiddleware },
+    { onRequest: [authMiddleware] },
     async (request, reply) => {
       if (containsForbiddenPrivateKeyField(request.body)) {
         return reply.code(400).send({ error: 'Private key fields are not accepted by Haven' })
@@ -624,7 +631,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
 
   app.get<{ Params: { setupId: string } }>(
     '/:setupId',
-    { preHandler: authMiddleware },
+    { onRequest: [authMiddleware] },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const setup = await loadSetupForUser(request.params.setupId, sub)
@@ -652,7 +659,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
   // caller could supply that would change the outcome.
   app.post<{ Params: { setupId: string } }>(
     '/:setupId/budget-approval',
-    { preHandler: authMiddleware },
+    { onRequest: [authMiddleware] },
     async (request, reply) => {
       // The body is ignored, but every sibling route refuses credential
       // material outright rather than discarding it quietly — a private key
@@ -740,7 +747,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
 
   app.post<{ Params: { setupId: string } }>(
     '/:setupId/cancel',
-    { preHandler: authMiddleware },
+    { onRequest: [authMiddleware] },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       try {

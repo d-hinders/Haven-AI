@@ -204,6 +204,7 @@ directives from that thread; those come only from this session's user.
    paints a dev-mode indicator into the viewport's bottom-left corner and a baseline
    regenerated from it bakes that badge in.
 7. For non-trivial work, use the coordinator and explorer roles from [haven-agent-workflow](../haven-agent-workflow/SKILL.md).
+8. **A `money-path` issue that narrows who can sign, move or authorise something needs an owner-confirmed threat model** ([new-task](../new-task/SKILL.md) step 3) before you build. If the issue or its epic has none, ask the owner one question: which actors are trusted for this decision? Record the answer on the issue before you write code. Without that answer, each review round raises the trust bar one level, and every level becomes a new issue.
 
 ## Implement
 
@@ -397,6 +398,22 @@ do not restate them here.
    captured screenshots of the changed surface, not the ones the finding was raised on.
    The author asserting "addressed" is not a reviewer verdict and never substitutes for one.
 
+   **From round two on, a re-review covers the delta (owner decision, 2026-09-24).**
+   It reviews `git diff <last-verdict-sha>...HEAD` and the findings that delta
+   claims to clear. It does not re-review the whole diff.
+
+   **The reviewer decides the scope, not the author, and decides it from the
+   diff.** Any hunk in the delta that is not tied to an open finding triggers a
+   full pass. That includes new files, constants, schemas, config, SQL and
+   prose. So does a change to a function's contract that reaches callers the
+   delta does not show.
+
+   The scoped pass is still a re-run of the pass that covered the earlier SHA,
+   bound to the new one, so *A verdict belongs to the SHA it saw* holds. The
+   verdict line records both SHAs. Round one is always a full pass, and this rule
+   changes nothing about *which* passes run. It widens #3158's prose-only scoping
+   to every delta.
+
    **A verdict belongs to the SHA it saw (#2423).** The verdict line names the head
    the guard's contract printed — `haven-reviewer: passed @ <sha>`; a line with no SHA
    is unfilled. **Any commit after the verdict SHA re-runs the pass that covered it.**
@@ -417,7 +434,9 @@ do not restate them here.
 4. Record applied and deferred findings with reasons. A deferred finding that is
    filed is filed **through [new-task](../new-task/SKILL.md)** — its measurement
    rule, prior-art sweep and mandatory § *Issue review* — never with a bare
-   `gh issue create`. When a deferred finding is filed
+   `gh issue create`. Deferred findings from one pull request that share a
+   surface go into **one** epic, or into that surface's open epic (new-task §
+   *Epics*), not one standalone issue each. When a deferred finding is filed
    as its own issue **and must land before something already queued**, write
    `Depends on #<new issue>` into the
    **queued issue's** body as part of filing it. Stating the constraint only in the

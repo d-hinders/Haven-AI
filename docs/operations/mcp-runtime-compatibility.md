@@ -217,7 +217,9 @@ last-verified: "2026-09-24"
 > typed data without an x402 context ONLY when it is a direct-payment
 > `PackedUserOperation` for the signer's own derived delegate account, on a
 > chain with pinned delegation contracts (Base, Base Sepolia), whose `callData`
-> is a single `execute` to the DelegationManager calling `redeemDelegations`.
+> is a single `execute` to the DelegationManager calling `redeemDelegations`
+> with exactly one non-empty delegation chain made to that account (not by it),
+> in `SingleDefault` mode, canonically encoded.
 > Anything else answers the new structured `TYPED_DATA_NOT_ALLOWED` refusal
 > (`next_action: stop_and_tell_user`, no signature, no audit entry), the same
 > envelope shape as `BARE_HASH_REFUSED` (#3169). Separately, the signer's

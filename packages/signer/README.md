@@ -117,7 +117,12 @@ refusal for an unbound `Delegation`): the primary type is
 sender is THIS signer's own delegate account (the counterfactual
 HybridDeleGator for the delegate key, derived offline — `src/delegate-account.ts`);
 and its `callData` is a single `execute` to the DelegationManager calling
-`redeemDelegations`. A delegate-wallet `TransferWithAuthorization` or `Permit`,
+`redeemDelegations`, whose arguments are decoded too (`src/redemption-guard.ts`):
+exactly one non-empty `Delegation[]` whose leaf delegate is this signer's own
+account and whose root delegator is not, `SingleDefault` mode, and canonical
+encoding at every level. The argument check matters: an EMPTY permission
+context makes the DelegationManager run the execution as the account itself,
+which would reach `transferOwnership`. A delegate-wallet `TransferWithAuthorization` or `Permit`,
 a UserOp that calls the account itself (`transferOwnership`, `updateSigners`,
 `upgradeToAndCall`), a UserOp for another account, and arbitrary typed data are
 all refused. The audit log records the EIP-712 digest actually signed, not the

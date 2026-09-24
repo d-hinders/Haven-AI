@@ -1340,7 +1340,9 @@ layer signs only these shapes, and refuses everything else with
     HybridDeleGator for the delegate key, derived offline by CREATE2 in
     `packages/signer/src/delegate-account.ts` and pinned to the MetaMask kit;
   - its `callData` is a single `execute` to the DelegationManager calling
-    `redeemDelegations`.
+    `redeemDelegations`, with exactly one non-empty `Delegation[]` whose leaf
+    delegate is this account and whose root delegator is not, in
+    `SingleDefault` mode, canonically encoded (`redemption-guard.ts`).
 - **An erc7710 settlement child or an EIP-3009 funding leg**, against a
   Haven-signed expected context (versions 2 and 3 only; the bare-hash v1
   context was removed in #3272).

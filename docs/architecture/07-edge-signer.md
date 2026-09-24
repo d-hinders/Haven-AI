@@ -273,7 +273,10 @@ branch will sign at all is narrowed by #3272: `haven_sign` signs typed data
 without an x402 context only when it is a `PackedUserOperation` for this
 signer's own derived delegate account, on a chain with pinned delegation
 contracts, whose `callData` is a single `execute` to the DelegationManager
-calling `redeemDelegations` — anything else is refused with
+calling `redeemDelegations` with exactly one non-empty delegation chain made
+TO this account (not by it), in `SingleDefault` mode, canonically encoded — an
+empty chain would make the DelegationManager execute as the account itself.
+Anything else is refused with
 `TYPED_DATA_NOT_ALLOWED`. The core's `signDelegationTypedData` itself signs
 verbatim; the allowlist is in the tool layer.
 

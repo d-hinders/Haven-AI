@@ -396,7 +396,8 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
    * guard left behind that now guards an empty set. So both directions are
    * measured here. The approver paths must be GONE (404 from the router, not
    * 410: they are not a retired flow a client should be told about, they are
-   * routes that no longer exist), and `POST /safe/exec` must still be THERE.
+   * routes that no longer exist). This block used to pin `POST /safe/exec` as
+   * still THERE; #2847 deleted it, and the block below pins that instead.
    */
   describe('the approver surface is deleted (#1988)', () => {
     const APPROVER_PATHS = [

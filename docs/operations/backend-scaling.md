@@ -5,7 +5,7 @@ covers:
   - packages/backend/src/platform/leader-lock.ts
   - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/infra/relayer.ts
-last-verified: "2026-08-29"
+last-verified: "2026-09-24"
 ---
 
 # Backend Scaling
@@ -16,10 +16,13 @@ may now run more than one, and the relayer is what still caps throughput.**
 ## What multiple replicas already handle
 
 - **Periodic monitors** — every replica starts the same `setInterval` ticks, so
-  each one is wrapped in `runIfLeader` (`platform/leader-lock.ts`). A Postgres
-  advisory lock elects one executor per tick; the losers skip rather than queue.
-  Without it, an N-replica deployment runs every scan N times and sends up to N
-  copies of each alert.
+  every tick but one is wrapped in `runIfLeader` (`platform/leader-lock.ts`). A
+  Postgres advisory lock elects one executor per tick; the losers skip rather
+  than queue. Without it, an N-replica deployment runs every scan N times and
+  sends up to N copies of each alert. The exception is the relayer balance
+  monitor, deliberately NOT leader-locked (`index.ts`): its scan feeds each
+  replica's own `/health/ops` answer, and its per-chain edge trigger bounds
+  duplicate alerts to the low→ok→low transition.
 - **First-deploy races on one counterfactual account**
   ([#1673](https://github.com/d-hinders/Haven-AI/issues/1673)). `runIfLeader`'s
   blocking sibling, `withKeyedAdvisoryLock`, serialises the callers that must
@@ -213,8 +216,8 @@ retry after an expiry opens its OWN `outbound_txs` row at its own nonce, so a
 persistently stuck RPC can leave several `broadcast` rows for one account, each
 bumped independently once it ages past 180 s — relayer gas amplification,
 bounded by `MAX_BUMPS_PER_NONCE` per lane and by the relayer budget guard
-(#717), never a fund risk. And only a `TIMEOUT` takes the hand-off branch: any
-other wait error (a transient RPC exception mid-wait) still closes the record
+(#717), never a fund risk. And only a `TIMEOUT`, or a null receipt with no wait
+error at all, takes the hand-off branch: any other wait error (a transient RPC exception mid-wait) still closes the record
 failed, exactly as before #1722 — unchanged behaviour, not a new gap, but the
 same ambiguity in a narrower window.
 
@@ -374,19 +377,22 @@ they queue behind the same key. Two consequences worth planning around:
 ### Multi-replica CORRECTNESS: closed except on the fail-open enqueue path (#1559)
 
 The correctness half of the old constraint — two replicas reading the same
-pending nonce and colliding — is **closed for every relayer submitter**
-(sweeps, Hybrid deploys, passport attestations and revocations, the bump
-worker, lane cancels) **whenever its record opened**. They submit through
-`infra/outbound-queue.ts`'s `submitRecorded`: sign → **stamp** the durable
+pending nonce and colliding — is **closed for every relayer submitter
+whenever its record opened**. Every broadcast goes through
+`infra/outbound-queue.ts`'s `submitRecorded`. The inline submitters (sweeps,
+Hybrid deploys, passport attestations and revocations) and lane cancels pass
+their record: sign → **stamp** the durable
 `outbound_txs` row under the partial UNIQUE (chain, nonce) live-broadcast
 index → broadcast. Postgres arbitrates the nonce lane: the losing replica's
 stamp is rejected, it re-reads and re-signs. The guarded stamp doubles as the
-fence — whoever stamps, sends.
+fence — whoever stamps, sends. The bump worker sends through the same
+pipeline without a record id (it stamps its own rows); its serialisation is
+the leader lock, and it re-uses explicit nonces rather than reading one.
 
 The Safe-bound sites that once relied on the in-process `withRelayerSendLock`
 alone were deleted with the rail (#1440). **One gap remains:** opening the
 record is fail-open by policy (`infra/outbound-queue.ts` header), so on a
-database error the submitter passes a null `recordId`, `submitRecorded` skips
+database error an inline submitter passes a null `recordId`, `submitRecorded` skips
 the stamp, and only the in-process lock serialises that submission. Two
 replicas can collide on that path — the loser's broadcast fails; nothing is
 sent anywhere it should not go. The header asks for the fail-open policy to be
@@ -436,16 +442,7 @@ Whoever picks this up should read the interaction with two existing pieces:
 ## Operating notes
 
 - Replica count is a Railway setting; nothing in the code reads it.
-- **The riskier direction is a row that is too HIGH, not a missing one.** The
-  write is backed by a single confirmation, so a reorg (or an RPC reporting a
-  nonce from a dropped block, or two environments sharing a database) can
-  persist a nonce the chain never reaches — and `GREATEST` means it can never
-  come back down. The read therefore ignores any row older than **5 minutes**:
-  the window this tier closes is seconds-scale RPC lag, so an older watermark
-  carries no information, and bounding it caps the damage of a bad row at
-  minutes rather than permanently. Without that bound, one bad row would make
-  every later authorize for the triple poll to the full timeout, forever,
-  surviving restarts.
-- The watermark only ever rises (`GREATEST` in the upsert). A lower incoming
-  value can only be a late write from a replica that fell behind, and honouring
-  it would re-open the window the table exists to close.
+- The allowance-nonce watermark this section used to carry operating notes for
+  (its 5-minute read bound and its `GREATEST` upsert) went with its table in
+  migration `071_drop_allowance_nonce_watermarks.ts`; the lesson it taught is
+  kept, as history, in the retired subsection above.

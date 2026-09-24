@@ -120,8 +120,10 @@ const defaultChainDeps: SubmitChainDeps = { getRelayer, withRelayerSendLock }
  *   receipt-check→re-broadcast path self-heals from the stored calldata.
  *
  * `withRelayerSendLock` still wraps the window: it is the in-process belt,
- * no longer the only line of defence — except on the null-`recordId` path
- * below, where it is the only one.
+ * no longer the only line of defence — except when an inline submitter's
+ * open failed open (the null-`recordId` path below), where it is the only
+ * one. The bump worker's null-`recordId` sends are also under its leader
+ * lock and re-use explicit nonces.
  *
  * A null `recordId` (the open failed open, or the bump worker stamping its
  * own rows) skips the stamp-first fence and degrades to the pre-#1559

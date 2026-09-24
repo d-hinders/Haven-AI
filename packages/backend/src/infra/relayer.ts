@@ -13,21 +13,23 @@ const relayers = new Map<number, Wallet>()
 // Confirmation waits MUST stay outside it so payments confirm in parallel.
 //
 // Since #1559 (epic #1554) this is no longer the only — or the main — line of
-// defence. Every relayer submitter (sweep, hybrid deploy, passport attest and
-// revoke, the bump worker, lane cancel) goes through `outbound-queue.ts`'s
-// `submitRecorded`: sign → STAMP the durable row under the partial UNIQUE
-// (chain, nonce) live-broadcast index → broadcast. Postgres arbitrates the
-// nonce lane there, so a stamped submission is cross-replica safe, and this
-// lock is the cheap in-process belt inside that pipeline. The Safe-bound
-// sites that once relied on the lock alone were deleted with the rail (#1440).
+// defence. Every relayer broadcast goes through `outbound-queue.ts`'s
+// `submitRecorded`. The inline submitters (sweep, hybrid deploy, passport
+// attest and revoke) and lane cancel pass a record id: sign → STAMP the
+// durable row under the partial UNIQUE (chain, nonce) live-broadcast index →
+// broadcast, so Postgres arbitrates the nonce lane and a stamped submission is
+// cross-replica safe. The bump worker passes a null id — it stamps its own
+// rows — and is serialised by its leader lock, re-using explicit nonces. Here
+// this lock is the cheap in-process belt. The Safe-bound sites that once
+// relied on the lock alone were deleted with the rail (#1440).
 //
-// One path still has only this lock: when `openOutboundRecord` fails open
-// (a database error, by the policy in `outbound-queue.ts`'s header) the
-// submitter passes a null `recordId`, `submitRecorded` skips the stamp, and
-// nothing but this in-process lock serialises the nonce. Across replicas that
-// path can collide — a failed broadcast, not a misdirected one — so
-// multi-replica correctness is closed for every submitter EXCEPT on the
-// fail-open enqueue path.
+// One path still picks its nonce under this lock alone: when
+// `openOutboundRecord` fails open (a database error, by the policy in
+// `outbound-queue.ts`'s header) an inline submitter passes a null `recordId`,
+// `submitRecorded` skips the stamp, and nothing but this in-process lock
+// serialises it. Across replicas that path can collide — a failed broadcast,
+// not a misdirected one — so multi-replica correctness is closed EXCEPT on
+// the fail-open enqueue path.
 const sendLocks = new Map<number, Promise<unknown>>()
 
 export async function withRelayerSendLock<T>(

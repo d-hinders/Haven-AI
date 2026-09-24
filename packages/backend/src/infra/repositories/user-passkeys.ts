@@ -127,7 +127,8 @@ export async function listUserPasskeys(
 
 /**
  * The passkey bound to (user, safe, chain) — the ownership check the
- * passkey-Safe exec path runs before building any transaction. `userId` is
+ * passkey-Safe exec path ran before building any transaction (that path went
+ * with `POST /safe/exec` in #2847). `userId` is
  * REQUIRED.
  */
 export async function findPasskeyForAccount(

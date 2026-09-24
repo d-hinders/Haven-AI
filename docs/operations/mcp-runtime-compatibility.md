@@ -213,6 +213,15 @@ last-verified: "2026-09-24"
 > delivered head); no tool added or renamed, no version-skew or consent-hash
 > change. Nothing else in this document was re-verified in this pass.
 >
+> **Recent re-verification (#3279, SDK wording):** documentation-only edits in
+> `@haven_ai/sdk` source comments (`client.ts`, `sweep.ts`, `types.ts`,
+> `x402.ts`, `x402-funding-leg.ts`), the README and the CHANGELOG. They name the
+> sweep destination as the agent's Haven account and the x402 funding leg as
+> account → delegate EOA, instead of the retired Safe. No tool, type, wire field
+> or description string served to an agent changes, so the version-skew and
+> consent-hash contracts do not move. Nothing else in this document was
+> re-verified in this pass.
+>
 > **Recent re-verification (#3271):** a direct payment (`haven_send` /
 > `haven_pay`) can now be signed by `payment_id`, like delegation-rail x402. New backend
 > route `GET /payments/:id/sign-context` (versioned by `@haven_ai/sdk`'s

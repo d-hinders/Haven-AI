@@ -257,7 +257,7 @@ const data = await response.json()
 
 Merchant-verified x402 retries use the official EIP-3009 `exact` scheme on Base USDC (`base` / `eip155:8453`). `haven.fetch()` sends the payment under `PAYMENT-SIGNATURE` (the x402 v2 name), and on the EIP-3009 bridge also under `X-PAYMENT` (v1), so a merchant on either version reads it. **On erc7710 it sends the v2 name ALONE**: that payload is always x402 v2, and its header carries a whole delegation chain, so duplicating it overflows the merchant's header limit and the request is refused with HTTP 431. If you build the retry yourself, follow the same rule. Haven's older tx-hash proof helper remains exported for Haven-native integrations; it is a different payload that happens to have shared the v2 name, and it is not what `haven.fetch()` sends.
 
-For standard x402, the `x402-wallet` identity is the agent delegate wallet, because that is the wallet that signs and settles the merchant payment. Integrations that scope access by Haven wallet/Safe address should use a Haven-native flow instead of standard merchant x402.
+For standard x402, the `x402-wallet` identity is the agent delegate wallet, because that is the wallet that signs and settles the merchant payment. Integrations that scope access by Haven wallet address should use a Haven-native flow instead of standard merchant x402.
 
 ## AI Agent Integration
 

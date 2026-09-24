@@ -125,10 +125,11 @@ export class X402FundingLeg {
     // delegate EOA for the merchant-facing EIP-3009 authorization. Haven does
     // not control this EOA or its private key.
     //
-    // The only automated funding path is a separate Safe AllowanceModule
-    // transfer signed by the agent key and constrained by the user's on-chain
-    // allowance. Haven's backend relays that signed top-up; it is not the source
-    // of payment authority.
+    // The only automated funding path is a separate transfer from the user's
+    // account, redeemed through the agent's budget delegation, signed by the
+    // agent key and constrained on-chain by the delegation's caveats. Haven's
+    // backend relays that signed top-up; it is not the source of payment
+    // authority.
     // #1521: the authorization is minted AFTER the backend's answer is
     // classified, never before. Signing first meant that when the idempotency
     // key resolved to an already-settled payment, a brand-new authorization

@@ -618,11 +618,12 @@ export class HavenClient {
   }
 
   /**
-   * Sweep stranded USDC and ETH from the delegate EOA back to the originating Safe.
+   * Sweep stranded USDC and ETH from the delegate EOA back to the agent's Haven account.
    *
    * The delegate key held by this client signs and submits the transfer transactions
    * directly — Haven's backend never handles the key or constructs signed txs
-   * (CASP/MiCA Red Line #2). Funds always go to the Safe linked to this agent.
+   * (CASP/MiCA Red Line #2). Funds always go to the Haven account linked to this agent
+   * (`accountAddress` from `getAgent()`).
    *
    * Requires `chainRpcs` to be set for the agent's chain in `HavenClientConfig`.
    */
@@ -1384,7 +1385,7 @@ export class HavenClient {
    * collapses an SSE JSON-RPC response to its `result`.
    */
   /**
-   * Wait for a payment's Safe→delegate funding tx to reach ≥1 on-chain
+   * Wait for a payment's account→delegate funding tx to reach ≥1 on-chain
    * confirmation. The hosted x402 completion path MUST call this after funding
    * and before delivering the merchant payment header, so the merchant's
    * balanceOf(delegate) / transferWithAuthorization verification sees the funded

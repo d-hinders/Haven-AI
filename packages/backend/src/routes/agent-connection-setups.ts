@@ -252,9 +252,10 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
   // did for the enforced modules): request validation runs in preValidation,
   // so a later auth hook would let an anonymous caller read the schema's 400
   // before its 401 once this module is enforced. The connector routes are not
-  // owner routes and authenticate inside the handler — `/resolve`, `/register`
-  // and `/:setupId/install-status` by the setup token, `/:setupId/connector-status`
-  // by the agent API key `/register` minted — so they are unaffected here.
+  // owner routes and authenticate inside the handler — `/resolve` and
+  // `/register` by the setup token, `/:setupId/connector-status` by the agent
+  // API key `/register` minted, and `/:setupId/install-status` by either (the
+  // published connector sends the API key) — so they are unaffected here.
   app.post<{ Body: CreateSetupBody }>(
     '/',
     { onRequest: [authMiddleware] },

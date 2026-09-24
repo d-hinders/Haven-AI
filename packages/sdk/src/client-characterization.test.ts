@@ -297,17 +297,16 @@ describe('HavenClient direct-payment facade characterization', () => {
     // NOT recover to that address over the bare hash the old `this.sign(hash)`
     // call would have signed instead (the behaviour #3271 replaced). If pay()
     // regresses to signing the bare hash again, both assertions flip and this
-    // test goes red — verified by reverting the pay() change locally, see
-    // client.ts.3271.bak / the PR description for the red→green transcript.
+    // test goes red.
     expect(submittedSignature).toBeDefined()
     const signData = directPaymentSignData()
     const typedDataAddress = await recoverTypedDataAddress({
-      domain: signData.typed_data.domain as never,
-      types: { PackedUserOperation: signData.typed_data.types.PackedUserOperation } as never,
+      domain: signData.typed_data.domain,
+      types: { PackedUserOperation: signData.typed_data.types.PackedUserOperation },
       primaryType: 'PackedUserOperation',
-      message: signData.typed_data.message as never,
+      message: signData.typed_data.message,
       signature: submittedSignature as `0x${string}`,
-    })
+    } as Parameters<typeof recoverTypedDataAddress>[0])
     expect(typedDataAddress.toLowerCase()).toBe(TEST_DELEGATE_ADDRESS.toLowerCase())
 
     const bareHashSigner = await recoverBareHashSigner(submittedSignature as `0x${string}`, signData.hash as `0x${string}`)

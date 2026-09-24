@@ -44,7 +44,8 @@ export async function getX402SignContext(
       body: {
         error:
           'Not an x402 intent — sign-context serves the x402 signing handoff only. ' +
-          'For a direct payment, sign the typed_data_b64 from the haven_pay/haven_send result instead.',
+          'For a direct payment, fetch GET /payments/:id/sign-context instead (haven_sign with ' +
+          'payment_id does this), or sign the typed_data_b64 from the haven_pay/haven_send result.',
         error_code: 'sign_context_unavailable',
       },
     }

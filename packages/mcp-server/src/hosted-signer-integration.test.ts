@@ -672,7 +672,8 @@ describe('Hosted MCP + Edge Signer integration', () => {
           JSON.stringify({
             error:
               'Not an x402 intent — sign-context serves the x402 signing handoff only. ' +
-              'For a direct payment, sign the typed_data_b64 from the haven_pay/haven_send result instead.',
+              'For a direct payment, fetch GET /payments/:id/sign-context instead (haven_sign with ' +
+              'payment_id does this), or sign the typed_data_b64 from the haven_pay/haven_send result.',
             error_code: 'sign_context_unavailable',
           }),
           { status: 409 },
@@ -683,7 +684,8 @@ describe('Hosted MCP + Edge Signer integration', () => {
           payment_id: directPaymentId,
           status: 'pending_signature',
           expires_at: '2099-01-01T00:00:00.000Z',
-          sign_data: { hash: realisticHash, typed_data: REALISTIC_TYPED_DATA },
+          direct_sign_context_version: 1,
+          sign_data: { hash: realisticHash, signature_scheme: 'eip712_userop', typed_data: REALISTIC_TYPED_DATA },
         }),
         { status: 200 },
       )
@@ -726,7 +728,12 @@ describe('Hosted MCP + Edge Signer integration', () => {
           payment_id: directPaymentId,
           status: 'pending_signature',
           // The real (uncorrupted) hash — mismatched against the corrupted typed data below.
-          sign_data: { hash: packedUserOperationHash(REALISTIC_TYPED_DATA), typed_data: corrupted },
+          direct_sign_context_version: 1,
+          sign_data: {
+            hash: packedUserOperationHash(REALISTIC_TYPED_DATA),
+            signature_scheme: 'eip712_userop',
+            typed_data: corrupted,
+          },
         }),
         { status: 200 },
       )

@@ -158,7 +158,7 @@ export async function getDirectSignContext(
       body: {
         payment_id: existing.id,
         status: 'expired',
-        error: 'Payment window expired — re-run the quote with the same idempotency key',
+        error: 'Payment window expired — re-run POST /payments with the same idempotency key',
         error_code: 'expired',
       },
     }

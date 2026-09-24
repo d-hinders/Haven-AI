@@ -1,21 +1,26 @@
 /**
  * `GET /payments/:id/sign-context` (#3271) — the direct-payment sibling of
- * `GET /x402/:id/sign-context` (#1263). Content-dispatch DB mocks
- * (`docs/contributing/ship-playbooks/backend.md` "Query mocks"); the SQL
- * itself is proven against real Postgres in the repository suites.
+ * `GET /x402/:id/sign-context` (#1263), end to end on real Postgres.
+ *
+ * Every assertion here is about what the route reads from, or writes to,
+ * `payment_intents` (ownership scoping, the refusal matrix, the lazy expiry,
+ * read-only-ness), so it runs through the real agent-auth lookup and the real
+ * row, never `vi.mock('db.js')` (`docs/contributing/testing-strategy.md`).
+ * The one mock is `computeHybridAccountAddress`: the counterfactual account
+ * derivation is a collaborator this test does not own, pinned so the typed
+ * data's `domain.verifyingContract` is deterministic.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { assertUserOpTypedDataBinding, packedUserOperationHash, DIRECT_SIGN_CONTEXT_VERSION } from '@haven_ai/sdk'
+import db from '../../db.js'
+import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
 import paymentRoutes from '../payments.js'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { allowanceModuleRailRetired, sessionRailRetired } from '../../rails/execution-rail.js'
 import { userOpTypedData } from '../../rails/delegation-rail.js'
 import directPaymentFixture from '../../../../sdk/src/__fixtures__/direct-payment-userop.json' with { type: 'json' }
-
-const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }))
-
-vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
 
 const DELEGATE_ACCOUNT = '0x' + 'dd'.repeat(20)
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
@@ -23,38 +28,18 @@ vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
   return { ...actual, computeHybridAccountAddress: async () => DELEGATE_ACCOUNT }
 })
 
-const AGENT = {
-  id: '11111111-1111-1111-1111-111111111111',
-  user_id: '22222222-2222-2222-2222-222222222222',
-  name: 'Payment Agent',
-  delegate_address: '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1',
-  account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
-  chain_id: 8453,
-  status: 'active',
-}
-
-const PAYMENT_ID = '33333333-3333-3333-3333-333333333333'
+const CHAIN_ID = 8453
+const DELEGATE = '0x1a642f0e3c3af545e7acbd38b07251b3990914f1'
 const RECIPIENT = '0x' + '22'.repeat(20)
-const AUTH: DbRoute = [/api_key_hash = \$1/, () => ({ rows: [AGENT] })]
-
-type DbRoute = [RegExp, (sql: string, params: unknown[]) => { rows: unknown[] } | Promise<{ rows: unknown[] }>]
-
-function primeDb(...routes: DbRoute[]) {
-  mockQuery.mockImplementation(async (sql: unknown, params: unknown[]) => {
-    const text = String(sql)
-    for (const [re, handler] of routes) {
-      if (re.test(text)) return handler(text, params)
-    }
-    return { rows: [] }
-  })
-}
-
-const sqlCalls = () => mockQuery.mock.calls.map((c) => ({ sql: String(c[0]), params: c[1] as unknown[] }))
+/** The real Base USDC address (`packages/core/src/chains.ts`): the idempotent
+ *  replay 409s a token that disagrees with what `resolveToken` gives 'USDC'. */
+const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+const OTHER_HASH = `0x${'11'.repeat(32)}`
 
 /**
- * A prepared UserOp raw enough that `toPackedUserOperation` fills every
- * unset gas field with a deterministic zero — the same shape a real prepared
- * redemption carries, minus the values this test does not need to vary.
+ * A prepared UserOp raw enough that `toPackedUserOperation` fills every unset
+ * gas field with a deterministic zero — the shape a real prepared redemption
+ * carries, minus the values this test does not vary.
  */
 const PREPARED_USER_OP = {
   sender: DELEGATE_ACCOUNT,
@@ -62,63 +47,136 @@ const PREPARED_USER_OP = {
   callData: '0x' + 'ab'.repeat(64),
 }
 
-/** The typed data production code would build for `PREPARED_USER_OP`, and the
- *  v0.7 UserOp hash it commits to — the row's `sign_hash` at authorize time is
- *  exactly this, per `rails/delegation-authorization.ts`'s prepare step. */
+/** The typed data production builds for `PREPARED_USER_OP`, and the v0.7
+ *  UserOp hash it commits to — what a genuine prepared row stores as `sign_hash`. */
 function goldenSignData(): { typedData: unknown; hash: string } {
-  const typedData = userOpTypedData(PREPARED_USER_OP, DELEGATE_ACCOUNT as `0x${string}`, AGENT.chain_id)
-  // The real production digest for this operation — the same
-  // `packedUserOperationHash` the client-side integrity check recomputes, so
-  // a row built from this pair is what a genuine prepared redemption stores.
-  const hash = packedUserOperationHash(typedData)
-  return { typedData, hash }
+  const typedData = userOpTypedData(PREPARED_USER_OP, DELEGATE_ACCOUNT as `0x${string}`, CHAIN_ID)
+  return { typedData, hash: packedUserOperationHash(typedData) }
 }
 
-function pendingIntentRow(overrides: Record<string, unknown> = {}) {
-  return {
-    id: PAYMENT_ID,
-    agent_id: AGENT.id,
+let seq = 0
+
+interface Seeded {
+  userId: string
+  agentId: string
+  apiKey: string
+}
+
+/** A user + delegation-rail account + ACTIVE agent holding a real API key. */
+async function seedAgent(): Promise<Seeded> {
+  const n = ++seq
+  const apiKey = `sk_agent_direct_sign_${n}_${Date.now()}`
+  const user = await db.query<{ id: string }>(
+    `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+    [`direct-sign-${n}-${Date.now()}@test.example`],
+  )
+  const userId = user.rows[0].id
+  const account = await db.query<{ id: string }>(
+    `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type)
+     VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid') RETURNING id`,
+    [userId, `0x${n.toString(16).padStart(40, 'f')}`, CHAIN_ID],
+  )
+  const agent = await db.query<{ id: string }>(
+    `INSERT INTO agents (user_id, account_id, name, status, delegate_address, api_key_hash)
+     VALUES ($1, $2, 'Direct signer', 'active', $3, $4) RETURNING id`,
+    [userId, account.rows[0].id, DELEGATE, createHash('sha256').update(apiKey).digest('hex')],
+  )
+  return { userId, agentId: agent.rows[0].id, apiKey }
+}
+
+/** A signable direct (non-x402) delegation-rail intent, overridable per case. */
+async function seedIntent(
+  owner: Seeded,
+  overrides: Partial<{
+    status: string
+    tx_hash: string | null
+    execution_rail: string | null
+    prepared_user_op: unknown
+    sign_hash: string
+    x402_resource_url: string | null
+    expires_at: string
+    send_idempotency_key: string | null
+  }> = {},
+): Promise<string> {
+  const row = {
     status: 'pending_signature',
     tx_hash: null,
     execution_rail: 'delegation',
     prepared_user_op: PREPARED_USER_OP,
-    sign_hash: null, // filled per-test from goldenSignData()
-    chain_id: AGENT.chain_id,
+    sign_hash: goldenSignData().hash,
     x402_resource_url: null,
-    payment_resource_url: null,
-    expires_at: '2099-01-01T00:00:00.000Z',
+    expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+    send_idempotency_key: null,
     ...overrides,
   }
+  const intent = await db.query<{ id: string }>(
+    `INSERT INTO payment_intents
+       (agent_id, user_id, account_address, token_symbol, token_address, to_address,
+        amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
+        status, tx_hash, expires_at, execution_rail, prepared_user_op, chain_id,
+        x402_resource_url, send_idempotency_key)
+     VALUES ($1, $2, $3, 'USDC', $4, $5, '10000', '0.01', $6, 1, $7,
+             $8, $9, $10, $11, $12, $13, $14, $15)
+     RETURNING id`,
+    [
+      owner.agentId,
+      owner.userId,
+      DELEGATE_ACCOUNT,
+      BASE_USDC,
+      RECIPIENT,
+      DELEGATE,
+      row.sign_hash,
+      row.status,
+      row.tx_hash,
+      row.expires_at,
+      row.execution_rail,
+      row.prepared_user_op == null ? null : JSON.stringify(row.prepared_user_op),
+      CHAIN_ID,
+      row.x402_resource_url,
+      row.send_idempotency_key,
+    ],
+  )
+  return intent.rows[0].id
 }
 
-describe('GET /payments/:id/sign-context (#3271)', () => {
+async function intentRow(id: string) {
+  const res = await db.query(`SELECT * FROM payment_intents WHERE id = $1`, [id])
+  return res.rows[0] as Record<string, unknown>
+}
+
+describeDb('GET /payments/:id/sign-context (#3271)', () => {
   let app: FastifyInstance
+  let agent: Seeded
+
   beforeAll(async () => {
+    await initDbHarness()
     app = Fastify({ logger: false })
     await app.register(paymentRoutes, { prefix: '/payments' })
   })
   afterAll(async () => app.close())
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(async () => {
+    await resetDb()
+    agent = await seedAgent()
+  })
 
-  async function get(id = PAYMENT_ID) {
+  function get(id: string, apiKey = agent.apiKey) {
     return app.inject({
       method: 'GET',
       url: `/payments/${id}/sign-context`,
-      headers: { authorization: 'Bearer sk_agent_test' },
+      headers: { authorization: `Bearer ${apiKey}` },
     })
   }
 
-  it('serves the exact rebuilt sign_data, passes the UserOp binding check, and matches the spec', async () => {
+  it('serves the exact rebuilt sign_data, passes the UserOp binding check, matches the spec, and writes nothing', async () => {
     const { typedData, hash } = goldenSignData()
-    primeDb(AUTH, [/WHERE id = \$1 AND agent_id = \$2/, () => ({
-      rows: [pendingIntentRow({ sign_hash: hash })],
-    })])
+    const id = await seedIntent(agent)
+    const before = await intentRow(id)
 
-    const res = await get()
+    const res = await get(id)
     expect(res.statusCode).toBe(200)
     const body = res.json()
 
-    expect(body.payment_id).toBe(PAYMENT_ID)
+    expect(body.payment_id).toBe(id)
     expect(body.status).toBe('pending_signature')
     expect(body.direct_sign_context_version).toBe(DIRECT_SIGN_CONTEXT_VERSION)
     expect(body.sign_data.signature_scheme).toBe('eip712_userop')
@@ -131,8 +189,8 @@ describe('GET /payments/:id/sign-context (#3271)', () => {
 
     expectMatchesSpec('GET', '/payments/{id}/sign-context', body)
 
-    // Read-only.
-    expect(sqlCalls().some((c) => /INSERT|UPDATE/i.test(c.sql))).toBe(false)
+    // Read-only: the row is byte-identical after the read.
+    expect(await intentRow(id)).toEqual(before)
   })
 
   it('the real captured #3271 payload also passes the binding check (fixture sanity)', () => {
@@ -142,130 +200,93 @@ describe('GET /payments/:id/sign-context (#3271)', () => {
   })
 
   it('CHARACTERIZATION: matches byte-for-byte what POST /payments\' idempotent replay serves for the same row', async () => {
-    // `replayIntentBody`'s delegation branch and `getDirectSignContext` now
-    // share `buildDirectSignData` (`modules/payments/direct-sign-context.ts`)
+    // `replayIntentBody`'s delegation branch and `getDirectSignContext` share
+    // `buildDirectSignData` (`modules/payments/direct-sign-context.ts`)
     // precisely so this cannot drift — this test is the guard on that.
-    const { hash } = goldenSignData()
     const KEY = 'idem-key-1'
-    primeDb(
-      AUTH,
-      // The account's CURRENT execution rail — read BEFORE the idempotency
-      // lookup by the create route's #993/#1986 gate. This is the ONE test
-      // in this file that exercises POST /payments, so it is the one that
-      // needs it mocked to `delegation` (every GET-only test below never
-      // reaches this query).
-      [/LEFT JOIN smart_accounts/, () => ({ rows: [{ execution_rail: 'delegation' }] })],
-      [/send_idempotency_key = \$2/, () => ({
-        rows: [{
-          id: PAYMENT_ID,
-          status: 'pending_signature',
-          expires_at: '2099-01-01T00:00:00.000Z',
-          // The real Base USDC address (`packages/core/src/chains.ts`) — the
-          // idempotent-replay lookup 409s a mismatch against what
-          // `resolveToken` resolves 'USDC' to on chain 8453, so this fixture
-          // must agree with production token config, not an arbitrary address.
-          token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'.toLowerCase(),
-          token_symbol: 'USDC',
-          to_address: RECIPIENT,
-          amount_raw: '10000',
-          amount_human: '0.01',
-          allowance_nonce: 1,
-          sign_hash: hash,
-          execution_rail: 'delegation',
-          prepared_user_op: PREPARED_USER_OP,
-          chain_id: AGENT.chain_id,
-        }],
-      })],
-      [/WHERE id = \$1 AND agent_id = \$2/, () => ({ rows: [pendingIntentRow({ sign_hash: hash })] })],
-    )
+    const id = await seedIntent(agent, { send_idempotency_key: KEY })
 
     const replayRes = await app.inject({
       method: 'POST',
       url: '/payments',
-      headers: { authorization: 'Bearer sk_agent_test' },
+      headers: { authorization: `Bearer ${agent.apiKey}` },
       payload: { token: 'USDC', amount: '0.01', to: RECIPIENT, idempotency_key: KEY },
     })
     expect(replayRes.statusCode).toBe(201)
+    expect(replayRes.json().payment_id).toBe(id)
 
-    const contextRes = await get()
+    const contextRes = await get(id)
     expect(contextRes.statusCode).toBe(200)
 
     expect(contextRes.json().sign_data.typed_data).toEqual(replayRes.json().sign_data.typed_data)
     expect(contextRes.json().sign_data.hash).toBe(replayRes.json().sign_data.hash)
   })
 
-  it('404s an unknown or foreign payment id (same answer on purpose)', async () => {
-    primeDb(AUTH, [/WHERE id = \$1 AND agent_id = \$2/, () => ({ rows: [] })])
-    const res = await get()
-    expect(res.statusCode).toBe(404)
+  it('404s an unknown id and another agent\'s id identically (same answer on purpose)', async () => {
+    const other = await seedAgent()
+    const foreignId = await seedIntent(other)
+
+    const unknown = await get('00000000-0000-4000-8000-000000000000')
+    const foreign = await get(foreignId)
+    expect(unknown.statusCode).toBe(404)
+    expect(foreign.statusCode).toBe(404)
+    expect(foreign.json()).toEqual(unknown.json())
   })
 
   it('409s an x402/MPP intent, naming the x402 sign-context route', async () => {
-    primeDb(AUTH, [/WHERE id = \$1 AND agent_id = \$2/, () => ({
-      rows: [pendingIntentRow({ x402_resource_url: 'https://merchant.example/resource', sign_hash: `0x${'11'.repeat(32)}` })],
-    })])
-    const res = await get()
+    const id = await seedIntent(agent, {
+      x402_resource_url: 'https://merchant.example/resource',
+      sign_hash: OTHER_HASH,
+    })
+    const res = await get(id)
     expect(res.statusCode).toBe(409)
     expect(res.json().error_code).toBe('sign_context_unavailable')
     expect(res.json().error).toMatch(/x402/)
   })
 
   it('410s a retired-SESSION-rail intent regardless of status', async () => {
-    primeDb(AUTH, [/WHERE id = \$1 AND agent_id = \$2/, () => ({
-      rows: [pendingIntentRow({ execution_rail: 'session_key', sign_hash: `0x${'11'.repeat(32)}` })],
-    })])
-    const res = await get()
+    const id = await seedIntent(agent, { execution_rail: 'session_key', sign_hash: OTHER_HASH })
+    const res = await get(id)
     const retired = sessionRailRetired('intent')
     expect(res.statusCode).toBe(retired.statusCode)
     expect(res.json().error).toBe(retired.body.error)
   })
 
   it('410s a retired-ALLOWANCE-rail intent (execution_rail null)', async () => {
-    primeDb(AUTH, [/WHERE id = \$1 AND agent_id = \$2/, () => ({
-      rows: [pendingIntentRow({ execution_rail: null, sign_hash: `0x${'11'.repeat(32)}` })],
-    })])
-    const res = await get()
+    const id = await seedIntent(agent, { execution_rail: null, sign_hash: OTHER_HASH })
+    const res = await get(id)
     const retired = allowanceModuleRailRetired('intent')
     expect(res.statusCode).toBe(retired.statusCode)
     expect(res.json().error).toBe(retired.body.error)
   })
 
   it('409s an already-executed intent with its tx hash', async () => {
-    primeDb(AUTH, [/WHERE id = \$1 AND agent_id = \$2/, () => ({
-      rows: [pendingIntentRow({ status: 'confirmed', tx_hash: '0x' + '99'.repeat(32), sign_hash: `0x${'11'.repeat(32)}` })],
-    })])
-    const res = await get()
+    const txHash = '0x' + '99'.repeat(32)
+    const id = await seedIntent(agent, { status: 'confirmed', tx_hash: txHash })
+    const res = await get(id)
     expect(res.statusCode).toBe(409)
     expect(res.json().error_code).toBe('already_executed')
+    expect(res.json().tx_hash).toBe(txHash)
   })
 
   it('409s a non-pending-signature intent (not_signable)', async () => {
-    primeDb(AUTH, [/WHERE id = \$1 AND agent_id = \$2/, () => ({
-      rows: [pendingIntentRow({ status: 'submitted', sign_hash: `0x${'11'.repeat(32)}` })],
-    })])
-    const res = await get()
+    const id = await seedIntent(agent, { status: 'submitted' })
+    const res = await get(id)
     expect(res.statusCode).toBe(409)
     expect(res.json().error_code).toBe('not_signable')
   })
 
-  it('410s and lazy-expires a stale pending row', async () => {
-    primeDb(AUTH, [/WHERE id = \$1 AND agent_id = \$2/, () => ({
-      rows: [pendingIntentRow({
-        expires_at: new Date(Date.now() - 1000).toISOString(),
-        sign_hash: `0x${'11'.repeat(32)}`,
-      })],
-    })])
-    const res = await get()
+  it('410s a stale pending row and lazily expires it in the database', async () => {
+    const id = await seedIntent(agent, { expires_at: new Date(Date.now() - 1000).toISOString() })
+    const res = await get(id)
     expect(res.statusCode).toBe(410)
     expect(res.json().error_code).toBe('expired')
-    expect(sqlCalls().some((c) => /UPDATE payment_intents/i.test(c.sql) && /status = 'expired'/.test(c.sql))).toBe(true)
+    expect((await intentRow(id)).status).toBe('expired')
   })
 
   it('409s a delegation-rail row with no stored signing payload', async () => {
-    primeDb(AUTH, [/WHERE id = \$1 AND agent_id = \$2/, () => ({
-      rows: [pendingIntentRow({ prepared_user_op: null, sign_hash: `0x${'11'.repeat(32)}` })],
-    })])
-    const res = await get()
+    const id = await seedIntent(agent, { prepared_user_op: null })
+    const res = await get(id)
     expect(res.statusCode).toBe(409)
     expect(res.json().error_code).toBe('sign_context_unavailable')
   })

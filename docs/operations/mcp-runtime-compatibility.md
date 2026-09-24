@@ -210,6 +210,29 @@ last-verified: "2026-09-23"
 > delivered head); no tool added or renamed, no version-skew or consent-hash
 > change. Nothing else in this document was re-verified in this pass.
 >
+> **Recent re-verification (#3271):** a direct payment (`haven_send` /
+> `haven_pay`) now signs by `payment_id`, like delegation-rail x402. New backend
+> route `GET /payments/:id/sign-context` (versioned by `@haven_ai/sdk`'s
+> `DIRECT_SIGN_CONTEXT_VERSION = 1`) serves the exact typed data; the signer's `haven_sign({ payment_id })` tries
+> the x402 fetch first and, ONLY on its 409 `sign_context_unavailable`, fetches
+> the direct context. Every signed UserOp — fetched or relayed — is re-hashed
+> and refused with `USEROP_BINDING_MISMATCH` when it disagrees with its
+> `payload_hash`. Additive on the wire: the hosted direct-payment result keeps
+> the `payload_hash` + `typed_data_b64` relay fields unconditionally and adds
+> `next_tool: haven_sign` with `{ payment_id }` plus
+> `signer_compatibility.direct_sign_context_version`; the signer's
+> `initialize` instructions list the versions it supports. Skew, both ways,
+> is agent-mediated (the hosted server cannot see the signer, as in #1155):
+> an OLD signer with the new hosted MCP does not list the version, so the
+> agent follows `signer_compatibility.fallback` and relays the unchanged
+> `typed_data_b64`; a NEW signer against an OLD backend gets the x402 409,
+> then a 404 from the direct fetch (`SIGN_CONTEXT_REFUSED`), and the agent
+> relays the same fields. No tool added or renamed and no argument removed,
+> so the consent hash (identity + tool names + surface version,
+> `packages/signer/src/consent.ts`) does not move. The `send` description
+> was re-cut under the #1591 mean cap. Nothing else in this document was
+> re-verified in this pass.
+>
 > **Recent re-verification (#3169):** the edge signer's `haven_sign` no longer
 > signs a bare `payload_hash` (no `payment_id`, no `typed_data` /
 > `typed_data_b64`, no `x402_expected`): that arm was raw secp256k1 over caller

@@ -234,7 +234,9 @@ Isolation rules that are non-negotiable for a payments product:
 - **`RELAYER_PRIVATE_KEY`** — since the #908 owner decision (2026-07-19) the
   SAME relayer EOA (`0xC825…9D7E`) serves Base mainnet and Base Sepolia,
   funded on both; it is gas-only either way (customer funds are unreachable
-  from it). **Gnosis (chain 100) is intentionally unfunded/dead** — the
+  from it). It submits delegator activation, passport attestations and
+  revocations, sweeps, and the outbound queue's fee bumps and lane cancels;
+  agent payments are paymaster-sponsored UserOps and never use it (#3264). **Gnosis (chain 100) is intentionally unfunded/dead** — the
   delegation rail is pinned to 8453/84532, so a zero balance there is a
   decision, not a broken relayer.
 - **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado** (legacy config;

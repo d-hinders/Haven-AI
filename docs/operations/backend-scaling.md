@@ -314,8 +314,10 @@ queries, at the cost of a second pool to configure and monitor.
 
 ## What still serialises: the relayer
 
-One relayer EOA per chain signs every sponsored transaction (Safe deploys,
-owner-signed execs, Hybrid deploys, allowance transfers, sweeps). An EOA has a
+One relayer EOA per chain signs every relayer-submitted transaction (Hybrid
+deploys, passport attestations and revocations, sweeps, and the outbound queue's
+own fee bumps and lane cancels). Agent payments are not among them: they are
+paymaster-sponsored UserOps and never touch the relayer's nonce. An EOA has a
 single sequential nonce, so **replicas do not multiply relayer throughput** —
 they queue behind the same key. Two consequences worth planning around:
 
@@ -325,8 +327,9 @@ they queue behind the same key. Two consequences worth planning around:
 2. **Single point of stall — self-healing on the queue lane, with one named
    exception.** One stuck transaction blocks every later submission on that
    chain. Since #1558 the leader-locked bump worker replaces a stuck
-   queue-lane tx with bumped fees (and alerts after 3 attempts); the
-   Safe-bound legacy sites have no bump path until they retire (#1440).
+   queue-lane tx with bumped fees (and alerts after 3 attempts). Every relayer
+   submitter is on the queue lane since the Safe-bound sites were deleted with
+   the rail (#1440).
 
    The exception, deliberate since [#1735](https://github.com/d-hinders/Haven-AI/issues/1735):
    a stuck **`passport_attest`** is NOT replaced. A same-nonce replacement is
@@ -368,22 +371,28 @@ they queue behind the same key. Two consequences worth planning around:
    operator procedure is
    [`stuck-revoke-alarm.md`](stuck-revoke-alarm.md).
 
-### Multi-replica CORRECTNESS: closed for the queue lane (#1559)
+### Multi-replica CORRECTNESS: closed except on the fail-open enqueue path (#1559)
 
 The correctness half of the old constraint — two replicas reading the same
-pending nonce and colliding — is **closed for queue-lane submitters** (sweeps,
-Hybrid deploys, passport anchors, the bump worker). They submit through
+pending nonce and colliding — is **closed for every relayer submitter**
+(sweeps, Hybrid deploys, passport attestations and revocations, the bump
+worker, lane cancels) **whenever its record opened**. They submit through
 `infra/outbound-queue.ts`'s `submitRecorded`: sign → **stamp** the durable
 `outbound_txs` row under the partial UNIQUE (chain, nonce) live-broadcast
 index → broadcast. Postgres arbitrates the nonce lane: the losing replica's
 stamp is rejected, it re-reads and re-signs. The guarded stamp doubles as the
 fence — whoever stamps, sends.
 
-The Safe-bound legacy sites (`safe-deploy`/`safe-exec`, allowance transfers,
-the deployers) still rely on the in-process `withRelayerSendLock` only, so
-**multi-replica remains gated on them** until #1440 retires the rail. The
-throughput ceiling above is unchanged either way — one key is still one
-sequential nonce.
+The Safe-bound sites that once relied on the in-process `withRelayerSendLock`
+alone were deleted with the rail (#1440). **One gap remains:** opening the
+record is fail-open by policy (`infra/outbound-queue.ts` header), so on a
+database error the submitter passes a null `recordId`, `submitRecorded` skips
+the stamp, and only the in-process lock serialises that submission. Two
+replicas can collide on that path — the loser's broadcast fails; nothing is
+sent anywhere it should not go. The header asks for the fail-open policy to be
+revisited per site now that the queue is the only lane; until it is, that path
+is the one multi-replica caveat. The throughput ceiling above is unchanged
+either way — one key is still one sequential nonce.
 
 ### Evaluation: a relayer key pool
 

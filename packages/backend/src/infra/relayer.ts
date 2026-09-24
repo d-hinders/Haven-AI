@@ -13,15 +13,21 @@ const relayers = new Map<number, Wallet>()
 // Confirmation waits MUST stay outside it so payments confirm in parallel.
 //
 // Since #1559 (epic #1554) this is no longer the only — or the main — line of
-// defence. Queue-lane submitters (sweep, hybrid deploy, passport, the bump
-// worker) go through `outbound-queue.ts`'s `submitRecorded`: sign → STAMP the
-// durable row under the partial UNIQUE (chain, nonce) live-broadcast index →
-// broadcast. Postgres arbitrates nonce lanes there, so those submitters are
-// cross-replica safe; this lock remains as the cheap in-process belt inside
-// that pipeline, and as the ONLY serialisation for the Safe-bound legacy
-// sites (safe-deploy/exec, the chain-read module, the deployers) — which retire
-// with #1440. Until they do, multi-replica remains gated on THEM, not on the
-// queue lane.
+// defence. Every relayer submitter (sweep, hybrid deploy, passport attest and
+// revoke, the bump worker, lane cancel) goes through `outbound-queue.ts`'s
+// `submitRecorded`: sign → STAMP the durable row under the partial UNIQUE
+// (chain, nonce) live-broadcast index → broadcast. Postgres arbitrates the
+// nonce lane there, so a stamped submission is cross-replica safe, and this
+// lock is the cheap in-process belt inside that pipeline. The Safe-bound
+// sites that once relied on the lock alone were deleted with the rail (#1440).
+//
+// One path still has only this lock: when `openOutboundRecord` fails open
+// (a database error, by the policy in `outbound-queue.ts`'s header) the
+// submitter passes a null `recordId`, `submitRecorded` skips the stamp, and
+// nothing but this in-process lock serialises the nonce. Across replicas that
+// path can collide — a failed broadcast, not a misdirected one — so
+// multi-replica correctness is closed for every submitter EXCEPT on the
+// fail-open enqueue path.
 const sendLocks = new Map<number, Promise<unknown>>()
 
 export async function withRelayerSendLock<T>(
@@ -95,9 +101,11 @@ export function getProvider(chainId: number): JsonRpcProvider {
  * for that chain — `RELAYER_PRIVATE_KEY_<chainId>` with a global
  * `RELAYER_PRIVATE_KEY` fallback (#640). This is the signer that submits
  * relayed transactions on that chain — delegator activation, passport
- * attestations, sweeps and owner-signed Safe `exec` relays — so it must resolve
- * per chain to honour the per-chain relayer isolation; otherwise a single
- * backend serving multiple chains would exec on every chain with the same key.
+ * attestations and revocations, sweeps, and the outbound queue's own fee bumps
+ * and stuck-lane cancels — so it must resolve per chain to honour the
+ * per-chain relayer isolation; otherwise a single backend serving multiple
+ * chains would submit on every chain with the same key. Agent payments are
+ * NOT among them: those are paymaster-sponsored UserOps (`rails/delegation-rail.ts`).
  * Cached per chainId.
  */
 export function getRelayer(chainId: number): Wallet {

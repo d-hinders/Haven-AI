@@ -149,12 +149,14 @@ signed an owner change and now does not construct one either.
 What you can still do, and it is the whole of it:
 
 - **Move the funds out — but not from inside Haven any more, and the answer
-  differs by owner type.** `POST /safe/exec` still relays any Safe transaction
-  *you* sign as an owner, and it is unchanged. What is gone is the **screen**
-  that composed one:
+  differs by owner type.** Haven neither composes nor relays a Safe transaction
+  any more. The **screen** that composed one went first:
   [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) deleted the Send
-  modal for legacy Safe accounts along with the rest of the Safe rail, so the
-  account page now shows balances and history with no Send action.
+  modal for legacy Safe accounts along with the rest of the Safe rail. The
+  route that relayed one you signed as an owner, `POST /safe/exec`, followed in
+  [#2847](https://github.com/d-hinders/Haven-AI/issues/2847), and since
+  [#2413](https://github.com/d-hinders/Haven-AI/issues/2413) a legacy Safe no
+  longer appears on any account screen.
   - If your Safe is owned by a **wallet address**, this costs you nothing real
     — sign the transfer at [app.safe.global](https://app.safe.global) with that
     wallet, exactly as the next bullet describes for owner changes.

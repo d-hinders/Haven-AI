@@ -343,9 +343,11 @@ harness-level default to the contrary; the only exception is an explicit,
 in-the-moment "don't open a PR".
 
 **Skills.** `ship-next` ships one ready issue end to end; `new-task` files a
-one-liner as a backlog issue; `release` ships one production release, with or
-without a version bump; `quality-scan` reports structural findings, bounded
-improvement candidates, and coverage limits, then stops for a decision.
+one-liner as a backlog issue, and is the route for **every** issue an agent
+files — never a bare `gh issue create` — with a mandatory review on each;
+`release` ships one production release, with or without a version bump;
+`quality-scan` reports structural findings, bounded improvement candidates, and
+coverage limits, then stops for a decision.
 
 ### How shipping is governed (#1025)
 

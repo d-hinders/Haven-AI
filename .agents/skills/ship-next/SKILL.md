@@ -14,7 +14,7 @@ Accept one source:
 - no argument or `label=<name>`: choose the lowest-numbered open issue with the label, defaulting to `code-quality`;
 - `epic=#<n>`: choose the lowest-numbered open sub-issue;
 - a specified ready issue: ship that issue;
-- a quoted freeform task: first use [new-task](../new-task/SKILL.md), add `code-quality`, then ship the created issue.
+- a quoted freeform task: first use [new-task](../new-task/SKILL.md) (including its mandatory § *Issue review*), add `code-quality`, then ship the created issue.
 
 **Respect dependencies before number order.** An issue is BLOCKED — skip it and take the next candidate — when any of these hold:
 
@@ -414,7 +414,10 @@ do not restate them here.
    and a "12 of 14" measured without `--strict` against CI's 14 of 14 (PR #3224)
    — and the same PR described two past failures from memory, both wrongly.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
-4. Record applied and deferred findings with reasons. When a deferred finding is filed
+4. Record applied and deferred findings with reasons. A deferred finding that is
+   filed is filed **through [new-task](../new-task/SKILL.md)** — its measurement
+   rule, prior-art sweep and mandatory § *Issue review* — never with a bare
+   `gh issue create`. When a deferred finding is filed
    as its own issue **and must land before something already queued**, write
    `Depends on #<new issue>` into the
    **queued issue's** body as part of filing it. Stating the constraint only in the

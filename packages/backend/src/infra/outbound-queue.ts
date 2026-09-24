@@ -122,8 +122,9 @@ const defaultChainDeps: SubmitChainDeps = { getRelayer, withRelayerSendLock }
  * `withRelayerSendLock` still wraps the window: it is the in-process belt,
  * no longer the only line of defence — except when an inline submitter's
  * open failed open (the null-`recordId` path below), where it is the only
- * one. The bump worker's null-`recordId` sends are also under its leader
- * lock and re-use explicit nonces.
+ * one — and for the bump worker's orphan re-send, which also reads a fresh
+ * nonce unstamped. Its same-nonce replacements re-use an explicit nonce under
+ * its leader lock.
  *
  * A null `recordId` (the open failed open, or the bump worker stamping its
  * own rows) skips the stamp-first fence and degrades to the pre-#1559

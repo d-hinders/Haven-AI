@@ -19,17 +19,18 @@ const relayers = new Map<number, Wallet>()
 // durable row under the partial UNIQUE (chain, nonce) live-broadcast index →
 // broadcast, so Postgres arbitrates the nonce lane and a stamped submission is
 // cross-replica safe. The bump worker passes a null id — it stamps its own
-// rows — and is serialised by its leader lock, re-using explicit nonces. Here
-// this lock is the cheap in-process belt. The Safe-bound sites that once
-// relied on the lock alone were deleted with the rail (#1440).
+// rows — and runs under its leader lock: a same-nonce replacement re-uses the
+// row's explicit nonce, an orphan re-send reads a fresh one. Here this lock
+// is the cheap in-process belt. The Safe-bound sites that once relied on the
+// lock alone were deleted with the rail (#1440).
 //
-// One path still picks its nonce under this lock alone: when
-// `openOutboundRecord` fails open (a database error, by the policy in
-// `outbound-queue.ts`'s header) an inline submitter passes a null `recordId`,
-// `submitRecorded` skips the stamp, and nothing but this in-process lock
-// serialises it. Across replicas that path can collide — a failed broadcast,
-// not a misdirected one — so multi-replica correctness is closed EXCEPT on
-// the fail-open enqueue path.
+// Two paths still pick a FRESH nonce under this lock alone, unstamped:
+// an inline submitter whose `openOutboundRecord` failed open (a database
+// error, by the policy in `outbound-queue.ts`'s header), and the bump
+// worker's orphan re-send (the leader lock serialises bump ticks, not other
+// replicas' inline sends). Across replicas either can collide with a stamped
+// send — a failed broadcast, not a misdirected one — so multi-replica
+// correctness is closed EXCEPT on those two paths.
 const sendLocks = new Map<number, Promise<unknown>>()
 
 export async function withRelayerSendLock<T>(

@@ -21,8 +21,9 @@ may now run more than one, and the relayer is what still caps throughput.**
   than queue. Without it, an N-replica deployment runs every scan N times and
   sends up to N copies of each alert. The exception is the relayer balance
   monitor, deliberately NOT leader-locked (`index.ts`): its scan feeds each
-  replica's own `/health/ops` answer, and its per-chain edge trigger bounds
-  duplicate alerts to the low→ok→low transition.
+  replica's own `/health/ops` answer. Its low-balance alert is edge-triggered
+  per chain but tracked per replica, so each low edge sends one alert per
+  replica.
 - **First-deploy races on one counterfactual account**
   ([#1673](https://github.com/d-hinders/Haven-AI/issues/1673)). `runIfLeader`'s
   blocking sibling, `withKeyedAdvisoryLock`, serialises the callers that must
@@ -374,11 +375,11 @@ they queue behind the same key. Two consequences worth planning around:
    operator procedure is
    [`stuck-revoke-alarm.md`](stuck-revoke-alarm.md).
 
-### Multi-replica CORRECTNESS: closed except on the fail-open enqueue path (#1559)
+### Multi-replica CORRECTNESS: closed except on two unstamped paths (#1559)
 
 The correctness half of the old constraint — two replicas reading the same
-pending nonce and colliding — is **closed for every relayer submitter
-whenever its record opened**. Every broadcast goes through
+pending nonce and colliding — is **closed for every stamped relayer
+submission**. Every broadcast goes through
 `infra/outbound-queue.ts`'s `submitRecorded`. The inline submitters (sweeps,
 Hybrid deploys, passport attestations and revocations) and lane cancels pass
 their record: sign → **stamp** the durable
@@ -386,19 +387,24 @@ their record: sign → **stamp** the durable
 index → broadcast. Postgres arbitrates the nonce lane: the losing replica's
 stamp is rejected, it re-reads and re-signs. The guarded stamp doubles as the
 fence — whoever stamps, sends. The bump worker sends through the same
-pipeline without a record id (it stamps its own rows); its serialisation is
-the leader lock, and it re-uses explicit nonces rather than reading one.
+pipeline without a record id (it stamps its own rows), under its leader lock:
+a same-nonce replacement re-uses the row's explicit nonce, and an orphan
+re-send reads a fresh one.
 
 The Safe-bound sites that once relied on the in-process `withRelayerSendLock`
-alone were deleted with the rail (#1440). **One gap remains:** opening the
-record is fail-open by policy (`infra/outbound-queue.ts` header), so on a
-database error an inline submitter passes a null `recordId`, `submitRecorded` skips
-the stamp, and only the in-process lock serialises that submission. Two
-replicas can collide on that path — the loser's broadcast fails; nothing is
-sent anywhere it should not go. The header asks for the fail-open policy to be
-revisited per site now that the queue is the only lane; until it is, that path
-is the one multi-replica caveat. The throughput ceiling above is unchanged
-either way — one key is still one sequential nonce.
+alone were deleted with the rail (#1440). **Two paths remain** that read a
+fresh nonce unstamped, with only the in-process lock between them and another
+replica. The first: opening the record is fail-open by policy
+(`infra/outbound-queue.ts` header), so on a database error an inline submitter
+passes a null `recordId` and `submitRecorded` skips the stamp. The second: the
+bump worker's orphan re-send, whose leader lock serialises bump ticks but not
+another replica's inline sends. Two replicas can collide on either path — the
+loser's broadcast fails; nothing is sent anywhere it should not go. The header
+asks for the fail-open policy to be revisited per site now that the queue is
+the only lane; until it is, those two paths are the multi-replica caveat.
+
+The throughput ceiling above is unchanged either way — one key is still one
+sequential nonce.
 
 ### Evaluation: a relayer key pool
 
@@ -444,5 +450,6 @@ Whoever picks this up should read the interaction with two existing pieces:
 - Replica count is a Railway setting; nothing in the code reads it.
 - The allowance-nonce watermark this section used to carry operating notes for
   (its 5-minute read bound and its `GREATEST` upsert) went with its table in
-  migration `071_drop_allowance_nonce_watermarks.ts`; the lesson it taught is
-  kept, as history, in the retired subsection above.
+  migration `071_drop_allowance_nonce_watermarks.ts`, and the notes went with
+  it. They are in this file's git history
+  (`git log -S GREATEST -- docs/operations/backend-scaling.md`).

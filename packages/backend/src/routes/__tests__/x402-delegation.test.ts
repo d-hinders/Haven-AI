@@ -29,6 +29,23 @@ import { delegationSigningPayload } from '../../rails/delegation-policy.js'
 import { settlementSalt, typedDataDigest } from '../../modules/x402/x402-delegation.js'
 import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
 import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
+/**
+ * #3272 criterion 8: the edge signer drops Haven's x402 expected-context v1 —
+ * the bare-hash binding from the Safe rail, a context with no `typedDataHash`.
+ * `signX402ExpectedContext` DERIVES the version from the context, so a site
+ * that ever omitted the commitment would emit v1 and every updated signer would
+ * refuse the payment. Pinned on each emission site, on a real response signed
+ * with the real binding key: the funding leg and the erc7710 settlement child
+ * (`delegation-authorize.ts`), and the replay rebuild (`replay.ts`, served by
+ * sign-context and by the funded-merchant retry).
+ */
+function expectBoundExpectedContext(auth: { version: number; message: string }, typedData: unknown): void {
+  expect([2, 3], `x402 expected-context version ${auth.version} — v1 is retired (#3272)`).toContain(auth.version)
+  const committed = JSON.parse(auth.message.split('\n')[1]).typedDataHash as unknown
+  expect(typeof committed, 'the signed context must commit to typedDataHash').toBe('string')
+  expect((committed as string).toLowerCase()).toBe(typedDataDigest(typedData)!.toLowerCase())
+}
+
 const DELEGATE_SIGNER = privateKeyToAccount(('0x' + '11'.repeat(32)) as `0x${string}`)
 async function signChild(child: unknown): Promise<`0x${string}`> {
   const payload = delegationSigningPayload(child as never, 84532)
@@ -186,6 +203,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(body.x402_expected_auth.message).toContain(
       typedDataDigest(body.sign_data.typed_data),
     )
+    expectBoundExpectedContext(body.x402_expected_auth, body.sign_data.typed_data)
     // The intent was pinned to the delegation rail, and the METERING budget
     // is recorded uniformly (#1059): delegation_hash carries the signed CHILD,
     // budget_delegation_hash the parent budget — never equal on erc7710.
@@ -588,6 +606,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
       })
       expect(res.statusCode).toBe(201)
       expect(res.json().sign_data.signature_scheme).toBe('eip712_userop')
+      // #3272 criterion 8: the funding leg's context is bound, never v1.
+      expectBoundExpectedContext(res.json().x402_expected_auth, res.json().sign_data.typed_data)
       // #2914 (naming epic #2906 phase 5, the contraction): `components.safe`
       // is gone — `payer_account` is the only name now, on a REAL response,
       // not a source regex.
@@ -2084,6 +2104,7 @@ describe('x402 sign-context by payment_id (#1263)', () => {
     expect(body.x402_expected.amount).toBe('100000') // atomic, never amount_human
     expect(body.x402_expected.typed_data_hash.toLowerCase()).toBe(derived.toLowerCase())
     expect(body.x402_expected.auth.version).toBe(2)
+    expectBoundExpectedContext(body.x402_expected_auth, body.sign_data.typed_data)
     // A read, not a replay:
     expect('idempotent_replay' in body).toBe(false)
     // Read-only: nothing was written.
@@ -2334,6 +2355,8 @@ describe('x402 sign-context funded-but-unsettled resume (#2290)', () => {
     // binding whose expiry disagrees with its signature verifies as tampered.
     const signed = JSON.parse(body.x402_expected_auth.message.split('\n')[1])
     expect(signed.expiresAt).toBe(body.x402_expected.expires_at)
+    // #3272 criterion 8: the funded retry's fresh context is bound, never v1.
+    expectBoundExpectedContext(body.x402_expected_auth, body.sign_data.typed_data)
     // And nothing was written: the intent row keeps its spent quote window.
     expect(mockQuery.mock.calls.some((c) => /UPDATE payment_intents/i.test(String(c[0])))).toBe(false)
   })

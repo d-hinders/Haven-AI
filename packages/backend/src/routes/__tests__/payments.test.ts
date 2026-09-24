@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
+// #3031: production wiring for the enforced module (see beforeAll).
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
 
 const { mockQuery, fiatMocks } = vi.hoisted(() => ({
@@ -181,6 +183,11 @@ describe('payment routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // #3031: production wiring — every money-path module is in
+    // `enforcedModules`, so the request schema refuses off-spec shapes
+    // before the handler (and the rungs that used to make those refusals
+    // are gone).
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/payments.ts'] })
     await app.register(paymentRoutes, { prefix: '/payments' })
   })
 

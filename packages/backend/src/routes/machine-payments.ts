@@ -4,7 +4,6 @@ import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { getAgentPaymentStatus } from '../modules/payments/index.js'
 import { agentExecutionRailLabel } from '../rails/execution-rail.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
-import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   handleGetAllowances,
   handleBalanceCoverage,
@@ -20,8 +19,6 @@ import {
   mppDemoRetired,
   prepareSweep,
   submitSweep,
-  RECONCILIATION_EVENT_TYPES,
-  SUPPORTED_ASSETS,
   type AuthorizeBody,
   type BudgetPrecheckBody,
   type EvidenceBody,
@@ -31,18 +28,30 @@ import {
   type SweepSubmitBody,
 } from '../modules/mpp/index.js'
 
-// Route handlers only: request validation, auth middleware wiring, rate-limit
-// config, and response serialization. Everything else — authorize
+/**
+ * The reconciliation-events request body: `paymentId`, `rail` and
+ * `eventType` required, the optional halves of `ReconciliationEventBody`
+ * unchanged. A NAMED alias rather than an inline `Pick`/`Omit` generic on
+ * the route: the route-modules extractor matches `app.post(` up to the
+ * first quote (#3135), and the inline form's string literals broke the
+ * match — see the note at the registration.
+ */
+type ReconciliationEventRequestBody =
+  Required<Pick<ReconciliationEventBody, 'paymentId' | 'rail' | 'eventType'>> &
+    Omit<ReconciliationEventBody, 'paymentId' | 'rail' | 'eventType'>
+
+// Route handlers only: auth middleware wiring, rate-limit config, and
+// response serialization — the request SHAPE has been the plugin's since
+// #3031, and what stays here is what JSON Schema cannot state. Everything
+// else — authorize
 // orchestration, the send flow, sweep prepare/submit orchestration,
 // evidence/receipt assembly, and the rail-aware allowances read — lives in
 // `src/modules/mpp/` (#997, epic #980 M4). See that module's `index.ts` for
 // the public surface and the boundary rationale.
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
-}
-
-/** #3128: a receipts cursor is a receipt id (uuid). */
+/** #3128: a receipts cursor is a receipt id (uuid). The SHAPE check moved
+ *  to the request schema (#3031, `format: uuid`); ownership stays semantic
+ *  in `listReceipts`. */
 const RECEIPT_CURSOR_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export default async function machinePaymentRoutes(app: FastifyInstance): Promise<void> {
@@ -121,12 +130,12 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     const limit = Number.isInteger(parsedLimit)
       ? Math.min(Math.max(parsedLimit, 1), 100)
       : 25
-    // #3128: the cursor is a receipt id from a previous page. Anything else
-    // is refused up front rather than reaching the uuid cast in the query.
+    // #3031: the cursor's uuid SHAPE is the request schema's (`format:
+    // uuid` on the `cursor` parameter), so the RECEIPT_CURSOR_PATTERN rung
+    // is gone. What stays semantic is the cursor's OWNERSHIP half: a
+    // well-formed uuid that names no receipt of THIS agent is still a 400
+    // from `listReceipts`, not an empty page (#3128).
     const cursor = request.query.cursor ?? null
-    if (cursor !== null && !RECEIPT_CURSOR_PATTERN.test(cursor)) {
-      return reply.code(400).send({ error: 'cursor must be the id of a receipt returned by a previous page (next_cursor).' })
-    }
 
     const page = await listReceipts(agent.id, limit, cursor)
     if (page === null) {
@@ -155,29 +164,20 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     const { asset, recipient, amount } = request.body
 
     // 1. Validate inputs
-    if (!asset || !SUPPORTED_ASSETS.includes(asset as SendAsset)) {
-      return reply.code(400).send({
-        error: 'asset must be one of: ETH, USDC',
-        supported: SUPPORTED_ASSETS,
-      })
-    }
-    if (!recipient || !isValidAddress(recipient)) {
-      return reply.code(400).send({ error: 'Valid recipient address is required' })
-    }
-    if (!amount || typeof amount !== 'string' || isNaN(Number(amount)) || Number(amount) <= 0) {
+    //
+    // #3031: the SHAPES — required `asset`/`recipient`/`amount`, the ETH|USDC
+    // enum, the recipient address pattern, `amount` string-ness, and the
+    // 1–128 `idempotency_key` — are the request schema's job now
+    // (`/machine-payments/send`, enforced since this file joined
+    // `enforcedModules`). What stays here is what the schema cannot say:
+    // `Number(amount)` must PARSE (`'1e2'` is digits-plus-letter and would
+    // NaN through `handleSend`'s conversion) and be POSITIVE — the same
+    // two-half split as the x402 amount.
+    if (isNaN(Number(amount)) || Number(amount) <= 0) {
       return reply.code(400).send({ error: 'amount must be a positive number' })
     }
 
-    let idempotencyKey: string | undefined
-    if (request.body.idempotency_key !== undefined) {
-      const key = request.body.idempotency_key
-      if (typeof key !== 'string' || key.length < 1 || key.length > 128) {
-        return reply.code(400).send({ error: 'idempotency_key must be a string of 1–128 characters' })
-      }
-      idempotencyKey = key
-    }
-
-    const result = await handleSend(agent, asset as SendAsset, recipient, amount, idempotencyKey)
+    const result = await handleSend(agent, asset as SendAsset, recipient, amount, request.body.idempotency_key)
     return reply.code(result.statusCode).send(result.body)
   })
 
@@ -195,64 +195,14 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     const agent = request.agent as AgentContext
     const body = request.body
 
-    if (!body || typeof body !== 'object') {
-      return reply.code(400).send({ error: 'Evidence body is required' })
-    }
-    if (!body.paymentId || typeof body.paymentId !== 'string') {
-      return reply.code(400).send({ error: 'paymentId is required' })
-    }
-    if (!body.rail || typeof body.rail !== 'string') {
-      return reply.code(400).send({ error: 'rail is required' })
-    }
-    if (!body.txHash || typeof body.txHash !== 'string') {
-      return reply.code(400).send({ error: 'txHash is required' })
-    }
-    if (body.resourceUrl !== undefined && typeof body.resourceUrl !== 'string') {
-      return reply.code(400).send({ error: 'resourceUrl must be a string' })
-    }
-    if (
-      body.paymentProofHeaderName !== undefined &&
-      typeof body.paymentProofHeaderName !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'paymentProofHeaderName must be a string' })
-    }
-    if (
-      body.paymentProofHeader !== undefined &&
-      typeof body.paymentProofHeader !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'paymentProofHeader must be a string' })
-    }
-    if (
-      body.protocolReceiptHeaderName !== undefined &&
-      typeof body.protocolReceiptHeaderName !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'protocolReceiptHeaderName must be a string' })
-    }
-    if (
-      body.protocolReceiptHeader !== undefined &&
-      typeof body.protocolReceiptHeader !== 'string'
-    ) {
-      return reply.code(400).send({ error: 'protocolReceiptHeader must be a string' })
-    }
-    if (
-      body.challengePayload !== undefined &&
-      !isPlainObject(body.challengePayload)
-    ) {
-      return reply.code(400).send({ error: 'challengePayload must be an object' })
-    }
-    if (
-      body.selectedPayment !== undefined &&
-      !isPlainObject(body.selectedPayment)
-    ) {
-      return reply.code(400).send({ error: 'selectedPayment must be an object' })
-    }
-    if (
-      body.protocolReceiptPayload !== undefined &&
-      !isPlainObject(body.protocolReceiptPayload)
-    ) {
-      return reply.code(400).send({ error: 'protocolReceiptPayload must be an object' })
-    }
-
+    // #3031: `MachinePaymentEvidenceRequest` (enforced) refuses every shape
+    // error this ladder used to: required `paymentId` (uuid)/`rail`/`txHash`
+    // (0x 64-hex), the optional strings, and the three optional OBJECTS —
+    // `type: 'object'` without `additionalProperties: false` refuses arrays
+    // and null exactly as `isPlainObject` did. What stays in the module is
+    // the SEMANTIC layer: rail eligibility, payment ownership/state, and the
+    // cross-field agreement checks (`modules/mpp/evidence.ts`), plus the
+    // 100–599 merchantStatus bound the module's own guard already held.
     const result = await attachEvidenceHandler(agent.id, body)
     return reply.code(result.statusCode).send(result.body)
   })
@@ -269,7 +219,16 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     },
   )
 
-  app.post<{ Body: ReconciliationEventBody }>('/reconciliation-events', { config: moneyPathRateLimit }, async (request, reply) => {
+  // The Body generic states the post-#3031 reality: the enforced schema
+  // guarantees `paymentId`/`rail`/`eventType` before the handler runs, so
+  // the type says so instead of a rung proving it at runtime. The type is a
+  // NAMED alias, not an inline generic: the route-modules extractor
+  // (`extractRoutes`, #3135) matches `app.post(` up to the first quote, and
+  // the inline `Pick<..., 'paymentId' | ...>`'s string literals swallowed
+  // the match — the route dropped out of `ROUTE_MODULE_BY_OPERATION`, and
+  // with it out of enforcement (caught by the generated-table staleness
+  // test, which is exactly what that gate exists for).
+  app.post<{ Body: ReconciliationEventRequestBody }>('/reconciliation-events', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
     const {
       paymentId,
@@ -280,31 +239,15 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       details,
     } = request.body
 
-    if (!paymentId || typeof paymentId !== 'string') {
-      return reply.code(400).send({ error: 'paymentId is required' })
-    }
-    if (!rail || typeof rail !== 'string') {
-      return reply.code(400).send({ error: 'rail is required' })
-    }
-    if (!eventType || !RECONCILIATION_EVENT_TYPES.has(eventType)) {
-      return reply.code(400).send({ error: 'Unsupported reconciliation event type' })
-    }
-    if (txHash !== undefined && (
-      typeof txHash !== 'string' ||
-      !/^0x[0-9a-fA-F]{64}$/.test(txHash)
-    )) {
-      return reply.code(400).send({ error: 'txHash must be a 0x-prefixed transaction hash' })
-    }
-    if (reason !== undefined && typeof reason !== 'string') {
-      return reply.code(400).send({ error: 'reason must be a string' })
-    }
-    if (details !== undefined && (
-      !details ||
-      typeof details !== 'object' ||
-      Array.isArray(details)
-    )) {
-      return reply.code(400).send({ error: 'details must be an object' })
-    }
+    // #3031: the shapes are `MachinePaymentReconciliationEventRequest`'s —
+    // required `paymentId` (uuid)/`rail`/`eventType` (the enum that replaces
+    // the RECONCILIATION_EVENT_TYPES rung), the 0x-64 txHash, optional
+    // string `reason` and open object `details` (arrays and null refused by
+    // `type: 'object'`). What stays is the module's SEMANTIC layer —
+    // payment ownership, state agreement, the duplicate-report rule
+    // (`modules/mpp/reconciliation.ts`) — which is also why this route must
+    // never be driven synthetically for a shadow reading (#3223): a forced
+    // event reports a merchant rejection that did not happen.
 
     const result = await handleReconciliationEvent(
       agent.id,
@@ -352,20 +295,26 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   })
 
   // ── POST /sweep/submit — relay a signed sweep authorization ─────────────────
-  app.post<{ Body: SweepSubmitBody }>('/sweep/submit', { config: moneyPathRateLimit }, async (request, reply) => {
-    const agent = request.agent as AgentContext
-    const body = request.body ?? {}
-    const signature = body.signature
-    const nonce = body.authorization?.nonce
+  // Body generic: the enforced schema guarantees `signature` and
+  // `authorization.nonce` before the handler runs.
+  app.post<{ Body: SweepSubmitBody & { signature: string; authorization: { nonce: string } } }>(
+    '/sweep/submit',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const body = request.body ?? {}
+      const signature = body.signature
+      const nonce = body.authorization?.nonce
 
-    if (!signature || typeof signature !== 'string' || !/^0x[0-9a-fA-F]+$/.test(signature)) {
-      return reply.code(400).send({ error: 'signature must be a 0x-prefixed hex string' })
-    }
-    if (!nonce || typeof nonce !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(nonce)) {
-      return reply.code(400).send({ error: 'authorization.nonce must be a 0x-prefixed 32-byte hex string' })
-    }
+      // #3031: `SweepSubmitRequest` + `SweepAuthorization` (enforced) refuse
+      // every shape error these two rungs answered: required `signature`
+      // (`^0x[0-9a-fA-F]+$` — the same pattern the rung stated) and the
+      // authorization's `nonce` (`^0x[0-9a-fA-F]{64}$`, same as the rung).
+      // The signature RECOVERY and the CAS claim stay semantic, in
+      // `modules/mpp/sweep.ts`.
 
-    const result = await submitSweep(agent, nonce, signature)
-    return reply.code(result.statusCode).send(result.body)
-  })
+      const result = await submitSweep(agent, nonce, signature)
+      return reply.code(result.statusCode).send(result.body)
+    },
+  )
 }

@@ -28,7 +28,7 @@ import { AgentPaymentNextAction, AgentPaymentPhase } from '../domain/agent-payme
 import { getChain, getExplorerUrl } from '../domain/chains.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
 import { classifyRevertForLedger, refuse } from '../modules/payments/index.js'
-import { formatTokenAmount, isAddress as isValidAddress, parseTokenAmount } from '@haven_ai/core'
+import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 // Evidence recording moved into the mpp module (#997); routes/payments.ts
 // needs it after a delegation-rail send confirms, so it imports the module's
 // public entry point (same pattern as routes/x402.ts -> modules/x402/).
@@ -297,20 +297,18 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     const { token, amount, to, idempotency_key } = request.body
 
     // 1. Validate inputs
-    if (!token || typeof token !== 'string') {
-      return reply.code(400).send({ error: 'Token symbol is required' })
-    }
-    if (!amount || typeof amount !== 'string' || isNaN(Number(amount)) || Number(amount) <= 0) {
+    //
+    // #3031: the SHAPES — required `token`/`amount`/`to`, the recipient
+    // address pattern, and the 1–128 `idempotency_key` — are the request
+    // schema's job now (`CreatePaymentRequest`, enforced since this file
+    // joined `enforcedModules`). What stays here is what the schema cannot
+    // say: `Number(amount)` must PARSE and be POSITIVE — `parseTokenAmount`
+    // is the converter and the zero/negative refusal below is its own rung;
+    // the token-SYMBOL resolution against the chain's token list is semantic
+    // (the supported set is chain data, not a wire enum), and so is the rail
+    // gate behind it.
+    if (isNaN(Number(amount)) || Number(amount) <= 0) {
       return reply.code(400).send({ error: 'Amount must be a positive number' })
-    }
-    if (!to || !isValidAddress(to)) {
-      return reply.code(400).send({ error: 'Valid recipient address is required' })
-    }
-    if (
-      idempotency_key !== undefined &&
-      (typeof idempotency_key !== 'string' || idempotency_key.length === 0 || idempotency_key.length > 128)
-    ) {
-      return reply.code(400).send({ error: 'idempotency_key must be a non-empty string of at most 128 characters' })
     }
 
     // 2. Resolve the execution rail — ABOVE token resolution (#2274).
@@ -558,9 +556,13 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       const { id } = request.params
       const { signature } = request.body
 
-      if (!signature || typeof signature !== 'string' || !signature.startsWith('0x')) {
-        return reply.code(400).send({ error: 'Valid 0x-prefixed signature is required' })
-      }
+      // #3031: the `0x`-prefix + hex + minimum-length shape check moved to
+      // the request schema (`^0x[0-9a-fA-F]{100,}$` — the rung's exact
+      // floor, corrected from the spec's stricter `{130}` so 100–129-hex
+      // shapes the route always accepted stay accepted). The signature's
+      // VALIDITY is deliberately not checked here at all: the account's own
+      // EIP-1271/4337 validation at submit is the real validator (note
+      // below), so there is nothing between the schema and that.
 
       // 1. Load intent
       const intent = await findIntentForAgent(id, agent.id)
@@ -642,12 +644,11 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       // validates in `validateUserOp`. That on-chain check IS the signature
       // verification — strictly stronger than a local recover, and it cannot
       // drift from the account's own rules. A bad signature is rejected by
-      // the bundler at submit; nothing moves. We therefore only shape-check
-      // here (a local EIP-712 reconstruction would add a second, weaker
-      // source of truth that could false-reject valid signatures).
-      if (!/^0x[0-9a-fA-F]{100,}$/.test(signature)) {
-        return reply.code(400).send({ error: 'Invalid signature format' })
-      }
+      // the bundler at submit; nothing moves. The shape check the first
+      // sentence refers to is the request schema's since #3031 (the rung
+      // that stood here answered `Invalid signature format`); a local
+      // EIP-712 reconstruction would add a second, weaker source of truth
+      // that could false-reject valid signatures.
 
       // #1482: refuse a MISDIRECTED erc7710 intent before anything is claimed.
       //

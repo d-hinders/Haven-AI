@@ -3,10 +3,6 @@
     "shadow": 1,
     "typeof": 13
   },
-  "routes/agent-delegations.ts": {
-    "shadow": 1,
-    "typeof": 8
-  },
   "routes/agent-passports.ts": {
     "shadow": 1,
     "typeof": 0
@@ -26,14 +22,6 @@
   "routes/hybrid-accounts.ts": {
     "shadow": 1,
     "typeof": 1
-  },
-  "routes/machine-payments.ts": {
-    "shadow": 1,
-    "typeof": 19
-  },
-  "routes/payments.ts": {
-    "shadow": 1,
-    "typeof": 4
   },
   "routes/safe-deploy.ts": {
     "shadow": 0,

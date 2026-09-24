@@ -10,6 +10,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
+import { hashTypedData } from 'viem'
 import { buildX402ExpectedMessage } from '@haven_ai/sdk'
 import { createEdgeSigner } from './core.js'
 import { createToolHandlers } from './tools.js'
@@ -37,6 +38,17 @@ const PAYMENT_REQUIRED = {
   ],
 }
 
+// #3272 (criterion 8): every x402 funding intent is delegation-rail typed
+// data now. The shape does not matter — only that its digest is what
+// `expectedX402`'s `typedDataHash` commits to.
+const FUNDING_TYPED_DATA = {
+  domain: { name: 'HavenX402Funding', version: '1', chainId: 84532, verifyingContract: `0x${'11'.repeat(20)}` },
+  types: { Funding: [{ name: 'note', type: 'string' }] },
+  primaryType: 'Funding',
+  message: { note: 'x402 funding leg (#3272 test fixture)' },
+}
+const FUNDING_DIGEST = hashTypedData(FUNDING_TYPED_DATA as Parameters<typeof hashTypedData>[0])
+
 async function expectedX402() {
   const context = {
     paymentId: 'pay_x402',
@@ -47,10 +59,11 @@ async function expectedX402() {
     asset: PAYMENT_REQUIRED.accepts[0].asset,
     network: PAYMENT_REQUIRED.accepts[0].network,
     expiresAt: EXPIRES_AT,
+    typedDataHash: FUNDING_DIGEST,
   }
   const message = buildX402ExpectedMessage(context)
   const account = privateKeyToAccount(BINDING_KEY)
-  return { ...context, auth: { version: 1 as const, message, signature: await account.signMessage({ message }), signer: account.address } }
+  return { ...context, auth: { version: 2 as const, message, signature: await account.signMessage({ message }), signer: account.address } }
 }
 
 function ok(payload: { success: boolean; data?: unknown; message?: string }): { success: true; data: unknown } {
@@ -63,6 +76,7 @@ describe('haven_x402_sign_header transport robustness', () => {
     const signed = ok(
       await handlers.haven_sign({
         payload_hash: FUNDING_HASH,
+        typed_data: FUNDING_TYPED_DATA,
         x402_expected: {
           payment_id: 'pay_x402',
           payload_hash: FUNDING_HASH,
@@ -72,6 +86,7 @@ describe('haven_x402_sign_header transport robustness', () => {
           asset: PAYMENT_REQUIRED.accepts[0].asset,
           network: PAYMENT_REQUIRED.accepts[0].network,
           expires_at: EXPIRES_AT,
+          typed_data_hash: FUNDING_DIGEST,
           auth: (await expectedX402()).auth,
         },
       }),
@@ -118,6 +133,7 @@ describe('haven_sign_x402 (one-shot funding + header signing)', () => {
     const result = ok(
       await handlers.haven_sign_x402({
         payload_hash: FUNDING_HASH,
+        typed_data: FUNDING_TYPED_DATA,
         x402_expected: {
           payment_id: 'pay_x402',
           payload_hash: FUNDING_HASH,
@@ -127,6 +143,7 @@ describe('haven_sign_x402 (one-shot funding + header signing)', () => {
           asset: PAYMENT_REQUIRED.accepts[0].asset,
           network: PAYMENT_REQUIRED.accepts[0].network,
           expires_at: EXPIRES_AT,
+          typed_data_hash: FUNDING_DIGEST,
           auth: (await expectedX402()).auth,
         },
         payment_required: PAYMENT_REQUIRED,
@@ -153,6 +170,7 @@ describe('haven_sign_x402 (one-shot funding + header signing)', () => {
     const result = ok(
       await handlers.haven_sign_x402({
         payload_hash: FUNDING_HASH,
+        typed_data: FUNDING_TYPED_DATA,
         x402_expected: {
           payment_id: 'pay_x402',
           payload_hash: FUNDING_HASH,
@@ -162,6 +180,7 @@ describe('haven_sign_x402 (one-shot funding + header signing)', () => {
           asset: PAYMENT_REQUIRED.accepts[0].asset,
           network: PAYMENT_REQUIRED.accepts[0].network,
           expires_at: EXPIRES_AT,
+          typed_data_hash: FUNDING_DIGEST,
           auth: (await expectedX402()).auth,
         },
         payment_required: JSON.stringify(PAYMENT_REQUIRED),
@@ -189,7 +208,7 @@ describe('haven_sign_x402 payment_id-only (#1355: payment_required from the fetc
     const expected = await expectedX402()
     return {
       payment_id: 'pay_x402',
-      sign_data: { hash: FUNDING_HASH, typed_data: { primaryType: 'X' } },
+      sign_data: { hash: FUNDING_HASH, typed_data: FUNDING_TYPED_DATA },
       x402_expected: {
         payment_id: 'pay_x402',
         payload_hash: FUNDING_HASH,
@@ -199,6 +218,7 @@ describe('haven_sign_x402 payment_id-only (#1355: payment_required from the fetc
         asset: PAYMENT_REQUIRED.accepts[0].asset,
         network: PAYMENT_REQUIRED.accepts[0].network,
         expires_at: EXPIRES_AT,
+        typed_data_hash: FUNDING_DIGEST,
         auth: expected.auth,
       },
       payment_required: PAYMENT_REQUIRED,
@@ -238,6 +258,7 @@ describe('haven_sign_x402 payment_id-only (#1355: payment_required from the fetc
 
     const failure = await handlers.haven_sign_x402({
       payload_hash: FUNDING_HASH,
+      typed_data: FUNDING_TYPED_DATA,
       x402_expected: (await contextBody()).x402_expected,
     })
     expect(failure.success).toBe(false)

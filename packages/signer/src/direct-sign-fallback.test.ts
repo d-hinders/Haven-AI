@@ -16,37 +16,25 @@ import { describe, it, expect } from 'vitest'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  ENTRY_POINT_V07,
-  PACKED_USER_OPERATION_FIELDS,
-  packedUserOperationHash,
-} from '@haven_ai/sdk'
+import { privateKeyToAccount } from 'viem/accounts'
 import { createEdgeSigner } from './core.js'
 import { createToolHandlers } from './tools.js'
 import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
+import { buildBoundDirectUserOp } from './test-support/direct-userop.js'
 
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
+const TEST_DELEGATE_ADDRESS = privateKeyToAccount(TEST_KEY).address
 const IDENTITY = { apiKey: 'sk_agent_test_3271', apiUrl: 'https://haven.test' }
 
+/**
+ * #3272: a real-shaped, BOUND UserOp for TEST_KEY's own delegate account — the
+ * toy fixture this file used (sender `0x1111…1111`, empty `callData`) is
+ * refused by the #3272 allowlist for BOTH reasons (wrong account, and no
+ * redeemDelegations call), which would mask which #3271 property each test
+ * below actually exercises.
+ */
 function buildDirectUserOp(overrides: { sender?: `0x${string}` } = {}) {
-  const sender = overrides.sender ?? `0x${'11'.repeat(20)}`
-  const typedData = {
-    domain: { name: 'HybridDeleGator', version: '1', chainId: 84532, verifyingContract: sender },
-    types: { PackedUserOperation: PACKED_USER_OPERATION_FIELDS.map((field) => ({ ...field })) },
-    primaryType: 'PackedUserOperation' as const,
-    message: {
-      sender,
-      nonce: '0',
-      initCode: '0x' as const,
-      callData: '0x' as const,
-      accountGasLimits: `0x${'00'.repeat(32)}` as const,
-      preVerificationGas: '0',
-      gasFees: `0x${'00'.repeat(32)}` as const,
-      paymasterAndData: '0x' as const,
-      entryPoint: ENTRY_POINT_V07 as `0x${string}`,
-    },
-  }
-  return { typedData, payloadHash: packedUserOperationHash(typedData) }
+  return buildBoundDirectUserOp({ delegate: TEST_DELEGATE_ADDRESS, ...overrides })
 }
 
 function fetchImplFor(

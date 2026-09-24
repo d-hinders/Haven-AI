@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
+import { hashTypedData } from 'viem'
 import { AgentPaymentFailureCode, buildX402ExpectedMessage } from '@haven_ai/sdk/edge'
 import { createEdgeSigner } from './core.js'
 import { createToolHandlers, type ToolPayload, type ToolSuccess } from './tools.js'
@@ -32,6 +33,17 @@ const PAYMENT_REQUIRED = {
   accepts: [{ scheme: 'exact', network: 'base', amount: '1000000', asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', payTo: '0x000000000000000000000000000000000000dEaD', maxTimeoutSeconds: 60 }],
 }
 
+// #3272 (criterion 8): every x402 funding intent is delegation-rail typed
+// data now — the shape does not matter, only that its digest is what
+// `expectedX402`'s `typed_data_hash` commits to.
+const FUNDING_TYPED_DATA = {
+  domain: { name: 'HavenX402Funding', version: '1', chainId: 84532, verifyingContract: `0x${'11'.repeat(20)}` },
+  types: { Funding: [{ name: 'note', type: 'string' }] },
+  primaryType: 'Funding',
+  message: { note: 'x402 funding leg (#3272 test fixture)' },
+}
+const FUNDING_DIGEST = hashTypedData(FUNDING_TYPED_DATA as Parameters<typeof hashTypedData>[0])
+
 async function expectedX402(expiresAt: string) {
   const expected = {
     payment_id: 'pay_x402',
@@ -42,13 +54,15 @@ async function expectedX402(expiresAt: string) {
     asset: PAYMENT_REQUIRED.accepts[0].asset,
     network: PAYMENT_REQUIRED.accepts[0].network,
     expires_at: expiresAt,
+    typed_data_hash: FUNDING_DIGEST,
   }
   const message = buildX402ExpectedMessage({
     paymentId: expected.payment_id, payloadHash: expected.payload_hash, resourceUrl: expected.resource_url,
     merchantTo: expected.merchant_to, amount: expected.amount, asset: expected.asset, network: expected.network, expiresAt: expected.expires_at,
+    typedDataHash: expected.typed_data_hash,
   })
   const account = privateKeyToAccount(BINDING_KEY)
-  return { ...expected, auth: { version: 1 as const, message, signature: await account.signMessage({ message }), signer: account.address } }
+  return { ...expected, auth: { version: 2 as const, message, signature: await account.signMessage({ message }), signer: account.address } }
 }
 
 function ok<T = unknown>(payload: ToolPayload): ToolSuccess<T> {
@@ -64,7 +78,11 @@ describe('the window is re-checked after the lazy x402 load (#3173 review r2)', 
     const handlers = createToolHandlers(createEdgeSigner(TEST_KEY, { x402BindingSigner: privateKeyToAccount(BINDING_KEY).address }))
     // Open at the first check (30 s ahead of the fake clock) — the mocked load then jumps to 2099.
     const signed = ok<{ x402_binding: string }>(
-      await handlers.haven_sign({ payload_hash: HASH, x402_expected: await expectedX402('2026-09-20T00:00:30.000Z') }),
+      await handlers.haven_sign({
+        payload_hash: HASH,
+        typed_data: FUNDING_TYPED_DATA,
+        x402_expected: await expectedX402('2026-09-20T00:00:30.000Z'),
+      }),
     )
     const first = await handlers.haven_x402_sign_header({ payment_required: PAYMENT_REQUIRED, x402_binding: signed.data.x402_binding })
     if (first.success) throw new Error('expected a failure payload')

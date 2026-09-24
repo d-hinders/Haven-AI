@@ -11,7 +11,6 @@ import {
   buildX402ExpectedMessage,
   buildSweepAuthorizationMessage,
   buildSweepTypedData,
-  signHash,
   verifySignature,
   selectStandardPaymentOption,
   toStandardPaymentRequirements,
@@ -57,18 +56,20 @@ export interface EdgeSigner {
    * visible to this process's audit log.
    */
   signDelegationTypedData(typedData: Record<string, unknown>): Promise<string>
-  /** Sign an x402 funding hash and remember the funded merchant-header context. */
-  signX402FundingHash(hash: string, expected: X402ExpectedPayment): X402FundingSignatureResult
   /**
    * Sign a delegation-rail x402 funding intent's EIP-712 typed data (#1138) and
-   * remember the funded merchant-header context, exactly as the hash path does.
+   * remember the funded merchant-header context — every x402 funding intent
+   * now takes this path (#3272 criterion 8: the bare-hash v1 rail is
+   * retired).
    *
-   * The account validates this typed data, NOT the bare ERC-4337 hash, so the
-   * expected context must be v2 and commit to its digest — see
-   * `assertExpectedBinding`.
+   * The account validates this typed data, NOT a bare hash, so the expected
+   * context must be v2/v3 and commit to its digest — see
+   * `assertExpectedBinding`. `typedData` is `undefined` when the caller had
+   * none to supply; that is itself refused (a v1 context that needed no typed
+   * data is refused earlier, by the version check).
    */
   signX402FundingTypedData(
-    typedData: X402FundingTypedData,
+    typedData: X402FundingTypedData | undefined,
     expected: X402ExpectedPayment,
   ): Promise<X402FundingSignatureResult>
   /** Build + sign the EIP-3009 X-PAYMENT header for the merchant leg of x402. */
@@ -164,7 +165,7 @@ export interface X402HeaderResult {
 }
 
 export interface X402FundingSignatureResult {
-  /** Raw ECDSA signature over the Haven funding hash. */
+  /** EIP-712 signature over the Haven-committed funding typed data. */
   signature: string
   /** Opaque process-local binding for the later merchant header signing step. */
   x402Binding: string
@@ -224,17 +225,6 @@ export function createEdgeSigner(
     }
   }
 
-  function signAndVerify(hash: string): string {
-    const signature = signHash(delegateKey, hash)
-    // Verify locally before handing the signature back, mirroring the SDK.
-    if (!verifySignature(hash, signature, delegateAddress)) {
-      throw new HavenSigningError(
-        'Local signature verification failed — recovered address does not match the delegate key.',
-      )
-    }
-    return signature
-  }
-
   return {
     delegateAddress,
 
@@ -246,35 +236,39 @@ export function createEdgeSigner(
       return account.signTypedData(typedData as Parameters<typeof account.signTypedData>[0])
     },
 
-    signX402FundingHash(hash: string, expected: X402ExpectedPayment): X402FundingSignatureResult {
-      assertExpectedBinding(hash, expected, options.x402BindingSigner, 'hash')
-      assertPayerMatchesDelegate(expected, delegateAddress, options.agentId)
-      const signature = signAndVerify(hash)
-      const x402Binding = randomUUID()
-      x402Bindings.set(x402Binding, { ...expected })
-      return { signature, x402Binding }
-    },
-
     async signX402FundingTypedData(
-      typedData: X402FundingTypedData,
+      typedData: X402FundingTypedData | undefined,
       expected: X402ExpectedPayment,
     ): Promise<X402FundingSignatureResult> {
-      assertExpectedBinding(expected.payloadHash, expected, options.x402BindingSigner, 'typed-data')
-      assertPayerMatchesDelegate(expected, delegateAddress, options.agentId)
-      // Recompute the digest from the typed data actually in hand and require it
-      // to equal Haven's commitment. Everything upstream is untrusted input; this
-      // equality is what makes the binding cover the bytes being signed rather
-      // than a hash that merely travels alongside them.
-      const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
-      if (digest.toLowerCase() !== expected.typedDataHash?.toLowerCase()) {
-        throw new HavenSigningError(
-          'x402 typed data does not match the digest Haven committed to in the expected context. ' +
-            'Refusing to sign — the payload was altered in transit or Haven declared a different one. ' +
-            'The most common cause is the typed data being truncated or reshaped while being copied ' +
-            'between tool calls (#1255): re-run the hosted quote and pass its typed_data_b64 string ' +
-            'through UNCHANGED instead of re-emitting the nested JSON.',
+      // Version skew first (#1143), independent of whether typedData was
+      // supplied: a v1 context (auth.version 1, retired #3272 criterion 8)
+      // must produce the STRUCTURED version-mismatch refusal, not a generic
+      // "typed data required" message that would fire first if this ran
+      // after the presence check below.
+      if (expected?.auth) {
+        assertSupportedBindingVersion(
+          expected.auth.version,
+          SUPPORTED_X402_EXPECTED_VERSIONS,
+          'x402 expected context',
         )
       }
+      if (!typedData) {
+        throw new HavenSigningError(
+          'This x402 funding intent is on the delegation rail: it commits to EIP-712 typed data, ' +
+            'which was not supplied. Pass typed_data_b64 from haven_pay_mcp_tool / ' +
+            'haven_pay_x402_quote through unchanged (or typed_data verbatim) — a bare ' +
+            'payload_hash is not what the account validates.',
+        )
+      }
+      // Recompute the digest from the typed data actually in hand — everything
+      // upstream is untrusted input. `assertExpectedBinding` requires this
+      // EXACT digest to equal Haven's `typedDataHash` commitment. (#3272 moved
+      // the digest-equality check that used to follow this call into
+      // `assertExpectedBinding`, and dropped a redundant comparison of
+      // `expected.payloadHash` with itself; what gets signed is unchanged.)
+      const digest = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+      assertExpectedBinding(digest, expected, options.x402BindingSigner)
+      assertPayerMatchesDelegate(expected, delegateAddress, options.agentId)
       // #1455: the digest check above proves Haven DECLARED these bytes. It
       // says nothing about what they mean. When the payload is a delegation —
       // the erc7710 settlement child, whose signature lets a merchant pull from
@@ -348,7 +342,7 @@ export function createEdgeSigner(
         }
         throw new HavenSigningError(
           'x402 funding binding is required before signing a merchant header. Sign the ' +
-            'hosted funding hash with x402_expected first (haven_sign returns a binding this ' +
+            'hosted funding payload with x402_expected first (haven_sign returns a binding this ' +
             'tool can use). A binding is also lost when the signer process restarts, since ' +
             'bindings live in memory only — re-sign to mint a fresh one.',
         )
@@ -572,14 +566,15 @@ function assertExpectedShape(expected: X402ExpectedPayment): void {
  * version arrives *here* instead of dying at the schema boundary with a raw
  * validation string.
  *
- * **Adding a version here is not sufficient to support it.** The mode rules in
+ * **Adding a version here is not sufficient to support it.** The rules in
  * `assertExpectedBinding` derive the expected version from the context's
- * *contents* (`typedDataHash` present ⇒ 2), not from `auth.version`, so a v3
- * that carries anything new needs that derivation extended in the same change.
- * Widening this array alone would admit a v3 context to the v1/v2 rule set:
+ * *contents* (`payerDelegate` present ⇒ 3, else 2 — `typedDataHash` is
+ * required unconditionally, #3272), not from `auth.version`, so a v4 that
+ * carries anything new needs that derivation extended in the same change.
+ * Widening this array alone would admit a v4 context to the v2/v3 rule set:
  * the array announces what this signer can evaluate, it does not define it.
  */
-export const SUPPORTED_X402_EXPECTED_VERSIONS: readonly number[] = [1, 2, 3]
+export const SUPPORTED_X402_EXPECTED_VERSIONS: readonly number[] = [2, 3]
 export const SUPPORTED_SWEEP_BINDING_VERSIONS: readonly number[] = [1]
 
 /**
@@ -664,41 +659,44 @@ export function assertSupportedBindingVersion(
 }
 
 /**
- * Verify Haven's expected-context binding before signing anything.
+ * Verify Haven's expected-context binding before signing x402 funding typed
+ * data. Every x402 funding intent is now delegation-rail (#3272, criterion
+ * 8): the bare-hash v1 context and its raw-ECDSA signing path are retired —
+ * `SUPPORTED_X402_EXPECTED_VERSIONS` no longer admits version 1, so a v1
+ * context (no `typedDataHash`) is refused below by the version-skew check,
+ * exactly like any other version this signer no longer understands.
  *
- * `mode` is what closes the #1138 downgrade in BOTH directions, and neither
- * half is optional:
- *
- * - `'hash'` (legacy rail, raw ECDSA) refuses a **v2** context. A v2 binding
- *   means the account validates typed data; raw-signing its 4337 hash would
- *   produce a signature the account rejects on-chain, after the intent is
- *   claimed.
- * - `'typed-data'` (delegation rail) refuses a **v1** context. Without the
- *   `typedDataHash` commitment, Haven's declaration covers only a hash that is
- *   NOT what gets signed — the signer would be endorsing a payload it cannot
- *   check, which is the whole property this binding exists to provide.
+ * `typedDataDigest` is the EIP-712 digest of the typed data ABOUT TO BE
+ * SIGNED, recomputed by the caller from the actual bytes in hand — never a
+ * value taken from `expected` itself. That equality is what makes the
+ * binding cover the bytes being signed, rather than a hash that merely
+ * travels alongside them. (#3272: this parameter used to be
+ * `expected.payloadHash`, compared with itself — redundant, because the
+ * digest-equality check that bound the typed data ran separately in
+ * `signX402FundingTypedData`; that check now lives here.)
  *
  * The version is derived from the context inside `buildX402ExpectedMessage`, so
  * a tampered `auth.version` cannot select a different rule than the signed
  * message encodes: the recomputed message simply stops matching.
  */
 function assertExpectedBinding(
-  payloadHash: string,
+  typedDataDigest: string,
   expected: X402ExpectedPayment,
   trustedSigner: string | undefined,
-  mode: 'hash' | 'typed-data' = 'hash',
 ): void {
   assertExpectedShape(expected)
   if (!trustedSigner) {
     throw new HavenSigningError(
-      'x402 expected-context verifier is not configured. Set HAVEN_X402_BINDING_SIGNER before signing x402 funding hashes.',
+      'x402 expected-context verifier is not configured. Set HAVEN_X402_BINDING_SIGNER before signing x402 funding payloads.',
     )
   }
-  // Skew check first (#1143). Every content check below — the hash comparison,
-  // the mode rules, the recomputed message — assumes we understand the context's
+  // Skew check first (#1143). Every content check below — the digest
+  // comparison, the recomputed message — assumes we understand the context's
   // shape. Under an unknown version they are symptoms, and reporting one as the
   // cause is what sent a live debugging session after the wrong string. A missing
   // `auth` is left to the message check below, which already fails closed on it.
+  // A v1 context (no `typedDataHash`, `auth.version` 1) is refused HERE, not by
+  // a separate check: 1 is no longer in `SUPPORTED_X402_EXPECTED_VERSIONS`.
   if (expected.auth) {
     assertSupportedBindingVersion(
       expected.auth.version,
@@ -706,19 +704,20 @@ function assertExpectedBinding(
       'x402 expected context',
     )
   }
-  if (expected.payloadHash.toLowerCase() !== payloadHash.toLowerCase()) {
-    throw new HavenSigningError('x402 expected context does not match the funding hash being signed.')
-  }
-  if (mode === 'hash' && expected.typedDataHash) {
-    throw new HavenSigningError(
-      'This x402 funding intent commits to EIP-712 typed data, so its bare hash must not be ' +
-        'raw-signed — the account would reject that signature on-chain. Sign sign_data.typed_data instead.',
-    )
-  }
-  if (mode === 'typed-data' && !expected.typedDataHash) {
+  if (!expected.typedDataHash) {
     throw new HavenSigningError(
       'Refusing to sign typed data under an expected context that does not commit to it. ' +
-        'Haven must return a v2 x402 expected context (with typedDataHash) for a delegation-rail intent.',
+        'Haven must return a v2/v3 x402 expected context (with typedDataHash) for a ' +
+        'delegation-rail intent.',
+    )
+  }
+  if (expected.typedDataHash.toLowerCase() !== typedDataDigest.toLowerCase()) {
+    throw new HavenSigningError(
+      'x402 typed data does not match the digest Haven committed to in the expected context. ' +
+        'Refusing to sign — the payload was altered in transit or Haven declared a different one. ' +
+        'The most common cause is the typed data being truncated or reshaped while being copied ' +
+        'between tool calls (#1255): re-run the hosted quote and pass its typed_data_b64 string ' +
+        'through UNCHANGED instead of re-emitting the nested JSON.',
     )
   }
   const message = buildX402ExpectedMessage({
@@ -736,8 +735,10 @@ function assertExpectedBinding(
   })
   // Contents-derived, mirroring the builder (#1138, #1690): a tampered
   // auth.version cannot select a different rule than the signed message
-  // encodes — the recomputed message simply stops matching.
-  const expectedVersion = expected.payerDelegate ? 3 : expected.typedDataHash ? 2 : 1
+  // encodes — the recomputed message simply stops matching. No `: 1` branch:
+  // `expected.typedDataHash` is unconditionally required above (#3272 —
+  // v1 is retired), so it is always truthy by this line.
+  const expectedVersion = expected.payerDelegate ? 3 : 2
   if (expected.auth?.version !== expectedVersion || expected.auth.message !== message) {
     throw new HavenSigningError('x402 expected context authentication message is invalid.')
   }

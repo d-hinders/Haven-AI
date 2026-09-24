@@ -8,14 +8,32 @@ import {
   verifySignature,
   HavenSigningError,
 } from '@haven_ai/sdk'
-import { createEdgeSigner } from './core.js'
+import { createEdgeSigner, type EdgeSigner, type X402ExpectedPayment } from './core.js'
 
 // Well-known test key (Hardhat account #0). Never used for real funds.
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
-const HASH = '0x' + 'ab'.repeat(32)
-const FUNDING_HASH = '0x' + 'cd'.repeat(32)
+
+// #3272 (criterion 8): every x402 funding intent is delegation-rail typed
+// data now — v1's bare `FUNDING_HASH` is retired along with
+// `signX402FundingHash`. This fixture's SHAPE does not matter (it is never a
+// direct-payment UserOp; the funding leg's shape checks live in
+// `signX402FundingTypedData`'s settlement-child branch, exercised below with
+// a real Delegation fixture) — only that its digest is what `expectedX402`'s
+// `typedDataHash` commits to.
+const FUNDING_TYPED_DATA = {
+  domain: {
+    chainId: 84532,
+    name: 'HavenX402Funding',
+    version: '1',
+    verifyingContract: '0x98ffBf30459a98FD80fAce18f519967769641F76' as const,
+  },
+  types: { Funding: [{ name: 'note', type: 'string' }] },
+  primaryType: 'Funding',
+  message: { note: 'x402 funding leg (#3272 test fixture)' },
+}
+const FUNDING_DIGEST = hashTypedData(FUNDING_TYPED_DATA as Parameters<typeof hashTypedData>[0])
 
 const PAYMENT_REQUIRED = {
   x402Version: 1,
@@ -34,7 +52,7 @@ const PAYMENT_REQUIRED = {
 
 const EXPECTED_X402_BASE = {
   paymentId: 'pay_x402',
-  payloadHash: FUNDING_HASH,
+  payloadHash: `0x${'cd'.repeat(32)}`,
   resourceUrl: PAYMENT_REQUIRED.resource.url,
   merchantTo: PAYMENT_REQUIRED.accepts[0].payTo,
   amount: PAYMENT_REQUIRED.accepts[0].amount,
@@ -43,21 +61,41 @@ const EXPECTED_X402_BASE = {
   expiresAt: '2099-01-01T00:00:00.000Z',
 }
 
-async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) {
-  const context = { ...EXPECTED_X402_BASE, ...overrides }
+/**
+ * Builds an x402 expected context. `typedDataHash` defaults to the funding
+ * fixture's digest (a v2 context, #3272: v1 no longer exists to default to).
+ * Pass `typedDataHash: undefined` explicitly to build a retired v1 context
+ * for the version-refusal tests.
+ */
+async function expectedX402(
+  overrides: Partial<typeof EXPECTED_X402_BASE> & { typedDataHash?: string; payerDelegate?: string; payerAgentId?: string } = {},
+) {
+  const context = {
+    ...EXPECTED_X402_BASE,
+    typedDataHash: FUNDING_DIGEST,
+    ...overrides,
+  }
   const message = buildX402ExpectedMessage(context)
   const account = privateKeyToAccount(BINDING_KEY)
   return {
     ...context,
     auth: {
-      // Derived exactly as the backend derives it (#1138) — a helper that
-      // hardcoded v1 would mask the version check instead of exercising it.
-      version: ((context as { typedDataHash?: string }).typedDataHash ? 2 : 1) as 1 | 2,
+      // Derived exactly as the backend derives it (#1138/#1690).
+      version: (context.payerDelegate ? 3 : context.typedDataHash ? 2 : 1) as 1 | 2 | 3,
       message,
       signature: await account.signMessage({ message }),
       signer: account.address,
     },
   }
+}
+
+/** Signs the funding leg with the shared fixture typed data — the v2/v3 path, the only one left. */
+async function fundV2(
+  signer: EdgeSigner,
+  overrides: Partial<typeof EXPECTED_X402_BASE> = {},
+) {
+  const expected = await expectedX402(overrides)
+  return signer.signX402FundingTypedData(FUNDING_TYPED_DATA as never, expected as unknown as X402ExpectedPayment)
 }
 
 describe('createEdgeSigner', () => {
@@ -70,15 +108,18 @@ describe('createEdgeSigner', () => {
     expect(() => createEdgeSigner('not-a-key')).toThrow(HavenSigningError)
   })
 
-  it('#3169: exposes NO raw-hash signing primitive — a bare hash is never signable', () => {
+  it('#3169/#3272: exposes NO raw-hash signing primitive — a bare hash is never signable', () => {
     const signer = createEdgeSigner(TEST_KEY)
-    // Inverted pin: the AllowanceModule-era `signPaymentHash(hash)` is gone. Every
-    // remaining signing method verifies something before it signs (a Haven
-    // binding, typed data the account validates, or a sweep authorization).
+    // Inverted pin: the AllowanceModule-era `signPaymentHash(hash)` is gone,
+    // and #3272 (criterion 8) retired its x402 v1 successor
+    // `signX402FundingHash` too. The x402 and sweep methods verify a Haven
+    // binding before they sign; `signDelegationTypedData` is a verbatim
+    // primitive, and the #3272 allowlist that gates it lives in tools.ts.
     expect('signPaymentHash' in signer).toBe(false)
+    expect('signX402FundingHash' in signer).toBe(false)
     expect(Object.keys(signer).sort()).toEqual([
       'buildX402PaymentHeader', 'delegateAddress', 'signDelegationTypedData', 'signSweepAuthorization',
-      'signX402FundingHash', 'signX402FundingTypedData',
+      'signX402FundingTypedData',
     ].sort())
   })
 })
@@ -86,7 +127,7 @@ describe('createEdgeSigner', () => {
 describe('buildX402PaymentHeader', () => {
   it('builds a merchant header for a Base USDC option', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const funding = await fundV2(signer)
     const result = await signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding)
     expect(typeof result.paymentHeader).toBe('string')
     expect(result.paymentHeader.length).toBeGreaterThan(0)
@@ -97,7 +138,7 @@ describe('buildX402PaymentHeader', () => {
 
   it('rejects unsupported payment options', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const funding = await fundV2(signer)
     await expect(
       signer.buildX402PaymentHeader({
         x402Version: 1,
@@ -122,7 +163,7 @@ describe('buildX402PaymentHeader', () => {
     // successful header here proves the signer selected the second option —
     // the permit2 one did not reach the signature.
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const funding = await fundV2(signer)
     const result = await signer.buildX402PaymentHeader({
       x402Version: 1,
       resource: { url: 'https://merchant.test/paid' },
@@ -146,7 +187,7 @@ describe('buildX402PaymentHeader', () => {
 
   it('refuses a permit2-ONLY challenge before any signature (#3116)', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const funding = await fundV2(signer)
     await expect(
       signer.buildX402PaymentHeader({
         x402Version: 1,
@@ -168,7 +209,7 @@ describe('buildX402PaymentHeader', () => {
 
   it('refuses an unrecognized paymentFlow on every entry (#3116)', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const funding = await fundV2(signer)
     await expect(
       signer.buildX402PaymentHeader({
         x402Version: 1,
@@ -185,7 +226,7 @@ describe('buildX402PaymentHeader', () => {
 
   it('still signs an explicitly-supported eip3009/authorization entry (#3116 positive control)', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const funding = await fundV2(signer)
     const result = await signer.buildX402PaymentHeader({
       x402Version: 1,
       resource: { url: 'https://merchant.test/paid' },
@@ -207,34 +248,40 @@ describe('buildX402PaymentHeader', () => {
     )
   })
 
-  it('rejects unauthenticated or tampered expected contexts before signing the funding hash', async () => {
+  it('rejects unauthenticated or tampered expected contexts before signing the funding typed data', async () => {
     const expected = await expectedX402()
     const unconfigured = createEdgeSigner(TEST_KEY)
-    expect(() => unconfigured.signX402FundingHash(FUNDING_HASH, expected)).toThrow(
-      'verifier is not configured',
-    )
+    await expect(
+      unconfigured.signX402FundingTypedData(FUNDING_TYPED_DATA as never, expected as unknown as X402ExpectedPayment),
+    ).rejects.toThrow('verifier is not configured')
 
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    expect(() =>
-      signer.signX402FundingHash(FUNDING_HASH, {
+    await expect(
+      signer.signX402FundingTypedData(FUNDING_TYPED_DATA as never, {
         ...expected,
         amount: '2000000',
-      }),
-    ).toThrow('authentication message')
-    expect(() =>
-      signer.signX402FundingHash('0x' + 'ef'.repeat(32), expected),
-    ).toThrow('funding hash')
+      } as unknown as X402ExpectedPayment),
+    ).rejects.toThrow('authentication message')
+    await expect(
+      signer.signX402FundingTypedData(FUNDING_TYPED_DATA as never, {
+        ...expected,
+        typedDataHash: `0x${'ef'.repeat(32)}`,
+      } as unknown as X402ExpectedPayment),
+    ).rejects.toThrow('does not match the digest')
   })
 
-  // ── v1 x402 path coverage (#324) ────────────────────────────────────────
+  // ── v1 x402 PROTOCOL path coverage (#324) ─────────────────────────────────
   // The edge signer mirrors the SDK's v1/v2 split: v2+ headers are re-wrapped
   // as { x402Version, accepted, payload }, but v1 headers must pass the x402
   // library's output through UNCHANGED — v1 facilitators reject the wrap.
-  // The PAYMENT_REQUIRED fixture above is x402Version 1 on purpose.
+  // The PAYMENT_REQUIRED fixture above is x402Version 1 on purpose. This is
+  // the x402 PROTOCOL version (the merchant header wire format) — unrelated
+  // to, and unaffected by, #3272's retirement of Haven's OWN internal
+  // expected-context v1 (the bare-hash binding format).
 
   it('passes v1 payment headers through unchanged (no accepted wrap)', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const funding = await fundV2(signer)
     const result = await signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding)
 
     const decoded = JSON.parse(
@@ -249,7 +296,7 @@ describe('buildX402PaymentHeader', () => {
 
   it('wraps v2 headers with accepted — the v1/v2 split is on x402Version', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const funding = await fundV2(signer)
     const result = await signer.buildX402PaymentHeader(
       { ...PAYMENT_REQUIRED, x402Version: 2 },
       funding.x402Binding,
@@ -277,7 +324,7 @@ describe('buildX402PaymentHeader', () => {
       bazaar: { info: { input: { method: 'GET' } } },
     }
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const funding = await fundV2(signer)
     const result = await signer.buildX402PaymentHeader(
       { ...PAYMENT_REQUIRED, x402Version: 2, extensions },
       funding.x402Binding,
@@ -300,7 +347,7 @@ describe('buildX402PaymentHeader', () => {
     // "funding binding is required" (which also covers an id the signer never
     // held) to one that says the binding was spent and names the remedy.
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const funding = await fundV2(signer)
     await signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding)
     await expect(signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding)).rejects.toThrow(
       'already used',
@@ -317,7 +364,7 @@ describe('buildX402PaymentHeader', () => {
     // another package's suite, so the v2 branch is pinned here too.
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
     const v2Required = { ...PAYMENT_REQUIRED, x402Version: 2 }
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const funding = await fundV2(signer)
     await signer.buildX402PaymentHeader(v2Required, funding.x402Binding)
     await expect(
       signer.buildX402PaymentHeader(v2Required, funding.x402Binding),
@@ -331,10 +378,7 @@ describe('buildX402PaymentHeader', () => {
     // BEFORE any header was built and no such header exists. A confident lie is
     // worse than the vague message it replaced.
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(
-      FUNDING_HASH,
-      await expectedX402({ expiresAt: new Date(Date.now() - 60_000).toISOString() }),
-    )
+    const funding = await fundV2(signer, { expiresAt: new Date(Date.now() - 60_000).toISOString() })
     // First call: the window check retires the binding.
     await expect(
       signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding),
@@ -356,9 +400,7 @@ describe('buildX402PaymentHeader', () => {
 
   it('rejects a merchant mismatch before signing a header', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
-      merchantTo: '0x000000000000000000000000000000000000bEEF',
-    }))
+    const funding = await fundV2(signer, { merchantTo: '0x000000000000000000000000000000000000bEEF' })
     await expect(
       signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding),
     ).rejects.toThrow('merchant recipient')
@@ -366,9 +408,7 @@ describe('buildX402PaymentHeader', () => {
 
   it('rejects an amount mismatch before signing a header', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
-      amount: '2000000',
-    }))
+    const funding = await fundV2(signer, { amount: '2000000' })
     await expect(
       signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding),
     ).rejects.toThrow('amount')
@@ -376,21 +416,15 @@ describe('buildX402PaymentHeader', () => {
 
   it('rejects resource, asset, and network mismatches', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const resourceBinding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
-      resourceUrl: 'https://merchant.test/other',
-    }))
+    const resourceBinding = await fundV2(signer, { resourceUrl: 'https://merchant.test/other' })
     await expect(
       signer.buildX402PaymentHeader(PAYMENT_REQUIRED, resourceBinding.x402Binding),
     ).rejects.toThrow('resource')
-    const assetBinding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
-      asset: '0x000000000000000000000000000000000000bEEF',
-    }))
+    const assetBinding = await fundV2(signer, { asset: '0x000000000000000000000000000000000000bEEF' })
     await expect(
       signer.buildX402PaymentHeader(PAYMENT_REQUIRED, assetBinding.x402Binding),
     ).rejects.toThrow('asset')
-    const networkBinding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
-      network: 'eip155:8453',
-    }))
+    const networkBinding = await fundV2(signer, { network: 'eip155:8453' })
     await expect(
       signer.buildX402PaymentHeader(PAYMENT_REQUIRED, networkBinding.x402Binding),
     ).rejects.toThrow('network')
@@ -408,14 +442,12 @@ describe('buildX402PaymentHeader', () => {
         },
       ],
     }
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
-      amount: '1500000',
-    }))
+    const funding = await fundV2(signer, { amount: '1500000' })
     await expect(signer.buildX402PaymentHeader(paymentRequired, funding.x402Binding)).resolves.toEqual(
       expect.objectContaining({ paymentHeader: expect.any(String) }),
     )
 
-    const mismatch = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+    const mismatch = await fundV2(signer)
     await expect(signer.buildX402PaymentHeader(paymentRequired, mismatch.x402Binding)).rejects.toThrow(
       'amount',
     )
@@ -423,9 +455,7 @@ describe('buildX402PaymentHeader', () => {
 
   it('rejects an expired x402 payment window before signing a merchant header', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402({
-      expiresAt: '2000-01-01T00:00:00.000Z',
-    }))
+    const funding = await fundV2(signer, { expiresAt: '2000-01-01T00:00:00.000Z' })
 
     await expect(
       signer.buildX402PaymentHeader(PAYMENT_REQUIRED, funding.x402Binding),
@@ -446,8 +476,7 @@ describe('buildX402PaymentHeader', () => {
     const delegateAddress = signer.delegateAddress
 
     // Wire the x402 expected context exactly as the hosted MCP would return it.
-    const expected = await expectedX402()
-    const funding = signer.signX402FundingHash(FUNDING_HASH, expected)
+    const funding = await fundV2(signer)
     const result = await signer.buildX402PaymentHeader(v2PaymentRequired, funding.x402Binding)
 
     // ── 1. The payment_header is a valid base64-JSON string ─────────────────
@@ -479,16 +508,13 @@ describe('buildX402PaymentHeader', () => {
 })
 
 /**
- * #1138 — delegation-rail typed-data signing.
- *
- * The property under test is narrow and load-bearing: the *Haven-signed
- * context* decides which payload may be signed, so neither a caller nor a
- * tampered response can pick the weaker path. On this rail `payloadHash` is the
- * bare ERC-4337 hash, which the account does NOT validate — raw-signing it
- * would be a signature the chain rejects, and signing typed data with no
- * commitment to it would be the edge signer endorsing bytes it cannot check.
+ * #1138 — delegation-rail typed-data signing. #3272 (criterion 8) retired the
+ * v1 bare-hash rail this describe block used to contrast against — every
+ * intent is v2/v3 typed data now, so what remains is: the digest commitment
+ * is real (criterion 4), and a v1 context is refused as an unsupported
+ * version rather than silently accepted.
  */
-describe('signX402FundingTypedData (#1138)', () => {
+describe('signX402FundingTypedData (#1138, #3272)', () => {
   // A minimally realistic account UserOp payload — shape matters (viem hashes
   // it), the values do not.
   const TYPED_DATA = {
@@ -546,28 +572,38 @@ describe('signX402FundingTypedData (#1138)', () => {
     )
   })
 
-  it('refuses to sign typed data under a v1 context that never committed to it', async () => {
+  it('#3272 criterion 8: refuses a RETIRED v1 context (no typedDataHash) with the structured version-mismatch refusal, whether or not typed data is supplied', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const v1 = await expectedX402() // no typedDataHash → v1
-    await expect(signer.signX402FundingTypedData(TYPED_DATA as never, v1)).rejects.toThrow(
-      /does not commit to it/,
+    const v1 = await expectedX402({ typedDataHash: undefined } as never)
+    // With typed data supplied — must not reach the digest check.
+    await expect(signer.signX402FundingTypedData(TYPED_DATA as never, v1)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_EXPECTED_CONTEXT_VERSION',
+    })
+    // With NO typed data supplied either — the version check must fire before
+    // the "typed data required" presence check, not after.
+    await expect(signer.signX402FundingTypedData(undefined, v1)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_EXPECTED_CONTEXT_VERSION',
+    })
+  })
+
+  it('refuses when typed data is required but not supplied, for a supported (v2) context', async () => {
+    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
+    await expect(signer.signX402FundingTypedData(undefined, await expectedV2())).rejects.toThrow(
+      /which was not supplied/,
     )
   })
 
-  it('refuses to RAW-sign the bare hash of a v2 (delegation-rail) intent', async () => {
+  it('refuses a v2 context whose announced auth.version was tampered to 3 (a version this signer supports, but not the one this content encodes)', async () => {
+    // #3272: tampering to 1 (the historical version of this test) now hits
+    // the EARLIER, stronger version-skew check first, since 1 is no longer
+    // supported at all — that is covered by the criterion-8 test above.
+    // Tampering to another SUPPORTED version instead still proves the
+    // property this test is for: the message is content-derived, so a
+    // tampered `auth.version` cannot select a different rule than the signed
+    // message encodes.
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
     const expected = await expectedV2()
-    // The other direction of the downgrade: the account would reject this
-    // signature on-chain, after the intent is already claimed.
-    expect(() => signer.signX402FundingHash(FUNDING_HASH, expected)).toThrow(
-      /must not be\s+raw-signed/,
-    )
-  })
-
-  it('refuses a v2 context whose announced auth.version was tampered to 1', async () => {
-    const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const expected = await expectedV2()
-    const tampered = { ...expected, auth: { ...expected.auth, version: 1 as const } }
+    const tampered = { ...expected, auth: { ...expected.auth, version: 3 as const } }
     await expect(signer.signX402FundingTypedData(TYPED_DATA as never, tampered)).rejects.toThrow(
       /authentication message is invalid/,
     )

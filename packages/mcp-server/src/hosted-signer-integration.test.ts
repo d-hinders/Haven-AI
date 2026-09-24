@@ -37,12 +37,147 @@ import { z } from 'zod/v3'
 import { HavenClient, buildX402ExpectedMessage, packedUserOperationHash } from '@haven_ai/sdk'
 import { privateKeyToAccount } from 'viem/accounts'
 import { hashTypedData, recoverTypedDataAddress } from 'viem'
+import { decodeAbiParameters, encodeAbiParameters, decodeFunctionData, encodeFunctionData } from 'viem'
 import {
   createEdgeSigner,
   createToolHandlers as createSignerHandlers,
   signerCompatibility,
   SIGNER_CAPABILITY_KEY,
+  deriveDelegateAccountAddress,
 } from '@haven_ai/signer'
+import directPaymentUserOpFixture from '../../sdk/src/__fixtures__/direct-payment-userop.json' with { type: 'json' }
+
+/** DelegationManager — reused from `@haven_ai/signer`'s own pin (`settlement-child.ts`). */
+const DELEGATION_MANAGER = '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3' as const
+
+const EXECUTE_ABI = [
+  {
+    type: 'function', name: 'execute',
+    inputs: [{ name: '_execution', type: 'tuple', components: [
+      { name: 'target', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'callData', type: 'bytes' },
+    ] }],
+    outputs: [], stateMutability: 'payable',
+  },
+] as const
+
+const REDEEM_DELEGATIONS_ABI = [
+  {
+    type: 'function', name: 'redeemDelegations',
+    inputs: [
+      { name: '_permissionContexts', type: 'bytes[]' },
+      { name: '_modes', type: 'bytes32[]' },
+      { name: '_executionCallDatas', type: 'bytes[]' },
+    ],
+    outputs: [], stateMutability: 'nonpayable',
+  },
+] as const
+
+/**
+ * #3272 (B1): the `Delegation`/`Caveat` ABI tuple, vendored the same way
+ * `@haven_ai/signer`'s `redemption-guard.ts` does (`@metamask/delegation-abis`
+ * `IDelegationManager`, a devDependency there — not a dependency of this
+ * package at all; these fixtures only need the SHAPE, never the kit).
+ */
+const DELEGATION_TUPLE_COMPONENTS = [
+  { name: 'delegate', type: 'address' },
+  { name: 'delegator', type: 'address' },
+  { name: 'authority', type: 'bytes32' },
+  { name: 'caveats', type: 'tuple[]', components: [
+    { name: 'enforcer', type: 'address' },
+    { name: 'terms', type: 'bytes' },
+    { name: 'args', type: 'bytes' },
+  ] },
+  { name: 'salt', type: 'uint256' },
+  { name: 'signature', type: 'bytes' },
+] as const
+const DELEGATION_ARRAY_PARAM = [{ type: 'tuple[]', components: DELEGATION_TUPLE_COMPONENTS }] as const
+/** `ExecutionMode.SingleDefault` — all-zero `bytes32`. */
+const SINGLE_DEFAULT_MODE = `0x${'00'.repeat(32)}` as const
+
+/**
+ * #3272 (B1): a real-shaped, BOUND `execute(DelegationManager, 0,
+ * redeemDelegations([permissionContext], [SingleDefault], [execution]))` —
+ * ONE non-empty `Delegation` (`delegate` = `sender`, `delegator` a distinct
+ * treasury address), the only shape `haven_sign`'s unbound branch allows
+ * through since the B1 fix (an EMPTY permission context is exactly the
+ * bypass that fix closes — MetaMask's DelegationManager treats it as
+ * self-authorised). `bigBlob` inside the caveat's `terms` keeps this the same
+ * multi-KB size class REALISTIC_TYPED_DATA existed to exercise (#1255),
+ * carried inside a well-formed field instead of raw bytes with no shape.
+ */
+function buildRealisticBoundCallData(sender: `0x${string}`): `0x${string}` {
+  const bigBlob = (`0x${'ab'.repeat(4000)}`) as `0x${string}`
+  const delegation = {
+    delegate: sender,
+    delegator: '0x98989898989898989898989898989898989898De' as `0x${string}`,
+    authority: `0x${'ff'.repeat(32)}` as `0x${string}`,
+    caveats: [{ enforcer: '0x1046bb45C8d673d4ea75321280DB34899413c069' as `0x${string}`, terms: bigBlob, args: '0x' as `0x${string}` }],
+    salt: 1n,
+    signature: (`0x${'ab'.repeat(65)}`) as `0x${string}`,
+  }
+  const permissionContext = encodeAbiParameters(DELEGATION_ARRAY_PARAM, [[delegation]])
+  const executionCallData = encodeFunctionData({
+    abi: [{ type: 'function', name: 'transfer', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }], stateMutability: 'nonpayable' }] as const,
+    functionName: 'transfer',
+    args: ['0x98ffBf30459a98FD80fAce18f519967769641F76', 10000n],
+  })
+  const inner = encodeFunctionData({
+    abi: REDEEM_DELEGATIONS_ABI,
+    functionName: 'redeemDelegations',
+    args: [[permissionContext], [SINGLE_DEFAULT_MODE], [executionCallData]],
+  })
+  return encodeFunctionData({
+    abi: EXECUTE_ABI,
+    functionName: 'execute',
+    args: [{ target: DELEGATION_MANAGER, value: 0n, callData: inner }],
+  })
+}
+
+/**
+ * #3272 (S2): re-derive the REAL captured fixture
+ * (`packages/sdk/src/__fixtures__/direct-payment-userop.json`, a dev-backend
+ * redemption on Base Sepolia) for a DIFFERENT sender — swapping `sender` /
+ * `domain.verifyingContract` and the leaf delegation's `delegate` field to
+ * `newSender`, and leaving every other real byte (the delegator, caveats,
+ * salt, signature, the ERC-20 transfer execution) untouched. Proves the
+ * allowlist accepts the actual production shape, not just this file's own
+ * synthetic one.
+ */
+function rebuildRealFixtureForSender(newSender: `0x${string}`) {
+  const fixtureTypedData = directPaymentUserOpFixture.typed_data as {
+    domain: Record<string, unknown>
+    types: Record<string, unknown>
+    primaryType: string
+    message: Record<string, unknown>
+  }
+  const originalCallData = fixtureTypedData.message.callData as `0x${string}`
+  const { args: executeArgs } = decodeFunctionData({ abi: EXECUTE_ABI, data: originalCallData })
+  const execution = executeArgs[0] as { target: `0x${string}`; value: bigint; callData: `0x${string}` }
+  const { args: redeemArgs } = decodeFunctionData({ abi: REDEEM_DELEGATIONS_ABI, data: execution.callData })
+  const [permissionContexts, modes, executionCallDatas] = redeemArgs as [readonly `0x${string}`[], readonly `0x${string}`[], readonly `0x${string}`[]]
+  const [delegations] = decodeAbiParameters(DELEGATION_ARRAY_PARAM, permissionContexts[0])
+  const adjustedDelegations = (delegations as unknown as Array<Record<string, unknown>>).map((d, i) =>
+    i === 0 ? { ...d, delegate: newSender } : d,
+  )
+  const adjustedPermissionContext = encodeAbiParameters(DELEGATION_ARRAY_PARAM, [adjustedDelegations as never])
+  const adjustedRedeemCallData = encodeFunctionData({
+    abi: REDEEM_DELEGATIONS_ABI,
+    functionName: 'redeemDelegations',
+    args: [[adjustedPermissionContext], modes as `0x${string}`[], executionCallDatas as `0x${string}`[]],
+  })
+  const adjustedCallData = encodeFunctionData({
+    abi: EXECUTE_ABI,
+    functionName: 'execute',
+    args: [{ target: execution.target, value: execution.value, callData: adjustedRedeemCallData }],
+  })
+  const typedData = {
+    ...fixtureTypedData,
+    domain: { ...fixtureTypedData.domain, verifyingContract: newSender },
+    message: { ...fixtureTypedData.message, sender: newSender, callData: adjustedCallData },
+  }
+  const payloadHash = packedUserOperationHash(typedData)
+  return { typedData, payloadHash }
+}
 import { createToolHandlers as createHostedHandlers, type ToolPayload } from './tools.js'
 import { createHostedHavenClient } from './server.js'
 
@@ -97,8 +232,14 @@ const TYPED_DATA = {
  * agent-side copy-through broke in production. Built exactly like the
  * backend's `userOpTypedData` output (all bigints pre-stringified).
  */
+// #3272: the delegate EOA's counterfactual account — `haven_sign`'s unbound
+// branch signs a direct-payment UserOp only for the signer's OWN account, so
+// a fixture whose `sender` was the raw EOA (pre-#3272) is now refused as a
+// third party's account.
+const REALISTIC_TYPED_DATA_SENDER = deriveDelegateAccountAddress(DELEGATE_ADDR)
+
 const REALISTIC_TYPED_DATA = {
-  domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: DELEGATE_ADDR },
+  domain: { name: 'HybridDeleGator', version: '1', chainId: 8453, verifyingContract: REALISTIC_TYPED_DATA_SENDER },
   // #3271: domain.verifyingContract === message.sender is one of the four
   // things `assertUserOpTypedDataBinding` (`@haven_ai/sdk`) pins, so this
   // fixture (already used against the direct rail below) stays a realistic
@@ -118,11 +259,14 @@ const REALISTIC_TYPED_DATA = {
   },
   primaryType: 'PackedUserOperation',
   message: {
-    sender: DELEGATE_ADDR,
+    sender: REALISTIC_TYPED_DATA_SENDER,
     // Keyed 4337 nonce — a >2^53 value, stringified like the backend does.
     nonce: (0x1n << 64n | 5n).toString(),
     initCode: '0x',
-    callData: '0x' + 'ab'.repeat(4000),
+    // #3272: BOUND — execute(DelegationManager, 0, redeemDelegations(...)),
+    // the only shape the unbound branch signs — while keeping the multi-KB
+    // size class this fixture exists for (#1255).
+    callData: buildRealisticBoundCallData(REALISTIC_TYPED_DATA_SENDER),
     accountGasLimits: '0x' + '11'.repeat(32),
     preVerificationGas: '60000',
     gasFees: '0x' + '22'.repeat(32),
@@ -136,7 +280,7 @@ const REALISTIC_TYPED_DATA = {
  * requires (same as what haven_pay_x402_quote returns in x402.expected).
  */
 async function makeX402ExpectedAuth(
-  rail: 'legacy' | 'delegation' = 'legacy',
+  rail: 'legacy' | 'delegation' = 'delegation',
   typedData: Record<string, unknown> = TYPED_DATA,
 ) {
   // camelCase keys for SDK's buildX402ExpectedMessage
@@ -165,7 +309,7 @@ async function makeX402ExpectedAuth(
     signer: BINDING_SIGNER,
   }
   // Return snake_case (what the signer Zod schema validates) and camelCase
-  // (what createEdgeSigner.signX402FundingHash expects).
+  // (what createEdgeSigner.signX402FundingTypedData expects).
   return {
     // snake_case for haven_sign tool input
     snake: {
@@ -180,7 +324,7 @@ async function makeX402ExpectedAuth(
       ...(context.typedDataHash ? { typed_data_hash: context.typedDataHash } : {}),
       auth,
     },
-    // camelCase for createEdgeSigner.signX402FundingHash
+    // camelCase for createEdgeSigner.signX402FundingTypedData
     camel: {
       paymentId: context.paymentId,
       payloadHash: context.payloadHash,
@@ -207,13 +351,14 @@ interface CapturedCall {
 let capturedCalls: CapturedCall[]
 
 function stubHavenApi(
-  rail: 'legacy' | 'delegation' = 'legacy',
+  rail: 'legacy' | 'delegation' = 'delegation',
   typedData: Record<string, unknown> = TYPED_DATA,
 ) {
   capturedCalls = []
   // The 201 body is a placeholder for the FLOW assertions; the message-level
   // contract is the sibling file's job. What matters here is the sign_data
-  // SHAPE, which is what routes the signer down the v1 or v2 path.
+  // SHAPE. Since #3272 the signer supports only v2/v3, so 'delegation' is the
+  // default; 'legacy' (v1) survives only to pin the refusal.
   const x402ExpectedAuth = {
     version: rail === 'delegation' ? 2 : 1,
     message: `Haven x402 expected context v${rail === 'delegation' ? 2 : 1}`,
@@ -304,6 +449,11 @@ afterEach(() => {
 
 describe('Hosted MCP + Edge Signer integration', () => {
   it('completes the x402 construct → sign → submit → header flow, key never in hosted traffic', async () => {
+    // #3272 (criterion 8): the expected-context v1 (bare-hash) rail this test
+    // used is retired — every x402 funding intent is delegation-rail (v2)
+    // typed data now, so the flow below signs on that rail.
+    stubHavenApi('delegation')
+
     // ── Setup ────────────────────────────────────────────────────────────────
     // Hosted MCP: keyless client (no delegate key)
     const havenKeyless = new HavenClient({
@@ -317,7 +467,7 @@ describe('Hosted MCP + Edge Signer integration', () => {
     const signerHandlers = createSignerHandlers(edgeSigner)
 
     // Pre-build x402 expected auth (normally returned by hosted haven_pay_x402_quote)
-    const x402Expected = await makeX402ExpectedAuth()
+    const x402Expected = await makeX402ExpectedAuth('delegation')
 
     // ── Step 1: Hosted MCP constructs the x402 funding intent ────────────────
     const quoteResult = ok<{
@@ -335,6 +485,7 @@ describe('Hosted MCP + Edge Signer integration', () => {
     const signResult = ok<{ signature: string; x402_binding: string }>(
       await signerHandlers.haven_sign({
         payload_hash: FUNDING_HASH,
+        typed_data: TYPED_DATA,
         x402_expected: x402Expected.snake,
       }),
     )
@@ -708,6 +859,24 @@ describe('Hosted MCP + Edge Signer integration', () => {
     expect(recovered.toLowerCase()).toBe(DELEGATE_ADDR.toLowerCase())
   })
 
+  it('#3272 (S2): the REAL captured production fixture, re-derived for this signer\'s own account, signs', async () => {
+    // Not a synthetic shape — packages/sdk/src/__fixtures__/direct-payment-userop.json
+    // is a redemption a dev backend actually built and had signed (Base
+    // Sepolia). Swapping ONLY `sender`/`domain.verifyingContract` and the
+    // leaf delegation's `delegate` to THIS signer's own account (leaving the
+    // real delegator, caveats, salt, signature, and ERC-20 transfer
+    // execution untouched) proves the allowlist accepts production bytes,
+    // not just this file's own hand-built ones.
+    const ownAccount = deriveDelegateAccountAddress(DELEGATE_ADDR)
+    const { typedData, payloadHash } = rebuildRealFixtureForSender(ownAccount)
+    const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
+    const signerHandlers = createSignerHandlers(edgeSigner)
+    const signed = ok<{ signature: string }>(
+      await signerHandlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData }),
+    )
+    expect(signed.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+  })
+
   // #3271 criterion 3: the direct fetch above is fine, but a served typed
   // data whose recomputed v0.7 hash disagrees with the fetched payload_hash
   // must refuse before signing — the same corruption class #1255 fixed for
@@ -823,8 +992,9 @@ describe('Hosted MCP + Edge Signer integration', () => {
     const signerHandlers = createSignerHandlers(edgeSigner)
     const delegateAddress = edgeSigner.delegateAddress
 
-    const x402Expected = await makeX402ExpectedAuth()
-    const funding = edgeSigner.signX402FundingHash(FUNDING_HASH, x402Expected.camel)
+    // #3272 (criterion 8): funding is always typed data now.
+    const x402Expected = await makeX402ExpectedAuth('delegation')
+    const funding = await edgeSigner.signX402FundingTypedData(TYPED_DATA as never, x402Expected.camel)
     const result = ok<{ payment_header: string }>(
       await signerHandlers.haven_x402_sign_header({
         payment_required: PAYMENT_REQUIRED,
@@ -858,6 +1028,10 @@ describe('Hosted MCP + Edge Signer integration', () => {
     // this pins that literal to the signer's exported constant. A rename on
     // either side would otherwise leave the agent looking up a key that no
     // longer exists — a silent downgrade to no detection at all.
+    // #3272 (criterion 8): expected-context v1 is retired — a v1 quote would
+    // no longer be one "the shipped signer verifies", which is the property
+    // this test pins.
+    stubHavenApi('delegation')
     const havenKeyless = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const quote = ok<{
       signer_compatibility: { x402_expected_context_version: number; signer_capability: string }
@@ -903,6 +1077,9 @@ describe('Hosted MCP + Edge Signer integration', () => {
  */
 describe('#2291 — the emitted guidance chain is executable', () => {
   it('walks next_tool/next_arguments from the quote to a usable merchant header', async () => {
+    // #3272 (criterion 8): expected-context v1 is retired — every x402
+    // funding intent is delegation-rail (v2) typed data now.
+    stubHavenApi('delegation')
     const havenKeyless = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const hostedHandlers = createHostedHandlers(havenKeyless)
     const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
@@ -934,10 +1111,11 @@ describe('#2291 — the emitted guidance chain is executable', () => {
     // instead: same tool, same contract, context handed over rather than
     // fetched. The tool under test is still the one the response NAMED; only
     // how its context arrives differs, and that is not what this test asserts.
-    const expected = await makeX402ExpectedAuth()
+    const expected = await makeX402ExpectedAuth('delegation')
     const signed = ok<{ signature: string; x402_binding: string; payment_header?: string }>(
       await handler({
         payload_hash: FUNDING_HASH,
+        typed_data: TYPED_DATA,
         x402_expected: expected.snake,
         payment_required: PAYMENT_REQUIRED,
       }),

@@ -1100,6 +1100,17 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(body.sign_data.signature_scheme).toBe('eip712_userop')
     expect(body.sign_data.hash).toBe(PREPARED.prepared.userOpHash)
     expect(body.sign_data.instructions).toMatch(/\/payments\//)
+    // #3272: the funding leg's expected context must bind the typed data
+    // digest, not the bare 4337 hash — that binding is what makes this a
+    // version-2 context. `signX402ExpectedContext` derives the version from
+    // whether `typedDataHash` was passed; asserting `2` here pins that this
+    // call site (delegation-authorize.ts's EIP-3009 funding leg) always
+    // supplies it and can never silently regress to the retired version 1.
+    expect(body.x402_expected_auth).toBeDefined()
+    expect(body.x402_expected_auth.version).toBe(2)
+    expect(body.x402_expected_auth.message).toContain(
+      typedDataDigest(body.sign_data.typed_data),
+    )
     // Funding goes to the EOA; the LEDGER records the real merchant + the scheme:
     expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
       executionRail: 'delegation',

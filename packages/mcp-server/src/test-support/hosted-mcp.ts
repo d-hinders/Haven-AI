@@ -29,8 +29,8 @@ export const DELEGATE_KEY = '0x' + 'a'.repeat(64)
 export const HEADER_SIGNING_KEY = '0x' + '12'.repeat(32)
 /** The expected-auth fixture the x402 quote/prepare routes return. */
 export const X402_EXPECTED_AUTH = {
-  version: 1 as const,
-  message: 'Haven x402 expected context v1\n{}',
+  version: 2 as const,
+  message: 'Haven x402 expected context v2\n{}',
   signature: '0x' + '11'.repeat(65),
   signer: '0x000000000000000000000000000000000000bEEF',
 }

@@ -46,7 +46,10 @@ const TYPED_DATA = {
 }
 
 async function signedContext(overrides: Record<string, unknown> = {}, versionOverride?: number) {
-  const context = { ...BASE, ...overrides }
+  // #3272: v1 (hash-mode) is retired — every context signed through this
+  // file's helper commits to typed data by default now (the fixed TYPED_DATA
+  // fixture) unless a test overrides typedDataHash itself.
+  const context = { typedDataHash: hashTypedData(TYPED_DATA as never), ...BASE, ...overrides }
   const message = buildX402ExpectedMessage(context as never)
   const account = privateKeyToAccount(BINDING_KEY)
   const derived = (context as { payerDelegate?: string }).payerDelegate
@@ -82,7 +85,7 @@ describe('the payer-mismatch refusal (#1690)', () => {
 
     let thrown: Error | null = null
     try {
-      signer.signX402FundingHash(FUNDING_HASH, expected as never)
+      await signer.signX402FundingTypedData(TYPED_DATA as never, expected as never)
     } catch (err) {
       thrown = err as Error
     }
@@ -113,11 +116,11 @@ describe('the payer-mismatch refusal (#1690)', () => {
     ).rejects.toThrow(/DIFFERENT agent/)
   })
 
-  it('a v3 context FOR this delegate signs, in hash mode (legacy-rail v3)', async () => {
+  it('a v3 context FOR this delegate signs, in typed-data mode', async () => {
     const signer = localSigner()
     const expected = await signedContext({ payerDelegate: signer.delegateAddress })
 
-    const result = signer.signX402FundingHash(FUNDING_HASH, expected as never)
+    const result = await signer.signX402FundingTypedData(TYPED_DATA as never, expected as never)
     expect(result.signature).toMatch(/^0x/)
   })
 
@@ -127,7 +130,7 @@ describe('the payer-mismatch refusal (#1690)', () => {
       payerDelegate: signer.delegateAddress.toUpperCase().replace('0X', '0x'),
     })
 
-    expect(() => signer.signX402FundingHash(FUNDING_HASH, expected as never)).not.toThrow()
+    await expect(signer.signX402FundingTypedData(TYPED_DATA as never, expected as never)).resolves.toBeDefined()
   })
 
   it('an unknown local agent id degrades the MESSAGE, never the guard', async () => {
@@ -136,7 +139,7 @@ describe('the payer-mismatch refusal (#1690)', () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
     const expected = await signedContext({ payerDelegate: OTHER_DELEGATE })
 
-    expect(() => signer.signX402FundingHash(FUNDING_HASH, expected as never)).toThrow(/unknown/)
+    await expect(signer.signX402FundingTypedData(TYPED_DATA as never, expected as never)).rejects.toThrow(/unknown/)
   })
 })
 
@@ -150,7 +153,7 @@ describe('the claim is inside the Haven-signed message — forgery breaks the bi
     const stripped = { ...expected } as Record<string, unknown>
     delete stripped.payerDelegate
 
-    expect(() => signer.signX402FundingHash(FUNDING_HASH, stripped as never)).toThrow(
+    await expect(signer.signX402FundingTypedData(TYPED_DATA as never, stripped as never)).rejects.toThrow(
       /authentication message is invalid/,
     )
   })
@@ -160,7 +163,7 @@ describe('the claim is inside the Haven-signed message — forgery breaks the bi
     const expected = await signedContext({ payerDelegate: OTHER_DELEGATE })
     const tampered = { ...expected, payerDelegate: signer.delegateAddress }
 
-    expect(() => signer.signX402FundingHash(FUNDING_HASH, tampered as never)).toThrow(
+    await expect(signer.signX402FundingTypedData(TYPED_DATA as never, tampered as never)).rejects.toThrow(
       /authentication message is invalid/,
     )
   })
@@ -169,7 +172,7 @@ describe('the claim is inside the Haven-signed message — forgery breaks the bi
     const signer = localSigner()
     const expected = await signedContext({ payerDelegate: signer.delegateAddress }, 2)
 
-    expect(() => signer.signX402FundingHash(FUNDING_HASH, expected as never)).toThrow(
+    await expect(signer.signX402FundingTypedData(TYPED_DATA as never, expected as never)).rejects.toThrow(
       /authentication message is invalid/,
     )
   })
@@ -183,7 +186,7 @@ describe('ordering: version skew is still diagnosed first', () => {
     const signer = localSigner()
     const expected = await signedContext({ payerDelegate: OTHER_DELEGATE }, 99)
 
-    expect(() => signer.signX402FundingHash(FUNDING_HASH, expected as never)).toThrow(
+    await expect(signer.signX402FundingTypedData(TYPED_DATA as never, expected as never)).rejects.toThrow(
       /out of date|versions up to/,
     )
   })

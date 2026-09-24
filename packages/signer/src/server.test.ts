@@ -5,20 +5,31 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { privateKeyToAccount } from 'viem/accounts'
-import { hashTypedData } from 'viem'
+import { encodeFunctionData, hashTypedData } from 'viem'
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
-  ENTRY_POINT_V07,
-  PACKED_USER_OPERATION_FIELDS,
   buildX402ExpectedMessage,
-  packedUserOperationHash,
   verifySignature,
 } from '@haven_ai/sdk'
 import { createEdgeSigner } from './core.js'
 import { buildSignerMcpServer, resolveEdgeSigner, runSignerConsentGate, runSignerStdioServer } from './server.js'
 import { createToolHandlers, type ToolSuccess, type ToolPayload } from './tools.js'
 import { computeSignerConsentHash, type SignerConsentInput } from './consent.js'
+import { deriveDelegateAccountAddress } from './delegate-account.js'
+import {
+  buildBoundDirectUserOp,
+  buildBoundRedeemDelegationsCallData,
+  buildDelegation,
+  buildEmptyPermissionContextRedemption,
+  buildExecuteCallData,
+  buildPermissionContext,
+  buildChainPermissionContext,
+  buildSelfCallCallData,
+  buildSingleExecutionCallData,
+  DEFAULT_DELEGATOR,
+} from './test-support/direct-userop.js'
+import { REDEEM_DELEGATIONS_ABI, SINGLE_DEFAULT_MODE } from './redemption-guard.js'
 
 // Pinned so the #1161 Node floor cannot make these host-dependent: the
 // guard lives at the credential/client choke point, which these exercise.
@@ -29,34 +40,21 @@ const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
 const HASH = '0x' + 'cd'.repeat(32)
 
+/** This test file's own delegate — every "own account" UserOp below derives its sender from this address. */
+const TEST_DELEGATE_ADDRESS = privateKeyToAccount(TEST_KEY).address
+
 /**
- * #3271: a self-consistent `PackedUserOperation` — every field the binding
- * check (`assertUserOpTypedDataBinding`) inspects is well-formed (domain
+ * #3271/#3272: a real-shaped, BOUND `PackedUserOperation` for `TEST_KEY`'s own
+ * delegate account — every field the binding check
+ * (`assertUserOpTypedDataBinding`) inspects is well-formed (domain
  * name/version, sender === verifyingContract, the v0.7 EntryPoint, the full
- * 9-field type list), so its recomputed hash is a real one rather than an
- * opaque literal like `HASH`. Replaces the old 2-field, mismatched-sender
- * toy that #3271 correctly refuses.
+ * 9-field type list) AND the #3272 allowlist's content checks pass (sender is
+ * TEST_KEY's own counterfactual account, callData redeems delegations through
+ * the DelegationManager). Replaces the old toy fixture (mismatched sender,
+ * empty callData) that #3272 correctly refuses.
  */
 function buildDirectUserOp(overrides: { chainId?: number; sender?: `0x${string}` } = {}) {
-  const sender = overrides.sender ?? `0x${'11'.repeat(20)}`
-  const chainId = overrides.chainId ?? 84532
-  const typedData = {
-    domain: { name: 'HybridDeleGator', version: '1', chainId, verifyingContract: sender },
-    types: { PackedUserOperation: PACKED_USER_OPERATION_FIELDS.map((field) => ({ ...field })) },
-    primaryType: 'PackedUserOperation' as const,
-    message: {
-      sender,
-      nonce: '0',
-      initCode: '0x' as const,
-      callData: '0x' as const,
-      accountGasLimits: `0x${'00'.repeat(32)}` as const,
-      preVerificationGas: '0',
-      gasFees: `0x${'00'.repeat(32)}` as const,
-      paymasterAndData: '0x' as const,
-      entryPoint: ENTRY_POINT_V07 as `0x${string}`,
-    },
-  }
-  return { typedData, payloadHash: packedUserOperationHash(typedData) }
+  return buildBoundDirectUserOp({ delegate: TEST_DELEGATE_ADDRESS, ...overrides })
 }
 
 /** #3169: a direct-payment UserOp — the account validating its OWN operation (#1254), the honest vehicle for a haven_sign signature. */
@@ -86,8 +84,21 @@ const EXPECTED_X402_BASE = {
   expires_at: '2099-01-01T00:00:00.000Z',
 }
 
-async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) {
-  const expected = { ...EXPECTED_X402_BASE, ...overrides }
+// #3272 (criterion 8): every x402 funding intent is delegation-rail typed
+// data now — v1's bare payload_hash signing is retired. This fixture's SHAPE
+// does not matter (any well-formed EIP-712 object), only that its digest is
+// what `expectedX402`'s `typed_data_hash` commits to; tests pass it as
+// `typed_data` alongside `x402_expected`.
+const X402_TYPED_DATA = {
+  domain: { name: 'HavenX402Funding', version: '1', chainId: 84532, verifyingContract: `0x${'11'.repeat(20)}` },
+  types: { Funding: [{ name: 'note', type: 'string' }] },
+  primaryType: 'Funding',
+  message: { note: 'x402 funding leg (#3272 test fixture)' },
+}
+const X402_TYPED_DATA_HASH = hashTypedData(X402_TYPED_DATA as Parameters<typeof hashTypedData>[0])
+
+async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> & { typed_data_hash?: string } = {}) {
+  const expected = { ...EXPECTED_X402_BASE, typed_data_hash: X402_TYPED_DATA_HASH, ...overrides }
   const message = buildX402ExpectedMessage({
     paymentId: expected.payment_id,
     payloadHash: expected.payload_hash,
@@ -97,12 +108,13 @@ async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) 
     asset: expected.asset,
     network: expected.network,
     expiresAt: expected.expires_at,
+    typedDataHash: expected.typed_data_hash,
   })
   const account = privateKeyToAccount(BINDING_KEY)
   return {
     ...expected,
     auth: {
-      version: 1 as const,
+      version: (expected.typed_data_hash ? 2 : 1) as 1 | 2,
       message,
       signature: await account.signMessage({ message }),
       signer: account.address,
@@ -445,11 +457,16 @@ describe('haven_sign tool', () => {
     expect(JSON.stringify(result)).not.toContain(TEST_KEY.slice(2))
 
     // The audit trail covers this branch too — a typed-data signing that
-    // left no local record would be invisible to the user.
+    // left no local record would be invisible to the user. #3272 (criterion
+    // 4): it records the digest ACTUALLY SIGNED (the EIP-712 digest) — never
+    // the caller-supplied payload_hash, a DIFFERENT value (the ERC-4337
+    // UserOp hash) the #3271 binding check merely cross-checks this typed
+    // data against.
     const rows = (await readFile(auditPath, 'utf8')).trim().split('\n')
     expect(rows).toHaveLength(1)
     const entry = JSON.parse(rows[0])
-    expect(entry).toMatchObject({ tool: 'haven_sign', payload_hash: payloadHash })
+    expect(entry).toMatchObject({ tool: 'haven_sign', payload_hash: digest })
+    expect(entry.payload_hash).not.toBe(payloadHash)
     expect(JSON.stringify(entry)).not.toContain(TEST_KEY.slice(2))
     expect(JSON.stringify(entry)).not.toContain(result.data.signature)
     await rm(dir, { recursive: true, force: true })
@@ -508,8 +525,10 @@ describe('haven_sign tool', () => {
         },
       })
 
-      // #3169: typed-data vehicle (the bare-hash arm is gone); the audit row
-      // still records the payload_hash argument, never the key or signature.
+      // #3169: typed-data vehicle (the bare-hash arm is gone). #3272
+      // (criterion 4): the audit row records the digest ACTUALLY SIGNED — the
+      // EIP-712 digest of DIRECT_USEROP — never the caller's payload_hash
+      // argument, never the key or signature.
       const result = ok<{ signature: string }>(
         await handlers.haven_sign({ payload_hash: DIRECT_USEROP_HASH, typed_data: DIRECT_USEROP }),
       )
@@ -520,11 +539,12 @@ describe('haven_sign tool', () => {
       expect(entry).toMatchObject({
         version: 1,
         tool: 'haven_sign',
-        payload_hash: DIRECT_USEROP_HASH,
+        payload_hash: hashTypedData(DIRECT_USEROP as Parameters<typeof hashTypedData>[0]),
         delegate_address: signer.delegateAddress,
         safe_address: '0x000000000000000000000000000000000000Cafe',
         chain_id: 100,
       })
+      expect(entry.payload_hash).not.toBe(DIRECT_USEROP_HASH)
       expect(entry.timestamp).toEqual(expect.any(String))
 
       const serialized = JSON.stringify(entry)
@@ -551,6 +571,7 @@ describe('haven_x402_sign_header tool', () => {
       const signed = ok<{ signature: string; x402_binding: string }>(
         await handlers.haven_sign({
           payload_hash: HASH,
+          typed_data: X402_TYPED_DATA,
           x402_expected: await expectedX402(),
         }),
       )
@@ -596,6 +617,7 @@ describe('haven_x402_sign_header tool', () => {
     const oneShot = ok<{ x402_binding: string; payment_header: string }>(
       await handlers.haven_sign_x402({
         payload_hash: HASH,
+        typed_data: X402_TYPED_DATA,
         x402_expected: await expectedX402(),
         payment_required: PAYMENT_REQUIRED,
       }),
@@ -635,7 +657,11 @@ describe('haven_x402_sign_header tool', () => {
       createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }),
     )
     const signed = ok<{ x402_binding: string }>(
-      await handlers.haven_sign({ payload_hash: HASH, x402_expected: await expectedX402() }),
+      await handlers.haven_sign({
+        payload_hash: HASH,
+        typed_data: X402_TYPED_DATA,
+        x402_expected: await expectedX402(),
+      }),
     )
     const header = ok<{ payment_header: string }>(
       await handlers.haven_x402_sign_header({
@@ -662,6 +688,7 @@ describe('haven_x402_sign_header tool', () => {
     const signed = ok<{ x402_binding: string }>(
       await handlers.haven_sign({
         payload_hash: HASH,
+        typed_data: X402_TYPED_DATA,
         x402_expected: await expectedX402({
           amount: '2000000',
         }),
@@ -680,6 +707,7 @@ describe('haven_x402_sign_header tool', () => {
     const signed = ok<{ x402_binding: string }>(
       await handlers.haven_sign({
         payload_hash: HASH,
+        typed_data: X402_TYPED_DATA,
         x402_expected: await expectedX402({
           expires_at: '2000-01-01T00:00:00.000Z',
         }),
@@ -717,7 +745,7 @@ describe('haven_x402_sign_header tool', () => {
     }
 
     const signed = ok<{ x402_binding: string }>(
-      await handlers.haven_sign({ payload_hash: HASH, x402_expected: wrapper }),
+      await handlers.haven_sign({ payload_hash: HASH, typed_data: X402_TYPED_DATA, x402_expected: wrapper }),
     )
     const result = ok<{ payment_header: string }>(
       await handlers.haven_x402_sign_header({
@@ -742,6 +770,7 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
       const result = ok<{ signature: string; payment_header: string }>(
         await handlers.haven_sign_x402({
           payload_hash: HASH,
+          typed_data: X402_TYPED_DATA,
           x402_expected: await expectedX402(),
           payment_required: PAYMENT_REQUIRED,
         }),
@@ -750,7 +779,10 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
       const rows = (await readFile(auditPath, 'utf8')).trim().split('\n')
       // Funding-hash signature + merchant-header signature = two entries.
       expect(rows).toHaveLength(2)
-      expect(JSON.parse(rows[0])).toMatchObject({ tool: 'haven_sign_x402', payload_hash: HASH })
+      // #3272 (criterion 4): the audit records the digest actually signed —
+      // the funding typed data's EIP-712 hash — never the caller's
+      // payload_hash argument (a different value).
+      expect(JSON.parse(rows[0])).toMatchObject({ tool: 'haven_sign_x402', payload_hash: X402_TYPED_DATA_HASH })
       expect(JSON.parse(rows[1]).tool).toBe('haven_sign_x402')
 
       const serialized = await readFile(auditPath, 'utf8')
@@ -768,6 +800,7 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
 
     const payload = await handlers.haven_sign_x402({
       payload_hash: HASH,
+      typed_data: X402_TYPED_DATA,
       x402_expected: await expectedX402({ expires_at: '2000-01-01T00:00:00.000Z' }),
       payment_required: PAYMENT_REQUIRED,
     })
@@ -797,6 +830,7 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
     const result = ok<{ signature: string; payment_header: string }>(
       await handlers.haven_sign_x402({
         payload_hash: HASH,
+        typed_data: X402_TYPED_DATA,
         x402_expected: wrapper,
         payment_required: PAYMENT_REQUIRED,
       }),
@@ -866,5 +900,442 @@ describe('haven_sign refuses an unbound delegation payload (#1476)', () => {
     // prove the new gate does not catch a UserOp, and whatever else this
     // fixture does downstream is #1254's business, not #1476's.
     expect(JSON.stringify(result)).not.toMatch(/Refusing to sign a delegation payload/)
+  })
+})
+
+/**
+ * #3272 — the unbound branch's allowlist. Every scenario below signed on
+ * `origin/dev` before this change (verified by temporarily reverting
+ * `tools.ts` — see the PR description's mutation table). Each must now be
+ * refused: no signature, no audit entry, structured TYPED_DATA_NOT_ALLOWED
+ * (or the pre-existing USEROP_BINDING_MISMATCH / BARE_HASH_REFUSED, when a
+ * scenario also fails one of #3271's or #3169's earlier checks).
+ */
+describe('#3272: haven_sign refuses everything except a bound direct-payment UserOp', () => {
+  async function expectNoSignatureNoAudit(
+    args: Record<string, unknown>,
+  ): Promise<{ code?: string; message?: string }> {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-3272-allowlist-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer, {
+        audit: { auditPath, delegateAddress: signer.delegateAddress },
+      })
+      const result = await handlers.haven_sign(args)
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected a refusal')
+      expect('signature' in result).toBe(false)
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+      return result
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('refuses the issue-reported probe (an invented domain/primaryType with no shape to verify)', async () => {
+    const result = await expectNoSignatureNoAudit({
+      payload_hash: `0x${'00'.repeat(31)}01`,
+      typed_data: {
+        domain: { name: 'HavenSignerKeyProbe', version: '1', chainId: 84532 },
+        types: { Probe: [{ name: 'note', type: 'string' }] },
+        primaryType: 'Probe',
+        message: { note: 'key check, no authority' },
+      },
+    })
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+  })
+
+  it('refuses a delegate USDC TransferWithAuthorization passed as typed_data', async () => {
+    const signer = createEdgeSigner(TEST_KEY)
+    const transfer = {
+      domain: { name: 'USD Coin', version: '2', chainId: 84532, verifyingContract: '0x036CbD53842c5426634e7929541eC2318f3dCF7e' },
+      types: {
+        TransferWithAuthorization: [
+          { name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' },
+          { name: 'validAfter', type: 'uint256' }, { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' },
+        ],
+      },
+      primaryType: 'TransferWithAuthorization',
+      message: { from: signer.delegateAddress, to: '0x00000000000000000000000000000000deadbeef', value: '1000000', validAfter: '0', validBefore: '4102444800', nonce: `0x${'01'.repeat(32)}` },
+    }
+    const digest = hashTypedData(transfer as Parameters<typeof hashTypedData>[0])
+    const result = await expectNoSignatureNoAudit({ payload_hash: digest, typed_data: transfer })
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+  })
+
+  it('refuses a USDC Permit passed as typed_data', async () => {
+    const permit = {
+      domain: { name: 'USD Coin', version: '2', chainId: 84532, verifyingContract: '0x036CbD53842c5426634e7929541eC2318f3dCF7e' },
+      types: {
+        Permit: [
+          { name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }, { name: 'value', type: 'uint256' },
+          { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' },
+        ],
+      },
+      primaryType: 'Permit',
+      message: { owner: TEST_DELEGATE_ADDRESS, spender: '0x000000000000000000000000000000000000dEaD', value: '1000000', nonce: '0', deadline: '4102444800' },
+    }
+    const digest = hashTypedData(permit as Parameters<typeof hashTypedData>[0])
+    const result = await expectNoSignatureNoAudit({ payload_hash: digest, typed_data: permit })
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+  })
+
+  it('refuses a PackedUserOperation that calls the account itself (self-call, e.g. transferOwnership)', async () => {
+    const sender = deriveDelegateAccountAddress(TEST_DELEGATE_ADDRESS)
+    const { typedData, payloadHash } = buildBoundDirectUserOp({
+      delegate: TEST_DELEGATE_ADDRESS,
+      callData: buildSelfCallCallData(sender),
+    })
+    const result = await expectNoSignatureNoAudit({ payload_hash: payloadHash, typed_data: typedData })
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/self-call/)
+  })
+
+  it("refuses a PackedUserOperation whose sender/verifyingContract is not THIS signer's delegate account (self-consistent, correct hash)", async () => {
+    const otherOwner = '0x1234567890123456789012345678901234567890' as const
+    const { typedData, payloadHash } = buildBoundDirectUserOp({ delegate: otherOwner })
+    // Self-consistent: assertUserOpTypedDataBinding (#3271) passes here — the
+    // hash is genuinely correct for this typed data. The #3272 allowlist is
+    // what must still refuse it.
+    const result = await expectNoSignatureNoAudit({ payload_hash: payloadHash, typed_data: typedData })
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/not this signer's own delegate account/)
+  })
+
+  it('criterion 2: refuses a self-consistent PackedUserOperation with the correct v0.7 hash for the signer\'s OWN account, but a callData target that is not the DelegationManager', async () => {
+    // The exact attack a hash-equality check alone cannot catch (#3271 is
+    // necessary, never sufficient): sender is genuinely this signer's own
+    // account, the hash genuinely matches — only WHAT it calls is wrong.
+    const { typedData, payloadHash } = buildBoundDirectUserOp({
+      delegate: TEST_DELEGATE_ADDRESS,
+      target: '0x9999999999999999999999999999999999999999',
+    })
+    const result = await expectNoSignatureNoAudit({ payload_hash: payloadHash, typed_data: typedData })
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/DelegationManager/)
+  })
+
+  it('criterion (c): refuses a self-consistent, correctly-bound PackedUserOperation scoped to a chain with no pinned delegation contracts', async () => {
+    // Self-consistent and otherwise fully bound (own account, own budget
+    // redemption) — only the CHAIN is one the delegation rail never runs on
+    // (Gnosis, 100; see packages/backend/src/rails/delegation-contracts.ts).
+    const { typedData, payloadHash } = buildBoundDirectUserOp({
+      delegate: TEST_DELEGATE_ADDRESS,
+      chainId: 100,
+    })
+    const result = await expectNoSignatureNoAudit({ payload_hash: payloadHash, typed_data: typedData })
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/pinned contracts/)
+  })
+
+  it('positive control: a real-shaped BOUND UserOp for the signer\'s own account signs, via relay', async () => {
+    const signer = createEdgeSigner(TEST_KEY)
+    const handlers = createToolHandlers(signer)
+    const { typedData, payloadHash } = buildBoundDirectUserOp({ delegate: TEST_DELEGATE_ADDRESS })
+    const result = await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    expect((result.data as { signature: string }).signature).toMatch(/^0x[0-9a-f]+$/i)
+  })
+
+  it("positive control: a real-shaped BOUND UserOp for the signer's own account signs, via payment_id fetch", async () => {
+    const { typedData, payloadHash } = buildBoundDirectUserOp({ delegate: TEST_DELEGATE_ADDRESS })
+    const IDENTITY = { apiKey: 'sk_agent_test_3272', apiUrl: 'https://haven.test' }
+    const handlers = createToolHandlers(createEdgeSigner(TEST_KEY), {
+      signContext: {
+        loadIdentity: async () => IDENTITY,
+        fetchImpl: (async (url: unknown) => {
+          const path = String(url)
+          if (path.includes('/x402/')) {
+            return new Response(
+              JSON.stringify({ error: 'not an x402 payment', error_code: 'sign_context_unavailable' }),
+              { status: 409 },
+            )
+          }
+          return new Response(
+            JSON.stringify({
+              payment_id: 'pay_3272',
+              status: 'pending_signature',
+              direct_sign_context_version: 1,
+              sign_data: { hash: payloadHash, signature_scheme: 'eip712_userop', typed_data: typedData },
+            }),
+            { status: 200 },
+          )
+        }) as typeof fetch,
+      },
+    })
+    const result = await handlers.haven_sign({ payment_id: 'pay_3272' })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    expect((result.data as { signature: string }).signature).toMatch(/^0x[0-9a-f]+$/i)
+  })
+})
+
+/**
+ * #3272 (B1) — `assertRedeemsOwnBudgetDelegation` decodes the redemption
+ * ARGUMENTS, not just the `redeemDelegations` selector. Each test below
+ * signed on this branch before that fix (verified by temporarily reverting
+ * `tools.ts` — see the PR's mutation table).
+ */
+describe('#3272 (B1): the redeemDelegations ARGUMENTS are verified, not just the selector', () => {
+  const SENDER = deriveDelegateAccountAddress(TEST_DELEGATE_ADDRESS)
+
+  async function expectNoSignatureNoAudit(callData: `0x${string}`): Promise<{ code?: string; message?: string }> {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-3272-b1-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer, {
+        audit: { auditPath, delegateAddress: signer.delegateAddress },
+      })
+      const { typedData, payloadHash } = buildBoundDirectUserOp({
+        delegate: TEST_DELEGATE_ADDRESS,
+        callData: buildExecuteCallData(
+          '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+          0n,
+          callData,
+        ),
+      })
+      const result = await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData })
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected a refusal')
+      expect('signature' in result).toBe(false)
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+      return result
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('B1 EXACT REGRESSION: an empty permission context paired with a self-call executes as self-authorised — refused', async () => {
+    // The exact live bypass shape: a self-call execution, packed the way
+    // ExecutionMode.SingleDefault expects (encodePacked, not ABI-encoded).
+    const selfCallSingleExecution = buildSingleExecutionCallData(
+      SENDER,
+      0n,
+      encodeFunctionData({
+        abi: [{ type: 'function', name: 'transferOwnership', inputs: [{ name: 'newOwner', type: 'address' }], outputs: [], stateMutability: 'nonpayable' }] as const,
+        functionName: 'transferOwnership',
+        args: ['0x000000000000000000000000000000000000dEaD'],
+      }),
+    )
+    const redeemCallData = buildEmptyPermissionContextRedemption(selfCallSingleExecution)
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/self-authorised|EMPTY/i)
+  })
+
+  it('refuses execute() value !== 0', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-3272-value-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer, { audit: { auditPath, delegateAddress: signer.delegateAddress } })
+      const { typedData, payloadHash } = buildBoundDirectUserOp({
+        delegate: TEST_DELEGATE_ADDRESS,
+        callData: buildExecuteCallData(
+          '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+          1n,
+          buildBoundRedeemDelegationsCallData({ delegate: SENDER }),
+        ),
+      })
+      const result = await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData })
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected a refusal')
+      expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a malformed inner call that is not a well-formed redeemDelegations(bytes[],bytes32[],bytes[])', async () => {
+    const result = await expectNoSignatureNoAudit('0xcef6d209deadbeef')
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+  })
+
+  it('refuses an ERC-7579 batch execute(bytes32,bytes) — selector 0xe9ae5c53 — at the OUTER call', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-3272-erc7579-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer, { audit: { auditPath, delegateAddress: signer.delegateAddress } })
+      const batchExecuteAbi = [
+        { type: 'function', name: 'execute', inputs: [{ name: '_mode', type: 'bytes32' }, { name: '_executionCalldata', type: 'bytes' }], outputs: [], stateMutability: 'payable' },
+      ] as const
+      const callData = encodeFunctionData({
+        abi: batchExecuteAbi,
+        functionName: 'execute',
+        args: [SINGLE_DEFAULT_MODE, buildBoundRedeemDelegationsCallData({ delegate: SENDER })],
+      })
+      const { typedData, payloadHash } = buildBoundDirectUserOp({ delegate: TEST_DELEGATE_ADDRESS, callData })
+      const result = await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData })
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected a refusal')
+      expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses execute() calldata with trailing bytes appended after a valid encoding', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-3272-trailing-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer, { audit: { auditPath, delegateAddress: signer.delegateAddress } })
+      const validCallData = buildExecuteCallData(
+        '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+        0n,
+        buildBoundRedeemDelegationsCallData({ delegate: SENDER }),
+      )
+      const withTrailingBytes = (validCallData + 'deadbeef') as `0x${string}`
+      const { typedData, payloadHash } = buildBoundDirectUserOp({ delegate: TEST_DELEGATE_ADDRESS, callData: withTrailingBytes })
+      const result = await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData })
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected a refusal')
+      expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+      expect(result.message).toMatch(/re-encode/)
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses redeemDelegations calldata with trailing bytes appended after a valid encoding (inner canonical check)', async () => {
+    // Distinct from the OUTER execute() trailing-bytes test above: this
+    // corrupts the INNER redeemDelegations call specifically, wrapped by an
+    // outer execute() that re-encodes canonically around the corrupted
+    // bytes — so only `assertRedeemsOwnBudgetDelegation`'s own re-encoding
+    // check can catch it.
+    const validRedeem = buildBoundRedeemDelegationsCallData({ delegate: SENDER })
+    const withTrailingBytes = (validRedeem + 'deadbeef') as `0x${string}`
+    const result = await expectNoSignatureNoAudit(withTrailingBytes)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/re-encode/)
+  })
+
+  it('refuses a permission context with trailing bytes appended after a valid Delegation[] encoding', async () => {
+    const delegation = buildDelegation({ delegate: SENDER, delegator: DEFAULT_DELEGATOR })
+    const validContext = buildPermissionContext(delegation)
+    const corruptedContext = (validContext + 'deadbeef') as `0x${string}`
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [[corruptedContext], [SINGLE_DEFAULT_MODE], [buildSingleExecutionCallData(SENDER, 0n, '0x')]],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/trailing or non-canonical bytes/)
+  })
+
+  it('refuses when the LEAF delegation\'s delegate is not this signer\'s own account (sender IS its own account)', async () => {
+    const someoneElse = '0x1234567890123456789012345678901234567890' as const
+    const redeemCallData = buildBoundRedeemDelegationsCallData({ delegate: someoneElse })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/not this signer's own account/)
+  })
+
+  it('refuses a two-link delegation chain whose leaf is this signer\'s account (Haven emits a single grant)', async () => {
+    const leaf = buildDelegation({ delegate: SENDER, delegator: '0x5555555555555555555555555555555555555555' })
+    const root = buildDelegation({ delegate: '0x5555555555555555555555555555555555555555', delegator: DEFAULT_DELEGATOR })
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [[buildChainPermissionContext([leaf, root])], [SINGLE_DEFAULT_MODE], [buildSingleExecutionCallData(SENDER, 0n, '0x')]],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/2-link delegation chain/)
+  })
+
+  it('refuses when the root delegation\'s delegator IS this signer\'s own account (self-to-self delegation)', async () => {
+    const redeemCallData = buildBoundRedeemDelegationsCallData({ delegate: SENDER, delegator: SENDER })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/root delegation granted by this signer/)
+  })
+
+  it('refuses mismatched permissionContexts/modes/executionCallDatas array lengths (one context, TWO modes — isolates the length-equality check from the exactly-one check below)', async () => {
+    const delegation = buildDelegation({ delegate: SENDER, delegator: DEFAULT_DELEGATOR })
+    const permissionContext = buildPermissionContext(delegation)
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [
+        [permissionContext],
+        [SINGLE_DEFAULT_MODE, SINGLE_DEFAULT_MODE],
+        [buildSingleExecutionCallData(SENDER, 0n, '0x')],
+      ],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/mismatched or empty argument arrays/)
+  })
+
+  it('refuses one context and one mode paired with TWO executions (isolates the executionCallDatas length check)', async () => {
+    const delegation = buildDelegation({ delegate: SENDER, delegator: DEFAULT_DELEGATOR })
+    const execution = buildSingleExecutionCallData(SENDER, 0n, '0x')
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [[buildPermissionContext(delegation)], [SINGLE_DEFAULT_MODE], [execution, execution]],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/mismatched or empty argument arrays/)
+  })
+
+  it('refuses redeeming TWO delegation chains at once — equal-length arrays, but not exactly one', async () => {
+    const delegation = buildDelegation({ delegate: SENDER, delegator: DEFAULT_DELEGATOR })
+    const permissionContext = buildPermissionContext(delegation)
+    const execution = buildSingleExecutionCallData(SENDER, 0n, '0x')
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [
+        [permissionContext, permissionContext],
+        [SINGLE_DEFAULT_MODE, SINGLE_DEFAULT_MODE],
+        [execution, execution],
+      ],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/redeems 2 delegation chains at once/)
+  })
+
+  it('refuses a non-SingleDefault execution mode', async () => {
+    const delegation = buildDelegation({ delegate: SENDER, delegator: DEFAULT_DELEGATOR })
+    const permissionContext = buildPermissionContext(delegation)
+    const BATCH_DEFAULT_MODE = `0x01${'00'.repeat(31)}` as const
+    const redeemCallData = encodeFunctionData({
+      abi: REDEEM_DELEGATIONS_ABI,
+      functionName: 'redeemDelegations',
+      args: [[permissionContext], [BATCH_DEFAULT_MODE], [buildSingleExecutionCallData(SENDER, 0n, '0x')]],
+    })
+    const result = await expectNoSignatureNoAudit(redeemCallData)
+    expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+    expect(result.message).toMatch(/ExecutionMode.SingleDefault/)
+  })
+
+  it('N1: refuses a domain.chainId that is a numeric STRING, not a number', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-3272-string-chainid-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      const signer = createEdgeSigner(TEST_KEY)
+      const handlers = createToolHandlers(signer, { audit: { auditPath, delegateAddress: signer.delegateAddress } })
+      const { typedData, payloadHash } = buildBoundDirectUserOp({ delegate: TEST_DELEGATE_ADDRESS, chainId: '84532' })
+      const result = await handlers.haven_sign({ payload_hash: payloadHash, typed_data: typedData })
+      expect(result.success).toBe(false)
+      if (result.success) throw new Error('expected a refusal')
+      expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+      expect(result.message).toMatch(/not a number/)
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

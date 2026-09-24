@@ -10,6 +10,15 @@ export {
   type X402HeaderResult,
 } from './core.js'
 
+/**
+ * #3272: the counterfactual HybridDeleGator account derivation
+ * `haven_sign`'s unbound-branch allowlist uses to decide "is this MY
+ * account". Exported so embedders and tests can compute the same address
+ * offline, without depending on `@metamask/smart-accounts-kit` (a
+ * devDependency here) at runtime.
+ */
+export { deriveDelegateAccountAddress } from './delegate-account.js'
+
 export {
   signerCapabilityAdvertisement,
   signerCompatibility,

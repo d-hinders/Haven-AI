@@ -20,7 +20,7 @@ import {
   buildSettlementDelegation,
   selectStoredAccepted,
   StoredAcceptedMismatchError,
-  typedDataDigest,
+  requireTypedDataDigest,
 } from './x402-delegation.js'
 import { serializeUserOp } from '../../rails/execution-rail.js'
 import { insertMachineIntent as createPaymentIntent } from '../../infra/repositories/payment-intents.js'
@@ -406,7 +406,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       expiresAt: intent.expires_at,
       // #1138: commit to the typed data, not just the 4337 hash — the
       // signer signs the former and can only verify what is bound.
-      typedDataHash: typedDataDigest(fundingAuth.prepared.signingTypedData),
+      typedDataHash: requireTypedDataDigest(fundingAuth.prepared.signingTypedData, 'EIP-3009 funding-leg'),
       // #1690: gated payer identity — {} until X402_EMIT_PAYER_CONTEXT=1.
       ...x402PayerContextFields(agent),
     })
@@ -823,7 +823,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     asset: tokenAddress,
     network,
     expiresAt: intent.expires_at,
-    typedDataHash: typedDataDigest(built.signingPayload),
+    typedDataHash: requireTypedDataDigest(built.signingPayload, 'erc7710 settlement'),
     // #1690: gated payer identity — {} until X402_EMIT_PAYER_CONTEXT=1.
     ...x402PayerContextFields(agent),
   })

@@ -11,8 +11,11 @@ import {
   isPackedUserOperationTypedData,
   type X402PaymentRequired,
 } from '@haven_ai/sdk/edge'
+import { decodeFunctionData, encodeFunctionData, hashTypedData } from 'viem'
 import { z } from 'zod/v3'
-import { isSettlementChildTypedData } from './settlement-child.js'
+import { DELEGATION_MANAGER, isSettlementChildTypedData } from './settlement-child.js'
+import { deriveDelegateAccountAddress } from './delegate-account.js'
+import { assertRedeemsOwnBudgetDelegation } from './redemption-guard.js'
 import { HavenBareHashRefusedError } from './bare-hash.js'
 import {
   appendSigningAuditEntry,
@@ -68,6 +71,184 @@ export class HavenUserOpBindingRefusedError extends HavenSigningError {
       nextToolOmittedReason:
         'call haven_sign again with payment_id alone (preferred), or with typed_data copied unchanged from the payment result',
     })
+  }
+}
+
+/**
+ * #3272: the unbound branch's allowlist. `assertUserOpTypedDataBinding`
+ * (#3271) proves the typed data and its `payload_hash` describe the SAME
+ * operation — necessary, never sufficient, because the caller supplies both
+ * values, so a self-consistent forgery binds perfectly to itself. This is
+ * the rest of the property: the operation described is the ONE shape this
+ * branch may ever sign — a direct payment that redeems the agent's own
+ * budget delegation, for its own account, on a chain the delegation rail
+ * runs on. Everything else (another agent's account, a self-call such as
+ * `transferOwnership`, a batch `execute`, a call to any contract other than
+ * the DelegationManager) is refused here, before
+ * `signer.signDelegationTypedData` ever sees it. Modelled on
+ * `HavenUserOpBindingRefusedError`: no signature, no audit entry, ever, for
+ * any refusal from this function.
+ */
+export const TYPED_DATA_NOT_ALLOWED = 'TYPED_DATA_NOT_ALLOWED' as const
+
+export class HavenTypedDataNotAllowedError extends HavenSigningError {
+  declare readonly code: typeof TYPED_DATA_NOT_ALLOWED
+  readonly next_action = AgentPaymentNextAction.StopAndTellUser
+  readonly step: ReturnType<typeof signerRefusalStep>
+
+  constructor(message: string) {
+    super(message)
+    ;(this as { code: string }).code = TYPED_DATA_NOT_ALLOWED
+    this.name = 'HavenTypedDataNotAllowedError'
+    this.step = signerRefusalStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason:
+        'sign only Haven-prepared payloads: call haven_sign with payment_id (preferred), or pass ' +
+        'typed_data / typed_data_b64 copied unchanged from a haven_send / haven_pay result, or ' +
+        'x402_expected from a Haven quote',
+    })
+  }
+}
+
+/**
+ * Chains the delegation rail has PINNED delegation contracts for
+ * (`packages/backend/src/rails/delegation-contracts.ts`) — the only chains a
+ * direct-payment UserOp may be scoped to. Gnosis (100) has no pinned
+ * DelegationManager/enforcer set, so it is deliberately excluded even though
+ * the delegate account itself could exist there.
+ */
+const DIRECT_PAYMENT_CHAIN_IDS: ReadonlySet<number> = new Set([8453, 84532])
+
+/** The DeleGator's single-execution `execute((address,uint256,bytes))` — selector `0x5c1c6dcd`. */
+const EXECUTE_ABI = [
+  {
+    type: 'function',
+    name: 'execute',
+    inputs: [
+      {
+        name: '_execution',
+        type: 'tuple',
+        components: [
+          { name: 'target', type: 'address' },
+          { name: 'value', type: 'uint256' },
+          { name: 'callData', type: 'bytes' },
+        ],
+      },
+    ],
+    outputs: [],
+    stateMutability: 'payable',
+  },
+] as const
+
+/**
+ * The content + provenance allowlist (#3272 criteria 1–2). Call ONLY after
+ * `assertUserOpTypedDataBinding` has already proven `typedData` is a
+ * well-formed `PackedUserOperation` matching its own `payload_hash` — this
+ * function trusts `typedData.domain`/`message` are shaped correctly and
+ * checks only what they SAY.
+ */
+function assertBoundDirectPaymentUserOp(
+  typedData: Record<string, unknown>,
+  delegateAddress: string,
+): void {
+  const domain = (typedData.domain ?? {}) as Record<string, unknown>
+  const message = (typedData.message ?? {}) as Record<string, unknown>
+
+  // (N1) chainId must already be a number/bigint. `Number(domain.chainId)`
+  // below would happily parse a numeric STRING, but viem's own EIP-712
+  // domain encoding does not accept a string chainId the same way — passing
+  // one through to `signDelegationTypedData` can silently drop it from the
+  // domain the digest actually covers, producing a different signed payload
+  // than this check evaluated. Refuse before that gap can matter.
+  if (typeof domain.chainId !== 'number' && typeof domain.chainId !== 'bigint') {
+    throw new HavenTypedDataNotAllowedError(
+      `This UserOperation's domain.chainId is ${typeof domain.chainId} (${String(domain.chainId)}), ` +
+        'not a number — refusing rather than risk signing a different EIP-712 domain than this ' +
+        'check evaluated.',
+    )
+  }
+
+  // (c) chain: only where the delegation rail has pinned contracts.
+  const chainId = Number(domain.chainId)
+  if (!DIRECT_PAYMENT_CHAIN_IDS.has(chainId)) {
+    throw new HavenTypedDataNotAllowedError(
+      'This signer only signs direct payments on chains the delegation rail has pinned ' +
+        `contracts for (${[...DIRECT_PAYMENT_CHAIN_IDS].join(', ')}); this typed data names ` +
+        `chain ${String(domain.chainId)}. Refusing.`,
+    )
+  }
+
+  // (d) sender: only this signer's OWN counterfactual delegate account —
+  // `assertUserOpTypedDataBinding` already proved `sender === verifyingContract`.
+  const ownAccount = deriveDelegateAccountAddress(delegateAddress as `0x${string}`)
+  const sender = typeof message.sender === 'string' ? message.sender : ''
+  if (sender.toLowerCase() !== ownAccount.toLowerCase()) {
+    throw new HavenTypedDataNotAllowedError(
+      `This UserOperation's account (${sender || 'unknown'}) is not this signer's own delegate ` +
+        `account (${ownAccount}) — signing it would authorize a DIFFERENT account's operation. ` +
+        'Sign only your own agent\'s Haven-prepared payloads.',
+    )
+  }
+
+  // (e) callData: a single execute(DelegationManager, 0, redeemDelegations(...)) —
+  // never a batch execute (ERC-7579 `execute(bytes32,bytes)`, selector
+  // `0xe9ae5c53`), an executeFromExecutor, a self-call, or a call to any
+  // other contract.
+  const callData = message.callData as `0x${string}`
+  let decoded: { target: `0x${string}`; value: bigint; callData: `0x${string}` }
+  try {
+    const { args } = decodeFunctionData({
+      abi: EXECUTE_ABI,
+      data: callData,
+    })
+    decoded = args[0] as unknown as typeof decoded
+  } catch {
+    throw new HavenTypedDataNotAllowedError(
+      "This UserOperation's callData is not a single execute((address,uint256,bytes)) call " +
+        '— a batch execute, executeFromExecutor, or any other selector is refused. This ' +
+        'signer only signs direct payments.',
+    )
+  }
+  // Canonical encoding: re-encoding the decoded call must reproduce the EXACT
+  // bytes, or `decodeFunctionData`'s tolerance of trailing/non-canonical
+  // padding would let calldata smuggle bytes past every check below.
+  const reEncodedExecute = encodeFunctionData({
+    abi: EXECUTE_ABI,
+    functionName: 'execute',
+    args: [decoded],
+  })
+  if (reEncodedExecute.toLowerCase() !== callData.toLowerCase()) {
+    throw new HavenTypedDataNotAllowedError(
+      "This UserOperation's execute() call does not re-encode to the exact callData bytes " +
+        '(trailing or non-canonical bytes). Refusing.',
+    )
+  }
+  if (decoded.target.toLowerCase() !== DELEGATION_MANAGER.toLowerCase()) {
+    throw new HavenTypedDataNotAllowedError(
+      `This UserOperation's execute() calls ${decoded.target}, not the DelegationManager ` +
+        `(${DELEGATION_MANAGER}). A direct payment only ever redeems the agent's own budget ` +
+        'delegation — refusing what looks like a self-call (e.g. transferOwnership, ' +
+        'updateSigners, upgradeToAndCall) or a call to an unrelated contract.',
+    )
+  }
+  if (decoded.value !== 0n) {
+    throw new HavenTypedDataNotAllowedError(
+      `This UserOperation's execute() sends ${decoded.value} wei of native value alongside the ` +
+        'DelegationManager call — a direct payment never does. Refusing.',
+    )
+  }
+  // #3272 (B1): decode the redemption ARGUMENTS, not just the selector — an
+  // empty (or otherwise not-this-signer's) delegation chain is a capture
+  // vector, not a shape the redeemDelegations selector alone rules out. Any
+  // HavenSigningError this throws is a refusal like the others; converted
+  // below via the same `try`.
+  try {
+    assertRedeemsOwnBudgetDelegation(decoded.callData, ownAccount as `0x${string}`)
+  } catch (err) {
+    throw new HavenTypedDataNotAllowedError(
+      err instanceof Error ? err.message : String(err),
+    )
   }
 }
 
@@ -245,7 +426,9 @@ const SIGN_DESCRIPTION = [
   'in transit is refused (USEROP_BINDING_MISMATCH) instead of producing a bad signature. Fallback for',
   'either flow: pass typed_data_b64 through UNCHANGED (never re-type the nested typed_data JSON); the',
   'account validates that EIP-712 payload, not payload_hash. On a direct payment the same binding',
-  'check runs on the relayed payload too.',
+  'check runs on the relayed payload too. This tool signs ONLY Haven-prepared payloads (#3272): a',
+  'direct-payment UserOp from your own account that redeems a delegation granted to it, or an x402',
+  'intent against a Haven-signed context — never an arbitrary typed_data payload, however it is shaped.',
   'Next: call mcp__haven__haven_submit with signature, then pass x402_binding',
   'to mcp__haven-signer__haven_x402_sign_header. A bare payload_hash with no payment_id, typed_data',
   'or x402_expected is REFUSED (BARE_HASH_REFUSED): a hash carries nothing this signer can verify.',
@@ -268,7 +451,7 @@ const X402_SIGN_HEADER_DESCRIPTION = [
 ].join(' ')
 
 const SIGN_X402_DESCRIPTION = [
-  'One-shot x402 signing for the fast 3-call flow: sign the funding hash AND build the EIP-3009',
+  'One-shot x402 signing for the fast 3-call flow: sign the funding payload AND build the EIP-3009',
   'merchant payment header in a single local call (equivalent to haven_sign followed by',
   'haven_x402_sign_header). The delegate key never leaves this process. From the haven_pay_mcp_tool',
   'result pass JUST payment_id — PREFERRED (#1263, #1355): this signer fetches the exact signing',
@@ -312,34 +495,19 @@ export const toolDescriptions: Record<SignerToolName, string> = {
 
 /** Map the wire-shaped x402_expected (snake_case) to the EdgeSigner's camelCase context. */
 /**
- * Sign the x402 funding leg on whichever rail the Haven-signed context declares
- * (#1138).
- *
- * The **context** selects the path, never the caller's arguments: a v2 context
- * (one that commits to a typed-data digest) requires typed data, a v1 context
- * requires the bare hash, and `assertExpectedBinding` rejects the mismatch. So
- * an agent that passes `typed_data` on a legacy-rail intent — or omits it on a
- * delegation-rail one — gets a clear refusal here rather than a signature the
- * chain rejects later.
+ * Sign the x402 funding leg (#1138). Every x402 funding intent is now
+ * delegation-rail typed data (#3272 criterion 8: the bare-hash v1 rail and
+ * `signX402FundingHash` are retired) — `signX402FundingTypedData` itself
+ * refuses a v1 context (no `typedDataHash`) with the structured
+ * version-mismatch error, whether or not `typedData` was supplied, so this
+ * function does no rail selection of its own.
  */
 async function signFundingLeg(
   signer: EdgeSigner,
   expected: X402ExpectedPayment,
-  payloadHash: string,
   typedData: Record<string, unknown> | undefined,
 ): Promise<X402FundingSignatureResult> {
-  if (!expected.typedDataHash) {
-    return signer.signX402FundingHash(payloadHash, expected)
-  }
-  if (!typedData) {
-    throw new HavenSigningError(
-      'This x402 funding intent is on the delegation rail: it commits to EIP-712 typed data, ' +
-        'which was not supplied. Pass typed_data_b64 from haven_pay_mcp_tool / ' +
-        'haven_pay_x402_quote through unchanged (or typed_data verbatim) — the bare ' +
-        'payload_hash is not what the account validates.',
-    )
-  }
-  return signer.signX402FundingTypedData(typedData as unknown as X402FundingTypedData, expected)
+  return signer.signX402FundingTypedData(typedData as unknown as X402FundingTypedData | undefined, expected)
 }
 
 function toExpectedX402(raw: {
@@ -602,7 +770,7 @@ export function createToolHandlers(
               : args.x402_expected
         const x402Expected = expectedRaw ? toExpectedX402(expectedRaw) : null
         const result = x402Expected
-          ? await signFundingLeg(signer, x402Expected, payloadHash, typedData)
+          ? await signFundingLeg(signer, x402Expected, typedData)
           : null
         if (!result) {
           // #1254: a DIRECT delegation-rail payment carries typed_data and no
@@ -633,34 +801,57 @@ export function createToolHandlers(
                   'fetches and verifies the context itself), or use haven_sign_x402.',
               )
             }
-            // #3271: a direct-payment PackedUserOperation — the digest check
-            // that binds this exact typed data to its own payload_hash, in
-            // the HybridDeleGator domain of its own sender, against the v0.7
-            // EntryPoint. Runs whether the bytes arrived by tool argument or
-            // by the payment_id fetch above; a corrupted payload is refused
-            // here, before a signature over the wrong digest is produced.
-            // A FETCHED direct context is served as `eip712_userop`, so it
-            // must BE a PackedUserOperation: any other shape there is refused
-            // by the same check rather than signed unchecked.
-            if (resolved?.kind === 'direct' || isPackedUserOperationTypedData(typedData)) {
-              try {
-                assertUserOpTypedDataBinding(typedData, payloadHash)
-              } catch (err) {
-                if (err instanceof HavenUserOpBindingError) {
-                  throw new HavenUserOpBindingRefusedError(err.message)
-                }
-                throw err
-              }
+            // #3272: the allowlist. This branch signs EXACTLY ONE shape — a
+            // direct-payment PackedUserOperation — and nothing else, however
+            // it is dressed up (a probe with an invented domain, a delegate
+            // TransferWithAuthorization, a USDC Permit, …). Everything that
+            // is not that shape is refused before either check below runs.
+            if (resolved?.kind !== 'direct' && !isPackedUserOperationTypedData(typedData)) {
+              throw new HavenTypedDataNotAllowedError(
+                'This signer signs only Haven-prepared payloads: a direct-payment ' +
+                  'PackedUserOperation from your own account that redeems a delegation granted to it, ' +
+                  'or a Haven-signed x402 context. Call haven_sign with payment_id ' +
+                  '(preferred), or pass x402_expected for an x402 funding leg.',
+              )
             }
+            // #3271: the digest check that binds this exact typed data to its
+            // own payload_hash, in the HybridDeleGator domain of its own
+            // sender, against the v0.7 EntryPoint. Runs whether the bytes
+            // arrived by tool argument or by the payment_id fetch above; a
+            // corrupted payload is refused here, before a signature over the
+            // wrong digest is produced. Necessary, never sufficient — a
+            // self-consistent forgery binds perfectly to itself, which is
+            // exactly what #3272's allowlist below closes.
+            try {
+              assertUserOpTypedDataBinding(typedData, payloadHash)
+            } catch (err) {
+              if (err instanceof HavenUserOpBindingError) {
+                throw new HavenUserOpBindingRefusedError(err.message)
+              }
+              throw err
+            }
+            // #3272: content + provenance — the ONE operation this branch may
+            // ever sign: redeeming a single delegation granted to the agent's
+            // own account, from that account, on a chain the delegation rail runs on.
+            assertBoundDirectPaymentUserOp(typedData, signer.delegateAddress)
             const signature = await signer.signDelegationTypedData(typedData)
-            await auditSigning('haven_sign', payloadHash)
+            // #3272 (criterion 4): audit the digest actually signed — the
+            // EIP-712 hash of this typed data — never the caller-supplied
+            // payload_hash (the ERC-4337 UserOp hash, a DIFFERENT value the
+            // #3271 check above merely cross-checked this typed data against).
+            await auditSigning('haven_sign', hashTypedData(typedData as Parameters<typeof hashTypedData>[0]))
             return { signature }
           }
           // #3169: bare hash, nothing to verify against — refused, never signed.
           // Not audited as a signing operation: nothing was signed.
           throw new HavenBareHashRefusedError()
         }
-        await auditSigning('haven_sign', payloadHash)
+        // #3272 (criterion 4): audit the digest actually signed. `result`
+        // only exists here because signFundingLeg succeeded, which requires
+        // `typedData` to be present and hashed — never the caller-supplied
+        // payload_hash, a different value the expected-context binding
+        // merely cross-checks this typed data against.
+        await auditSigning('haven_sign', hashTypedData(typedData as Parameters<typeof hashTypedData>[0]))
         return { signature: result.signature, x402_binding: result.x402Binding }
       }),
 
@@ -704,14 +895,8 @@ export function createToolHandlers(
           )
         }
         // 1. Sign the funding leg (records the binding + checks expiry/context).
-        //    Which payload that is — bare hash or the account's typed data — is
-        //    decided by the Haven-signed context, not by the caller (#1138).
-        const funding = await signFundingLeg(
-          signer,
-          toExpectedX402(expectedRaw),
-          payloadHash,
-          fetched?.typedData ?? resolveTypedData(args),
-        )
+        const fundingTypedData = fetched?.typedData ?? resolveTypedData(args)
+        const funding = await signFundingLeg(signer, toExpectedX402(expectedRaw), fundingTypedData)
         // 2. Build the merchant EIP-3009 header against that binding — local, no network.
         //    #1355: prefer the PaymentRequired the context fetch carried (same
         //    Haven read the signing bytes came from — one less blob an agent
@@ -739,7 +924,13 @@ export function createToolHandlers(
         // Two audit entries — one per signing operation — matching the
         // decomposed haven_sign + haven_x402_sign_header trail, so the funding
         // signature and the merchant header remain distinguishable in the log.
-        await auditSigning('haven_sign_x402', payloadHash)
+        // #3272 (criterion 4): the funding entry records the digest actually
+        // signed — `fundingTypedData` is guaranteed present here, since
+        // `signFundingLeg` above would otherwise have refused.
+        await auditSigning(
+          'haven_sign_x402',
+          hashTypedData(fundingTypedData as Parameters<typeof hashTypedData>[0]),
+        )
         await auditSigning('haven_sign_x402', hashPayloadForAudit(paymentRequired))
         return {
           signature: funding.signature,
@@ -896,6 +1087,18 @@ function normalizeError(err: unknown): ToolFailure {
     // #3271: the UserOp binding-mismatch refusal, structured like the others.
     // Checked BEFORE the `HavenSigningError` branch below since this class
     // extends it.
+    return {
+      success: false,
+      code: err.code,
+      message: err.message,
+      next_action: err.next_action,
+      ...nextStepWireFields(err.step),
+    }
+  }
+  if (err instanceof HavenTypedDataNotAllowedError) {
+    // #3272: the unbound-branch allowlist refusal, structured like the
+    // others. Checked BEFORE the `HavenSigningError` branch below since this
+    // class extends it.
     return {
       success: false,
       code: err.code,

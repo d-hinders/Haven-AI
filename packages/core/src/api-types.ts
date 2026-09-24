@@ -3886,10 +3886,10 @@ export type components = {
             resource_url?: string;
             x402_expected_auth: {
                 /**
-                 * @description Contents-derived, never chosen: 1 = hash-only (legacy rail); 2 = commits to the EIP-712 typedDataHash (delegation rail, #1138); 3 = additionally binds the payer identity (#1690). The enum previously claimed [1] while v2 had shipped — corrected here.
+                 * @description Contents-derived, never chosen: 2 = commits to the EIP-712 typedDataHash (delegation rail, #1138); 3 = additionally binds the payer identity (#1690). Version 1 (hash-only, retired Safe rail) is never emitted since #3272 — signX402ExpectedContext requires typedDataHash — and the signer refuses it.
                  * @enum {integer}
                  */
-                version: 1 | 2 | 3;
+                version: 2 | 3;
                 /** @description Haven-signed expected x402 context. Includes expiresAt when the funding window is time-bound. */
                 message: string;
                 signature: string;

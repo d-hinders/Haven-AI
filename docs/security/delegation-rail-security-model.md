@@ -4,6 +4,10 @@ status: current
 contract: true
 covers:
   - packages/backend/src/middleware/owner-cli.ts
+  - packages/signer/src/delegate-account.ts
+  - packages/signer/src/tools.ts
+  - packages/signer/src/redemption-guard.ts
+  - packages/signer/src/core.ts
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/routes/auth.ts
   - packages/backend/src/infra/repositories/device-authorizations.ts
@@ -1318,3 +1322,83 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > loosenings, so nothing that is accepted today is refused. Scope of this note:
 > those two files and those four fields. Nothing else in this document was
 > re-verified.
+
+## 10. The edge signer's signing surface (#3272)
+
+The agent's delegate key lives in `@haven_ai/signer` on the user's machine. For
+most of the rail's life, `haven_sign` would sign **any** EIP-712 typed data it
+was handed. The only exceptions were a `Delegation` without a Haven-signed
+context (#1476) and a bare hash (#3169). It worked as a signing oracle: on
+2026-09-24 it returned a valid signature over a made-up `Probe` message
+(`primaryType: "Probe"`, no `verifyingContract`). Since #3272 the MCP tool
+layer signs only these shapes, and refuses everything else with
+`TYPED_DATA_NOT_ALLOWED` (no signature, no audit entry):
+
+- **A direct-payment `PackedUserOperation`**, only when all of these hold:
+  - it passes the #3271 binding check;
+  - its chain has pinned delegation contracts (Base, Base Sepolia);
+  - its sender is the signer's OWN delegate account: the counterfactual
+    HybridDeleGator for the delegate key, derived offline by CREATE2 in
+    `packages/signer/src/delegate-account.ts` and pinned to the MetaMask kit;
+  - its `callData` is a single `execute` to the DelegationManager calling
+    `redeemDelegations`, with exactly one delegation: a single grant made to
+    this account by a different account, in
+    `SingleDefault` mode, canonically encoded (`redemption-guard.ts`).
+- **An erc7710 settlement child or an EIP-3009 funding leg**, against a
+  Haven-signed expected context (versions 2 and 3 only; the bare-hash v1
+  context was removed in #3272).
+- **The EIP-3009 merchant header**, against the recorded binding.
+- **The sweep home**, against Haven's recovery binding.
+
+The core's `signDelegationTypedData` remains a verbatim primitive for embedders.
+The allowlist lives in the tool layer, and an embedder calling the core
+directly owns that check.
+
+**The blast-radius questions #3272 asked, and where each now stands:**
+
+- **The delegate wallet's token balance.** The EIP-3009 bridge funds the
+  delegate EOA, so a `TransferWithAuthorization` or USDC `Permit` signed
+  through the old oracle could move that balance. A max-value `Permit` would
+  also have covered every future funding leg. **Closed for an updated signer:**
+  neither is a `PackedUserOperation`, so both are refused (pinned by the signer's
+  tests).
+- **Capture of the delegate account.** `transferOwnership`, `updateSigners`
+  and `addKey` on the HybridDeleGator are `onlyEntryPointOrSelf` (upstream
+  MetaMask delegation-framework v1.3.0, read against the source, not the
+  deployed bytecode), so a UserOp the account executes on itself reaches
+  them. That can happen two ways, and an updated signer refuses both:
+  - A direct self-call (`execute` targeting the account itself) is refused,
+    because the only permitted target is the DelegationManager.
+  - A self-call smuggled through `redeemDelegations` is refused too. In
+    v1.3.0, a redemption with an EMPTY permission context is self-authorised:
+    the DelegationManager calls `executeFromExecutor` on the caller, which runs
+    any execution as the account. The #3272 review reproduced exactly that
+    capture against an early version of the allowlist, which checked only the
+    function selector.
+
+  The allowlist therefore decodes the redemption. It must carry exactly one
+  permission context holding exactly one delegation: a grant to this signer's
+  own account from a different account, in `SingleDefault` mode, with every
+  level canonically encoded. An empty chain, a multi-link chain, a
+  self-granted delegation and a delegation to another account are each
+  refused, and each case is pinned by a test. The
+  treasury was never exposed beyond the caveats either way: budget, recipient
+  pin and expiry are enforced by the DelegationManager on redemption. A
+  captured delegate account would still have been able to redeem the budget
+  every period until the owner revoked it.
+- **ERC-1271.** `isValidSignature` is on the ABI. Whether the account accepts a
+  plain owner ECDSA signature over a raw digest, without ERC-7739 wrapping, is
+  **not verified in this repository**. **Reduced for an updated signer:** it
+  now signs only EIP-712 digests in the HybridDeleGator `PackedUserOperation`
+  domain of its own account (plus the Haven-bound x402, header and sweep
+  payloads), not arbitrary digests a protocol could present for a 1271 check.
+- **Installed signers.** A signer installed before #3272 keeps the oracle until
+  it is upgraded. Haven cannot gate that: the attack never passes through
+  Haven, and the hosted MCP cannot see the signer's handshake. Credential
+  rotation does not help, because the new key lands in the same old signer. The
+  remedy is the signer upgrade (a connector re-run), carried by the release
+  notes (`packages/signer/CHANGELOG.md`).
+
+> **Scope of this section:** written for #3272 against the signer at that
+> change. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.

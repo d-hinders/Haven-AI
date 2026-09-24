@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 contract: true
 covers:
+  - packages/backend/src/infra/chain/x402-binding-signer.ts
   - packages/backend/src/openapi/party-model.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
@@ -54,7 +55,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-23"
+last-verified: "2026-09-24"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -441,8 +442,8 @@ the money. The scheme is stated explicitly at both hops (reported at quote,
 echoed at submit) rather than inferred, which is #1360's property applied to a
 second entry point.
 
-Before signing the funding hash, the edge signer checks payload-hash equality,
-reconstructs the canonical payment/resource/merchant/amount/asset/network/expiry
+Before signing the funding payload, the edge signer checks the typed-data
+digest against Haven's committed `typedDataHash`, reconstructs the canonical payment/resource/merchant/amount/asset/network/expiry
 context, verifies Haven's expected-context signature against its configured
 trusted signer.
 
@@ -472,14 +473,14 @@ contents rather than announced:
 
 | Version | Carries | Signer may sign |
 |---|---|---|
-| v1 | no `typedDataHash` | the bare hash (raw ECDSA) — legacy rail |
+| v1 | no `typedDataHash` | **nothing — retired (#3272).** Refused as an unsupported version; the backend can no longer emit it (`signX402ExpectedContext` requires `typedDataHash`) |
 | v2 | `typedDataHash` | `sign_data.typed_data` (EIP-712) — delegation rail. Preferred transport (#1263): the signer fetches the exact payload itself via `GET /x402/:id/sign-context` when handed just `payment_id` — and the hosted x402 quote tools are accordingly **compact by default** (#1272): no `typed_data`/`typed_data_b64` in the response unless `include_signing_payload=true`. Fallback (#1255): re-run the quote with the same `idempotency_key` plus that flag (the replay returns the ORIGINAL sign_data, #1207), then relay `typed_data_b64` as one opaque base64 string, unchanged. All transports land in this same digest check |
 
-The signer refuses the mismatch **in both directions**: raw-signing the hash of
-a v2 intent (the account would reject that signature on-chain, after the intent
-is claimed), and signing typed data under a v1 context (no commitment to what
-is being signed). It then re-derives the digest from the typed data in hand and
-requires it to equal the committed one, so the Haven-signed declaration covers
+Since #3272 there is no raw-hash signing path, so only one mismatch remains to
+refuse: a context that carries no `typedDataHash` (v1) is refused as an
+unsupported version before any content check. For v2 and v3 the signer
+re-derives the digest from the typed data in hand and requires it to equal the
+committed one, so the Haven-signed declaration covers
 the exact bytes signed. `buildX402ExpectedMessage` puts the version in both the
 header line and the signed payload, so neither context can be replayed as the
 other.
@@ -535,7 +536,7 @@ The recommended three-call fast path for an x402-protected MCP tool is:
    then `notifications/initialized`) and sends the unpaid, session-bound
    `tools/call` quote probe. It records the MCP transport context and returns
    the unsigned funding payload plus merchant/tool context.
-2. `haven_sign_x402` — the local signer signs the funding hash and creates the
+2. `haven_sign_x402` — the local signer signs the funding payload and creates the
    merchant-bound payment header.
 3. `haven_settle_mcp_tool` — hosted MCP resolves the merchant call context
    (#2282, below), relays the funding signature, waits for confirmation,

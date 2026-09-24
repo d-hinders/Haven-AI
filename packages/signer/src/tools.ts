@@ -406,7 +406,9 @@ const SIGN_DESCRIPTION = [
   'in transit is refused (USEROP_BINDING_MISMATCH) instead of producing a bad signature. Fallback for',
   'either flow: pass typed_data_b64 through UNCHANGED (never re-type the nested typed_data JSON); the',
   'account validates that EIP-712 payload, not payload_hash. On a direct payment the same binding',
-  'check runs on the relayed payload too.',
+  'check runs on the relayed payload too. This tool signs ONLY Haven-prepared payloads (#3272): a',
+  'direct-payment UserOp that redeems your own budget delegation for your own account, or an x402',
+  'intent against a Haven-signed context — never an arbitrary typed_data payload, however it is shaped.',
   'Next: call mcp__haven__haven_submit with signature, then pass x402_binding',
   'to mcp__haven-signer__haven_x402_sign_header. A bare payload_hash with no payment_id, typed_data',
   'or x402_expected is REFUSED (BARE_HASH_REFUSED): a hash carries nothing this signer can verify.',
@@ -473,34 +475,19 @@ export const toolDescriptions: Record<SignerToolName, string> = {
 
 /** Map the wire-shaped x402_expected (snake_case) to the EdgeSigner's camelCase context. */
 /**
- * Sign the x402 funding leg on whichever rail the Haven-signed context declares
- * (#1138).
- *
- * The **context** selects the path, never the caller's arguments: a v2 context
- * (one that commits to a typed-data digest) requires typed data, a v1 context
- * requires the bare hash, and `assertExpectedBinding` rejects the mismatch. So
- * an agent that passes `typed_data` on a legacy-rail intent — or omits it on a
- * delegation-rail one — gets a clear refusal here rather than a signature the
- * chain rejects later.
+ * Sign the x402 funding leg (#1138). Every x402 funding intent is now
+ * delegation-rail typed data (#3272 criterion 8: the bare-hash v1 rail and
+ * `signX402FundingHash` are retired) — `signX402FundingTypedData` itself
+ * refuses a v1 context (no `typedDataHash`) with the structured
+ * version-mismatch error, whether or not `typedData` was supplied, so this
+ * function does no rail selection of its own.
  */
 async function signFundingLeg(
   signer: EdgeSigner,
   expected: X402ExpectedPayment,
-  payloadHash: string,
   typedData: Record<string, unknown> | undefined,
 ): Promise<X402FundingSignatureResult> {
-  if (!expected.typedDataHash) {
-    return signer.signX402FundingHash(payloadHash, expected)
-  }
-  if (!typedData) {
-    throw new HavenSigningError(
-      'This x402 funding intent is on the delegation rail: it commits to EIP-712 typed data, ' +
-        'which was not supplied. Pass typed_data_b64 from haven_pay_mcp_tool / ' +
-        'haven_pay_x402_quote through unchanged (or typed_data verbatim) — the bare ' +
-        'payload_hash is not what the account validates.',
-    )
-  }
-  return signer.signX402FundingTypedData(typedData as unknown as X402FundingTypedData, expected)
+  return signer.signX402FundingTypedData(typedData as unknown as X402FundingTypedData | undefined, expected)
 }
 
 function toExpectedX402(raw: {
@@ -763,7 +750,7 @@ export function createToolHandlers(
               : args.x402_expected
         const x402Expected = expectedRaw ? toExpectedX402(expectedRaw) : null
         const result = x402Expected
-          ? await signFundingLeg(signer, x402Expected, payloadHash, typedData)
+          ? await signFundingLeg(signer, x402Expected, typedData)
           : null
         if (!result) {
           // #1254: a DIRECT delegation-rail payment carries typed_data and no
@@ -839,7 +826,12 @@ export function createToolHandlers(
           // Not audited as a signing operation: nothing was signed.
           throw new HavenBareHashRefusedError()
         }
-        await auditSigning('haven_sign', payloadHash)
+        // #3272 (criterion 4): audit the digest actually signed. `result`
+        // only exists here because signFundingLeg succeeded, which requires
+        // `typedData` to be present and hashed — never the caller-supplied
+        // payload_hash, a different value the expected-context binding
+        // merely cross-checks this typed data against.
+        await auditSigning('haven_sign', hashTypedData(typedData as Parameters<typeof hashTypedData>[0]))
         return { signature: result.signature, x402_binding: result.x402Binding }
       }),
 
@@ -883,14 +875,8 @@ export function createToolHandlers(
           )
         }
         // 1. Sign the funding leg (records the binding + checks expiry/context).
-        //    Which payload that is — bare hash or the account's typed data — is
-        //    decided by the Haven-signed context, not by the caller (#1138).
-        const funding = await signFundingLeg(
-          signer,
-          toExpectedX402(expectedRaw),
-          payloadHash,
-          fetched?.typedData ?? resolveTypedData(args),
-        )
+        const fundingTypedData = fetched?.typedData ?? resolveTypedData(args)
+        const funding = await signFundingLeg(signer, toExpectedX402(expectedRaw), fundingTypedData)
         // 2. Build the merchant EIP-3009 header against that binding — local, no network.
         //    #1355: prefer the PaymentRequired the context fetch carried (same
         //    Haven read the signing bytes came from — one less blob an agent
@@ -918,7 +904,13 @@ export function createToolHandlers(
         // Two audit entries — one per signing operation — matching the
         // decomposed haven_sign + haven_x402_sign_header trail, so the funding
         // signature and the merchant header remain distinguishable in the log.
-        await auditSigning('haven_sign_x402', payloadHash)
+        // #3272 (criterion 4): the funding entry records the digest actually
+        // signed — `fundingTypedData` is guaranteed present here, since
+        // `signFundingLeg` above would otherwise have refused.
+        await auditSigning(
+          'haven_sign_x402',
+          hashTypedData(fundingTypedData as Parameters<typeof hashTypedData>[0]),
+        )
         await auditSigning('haven_sign_x402', hashPayloadForAudit(paymentRequired))
         return {
           signature: funding.signature,

@@ -57,8 +57,6 @@ export interface EdgeSigner {
    * visible to this process's audit log.
    */
   signDelegationTypedData(typedData: Record<string, unknown>): Promise<string>
-  /** Sign an x402 funding hash and remember the funded merchant-header context. */
-  signX402FundingHash(hash: string, expected: X402ExpectedPayment): X402FundingSignatureResult
   /**
    * Sign a delegation-rail x402 funding intent's EIP-712 typed data (#1138) and
    * remember the funded merchant-header context, exactly as the hash path does.

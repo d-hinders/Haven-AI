@@ -594,7 +594,7 @@ const start = async () => {
           const chains = deployableChainIds()
           for (const chainId of chains) {
             const tick = await runOutboundBumpTick(chainId, deps, app.log)
-            if (tick.bumped || tick.closedMined || tick.closedFailed || tick.rebroadcastOrphans || tick.failedOrphans || tick.alerted) {
+            if (tick.bumped || tick.closedMined || tick.closedFailed || tick.rebroadcastOrphans || tick.alerted) {
               app.log.info({ chainId, ...tick }, 'Outbound bump tick acted')
             }
           }

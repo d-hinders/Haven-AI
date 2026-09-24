@@ -1887,8 +1887,8 @@ column regardless of scheme (exposed per receipt in
 `/machine-payments/receipts`). NULL on legacy-rail intents and on rows
 predating migration 053; derived backfill was deliberately skipped.
 
-Since #717 every relayer-paid leg (allowance transfers, sweeps, deploys)
-also runs under a per-identity **relayer gas budget** (`relayer_gas_events`,
+Since #717 every relayer-paid leg (sweeps and deploys; allowance transfers
+too, until the Safe rail's retirement deleted them) also runs under a per-identity **relayer gas budget** (`relayer_gas_events`,
 migration 054): over-cap requests get a 429 with the intent left pending —
 never burned to failed — and every submitted relayer tx is recorded with its
 receipt's gas numbers for cost attribution. Availability guard, not a funds

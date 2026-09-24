@@ -142,8 +142,8 @@ front-matter coupling reaches; the export route that consumes it is reviewed
 under #2871 and is not a contract surface here.
 
 **Relayer gas budgets (#717) — an availability control on the same signer:**
-every relayer-paid operation (deploys, execs, allowance transfers, sweeps)
-runs a per-identity window budget before the relayer signs (over-cap → 429,
+every relayer-paid operation (deploys and sweeps; Safe execs and allowance
+transfers too, until #1440 deleted them) runs a per-identity window budget before the relayer signs (over-cap → 429,
 the intent/sweep left retryable, never burned) and records its submitted txs
 with receipt gas numbers (`relayer_gas_events`) for attribution. Direction of
 failure is the OPPOSITE of the money-path gates and deliberate: a database

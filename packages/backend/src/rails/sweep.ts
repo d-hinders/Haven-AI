@@ -153,8 +153,10 @@ export async function relaySweepAuthorization(
   })
   // #1559: sign → stamp → broadcast; the stamp (under the relayer send lock,
   // inside submitRecorded) both records the sweep durably and fences it —
-  // the sweep can't race a payment for the same EOA nonce (#692/#718), on
-  // this replica or any other.
+  // the sweep can't race another relayer submission for the same nonce
+  // (#692/#718), on this replica or any other. Except when the record failed
+  // open: `record.id` is then null, the stamp is skipped, and only the
+  // in-process lock serialises (see `infra/outbound-queue.ts`).
   const tx = await submitRecorded({
     chainId: auth.chainId,
     recordId: record.id,

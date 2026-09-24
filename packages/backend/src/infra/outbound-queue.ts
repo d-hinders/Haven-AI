@@ -119,9 +119,12 @@ const defaultChainDeps: SubmitChainDeps = { getRelayer, withRelayerSendLock }
  *   whose tx never reached the mempool, which the bump worker's
  *   receipt-check→re-broadcast path self-heals from the stored calldata.
  *
- * `withRelayerSendLock` still wraps the window: it is the in-process belt
- * (cheap, and the Safe-bound legacy sites still rely on the same lane until
- * #1440), no longer the only line of defence.
+ * `withRelayerSendLock` still wraps the window: it is the in-process belt,
+ * no longer the only line of defence — except when an inline submitter's
+ * open failed open (the null-`recordId` path below), where it is the only
+ * one — and for the bump worker's orphan re-send, which also reads a fresh
+ * nonce unstamped. Its same-nonce replacements re-use an explicit nonce under
+ * its leader lock.
  *
  * A null `recordId` (the open failed open, or the bump worker stamping its
  * own rows) skips the stamp-first fence and degrades to the pre-#1559

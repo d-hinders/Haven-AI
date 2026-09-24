@@ -10,8 +10,9 @@
  *    stubbed to id-null so no database is touched.
  *  - A SCAN so the next submitter-shaped module cannot bypass the queue
  *    silently: queue-lane files must reference `submitRecorded`, and the set
- *    of legacy lock-only submitters (Safe-bound, retiring with #1440) is
- *    PINNED so it can only shrink.
+ *    of files allowed to broadcast outside it is PINNED so it can only
+ *    shrink. The Safe-bound submitters it once held were deleted with the
+ *    rail (#1440); what remains is the lock's home and the pipeline itself.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -213,8 +214,9 @@ function backendSources(dir = BACKEND_SRC, out: string[] = []): string[] {
 const WRITE_SHAPED = /\.(sendTransaction|attest|revoke|execTransaction|executeAllowanceTransfer|broadcastTransaction)\s*\(/
 
 /**
- * The Safe-bound legacy submitters (#1440 retires them) — the ONLY files
- * allowed to broadcast under the bare lock instead of `submitRecorded`.
+ * The ONLY files allowed to broadcast under the bare lock instead of
+ * `submitRecorded`. It held the Safe-rail submitters until #1440
+ * deleted them; the two left are the lock's home and the pipeline itself.
  * PINNED so the set can only shrink: a new submitter that reaches for the
  * bare lock instead of the queue fails the scan by not being listed here.
  */

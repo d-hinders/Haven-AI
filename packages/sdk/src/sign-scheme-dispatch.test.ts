@@ -145,6 +145,29 @@ describe('sign_data.signature_scheme dispatch (#776)', () => {
     expect(sig).toBe(EXPECTED_SIGNATURE)
   })
 
+  it("'eip712_delegation' through signForData produces the exact expected signature over the own-account child (golden value, #3283)", async () => {
+    // The end-to-end anchor for the dispatch path the test above reaches only
+    // by equality with the primitive: digest and signature for ownChild()
+    // under this key, computed once with ethers (independently of the SDK's
+    // viem signer, which agreed) and pinned here.
+    const EXPECTED_DIGEST = '0x0e3948f2f898994805ed052d9995be8cd36f434a8fe56214cee2596497c30025'
+    const EXPECTED_SIGNATURE =
+      '0xa73e91c21fe2895598a00cf14d7d20057282dc5bfeb62910162017c94849a8f4' +
+      '6a0285ff545f668f2e63867fedecb730814ef452cb40c9031e922ee3f96089141c'
+    const child = ownChild()
+    const types = { ...(child.types as Record<string, unknown>) }
+    delete types.EIP712Domain
+    expect(ethers.TypedDataEncoder.hash(child.domain as never, types as never, child.message as never)).toBe(
+      EXPECTED_DIGEST,
+    )
+    const sig = await signFor(
+      client(),
+      { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: child },
+      EXPECTATION,
+    )
+    expect(sig).toBe(EXPECTED_SIGNATURE)
+  })
+
   it("'eip712_delegation' does NOT produce the bare-hash signature", async () => {
     // Belt and braces on the branch above: a fallthrough to the bare hash
     // would still return a valid-looking 65-byte signature, so assert it is
@@ -177,7 +200,8 @@ describe('sign_data.signature_scheme dispatch (#776)', () => {
     const attempt = () =>
       signFor(client(), { hash: HASH, signature_scheme: 'eip712_delegation', typed_data: td }, EXPECTATION)
     await expect(attempt()).rejects.toThrow(/ROOT delegation/)
-    await expect(attempt()).rejects.toBeInstanceOf(HavenSigningError)
+    await expect(attempt()).rejects.toBeInstanceOf(HavenTypedDataRefusedError)
+    await expect(attempt()).rejects.toMatchObject({ code: 'TYPED_DATA_NOT_ALLOWED' })
   })
 
   it('refuses a ROOT-authority child even when every caveat matches the 402', async () => {

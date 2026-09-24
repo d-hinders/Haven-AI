@@ -29,7 +29,8 @@ redemption guard, `deriveDelegateAccountAddress` and `verifySettlementChild` —
 and loads in about a third of the time; use it when you need those helpers
 without the HTTP client. A class imported from either entry is the same class.
 `@haven_ai/sdk/test-support` (#3283) holds test fixture builders shared by
-Haven's own packages; it is not a signing API and nothing at runtime imports it.
+Haven's own packages; it is not a signing API, nothing at runtime imports it,
+and it carries no semver guarantee.
 
 ## Quick Start
 

@@ -192,15 +192,25 @@ export type { SettlementChildExpectation }
  * child against `expectation` (from somewhere Haven did not write — the
  * merchant's 402 in the SDK, the Haven-signed expected context in the
  * signer), AND that it is re-delegated from this key's OWN account. Throws
- * `HavenSigningError` on any disagreement.
+ * `HavenTypedDataRefusedError` (code `TYPED_DATA_NOT_ALLOWED`) on any
+ * disagreement.
  */
 export function assertOwnSettlementChild(
   typedData: unknown,
   expectation: SettlementChildExpectation,
   delegateAddress: string,
 ): void {
-  verifySettlementChild(typedData as SettlementChildTypedData, {
-    ...expectation,
-    delegatorAccount: deriveDelegateAccountAddress(delegateAddress as Address),
-  })
+  try {
+    verifySettlementChild(typedData as SettlementChildTypedData, {
+      ...expectation,
+      delegatorAccount: deriveDelegateAccountAddress(delegateAddress as Address),
+    })
+  } catch (err) {
+    // One refusal code for everything this surface refuses, so an agent sees
+    // TYPED_DATA_NOT_ALLOWED for a bad child exactly as for a bad UserOp.
+    if (err instanceof HavenSigningError && !(err instanceof HavenTypedDataRefusedError)) {
+      throw new HavenTypedDataRefusedError(err.message)
+    }
+    throw err
+  }
 }

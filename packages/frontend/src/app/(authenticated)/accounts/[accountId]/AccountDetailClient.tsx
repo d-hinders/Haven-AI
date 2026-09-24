@@ -87,18 +87,18 @@ export default function AccountDetailClient() {
   const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents()
 
-  // Find this Safe from user's list
-  const safe = user?.accounts?.find((s) => s.id === accountId)
-  const accountAddress = safe?.account_address ?? null
-  const chainId = safe?.chain_id ?? DEFAULT_CHAIN_ID
+  // Find this account from user's list
+  const account = user?.accounts?.find((s) => s.id === accountId)
+  const accountAddress = account?.account_address ?? null
+  const chainId = account?.chain_id ?? DEFAULT_CHAIN_ID
 
-  // Keep the active Safe in sync with the route. Runs as an effect so we
+  // Keep the active account in sync with the route. Runs as an effect so we
   // never call setState during render.
   useEffect(() => {
-    if (safe && activeAccount?.id !== safe.id) {
-      setActiveAccount(safe)
+    if (account && activeAccount?.id !== account.id) {
+      setActiveAccount(account)
     }
-  }, [safe, activeAccount, setActiveAccount])
+  }, [account, activeAccount, setActiveAccount])
 
   const accountNamesByAddress = new Map<string, string>()
   for (const account of user?.accounts ?? []) {
@@ -170,8 +170,8 @@ export default function AccountDetailClient() {
   }
 
   const handleRename = async (name: string) => {
-    if (!safe) return
-    await renameAccount(safe.id, name)
+    if (!account) return
+    await renameAccount(account.id, name)
     setRenameOpen(false)
   }
 
@@ -195,11 +195,11 @@ export default function AccountDetailClient() {
   //    replacement and has nothing to do with the sweep this refusal means.
   //    The phrasing follows the sweep screen's own vocabulary instead.
   const handleRemoveConfirmed = async () => {
-    if (!safe) return
+    if (!account) return
     setRemoving(true)
     setRemoveError(null)
     try {
-      await removeAccount(safe.id)
+      await removeAccount(account.id)
       router.push('/accounts')
     } catch (err) {
       setRemoveError(
@@ -231,7 +231,7 @@ export default function AccountDetailClient() {
   }
 
   // While auth context is still hydrating `user.accounts`, avoid flashing
-  // "Account not found" — the safe lookup will resolve once safes load.
+  // "Account not found" — the account lookup will resolve once accounts load.
   if (authLoading || !user) {
     return (
       <div role="status" aria-busy="true" aria-label="Loading account" className="max-w-5xl py-16 flex items-center justify-center gap-2">
@@ -241,7 +241,7 @@ export default function AccountDetailClient() {
     )
   }
 
-  if (!safe) {
+  if (!account) {
     return (
       <div className="max-w-5xl py-16 text-center">
         <p className="text-sm text-[var(--v2-ink-3)]">Account not found</p>
@@ -252,13 +252,13 @@ export default function AccountDetailClient() {
   return (
     <div className="max-w-5xl space-y-6">
       <PageHeader
-        title={safe.name}
+        title={account.name}
         subtitle={
           'Control the funds, agent access, and recent activity for this Haven wallet.'
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {safe.is_default && (user?.accounts?.length ?? 0) > 1 ? (
+            {account.is_default && (user?.accounts?.length ?? 0) > 1 ? (
               <StatusBadge tone="brand">Default</StatusBadge>
             ) : null}
             <StatusBadge>{chain.name}</StatusBadge>
@@ -284,7 +284,7 @@ export default function AccountDetailClient() {
               Account-level settings live behind a kebab menu so they don't
               compete visually with the transactional Send/Receive buttons.
               "Rename" + "Remove" are direct actions; "Set as default" only
-              appears when this isn't already the default Safe.
+              appears when this isn't already the default account.
             */}
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -297,11 +297,11 @@ export default function AccountDetailClient() {
                 <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
                   Rename
                 </DropdownMenuItem>
-                {!safe.is_default && (user?.accounts?.length ?? 0) > 1 ? (
+                {!account.is_default && (user?.accounts?.length ?? 0) > 1 ? (
                   <DropdownMenuItem
                     onSelect={() => {
-                      void setDefault(safe.id)
-                      toast.success(`${safe.name} is now your default account`)
+                      void setDefault(account.id)
+                      toast.success(`${account.name} is now your default account`)
                     }}
                   >
                     Set as default
@@ -512,7 +512,7 @@ export default function AccountDetailClient() {
       {/* #1089: backup & recovery is an account capability, not an agent one —
           it works from the moment the account exists, with no agent required. */}
       <AccountSignersCard
-        accountAddress={safe.account_address}
+        accountAddress={account.account_address}
         chainId={chainId}
         userEmail={user?.email ?? ''}
       />
@@ -549,7 +549,7 @@ export default function AccountDetailClient() {
             </div>
           </div>
           {/* #2413: "Required approvals" and "Approvers" lived here. Both were
-              fed by the Safe-details read that this slice deletes, and both
+              fed by the account-details read that this slice deletes, and both
               were already inert for a delegation account — the hook behind
               them was gated to the retired rail. Delegation signers are shown
               by AccountSignersCard above, which is the live control. */}
@@ -635,12 +635,12 @@ export default function AccountDetailClient() {
       )}
       <ReceiveFundsModal
         open={receiveOpen}
-        safe={safe}
+        account={account}
         onClose={() => setReceiveOpen(false)}
       />
       {renameOpen && (
         <RenameModal
-          safe={safe}
+          account={account}
           onClose={() => setRenameOpen(false)}
           onRename={handleRename}
           loading={accountsLoading}
@@ -650,7 +650,7 @@ export default function AccountDetailClient() {
         open={removeOpen}
         onCancel={closeRemoveDialog}
         onConfirm={handleRemoveConfirmed}
-        title={`Remove ${safe.name}?`}
+        title={`Remove ${account.name}?`}
         body={(
           <div className="space-y-3">
             <p>
@@ -670,18 +670,18 @@ export default function AccountDetailClient() {
 }
 
 function RenameModal({
-  safe,
+  account,
   onClose,
   onRename,
   loading,
 }: {
-  safe: SmartAccount
+  account: SmartAccount
   onClose: () => void
   onRename: (name: string) => Promise<void>
   loading: boolean
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const [name, setName] = useState(safe.name)
+  const [name, setName] = useState(account.name)
   const [error, setError] = useState('')
   useFocusTrap(panelRef, true)
   useEscapeToClose(true, onClose, { enabled: !loading })

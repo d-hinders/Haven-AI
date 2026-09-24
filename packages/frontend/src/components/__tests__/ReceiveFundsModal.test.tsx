@@ -73,7 +73,7 @@ describe('ReceiveFundsModal', () => {
   it('shows the on-chain receive context, network, address, and supported tokens', () => {
     const onClose = vi.fn()
 
-    render(<ReceiveFundsModal open safe={SAFE} onClose={onClose} />)
+    render(<ReceiveFundsModal open account={SAFE} onClose={onClose} />)
 
     expect(screen.getByRole('heading', { name: 'Receive funds' })).toBeInTheDocument()
     expect(screen.getByText('Based')).toBeInTheDocument()
@@ -95,7 +95,7 @@ describe('ReceiveFundsModal', () => {
   })
 
   it('copies the receive address and can reveal a QR code', async () => {
-    render(<ReceiveFundsModal open safe={SAFE} onClose={vi.fn()} />)
+    render(<ReceiveFundsModal open account={SAFE} onClose={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy address' }))
 
@@ -127,13 +127,13 @@ describe('ReceiveFundsModal', () => {
   describe.each([
     ['a chain_id that is absent', { ...SAFE, chain_id: undefined as unknown as number }],
     ['a chain_id that is present but unregistered', { ...SAFE, chain_id: 999_999 }],
-  ])('with %s', (_label, unresolvedSafe: SmartAccount) => {
+  ])('with %s', (_label, unresolvedAccount: SmartAccount) => {
     it('renders without throwing and refuses to name a network or reveal an address', () => {
       // A1 — does not throw. Today's code takes the whole screen down through
       // the error boundary here; the throw is a distinguishable failure from an
       // assertion failing, which is what the issue asks to be checked.
       expect(() =>
-        render(<ReceiveFundsModal open safe={unresolvedSafe} onClose={vi.fn()} />),
+        render(<ReceiveFundsModal open account={unresolvedAccount} onClose={vi.fn()} />),
       ).not.toThrow()
 
       const dialog = screen.getByRole('dialog')

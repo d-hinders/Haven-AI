@@ -421,13 +421,13 @@ export function useAgentConnectionSetup({
   // deps) is deliberate: `tokenOptions` changes identity whenever the chosen
   // wallet's chain changes, so depending on it here would re-run this effect
   // and snap the user's wallet choice back to the default mid-selection.
-  const initialSafeIdRef = useRef(initialAccountId)
-  initialSafeIdRef.current = initialAccountId
+  const initialAccountIdRef = useRef(initialAccountId)
+  initialAccountIdRef.current = initialAccountId
   const prevOpenRef = useRef(false)
 
   useEffect(() => {
     if (open && !prevOpenRef.current) {
-      setSelectedAccountId(initialSafeIdRef.current)
+      setSelectedAccountId(initialAccountIdRef.current)
     }
     prevOpenRef.current = open
   }, [open])

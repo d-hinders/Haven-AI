@@ -11,7 +11,7 @@ import type { SmartAccount } from '@/context/AuthContext'
 interface Props {
   open: boolean
   action: 'receive' | 'add-funds'
-  safes: SmartAccount[]
+  accounts: SmartAccount[]
   onClose: () => void
   onSelect: (accountId: string) => void
 }
@@ -19,7 +19,7 @@ interface Props {
 export default function DashboardActionPickerModal({
   open,
   action,
-  safes,
+  accounts,
   onClose,
   onSelect,
 }: Props) {
@@ -59,24 +59,24 @@ export default function DashboardActionPickerModal({
         </div>
 
         <div className="p-4 space-y-2">
-          {safes.map((safe) => (
+          {accounts.map((account) => (
             <button
-              key={safe.id}
-              onClick={() => onSelect(safe.id)}
+              key={account.id}
+              onClick={() => onSelect(account.id)}
               className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-left transition-colors hover:border-brand/30 hover:bg-[var(--v2-brand-soft)]"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-[var(--v2-ink)] truncate">{safe.name}</span>
-                    {safe.is_default && (
+                    <span className="text-sm font-medium text-[var(--v2-ink)] truncate">{account.name}</span>
+                    {account.is_default && (
                       <span className="text-xs px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
                         Default
                       </span>
                     )}
                   </div>
                   <p className="text-xs text-[var(--v2-ink-3)] mt-1">
-                    {getChainConfig(safe.chain_id).name}
+                    {getChainConfig(account.chain_id).name}
                   </p>
                 </div>
                 <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)] flex-shrink-0" />

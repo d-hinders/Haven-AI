@@ -176,7 +176,7 @@ export default function AddFundsModal({ open, onClose, onReceive, accountAddress
                 ("Error copy explains the next useful action") does not exempt
                 the states where we are the ones who cannot proceed. Retrying is
                 the honest one, and the only one: the unresolved chain reaches
-                this component as a safe that arrived without `chain_id`, which
+                this component as an account that arrived without `chain_id`, which
                 is a load-shaped condition, so re-fetching is a real step rather
                 than a gesture.
 
@@ -203,7 +203,7 @@ export default function AddFundsModal({ open, onClose, onReceive, accountAddress
               It stays removed after #1852, but for a DIFFERENT reason than the
               one written here first — recorded rather than quietly rewritten,
               because the change of reason is the interesting part. Originally:
-              `ReceiveFundsModal` called `getChainConfig(safe.chain_id)` on an
+              `ReceiveFundsModal` called `getChainConfig(account.chain_id)` on an
               unconditional path and THREW on a missing chain, so the refusal
               screen's own way out was a crash, and it named the network with
               full confidence in four places besides. #1852 fixed both. The
@@ -215,7 +215,7 @@ export default function AddFundsModal({ open, onClose, onReceive, accountAddress
             */}
           </div>
 
-          {/* Fallback when provider unavailable and no safe */}
+          {/* Fallback when provider unavailable and no account */}
           {!onrampAvailable && !accountAddress && onReceive && (
             <Button onClick={handleReceiveInstead} className="w-full">
               Receive instead

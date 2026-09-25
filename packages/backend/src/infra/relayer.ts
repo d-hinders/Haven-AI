@@ -1,6 +1,7 @@
-import { JsonRpcProvider, Wallet, formatEther, parseEther, type Provider } from 'ethers'
+import { JsonRpcProvider, Network, Wallet, formatEther, parseEther, type Provider } from 'ethers'
 import { relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from '../domain/chains.js'
+import { secondaryRpcUrl } from './chain/rpc-transport.js'
 
 const providers = new Map<number, JsonRpcProvider>()
 const relayers = new Map<number, Wallet>()
@@ -89,9 +90,12 @@ export async function getRelayerFeeOverrides(
  * receipt verifier behind `relayer-reads.ts` would read "no log" from a
  * lagging fallback rather than fail. A quota-dead `RPC_URL_BASE*` still fails
  * the ethers side; configuring a healthy endpoint is the remedy there. The one
- * provider refusal handled in code is the `pending` block tag on the nonce
- * read (#2769): `readNextRelayerNonce` in `outbound-queue.ts` then walks up
- * from this same provider's `latest` count over the live-broadcast ledger.
+ * provider refusal handled in code is dRPC's "No label `flashblocks`" (#2769),
+ * at two points. On the `pending` nonce read, `readNextRelayerNonce` in
+ * `outbound-queue.ts` walks up from this same provider's `latest` count over
+ * the live-broadcast ledger. On `eth_sendRawTransaction`, `broadcastSigned`
+ * sends the identical signed bytes through the configured second provider
+ * (`RPC_URL_BASE*_FALLBACK`), while every read and receipt wait stays here.
  *
  * JSON-RPC batching is OFF (`batchMaxCount: 1`). By default ethers bundles
  * every call made within about 10 ms into ONE request of up to 100 calls.
@@ -112,11 +116,40 @@ export async function getRelayerFeeOverrides(
 export function getProvider(chainId: number): JsonRpcProvider {
   let provider = providers.get(chainId)
   if (!provider) {
-    provider = new JsonRpcProvider(getChain(chainId).rpcUrl, undefined, {
-      batchMaxCount: 1,
-      staticNetwork: true,
-    })
+    provider = newEthersProvider(getChain(chainId).rpcUrl)
     providers.set(chainId, provider)
+  }
+  return provider
+}
+
+/**
+ * The ONE place an ethers provider is constructed (`rpc-transport-guard`).
+ * The primary passes no network (detected once, then static). The fallback
+ * pins it: an unreachable fallback must not start ethers' 1 s `eth_chainId`
+ * detection retry, which never stops, and a pinned network also stops the
+ * fallback's own `eth_chainId` answer from being trusted.
+ */
+function newEthersProvider(url: string, network?: Network): JsonRpcProvider {
+  return new JsonRpcProvider(url, network, { batchMaxCount: 1, staticNetwork: true })
+}
+
+const fallbackBroadcastProviders = new Map<number, JsonRpcProvider>()
+
+/**
+ * The provider for the chain's configured second endpoint
+ * (`RPC_URL_BASE*_FALLBACK`), or null when none is configured (#2769). It is
+ * used for ONE thing: re-sending an already signed raw transaction that the
+ * primary refused with dRPC's flashblocks error (`broadcastSigned` in
+ * `outbound-queue.ts`). The relayer wallet is never bound to it, so it never
+ * picks a nonce, signs, or answers a read: the single nonce view above holds.
+ */
+export function getFallbackBroadcastProvider(chainId: number): JsonRpcProvider | null {
+  const url = secondaryRpcUrl(chainId)
+  if (!url) return null
+  let provider = fallbackBroadcastProviders.get(chainId)
+  if (!provider) {
+    provider = newEthersProvider(url, Network.from(chainId))
+    fallbackBroadcastProviders.set(chainId, provider)
   }
   return provider
 }

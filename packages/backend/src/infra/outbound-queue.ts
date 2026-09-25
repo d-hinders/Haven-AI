@@ -28,7 +28,12 @@
  * § Multi-replica CORRECTNESS).
  */
 
-import { Transaction, type TransactionResponse } from 'ethers'
+import {
+  Transaction,
+  TransactionResponse,
+  type Provider,
+  type TransactionResponseParams,
+} from 'ethers'
 import {
   enqueueOutboundTx,
   markOutboundTxBroadcast,
@@ -36,7 +41,7 @@ import {
   markOutboundTxMined,
   listLiveBroadcastNoncesFrom,
 } from './repositories/outbound-txs.js'
-import { getRelayer, withRelayerSendLock } from './relayer.js'
+import { getFallbackBroadcastProvider, getRelayer, withRelayerSendLock } from './relayer.js'
 import { describeRevert, isDeterministicRevert } from './deterministic-revert.js'
 
 export interface OutboundBroadcastStamp {
@@ -104,6 +109,8 @@ export class OutboundFencedError extends Error {
 export interface SubmitChainDeps {
   getRelayer: typeof getRelayer
   withRelayerSendLock: typeof withRelayerSendLock
+  /** Optional so existing fakes need not grow it; the default is the real send. */
+  sendRawViaFallback?: typeof sendRawViaFallback
 }
 
 const defaultChainDeps: SubmitChainDeps = { getRelayer, withRelayerSendLock }
@@ -237,7 +244,7 @@ export async function submitRecorded(
         }
         if (!stamped) throw new OutboundFencedError(params.recordId)
       }
-      return provider.broadcastTransaction(raw)
+      return broadcastSigned(params.chainId, provider, raw, chain.sendRawViaFallback ?? sendRawViaFallback)
     }
     throw new Error(
       `outbound-queue: could not win a nonce lane on chain ${params.chainId} after ${MAX_LANE_ATTEMPTS} attempts`,
@@ -312,6 +319,132 @@ export async function readNextRelayerNonce(
     )
     return Number(next)
   }
+}
+
+/**
+ * Broadcast the signed bytes (#2769). Normally through the relayer's own
+ * provider. dRPC's Base plans also refuse `eth_sendRawTransaction` with the
+ * same "No label `flashblocks`" body they give the `pending` read. On THAT
+ * refusal only, the identical raw transaction is sent through the chain's
+ * configured second provider (`RPC_URL_BASE_FALLBACK` /
+ * `RPC_URL_BASE_SEPOLIA_FALLBACK`, the same one the viem transport fails over
+ * to) — never the public node. The bytes are already signed and stamped: the
+ * hash is fixed, both providers forward to the same sequencer, and a second
+ * copy of the same transaction is a no-op, so this changes WHICH gateway
+ * carries the broadcast, never WHAT it is. The returned response is built on
+ * the PRIMARY provider, so `wait()` and every later read stay on the single
+ * nonce view (#1533). Any other broadcast error propagates unchanged, and so
+ * does the refusal when no second provider is configured.
+ */
+export async function broadcastSigned(
+  chainId: number,
+  provider: Provider,
+  raw: string,
+  sendFallback: (chainId: number, raw: string) => Promise<string> = sendRawViaFallback,
+): Promise<TransactionResponse> {
+  try {
+    return await provider.broadcastTransaction(raw)
+  } catch (err) {
+    if (!isPendingTagRefusal(err)) throw err
+    const tx = Transaction.from(raw)
+    // Read the block BEFORE sending, as ethers' own broadcast does alongside
+    // its send: a failed read then fails cleanly with nothing re-sent.
+    const blockNumber = await provider.getBlockNumber()
+    const hash = await sendFallback(chainId, raw)
+    if (hash.toLowerCase() !== tx.hash?.toLowerCase()) {
+      throw new Error(
+        `outbound-queue: the fallback provider returned hash ${hash}; the signed transaction is ${tx.hash}`,
+      )
+    }
+    console.warn(
+      `outbound-queue: the RPC refused eth_sendRawTransaction on chain ${chainId}; ` +
+        `broadcast ${hash} through the fallback provider (#2769)`,
+    )
+    // Mirrors ethers' own broadcastTransaction: wrap the signed transaction on
+    // the primary provider, replaceable from the current block. The signed
+    // Transaction carries every field formatTransactionResponse would (hash,
+    // from, to, nonce, chainId, signature; blockNumber/blockHash null) except
+    // gasPrice, null here vs undefined there, which no caller reads.
+    return new TransactionResponse(tx as unknown as TransactionResponseParams, provider).replaceableTransaction(
+      blockNumber,
+    )
+  }
+}
+
+/**
+ * `eth_sendRawTransaction` through the chain's configured second provider
+ * (`getFallbackBroadcastProvider` in `relayer.ts`). Its URL carries a provider
+ * API key, and ethers puts the request URL into a non-2xx error's message and
+ * into its enumerable `info.requestUrl` / `request` — which reach the
+ * `outbound_txs` error column, logs and an operator response. So a failure is
+ * rethrown by {@link fallbackSendError}, rebuilt from safe fields only.
+ */
+export async function sendRawViaFallback(chainId: number, raw: string): Promise<string> {
+  const fallback = getFallbackBroadcastProvider(chainId)
+  if (!fallback) {
+    throw new Error(
+      `outbound-queue: the RPC refused the broadcast on chain ${chainId} and no fallback provider is configured`,
+    )
+  }
+  try {
+    return String(await fallback.send('eth_sendRawTransaction', [raw]))
+  } catch (err) {
+    throw fallbackSendError(err, secretSegments(fallback._getConnection().url))
+  }
+}
+
+/**
+ * A fallback send failure, rebuilt so no URL — and so no API key — can leave
+ * it: ethers' short message and code, and the JSON-RPC error body's own code
+ * and message (kept so revert and nonce classification still work), with any
+ * URL in the text replaced. `info`, `request` and `response` are never copied.
+ */
+/**
+ * The key-like pieces of an endpoint URL — path segments and query values of
+ * 12+ characters — so a provider that echoes its key WITHOUT the URL (say
+ * `dkey=<key>` in a JSON-RPC message) is still scrubbed.
+ */
+function secretSegments(url: string): string[] {
+  return url.split(/[/?&=#]/).filter((part) => part.length >= 12 && !part.includes(':'))
+}
+
+export function fallbackSendError(err: unknown, secrets: string[] = []): Error {
+  const e = err as {
+    code?: unknown
+    shortMessage?: unknown
+    message?: unknown
+    error?: { code?: unknown; message?: unknown }
+    info?: { error?: { code?: unknown; message?: unknown } }
+  } | null
+  const scrub = (text: string) =>
+    secrets.reduce(
+      (acc, secret) => acc.split(secret).join('<redacted>'),
+      text.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)\]}]+/gi, '<fallback-url>'),
+    )
+  // ethers keeps the JSON-RPC error body in `error` or `info.error` — only
+  // that body's code and message are copied, never the rest of `info`.
+  const body = e?.error ?? e?.info?.error
+  const rpc =
+    body && typeof body === 'object'
+      ? {
+          code: body.code,
+          message: typeof body.message === 'string' ? scrub(body.message) : undefined,
+        }
+      : undefined
+  const base =
+    typeof e?.shortMessage === 'string'
+      ? e.shortMessage
+      : typeof e?.message === 'string'
+        ? e.message
+        : String(err)
+  const detail = rpc?.message ? ` (rpc: ${rpc.message})` : ''
+  const out = new Error(`outbound-queue: fallback broadcast failed: ${scrub(base)}${detail}`) as Error & {
+    code?: unknown
+    error?: { code?: unknown; message?: string }
+  }
+  if (e?.code !== undefined) out.code = e.code
+  if (rpc) out.error = rpc
+  return out
 }
 
 /**

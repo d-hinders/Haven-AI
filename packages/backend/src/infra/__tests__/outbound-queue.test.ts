@@ -15,6 +15,7 @@ import {
   OutboundFencedError,
   openOutboundRecord,
   isPendingTagRefusal,
+  sendRawViaFallback,
   submitRecorded,
   type OutboundQueueRepo,
   type SubmitChainDeps,
@@ -451,5 +452,83 @@ describeDb('openOutboundRecord (#1556)', () => {
     expect(tags).toEqual(['pending'])
     expect(broadcasts).toEqual([])
     expect((await rowsFor(CHAIN))[0].status).toBe('queued')
+  })
+
+  // ── #2769: the same provider also refuses eth_sendRawTransaction ─────────
+  // The post-deploy run of #3320 (qa-dev 36150884607) got past the nonce and
+  // failed at the broadcast with the same flashblocks body. The signed bytes
+  // then go through the configured second provider (Alchemy on dev).
+  function broadcastRefusingChain(onBroadcast: () => never = () => { throw pendingRefusal() }) {
+    const fallbackSends: string[] = []
+    let fallbackHash: (raw: string) => Promise<string> = async (raw) => {
+      const { Transaction } = await import('ethers')
+      return Transaction.from(raw).hash!
+    }
+    const provider = {
+      getNetwork: async () => ({ chainId: BigInt(CHAIN), name: 'test' }),
+      getFeeData: async () => ({ maxFeePerGas: 200n, maxPriorityFeePerGas: 10n, gasPrice: 200n }),
+      estimateGas: async () => 60_000n,
+      getTransactionCount: async () => 7,
+      getBlockNumber: async () => 1234,
+      broadcastTransaction: async () => onBroadcast(),
+    }
+    const wallet = new Wallet('0x' + '66'.repeat(32), provider as never)
+    const chain: SubmitChainDeps = {
+      getRelayer: (() => wallet) as never,
+      withRelayerSendLock: async (_chainId, fn) => fn(),
+      sendRawViaFallback: async (_chainId, raw) => {
+        fallbackSends.push(raw)
+        return fallbackHash(raw)
+      },
+    }
+    return {
+      chain,
+      fallbackSends,
+      setFallbackHash: (fn: (raw: string) => Promise<string>) => { fallbackHash = fn },
+    }
+  }
+
+  it('#2769: a refused broadcast sends the IDENTICAL signed bytes through the fallback provider', async () => {
+    const { chain, fallbackSends } = broadcastRefusingChain()
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+
+    const sent = await submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain)
+
+    expect(fallbackSends).toHaveLength(1)
+    const { Transaction } = await import('ethers')
+    const sentTx = Transaction.from(fallbackSends[0])
+    // The response describes exactly the transaction that was stamped and sent.
+    expect(sent.hash).toBe(sentTx.hash)
+    expect(sent.nonce).toBe(7)
+    expect(sent.to?.toLowerCase()).toBe(TO)
+    const [row] = await rowsFor(CHAIN)
+    expect([row.status, row.nonce, row.tx_hash]).toEqual(['broadcast', '7', sentTx.hash!.toLowerCase()])
+  })
+
+  it('#2769: a fallback that answers a DIFFERENT hash is refused, never trusted', async () => {
+    const { chain, setFallbackHash } = broadcastRefusingChain()
+    setFallbackHash(async () => '0x' + 'ee'.repeat(32))
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+
+    await expect(
+      submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain),
+    ).rejects.toThrow(/fallback provider returned hash/)
+  })
+
+  it('#2769: any OTHER broadcast error propagates, and the fallback is never tried', async () => {
+    const { chain, fallbackSends } = broadcastRefusingChain(() => {
+      throw makeError('nonce has already been used', 'NONCE_EXPIRED', { transaction: {} as never })
+    })
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+
+    await expect(
+      submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain),
+    ).rejects.toMatchObject({ code: 'NONCE_EXPIRED' })
+    expect(fallbackSends).toEqual([])
+  })
+
+  it('#2769: with no fallback provider configured for the chain, the refusal still surfaces', async () => {
+    // Gnosis (100) has no second provider in rpc-transport.
+    await expect(sendRawViaFallback(100, '0x00')).rejects.toThrow(/no fallback provider is configured/)
   })
 })

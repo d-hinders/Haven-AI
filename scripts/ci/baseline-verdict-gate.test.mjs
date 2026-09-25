@@ -609,7 +609,7 @@ describe('block shapes and globs (#3309)', () => {
   })
 
   test('emphasis around a whole name or the whole list is not a glob', () => {
-    for (const list of ['**a.png**', '*a.png*', '**a.png, c.png**', '**a.png**, *c.png*', '`a.png`.']) {
+    for (const list of ['**a.png**', '*a.png*', '**a.png, c.png**', '**a.png**, *c.png*', '*a.png*, *c.png*', '**a.png**, **c.png**', '`a.png`.']) {
       assert.equal(listHasGlob(list), false, list)
       const block = parseVerdicts([`design-review verdict: changes requested @ cc00000 -- baselines: ${list}`])
       const passB = parseVerdicts(['design-review verdict: passed @ bb00000 -- baselines: b.png'])

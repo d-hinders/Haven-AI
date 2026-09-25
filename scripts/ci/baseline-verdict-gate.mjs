@@ -226,6 +226,8 @@ export function parseNameList(raw) {
 /** `**a.png**`, `*a.png*`: emphasis wrapping a whole name or list, not a glob. */
 const EMPHASIS_RE = /^(\*+)([^*](?:.*[^*])?)\1$/
 const stripEmphasis = (s) => s.replace(EMPHASIS_RE, '$2')
+/** `**a.png, b.png**`: one pair around the whole list. No `*` inside, or `*a*, *b*` would lose its outer two. */
+const LIST_EMPHASIS_RE = /^(\*+)([^*]+)\1$/
 
 /**
  * Does a BLOCK's name list use a glob (#3309)? `*.png`, `**`, `*-mobile.png`,
@@ -238,7 +240,7 @@ const stripEmphasis = (s) => s.replace(EMPHASIS_RE, '$2')
  * widening those would verify, not veto.
  */
 export function listHasGlob(raw) {
-  const text = stripEmphasis(String(raw ?? '').replace(/\]\([^)]*\)/g, ']').replace(/^[\s(]+|[\s.,;:)]+$/g, ''))
+  const text = String(raw ?? '').replace(/\]\([^)]*\)/g, ']').replace(/^[\s(]+|[\s.,;:)]+$/g, '').replace(LIST_EMPHASIS_RE, '$2')
   return text
     .split(LIST_SPLIT_RE)
     .some((part) => stripEmphasis(part.replace(/[^A-Za-z0-9._\-/*]/g, '').replace(/^\.+|\.+$/g, '')).includes('*'))

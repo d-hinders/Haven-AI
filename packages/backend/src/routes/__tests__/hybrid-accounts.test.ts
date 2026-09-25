@@ -95,6 +95,10 @@ describe('POST /accounts/hybrid (#825)', () => {
     ['no owner at all', {}],
     ['bad owner address', { owner_address: 'nope' }],
     ['passkey without coords', { passkeys: [{ key_id: 'k' }] }],
+    // #3032 round-1 F2: the schema's `key_id` has no minLength, so emptiness
+    // stays a handler check — an empty key_id was a 400 before the typeof
+    // flip and must stay one.
+    ['passkey with empty key_id', { passkeys: [{ key_id: '', x: '0x11', y: '0x22' }] }],
     // chain 1 is value-bearing, so the #908 signer floor runs first — two
     // signers pass it and reach the contract-availability check under test:
     ['unpinned chain', { owner_address: OWNER, chain_id: 1, passkeys: [{ key_id: '0xcc33', x: '0x5', y: '0x6' }] }],

@@ -192,10 +192,16 @@ function orderingReply(reply: FastifyReply, err: RekeyOrderingError): FastifyRep
   })
 }
 
-// The unique-violation narrow lives in `infra/pg-errors.ts` (#3032). Call
-// sites below watch the delegate-collision constraint the multi-agent model
-// rests on; openRekey's own unique index is narrowed beside it.
-const isPgUniqueDelegateViolation = (err: unknown): boolean =>
+// The unique-violation narrow lives in `infra/pg-errors.ts` (#3032). The
+// openRekey catch below watches the unique violations the OPEN path can
+// actually raise — and the race guard among them is
+// `idx_agent_rekeys_one_in_flight` (migration 065): openRekey's transaction
+// inserts ONLY into agent_rekeys, so its concurrent-open loser surfaces as
+// that partial index's 23505, not as a delegate collision. The delegate
+// index stays watched on the same account for the same reason the route
+// checks it before opening.
+const isPgRekeyOpenUniqueViolation = (err: unknown): boolean =>
+  isPgUniqueViolation(err, 'idx_agent_rekeys_one_in_flight') ||
   isPgUniqueViolation(err, 'idx_agents_user_delegate_non_revoked_unique')
 
 /**
@@ -405,7 +411,13 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         residualDisposition: residualAtomic > 0n ? (disposition as string) : 'none',
       })
     } catch (err) {
-      if (!(err instanceof RekeyOpenConflictError) && !isPgUniqueDelegateViolation(err)) throw err
+      // The race this catch exists for: a second concurrent open loses the
+      // `idx_agent_rekeys_one_in_flight` race — the repository's own doc
+      // comment says exactly that — and MUST land in the 409 branch below,
+      // never re-throw as a 500 with the raw constraint error in the body
+      // (#3032 round-1 finding F1). The delegate index stays watched on the
+      // same account per the belt-and-braces note above.
+      if (!(err instanceof RekeyOpenConflictError) && !isPgRekeyOpenUniqueViolation(err)) throw err
       const existing = await findInFlightRekey(request.params.id)
       if (existing) {
         return reply.code(409).send({

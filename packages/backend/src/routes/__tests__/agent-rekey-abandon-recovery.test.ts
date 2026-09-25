@@ -47,6 +47,8 @@ const {
   mockAdoptAbandonedCarry,
   mockMarkRevoked,
   mockMarkMetered,
+  mockOpenRekey,
+  mockGetTokenBalance,
 } = vi.hoisted(() => ({
   mockFindOwnedRekeyAgent: vi.fn(),
   mockFindRekey: vi.fn(),
@@ -56,6 +58,8 @@ const {
   mockAdoptAbandonedCarry: vi.fn(),
   mockMarkRevoked: vi.fn(),
   mockMarkMetered: vi.fn(),
+  mockOpenRekey: vi.fn(),
+  mockGetTokenBalance: vi.fn(),
 }))
 
 // The pool is deliberately not stubbed — every query is behind a repository
@@ -92,6 +96,18 @@ vi.mock('../../infra/repositories/agent-rekeys.js', async (importOriginal) => {
     adoptAbandonedCarry: (...a: unknown[]) => mockAdoptAbandonedCarry(...a),
     markRevoked: (...a: unknown[]) => mockMarkRevoked(...a),
     markMetered: (...a: unknown[]) => mockMarkMetered(...a),
+    // Only the concurrent-open race pin below reaches openRekey; it must
+    // reject with the REAL one-in-flight constraint error — a shape no other
+    // test here exercises (the in-flight 409s above are reached with no
+    // constraint-bearing error, which is why they could not catch F1).
+    openRekey: (...a: unknown[]) => mockOpenRekey(...a),
+  }
+})
+vi.mock('../../infra/chain/relayer-reads.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../infra/chain/relayer-reads.js')>()
+  return {
+    ...actual,
+    getTokenBalance: (...a: unknown[]) => mockGetTokenBalance(...a),
   }
 })
 
@@ -191,6 +207,12 @@ describe('re-key abandon recovery (#1868)', () => {
     mockFindLiveAgentByDelegate.mockResolvedValue(null)
     mockListNonRevoked.mockResolvedValue([])
     mockAdoptAbandonedCarry.mockResolvedValue(null)
+    mockGetTokenBalance.mockResolvedValue(0n)
+    // A plain (non-constraint) rejection: any test that actually reaches
+    // openRekey must have chosen its own error — a bare failure here
+    // re-throws and surfaces as a 500, which keeps an unintended openRekey
+    // call loud instead of silently green.
+    mockOpenRekey.mockRejectedValue(new Error('openRekey reached without a test-specific rejection'))
     // The pre-#1868 empty walk, so the wedge is reproducible as dev behaves.
     mockMarkRevoked.mockImplementation(async () => rekeyRow({ stage: 'revoked' }))
     mockMarkMetered.mockImplementation(async () =>
@@ -296,6 +318,45 @@ describe('re-key abandon recovery (#1868)', () => {
       // an interruption completes the re-key against a key the screen never
       // showed (#1868, comment of 2026-08-22).
       expect(body.new_delegate_address).toBe(NEW_DELEGATE)
+    })
+  })
+
+  describe('the concurrent-open race lands in the 409 branch, never a 500 (#3032 F1)', () => {
+    it('openRekey losing idx_agent_rekeys_one_in_flight answers 409, not the raw-constraint 500', async () => {
+      // Route the whole open path to the openRekey call: empty table for the
+      // collision check, no pre-existing in-flight row, nothing to sweep on
+      // the old delegate — the ONLY way out is openRekey, which rejects with
+      // the exact error shape Postgres raises when a second concurrent open
+      // loses the partial-index race (migration 065). No existing test in
+      // this file exercised a constraint-bearing error, which is why the
+      // round-1 narrow regression passed the suite while racing to a 500.
+      mockGetTokenBalance.mockResolvedValue(0n)
+      mockOpenRekey.mockRejectedValue(
+        Object.assign(
+          new Error('duplicate key value violates unique constraint "idx_agent_rekeys_one_in_flight"'),
+          {
+            code: '23505',
+            constraint: 'idx_agent_rekeys_one_in_flight',
+            detail: 'Key (agent_id)=(11111111-1111-1111-1111-111111111111) already exists.',
+          },
+        ),
+      )
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/agents/${AGENT_ID}/rekey`,
+        // A fresh candidate address — the second opener in the race.
+        payload: { new_delegate_address: '0x' + 'ee'.repeat(20) },
+      })
+
+      // Explicitly NOT the 500 envelope: under the round-1 narrow this exact
+      // probe answered 500 with the raw constraint error in the body.
+      expect(res.statusCode).not.toBe(500)
+      expect(res.statusCode).toBe(409)
+      const body = res.json()
+      expect(['rekey_already_in_flight', 'rekey_unavailable']).toContain(body.error)
+      expect(JSON.stringify(body)).not.toContain('23505')
+      expect(JSON.stringify(body)).not.toContain('idx_agent_rekeys_one_in_flight')
     })
   })
 })

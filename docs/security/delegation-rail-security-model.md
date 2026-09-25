@@ -1370,9 +1370,11 @@ signer imports:
     `redeemDelegations` with exactly one delegation: a single grant made to
     this account by a different account, in `SingleDefault` mode, canonically
     encoded at every level;
-  - **on the x402 funding leg (#3281)**, its single execution is a
+  - **on the signer's x402 funding leg (#3281)**, its single execution is a
     `transfer` of the quoted amount of the quoted token to this key's own
-    delegate EOA. That address is local, not from Haven.
+    delegate EOA. That address is local, not from Haven. The SDK's own
+    funding leg (`signForData`) does not run this recipient pin yet; see the
+    epic's notes.
 - **An erc7710 settlement child `Delegation`**, verified against an
   expectation Haven cannot rewrite: payee, amount, token, chain, and an expiry
   of at most 600 seconds. It must not be a ROOT delegation, and it must be
@@ -1383,8 +1385,10 @@ signer imports:
   sweep home**, against Haven's recovery binding (see residual 2).
 
 The signer's x402 arm (#3281) signs only the first two shapes, however validly
-Haven's binding key declared anything else. Every refusal on the shape checks
-is `TYPED_DATA_NOT_ALLOWED` (no signature, no audit entry, nothing submitted).
+Haven's binding key declared anything else. Every refusal on the shape checks,
+the settlement child's included, is `TYPED_DATA_NOT_ALLOWED`, or
+`USEROP_BINDING_MISMATCH` for a funding leg whose hash does not match. In every
+case nothing is signed, audited or submitted.
 The core's `signDelegationTypedData`, `HavenClient.sign(hash)` and the SDK's
 exported signing primitives stay verbatim, for embedders; the checks are in
 `haven_sign`, `signX402FundingTypedData` and `signForData`.
@@ -1395,9 +1399,11 @@ exported signing primitives stay verbatim, for embedders; the checks are in
    prepare payments the caveats allow, because preparing payments is what the
    agent delegated to Haven. For a pinned budget that means only the pinned
    recipient. For an open budget it means any recipient, up to the full period
-   budget, every period, until expiry or revocation. On the EIP-3009 bridge,
-   #3281's recipient pin narrows this under a compromised binding key: the
-   funding leg can only move budget into the agent's own EOA.
+   budget, every period, until expiry or revocation. #3281's recipient pin
+   narrows this on the signer's x402 funding leg only: under a compromised
+   binding key, that leg can move budget only into the agent's own EOA. A
+   correctly shaped direct payment (`haven_sign` without an x402 context)
+   still pays whatever recipient the budget allows, by design.
 2. **Delegate-EOA balances.** The bridge's merchant header and
    `haven_sign_sweep_delegate` sign token authorisations over the delegate
    EOA's own transient balance. With no local account address configured, the
@@ -1413,7 +1419,8 @@ exported signing primitives stay verbatim, for embedders; the checks are in
   also have covered every future funding leg. **Closed for an updated signer,
   on every branch:** neither is a signable shape, so both are refused on the
   unbound branch (#3272) and on the x402 arm even when Haven's binding key
-  declared them (#3281). Each case is pinned by the signer's tests.
+  declared them (#3281). Each case is pinned by the signer's tests
+  (`server.test.ts` and `x402-arm-guard.test.ts`).
 - **Capture of the delegate account.** `transferOwnership`, `updateSigners`
   and `addKey` on the HybridDeleGator are `onlyEntryPointOrSelf` (upstream
   MetaMask delegation-framework v1.3.0, read against the source, not the

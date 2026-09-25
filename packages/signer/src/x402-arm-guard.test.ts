@@ -29,6 +29,9 @@ import {
 } from '@haven_ai/sdk/test-support'
 import { createEdgeSigner, type X402ExpectedPayment } from './core.js'
 import { createToolHandlers, type ToolPayload } from './tools.js'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const DELEGATE = addressFromKey(KEY) as `0x${string}`
@@ -148,6 +151,33 @@ describe('x402 arm: the funding leg (#3281)', () => {
     await expect(attempt()).rejects.toThrow(/x402 arm signs only/)
   })
 
+  it('criterion 2: refuses a validly bound USDC Permit on the x402 arm', async () => {
+    const permit = {
+      domain: { name: 'USD Coin', version: '2', chainId: 8453, verifyingContract: QUOTE.asset },
+      types: {
+        Permit: [
+          { name: 'owner', type: 'address' },
+          { name: 'spender', type: 'address' },
+          { name: 'value', type: 'uint256' },
+          { name: 'nonce', type: 'uint256' },
+          { name: 'deadline', type: 'uint256' },
+        ],
+      },
+      primaryType: 'Permit',
+      message: {
+        owner: DELEGATE,
+        spender: '0x000000000000000000000000000000000000bad1',
+        value: (2n ** 256n - 1n).toString(),
+        nonce: '0',
+        deadline: '99999999999',
+      },
+    }
+    const expected = await bound(permit, `0x${'cd'.repeat(32)}`)
+    const attempt = () => signer().signX402FundingTypedData(permit as never, expected as unknown as X402ExpectedPayment)
+    await expect(attempt()).rejects.toBeInstanceOf(HavenTypedDataRefusedError)
+    await expect(attempt()).rejects.toThrow(/x402 arm signs only/)
+  })
+
   it('criterion 5: refuses a funding leg that pays anyone but this signer\'s own delegate EOA', async () => {
     const funding = buildFundingLegUserOp({
       delegate: DELEGATE,
@@ -257,6 +287,35 @@ describe('x402 arm: the settlement child (#3281 criterion 8)', () => {
         signer().signX402FundingTypedData(td as never, expected as unknown as X402ExpectedPayment),
       ).rejects.toThrow(/ROOT delegation/)
     })
+  })
+
+  it('tool layer: a ROOT child through haven_sign is TYPED_DATA_NOT_ALLOWED, and nothing is audited', async () => {
+    const td = ownChild()
+    td.message.authority = ROOT_AUTHORITY
+    td.message.caveats = []
+    const expected = await boundChild(td)
+    const dir = await mkdtemp(join(tmpdir(), 'x402-arm-guard-'))
+    const auditPath = join(dir, 'audit.jsonl')
+    try {
+      await inWindow(async () => {
+        const handlers = createToolHandlers(signer(), {
+          audit: { auditPath, delegateAddress: DELEGATE, accountAddress: OWN_ACCOUNT, chainId: 84532 },
+        })
+        const result = (await handlers.haven_sign({
+          payload_hash: expected.payloadHash,
+          typed_data: td,
+          x402_expected: wire(expected as never),
+        } as never)) as ToolPayload & { code?: string; next_action?: string; message?: string }
+        expect(result.success).toBe(false)
+        expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+        expect(result.next_action).toBe('stop_and_tell_user')
+        expect(result.message).toMatch(/ROOT delegation/)
+      })
+      // Nothing was signed, so nothing was audited (criterion 1).
+      await expect(readFile(auditPath, 'utf8')).rejects.toThrow()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it("refuses a child delegated by an account other than this signer's own", async () => {

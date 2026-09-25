@@ -4,14 +4,13 @@ import { privateKeyToAccount } from 'viem/accounts'
 import {
   addressFromKey,
   assertBoundDirectPaymentUserOp,
+  assertOwnSettlementChild,
   assertFundingLegPaysDelegate,
   assertUserOpTypedDataBinding,
   chainIdForNetwork,
-  deriveDelegateAccountAddress,
   HavenTypedDataRefusedError,
   isPackedUserOperationTypedData,
   isSettlementChildTypedData,
-  verifySettlementChild,
   buildX402ExpectedMessage,
   buildSweepAuthorizationMessage,
   buildSweepTypedData,
@@ -293,7 +292,10 @@ export function createEdgeSigner(
               'scoped to. Update @haven_ai/signer.',
           )
         }
-        verifySettlementChild(typedData, {
+        // #3281: through the shared SDK wrapper, so every child refusal is
+        // TYPED_DATA_NOT_ALLOWED (structured at the tool layer), like the
+        // funding-leg refusals below — not a bare SIGNING_ERROR.
+        assertOwnSettlementChild(typedData, {
           merchantTo: expected.merchantTo,
           amount: expected.amount,
           asset: expected.asset,
@@ -303,14 +305,13 @@ export function createEdgeSigner(
           // signed another" class this file exists to catch (#1455 review).
           chainId: settlementChainId,
           expiresAt: expected.expiresAt,
-          // #3281 criterion 8: the child must be re-delegated FROM this
-          // signer's own account (the verifier also refuses a ROOT
-          // authority). The exact budget-delegation hash is not checked: it
-          // is knowable here only by trusting Haven for it, and the invariant
-          // does not need it — a non-ROOT authority must resolve on-chain to
-          // a delegation made TO this account, which only its owner can sign.
-          delegatorAccount: deriveDelegateAccountAddress(delegateAddress as `0x${string}`),
-        })
+        }, delegateAddress)
+        // #3281 criterion 8: the wrapper also requires the child to be
+        // re-delegated FROM this signer's own account, and the verifier refuses
+        // a ROOT authority. The exact budget-delegation hash is not checked: it
+        // is knowable here only by trusting Haven for it, and the invariant
+        // does not need it — a non-ROOT authority must resolve on-chain to a
+        // delegation made TO this account, which only its owner can sign.
       } else if (isPackedUserOperationTypedData(typedData)) {
         // #3281 (epic #3284): the binding above proves Haven DECLARED these
         // bytes — but a compromised binding key can declare anything. So the

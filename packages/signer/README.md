@@ -105,8 +105,11 @@ it signs whatever typed data it is handed. The allowlist lives in the MCP tool
 layer: `haven_sign` signs typed data only when it is a bound direct-payment
 `PackedUserOperation` (below) or an x402 payload against a Haven-signed context,
 refuses anything else with `TYPED_DATA_NOT_ALLOWED`, and answers a bare
-`payload_hash` with `BARE_HASH_REFUSED`. An embedder that calls the core
-directly owns that check itself.
+`payload_hash` with `BARE_HASH_REFUSED`. An embedder that calls
+`signDelegationTypedData` directly owns that check itself. The core's
+`signX402FundingTypedData` is not a verbatim primitive: since #3281 it runs
+the x402 shape checks itself (a guarded funding leg or a verified settlement
+child only), whoever calls it.
 
 **The unbound-branch allowlist (#3272).** Without an x402 context, `haven_sign`
 signs typed data only when ALL of these hold; otherwise it refuses, with no

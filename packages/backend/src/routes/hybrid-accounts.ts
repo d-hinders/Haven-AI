@@ -62,6 +62,17 @@ interface CreateHybridBody {
 
 const HEX_COORD_RE = /^0x[0-9a-fA-F]{1,64}$/
 
+/**
+ * String-ness narrow in the cross-realm-safe form, mirroring
+ * agent-connection-setups.ts. The request schema covers `key_id` PRESENCE
+ * but has no `minLength` (POST /accounts/hybrid passkeys item), so emptiness
+ * stays a handler check: an empty key_id was a 400 before the #3032 flip
+ * (round-1 finding F2) and must stay one.
+ */
+function isString(value: unknown): value is string {
+  return Object.prototype.toString.call(value) === '[object String]'
+}
+
 export default async function hybridAccountRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
@@ -84,14 +95,19 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     for (const pk of passkeys ?? []) {
       // `key_id` string-ness and the 0x-hex coordinate SHAPES are the request
       // schema's (#3032: this file is enforced — `required: ['key_id','x','y']`
-      // and the coordinate patterns). What stays here is SEMANTIC: the
-      // coordinates must PARSE as BigInt, which ajv's pattern alone does not
-      // prove. The cast restates the schema's guarantee for the compiler —
-      // same idiom as the `owner_address` cast below.
+      // and the coordinate patterns) — except EMPTINESS: the schema's `key_id`
+      // has no `minLength`, so the old `!pk.key_id` 400 stays here as a named
+      // check (#3032 round-1 finding F2; the schema does not cover it). What
+      // stays SEMANTIC: the coordinates must PARSE as BigInt, which ajv's
+      // pattern alone does not prove. The push below restates the now-proven
+      // string-ness for the compiler — same idiom as the `owner_address` cast.
+      if (!isString(pk.key_id) || pk.key_id.length === 0) {
+        return reply.code(400).send({ error: 'each passkey needs a key_id' })
+      }
       if (!pk.x || !pk.y || !HEX_COORD_RE.test(pk.x) || !HEX_COORD_RE.test(pk.y)) {
         return reply.code(400).send({ error: 'each passkey needs 0x-hex x and y coordinates' })
       }
-      parsedPasskeys.push({ keyId: pk.key_id as string, x: BigInt(pk.x), y: BigInt(pk.y) })
+      parsedPasskeys.push({ keyId: pk.key_id, x: BigInt(pk.x), y: BigInt(pk.y) })
     }
     if (!owner_address && parsedPasskeys.length === 0) {
       return reply.code(400).send({ error: 'at least one owner (owner_address or passkeys) is required' })

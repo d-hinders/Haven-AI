@@ -4,6 +4,7 @@ import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { getAgentPaymentStatus } from '../modules/payments/index.js'
 import { agentExecutionRailLabel } from '../rails/execution-rail.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
+import { toCanonicalAddress } from '../modules/transactions/index.js'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import {
   handleGetAllowances,
@@ -74,9 +75,17 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       id: agent.id,
       name: agent.name,
       status: agent.status,
-      account_address: agent.account_address,
-      delegate_address: agent.delegate_address,
-      delegate_account_address: delegateAccountAddress,
+      // #3319: `delegate_address` is stored lowercase (every write LOWERs it)
+      // and is checksummed HERE at the read boundary, matching the checksummed
+      // `delegate` on the agent's receipts (#3307). `account_address` comes
+      // from `smart_accounts.account_address`, written as viem computed it
+      // (already checksummed; verified live on dev), and
+      // `delegate_account_address` is a viem counterfactual derivation —
+      // both canonicalised through the same total helper, which is a no-op on
+      // an already-checksummed address.
+      account_address: toCanonicalAddress(agent.account_address),
+      delegate_address: toCanonicalAddress(agent.delegate_address),
+      delegate_account_address: toCanonicalAddress(delegateAccountAddress),
       chain_id: agent.chain_id,
       // #1306: which on-chain policy primitive gates this agent's spend —
       // reporting only, same two-value bucketing handleGetAllowances already

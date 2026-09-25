@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+## 0.5.0-alpha.1 — 2026-09-25
+
 - **Client identity (#3303, epic #3302).** Every Haven API request the CLI makes carries `X-Haven-Client: @haven_ai/cli/<version>` (`CLI_CLIENT_IDENTITY`), so the backend can tell an outdated CLI what to run. No command output changes.
 
 ## 0.5.0-alpha.0 — 2026-09-25

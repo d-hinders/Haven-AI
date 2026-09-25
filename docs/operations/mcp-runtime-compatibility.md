@@ -1036,6 +1036,28 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.5.0-alpha.1 release, 2026-09-25):** the manifest table
+> above is re-pinned by the bump to `0.5.0-alpha.1` for `connect`, `mcp`, `sdk`
+> and `signer`, and the bump also rewrote `SDK_VERSION` in
+> `packages/sdk/src/client-identity.ts`, as the client-identity section below
+> says it must. **`0.5.0-alpha.0` was cut but never published**: #3303
+> (#3316) landed on `dev` after that cut and before its promotion, with its
+> five CHANGELOG entries under `Unreleased`. Publishing it as alpha.0 would
+> have shipped code its own CHANGELOG called unreleased, so alpha.1 stamps it.
+> The published step is therefore `0.4.0-alpha.0` → `0.5.0-alpha.1`: MINOR,
+> for exactly the fail-closed signer refusals the alpha.0 note below records.
+> **#3303 adds no break.** Every client now sends `X-Haven-Client` (except the
+> connector's read-only `probeHostedAgentIdentity`, behind `--doctor` /
+> `--unwire`, which deliberately sends none), and the
+> backend hints below a `recommended_version` and refuses (426) only below a
+> SET `min_version`. Every threshold in `CLIENT_COMPAT` is null at this cut, so
+> no client is hinted or refused by this release. The signer maps a future 426
+> to its existing `SIGN_CONTEXT_REFUSED`; what is new is the
+> `backend_error_code: 'client_outdated'` value and the `client_update` field,
+> both additive.
+> Re-read, not rubber-stamped: the Node floor and the Codex and Claude Code rows
+> are unchanged. `last-verified` is not bumped.
+>
 > **Re-verification (0.5.0-alpha.0 release, 2026-09-25):** the manifest table
 > above is re-pinned by the bump to `0.5.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`; the four numbers were not copied by hand. **Re-read, not
@@ -1210,10 +1232,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.5.0-alpha.0` |
-| `@haven_ai/mcp` | `0.5.0-alpha.0` |
-| `@haven_ai/sdk` | `0.5.0-alpha.0` |
-| `@haven_ai/signer` | `0.5.0-alpha.0` |
+| `@haven_ai/connect` | `0.5.0-alpha.1` |
+| `@haven_ai/mcp` | `0.5.0-alpha.1` |
+| `@haven_ai/sdk` | `0.5.0-alpha.1` |
+| `@haven_ai/signer` | `0.5.0-alpha.1` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

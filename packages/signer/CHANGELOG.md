@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+## 0.5.0-alpha.1 — 2026-09-25
+
 - **Client identity at sign-context; `client_outdated` refusal (#3303, epic #3302).** Both sign-context reads send `X-Haven-Client: @haven_ai/signer/<version>`. If this signer is below a minimum version the deployment has explicitly set, the backend answers 426. `haven_sign` / `haven_sign_x402` then return `SIGN_CONTEXT_REFUSED` with `backend_error_code: 'client_outdated'`, the backend's `client_update` (including `upgrade_command`), `next_action: stop_and_tell_user`, and a `next_tool_omitted_reason`. They return no signature and no `fallback`, and the prepared payment is left unsigned. A `client_update` hint on a successful read is carried onto the signing result. Nothing about what the signer signs changes.
 
 ## 0.5.0-alpha.0 — 2026-09-25

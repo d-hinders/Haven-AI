@@ -3071,9 +3071,10 @@ to call next in structured fields, and those fields are typed end to end
 >   `merchant_address` / `payer_address`, the rail context (`asset`,
 >   `x402` / `mpp` `.asset` / `.merchant_address`) and `parties`.
 > - **`GET /payments/:id` and `GET /payments`:** checksum `to`.
-> - **Why:** for one payment, the receipt, the status and the transaction row
->   (#3129) now carry the same checksummed `merchant_address`, token address
->   and `parties`.
+> - **Why:** for one payment, the receipt and the status now carry the same
+>   checksummed `merchant_address`, token address and `parties` (a
+>   cross-surface real-Postgres test proves it). The transaction row (#3129)
+>   uses the same `toCanonicalAddress` for its merchant and token addresses.
 >
 > **What stays as stored:**
 > - Storage (`LOWER(...)`).
@@ -3083,8 +3084,9 @@ to call next in structured fields, and those fields are typed end to end
 > - **The resume state's rebuilt payment objects.** `haven_get_resume_state`
 >   builds `accepted`, `paymentRequired`, the MPP `challenge` and its
 >   `merchantAddress` from the row in stored casing, so what goes back to
->   merchants and signers is byte-identical. Its embedded status is checksummed
->   like any other.
+>   merchants and signers is byte-identical. Every address
+>   `haven_get_resume_state` returns stays in stored casing. The status the
+>   lookup reads internally is checksummed, but it is not part of the response.
 > - **Declared asymmetry:** the SDK's `X402Receipt.merchantTo` is now
 >   checksummed on the resume path, where it is read from the status. On a
 >   fresh payment it stays lowercase, because there it comes from the authorize

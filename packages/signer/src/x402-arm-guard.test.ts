@@ -318,6 +318,26 @@ describe('x402 arm: the settlement child (#3281 criterion 8)', () => {
     }
   })
 
+  it('a MALFORMED child (truncated caveat terms) is a structured refusal, not an unknown error', async () => {
+    const td = ownChild()
+    const transfer = td.message.caveats.find(
+      (c: { enforcer: string }) => c.enforcer.toLowerCase() === '0xf100b0819427117ecf76ed94b358b1a5b5c6d2fc',
+    )
+    transfer.terms = transfer.terms.slice(0, 2 + 40) // token only, amount word missing
+    const expected = await boundChild(td)
+    await inWindow(async () => {
+      const handlers = createToolHandlers(signer())
+      const result = (await handlers.haven_sign({
+        payload_hash: expected.payloadHash,
+        typed_data: td,
+        x402_expected: wire(expected as never),
+      } as never)) as ToolPayload & { code?: string; message?: string }
+      expect(result.success).toBe(false)
+      expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
+      expect(result.message).toMatch(/malformed/)
+    })
+  })
+
   it("refuses a child delegated by an account other than this signer's own", async () => {
     const td = ownChild()
     td.message.delegator = '0x1111111111111111111111111111111111111111'

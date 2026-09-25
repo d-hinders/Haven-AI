@@ -207,11 +207,14 @@ export function assertOwnSettlementChild(
     })
   } catch (err) {
     // One refusal code for everything this surface refuses, so an agent sees
-    // TYPED_DATA_NOT_ALLOWED for a bad child exactly as for a bad UserOp.
-    if (err instanceof HavenSigningError && !(err instanceof HavenTypedDataRefusedError)) {
-      throw new HavenTypedDataRefusedError(err.message)
-    }
-    throw err
+    // TYPED_DATA_NOT_ALLOWED for a bad child exactly as for a bad UserOp —
+    // including a MALFORMED child whose caveat terms do not even parse
+    // (#3281 doc review: a truncated term used to escape as a raw BigInt error).
+    if (err instanceof HavenTypedDataRefusedError) throw err
+    if (err instanceof HavenSigningError) throw new HavenTypedDataRefusedError(err.message)
+    throw new HavenTypedDataRefusedError(
+      `Refusing to sign the x402 settlement child: it is malformed (${err instanceof Error ? err.message : String(err)}).`,
+    )
   }
 }
 

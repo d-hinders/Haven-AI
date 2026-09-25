@@ -1386,8 +1386,10 @@ signer imports:
 
 The signer's x402 arm (#3281) signs only the first two shapes, however validly
 Haven's binding key declared anything else. Every refusal on the shape checks,
-the settlement child's included, is `TYPED_DATA_NOT_ALLOWED`, or
-`USEROP_BINDING_MISMATCH` for a funding leg whose hash does not match. In every
+the settlement child's (malformed children included), is
+`TYPED_DATA_NOT_ALLOWED`, or `USEROP_BINDING_MISMATCH` for a funding leg whose
+hash does not match. A settlement network the signer cannot map keeps its own
+`SIGNING_ERROR`, which asks for a signer update. In every
 case nothing is signed, audited or submitted.
 The core's `signDelegationTypedData`, `HavenClient.sign(hash)` and the SDK's
 exported signing primitives stay verbatim, for embedders; the checks are in

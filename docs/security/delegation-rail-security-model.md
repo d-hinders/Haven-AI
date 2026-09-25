@@ -1445,7 +1445,7 @@ once, against its fixed threat model, when its last slice lands.
 
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this diff renames backend-internal identifiers to account vocabulary in the
-> files this document covers: `userSafeId` → `accountId`
+> files this document covers, namely `userSafeId` → `accountId`
 > (`routes/agent-delegations.ts`, `routes/hybrid-accounts.ts`,
 > `infra/repositories/{hybrid-signers}.ts`,
 > `rails/{hybrid-signer-actions,hybrid-account-config}.ts`), `safes` /

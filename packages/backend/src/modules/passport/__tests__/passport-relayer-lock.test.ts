@@ -25,6 +25,8 @@ const BACKEND_SRC = join(__dirname, '..', '..', '..')
 // ── The behavioural pins ─────────────────────────────────────────────────────
 
 const UID = '0x' + 'ab'.repeat(32)
+/** The mocked relayer's key — its derived address is the log's attester. */
+const RELAYER_KEY = '0x' + '11'.repeat(32)
 
 const trace: string[] = []
 let inFlight = 0
@@ -56,10 +58,31 @@ function fakeProviderWallet() {
       inFlight -= 1
       pendingNonce += 1
       const parsed = actualEthers.Transaction.from(raw)
-      return { hash: parsed.hash, nonce: parsed.nonce, wait: async () => ({ status: 1 }) }
+      // #3294: the receipt carries OUR Attested log, or the anchor refuses to
+      // record and throws (the mined-without-log path) instead of returning.
+      // The attester is the RELAYER'S OWN address — the wallet this mock
+      // hands out — because EAS sets attester to msg.sender and the anchor
+      // checks the event against the broadcaster.
+      const iface = new actualEthers.Interface([
+        'event Attested(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schemaUID)',
+      ])
+      const encoded = iface.encodeEventLog('Attested', [
+        '0x' + '22'.repeat(20),
+        new actualEthers.Wallet(RELAYER_KEY).address,
+        UID,
+        UID,
+      ])
+      return {
+        hash: parsed.hash,
+        nonce: parsed.nonce,
+        wait: async () => ({
+          status: 1,
+          logs: [{ address: getEasDeployment(84532).eas, topics: [...encoded.topics], data: encoded.data }],
+        }),
+      }
     },
   }
-  return new actualEthers.Wallet('0x' + '11'.repeat(32), provider as never)
+  return new actualEthers.Wallet(RELAYER_KEY, provider as never)
 }
 const wallet = fakeProviderWallet()
 
@@ -107,6 +130,7 @@ vi.mock('ethers', async () => {
 })
 
 const { anchorOnChain, revokeOnChain } = await import('../attestation.js')
+const { getEasDeployment } = await import('../schema.js')
 
 const claim = {
   agentEoa: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',

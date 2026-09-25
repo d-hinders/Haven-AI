@@ -39,15 +39,18 @@ import {
   setAnchorLiveness,
   anchorOnChain,
   recoverAnchorFromReceipt,
+  repairAnchorUidFromReceipt,
   classifyAnchorTxLiveness,
   setRevoker,
   revokeOnChain,
   setRevocationProbe,
   readRevocationAnchor,
+  setAnchorUidRepair,
   setReceiptSigningKey,
   passportReadiness,
   logPassportReadiness,
   retryPendingPassports,
+  repairAnchoredUids,
   reconcilePendingRevocations,
   reconcilePendingReanchors,
   listStuckReanchors,
@@ -322,6 +325,14 @@ setRevoker(revokeOnChain)
 // row without broadcasting anything. Unwired, it degrades to the pre-#1758
 // behaviour — a stuck `pending` row, never a wrong `confirmed` one.
 setRevocationProbe(readRevocationAnchor)
+// #3294: rows anchored before the fix store the staticCall-predicted UID,
+// which never existed on-chain — revocation of such a row reverts NotFound()
+// forever while the agent's REAL attestation stays live. The retire consults
+// this repair before spending gas on an unseen UID: the row is re-derived
+// from its own anchor receipt and the REAL uid is what gets revoked. Unwired,
+// the retire submits the stored UID exactly as before (#3294's pre-fix
+// behaviour) — never a wrong write.
+setAnchorUidRepair(repairAnchorUidFromReceipt)
 // Receipts the merchant-facing verifier hands out (#974) are signed with a
 // DEDICATED key, never the relayer's: the relayer pays gas for user-authorised
 // transactions, while this one signs public assertions and its address is
@@ -681,6 +692,18 @@ const start = async () => {
                 'Passport issuance rows past the attention threshold — investigate, the backoff is capped',
               )
             }
+          })
+          // #3294: rows anchored before the fix store the staticCall-predicted
+          // UID, which never existed on-chain — revocation of such a row loops
+          // on `NotFound()` while the agent's REAL attestation stays live. The
+          // repair re-derives each row's UID from its anchor receipt; the
+          // revocation half below (and the retire's own repair gate) then
+          // converges on the real credential. Batched and paced here; the
+          // phase split keeps a failure here away from the safety-critical
+          // revocation half, exactly as for issuance above.
+          await phase('anchor-repair', async () => {
+            const repairs = await repairAnchoredUids()
+            if (repairs.attempted) app.log.info(repairs, 'Passport anchor UID repairs')
           })
           await phase('revocation', async () => {
             const revocations = await reconcilePendingRevocations()

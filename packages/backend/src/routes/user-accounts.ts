@@ -187,9 +187,13 @@ app.get<{ Params: { accountId: string } }>(
     const chain = getChain(chainId)
 
     // The same ethers-backed balance read `GET /balances/:accountAddress` runs —
-    // no new chain machinery, and a failed read reads as zero exactly as it
-    // does there (a balance RPC hiccup must not 500 a hand-off whose whole
-    // job is to be pasteable).
+    // no new chain machinery, and a failed read answers '0' rather than 500ing
+    // a hand-off whose whole job is to be pasteable. Since #3295 that route no
+    // longer reads a failure as zero — it serves the last-known balance,
+    // marked stale — while THIS endpoint still does: `funded` computed from a
+    // substituted value would claim an account is funded off a figure that may
+    // be hours old, which is a different decision than a display value. The
+    // gap is deferred by name in #3295 to a follow-up.
     const client = getChainClient('ethers')
     const tokens = Object.values(chain.tokens)
     const nativeToken = tokens.find((t) => t.address === null)!

@@ -67,6 +67,8 @@ import {
   LabelChip,
   LabelChipRow,
   LabelOptionRow,
+  BalanceFreshnessIndicator,
+  WhenBalanceDegraded,
 } from '@/components/haven'
 
 /**
@@ -842,6 +844,46 @@ export default function DesignSystemPage() {
                 checked
                 onToggle={() => {}}
               />
+            </div>
+          </Card>
+
+          <Card hover={false} className="p-5" data-testid="ds-balance-freshness">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Balance freshness</h3>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              <code className="rounded bg-[var(--v2-surface)] px-1">BalanceFreshnessIndicator</code>{' '}
+              marks a balance that could not be read from the chain right now (#3295). Haven shows
+              the last figure it actually saw, quietly labelled with how old it is — a timestamp,
+              not an alarm — and says &ldquo;Unavailable&rdquo; only when no balance has ever been
+              read. A fresh balance renders no indicator at all. The amber is the same caution tint
+              as every other &ldquo;worth knowing, not urgent&rdquo; surface; the figure it sits
+              beside stays in the normal ink so the value itself never reads as broken.
+            </p>
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center gap-3">
+                <span className="v2-tabular text-lg font-semibold text-[var(--v2-ink)]">1 337,00 kr</span>
+                <BalanceFreshnessIndicator
+                  freshness={{ status: 'stale', asOf: new Date(Date.now() - 5 * 60_000).toISOString() }}
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-[var(--v2-ink-2)]">USDC 2.50</span>
+                <BalanceFreshnessIndicator freshness={{ status: 'unavailable' }} size="compact" />
+              </div>
+            </div>
+            <p className="mt-4 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              <code className="rounded bg-[var(--v2-surface)] px-1">WhenBalanceDegraded</code>{' '}
+              attaches extra content to a degraded figure without each call site
+              branching on the marker — its children render only when a freshness
+              marker is present.
+            </p>
+            <div className="mt-3">
+              <WhenBalanceDegraded
+                freshness={{ status: 'stale', asOf: new Date(Date.now() - 45 * 60_000).toISOString() }}
+              >
+                <p className="text-xs text-[var(--v2-ink-3)]">
+                  Shown only while the balance is degraded.
+                </p>
+              </WhenBalanceDegraded>
             </div>
           </Card>
 

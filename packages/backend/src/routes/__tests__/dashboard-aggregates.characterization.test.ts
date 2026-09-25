@@ -23,6 +23,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
+// The double below replaces only the FETCHING half of the accounts barrel;
+// the route also reads the pure freshness combiner from it (#3295), which
+// stays real so the marker math this file pins is the production math.
+import { combineBalanceFreshness } from '../../modules/accounts/balance-freshness.js'
 
 const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -43,7 +47,10 @@ const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(()
 vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
-vi.mock('../../modules/accounts/index.js', () => portfolioMocks)
+vi.mock('../../modules/accounts/index.js', () => ({
+  ...portfolioMocks,
+  combineBalanceFreshness,
+}))
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 vi.mock('../../modules/transactions/index.js', () => transactionMocks)
 

@@ -4474,10 +4474,24 @@ export type components = {
             symbol: string;
             /** @description Token contract address; null for the chain-native token (exactly one entry). */
             address: string | null;
-            /** @description Raw base units; '0' when the RPC lookup failed. */
+            /** @description Raw base units. On a failed read, the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token. */
             balance: string;
             formatted: string;
             decimals: number;
+            balanceFreshness?: components["schemas"]["BalanceFreshness"];
+        };
+        /** @description Present only when this entry's balance read FAILED (#3295). Absent on a clean read. The balance string it marks is still additive: the last-known value when one exists (status stale), else the filler '0' (status unavailable). */
+        BalanceFreshness: {
+            /** @enum {string} */
+            status: "stale";
+            /**
+             * Format: date-time
+             * @description When the served value was last successfully read from the chain.
+             */
+            asOf: string;
+        } | {
+            /** @enum {string} */
+            status: "unavailable";
         };
         BalancesResponse: {
             /** @description Native token first, then ERC-20s in registry order. Never empty. */
@@ -4522,7 +4536,7 @@ export type components = {
         };
         PortfolioBreakdown: {
             symbol: string;
-            /** @description Raw base units; '0' on RPC failure. */
+            /** @description Raw base units. On a failed read, the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token. */
             balance: string;
             formatted: string;
             /** @description When the price feed fails, valued at the last good price this server instance has seen for the token; 0 only if it has none (#3297). */
@@ -4530,6 +4544,7 @@ export type components = {
             eurValue: number;
             /** @description Same one price read as usd/eur (#3127 round 2). When the price feed fails, the last good price this server instance has seen; 0 only if it has none (#3297). */
             sekValue?: number;
+            balanceFreshness?: components["schemas"]["BalanceFreshness"];
         };
         PortfolioResponse: {
             totalUsd: number;
@@ -4594,15 +4609,19 @@ export type components = {
             change: {
                 /** @description true iff a yesterday snapshot existed to diff against. */
                 available: boolean;
-                usdAmount: number;
-                eurAmount: number;
-                /** @description Null when yesterday’s snapshot predates migration 090 (no SEK baseline stored) — the client reports the change as unavailable rather than reading a fabricated swing. */
+                /** @description Null when balanceFreshness below is unavailable: the totals are understated by an unknown amount, so no swing may be claimed. */
+                usdAmount: number | null;
+                /** @description Null when balanceFreshness below is unavailable, as usdAmount. */
+                eurAmount: number | null;
+                /** @description Null when yesterday’s snapshot predates migration 090 (no SEK baseline stored) or when balanceFreshness below is unavailable — the client reports the change as unavailable rather than reading a fabricated swing. */
                 sekAmount?: number | null;
                 /** @description 0 when unavailable or the previous total was 0. */
                 usdPercent: number;
                 eurPercent: number;
                 /** @description 0 when the SEK baseline is missing or the previous total was 0. */
                 sekPercent?: number;
+                /** @description Present only when at least one of the totals' balance reads failed (#3295): stale with the oldest served as-of time, or unavailable when some token has no known value. Absent on a clean read. */
+                balancesFreshness?: components["schemas"]["BalanceFreshness"];
             };
             metrics: {
                 /** @description Agents with status 'active' only. */

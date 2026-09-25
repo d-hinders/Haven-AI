@@ -42,6 +42,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { BalanceFreshnessIndicator } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { TransactionActivityRow } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
@@ -205,6 +206,8 @@ function DashboardHero({
   currency,
   changeAvailable,
   sekChangeUnavailable,
+  balancesFreshness,
+  changeUnavailable,
   changeAmount,
   changePercent,
   hasAccounts,
@@ -224,7 +227,16 @@ function DashboardHero({
   changeAvailable: boolean
   /** True when the SEK baseline for yesterday predates migration 090 — no swing may be claimed. */
   sekChangeUnavailable: boolean
-  changeAmount: number
+  /**
+   * The aggregated degraded-balance marker (#3295). `stale` renders a subtle
+   * "as of …" indicator beside the headline figure; `unavailable` means some
+   * token has never been read, so the day's change is reported unavailable
+   * rather than as a swing computed from an understated total.
+   */
+  balancesFreshness?: { status: 'stale'; asOf: string } | { status: 'unavailable' }
+  /** True when some token has no known value — the change line must step aside. */
+  changeUnavailable: boolean
+  changeAmount: number | null
   changePercent: number
   hasAccounts: boolean
   hasFunds: boolean
@@ -275,25 +287,37 @@ function DashboardHero({
             <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular sm:text-5xl">
               {formatFiat(animatedTotal, currency)}
             </p>
-          )}
-          {/*
-            Three meta-line states under the headline number:
-            1. Watching for a deposit (user opened Receive earlier, balance
-               still 0) — shows a soft brand-tinted pill with a pulse so the
-               user knows the dashboard is actively listening.
-            2. Funded with change data — show today's signed % change.
-            3. Funded without change data, OR no change available — quiet
-               "Across all linked Haven accounts." caption.
-          */}
-          {watchingForDeposit ? (
-            <p className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[var(--v2-brand)]">
-              <span
-                aria-hidden="true"
-                className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--v2-brand)] animate-pending-pulse"
-              />
-              Watching for incoming deposits…
-            </p>
-          ) : changeAvailable && !sekChangeUnavailable ? (
+            )}
+            {/* #3295: the headline figure is the last-known balance when the
+                live read failed — a subtle indicator says how old it is, rather
+                than the number silently claiming to be current. */}
+            {balancesFreshness && (
+              <div className="mt-2">
+                <BalanceFreshnessIndicator freshness={balancesFreshness} />
+              </div>
+            )}
+            {/*
+              Three meta-line states under the headline number:
+              1. Watching for a deposit (user opened Receive earlier, balance
+                 still 0) — shows a soft brand-tinted pill with a pulse so the
+                 user knows the dashboard is actively listening.
+              2. Funded with change data — show today's signed % change.
+              3. Funded without change data, OR no change available — quiet
+                 "Across all linked Haven accounts." caption.
+              #3295 adds a fourth input: when some token has never been read
+              (unavailable), the change line steps aside entirely — no swing may
+              be claimed from a total understated by an unknown amount. A merely
+              stale set of totals still diffs normally.
+            */}
+            {watchingForDeposit ? (
+              <p className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[var(--v2-brand)]">
+                <span
+                  aria-hidden="true"
+                  className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--v2-brand)] animate-pending-pulse"
+                />
+                Watching for incoming deposits…
+              </p>
+            ) : changeAvailable && !sekChangeUnavailable && !changeUnavailable && changeAmount !== null ? (
             <p className={`mt-3 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
               {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent)}) today
             </p>
@@ -647,7 +671,23 @@ export default function DashboardClient() {
   // user can complete them in any order. The guide always renders the
   // canonical Fund → Agent → First payment ordering but a step completed
   // out of order shows as done regardless.
-  const fundingStateKnown = accounts.length > 0 && !balancesLoading && !balancesError
+  // #3295: a failed balance read serves the last-known balance, so those
+  // figures still settle `hasAnyBalance` — a funded user is never told to
+  // fund their account because one read blipped. Only when some token has
+  // NEVER been read (status 'unavailable') AND no token shows any balance is
+  // the funding state unknown: the wire's zeros are then fillers, not
+  // figures, and an empty-looking account may not be empty.
+  const hasUnavailableBalance = balances.some(
+    (balance) => balance.balanceFreshness?.status === 'unavailable',
+  )
+  const fundingStateKnown =
+    accounts.length > 0 &&
+    !balancesLoading &&
+    !balancesError &&
+    // Unknown only when the zeros might be lying: some token was never read
+    // AND nothing shows a balance. A known balance settles it regardless of
+    // which other token is unread.
+    (!hasUnavailableBalance || hasAnyBalance)
   const dataReady = fundingStateKnown && !agentsLoading
   const hasFunds = fundingStateKnown && hasAnyBalance
 
@@ -856,12 +896,20 @@ export default function DashboardClient() {
   // change.sekAmount is `null` when yesterday's snapshot predates migration
   // 090 — no SEK baseline was stored — and the hero then reports the change
   // as unavailable rather than reading the null as a zero swing.
+  // #3295: the same null rule now also covers a balance read that has never
+  // succeeded (balancesFreshness.status === 'unavailable') — the totals are
+  // understated by an unknown amount, so no swing may be claimed. A merely
+  // STALE set of totals still diffs normally. `change.balancesFreshness`
+  // also tells the hero to render its subtle stale indicator beside the
+  // headline figure.
   const totalFiat = currency === 'EUR'
     ? (overview?.totals.eur ?? 0)
     : currency === 'SEK'
       ? (overview?.totals.sek ?? 0)
       : (overview?.totals.usd ?? 0)
   const sekChangeUnavailable = currency === 'SEK' && overview?.change.sekAmount == null
+  const balancesFreshness = overview?.change.balancesFreshness
+  const changeUnavailable = balancesFreshness?.status === 'unavailable'
   const changeAmount = currency === 'EUR'
     ? (overview?.change.eurAmount ?? 0)
     : currency === 'SEK'
@@ -954,6 +1002,8 @@ export default function DashboardClient() {
       currency={currency}
       changeAvailable={Boolean(overview?.change.available)}
       sekChangeUnavailable={sekChangeUnavailable}
+      balancesFreshness={balancesFreshness}
+      changeUnavailable={changeUnavailable}
       changeAmount={changeAmount}
       changePercent={changePercent}
       hasAccounts={accounts.length > 0}

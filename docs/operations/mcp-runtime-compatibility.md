@@ -3212,4 +3212,14 @@ to call next in structured fields, and those fields are typed end to end
 >
 > Scope of this note: those tool results. Nothing else in this document was
 > re-verified.
-
+>
+> **Re-verified unchanged (#3295, 2026-09-25, last-known balances):** this doc
+> is coupled through `routes/user-accounts.ts`, whose change is comment-only:
+> the funding endpoint's parity comment now states that `GET
+> /balances/:accountAddress` serves a last-known balance on a failed read
+> (#3295) while THIS endpoint still answers `'0'` and computes `funded` from
+> it — behaviour byte-identical, the marker gap deferred by name to a
+> follow-up. The `/user/accounts*` reads the CLI calls keep their shapes; no
+> tool, schema key, `next_tool` value, expected-context version or signer
+> contract changes. Scope of this note: that comment. Nothing else in this
+> document was re-verified.

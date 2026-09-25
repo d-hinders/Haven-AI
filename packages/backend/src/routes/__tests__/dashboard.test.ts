@@ -4,6 +4,10 @@ import fastifyJwt from '@fastify/jwt'
 // #2392: the spec's own schema decides whether the overview matches what the
 // dashboard's generated wire types promise — see the #1090 block below.
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
+// The double below replaces only the FETCHING half of the accounts barrel;
+// the route also reads the pure freshness combiner from it (#3295), which
+// stays real so the marker math this file pins is the production math.
+import { combineBalanceFreshness } from '../../modules/accounts/balance-freshness.js'
 
 const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -46,7 +50,10 @@ vi.mock('../../db.js', () => ({
   },
 }))
 
-vi.mock('../../modules/accounts/index.js', () => portfolioMocks)
+vi.mock('../../modules/accounts/index.js', () => ({
+  ...portfolioMocks,
+  combineBalanceFreshness,
+}))
 vi.mock('../../infra/fiat-values.js', () => ({
   getFiatValuesForTokenAmount: vi.fn(),
 }))
@@ -412,5 +419,211 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
     expect(agent.allowances).toEqual([
       { tokenSymbol: 'USDC', allowanceAmount: '1.00', resetPeriodMin: 1440 },
     ])
+  })
+})
+
+// #3295 — `GET /dashboard/overview` under a degraded balance read.
+//
+// The route tests above mock `fetchPortfolioForAccount` wholesale, which is
+// exactly the seam this behavior needs: the module-level substitution itself
+// is proven in `modules/accounts/__tests__/portfolio-last-known.test.ts`;
+// what a route test CAN pin is how the overview projects a degraded
+// portfolio — totals computed from the substituted values, the additive
+// marker on `change`, and the change amounts reported unavailable when some
+// token has no known value (never a swing computed from a zero).
+describe('dashboard overview under degraded balance reads (#3295)', () => {
+  let app: FastifyInstance
+  let token: string
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(dashboardRoutes, { prefix: '/dashboard' })
+    token = app.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })
+  })
+  afterAll(async () => app.close())
+
+  beforeEach(() => {
+    portfolioMocks.fetchPortfolioForAccount.mockReset()
+    transactionMocks.fetchAccountTransactions.mockReset()
+    transactionMocks.mergeX402Transactions.mockReset()
+    transactionMocks.resolveTransactionCurrency.mockClear()
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
+    transactionMocks.mergeX402Transactions.mockResolvedValue([])
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('AS has_first_agent_payment')) {
+        return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
+      }
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+        return Promise.resolve({ rows: [SAFE] })
+      }
+      if (sql.includes('FROM agents a')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('GROUP BY token_symbol')) {
+        return Promise.resolve({ rows: [] })
+      }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+  })
+
+  async function getOverview() {
+    return app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+  }
+
+  it('reports degraded totals built from the last-known balances, with the additive marker', async () => {
+    // What the module returns when one token's read failed after a good one:
+    // the breakdown entry carries the SUBSTITUTED last-known balance and the
+    // stale marker; the totals are priced from those substituted values.
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
+      totalUsd: 2000,
+      totalEur: 1800,
+      totalSek: 20_000,
+      breakdown: [
+        {
+          symbol: 'USDC',
+          balance: '2000000',
+          formatted: '2.00',
+          usdValue: 2000,
+          eurValue: 1800,
+          sekValue: 20_000,
+          balanceFreshness: { status: 'stale', asOf: '2026-09-25T07:55:00.000Z' },
+        },
+      ],
+    })
+
+    const body = (await getOverview()).json()
+
+    expect(body.totals).toEqual({ usd: 2000, eur: 1800, sek: 20_000 })
+    expect(body.change.balancesFreshness).toEqual({
+      status: 'stale',
+      asOf: '2026-09-25T07:55:00.000Z',
+    })
+    // Stale tokens still diff normally — the last-known figures sit on both
+    // sides of the subtraction.
+    expect(body.change.usdAmount).not.toBeNull()
+  })
+
+  it('reports the change as unavailable when some token has no known value — never a swing from a zero', async () => {
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
+      totalUsd: 0,
+      totalEur: 0,
+      totalSek: 0,
+      breakdown: [
+        {
+          symbol: 'USDC',
+          balance: '0',
+          formatted: '0.00',
+          usdValue: 0,
+          eurValue: 0,
+          sekValue: 0,
+          balanceFreshness: { status: 'unavailable' },
+        },
+      ],
+    })
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) {
+        return Promise.resolve({
+          rows: [
+            {
+              snapshot_date: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
+              total_usd: '80',
+              total_eur: '75',
+              total_sek: '740',
+            },
+          ],
+        })
+      }
+      if (sql.includes('AS has_first_agent_payment')) {
+        return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
+      }
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+        return Promise.resolve({ rows: [SAFE] })
+      }
+      if (sql.includes('FROM agents a')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('GROUP BY token_symbol')) {
+        return Promise.resolve({ rows: [] })
+      }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+
+    const body = (await getOverview()).json()
+
+    expect(body.change.balancesFreshness).toEqual({ status: 'unavailable' })
+    // Amounts null (matches how `sekAmount: null` already reads), percentages
+    // inert: no -100% swing fabricated from a zero.
+    expect(body.change.usdAmount).toBeNull()
+    expect(body.change.eurAmount).toBeNull()
+    expect(body.change.sekAmount).toBeNull()
+  })
+
+  it('clean reads carry no marker and unchanged change amounts', async () => {
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
+      totalUsd: 100,
+      totalEur: 92,
+      totalSek: 920,
+      breakdown: [
+        {
+          symbol: 'USDC',
+          balance: '100000000',
+          formatted: '100.00',
+          usdValue: 100,
+          eurValue: 92,
+          sekValue: 920,
+        },
+      ],
+    })
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) {
+        return Promise.resolve({
+          rows: [
+            {
+              snapshot_date: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
+              total_usd: '80',
+              total_eur: '75',
+              total_sek: '740',
+            },
+          ],
+        })
+      }
+      if (sql.includes('AS has_first_agent_payment')) {
+        return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
+      }
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+        return Promise.resolve({ rows: [SAFE] })
+      }
+      if (sql.includes('FROM agents a')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('GROUP BY token_symbol')) {
+        return Promise.resolve({ rows: [] })
+      }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+
+    const body = (await getOverview()).json()
+
+    expect(body.change.balancesFreshness).toBeUndefined()
+    expect(body.change.usdAmount).toBeCloseTo(20, 10)
+    expect(body.change.eurAmount).toBeCloseTo(17, 10)
+    expect(body.change.sekAmount).toBeCloseTo(180, 10)
   })
 })

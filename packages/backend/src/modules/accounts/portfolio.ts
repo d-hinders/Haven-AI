@@ -4,6 +4,12 @@ import { getProvider } from '../../infra/chain/relayer-reads.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { fetchTokenPrices } from '../../infra/prices.js'
 import { createCache } from '../../platform/cache.js'
+import {
+  balanceFreshness,
+  knownBalance,
+  recordKnownBalance,
+  type BalanceFreshness,
+} from './balance-freshness.js'
 
 const ERC20_ABI = ['function balanceOf(address account) view returns (uint256)']
 
@@ -15,6 +21,14 @@ export interface PortfolioBreakdownItem {
   eurValue: number
   /** Same one price read as usd/eur — the display default currency (#3127 round 2). */
   sekValue: number
+  /**
+   * Present only when this entry's balance read FAILED (#3295): 'stale' with
+   * the last successful read's time, or 'unavailable' when no balance has
+   * ever been read for this token. Absent on a clean read, so the wire shape
+   * stays additive and every `balance` remains a decimal string — the token
+   * registry the CLI reads keeps its shape either way.
+   */
+  balanceFreshness?: BalanceFreshness
 }
 
 export interface Portfolio {
@@ -80,12 +94,35 @@ function displayPrice(prices: PriceMap, symbol: string): TokenPrice | undefined 
 
 /**
  * Results where a balance read failed — or (#3297) a held token has no price at
- * all, fresh or last-good. Such a leg still reads as zero in the response, but
- * the result is never cached: one RPC blip or one pricing outage must not pin a
- * zero on the dashboard for the whole TTL. The repeat request is still bounded
- * by the price-fetch backoff above.
+ * all, fresh or last-good. A failed balance leg is no longer a silent zero
+ * (#3295): it serves the last-known balance, marked stale with its as-of time,
+ * or stays '0' marked unavailable when nothing was ever read. Either way the
+ * result is never cached: one RPC blip or one pricing outage must not pin a
+ * degraded figure on the dashboard for the whole TTL. The repeat request is
+ * still bounded by the price-fetch backoff above.
  */
 const degradedResults = new WeakSet<Portfolio>()
+
+/**
+ * Resolve one read to its raw base-unit string and wire marker. A fulfilled
+ * read is recorded as the token's last-known balance and carries no marker;
+ * a rejected one substitutes the last-known value and is marked stale with
+ * its as-of time, or stays '0' marked unavailable when nothing was ever read.
+ */
+function resolveBalanceRead(
+  chainId: number,
+  accountAddress: string,
+  tokenAddress: string | null,
+  result: PromiseSettledResult<bigint>,
+): { raw: string; freshness: BalanceFreshness | null } {
+  if (result.status === 'fulfilled') {
+    const raw = result.value.toString()
+    recordKnownBalance(chainId, accountAddress, tokenAddress, raw)
+    return { raw, freshness: null }
+  }
+  const known = knownBalance(chainId, accountAddress, tokenAddress)
+  return { raw: known?.balance ?? '0', freshness: balanceFreshness(true, known) }
+}
 
 export async function fetchPortfolioForAccount(
   chainId: number,
@@ -120,34 +157,39 @@ export async function fetchPortfolioForAccount(
       return price
     }
 
-    const nativeRaw =
-      nativeResult.status === 'fulfilled' ? nativeResult.value.toString() : '0'
-    const nativeFormatted = formatTokenValue(nativeRaw, nativeToken.decimals)
+    const nativeRead = resolveBalanceRead(chainId, accountAddress, null, nativeResult)
+    const nativeFormatted = formatTokenValue(nativeRead.raw, nativeToken.decimals)
     const nativeNum = parseFloat(nativeFormatted)
     const nativePrice = priceHeld(nativeToken.symbol, nativeNum)
     breakdown.push({
       symbol: nativeToken.symbol,
-      balance: nativeRaw,
+      balance: nativeRead.raw,
       formatted: nativeFormatted,
       usdValue: nativeNum * (nativePrice?.usd ?? 0),
       eurValue: nativeNum * (nativePrice?.eur ?? 0),
       sekValue: nativeNum * (nativePrice?.sek ?? 0),
+      ...(nativeRead.freshness ? { balanceFreshness: nativeRead.freshness } : {}),
     })
 
     for (let i = 0; i < erc20Tokens.length; i++) {
       const token = erc20Tokens[i]
-      const result = erc20Results[i]
-      const rawBalance = result.status === 'fulfilled' ? result.value.toString() : '0'
-      const formatted = formatTokenValue(rawBalance, token.decimals)
+      const read = resolveBalanceRead(
+        chainId,
+        accountAddress,
+        token.address,
+        erc20Results[i],
+      )
+      const formatted = formatTokenValue(read.raw, token.decimals)
       const num = parseFloat(formatted)
       const price = priceHeld(token.symbol, num)
       breakdown.push({
         symbol: token.symbol,
-        balance: rawBalance,
+        balance: read.raw,
         formatted,
         usdValue: num * (price?.usd ?? 0),
         eurValue: num * (price?.eur ?? 0),
         sekValue: num * (price?.sek ?? 0),
+        ...(read.freshness ? { balanceFreshness: read.freshness } : {}),
       })
     }
 

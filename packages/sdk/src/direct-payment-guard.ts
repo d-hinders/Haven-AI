@@ -18,7 +18,7 @@
  * where a compromised Haven API would otherwise be enough to get an
  * account-capturing UserOp signed).
  */
-import { decodeFunctionData, encodeFunctionData, type Address } from 'viem'
+import { decodeFunctionData, encodeFunctionData, encodePacked, type Address, type Hex } from 'viem'
 import { HavenSigningError } from './types.js'
 import {
   DELEGATION_MANAGER,
@@ -27,7 +27,7 @@ import {
   type SettlementChildTypedData,
 } from './settlement-child.js'
 import { deriveDelegateAccountAddress } from './delegate-account.js'
-import { assertRedeemsOwnBudgetDelegation } from './redemption-guard.js'
+import { assertRedeemsOwnBudgetDelegation, REDEEM_DELEGATIONS_ABI } from './redemption-guard.js'
 
 /** Wire code for a typed-data payload outside the signable allowlist. */
 export const TYPED_DATA_NOT_ALLOWED = 'TYPED_DATA_NOT_ALLOWED' as const
@@ -207,10 +207,100 @@ export function assertOwnSettlementChild(
     })
   } catch (err) {
     // One refusal code for everything this surface refuses, so an agent sees
-    // TYPED_DATA_NOT_ALLOWED for a bad child exactly as for a bad UserOp.
-    if (err instanceof HavenSigningError && !(err instanceof HavenTypedDataRefusedError)) {
-      throw new HavenTypedDataRefusedError(err.message)
-    }
-    throw err
+    // TYPED_DATA_NOT_ALLOWED for a bad child exactly as for a bad UserOp —
+    // including a MALFORMED child whose caveat terms do not even parse
+    // (#3281 doc review: a truncated term used to escape as a raw BigInt error).
+    if (err instanceof HavenTypedDataRefusedError) throw err
+    if (err instanceof HavenSigningError) throw new HavenTypedDataRefusedError(err.message)
+    throw new HavenTypedDataRefusedError(
+      `Refusing to sign the x402 settlement child: it is malformed (${err instanceof Error ? err.message : String(err)}).`,
+    )
+  }
+}
+
+/** ERC-20 `transfer(address,uint256)` — selector `0xa9059cbb`. */
+const ERC20_TRANSFER_ABI = [
+  {
+    type: 'function',
+    name: 'transfer',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ type: 'bool' }],
+    stateMutability: 'nonpayable',
+  },
+] as const
+
+/**
+ * #3281 (epic #3284, criterion 5): pin WHERE an x402 EIP-3009 funding leg's
+ * redemption sends the money. The funding leg is always
+ * `transfer(<delegate EOA>, <amount>)` of the quoted token
+ * (`delegation-authorize.ts` → `prepareDelegationPayment(agent, token,
+ * payTo = the delegate EOA, amountRaw)`), so the single execution must be
+ * exactly `encodePacked(asset, 0, transfer(delegateAddress, amount))`.
+ *
+ * `delegateAddress` is the signer's OWN key address — local, not from Haven —
+ * so even a compromised binding key can at most move budget into the agent's
+ * own EOA (the hot-delegate residual the sweep returns), never to an attacker.
+ * `asset` and `amount` come from the Haven-signed expected context and keep
+ * the leg consistent with what Haven declared.
+ *
+ * Call ONLY after `assertBoundDirectPaymentUserOp` has passed on the same
+ * typed data (it proves the `execute` → `redeemDelegations` shape this reads).
+ * Throws `HavenTypedDataRefusedError` on any disagreement.
+ */
+export function assertFundingLegPaysDelegate(
+  typedData: Record<string, unknown>,
+  expected: { delegateAddress: string; asset: string; amount: string },
+): void {
+  const refuse = (detail: string): never => {
+    throw new HavenTypedDataRefusedError(
+      `Refusing to sign this x402 funding leg: ${detail}. A funding leg only ever moves the quoted ` +
+        "amount of the quoted token from the account to this agent's own delegate wallet.",
+    )
+  }
+  const message = (typedData.message ?? {}) as Record<string, unknown>
+  let executionCallData: Hex
+  try {
+    const { args: executeArgs } = decodeFunctionData({ abi: EXECUTE_ABI, data: message.callData as Hex })
+    const inner = (executeArgs[0] as { callData: Hex }).callData
+    const { args } = decodeFunctionData({ abi: REDEEM_DELEGATIONS_ABI, data: inner })
+    const executions = args[2] as readonly Hex[]
+    executionCallData = executions[0]
+  } catch {
+    return refuse('its redemption could not be decoded')
+  }
+  // SingleDefault execution calldata = encodePacked(address target, uint256 value, bytes callData).
+  const body = executionCallData.slice(2)
+  if (body.length < (20 + 32) * 2) refuse('its execution is too short to be a token transfer')
+  const target = `0x${body.slice(0, 40)}` as Address
+  const value = BigInt(`0x${body.slice(40, 104)}`)
+  const callData = `0x${body.slice(104)}` as Hex
+  if (target.toLowerCase() !== expected.asset.toLowerCase()) {
+    refuse(`it calls ${target}, not the quoted token ${expected.asset}`)
+  }
+  if (value !== 0n) refuse(`it sends ${value} wei of native value`)
+  let to: Address
+  let amount: bigint
+  try {
+    const decoded = decodeFunctionData({ abi: ERC20_TRANSFER_ABI, data: callData })
+    ;[to, amount] = decoded.args as unknown as [Address, bigint]
+  } catch {
+    return refuse('its execution is not an ERC-20 transfer(address,uint256)')
+  }
+  // Canonical encoding of the whole execution: no trailing or smuggled bytes.
+  const reEncoded = encodePacked(
+    ['address', 'uint256', 'bytes'],
+    [target, value, encodeFunctionData({ abi: ERC20_TRANSFER_ABI, functionName: 'transfer', args: [to, amount] })],
+  )
+  if (reEncoded.toLowerCase() !== executionCallData.toLowerCase()) {
+    refuse('its execution does not re-encode to the exact bytes signed (trailing or non-canonical bytes)')
+  }
+  if (to.toLowerCase() !== expected.delegateAddress.toLowerCase()) {
+    refuse(`it pays ${to}, not this agent's own delegate wallet (${expected.delegateAddress})`)
+  }
+  if (amount !== BigInt(expected.amount)) {
+    refuse(`it moves ${amount}, not the quoted amount ${expected.amount}`)
   }
 }

@@ -23,6 +23,7 @@ import {
   buildDelegation,
   buildEmptyPermissionContextRedemption,
   buildExecuteCallData,
+  buildFundingLegUserOp,
   buildPermissionContext,
   buildChainPermissionContext,
   buildSelfCallCallData,
@@ -84,21 +85,8 @@ const EXPECTED_X402_BASE = {
   expires_at: '2099-01-01T00:00:00.000Z',
 }
 
-// #3272 (criterion 8): every x402 funding intent is delegation-rail typed
-// data now — v1's bare payload_hash signing is retired. This fixture's SHAPE
-// does not matter (any well-formed EIP-712 object), only that its digest is
-// what `expectedX402`'s `typed_data_hash` commits to; tests pass it as
-// `typed_data` alongside `x402_expected`.
-const X402_TYPED_DATA = {
-  domain: { name: 'HavenX402Funding', version: '1', chainId: 84532, verifyingContract: `0x${'11'.repeat(20)}` },
-  types: { Funding: [{ name: 'note', type: 'string' }] },
-  primaryType: 'Funding',
-  message: { note: 'x402 funding leg (#3272 test fixture)' },
-}
-const X402_TYPED_DATA_HASH = hashTypedData(X402_TYPED_DATA as Parameters<typeof hashTypedData>[0])
-
 async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> & { typed_data_hash?: string } = {}) {
-  const expected = { ...EXPECTED_X402_BASE, typed_data_hash: X402_TYPED_DATA_HASH, ...overrides }
+  const expected = { ...EXPECTED_X402_BASE, ...overrides }
   const message = buildX402ExpectedMessage({
     paymentId: expected.payment_id,
     payloadHash: expected.payload_hash,
@@ -120,6 +108,29 @@ async function expectedX402(overrides: Partial<typeof EXPECTED_X402_BASE> & { ty
       signer: account.address,
     },
   }
+}
+
+/**
+ * #3281: signs the funding leg — the only shape the x402 arm accepts. A test
+ * that quotes something other than PAYMENT_REQUIRED's asset/amount/network
+ * gets a funding leg built for THAT quote (and an expected context committing
+ * to it), exactly `fundV2` in core.test.ts. Returns the typed data, its
+ * payload_hash (the v0.7 UserOp hash) and the signed x402_expected context.
+ */
+async function fundedX402(overrides: Partial<typeof EXPECTED_X402_BASE> = {}) {
+  const quoted = { ...EXPECTED_X402_BASE, ...overrides }
+  const funding = buildFundingLegUserOp({
+    delegate: TEST_DELEGATE_ADDRESS as `0x${string}`,
+    asset: quoted.asset as `0x${string}`,
+    amount: quoted.amount,
+    chainId: quoted.network === 'base-sepolia' || quoted.network === 'eip155:84532' ? 84532 : 8453,
+  })
+  const expected = await expectedX402({
+    ...overrides,
+    payload_hash: funding.payloadHash as string,
+    typed_data_hash: funding.digest,
+  })
+  return { typedData: funding.typedData, payloadHash: funding.payloadHash as string, digest: funding.digest, expected }
 }
 
 function ok<T = unknown>(payload: ToolPayload): ToolSuccess<T> {
@@ -568,11 +579,12 @@ describe('haven_x402_sign_header tool', () => {
       const handlers = createToolHandlers(signer, {
         audit: { auditPath, delegateAddress: signer.delegateAddress },
       })
+      const funded = await fundedX402()
       const signed = ok<{ signature: string; x402_binding: string }>(
         await handlers.haven_sign({
-          payload_hash: HASH,
-          typed_data: X402_TYPED_DATA,
-          x402_expected: await expectedX402(),
+          payload_hash: funded.payloadHash,
+          typed_data: funded.typedData,
+          x402_expected: funded.expected,
         }),
       )
 
@@ -614,11 +626,12 @@ describe('haven_x402_sign_header tool', () => {
       createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }),
     )
 
+    const funded = await fundedX402()
     const oneShot = ok<{ x402_binding: string; payment_header: string }>(
       await handlers.haven_sign_x402({
-        payload_hash: HASH,
-        typed_data: X402_TYPED_DATA,
-        x402_expected: await expectedX402(),
+        payload_hash: funded.payloadHash,
+        typed_data: funded.typedData,
+        x402_expected: funded.expected,
         payment_required: PAYMENT_REQUIRED,
       }),
     )
@@ -656,11 +669,12 @@ describe('haven_x402_sign_header tool', () => {
     const handlers = createToolHandlers(
       createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }),
     )
+    const funded = await fundedX402()
     const signed = ok<{ x402_binding: string }>(
       await handlers.haven_sign({
-        payload_hash: HASH,
-        typed_data: X402_TYPED_DATA,
-        x402_expected: await expectedX402(),
+        payload_hash: funded.payloadHash,
+        typed_data: funded.typedData,
+        x402_expected: funded.expected,
       }),
     )
     const header = ok<{ payment_header: string }>(
@@ -685,13 +699,12 @@ describe('haven_x402_sign_header tool', () => {
     const missing = await handlers.haven_x402_sign_header({ payment_required: PAYMENT_REQUIRED })
     expect(missing.success).toBe(false)
 
+    const funded = await fundedX402({ amount: '2000000' })
     const signed = ok<{ x402_binding: string }>(
       await handlers.haven_sign({
-        payload_hash: HASH,
-        typed_data: X402_TYPED_DATA,
-        x402_expected: await expectedX402({
-          amount: '2000000',
-        }),
+        payload_hash: funded.payloadHash,
+        typed_data: funded.typedData,
+        x402_expected: funded.expected,
       }),
     )
     const mismatched = await handlers.haven_x402_sign_header({
@@ -704,13 +717,12 @@ describe('haven_x402_sign_header tool', () => {
 
   it('returns PAYMENT_WINDOW_EXPIRED when x402_expected.expires_at has passed', async () => {
     const handlers = createToolHandlers(createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }))
+    const funded = await fundedX402({ expires_at: '2000-01-01T00:00:00.000Z' })
     const signed = ok<{ x402_binding: string }>(
       await handlers.haven_sign({
-        payload_hash: HASH,
-        typed_data: X402_TYPED_DATA,
-        x402_expected: await expectedX402({
-          expires_at: '2000-01-01T00:00:00.000Z',
-        }),
+        payload_hash: funded.payloadHash,
+        typed_data: funded.typedData,
+        x402_expected: funded.expected,
       }),
     )
 
@@ -736,16 +748,17 @@ describe('haven_x402_sign_header tool', () => {
 
     // Same handoff mistake as the one-shot path, but on the decomposed
     // haven_sign → haven_x402_sign_header flow: pass the whole `x402` wrapper.
+    const funded = await fundedX402()
     const wrapper = {
       accepted: PAYMENT_REQUIRED.accepts[0],
       resource_url: PAYMENT_REQUIRED.resource.url,
       merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
       funding_to: '0x000000000000000000000000000000000000bEEf',
-      expected: await expectedX402(),
+      expected: funded.expected,
     }
 
     const signed = ok<{ x402_binding: string }>(
-      await handlers.haven_sign({ payload_hash: HASH, typed_data: X402_TYPED_DATA, x402_expected: wrapper }),
+      await handlers.haven_sign({ payload_hash: funded.payloadHash, typed_data: funded.typedData, x402_expected: wrapper }),
     )
     const result = ok<{ payment_header: string }>(
       await handlers.haven_x402_sign_header({
@@ -767,11 +780,12 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
         audit: { auditPath, delegateAddress: signer.delegateAddress },
       })
 
+      const funded = await fundedX402()
       const result = ok<{ signature: string; payment_header: string }>(
         await handlers.haven_sign_x402({
-          payload_hash: HASH,
-          typed_data: X402_TYPED_DATA,
-          x402_expected: await expectedX402(),
+          payload_hash: funded.payloadHash,
+          typed_data: funded.typedData,
+          x402_expected: funded.expected,
           payment_required: PAYMENT_REQUIRED,
         }),
       )
@@ -781,8 +795,9 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
       expect(rows).toHaveLength(2)
       // #3272 (criterion 4): the audit records the digest actually signed —
       // the funding typed data's EIP-712 hash — never the caller's
-      // payload_hash argument (a different value).
-      expect(JSON.parse(rows[0])).toMatchObject({ tool: 'haven_sign_x402', payload_hash: X402_TYPED_DATA_HASH })
+      // payload_hash argument (a different value). #3281: that digest is now
+      // the REAL funding leg's, not a toy fixture's.
+      expect(JSON.parse(rows[0])).toMatchObject({ tool: 'haven_sign_x402', payload_hash: funded.digest })
       expect(JSON.parse(rows[1]).tool).toBe('haven_sign_x402')
 
       const serialized = await readFile(auditPath, 'utf8')
@@ -798,10 +813,11 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
   it('returns PAYMENT_WINDOW_EXPIRED on the one-shot path when expires_at has passed', async () => {
     const handlers = createToolHandlers(createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER }))
 
+    const funded = await fundedX402({ expires_at: '2000-01-01T00:00:00.000Z' })
     const payload = await handlers.haven_sign_x402({
-      payload_hash: HASH,
-      typed_data: X402_TYPED_DATA,
-      x402_expected: await expectedX402({ expires_at: '2000-01-01T00:00:00.000Z' }),
+      payload_hash: funded.payloadHash,
+      typed_data: funded.typedData,
+      x402_expected: funded.expected,
       payment_required: PAYMENT_REQUIRED,
     })
 
@@ -819,18 +835,19 @@ describe('haven_sign_x402 tool (one-shot funding + header)', () => {
 
     // The agent passes the entire `x402` object from haven_pay_mcp_tool instead
     // of the nested `x402.expected` — the signer should unwrap and sign it.
+    const funded = await fundedX402()
     const wrapper = {
       accepted: PAYMENT_REQUIRED.accepts[0],
       resource_url: PAYMENT_REQUIRED.resource.url,
       merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
       funding_to: '0x000000000000000000000000000000000000bEEf',
-      expected: await expectedX402(),
+      expected: funded.expected,
     }
 
     const result = ok<{ signature: string; payment_header: string }>(
       await handlers.haven_sign_x402({
-        payload_hash: HASH,
-        typed_data: X402_TYPED_DATA,
+        payload_hash: funded.payloadHash,
+        typed_data: funded.typedData,
         x402_expected: wrapper,
         payment_required: PAYMENT_REQUIRED,
       }),

@@ -61,7 +61,7 @@ It exposes four stdio MCP tools, all sign-only:
 
 | Tool | Does | Emits |
 |---|---|---|
-| `haven_sign` | Sign one payment. Preferred form is `{ payment_id }` alone — the signer fetches the exact payload itself. Signs only Haven-prepared payloads (#3272): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account, an erc7710 settlement child or EIP-3009 funding leg against a Haven-signed context (which it records and binds); other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }` or `{ signature, x402_binding }` |
+| `haven_sign` | Sign one payment. Preferred form is `{ payment_id }` alone — the signer fetches the exact payload itself. Signs only Haven-prepared payloads (#3272, #3281): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account, or — against a Haven-signed context, which it records and binds — an EIP-3009 funding leg of that same shape paying this signer's own delegate EOA, or an erc7710 settlement child from this signer's own account; other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }` or `{ signature, x402_binding }` |
 | `haven_sign_x402` | One-shot x402: funding signature **and** the merchant header in a single local call (`haven_sign` + `haven_x402_sign_header`). `{ payment_id }` alone is the preferred call | `{ signature, x402_binding, payment_header, accepted }` |
 | `haven_x402_sign_header` | Build + sign the EIP-3009 merchant payment header, only when the fresh merchant `payment_required` matches the recorded `x402_binding` | `{ payment_header, accepted }` |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless EIP-3009 sweep that recovers stranded funds from the delegate wallet back to your own account. Never broadcasts | `{ signature }` |
@@ -105,8 +105,11 @@ it signs whatever typed data it is handed. The allowlist lives in the MCP tool
 layer: `haven_sign` signs typed data only when it is a bound direct-payment
 `PackedUserOperation` (below) or an x402 payload against a Haven-signed context,
 refuses anything else with `TYPED_DATA_NOT_ALLOWED`, and answers a bare
-`payload_hash` with `BARE_HASH_REFUSED`. An embedder that calls the core
-directly owns that check itself.
+`payload_hash` with `BARE_HASH_REFUSED`. An embedder that calls
+`signDelegationTypedData` directly owns that check itself. The core's
+`signX402FundingTypedData` is not a verbatim primitive: since #3281 it runs
+the x402 shape checks itself (a guarded funding leg or a verified settlement
+child only), whoever calls it.
 
 **The unbound-branch allowlist (#3272).** Without an x402 context, `haven_sign`
 signs typed data only when ALL of these hold; otherwise it refuses, with no
@@ -144,9 +147,13 @@ operation, never that Haven prepared it — provenance is `payment_id` (below).
 It runs whether the typed data arrived as a tool argument or by the
 `payment_id` fetch; a fetched direct context that is not a
 `PackedUserOperation` at all is refused by the same check. The x402 EIP-3009
-bridge's funding leg keeps its own digest check against the Haven-signed
-expected context in this signer (the SDK's `signForData` runs this binding
-check there too). The check exists because this typed data is
+bridge's funding leg is checked against the Haven-signed expected context AND,
+since #3281, by this same binding check against the declared UserOp hash, the
+direct-payment allowlist and a recipient pin (a transfer of the quoted amount
+to this signer's own delegate EOA). A settlement child must be re-delegated
+from this signer's own account, never a ROOT grant. Anything else on the x402
+arm is `TYPED_DATA_NOT_ALLOWED`, however validly Haven's binding key declared
+it. The check exists because this typed data is
 multi-KB and can reach the signer through a language model relaying it by
 hand: one corrupted character used to produce a valid-looking signature over
 the wrong digest, surfacing only as an opaque `AA24 signature error` from the

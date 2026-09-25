@@ -41,6 +41,7 @@ import { DELEGATION_MANAGER } from '@haven_ai/sdk/edge'
 import {
   buildBoundRedeemDelegationsCallData,
   buildExecuteCallData,
+  buildFundingLegUserOp,
   rebuildDirectUserOpForSender,
 } from '@haven_ai/sdk/test-support'
 import {
@@ -111,27 +112,41 @@ const PAYMENT_REQUIRED = {
   ],
 }
 
-const FUNDING_HASH = '0x' + 'cd'.repeat(32)
 const FUNDING_PAYMENT_ID = 'pay_x402_integration'
 const DELEGATE_ADDR = privateKeyToAccount(DELEGATE_KEY).address
 
 /**
- * The EIP-712 payload a delegation-rail account validates. Shape only — what
- * the contract turns on is the digest, and the v2 context commits to exactly
- * that. Signing this exercises `signX402FundingTypedData`, the entry point a
- * stale signer build simply does not have (#1154/#1187).
+ * #3281 (epic #3284): the x402 FUNDING LEG exactly as the backend builds it —
+ * this delegate's own account redeeming one budget delegation, transferring
+ * the quoted amount (`maxAmountRequired`, what the x402 context quotes) of the
+ * quoted token to this delegate's own EOA. The signer's x402 arm now signs
+ * only this shape (or a verified settlement child), so the shared builder
+ * replaces the pre-#3281 2-field toy. Its v0.7 UserOp hash is the funding
+ * intent's `payload_hash`.
  */
-const TYPED_DATA = {
-  domain: { name: 'HybridDeleGator', version: '1', chainId: 84532, verifyingContract: DELEGATE_ADDR },
-  types: {
-    PackedUserOperation: [
-      { name: 'sender', type: 'address' },
-      { name: 'nonce', type: 'uint256' },
-    ],
-  },
-  primaryType: 'PackedUserOperation',
-  message: { sender: DELEGATE_ADDR, nonce: '7' },
-} as Record<string, unknown>
+const FUNDING = buildFundingLegUserOp({
+  delegate: DELEGATE_ADDR,
+  asset: PAYMENT_REQUIRED.accepts[0].asset as `0x${string}`,
+  amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+  chainId: 8453,
+})
+const TYPED_DATA = FUNDING.typedData as unknown as Record<string, unknown>
+const FUNDING_HASH = FUNDING.payloadHash as string
+
+/**
+ * #3281: the redemption-sized (#1255) x402 funding leg — the same shape with a
+ * multi-KB caveat term, so the copy-through tests below keep their size class
+ * while carrying a funding leg the x402 arm will sign.
+ */
+const REALISTIC_FUNDING = buildFundingLegUserOp({
+  delegate: DELEGATE_ADDR,
+  asset: PAYMENT_REQUIRED.accepts[0].asset as `0x${string}`,
+  amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+  chainId: 8453,
+  caveats: [{ enforcer: '0x1046bb45C8d673d4ea75321280DB34899413c069', terms: `0x${'ab'.repeat(4000)}`, args: '0x' }],
+})
+const REALISTIC_FUNDING_TYPED_DATA = REALISTIC_FUNDING.typedData as unknown as Record<string, unknown>
+const REALISTIC_FUNDING_HASH = REALISTIC_FUNDING.payloadHash as string
 
 /**
  * A payload shaped like a LIVE delegation-rail redemption (#1255): the full
@@ -193,7 +208,8 @@ async function makeX402ExpectedAuth(
   // camelCase keys for SDK's buildX402ExpectedMessage
   const context = {
     paymentId: FUNDING_PAYMENT_ID,
-    payloadHash: FUNDING_HASH,
+    // #3281: the x402 arm checks the #3271 binding against this declared hash.
+    payloadHash: packedUserOperationHash(typedData as never) as string,
     resourceUrl: PAYMENT_REQUIRED.resource.url,
     merchantTo: PAYMENT_REQUIRED.accepts[0].payTo,
     amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
@@ -304,7 +320,7 @@ function stubHavenApi(
         // hosted surface must pass BOTH through — the signer picks the path.
         sign_data:
           rail === 'delegation'
-            ? { hash: FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: typedData }
+            ? { hash: packedUserOperationHash(typedData as never), signature_scheme: 'eip712_userop', typed_data: typedData }
             : { hash: FUNDING_HASH },
         expires_at: '2099-01-01T00:00:00.000Z',
       })
@@ -502,14 +518,14 @@ describe('Hosted MCP + Edge Signer integration', () => {
     // signer's digest check refused. The b64 form crosses as ONE opaque
     // string. This test walks the REAL surfaces end to end with a payload of
     // the size class that actually broke.
-    stubHavenApi('delegation', REALISTIC_TYPED_DATA)
+    stubHavenApi('delegation', REALISTIC_FUNDING_TYPED_DATA)
 
     const havenKeyless = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const hostedHandlers = createHostedHandlers(havenKeyless)
     const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
     const signerHandlers = createSignerHandlers(edgeSigner)
 
-    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_FUNDING_TYPED_DATA)
 
     const quote = ok<{ typed_data?: unknown; typed_data_b64?: string }>(
       // #1272: the b64 round-trip under test is the opt-in transport.
@@ -528,7 +544,7 @@ describe('Hosted MCP + Edge Signer integration', () => {
     // The signer accepts the b64 form ALONE — no nested-JSON copy anywhere.
     const signed = ok<{ signature: string }>(
       await signerHandlers.haven_sign({
-        payload_hash: FUNDING_HASH,
+        payload_hash: REALISTIC_FUNDING_HASH,
         typed_data_b64: quote.typed_data_b64,
         x402_expected: x402Expected.snake,
       }),
@@ -538,15 +554,15 @@ describe('Hosted MCP + Edge Signer integration', () => {
   })
 
   it('haven_sign_x402 (the fast path) also accepts typed_data_b64 alone (#1255)', async () => {
-    stubHavenApi('delegation', REALISTIC_TYPED_DATA)
+    stubHavenApi('delegation', REALISTIC_FUNDING_TYPED_DATA)
     const edgeSigner = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
     const signerHandlers = createSignerHandlers(edgeSigner)
-    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_FUNDING_TYPED_DATA)
 
     const signed = ok<{ signature: string; payment_header: string }>(
       await signerHandlers.haven_sign_x402({
-        payload_hash: FUNDING_HASH,
-        typed_data_b64: Buffer.from(JSON.stringify(REALISTIC_TYPED_DATA)).toString('base64'),
+        payload_hash: REALISTIC_FUNDING_HASH,
+        typed_data_b64: Buffer.from(JSON.stringify(REALISTIC_FUNDING_TYPED_DATA)).toString('base64'),
         x402_expected: x402Expected.snake,
         payment_required: PAYMENT_REQUIRED,
       }),
@@ -589,7 +605,7 @@ describe('Hosted MCP + Edge Signer integration', () => {
     // signer fetches the exact bytes itself. This walks the real handler with
     // a stubbed Haven sign-context endpoint serving the redemption-sized
     // payload — no typed_data anywhere in the tool call.
-    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_FUNDING_TYPED_DATA)
     let fetchedUrl = ''
     const signContextFetch = (async (url: unknown, init?: RequestInit) => {
       fetchedUrl = String(url)
@@ -598,9 +614,9 @@ describe('Hosted MCP + Edge Signer integration', () => {
         JSON.stringify({
           payment_id: FUNDING_PAYMENT_ID,
           sign_data: {
-            hash: FUNDING_HASH,
+            hash: REALISTIC_FUNDING_HASH,
             signature_scheme: 'eip712_userop',
-            typed_data: REALISTIC_TYPED_DATA,
+            typed_data: REALISTIC_FUNDING_TYPED_DATA,
           },
           x402_expected: x402Expected.snake,
         }),
@@ -630,11 +646,11 @@ describe('Hosted MCP + Edge Signer integration', () => {
   it('a fetched payload still passes the SAME digest check — provenance skips nothing (#1263)', async () => {
     // Serve a typed_data that does NOT match the committed digest: the signer
     // must refuse it exactly as it refuses a mangled tool argument.
-    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_FUNDING_TYPED_DATA)
     const mangled = {
-      ...REALISTIC_TYPED_DATA,
+      ...REALISTIC_FUNDING_TYPED_DATA,
       message: {
-        ...(REALISTIC_TYPED_DATA.message as Record<string, unknown>),
+        ...(REALISTIC_FUNDING_TYPED_DATA.message as Record<string, unknown>),
         callData: '0x' + 'ab'.repeat(100),
       },
     }
@@ -642,7 +658,7 @@ describe('Hosted MCP + Edge Signer integration', () => {
       new Response(
         JSON.stringify({
           payment_id: FUNDING_PAYMENT_ID,
-          sign_data: { hash: FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: mangled },
+          sign_data: { hash: REALISTIC_FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: mangled },
           x402_expected: x402Expected.snake,
         }),
         { status: 200 },
@@ -663,12 +679,12 @@ describe('Hosted MCP + Edge Signer integration', () => {
   })
 
   it('haven_sign (decomposed path) also signs from payment_id alone (#1263)', async () => {
-    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_FUNDING_TYPED_DATA)
     const signContextFetch = (async () =>
       new Response(
         JSON.stringify({
           payment_id: FUNDING_PAYMENT_ID,
-          sign_data: { hash: FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: REALISTIC_TYPED_DATA },
+          sign_data: { hash: REALISTIC_FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: REALISTIC_FUNDING_TYPED_DATA },
           x402_expected: x402Expected.snake,
         }),
         { status: 200 },
@@ -688,12 +704,12 @@ describe('Hosted MCP + Edge Signer integration', () => {
   })
 
   it('a caller-supplied payload_hash that disagrees with the fetch is refused (#1263)', async () => {
-    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_TYPED_DATA)
+    const x402Expected = await makeX402ExpectedAuth('delegation', REALISTIC_FUNDING_TYPED_DATA)
     const signContextFetch = (async () =>
       new Response(
         JSON.stringify({
           payment_id: FUNDING_PAYMENT_ID,
-          sign_data: { hash: FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: REALISTIC_TYPED_DATA },
+          sign_data: { hash: REALISTIC_FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: REALISTIC_FUNDING_TYPED_DATA },
           x402_expected: x402Expected.snake,
         }),
         { status: 200 },

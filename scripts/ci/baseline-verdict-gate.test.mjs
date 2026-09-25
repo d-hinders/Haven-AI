@@ -542,6 +542,7 @@ describe('block shapes and globs (#3309)', () => {
   const SHAPES = [
     ['a table row', (x) => `| design-review verdict: ${x} |`],
     ['a table row with more cells', (x) => `| a.png | design-review verdict: ${x} | note |`],
+    ['a table row with the label in its own cell', (x) => `| design-review verdict | ${x} |`],
     ['a heading', (x) => `### design-review verdict: ${x}`],
     ['an open task-list item', (x) => `- [ ] design-review verdict: ${x}`],
     ['a ticked `*` task-list item', (x) => `* [x] design-review verdict: ${x}`],
@@ -552,6 +553,8 @@ describe('block shapes and globs (#3309)', () => {
     ['an HTML <p> line', (x) => `<p>design-review verdict: ${x}</p>`],
   ]
   const GLOBS = ['*.png', '`*.png`', '**', '*-mobile.png', 'dir/*.png', './*.png']
+  // In a block, `*` itself too: it is the documented wildcard.
+  const BLOCK_GLOBS = ['*', ...GLOBS]
 
   for (const [label, shape] of SHAPES) {
     test(`a block in ${label} vetoes an older bound pass`, () => {
@@ -570,6 +573,38 @@ describe('block shapes and globs (#3309)', () => {
       assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false)
     })
   }
+
+  for (const [label, shape] of SHAPES) {
+    test(`a glob block in ${label} covers every baseline, \`*\` included`, () => {
+      for (const glob of BLOCK_GLOBS) {
+        const blocks = parseVerdicts([shape(`changes requested @ cc00000 -- baselines: ${glob}`)])
+        assert.ok(blocks[0]?.names.includes('*'), `${glob}: ${JSON.stringify(blocks[0]?.names)}`)
+        assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, glob)
+      }
+    })
+  }
+
+  test('CRLF text (the web editor) is read like LF, and a strict line is still read once', () => {
+    const blocks = parseVerdicts([`intro\r\n| design-review verdict: ${BLOCK} |\r\nmore\r\n`])
+    assert.equal(blocks.length, 1)
+    assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false)
+    assert.equal(parseVerdicts([`intro\r\ndesign-review verdict: ${BLOCK}\r\n`]).length, 1)
+  })
+
+  test('adversarial lines of boxes, tags and bars parse in linear time', () => {
+    const lines = [
+      '[ ] '.repeat(5000),
+      '- [ ] [ ] '.repeat(2000),
+      '| [ ] [ ] '.repeat(2000) + '| x |',
+      '|'.repeat(10000),
+      '<'.repeat(10000),
+      '<p>'.repeat(3000) + 'design-review verdict',
+    ]
+    const t0 = performance.now()
+    parseVerdicts(lines)
+    const ms = performance.now() - t0
+    assert.ok(ms < 500, `took ${ms.toFixed(0)} ms`)
+  })
 
   test('a glob block in a table row is read as both at once', () => {
     const blocks = parseVerdicts(['| design-review verdict: changes requested @ cc00000 -- baselines: `*.png` |'])
@@ -956,8 +991,18 @@ describe('mutation proofs (each gating branch can fire)', () => {
       '| design-review verdict: changes requested @ cc00000 -- baselines: topbar-desktop.png |',
     ])
     assert.equal(evaluate(tableBlock).verdict, 'fail')
-    const mutated = await mutant(`const m = line.match(BLOCK_LINE_RE)`, `const m = null`)
+    const mutated = await mutant(`const label = line.match(BLOCK_LABEL_RE)`, `const label = null`)
     assert.equal(mutated(tableBlock).verdict, 'pass')
+  })
+
+  test('M17: the trailing strip keeps a bare `*` — mutant strips it', async () => {
+    const starHeading = conflict([
+      'design-review verdict: passed @ bb00000 -- baselines: topbar-desktop.png',
+      '### design-review verdict: changes requested @ cc00000 -- baselines: *',
+    ])
+    assert.equal(evaluate(starHeading).verdict, 'fail')
+    const mutated = await mutant("replace(/[\\s`_]+$/, '')", "replace(/[\\s`*_]+$/, '')")
+    assert.equal(mutated(starHeading).verdict, 'pass')
   })
 
   test('M15: a pass in a block-only shape is dropped — mutant keeps it', async () => {

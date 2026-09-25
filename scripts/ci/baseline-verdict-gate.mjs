@@ -70,7 +70,7 @@
 // A block is also read in shapes a pass is not (#3309): a table row, a
 // heading, a task-list item, an italic or backticked label, an HTML-wrapped
 // line, `design review verdict:` without the hyphen, a space before the
-// colon (BLOCK_LINE_RE). A pass in those shapes is dropped: its line shape
+// colon (BLOCK_LABEL_RE). A pass in those shapes is dropped: its line shape
 // stays the one above.
 //
 // When verdicts conflict (#3301), the newest one decides, per baseline:
@@ -170,15 +170,29 @@ export const DECLARATION_RE = /^\s*(?:[-*]\s*)?baseline-change:\s*(.+)$/gim
 // label may be bold: a block written in any of those shapes must still be
 // read, or the gate cannot see it (#3301).
 export const VERDICT_RE = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s*)?(?:\*\*|__)?design-review\s+verdict:(?:\*\*|__)?\s*(.+)$/gim
-// A BLOCK is read in more shapes than a pass (#3309): a table row, a heading,
-// a task-list item, an italic or backticked label, an HTML-wrapped line,
-// `design review verdict:` without the hyphen, a space before the colon. An
-// unread block lets an older pass verify, so the wider reading fails closed;
-// a pass in one of these shapes is dropped, never read — the line a pass
-// needs stays VERDICT_RE. Whole table cells, then anything but letters (and
-// tags, and a `[ ]`/`[x]` box) may precede the label, so a sentence that
-// merely mentions the label is not a line.
-export const BLOCK_LINE_RE = /^(?:\s*\|(?:[^|\n]*\|)*?)?(?:[^A-Za-z\n]|<[^>\n]*>|\[[ xX]\])*design[-\s]*review\s+verdict[\s*_`]*:[\s*_`]*(.+)$/i
+// A BLOCK is read in more shapes than a pass (#3309): a table row (the label
+// in its own cell, with or without the colon), a heading, a task-list item,
+// an italic or backticked label, an HTML-wrapped line, `design review
+// verdict:` without the hyphen, a space before the colon. An unread block
+// lets an older pass verify, so the wider reading fails closed; a pass in
+// one of these shapes is dropped, never read — the line a pass needs stays
+// VERDICT_RE. Tags and `[ ]`/`[x]` boxes are removed from the line first, and
+// the label is then found with this unanchored pattern; what precedes it is
+// checked in code (`blockPrefixOk`), not by an anchored alternation — one
+// where a box could match two ways backtracked exponentially on a line of
+// boxes, and any PR author writes those lines.
+export const BLOCK_LABEL_RE = /design[-\s]*review\s+verdict[\s*_`]*[:|][\s*_`]*/i
+const NO_LETTERS_RE = /^[^A-Za-z]*$/
+
+/**
+ * May this text precede a block label? Anything but letters (`#`, `>`, `-`,
+ * `|`, `` ` ``, `_`, `*`, digits); or whole table cells and then anything but
+ * letters — so a sentence that merely mentions the label is not a line.
+ */
+function blockPrefixOk(prefix) {
+  if (NO_LETTERS_RE.test(prefix)) return true
+  return prefix.trimStart().startsWith('|') && NO_LETTERS_RE.test(prefix.slice(prefix.lastIndexOf('|') + 1))
+}
 
 const SHA_RE = /@\s*`?([0-9a-fA-F]{7,40})\b/
 /** The sha a verdict is bound to: only right after the `@` that ends its verdict word. */
@@ -283,13 +297,17 @@ export function parseVerdicts(texts) {
       out.push(parseVerdictBody(m[1] ?? '', m[0].trim()))
     }
     // The block-only shapes (#3309): a line VERDICT_RE already read is not
-    // read twice, and a pass found here is dropped.
-    for (const line of String(text).split('\n')) {
-      if (strictLine.test(line)) continue
-      const m = line.match(BLOCK_LINE_RE)
-      if (!m) continue
-      const body = m[1].replace(/<[^>]*>/g, ' ').replace(/\|/g, ' ').replace(/[\s`*_]+$/, '')
-      const v = parseVerdictBody(body, line.trim())
+    // read twice, and a pass found here is dropped. CRLF text (the web
+    // editor's) splits the same as LF. The trailing strip leaves `*` alone:
+    // `baselines: *` must stay the wildcard.
+    for (const rawLine of String(text).split(/\r?\n/)) {
+      if (strictLine.test(rawLine)) continue
+      const line = rawLine.replace(/<[^>]*>/g, ' ').replace(/\[[ xX]\]/g, ' ')
+      const label = line.match(BLOCK_LABEL_RE)
+      if (!label || !blockPrefixOk(line.slice(0, label.index))) continue
+      const body = line.slice(label.index + label[0].length).replace(/\|/g, ' ').replace(/[\s`_]+$/, '')
+      if (!body) continue
+      const v = parseVerdictBody(body, rawLine.trim())
       if (!v.passing) out.push(v)
     }
   }

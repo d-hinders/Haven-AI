@@ -1046,11 +1046,15 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > have shipped code its own CHANGELOG called unreleased, so alpha.1 stamps it.
 > The published step is therefore `0.4.0-alpha.0` → `0.5.0-alpha.1`: MINOR,
 > for exactly the fail-closed signer refusals the alpha.0 note below records.
-> **#3303 adds no break.** Every client now sends `X-Haven-Client`, and the
+> **#3303 adds no break.** Every client now sends `X-Haven-Client` (except the
+> connector's read-only `probeHostedAgentIdentity`, behind `--doctor` /
+> `--unwire`, which deliberately sends none), and the
 > backend hints below a `recommended_version` and refuses (426) only below a
 > SET `min_version`. Every threshold in `CLIENT_COMPAT` is null at this cut, so
 > no client is hinted or refused by this release. The signer maps a future 426
-> to `SIGN_CONTEXT_REFUSED` / `client_outdated`, which is an additive code.
+> to its existing `SIGN_CONTEXT_REFUSED`; what is new is the
+> `backend_error_code: 'client_outdated'` value and the `client_update` field,
+> both additive.
 > Re-read, not rubber-stamped: the Node floor and the Codex and Claude Code rows
 > are unchanged. `last-verified` is not bumped.
 >

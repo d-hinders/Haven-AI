@@ -21,6 +21,8 @@ covers:
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/edge.ts
+  - packages/sdk/src/client-identity.ts
+  - packages/core/src/client-compat.ts
   - packages/sdk/package.json
   - packages/sdk/tsup.config.ts
   - scripts/release-bump.mjs

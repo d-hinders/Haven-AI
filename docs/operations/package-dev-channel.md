@@ -24,6 +24,7 @@ covers:
   - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
+  - packages/core/src/client-compat.ts
 last-verified: "2026-09-24"
 ---
 

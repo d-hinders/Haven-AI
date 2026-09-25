@@ -195,8 +195,8 @@ the epic when its last sub-issue lands on `dev`.
 
 > **Re-verification (#3303, 2026-09-25):** coupled again through
 > `scripts/release-bump.mjs`, which gains one `SOURCE_VERSION_CONSTANTS` entry —
-> `SDK_VERSION` in `packages/sdk/src/client-identity.ts`, rewritten and verified
-> exactly like the four constants beside it. No branch, promotion, dist-tag,
+> the SDK's `SDK_VERSION`, rewritten and verified exactly like the four
+> constants beside it. No branch, promotion, dist-tag,
 > channel, build order or credential path moves, and this document names no
 > source constant, so nothing in it was made stale. `last-verified` not bumped,
 > for the reason in the note above.

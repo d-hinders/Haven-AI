@@ -89,11 +89,21 @@ export async function getRelayerFeeOverrides(
  * receipt verifier behind `relayer-reads.ts` would read "no log" from a
  * lagging fallback rather than fail. A quota-dead `RPC_URL_BASE*` still fails
  * the ethers side; configuring a healthy endpoint is the remedy there.
+ *
+ * JSON-RPC batching is OFF (`batchMaxCount: 1`). By default ethers bundles
+ * every call made within about 10 ms into ONE request of up to 100 calls.
+ * dRPC's free plan, the dev primary since 2026-09-24, refuses any batch over
+ * three and returns code 31 on every item ("Batch of more than 3 requests are
+ * not allowed on free plan"). Whether a read landed in a large batch depended
+ * on what else fired in the same 10 ms. As a result, dashboard balances
+ * flickered to zero, and sweep relays and account deploys failed
+ * intermittently (#2769). Providers bill per call either way, so batching
+ * saved only round trips.
  */
 export function getProvider(chainId: number): JsonRpcProvider {
   let provider = providers.get(chainId)
   if (!provider) {
-    provider = new JsonRpcProvider(getChain(chainId).rpcUrl)
+    provider = new JsonRpcProvider(getChain(chainId).rpcUrl, undefined, { batchMaxCount: 1 })
     providers.set(chainId, provider)
   }
   return provider

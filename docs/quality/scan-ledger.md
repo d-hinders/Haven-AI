@@ -1181,3 +1181,27 @@ trusting a mutation); a fresh worktree needs the core and SDK builds before
 backend suites, and Vitest's `Tests` line hides files that failed to import;
 `ethers`' provider bypasses a stubbed global `fetch`; `fetch` resolves on
 4xx/5xx.
+
+**Disposition (owner, 2026-09-25): file all; merge the report (#3334, `5a3ad38b`).**
+S1 → epic #3335 (`epic`, `area:ci`, `area:qa`, `area:docs`), with slices #3336
+(conformance probe), #3338 (per-attempt logs and the attempt-2 count), #3337
+(failure class and signatures; it absorbed #3339, which was closed after the
+spec review found both rewriting the same body builder) and #3340
+(guard-freshness window and reopen). The held-back guard-freshness candidate
+became #3340. C1 → #3341 (it widened in review to the docs-audit workflow's
+copy of the same upsert). C2 → #3342, C3 → #3343 (`money-path`; each carries a
+threat model pending the owner's confirmation). C4 → #3344. C5 → #3345 (`money-path`; it
+widened in review to a third alert sender, the catalog ops alert). The
+held-back candidates: the classifier → #3346, the copy lint → #3347, the scan
+reference → #3348 (it widened in review to the release skill's run-level
+qa-dev read). The #2769 context was posted there as a comment. Filed to the
+backlog (no `code-quality`); every issue has a spec-review verdict (the
+epic's slices share one, posted on #3335).
+
+*Scan figures corrected after filing, found by the spec reviews* (each
+issue's verdict comment lists its other corrections):
+- C4's dead-port "3 passed" was 2 PASS tests plus 1 SKIP test (#3344).
+- C-extra-2's incident was a backend PR (51 files, 47 backend) that also
+  edited a served doc, not a docs-only one (#3346).
+- The C-extra-4 "1 vs 9" count-noun figure could not be reproduced, because
+  no regex was recorded; it was dropped (#3348).

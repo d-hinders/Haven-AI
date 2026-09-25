@@ -10,7 +10,7 @@ alone.
 
 ### Added
 
-- **Task budgets: three new tools (#3329).** `haven_open_task_budget` and `haven_close_task_budget` reserve and end a short-lived, self-delegated child of the agent's own budget delegation, scoped to one task; `haven_submit` (already relaying `payment_id` signatures) now also accepts `task_budget_id` (mutually exclusive with `payment_id`) to relay a task-budget open/close signature instead. `haven_send`, `haven_pay_x402_quote` and `haven_pay_x402` all gain an optional `task_budget_id` argument to spend against an open task budget instead of the agent's period budget. **Consent:** the tool set changed, so an existing operator's `HAVEN_SIGNER_ACK` / ack-file hash no longer matches and they are re-prompted once, on next launch, to acknowledge the two new tools.
+- **Task budgets: three new tools (#3329).** `haven_open_task_budget` and `haven_close_task_budget` reserve and end a short-lived, self-delegated child of the agent's own budget delegation, scoped to one task; `haven_submit` is new on this runtime and relays the local signer's signature for a task budget by `task_budget_id` only — a `payment_id` is refused here, because this runtime signs and submits a payment inline and has no relay step for it. `task_budget_id` is an optional argument on `haven_send`, `haven_pay_x402_quote` and `haven_pay_x402`. The tool set grew by three, so the consent hash changes and every operator is asked to consent once more on the next launch.
 
 ### Removed
 

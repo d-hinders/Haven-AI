@@ -113,9 +113,11 @@ function refuse(detail: string): never {
 
 /**
  * Verify `redeemCalldata` (the bytes passed to `execute()`, selector already
- * confirmed to be `redeemDelegations` by the caller) is EXACTLY Haven's own
- * shape: one delegation, redeemed by `ownAccount`, granted by someone else,
- * in `SingleDefault` mode, with no encoding slack anywhere. Throws
+ * confirmed to be `redeemDelegations` by the caller) is EXACTLY one of Haven's
+ * two shapes: a single delegation redeemed by `ownAccount` and granted by
+ * someone else, or (#3329) that grant behind one task-budget child `ownAccount`
+ * delegated to itself; in `SingleDefault` mode, with no encoding slack
+ * anywhere. Throws
  * `HavenSigningError` (never returns) on any disagreement.
  */
 export function assertRedeemsOwnBudgetDelegation(redeemCalldata: Hex, ownAccount: Address): void {

@@ -2224,7 +2224,7 @@ export type paths = {
         put?: never;
         /**
          * Submit the agent signature — opens a pending child, or relays the signed close operation.
-         * @description status=pending: verifies signature recovers the agent's delegate key over the stored child typed data, then flips to open. status=closing: submits the stored close UserOp with signature; flips to closed. Any other status is 409.
+         * @description status=pending: verifies signature recovers the agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed; if that operation has gone stale (the account moved on since it was prepared) the answer is 409 close_needs_reprepare — call close again and re-sign. Any other status is 409.
          */
         post: operations["submitTaskBudget"];
         delete?: never;
@@ -2244,7 +2244,7 @@ export type paths = {
         put?: never;
         /**
          * Close a task budget — trivially if never signed or already expired, otherwise prepares the revocation.
-         * @description status=pending, or status=open past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the agent's own delegate account and returns sign_data for the agent to sign, then submit via POST /task-budgets/{id}/submit. status=closing: re-serves the SAME sign_data (idempotent). status=closed: 409.
+         * @description status=pending, or status=open past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the agent's own delegate account and returns sign_data for the agent to sign, then submit via POST /task-budgets/{id}/submit. status=closing: re-prepares a fresh close operation and replaces the stored one (the earlier one may have gone stale), so calling close again is always safe. status=closed: 409.
          */
         post: operations["closeTaskBudget"];
         delete?: never;

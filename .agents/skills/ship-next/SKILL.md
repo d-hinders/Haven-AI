@@ -14,7 +14,7 @@ Accept one source:
 - no argument or `label=<name>`: choose the lowest-numbered open issue with the label, defaulting to `code-quality`;
 - `epic=#<n>`: choose the lowest-numbered open sub-issue;
 - a specified ready issue: ship that issue;
-- a quoted freeform task: first use [new-task](../new-task/SKILL.md) (including its mandatory § *Issue review*), add `code-quality`, then ship the created issue.
+- a quoted freeform task: first use [new-task](../new-task/SKILL.md) (including its mandatory § *Issue review*), add `code-quality`, then ship the created issue. The label is not what makes the issue ready. It is there so that a run that stops partway leaves the issue in the loop's queue rather than orphaned.
 
 **Respect dependencies before number order.** An issue is BLOCKED — skip it and take the next candidate — when any of these hold:
 

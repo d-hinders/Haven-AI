@@ -110,7 +110,7 @@ applies `area:*` labels but *not* `code-quality`, so capturing a task doesn't
 queue it for the loop. In practice, most issues are picked up by a partner or
 session claiming them (the `🔒 CLAIM` protocol in [`AGENTS.md`](../../AGENTS.md)),
 not by the label. An issue is ready when its reviewed spec is right. See
-new-task § *Backlog And Shipping*. Add `code-quality` only when you want the
+[new-task § *Backlog And Shipping*](../../.agents/skills/new-task/SKILL.md). Add `code-quality` only when you want the
 loop below to take it, or skip straight to shipping
 with `ship-next "<description>"` (drafts the issue *and* runs the pipeline). This
 is the low-friction front door for partners: throw a sentence, the system does
@@ -118,7 +118,7 @@ the paperwork. Then the loop consumes those issues one of these ways:
 
 1. **Standalone labeled issues** — for small, self-contained tasks. Open an issue
    with a concrete **scope + acceptance criteria** and add the **`code-quality`**
-   label (the loop's default "ready" marker). The "🔁 Loop task" issue template
+   label (the loop's default selector label). The "🔁 Loop task" issue template
    (`.github/ISSUE_TEMPLATE/`) prompts for the fields the loop needs and applies
    the label for you. Run `/loop /ship-next` (or `label=<name>` for a different
    loop label); the loop takes them oldest-first.

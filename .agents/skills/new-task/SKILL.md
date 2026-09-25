@@ -351,13 +351,15 @@ step that makes an issue ready or pickable.
 
 **How work actually gets picked up (measured 2026-09-25).** Partners and
 sessions claim issues through the `🔒 CLAIM` protocol in
-[`AGENTS.md`](../../../AGENTS.md). Since 2026-09-15 there have been roughly 240
-claim comments. Only 8 of the last 60 completed non-epic issues carried
-`code-quality`, and none were open with it that day. #3307 went from spec review
-to merge through a claim in about an hour, with no label.
+[`AGENTS.md`](../../../AGENTS.md). Since 2026-09-15 there have been about 240
+claim comments across about 95 distinct issues. Only 6 of the last 60 completed
+non-epic issues carried `code-quality`. #3307 went from claim to merge in about
+75 minutes, and never carried the label.
 
-`code-quality` is only the selector for a no-argument
-[ship-next](../ship-next/SKILL.md) run, an autonomous loop that is used rarely.
+`code-quality` is the selector for a no-argument
+[ship-next](../ship-next/SKILL.md) run. That loop is rarely driven by hand. Two
+scheduled workflows (`guard-freshness.yml`, `db-concurrency-proof.yml`) also add
+the label automatically, to queue the CI-health issues they file.
 
 - Do not add `code-quality` by default, and do not offer it as a closing step.
 - When the requester passes `--ship` or clearly asks to ship now, run § *Issue

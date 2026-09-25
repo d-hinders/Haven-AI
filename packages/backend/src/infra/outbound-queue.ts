@@ -34,6 +34,7 @@ import {
   markOutboundTxBroadcast,
   markOutboundTxFailed,
   markOutboundTxMined,
+  maxLiveBroadcastNonce,
 } from './repositories/outbound-txs.js'
 import { getRelayer, withRelayerSendLock } from './relayer.js'
 import { describeRevert, isDeterministicRevert } from './deterministic-revert.js'
@@ -65,6 +66,8 @@ export interface OutboundQueueRepo {
   markOutboundTxBroadcast: typeof markOutboundTxBroadcast
   markOutboundTxMined: typeof markOutboundTxMined
   markOutboundTxFailed: typeof markOutboundTxFailed
+  /** Optional so existing fakes need not grow it; the default is the real read. */
+  maxLiveBroadcastNonce?: typeof maxLiveBroadcastNonce
 }
 
 const defaultRepo: OutboundQueueRepo = {
@@ -72,6 +75,7 @@ const defaultRepo: OutboundQueueRepo = {
   markOutboundTxBroadcast,
   markOutboundTxMined,
   markOutboundTxFailed,
+  maxLiveBroadcastNonce,
 }
 
 function warn(action: string, err: unknown): void {
@@ -167,7 +171,13 @@ export async function submitRecorded(
   return chain.withRelayerSendLock(params.chainId, async () => {
     const MAX_LANE_ATTEMPTS = 3
     for (let attempt = 0; attempt < MAX_LANE_ATTEMPTS; attempt++) {
-      const nonce = params.nonce ?? (await relayer.getNonce('pending'))
+      const nonce =
+        params.nonce ??
+        (await readNextRelayerNonce(
+          params.chainId,
+          relayer,
+          repo.maxLiveBroadcastNonce ?? maxLiveBroadcastNonce,
+        ))
       let populated
       try {
         populated = await relayer.populateTransaction({
@@ -233,6 +243,62 @@ export async function submitRecorded(
       `outbound-queue: could not win a nonce lane on chain ${params.chainId} after ${MAX_LANE_ATTEMPTS} attempts`,
     )
   })
+}
+
+/**
+ * The next nonce for a fresh relayer send (#2769).
+ *
+ * Normally the node's `pending` count: it includes this relayer's
+ * transactions still in the mempool, so back-to-back sends take N, N+1, …
+ *
+ * Some providers refuse the `pending` block tag outright. dRPC's Base plans
+ * route it only to flashblocks-capable upstreams and answer "no available
+ * upstreams … No label `flashblocks`" when there are none, while serving
+ * `latest` normally. Every relayer send (account deploy at first activation,
+ * sweeps, passport attestations) died at this read on dev from 2026-09-25.
+ *
+ * On THAT refusal only, the nonce is derived without the node's mempool view:
+ * the larger of the chain's `latest` count (same provider, so #1533's single
+ * nonce view holds) and one past the highest nonce this relayer holds a live
+ * broadcast at in `outbound_txs`. Every send through {@link submitRecorded}
+ * with a record id is stamped there BEFORE it is broadcast, so the ledger
+ * sees our own in-flight transactions even when the node will not report
+ * them. What it cannot see — an unstamped send (a failed-open record, the
+ * bump worker's orphan re-send) or another writer on the key — surfaces as a
+ * rejected broadcast (nonce too low / replacement underpriced), the same
+ * failure class a stale `pending` read already produces: a failed send,
+ * never a misdirected one. Any other error from the `pending` read
+ * propagates unchanged: a dead endpoint is not papered over here.
+ */
+export async function readNextRelayerNonce(
+  chainId: number,
+  relayer: { getNonce(blockTag?: string): Promise<number> },
+  readLedger: (chainId: number) => Promise<bigint | null> = maxLiveBroadcastNonce,
+): Promise<number> {
+  try {
+    return await relayer.getNonce('pending')
+  } catch (err) {
+    if (!isPendingTagRefusal(err)) throw err
+    const [latest, ledger] = await Promise.all([relayer.getNonce('latest'), readLedger(chainId)])
+    const floor = ledger === null ? 0 : Number(ledger) + 1
+    const nonce = Math.max(latest, floor)
+    console.warn(
+      `outbound-queue: the RPC refused the 'pending' block tag on chain ${chainId}; ` +
+        `nonce ${nonce} derived from latest ${latest} and the live-broadcast ledger (#2769)`,
+    )
+    return nonce
+  }
+}
+
+/**
+ * True only for a provider refusing the `pending` block tag itself — never
+ * for a timeout, a rate limit or a dead endpoint. Matches the refusal text
+ * wherever ethers put it (the top-level message quotes the RPC error body).
+ */
+export function isPendingTagRefusal(err: unknown): boolean {
+  const e = err as { message?: unknown; error?: { message?: unknown } } | null
+  const text = [e?.message, e?.error?.message].filter((m) => typeof m === 'string').join(' ')
+  return /No label `flashblocks`/i.test(text) || /pending block (tag )?(is )?not supported/i.test(text)
 }
 
 function toBigIntOrUndefined(value: unknown): bigint | undefined {

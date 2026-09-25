@@ -101,6 +101,18 @@ export const MARK_OUTBOUND_TX_REPLACED_SQL = `UPDATE outbound_txs
    WHERE id = $1 AND status = 'broadcast'
    RETURNING *`
 
+/**
+ * The highest nonce this relayer holds a LIVE broadcast at on a chain (#2769),
+ * or null when it holds none. Backed by `idx_outbound_txs_live_nonce`, the
+ * partial UNIQUE index on (chain_id, nonce) WHERE status = 'broadcast'.
+ *
+ * It is the ledger half of the nonce fallback in `outbound-queue.ts`: when
+ * the RPC refuses the `pending` block tag, the next nonce is derived from the
+ * chain's `latest` count and this, instead of from the node's mempool view.
+ */
+export const MAX_LIVE_BROADCAST_NONCE_SQL = `SELECT MAX(nonce)::text AS nonce FROM outbound_txs
+   WHERE chain_id = $1 AND status = 'broadcast'`
+
 /** The bump worker's scan (#1558): broadcast rows nothing has confirmed. */
 export const LIST_UNMINED_OUTBOUND_TXS_SQL = `SELECT * FROM outbound_txs
    WHERE chain_id = $1 AND status = 'broadcast'
@@ -446,4 +458,13 @@ export async function listUnminedOutboundTxs(
     olderThanSeconds,
   ])
   return rows
+}
+
+export async function maxLiveBroadcastNonce(
+  chainId: number,
+  db: Executor = pool,
+): Promise<bigint | null> {
+  const { rows } = await db.query<{ nonce: string | null }>(MAX_LIVE_BROADCAST_NONCE_SQL, [chainId])
+  const nonce = rows[0]?.nonce
+  return nonce === null || nonce === undefined ? null : BigInt(nonce)
 }

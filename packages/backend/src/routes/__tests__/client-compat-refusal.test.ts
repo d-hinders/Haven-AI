@@ -82,13 +82,14 @@ async function seedAgent(executionRail: 'delegation' | 'session_key' = 'delegati
 
 async function seedIntent(
   owner: Seeded,
-  overrides: Partial<{ status: string; send_idempotency_key: string | null; x402_idempotency_key: string | null; payment_rail: string | null }> = {},
+  overrides: Partial<{ status: string; send_idempotency_key: string | null; x402_idempotency_key: string | null; payment_rail: string | null; expires_at: string }> = {},
 ): Promise<string> {
   const row = {
     status: 'pending_signature',
     send_idempotency_key: null,
     x402_idempotency_key: null,
     payment_rail: null,
+    expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
     ...overrides,
   }
   const intent = await db.query<{ id: string }>(
@@ -109,7 +110,7 @@ async function seedIntent(
       DELEGATE,
       SIGN_HASH,
       row.status,
-      new Date(Date.now() + 10 * 60_000).toISOString(),
+      row.expires_at,
       JSON.stringify(PREPARED_USER_OP),
       CHAIN_ID,
       row.send_idempotency_key,
@@ -232,15 +233,45 @@ describeDb('client-version refusal on the real payment routes (#3303)', () => {
     expect(await tableCounts()).toEqual(before)
   })
 
-  it('a live x402 row with the same key IS a replay and reaches the handler', async () => {
-    await seedIntent(agent, { x402_idempotency_key: 'live-key', payment_rail: 'x402' })
+  it('a live x402 row with the same key IS a replay: the handler rebuilds that row\'s sign context, minting nothing', async () => {
+    // The rebuild signs Haven's x402 binding; any well-formed test key serves.
+    const previousBindingKey = process.env.X402_BINDING_PRIVATE_KEY
+    process.env.X402_BINDING_PRIVATE_KEY = `0x${'42'.repeat(32)}`
+    const id = await seedIntent(agent, { x402_idempotency_key: 'live-key', payment_rail: 'x402' })
+    const before = await tableCounts()
     const res = await app.inject({
       method: 'POST',
       url: '/x402/authorize',
       headers: { authorization: `Bearer ${agent.apiKey}`, 'x-haven-client': MCP_OLD },
       payload: { ...X402_BODY, idempotencyKey: 'live-key' },
     })
-    expect(res.statusCode).not.toBe(426)
+    if (previousBindingKey === undefined) delete process.env.X402_BINDING_PRIVATE_KEY
+    else process.env.X402_BINDING_PRIVATE_KEY = previousBindingKey
+    // 201 with the SAME payment id: the replay's rebuilt sign context, not a new intent.
+    expect(res.statusCode).toBe(201)
+    expect(res.json().payment_id).toBe(id)
+    expect(res.json().client_update.required).toBe(true)
+    expect(await tableCounts()).toEqual(before)
+  })
+
+  it.each([
+    ['POST /payments', '/payments', { send_idempotency_key: 'stale-key' }, { ...PAYMENT_BODY, idempotency_key: 'stale-key' }],
+    ['POST /x402/authorize', '/x402/authorize', { x402_idempotency_key: 'stale-key', payment_rail: 'x402' }, { ...X402_BODY, idempotencyKey: 'stale-key' }],
+  ] as const)('%s: a pending row PAST its expires_at is not a replay — refused, and the row is not even lazily expired (#3303 review B1)', async (_label, url, seed, payload) => {
+    const id = await seedIntent(agent, { ...seed, expires_at: new Date(Date.now() - 60 * 60_000).toISOString() })
+    const before = await tableCounts()
+    const rowBefore = await intentRow(id)
+    const res = await app.inject({
+      method: 'POST',
+      url,
+      headers: { authorization: `Bearer ${agent.apiKey}`, 'x-haven-client': MCP_OLD },
+      payload,
+    })
+    expect(res.statusCode).toBe(426)
+    expect(await tableCounts()).toEqual(before)
+    // Nothing touched it: the handler, which would have lazily expired it and
+    // then prepared a fresh payment, never ran.
+    expect(await intentRow(id)).toEqual(rowBefore)
   })
 
   it('an agent on a retired rail keeps its 410 — the real rail seam decides, not the refusal', async () => {

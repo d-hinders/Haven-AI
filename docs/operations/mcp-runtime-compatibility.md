@@ -2330,9 +2330,20 @@ The backend reads the header against one hand-edited table, `CLIENT_COMPAT` in
 | no header, unparseable, not a published package, or a `0.0.0-dev.*` snapshot | nothing, whatever the table says | — |
 
 A below-minimum client on a route that does not refuse it gets
-`client_update.required: true` instead. Sweep, sign, settle, evidence, status
-reads, an idempotent replay of an accepted request, and an agent on a retired
-rail are never refused. The table ships with every threshold `null`, so until an
+`client_update.required: true` instead. Sweep, sign, settle, evidence and
+status reads are never refused, and neither is an agent on a retired rail. An
+idempotent replay is exempt only when the handler would answer it from the
+existing row. A `pending_signature` row past its `expires_at` does not qualify:
+the handler would replace it with a new payment, so that request is refused
+like any new one.
+
+**What a signer minimum does and does not cover.** The signer meets the
+backend only when it signs by `payment_id`: that path runs the sign-context
+read, which is where the refusal lives. A signer handed `typed_data_b64` or
+`x402_expected` directly never contacts the backend before signing, and the
+sign and settle legs are never refused. A signer minimum therefore stops the
+default path and tells the agent what to run, but it does not guarantee that no
+older signer ever signs. The table ships with every threshold `null`, so until an
 owner sets one the only observable change is the header itself.
 
 **How each runtime surfaces it.**

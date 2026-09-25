@@ -60,9 +60,10 @@ describe('X-Haven-Client (#3303)', () => {
     const transport = new HavenApiTransport({
       apiKey: 'sk_agent_test',
       clientIdentity: identity,
-      defaultHeaders: { [HAVEN_CLIENT_HEADER]: '@haven_ai/sdk/99.0.0' },
+      defaultHeaders: { [HAVEN_CLIENT_HEADER]: '@haven_ai/sdk/99.0.0', 'x-haven-client': 'lower/1.0.0' },
     })
-    await transport.withRequestContext({ [HAVEN_CLIENT_HEADER]: 'spoofed/1.0.0' }, () => transport.get('/x'))
+    await transport.withRequestContext({ 'X-HAVEN-CLIENT': 'spoofed/1.0.0' }, () => transport.get('/x'))
+    // Exactly one value — a second spelling would make fetch join them.
     expect(seen[0].get(HAVEN_CLIENT_HEADER)).toBe('@haven_ai/mcp/0.4.0-alpha.0')
   })
 

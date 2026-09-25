@@ -16,6 +16,12 @@ type HavenApiTransportConfig = Pick<
   'apiKey' | 'baseUrl' | 'requestTimeout' | 'defaultHeaders' | 'clientIdentity'
 >
 
+/** Headers minus any case-spelling of `X-Haven-Client` (#3303 review, N1). */
+function withoutClientHeader(headers: Record<string, string>): Record<string, string> {
+  const target = HAVEN_CLIENT_HEADER.toLowerCase()
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== target))
+}
+
 /**
  * Per-dispatch state carried through `AsyncLocalStorage`: the extra headers,
  * and the last `client_update` the backend sent during this dispatch (#3303),
@@ -99,9 +105,11 @@ export class HavenApiTransport {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.apiKey}`,
-          ...this.defaultHeaders,
-          ...contextHeaders,
-          // Last, so neither `defaultHeaders` nor a dispatch context can
+          ...withoutClientHeader(this.defaultHeaders),
+          ...withoutClientHeader(contextHeaders),
+          // Last, and any other spelling of it dropped above (fetch would
+          // JOIN `x-haven-client` and `X-Haven-Client` into one unparseable
+          // value), so neither `defaultHeaders` nor a dispatch context can
           // misname the client; `clientIdentity` is the one way to set it.
           [HAVEN_CLIENT_HEADER]: this.clientIdentity,
         },

@@ -44,9 +44,11 @@ import type { AgentContext } from './agentAuth.js'
  * Two more things skip the refusal and let the handler answer as today:
  * - an agent whose account is on a retired rail — the handler's 410 is the
  *   truer answer, and it is what a retired account has always received;
- * - an idempotent replay of a request already accepted (its key already has a
- *   row for this agent) — the replay returns the first request's result and
- *   mints nothing new.
+ * - an idempotent replay the handler will answer from the existing row
+ *   without preparing anything — the exemption mirrors each handler's own
+ *   replay rule (`clientCompatDeps.findReplay`). A pending row past its
+ *   `expires_at` is NOT one: the handler lazily expires it and prepares a
+ *   fresh payment, so that request is refused like a new one.
  * Both checks run only on the refusal branch, so a request that is not about
  * to be refused costs no query.
  */
@@ -217,15 +219,32 @@ export function clientCompatDeps(table: CompatTable = CLIENT_COMPAT): ClientComp
       return resolveExecutionRail(state).rail === 'delegation' ? 'delegation' : 'retired'
     },
     findReplay: async (store, agentId, key) => {
+      const now = Date.now()
       if (store === 'send_intent') {
-        // Already excludes failed and expired rows: only a live replay is found.
-        return (await findSendIntentByIdempotencyKey(agentId, key)) !== null
+        // Mirrors `findPaymentReplay` (routes/payments.ts): a row in any status
+        // other than pending_signature is answered from the row (a status
+        // replay, or a 409 on a mismatch) — no new work. A pending_signature
+        // row PAST its expires_at is lazily expired by the handler, which then
+        // prepares a fresh payment: that is NOT a replay (#3303 review, B1).
+        const row = await findSendIntentByIdempotencyKey(agentId, key)
+        if (!row) return false
+        if (row.status !== 'pending_signature') return true
+        return new Date(row.expires_at).getTime() >= now
       }
-      // The x402 lookup DOES return an expired row (the handler frees it and
-      // mints a fresh intent), so an expired row is not a replay here: letting
-      // it through would let an outdated client mint new work by reusing a key.
-      const existing = await findX402IntentByIdempotencyKey(agentId, key)
-      return existing !== null && existing.status !== 'expired'
+      // Mirrors `delegationReplay` (modules/x402/replay.ts): only a confirmed
+      // row with a tx hash, or an in-window pending_signature row carrying its
+      // prepared UserOp, is served without minting. Every other status, an
+      // expired row, and a time-expired pending row all fall through to a
+      // fresh intent there, so none of them is a replay here. Anything this
+      // rule is unsure of is refused — the refusal writes nothing.
+      const row = await findX402IntentByIdempotencyKey(agentId, key)
+      if (!row) return false
+      if (row.status === 'confirmed' && row.tx_hash) return true
+      return (
+        row.status === 'pending_signature' &&
+        row.prepared_user_op != null &&
+        new Date(row.expires_at).getTime() >= now
+      )
     },
   }
 }
@@ -273,7 +292,14 @@ export function injectClientUpdate(payload: unknown, contentType: unknown, hint:
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return payload
   if ('client_update' in parsed) return payload
-  return JSON.stringify({ ...(parsed as Record<string, unknown>), client_update: hint })
+  // Splice the field in as TEXT before the closing brace rather than
+  // re-serializing: a parse/stringify round trip reorders integer-like keys
+  // and would lose precision on any integer above 2^53, and the body is the
+  // route's, not this hook's (#3303 review, N2). The parse above only decides
+  // WHETHER to add the field.
+  const end = payload.lastIndexOf('}')
+  const isEmpty = Object.keys(parsed).length === 0
+  return `${payload.slice(0, end)}${isEmpty ? '' : ','}"client_update":${JSON.stringify(hint)}${payload.slice(end)}`
 }
 
 export function registerClientCompatHooks(app: FastifyInstance, deps: ClientCompatDeps = defaultDeps): void {

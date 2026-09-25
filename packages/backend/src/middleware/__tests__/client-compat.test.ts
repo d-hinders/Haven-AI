@@ -287,6 +287,15 @@ describe('hint', () => {
     notes_url: null,
   }
 
+  it('injectClientUpdate splices the field in as text — key order and big integers survive byte-for-byte (#3303 review N2)', () => {
+    const body = '{"2":"b","1":"a","big":12345678901234567890,"nested":{"x":1}}'
+    const out = injectClientUpdate(body, 'application/json', HINT) as string
+    expect(out.startsWith('{"2":"b","1":"a","big":12345678901234567890,"nested":{"x":1},')).toBe(true)
+    expect(JSON.parse(out).client_update).toEqual(HINT)
+    expect(JSON.parse(injectClientUpdate('{}', 'application/json', HINT) as string)).toEqual({ client_update: HINT })
+    expect(JSON.parse(injectClientUpdate('{"a":1}\n', 'application/json', HINT) as string)).toEqual({ a: 1, client_update: HINT })
+  })
+
   it('injectClientUpdate only rewrites a JSON object and never overwrites an existing client_update', () => {
     expect(JSON.parse(injectClientUpdate('{"a":1}', 'application/json; charset=utf-8', HINT) as string)).toEqual({
       a: 1,

@@ -17,6 +17,10 @@ describe('getProvider — no JSON-RPC batching (dRPC free plan)', () => {
     // which surfaced as zero balances and failed relays under concurrent reads.
     expect(getProvider(84532)._getOption('batchMaxCount')).toBe(1)
   })
+
+  it('detects the chain once rather than sending eth_chainId before every call', () => {
+    expect(getProvider(84532)._getOption('staticNetwork')).toBe(true)
+  })
 })
 
 describe('getRelayer — per-chain key (#640 deploy/exec path)', () => {

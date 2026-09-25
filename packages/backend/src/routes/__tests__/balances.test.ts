@@ -205,6 +205,27 @@ describe('balance routes', () => {
     expect(mockGetProvider).not.toHaveBeenCalled()
   })
 
+  it('does not cache a read whose balance leg failed, so the next request re-reads', async () => {
+    // A fresh address: the route's cache is module-level and outlives each test.
+    const account = '0x3333333333333333333333333333333333333333'
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    mockQuery.mockResolvedValue({ rows: [{ id: 'safe-base', chain_id: 8453 }] })
+    // dRPC's free-plan batch refusal (code 31) on the first read only.
+    mockBalanceOf.mockRejectedValueOnce(new Error('Batch of more than 3 requests are not allowed on free plan'))
+
+    const request = () => app.inject({
+      method: 'GET',
+      url: `/balances/${account}?chain_id=8453`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    const degraded = await request()
+    expect(degraded.json().balances[1].balance).toBe('0')
+
+    const recovered = await request()
+    expect(recovered.json().balances[1].balance).toBe('2500000')
+  })
+
   it('does not fall back to another chain when the requested chain is not owned', async () => {
     const token = signToken({ sub: 'user-1', email: 'test@example.com' })
     mockQuery.mockResolvedValueOnce({ rows: [] })

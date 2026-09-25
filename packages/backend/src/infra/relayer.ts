@@ -99,11 +99,20 @@ export async function getRelayerFeeOverrides(
  * flickered to zero, and sweep relays and account deploys failed
  * intermittently (#2769). Providers bill per call either way, so batching
  * saved only round trips.
+ *
+ * `staticNetwork: true` goes with it. Without it, ethers sends an
+ * `eth_chainId` before each call, which used to travel inside the same batch.
+ * With batching off, that would double the request count on a rate-limited
+ * free plan. With it, the chain is detected once, on first use, and then
+ * cached.
  */
 export function getProvider(chainId: number): JsonRpcProvider {
   let provider = providers.get(chainId)
   if (!provider) {
-    provider = new JsonRpcProvider(getChain(chainId).rpcUrl, undefined, { batchMaxCount: 1 })
+    provider = new JsonRpcProvider(getChain(chainId).rpcUrl, undefined, {
+      batchMaxCount: 1,
+      staticNetwork: true,
+    })
     providers.set(chainId, provider)
   }
   return provider

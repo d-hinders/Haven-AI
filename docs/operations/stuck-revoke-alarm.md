@@ -375,7 +375,15 @@ being cancelled.
 
 With every precondition met, the action is a **same-nonce cancel**: a 0-value
 self-transfer from the relayer at that exact nonce, with bumped fees, so that
-the stuck revoke can never mine.
+the stuck revoke can never mine. It is encoded; run it with the stuck row's id:
+
+```bash
+npm run ops:cancel-stuck-lane -w packages/backend -- <outbound-row-id>
+```
+
+It re-checks precondition 4 itself: below the bump cap it refuses with
+`automated_recovery_owns_it` and sends nothing (#2769). It does not check
+preconditions 1, 2, 3 or 5 — those stay yours.
 
 - **Do this even if the transaction has vanished from the mempool.** A dropped
   transaction does not free its own nonce here: its row is still `broadcast`,

@@ -193,8 +193,9 @@ warning. Operator response:
 
    The command re-verifies the row is really the wedge before sending anything
    (fail-closed: it refuses a young/slow broadcast, an already-mined one, a
-   row already cancelled, or a bump-worker-owned submitter — and it closes a
-   mined row from the receipt instead of cancelling). The cancel goes through
+   row already cancelled, or a rebroadcast-safe row the bump worker still owns
+   because its lane is below the bump cap — and it closes a mined row from the
+   receipt instead of cancelling). The cancel goes through
    the outbound pipeline (`infra/outbound-lane-cancel.ts`): nonce, chain and
    wallet come from the stuck row itself, and the cancel gets a durable
    `outbound_txs` record the bump worker reconciles like any other broadcast —
@@ -226,6 +227,38 @@ warning. Operator response:
    them — and the hand-run cancel adds its own hazards (typo'd nonce, wrong
    chain, wrong wallet) that the encoded command removes. Use the command,
    never a bare transaction.
+
+**A capped sweep, deploy or revoke lane (#2769).** Those submitters are
+rebroadcast-safe, so the bump worker fee-replaces them itself, and nothing
+above applies while it does. It stops for good at the cap and logs
+`outbound-bump: nonce lane stuck after 3 replacements — INCIDENT, not
+retrying`. The shape that gets there: a row stamped `broadcast` whose send
+never reached a node, with every re-send failing through an RPC outage. Later
+sends then take N+1, N+2 … and all of them wait behind N. The same command
+clears it, and refuses while the lane is still below the cap:
+
+1. Find the lowest live nonce on the chain. It is the hole; the INCIDENTs
+   above it are its symptoms.
+
+   ```sql
+   SELECT id, nonce, submitter, status, updated_at FROM outbound_txs
+    WHERE chain_id = <chain_id> AND status = 'broadcast'
+    ORDER BY nonce LIMIT 5;
+   ```
+
+   Its nonce should equal the relayer's `eth_getTransactionCount(…,
+   "latest")`. If the chain is already past it, the worker closes the row
+   itself once that is settled (#3293) and there is nothing to cancel.
+2. Read what the cancel releases. Every row above N is released to mine at
+   once; the passport revoke runbook's precondition 5
+   ([`stuck-revoke-alarm.md`](stuck-revoke-alarm.md) §4) is the reason to look
+   first, above all for a `passport_attest`.
+3. Run `npm run ops:cancel-stuck-lane -w packages/backend -- <row-id>` for
+   that row. The burned payload's owner retries on a fresh record: the sweep
+   is re-run, the deploy is re-attempted at the next activation, and
+   `reconcileRevocation` submits a fresh revoke.
+4. Rows above N whose own lanes also capped during the outage stay stuck after
+   N clears. Repeat from step 1 until the lowest live row mines on its own.
 
 > **Fixed by [#1745](https://github.com/d-hinders/Haven-AI/issues/1745) — this
 > procedure used to be more dangerous, and the history is worth keeping.**

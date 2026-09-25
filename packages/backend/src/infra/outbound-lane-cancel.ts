@@ -77,11 +77,45 @@
  * The claim flips the attest to `replaced` at nonce N and a failed cancel
  * broadcast is closed `failed` at nonce N — both are exactly what
  * `countLaneAttemptsAtNonce` counts, so cancels burden the same incident cap
- * the worker alerts on. The trigger itself is NOT gated on the cap: the cap's
- * escalation target is the operator, and this is the operator acting.
+ * the worker alerts on. For a `passport_attest` the trigger itself is NOT
+ * gated on the cap: the cap's escalation target is the operator, and this is
+ * the operator acting.
+ *
+ * ## Rebroadcast-safe rows: only once the worker has given the lane up (#2769)
+ *
+ * A stuck sweep, hybrid deploy, passport revoke or lane cancel is the bump
+ * worker's to fee-replace, so below {@link MAX_BUMPS_PER_NONCE} counted
+ * attempts at its nonce the trigger refuses (`automated_recovery_owns_it`):
+ * bump, don't burn. AT the cap the worker stops for good — "nonce lane stuck
+ * after N replacements — INCIDENT, not retrying" — and names the operator as
+ * the owner. Before #2769 the trigger refused those rows too, so a capped
+ * rebroadcast-safe lane had no encoded recovery at all, only the hand-run
+ * self-send the runbooks forbid (`stuck-revoke-alarm.md` §4 prescribes this
+ * exact cancel for a capped revoke).
+ *
+ * The shape that made it real: a row stamped `broadcast` whose send then
+ * failed never reaches a node. Its failed bump attempts count toward the cap
+ * like any other, so after an RPC outage longer than the worker's three
+ * attempts the row holds nonce N forever, the #2769 ledger walk steps later
+ * sends over it to N+1, N+2 …, and every one of them waits behind a hole no
+ * one fills. Cancelling N — a 0-value self-send, the same transaction the
+ * attest path sends — fills it.
+ *
+ * Burning a capped rebroadcast-safe payload is safe for the same reason the
+ * worker was allowed to re-send it: each owner retries on a fresh record. A
+ * sweep is re-run (the EIP-3009 authorization is single-use, so a late
+ * duplicate reverts and moves nothing); a hybrid deploy is re-attempted at the
+ * next activation (CREATE2, idempotent); `reconcileRevocation` submits a
+ * fresh revoke. Nothing is re-keyed off the burned row's hash.
  */
 
-import { STALE_BROADCAST_SECONDS, REBROADCAST_SAFE_SUBMITTERS, bumpedFees, type BumpDeps } from './outbound-bump-worker.js'
+import {
+  MAX_BUMPS_PER_NONCE,
+  STALE_BROADCAST_SECONDS,
+  REBROADCAST_SAFE_SUBMITTERS,
+  bumpedFees,
+  type BumpDeps,
+} from './outbound-bump-worker.js'
 import { submitRecorded, type SubmitChainDeps } from './outbound-queue.js'
 import type { OutboundTxRow } from './repositories/outbound-txs.js'
 
@@ -134,6 +168,8 @@ export interface LaneCancelDeps {
   markMined: BumpDeps['markMined']
   markFailed: BumpDeps['markFailed']
   markReplaced: BumpDeps['markReplaced']
+  /** Counted attempts at a nonce — the bump worker's own cap arithmetic. */
+  countLaneAttempts: BumpDeps['countLaneAttempts']
   /**
    * Pre-stamp failure close: mark the cancel attempt failed at the nonce AND
    * roll the claim back, ATOMICALLY (review finding — two independent writes
@@ -161,9 +197,10 @@ const refuse = (code: LaneCancelRefusal, detail: string): LaneCancelOutcome => (
 
 /**
  * Cancel the stuck outbound row's nonce lane. Fail-closed: every path that is
- * not "this row is a stale, stamped, still-unmined broadcast from a submitter
- * whose recovery the worker refuses to own" is a refusal or a chain-first
- * close, and nothing reaches the chain on any of them.
+ * not "this row is a stale, stamped, still-unmined broadcast whose recovery
+ * the worker refuses to own — a non-rebroadcast-safe submitter, or any lane
+ * at the worker's bump cap" is a refusal or a chain-first close, and nothing
+ * reaches the chain on any of them.
  */
 export async function cancelStuckOutboundLane(
   recordId: string,
@@ -171,16 +208,6 @@ export async function cancelStuckOutboundLane(
 ): Promise<LaneCancelOutcome> {
   const row = await deps.getRow(recordId)
   if (!row) return refuse('not_found', `no outbound_txs row ${recordId}`)
-
-  // A rebroadcast-safe submitter's stuck row is the bump worker's to replace
-  // (and a lane_cancel row is itself one of those) — cancelling it is the
-  // wrong tool even when the lane cap has tripped: bump, don't burn.
-  if (REBROADCAST_SAFE_SUBMITTERS.has(row.submitter)) {
-    return refuse(
-      'automated_recovery_owns_it',
-      `submitter '${row.submitter}' is rebroadcast-safe — the bump worker fee-replaces it; a cancel would burn a retryable payload`,
-    )
-  }
 
   // Idempotency lives here: after a successful trigger the attest row is
   // `replaced`, so a second trigger refuses. `queued` is not a wedge (the
@@ -197,6 +224,21 @@ export async function cancelStuckOutboundLane(
   }
   if (row.nonce === null || !row.tx_hash) {
     return refuse('not_stamped', 'broadcast row carries no nonce/hash stamp — nothing to cancel at')
+  }
+
+  // A rebroadcast-safe submitter's stuck row (a lane_cancel row is one too)
+  // is the bump worker's to replace while it still will: bump, don't burn.
+  // Once the lane is at the worker's cap the worker has stopped for good and
+  // handed the lane to the operator — this trigger is that hand-off (#2769).
+  if (REBROADCAST_SAFE_SUBMITTERS.has(row.submitter)) {
+    const attempts = await deps.countLaneAttempts(row.chain_id, BigInt(row.nonce))
+    if (attempts < MAX_BUMPS_PER_NONCE) {
+      return refuse(
+        'automated_recovery_owns_it',
+        `submitter '${row.submitter}' is rebroadcast-safe and its lane has ${attempts} of ${MAX_BUMPS_PER_NONCE} attempts — ` +
+          'the bump worker still fee-replaces it; a cancel would burn a retryable payload',
+      )
+    }
   }
 
   // The slow-vs-stuck gate, same threshold as the worker's scan: a young
@@ -345,6 +387,7 @@ export async function productionLaneCancelDeps(): Promise<LaneCancelDeps> {
     markMined: repo.markOutboundTxMined,
     markFailed: (id, reason, nonce) => repo.markOutboundTxFailed(id, reason, undefined, nonce),
     markReplaced: repo.markOutboundTxReplaced,
+    countLaneAttempts: repo.countLaneAttemptsAtNonce,
     failCancelAndRestore: repo.failCancelAttemptAndRestoreLane,
     relayerAddress: (chainId) => getRelayer(chainId).address,
     chain: { getRelayer, withRelayerSendLock },

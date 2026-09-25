@@ -13,10 +13,17 @@
  * The row id is in the worker's alert:
  *   outbound-bump: stuck broadcast from a non-idempotent submitter — NOT replacing it …
  *
+ * Since #2769 it also clears a lane the bump worker has GIVEN UP on: a stuck
+ * sweep, hybrid deploy, passport revoke or lane cancel whose nonce is at the
+ * worker's cap (alert: `outbound-bump: nonce lane stuck after 3 replacements
+ * — INCIDENT, not retrying`). Below the cap those rows are still the worker's
+ * and the trigger refuses them. `ops:cancel-stuck-lane` is the same command
+ * under a name that says so.
+ *
  * Fail-closed: the trigger refuses anything that is not a stale, stamped,
- * still-unmined broadcast from a non-rebroadcast-safe submitter (a young/slow
- * tx, an already-mined one, a row already cancelled, a worker-owned
- * submitter). Triggering twice is safe — the second run is refused. Both race
+ * still-unmined broadcast the worker will not recover (a young/slow tx, an
+ * already-mined one, a row already cancelled, a rebroadcast-safe row still
+ * below the bump cap). Triggering twice is safe — the second run is refused. Both race
  * outcomes after a successful trigger resolve automatically (see
  * `infra/outbound-lane-cancel.ts`); there is nothing further to run by hand.
  *

@@ -32,6 +32,7 @@ import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from './helpers/db-harness.js'
 import { submitRecorded, type SubmitChainDeps } from '../outbound-queue.js'
 import {
+  MAX_BUMPS_PER_NONCE,
   STALE_BROADCAST_SECONDS,
   runOutboundBumpTick,
   type BumpDeps,
@@ -301,6 +302,7 @@ describeDb('operator lane cancel frees the wedge (#1743 Option A)', () => {
       markMined: markOutboundTxMined,
       markFailed: (id, reason, nonce) => markOutboundTxFailed(id, reason, undefined, nonce),
       markReplaced: markOutboundTxReplaced,
+      countLaneAttempts: countLaneAttemptsAtNonce,
       failCancelAndRestore: failCancelAttemptAndRestoreLane,
       relayerAddress: () => wallet.address,
       chain: { getRelayer: (() => wallet) as never, withRelayerSendLock: async (_c, fn) => fn() },
@@ -437,17 +439,60 @@ describeDb('operator lane cancel frees the wedge (#1743 Option A)', () => {
     expect(rows.filter((r) => r.submitter === LANE_CANCEL_SUBMITTER)).toHaveLength(1)
   })
 
-  it("refuses a rebroadcast-safe submitter's stuck row — the bump worker owns those, cancel would burn a retryable payload", async () => {
+  /** A stale `broadcast` sweep at STUCK_NONCE, with `failedAttempts` failed
+   *  bump attempts already counted at that nonce (the worker's cap input). */
+  async function insertStuckSweep(failedAttempts: number): Promise<OutboundTxRow> {
     const sweep = await enqueueOutboundTx({ chainId: CHAIN, submitter: 'sweep', toAddress: EAS, data: '0x' + 'ff'.repeat(40) })
     const stamped = await markOutboundTxBroadcast(sweep.id, { txHash: '0x' + '77'.repeat(32), nonce: BigInt(STUCK_NONCE) })
     await db.query(`UPDATE outbound_txs SET updated_at = NOW() - INTERVAL '10 minutes' WHERE id = $1`, [stamped!.id])
+    for (let i = 0; i < failedAttempts; i++) {
+      const attempt = await enqueueOutboundTx({ chainId: CHAIN, submitter: 'sweep', toAddress: EAS, data: '0x' + 'ff'.repeat(40) })
+      await markOutboundTxFailed(attempt.id, 'bump broadcast failed: fixture', undefined, BigInt(STUCK_NONCE))
+    }
+    return stamped!
+  }
+
+  it("refuses a rebroadcast-safe submitter's stuck row BELOW the bump cap — the bump worker still owns it, cancel would burn a retryable payload", async () => {
+    const sweep = await insertStuckSweep(MAX_BUMPS_PER_NONCE - 1)
     const { deps, broadcasts } = cancelHarness()
 
     const result = await cancelStuckOutboundLane(sweep.id, deps)
     expect(result.outcome).toBe('refused')
-    if (result.outcome === 'refused') expect(result.code).toBe('automated_recovery_owns_it')
+    if (result.outcome === 'refused') {
+      expect(result.code).toBe('automated_recovery_owns_it')
+      expect(result.detail).toContain(`${MAX_BUMPS_PER_NONCE - 1} of ${MAX_BUMPS_PER_NONCE}`)
+    }
     expect(broadcasts).toEqual([])
-    expect((await rowsFor(CHAIN))[0].status).toBe('broadcast')
+    expect((await rowsFor(CHAIN)).find((r) => r.id === sweep.id)!.status).toBe('broadcast')
+  })
+
+  it('#2769: cancels a rebroadcast-safe row AT the bump cap — the worker gave the lane up, and a hole there blocks every later nonce', async () => {
+    // The #2769 shape: stamped, never reached a node, and every bump attempt
+    // failed during the outage, so the worker stopped for good.
+    const sweep = await insertStuckSweep(MAX_BUMPS_PER_NONCE)
+    const { deps, broadcasts, wallet } = cancelHarness()
+
+    // Positive control: the worker really has walked away from this lane.
+    const tickBroadcasts: unknown[] = []
+    const tick = await runOutboundBumpTick(CHAIN, realRepoDeps(tickBroadcasts), log)
+    expect(tick.alerted).toBe(1)
+    expect(tickBroadcasts).toEqual([])
+
+    const result = await cancelStuckOutboundLane(sweep.id, deps)
+    if (result.outcome !== 'cancel_broadcast') throw new Error(`expected cancel_broadcast, got ${JSON.stringify(result)}`)
+    expect(result.nonce).toBe(String(STUCK_NONCE))
+    expect(broadcasts).toHaveLength(1)
+    expect(broadcasts[0].nonce).toBe(STUCK_NONCE)
+    expect(broadcasts[0].to?.toLowerCase()).toBe(wallet.address.toLowerCase())
+    expect(broadcasts[0].value).toBe(0n)
+
+    const rows = await rowsFor(CHAIN)
+    const cancel = rows.find((r) => r.submitter === LANE_CANCEL_SUBMITTER)!
+    const stuck = rows.find((r) => r.id === sweep.id)!
+    expect(stuck.status).toBe('replaced')
+    expect(stuck.replaced_by).toBe(cancel.id)
+    expect(cancel.status).toBe('broadcast')
+    expect(cancel.nonce).toBe(String(STUCK_NONCE))
   })
 
   it('a PRE-STAMP failure closes the cancel attempt failed AT the nonce and ROLLS THE CLAIM BACK — the wedge stays loud and the trigger re-runnable', async () => {

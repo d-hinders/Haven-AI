@@ -592,20 +592,24 @@ describe('block shapes and globs (#3309)', () => {
     assert.equal(parseVerdicts([`intro\r\ndesign-review verdict: ${BLOCK}\r\n`]).length, 1)
   })
 
-  test('adversarial lines of boxes, tags and bars parse in linear time', () => {
-    const lines = [
-      '[ ] '.repeat(5000),
-      '- [ ] [ ] '.repeat(2000),
-      '| [ ] [ ] '.repeat(2000) + '| x |',
-      '|'.repeat(10000),
-      '<'.repeat(50000),
-      ':'.repeat(20000) + ' design-review verdict: x',
-      '<p>'.repeat(3000) + 'design-review verdict',
-    ]
+  test('adversarial runs parse in linear time — raw, in a strict line, in a loose line, before the label', () => {
+    // Every run a regex here could go super-linear on, 60k long (a comment
+    // holds 65,536): blank lines once took 28 s through `^\s*` (#3309).
+    const runs = [' ', '*', '.', '](', '\n', '<', '[ ] ', '|', ':', '_', '-', '@', ',', '> ', '#']
     const t0 = performance.now()
-    parseVerdicts(lines)
+    for (const c of runs) {
+      const r = c.repeat(Math.ceil(60000 / c.length)).slice(0, 60000)
+      parseVerdicts([
+        r,
+        `design-review verdict: changes requested @ cc00000 -- baselines: ${r}x`,
+        `design-review verdict: ${r}x`,
+        `### design-review verdict: changes requested @ cc00000 -- baselines: ${r}x`,
+        `${r} design-review verdict: changes requested`,
+      ])
+      parseDeclarations([r, `baseline-change: ${r} -- ${r}`])
+    }
     const ms = performance.now() - t0
-    assert.ok(ms < 500, `took ${ms.toFixed(0)} ms`)
+    assert.ok(ms < 2000, `took ${ms.toFixed(0)} ms`)
   })
 
   test('a glob block in a table row is read as both at once', () => {
@@ -676,6 +680,30 @@ describe('block shapes and globs (#3309)', () => {
       assert.equal(verifiedFor('b.png', [...passB, ...block], ctx), true, list)
     }
     for (const glob of GLOBS) assert.equal(listHasGlob(glob), true, glob)
+  })
+
+  test('a `*` around anything but a whole .png name is a glob — per name, and in mixed line emphasis', () => {
+    for (const list of ['*.png*', '**.png**', '*-desktop.png*', '*top*', 'a.png, *.png*', '*desktop.png', '** **']) {
+      const blocks = parseVerdicts([`design-review verdict: changes requested @ cc00000 -- baselines: ${list}`])
+      assert.ok(blocks[0].names.includes('*'), `${list}: ${JSON.stringify(blocks[0].names)}`)
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, list)
+    }
+    for (const line of [
+      '*_design-review verdict: changes requested @ cc00000 -- baselines: *.png_*',
+      '_*design-review verdict: changes requested @ cc00000 -- baselines: *.png*_',
+      '*design-review verdict:* changes requested @ cc00000 -- baselines: b.png*',
+    ]) {
+      const blocks = parseVerdicts([line])
+      assert.ok(blocks[0].names.includes('*'), `${line}: ${JSON.stringify(blocks[0].names)}`)
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, line)
+    }
+  })
+
+  test('the pass side reads exactly as at base — no emphasis stripping there', () => {
+    // `__…a.png__` named `a.png__.png` at base, which covers nothing.
+    const [pass] = parseVerdicts(['__design-review verdict: approved @ cc00000 -- a.png__'])
+    assert.equal(pass.passing, true)
+    assert.equal(verifiedFor('a.png', [pass], ctx), false)
   })
 
   test('regression guard: every committed baseline name round-trips and is no glob', () => {
@@ -935,7 +963,7 @@ describe('mutation proofs (each gating branch can fire)', () => {
       'design-review verdict: changes requested @ cc00000 -- baselines: `topbar-desktop.png`',
     ])
     assert.equal(evaluate(ticked).verdict, 'fail')
-    const mutated = await mutant(`const kept = rawPart.replace(/[^A-Za-z0-9._\\-/*]/g, '').replace(/^\\.+|\\.+$/g, '').toLowerCase()`, `const kept = rawPart`)
+    const mutated = await mutant(`const kept = trimChars(rawPart.replace(/[^A-Za-z0-9._\\-/*]/g, ''), '.').toLowerCase()`, `const kept = rawPart`)
     assert.equal(mutated(ticked).verdict, 'pass')
   })
 
@@ -999,14 +1027,14 @@ describe('mutation proofs (each gating branch can fire)', () => {
       'design-review verdict: changes requested @ cc00000 -- baselines: *.png',
     ])
     assert.equal(evaluate(globBlock).verdict, 'fail')
-    const mutated = await mutant(`if (!passing && !names.includes('*') && listHasGlob(listText))`, `if (false)`)
+    const mutated = await mutant(`if (!passing && !names.includes('*') && listHasGlob(listText, lineOpen))`, `if (false)`)
     assert.equal(mutated(globBlock).verdict, 'pass')
   })
 
   test('M13: the glob reading is blocks-only — mutant widens a pass too', async () => {
     const globPass = conflict(['design-review verdict: passed @ bb00000 -- baselines: *.png'])
     assert.equal(evaluate(globPass).verdict, 'fail')
-    const mutated = await mutant(`if (!passing && !names.includes('*') && listHasGlob(listText))`, `if (!names.includes('*') && listHasGlob(listText))`)
+    const mutated = await mutant(`if (!passing && !names.includes('*') && listHasGlob(listText, lineOpen))`, `if (!names.includes('*') && listHasGlob(listText, lineOpen))`)
     assert.equal(mutated(globPass).verdict, 'pass')
   })
 
@@ -1026,7 +1054,7 @@ describe('mutation proofs (each gating branch can fire)', () => {
       '### design-review verdict: changes requested @ cc00000 -- baselines: *',
     ])
     assert.equal(evaluate(starHeading).verdict, 'fail')
-    const mutated = await mutant("replace(/[\\s`_]+$/, '')", "replace(/[\\s`*_]+$/, '')")
+    const mutated = await mutant("' \\t\\r\\n\\f\\v`_').trimStart()", "' \\t\\r\\n\\f\\v`_*').trimStart()")
     assert.equal(mutated(starHeading).verdict, 'pass')
   })
 

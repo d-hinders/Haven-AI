@@ -66,9 +66,11 @@ describeDb('label routes (#3167)', () => {
     })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     // Both new modules are born ENFORCED in `src/index.ts` (#3028 rollout);
-    // the suite runs every case under enforcement.
+    // the suite runs every case under enforcement. The production shape
+    // since the #3032 flip: mode `enforce` — the list decides only under it
+    // (`off` is now the global kill switch).
     installRequestValidation(app, {
-      mode: 'off',
+      mode: 'enforce',
       enforcedModules: ['routes/labels.ts', 'routes/agent-labels.ts'],
     })
     await app.register(agentRoutes, { prefix: '/agents' })

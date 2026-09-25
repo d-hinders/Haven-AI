@@ -467,11 +467,17 @@ export const config = {
   // HAVEN_CONNECTOR_CHANNEL above: a typo must not silently fall back to
   // "granted" and look like the feature is off when it is merely misspelled.
   accountingEntitlementMode: parseAccountingEntitlementMode(process.env.HAVEN_ACCOUNTING_ENTITLEMENT_MODE),
-  // The request-validation plugin's mode (#3029). Default `shadow` — the
-  // observation harness — until slice 4 of epic #3028 flips the default to
-  // `enforce`. Boot-read on purpose: the injected schemas and attachValidation
-  // are fixed at route registration, so a mode change is a restart, not a
-  // live kill switch (documented in .env.example and the runbook).
+  // The request-validation plugin's mode (#3029, epic #3028). Default
+  // `enforce` SINCE SLICE 4's FLIP (#3032): the epic's rollout is complete —
+  // every constrained module is listed in index.ts's `enforcedModules`, the
+  // ratchet sits at zeros, and the connector/CLI/dashboard request shapes
+  // were corrected and proven against the published clients. `off` and
+  // `shadow` remain the operator kill switches, both GLOBAL (a listed module
+  // does not escape them). Boot-read on purpose: the injected schemas and
+  // attachValidation are fixed at route registration, so a mode change is a
+  // restart, not a live kill switch (documented in .env.example and the
+  // runbook). Per-module rollback is a LIST edit, not a mode change (epic
+  // decision 6).
   requestValidationMode: parseRequestValidationMode(process.env.HAVEN_REQUEST_VALIDATION),
   // Cadence of the background retry sweep (#2866): every tick re-feeds the
   // failed / skipped / stale-pending sync rows whose backoff has elapsed. A
@@ -590,18 +596,22 @@ export function parseAccountingEntitlementMode(raw: string | undefined | null): 
 export type RequestValidationMode = 'off' | 'shadow' | 'enforce'
 
 export function parseRequestValidationMode(raw: string | undefined | null): RequestValidationMode {
-  if (raw === undefined || raw === null) return 'shadow'
+  if (raw === undefined || raw === null) return 'enforce'
   const value = raw.trim()
-  if (value === '') return 'shadow'
+  if (value === '') return 'enforce'
   if (value === 'off' || value === 'shadow' || value === 'enforce') return value
   throw new Error(
     `HAVEN_REQUEST_VALIDATION is set to ${JSON.stringify(raw)}; it must be "off" ` +
-      '(nothing runs, except an enforcedModules module), "shadow" (log and ' +
-      'count would-be refusals; the body is restored, so the handler reads ' +
-      'what the client sent) ' +
-      'or "enforce" (refuse with the 400 envelope). Refusing to start rather than ' +
-      'falling back, because a misspelled "enforce" on prod would silently mean ' +
-      '"shadow" and look like the gate is on when it is merely misspelled. ' +
-      'A mode change is a RESTART: the schemas are fixed at route registration.',
+      '(the GLOBAL kill switch: nothing runs, `enforcedModules` included — set it ' +
+      'back to "enforce" to restore the gate), "shadow" (the GLOBAL observation ' +
+      'switch: log and count would-be refusals on every constrained route; the ' +
+      'body is restored, so the handler reads what the client sent) ' +
+      'or "enforce" (the DEFAULT since epic #3028 slice 4: refuse with the 400 ' +
+      "envelope on the modules index.ts's `enforcedModules` lists — the per-module " +
+      'rollback list; one misbehaving module returns to shadow by a LIST edit, ' +
+      'not a global switch). Refusing to start rather than falling back, because ' +
+      'a misspelled "enforce" on prod would silently mean "shadow" and look like ' +
+      "the gate is on when it is merely misspelled. A mode change is a RESTART: " +
+      'the schemas are fixed at route registration.',
   )
 }

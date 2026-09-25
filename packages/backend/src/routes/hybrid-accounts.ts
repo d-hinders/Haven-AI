@@ -82,13 +82,16 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     }
     const parsedPasskeys: PasskeySigner[] = []
     for (const pk of passkeys ?? []) {
-      if (!pk.key_id || typeof pk.key_id !== 'string') {
-        return reply.code(400).send({ error: 'each passkey needs a key_id' })
-      }
+      // `key_id` string-ness and the 0x-hex coordinate SHAPES are the request
+      // schema's (#3032: this file is enforced — `required: ['key_id','x','y']`
+      // and the coordinate patterns). What stays here is SEMANTIC: the
+      // coordinates must PARSE as BigInt, which ajv's pattern alone does not
+      // prove. The cast restates the schema's guarantee for the compiler —
+      // same idiom as the `owner_address` cast below.
       if (!pk.x || !pk.y || !HEX_COORD_RE.test(pk.x) || !HEX_COORD_RE.test(pk.y)) {
         return reply.code(400).send({ error: 'each passkey needs 0x-hex x and y coordinates' })
       }
-      parsedPasskeys.push({ keyId: pk.key_id, x: BigInt(pk.x), y: BigInt(pk.y) })
+      parsedPasskeys.push({ keyId: pk.key_id as string, x: BigInt(pk.x), y: BigInt(pk.y) })
     }
     if (!owner_address && parsedPasskeys.length === 0) {
       return reply.code(400).send({ error: 'at least one owner (owner_address or passkeys) is required' })

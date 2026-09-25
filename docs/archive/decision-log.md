@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: archived
 covers: []  # narrative — no direct code mirror
-last-verified: "2026-09-19"
+last-verified: "2026-09-25"
 ---
 
 # Decision Log
@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-09-25 | Request validation enforces by default; `off`/`shadow` are global kill switches, `enforcedModules` is the per-module rollback | #3032, #3028, #3223 |
 | 2026-09-19 | The fix→review loop gets a fourth exit: a prose-only round cannot loop forever | #3158, PR #3156 |
 | 2026-09-11 | Accounting connections: self-serve, provider-generic, dev-only; Fortnox hardened | #2858, #2872 |
 | 2026-09-04 | `latest` dist-tag moves onto every release, prereleases included | #2536, #2647 |
@@ -49,6 +50,33 @@ named where they belong below.
 | 2026-07-12 | Session rail retired outright; AllowanceModule import-only | #834 (AllowanceModule half superseded) |
 | — | Approval-queue history readability waived | #2021, #2055 |
 | — | Historical: POC scope and phased roadmap | — |
+
+---
+
+## 2026-09-25 — request validation enforces by default; the kill switches are global (#3032)
+
+The epic #3028 rollout ended where it began (#3029): the request gate runs
+without an operator flag. `HAVEN_REQUEST_VALIDATION` unset (or empty) boots
+`enforce`; `off` and `shadow` remain the operator kill switches and are
+GLOBAL — an `enforcedModules` entry no longer escapes them. The pre-flip
+override existed so slice 1's proof module could enforce under a shadow
+default; once the default flipped, a list that silently re-enforced route
+files behind an `off` switch would make the switch lie. `enforcedModules`
+itself stays (decision 6) as the per-module ROLLBACK list: removing one file
+returns exactly that module to shadow without a global switch in front of
+every payment route.
+
+Evidence per decision 8 and the #3223 ruling: operations a shadow reading
+could prove (traffic in the 2026-09-22 window) flipped on that reading; the 33
+of slice 4's 36 operations it could never prove flipped on per-route TEST
+evidence — an off-spec body answers the 400 envelope before the handler, a
+conformant one reaches it — the same instrument decision 8 allowed for slice
+2. The two route modules that still authenticated after request validation
+(`agent-passports.ts`, `agent-connection-setups.ts`) moved auth to `onRequest`
+first (#3276), so an anonymous off-spec request answers 401 before any 400.
+The "is a 400" refusal rule is stated once, in the request-validation
+plugin's `schemaErrorFormatter` (`packages/backend/src/openapi/spec.ts`
+carries the schema-side wording; no route file restates it).
 
 ---
 

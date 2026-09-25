@@ -13,26 +13,39 @@
  * enforcement lands
  * BEHIND A MODE, shadow-first (owner decision #2, epic #3028):
  *
- *   off     — no schema is injected and no route is observed, EXCEPT a
- *             module in `enforcedModules`, which stays enforced whatever
- *             the mode is
+ *   off     — nothing runs anywhere: no schema is injected and no route is
+ *             observed. The GLOBAL kill switch (#3032: an `enforcedModules`
+ *             entry does not override it — an operator setting `off` is
+ *             stopping this layer outright)
  *   shadow  — every route's request is compiled against the spec; a refusal is
  *             logged once (`request_validation.would_refuse`) and counted, and
  *             the request CONTINUES on the normal path — no behaviour change on
- *             any currently-accepted request. That last clause was ASPIRATIONAL
- *             until #3082: ajv's `coerceTypes` rewrites the body in place, so
- *             shadow was editing the payload it claimed only to measure and a
- *             `null` reached handlers as `''`. It is now enforced for the
- *             request BODY by a snapshot/restore pair (see the hooks below),
- *             not merely stated. Querystring and params coercion deliberately
- *             stays, so the promise still reads narrower than it sounds — and
- *             a body that coercion made VALID is now counted as
- *             `request_validation.would_coerce` rather than passing unseen.
- *   enforce — a refused request gets the 400 envelope instead of the route
+ *             any currently-accepted request. The GLOBAL observation switch,
+ *             listed modules included (#3032). That last clause was
+ *             ASPIRATIONAL until #3082: ajv's `coerceTypes` rewrites the body
+ *             in place, so shadow was editing the payload it claimed only to
+ *             measure and a `null` reached handlers as `''`. It is now
+ *             enforced for the request BODY by a snapshot/restore pair (see
+ *             the hooks below), not merely stated. Querystring and params
+ *             coercion deliberately stays, so the promise still reads narrower
+ *             than it sounds — and a body that coercion made VALID is now
+ *             counted as `request_validation.would_coerce` rather than passing
+ *             unseen.
+ *   enforce — the DEFAULT since slice 4's flip (#3032). A refused request on
+ *             a module listed in `enforcedModules` gets the 400 envelope; a
+ *             module NOT listed falls back to shadow behaviour (log and
+ *             continue), which is the per-module rollback: removing one file
+ *             from the list returns exactly that module to observation without
+ *             a global switch in front of every payment route (epic decision
+ *             6). After the flip the list covers every constrained module, so
+ *             the fallback is the exception path a rollback deliberately
+ *             creates — never the default state of a new module (new modules
+ *             are born enforced; the ratchet keeps `shadow: 0` everywhere).
  *
- * Per-module `enforcedModules` flips a module regardless of the mode (the
- * proof module rides this in slice 1); slices 2–4 flip the rest after their
- * shadow counters have been read on dev.
+ * Per-module `enforcedModules` flips a module under `enforce` (and before the
+ * flip did so under EVERY mode — the proof module rode that in slice 1); the
+ * epic's slices 2–4 grew the list module by module after their shadow
+ * readings.
  *
  * ## Why the flip is keyed on the route FILE (#3135, epic #3028 decision 7)
  *
@@ -147,18 +160,25 @@ export function resolveParameter(parameter: Json): Json | undefined {
 
 export interface RequestValidationOptions {
   /**
-   * Boot-read mode. `off` observes nothing OUTSIDE `enforcedModules`, which
-   * stays enforced whatever the mode is; `shadow` logs and continues;
-   * `enforce` refuses.
+   * Boot-read mode. `off` runs NOTHING anywhere (the global kill switch —
+   * `enforcedModules` does not override it, #3032); `shadow` observes
+   * everything globally and refuses nothing; `enforce` (the DEFAULT since
+   * slice 4's flip) refuses on the modules listed in `enforcedModules` and
+   * falls back to shadow behaviour elsewhere — the per-module rollback list.
    */
   mode: RequestValidationMode
   /**
-   * Route FILES flipped to enforce REGARDLESS of the mode (and regardless of
-   * `off`): the schema is injected and a refusal is the 400 envelope. Keys are
-   * `'routes/<file>.ts'`, or the bare `'index.ts'` for the routes declared on
-   * the app itself — the same keys the ratchet baseline uses. Two modules
-   * sharing a mount prefix flip independently (header § *Why the flip is keyed
-   * on the route FILE*).
+   * Route FILES enforced under `mode: 'enforce'`: the schema is injected and
+   * a refusal is the 400 envelope. Keys are `'routes/<file>.ts'`, or the bare
+   * `'index.ts'` for the routes declared on the app itself — the same keys the
+   * ratchet baseline uses. Two modules sharing a mount prefix flip
+   * independently (header § *Why the flip is keyed on the route FILE*).
+   *
+   * ROLLBACK LIST since the flip (#3032, epic decision 6): with the default
+   * `enforce`, deleting an entry returns exactly that module to shadow
+   * behaviour — the response to one misbehaving module — instead of a global
+   * switch in front of every payment route. Under `off` or `shadow` the list
+   * is INERT: those modes are global.
    */
   enforcedModules?: string[]
 }
@@ -587,11 +607,28 @@ export function installRequestValidation(app: FastifyInstance, options: RequestV
     const openApiPath = fastifyPathToOpenApi(prefix, ro.routePath ?? routeOptions.url)
     const method = String(routeOptions.method).toLowerCase()
 
-    // The enforcement decision is keyed on the route FILE, so it has to be
-    // resolved BEFORE the `off` early-return — an enforced module stays
-    // enforced whatever the mode is.
-    const enforced = moduleIsEnforced(routeModuleFor(method, openApiPath), enforcedModules)
-    if (mode === 'off' && !enforced) return
+    // The enforcement decision after the flip (#3032, epic #3028 slice 4):
+    //
+    //   mode `off`     — the GLOBAL kill switch: nothing runs, and an entry in
+    //                    `enforcedModules` does NOT override it. An operator
+    //                    setting `off` is stopping the layer outright — a list
+    //                    that silently re-enforced 36 route files behind their
+    //                    back would make the switch lie.
+    //   mode `shadow`  — the GLOBAL observation switch: every constrained
+    //                    route logs and continues, listed or not.
+    //   mode `enforce` — the DEFAULT since the flip: listed modules refuse
+    //                    (the 400 envelope); an unlisted module falls back to
+    //                    observation, which is the per-module ROLLBACK (epic
+    //                    decision 6): removing one file from the list returns
+    //                    exactly that module to shadow behaviour without a
+    //                    global switch in front of every payment route.
+    //
+    // Before the flip the list overrode every mode (slice 1–3 semantics — the
+    // proof module had to refuse while the world was still in shadow — pinned
+    // then by tests that this slice re-pins); the flip is what makes the
+    // issue's "kill switches — global" true.
+    if (mode === 'off') return
+    const enforced = mode === 'enforce' && moduleIsEnforced(routeModuleFor(method, openApiPath), enforcedModules)
 
     const pathItem = spec.paths[openApiPath]
     const operation = pathItem?.[method] as Json | undefined

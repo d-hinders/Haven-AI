@@ -193,7 +193,7 @@ export type SignerChangeFailure = { status: 409 | 400 | 502; error: string; deta
  * Shape-check the signed envelope a submit must carry.
  *
  * Callable BEFORE the account is resolved, because that is the order the
- * agent-scoped route has always used: a malformed body is a 400 whether or
+ * agent-scoped route has always used: a malformed body answers 400 whether or
  * not the account's signer config happens to load. Extracting the checks
  * without preserving that precedence would have silently turned those 400s
  * into 409s (caught in review).

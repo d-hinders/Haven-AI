@@ -287,8 +287,8 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
   )
 
   // PATCH /accounting/connections/:provider/settings { suggested_account?,
-  // auto_feed? } — exactly those two keys (#2867); anything else is a 400
-  // that names the key.
+  // auto_feed? } — exactly those two keys (#2867); anything else draws the
+  // 400 envelope, naming the key.
   app.patch<{ Params: ProviderParams; Body: unknown }>(
     '/connections/:provider/settings',
     { onRequest: [authMiddleware, requireAccountingFeature] },

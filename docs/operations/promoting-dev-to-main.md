@@ -7,6 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - docs/operations/dev-environment.md
+  - packages/backend/src/index.ts
   - scripts/release-scope.mjs
 last-verified: "2026-09-09"
 ---
@@ -232,6 +233,24 @@ so this is a rule to point at rather than a question to ask the release runner.
 
       Use a key distinct from the dev/QA ones, so usage is attributable and
       either can be rotated alone.
+
+- [ ] **Request validation is ENFORCING in prod since the #3032 flip** (epic
+      #3028 slice 4): with `HAVEN_REQUEST_VALIDATION` unset the backend boots
+      in `enforce` and off-spec requests to any enforced module get the 400
+      envelope. Prod sets no value — verify it stays that way (a stale
+      `HAVEN_REQUEST_VALIDATION=shadow` from the rollout era would silently
+      hold prod in observation). The per-module kill path is a **list edit**
+      (`packages/backend/src/index.ts`, `enforcedModules`): removing one route
+      file there returns exactly that module to shadow on the next deploy —
+      the response to one misbehaving module, per epic decision 6 — while
+      `HAVEN_REQUEST_VALIDATION=off` / `shadow` are the GLOBAL switches (a
+      listed module does not escape them; a mode change is a restart). The
+      shadow reading did not prove three machine-payment routes
+      (`GET /payments`, `GET /payments/{id}/receipt`,
+      `POST /machine-payments/reconciliation-events`); they are enforced on
+      test evidence per the #3223 owner decision, and a real
+      reconciliation-event refusal in prod is a client to fix, not the gate to
+      loosen.
 
 - [ ] **Prod smoke:** load the prod app (no `DEV` badge), check login + balances,
       and run one small real payment / x402 happy path as a canary.

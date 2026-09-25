@@ -236,7 +236,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const agent = await loadOwnedDelegationAgent(request.params.id, sub)
       if (!agent) return reply.code(404).send({ error: 'Agent not found' })
       // Envelope first, config second — the precedence this route has always
-      // had: a malformed body is a 400 regardless of config state.
+      // had: a malformed body answers 400 regardless of config state.
       const envelope = validateSignedSubmission(request.body ?? {})
       if (!envelope.ok) {
         return reply.code(envelope.failure.status).send({ error: envelope.failure.error })

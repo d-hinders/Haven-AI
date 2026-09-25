@@ -316,41 +316,44 @@ Isolation rules that are non-negotiable for a payments product:
   that deterministic test so the normal 15-minute merchant-report grace stays
   in force; never set it in production.
 - **Request-validation mode** — `HAVEN_REQUEST_VALIDATION` on the backend is
-  `off` (no schema is injected — EXCEPT on an `enforcedModules` module,
-  which stays enforced regardless of the mode) | `shadow` (default: log and
-  count would-be refusals;
-  since #3082 the request BODY is restored after validation so nothing the
-  handler reads changes, and a body that coercion alone made valid is counted
-  as `would_coerce`. Typed querystring/params are still coerced — that is what
-  makes them usable) | `enforce` (off-spec requests get the documented 400
-  envelope). Per the OpenAPI spec, via the request-validation plugin
-  (#3029, epic #3028).
+  `enforce` (**default since slice 4's flip, #3032**: off-spec requests on the
+  modules `index.ts`'s `enforcedModules` lists are refused with the documented
+  400 envelope; the list is the per-module ROLLBACK — epic decision 6 — so
+  removing one route file there returns exactly that module to shadow
+  behaviour, the response to one misbehaving module) | `shadow` (the GLOBAL
+  observation switch: log and count would-be refusals on every constrained
+  route, listed or not; since #3082 the request BODY is restored after
+  validation so nothing the handler reads changes, and a body that coercion
+  alone made valid is counted as `would_coerce`. Typed querystring/params are
+  still coerced — that is what makes them usable) | `off` (the GLOBAL kill
+  switch: nothing runs, `enforcedModules` included). Per the OpenAPI spec, via
+  the request-validation plugin (#3029, epic #3028). Any other value refuses
+  the boot.
 
-  **`enforce` is not global, despite the name.** A route is enforced only when
-  the route FILE that declares it is in the plugin's `enforcedModules` —
-  `mode` gates the `off` early-return and the counters and nothing else.
-  Since #3030 (epic #3028 slice 2) `index.ts` lists **every non-money route
-  module** there — the four already-enforced ones (`contacts`, `merchants`,
-  `labels`, `agent-labels`), the 22 slice-2 files (`accounting*`,
-  `agent-activity`, `analytics*`, `auth`, `balances`, `catalog*`,
-  `dashboard`, `discovery`, `health`, `openapi`, `passkeys`,
-  `passport-verify`, `portfolio`, `safe-deploy`, `transactions`, `user`,
-  `user-accounts*`, plus `accounting-webhooks`, which #3196 landed in the
-  slice's base commit) and the bare `'index.ts'` for the inline `GET /` and
-  `GET /chains`. `routes/x402.ts` joined them in slice 3
-  (#3031) — the first money-path module, and the only one the 2026-09-22
-  shadow reading proved conformant on every operation. Eight money-path
-  modules are still shadowed (`payments`, `machine-payments`, `agents`,
-  `agent-delegations`, `agent-rekey`, `agent-passports`,
-  `agent-connection-setups`, `hybrid-accounts` — the rest of slices 3–4,
-  #3031/#3032). The reading printed NOT PROVEN for 48 of their operations —
-  15 in slice 3's three remaining modules, 33 in slice 4's five — so on dev an off-spec request to any
-  other route answers the 400 envelope. Slice 2 flipped on the epic's
-  fallback (owner decision 2026-09-21 on #3028): the in-process shadow
-  counter resets on every deploy and carried no per-route traffic (until
-  #3208), so it could not prove the 22 modules; each module's route tests (off-spec → the
-  envelope, conformant → unchanged) are the instrument, and `enforce` on
-  dev is the reading. The variable is not the switch that widens the list.
+  **The list, not the mode, names the enforced routes.** Since #3030 (epic
+  #3028 slice 2) `index.ts` lists **every non-money route module** there —
+  the four already-enforced ones (`contacts`, `merchants`, `labels`,
+  `agent-labels`), the 22 slice-2 files (`accounting*`, `agent-activity`,
+  `analytics*`, `auth`, `balances`, `catalog*`, `dashboard`, `discovery`,
+  `health`, `openapi`, `passkeys`, `passport-verify`, `portfolio`,
+  `safe-deploy`, `transactions`, `user`, `user-accounts*`, plus
+  `accounting-webhooks`, which #3196 landed in the slice's base commit) and
+  the bare `'index.ts'` for the inline `GET /` and `GET /chains`.
+  `routes/x402.ts` joined them in slice 3 (#3031) — the first money-path
+  module, and the only one the 2026-09-22 shadow reading proved conformant on
+  every operation. Slice 4 (#3032) added the last five (`agents`,
+  `agent-rekey`, `agent-connection-setups`, `agent-passports`,
+  `hybrid-accounts`) and flipped the default: every constrained module is
+  listed and the mode defaults to `enforce`. The slice-3/4 modules stayed
+  shadowed until then because the reading printed NOT PROVEN for 48 of their
+  operations — 15 in slice 3's three remaining modules, 33 in slice 4's five —
+  and the owner then ruled (#3223, 2026-09-24, on the epic) that routes a
+  shadow reading can never prove are enforced on TEST evidence (per-route
+  off-spec → envelope, conformant → unchanged), the same instrument decision 8
+  allowed slice 2. Before the flip the list overrode every mode (the proof
+  module had to refuse while the world was still in shadow); since the flip
+  `off` and `shadow` are global — an entry in the list cannot escape either
+  kill switch, which is what makes them switches.
 
   **Keyed on the FILE, not the mount prefix, since #3135** (epic #3028
   decision 7). A prefix could not express the epic's slice partition:

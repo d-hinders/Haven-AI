@@ -498,7 +498,8 @@ describe('the raw-body parser is route-scoped', () => {
 describe('the shadow-mode validation plugin must not corrupt the raw body (B1, PR #3196 review)', () => {
   /**
    * The wiring that would have gone red on the B1 head: the ROOT-SCOPE
-   * request-validation plugin (as `index.ts` installs it, default shadow),
+   * request-validation plugin (as `index.ts` installs it — default `shadow`
+   * at the time; `enforce` since the #3032 flip),
    * THEN the webhook route. The bare-`Fastify()` mounts above never ran the
    * plugin, which is exactly why all of them stayed green while every
    * production delivery was refused.

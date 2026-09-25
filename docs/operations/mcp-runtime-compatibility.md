@@ -3046,6 +3046,26 @@ to call next in structured fields, and those fields are typed end to end
 > note: those schemas and that hook. Nothing else in this document was
 > re-verified.
 
+> **Re-verified #3032 (2026-09-25, request validation slice 4, the
+> enforcement itself):** this diff touches the same covered files again —
+> `routes/agent-connection-setups.ts` and `routes/agents.ts` — and moves no
+> wire contract the MCP server or connector depends on. The handler-side
+> shape rungs (name string-ness, setup-token string-ness, MCP-server-name
+> regex entry, 23505 unique narrowing) are deleted because the OpenAPI
+> schemas (including the #3276 loosenings above) state each one, and the
+> five modules join `enforcedModules` with the mode default flipped to
+> `enforce`: an off-spec request now answers the 400 envelope BEFORE the
+> handler, where before it reached the handler's own 400/401. For conformant
+> connector and MCP traffic — the only traffic this document's skew and
+> consent-hash contracts are about — nothing changes: every field those
+> clients send is declared, coercion converts the loose-typed extras the
+> schemas permit, and the handler-side normalisation (`mcp_server_name` →
+> null when malformed, `superseded_agent_ids` filtering) is unchanged. A
+> connector that today gets a 400 from a handler rung gets the same 400 from
+> the envelope, naming the field. Version-skew and consent-hash contracts
+> are untouched. Scope of this note: the validation plumbing and the mode
+> default. Nothing else in this document was re-verified.
+
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
 > this doc is coupled through `routes/transactions.ts`,
 > `routes/user-accounts.ts` and `routes/agent-connection-setups.ts` (the

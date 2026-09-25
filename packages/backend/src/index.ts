@@ -176,6 +176,25 @@ installRequestValidation(app, {
     // and stay shadowed by owner decision (2026-09-22): a route printed
     // NOT PROVEN is not enforced on a guess.
     'routes/x402.ts',
+    // #3032 (epic #3028 slice 4, the LAST slice): the remaining five modules
+    // join, and the default mode flips to `enforce`. Evidence per the owner's
+    // instrument decision (epic decision 8, #3208) and the #3223 ruling:
+    // the 2026-09-22 reading proved 3 of these 36 operations conformant with
+    // traffic and left 33 NOT PROVEN; the owner then decided (2026-09-24,
+    // on the epic) that routes a shadow reading can never prove are enforced
+    // on TEST evidence — per-route off-spec → 400-envelope and conformant →
+    // byte-identical pins, the same instrument decision 8 allowed for slice
+    // 2. The connector-path clients (published `@haven_ai/connect`, `cli`,
+    // dashboard) drive the highest-traffic of these routes; their five
+    // undeclared request fields were declared in #3276 with regenerated
+    // types. From this slice on `enforcedModules` is the per-module ROLLBACK
+    // list (epic decision 6): the default is enforce, and removing one file
+    // here returns exactly that module to shadow.
+    'routes/agents.ts',
+    'routes/agent-rekey.ts',
+    'routes/agent-connection-setups.ts',
+    'routes/agent-passports.ts',
+    'routes/hybrid-accounts.ts',
   ],
 })
 

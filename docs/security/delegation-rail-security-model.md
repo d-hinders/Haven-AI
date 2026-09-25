@@ -1328,6 +1328,27 @@ the tier is load-bearing here; it bounds row creation, not guessing.
 > those two files and those four fields. Nothing else in this document was
 > re-verified.
 
+> **Re-verified #3032 (2026-09-25, request validation slice 4, the
+> enforcement itself):** this diff touches four covered files —
+> `routes/agents.ts`, `routes/agent-rekey.ts`,
+> `routes/agent-connection-setups.ts`, `routes/hybrid-accounts.ts` — and moves
+> no authority or custody boundary. What moved is where the request SHAPE is
+> decided: the handler-side type/shape rungs (name string-ness, delegate
+> address narrowing, bigint serializer rungs, setup-token string-ness,
+> passkey coordinate shapes, the 23505 uniques) are deleted because the
+> OpenAPI schemas state each one, and the five modules join `enforcedModules`
+> with the mode default flipped to `enforce`. The authority checks the
+> paragraphs above describe — revoke-precedes-issue, budget carry, owner
+> signatures, the delegation rail's approve-verify flow — are handler
+> SEMANTICS and are untouched: the schema refuses shapes before the handler,
+> never authority after it. The refusal code stays 400 with the plugin's
+> envelope (which names a field, never a rail, so the #2245 rail-agnostic
+> refusal property holds); an anonymous caller still gets 401 before any 400
+> (the #3276 note above). The `agent-passports.ts` module enforces without a
+> handler edit — its rung count was already 0. Scope of this note: the four
+> files' validation plumbing and the mode default. Nothing else in this
+> document was re-verified.
+
 ## 10. The delegate key's signing surface (#3272, epic #3284)
 
 The agent's delegate key signs in two places: `@haven_ai/signer` on the user's

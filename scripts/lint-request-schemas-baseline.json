@@ -1,31 +1,7 @@
 {
-  "routes/agent-connection-setups.ts": {
-    "shadow": 1,
-    "typeof": 13
-  },
   "routes/agent-delegations.ts": {
     "shadow": 1,
     "typeof": 8
-  },
-  "routes/agent-passports.ts": {
-    "shadow": 1,
-    "typeof": 0
-  },
-  "routes/agent-rekey.ts": {
-    "shadow": 1,
-    "typeof": 6
-  },
-  "routes/agents.ts": {
-    "shadow": 1,
-    "typeof": 2
-  },
-  "routes/contacts.ts": {
-    "shadow": 0,
-    "typeof": 1
-  },
-  "routes/hybrid-accounts.ts": {
-    "shadow": 1,
-    "typeof": 1
   },
   "routes/machine-payments.ts": {
     "shadow": 1,

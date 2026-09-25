@@ -504,9 +504,13 @@ describe('installRequestValidation — off mode (#3029)', () => {
     ;(app.log as unknown as { info: typeof originalInfo }).info = originalInfo
   })
 
-  it('off does not disable an enforcedModules module — the proof-module override holds', async () => {
-    // Re-installed below in its own app; asserted there. Here we pin that the
-    // OFF app did not inject a schema at all (the probe answers regardless).
+  it('off is the GLOBAL kill switch since the #3032 flip: even an enforcedModules module is INERT', async () => {
+    // Pre-flip this pinned the override ("off does not disable an
+    // enforcedModules module"); the flip inverted it (#3032, per the issue's
+    // "kill switches — global"): an operator setting `off` stops the layer
+    // outright. The contacts FILE is listed here to prove the list cannot
+    // escape the switch. Mutation: honour `enforced` under `off` again →
+    // 400 → red.
     const res = await app.inject({
       method: 'POST',
       url: '/contacts',
@@ -517,7 +521,7 @@ describe('installRequestValidation — off mode (#3029)', () => {
   })
 })
 
-describe('installRequestValidation — enforce mode (#3029)', () => {
+describe('installRequestValidation — enforce mode (#3029, default since the #3032 flip)', () => {
   let app: FastifyInstance
   let token: string
 
@@ -530,9 +534,12 @@ describe('installRequestValidation — enforce mode (#3029)', () => {
       void reply.status(statusCode).send({ error: error.message })
     })
     await app.register(fastifyJwt, { secret: 'test-secret' })
-    // enforcedModules flips the module REGARDLESS of the env mode — proven by
-    // pairing mode:'off' with the contacts FILE enforced.
-    installRequestValidation(app, { mode: 'off', enforcedModules: ['routes/contacts.ts'] })
+    // Since the #3032 flip the list matters under `enforce` ONLY. This app
+    // pairs mode:'enforce' with the contacts FILE listed — the production
+    // shape (index.ts + the config default) from slice 4 on. The pre-flip
+    // override pin (mode:'off' + listed still refusing) is INVERTED in the
+    // off-mode describe above: the kill switches are global now.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/contacts.ts'] })
     await app.register(contactProbeRoutes, { prefix: '/contacts' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
   })
@@ -541,7 +548,7 @@ describe('installRequestValidation — enforce mode (#3029)', () => {
     await app.close()
   })
 
-  it('mode:off + enforcedModules still refuses with the 400 envelope', async () => {
+  it('mode:enforce + enforcedModules refuses with the 400 envelope', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/contacts',
@@ -621,8 +628,12 @@ describe('two modules sharing one mount prefix flip INDEPENDENTLY (#3135)', () =
       void reply.status(error.statusCode ?? 500).send({ error: error.message })
     })
     await app.register(fastifyJwt, { secret: 'test-secret' })
-    // ONE of the four /agents files is enforced; the other is left in shadow.
-    installRequestValidation(app, { mode: 'shadow', enforcedModules: ['routes/agent-delegations.ts'] })
+    // ONE of the four /agents files is enforced; the other falls back to
+    // observation. Pre-flip this install used mode:'shadow' + the override;
+    // since #3032 the list decides only under `enforce` — mode:'enforce' with
+    // one file listed IS the rollback shape (epic decision 6), and the
+    // unlisted sibling's shadow fallback is exactly what a rollback restores.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/agent-delegations.ts'] })
     await app.register(agentsProbeRoutes, { prefix: '/agents' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
   })

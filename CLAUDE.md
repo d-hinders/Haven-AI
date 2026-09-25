@@ -10,6 +10,7 @@ covers:
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/routes/agents.ts
+  - packages/backend/src/index.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/x402.ts
   - packages/frontend/src/app/globals.css
@@ -215,7 +216,10 @@ All of these must fail for funds to be at risk.
 - Explicit types over `any`; `async`/`await`, not callbacks.
 - Structured error responses from every API route.
 - A route's request schema comes from the spec through the request-validation
-  plugin; `lint:request-schemas` is shrink-only.
+  plugin — **enforcing by default since #3032** (`HAVEN_REQUEST_VALIDATION`
+  unset boots `enforce`; `off`/`shadow` are the global kill switches, the
+  per-module rollback is an `enforcedModules` list edit in
+  `packages/backend/src/index.ts`); `lint:request-schemas` is shrink-only.
 - Every MCP payment-flow response names its next tool with arguments in that
   tool's vocabulary, or says why none follows (`next_tool_omitted_reason`);
   `lint:next-steps` is shrink-only at zero (epic #3105).

@@ -434,8 +434,14 @@ describe('verifiedFor — conflicting verdicts (#3301)', () => {
   })
 
   test('a block bound BEFORE the last touch is about an older image and is ignored', () => {
-    const rank2 = { '0000000': 0, aa00000: 1, cc00000: 3, dd00000: 4 }
-    const at = (a, b) => (a in rank2 && b in rank2 ? rank2[a] <= rank2[b] : null)
+    // Block-vs-pass ancestry is UNKNOWN here, so `clears` cannot let the pass
+    // through — only the before-the-last-touch rule can (the linear-chain
+    // version of this test passed with that rule deleted).
+    const at = (a, b) => {
+      if (a === 'aa00000' && b === '0000000') return false // last touch ≰ block: block predates the image
+      if (a === '0000000' && b === 'cc00000') return null // block vs pass: unknown
+      return chain(a, b) ?? true
+    }
     const vs = [v('changes requested @ 0000000 -- baselines: a.png'), v('passed @ cc00000 -- baselines: a.png')]
     assert.equal(verifiedFor('a.png', vs, { ...ctx, isAncestor: at }), true)
   })
@@ -444,6 +450,17 @@ describe('verifiedFor — conflicting verdicts (#3301)', () => {
     const at = (a, b) => (b === 'dd00000' && a === 'ab99999' ? false : chain(a, b) ?? (a === 'aa00000'))
     const vs = [v('changes requested @ ab99999 -- baselines: a.png'), v('passed @ cc00000 -- baselines: a.png')]
     assert.equal(verifiedFor('a.png', vs, { ...ctx, isAncestor: at }), true)
+  })
+
+  test('a pass with a malformed or backticked sha stays a pass — never a veto', () => {
+    const tpl = v('passed @ <head-sha> -- baselines: *')
+    assert.equal(tpl.passing, true)
+    assert.equal(tpl.sha, null)
+    const ticked = v('passed @ `cc00000` -- baselines: a.png')
+    assert.equal(ticked.passing, true)
+    assert.equal(ticked.sha, 'cc00000')
+    const vs = [v('passed @ cc00000 -- baselines: a.png'), tpl]
+    assert.equal(verifiedFor('a.png', vs, ctx), true)
   })
 
   test('a single bound pass with no block still verifies (the pre-#3301 case)', () => {

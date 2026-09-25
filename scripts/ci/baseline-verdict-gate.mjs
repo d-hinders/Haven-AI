@@ -152,7 +152,7 @@ export const PASSING_VERDICTS = new Set(['passed', 'approved'])
 export const DECLARATION_RE = /^\s*(?:[-*]\s*)?baseline-change:\s*(.+)$/gim
 export const VERDICT_RE = /^\s*(?:[-*]\s*)?design-review\s+verdict:\s*(.+)$/gim
 
-const SHA_RE = /@\s*([0-9a-fA-F]{7,40})\b/
+const SHA_RE = /@\s*`?([0-9a-fA-F]{7,40})\b/
 const SEPARATOR_RE = /\s+(?:--|—)\s+/
 const LIST_SPLIT_RE = /[\s,]+/
 
@@ -223,10 +223,15 @@ export function parseVerdicts(texts) {
       // before the `--` separator or the `baselines:` marker. Only that head is
       // read, and only as a whole: a substring match over the line let `not
       // approved`, and a baseline named `approved-mock.png`, verify (#3301).
+      // The head ends at the first `@` whether or not a sha parses after it,
+      // so a pass with a malformed sha (`@ <head-sha>` pasted from a template)
+      // stays a pass — unbound, so not evidence — instead of reading as a
+      // block that vetoes.
       const sep = body.match(SEPARATOR_RE)
       const markerIdx = body.toLowerCase().indexOf('baselines:')
-      const headEnd = shaMatch
-        ? shaMatch.index
+      const atIdx = body.indexOf('@')
+      const headEnd = atIdx !== -1
+        ? atIdx
         : Math.min(sep ? sep.index : body.length, markerIdx === -1 ? body.length : markerIdx)
       const word = body.slice(0, headEnd).toLowerCase().replace(/^[^a-z/]+|[^a-z/]+$/g, '')
       const passing = PASSING_VERDICTS.has(word)
@@ -392,7 +397,7 @@ export function evaluate({ pr, files, declarationTexts, verdictTexts, lastTouch 
     `mass re-bless — a font or Playwright bump that moves every baseline — declare \`*\`.`,
     `A non-passing verdict (\`changes requested\`) at or after a pass vetoes it, and a line`,
     `naming a file outranks a \`*\` line for that file: re-review the fixed PNG and post a`,
-    `new \`passed\` at a later sha rather than deleting the earlier block.`,
+    `new \`passed\` NAMING THE FILE at a later sha (a \`*\` pass does not clear a named block)`,
     ``,
     `Per file:`,
     ``,

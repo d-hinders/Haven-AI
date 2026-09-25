@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
-import { hashTypedData } from 'viem'
-import { AgentPaymentFailureCode, buildX402ExpectedMessage } from '@haven_ai/sdk/edge'
+import { AgentPaymentFailureCode, addressFromKey, buildX402ExpectedMessage } from '@haven_ai/sdk/edge'
+import { buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 import { createEdgeSigner } from './core.js'
 import { createToolHandlers, type ToolPayload, type ToolSuccess } from './tools.js'
 
@@ -26,23 +26,25 @@ vi.mock('x402/schemes', () => {
 
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
-const HASH = '0x' + 'cd'.repeat(32)
 const PAYMENT_REQUIRED = {
   x402Version: 1,
   resource: { url: 'https://merchant.test/paid', description: 'paid data' },
   accepts: [{ scheme: 'exact', network: 'base', amount: '1000000', asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', payTo: '0x000000000000000000000000000000000000dEaD', maxTimeoutSeconds: 60 }],
 }
 
-// #3272 (criterion 8): every x402 funding intent is delegation-rail typed
-// data now — the shape does not matter, only that its digest is what
-// `expectedX402`'s `typed_data_hash` commits to.
-const FUNDING_TYPED_DATA = {
-  domain: { name: 'HavenX402Funding', version: '1', chainId: 84532, verifyingContract: `0x${'11'.repeat(20)}` },
-  types: { Funding: [{ name: 'note', type: 'string' }] },
-  primaryType: 'Funding',
-  message: { note: 'x402 funding leg (#3272 test fixture)' },
-}
-const FUNDING_DIGEST = hashTypedData(FUNDING_TYPED_DATA as Parameters<typeof hashTypedData>[0])
+// #3281: a REAL funding leg (the shared builder) — this key's own account
+// redeeming one budget delegation, transferring the quoted amount of the
+// quoted token to this key's own delegate EOA. `payloadHash` is the
+// `payload_hash` `haven_sign` binds against, `digest` its `typed_data_hash`.
+const FUNDING = buildFundingLegUserOp({
+  delegate: addressFromKey(TEST_KEY) as `0x${string}`,
+  asset: PAYMENT_REQUIRED.accepts[0].asset as `0x${string}`,
+  amount: PAYMENT_REQUIRED.accepts[0].amount,
+  chainId: 8453, // PAYMENT_REQUIRED's network ('base')
+})
+const FUNDING_TYPED_DATA = FUNDING.typedData
+const HASH = FUNDING.payloadHash as string
+const FUNDING_DIGEST = FUNDING.digest
 
 async function expectedX402(expiresAt: string) {
   const expected = {

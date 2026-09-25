@@ -256,6 +256,20 @@ last-verified: "2026-09-25"
 > cannot gate that. Nothing else in this document was re-verified in this
 > pass.
 >
+> **Recent re-verification (#3281):** the signer's x402 arm (`haven_sign` with
+> `x402_expected` or a fetched x402 context, and `haven_sign_x402`) now signs
+> only a funding-leg `PackedUserOperation` that passes the same allowlist plus
+> a recipient pin (a transfer of the quoted amount to the signer's own
+> delegate EOA), or an erc7710 settlement child delegated by the signer's own
+> account. Anything else answers `TYPED_DATA_NOT_ALLOWED` or
+> `USEROP_BINDING_MISMATCH`, with the same envelopes as the unbound branch,
+> even when Haven's binding validly declared it. No tool, argument or version
+> set changes, so the handshake and consent hash do not move. Skew: a new
+> signer against the current backend signs every live shape, which the
+> backend's `funding-leg-signer-shape.contract.test.ts` pins. Installed
+> signers keep the old x402 arm until upgraded. Nothing else in this document
+> was re-verified in this pass.
+>
 > **Recent re-verification (#3283):** the allowlist above moved into
 > `@haven_ai/sdk` (`assertBoundDirectPaymentUserOp` and friends, exported from
 > `@haven_ai/sdk/edge`). The signer imports it and wraps the SDK's

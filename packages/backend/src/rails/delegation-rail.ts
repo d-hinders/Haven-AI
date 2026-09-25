@@ -154,6 +154,35 @@ export interface RedemptionSubmitResult {
   actualGasCost: bigint
 }
 
+/**
+ * The ONE call a redemption UserOp makes: `redeemDelegations` on the chain's
+ * DelegationManager, redeeming exactly `[[delegation]]` in `SingleDefault`
+ * mode against a single ERC-20 `transfer(to, amount)` on `token`. Pure —
+ * extracted from `prepareRedemption` (#3281) so a contract test can prove the
+ * bytes the backend emits are the shape the edge signer's guard accepts
+ * (`assertBoundDirectPaymentUserOp` / `assertFundingLegPaysDelegate` in
+ * `@haven_ai/sdk`) without a bundler.
+ */
+export function buildRedemptionCall(
+  chainId: number,
+  delegation: Delegation,
+  token: Address,
+  to: Address,
+  amount: bigint,
+): { to: Address; value: bigint; data: Hex } {
+  const execution = createExecution({
+    target: token,
+    value: 0n,
+    callData: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [to, amount] }),
+  })
+  const data = contracts.DelegationManager.encode.redeemDelegations({
+    delegations: [[delegation]],
+    modes: [ExecutionMode.SingleDefault],
+    executions: [[execution]],
+  })
+  return { to: getDelegationContracts(chainId).delegationManager, value: 0n, data }
+}
+
 export interface DelegationRail {
   delegateAccountAddress: Address
   /**
@@ -268,21 +297,10 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
     to: Address,
     amount: bigint,
   ): Promise<PreparedRedemption> {
-    const execution = createExecution({
-      target: token,
-      value: 0n,
-      callData: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [to, amount] }),
-    })
-    const redeemData = contracts.DelegationManager.encode.redeemDelegations({
-      delegations: [[delegation]],
-      modes: [ExecutionMode.SingleDefault],
-      executions: [[execution]],
-    })
-    const manager = getDelegationContracts(cfg.chainId).delegationManager
     // The stub signature comes from the account implementation, so gas
     // estimation validates without the backend holding a key.
     const userOperation = await client.prepareUserOperation({
-      calls: [{ to: manager, value: 0n, data: redeemData }],
+      calls: [buildRedemptionCall(cfg.chainId, delegation, token, to, amount)],
     })
     const userOpHash = getUserOperationHash({
       chainId: cfg.chainId,

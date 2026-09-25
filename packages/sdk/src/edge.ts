@@ -75,4 +75,6 @@ export {
   HavenTypedDataRefusedError,
   TYPED_DATA_NOT_ALLOWED,
   assertBoundDirectPaymentUserOp,
+  assertFundingLegPaysDelegate,
+  assertOwnSettlementChild,
 } from './direct-payment-guard.js'

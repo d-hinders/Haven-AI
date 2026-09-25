@@ -77,7 +77,12 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      expected-context versions 2 and 3 only.
    - `signX402FundingTypedData(typedData, expected)` → verifies Haven's
      signature over the expected context and that it commits to this typed
-     data's digest, then returns the funding signature plus a process-local
+     data's digest, then (#3281) signs only two shapes whatever the binding
+     declares: a funding-leg `PackedUserOperation` that passes the
+     direct-payment allowlist and pays the quoted amount to this signer's own
+     delegate EOA, or an erc7710 settlement child re-delegated from this
+     signer's own account (never ROOT). It then returns the funding signature
+     plus a process-local
      `x402_binding` that records the authenticated funding-intent and
      merchant-header context returned by hosted MCP.
    - `signDelegationTypedData(typedData)` → a verbatim primitive: signs
@@ -269,7 +274,9 @@ signers; since #3271 they also have a fetch path (`GET /payments/:id/sign-contex
 
 Note the trust-model asymmetry: the **x402** typed-data leg
 (`signX402FundingTypedData`) verifies a Haven-authenticated expected context
-and digest equality before signing. The **direct** leg's binding check (#3271)
+and digest equality before signing, and since #3281 also refuses any shape
+but a guarded funding leg or a verified settlement child, so a compromised
+binding key cannot widen what it signs (epic #3284's threat model). The **direct** leg's binding check (#3271)
 is a CORRUPTION check, not an authentication: the caller supplies both the
 typed data and `payload_hash`, so the check proves they describe the same
 operation, never that Haven prepared it. The authority boundary remains the

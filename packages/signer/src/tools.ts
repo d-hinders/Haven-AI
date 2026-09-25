@@ -392,7 +392,19 @@ async function signFundingLeg(
   expected: X402ExpectedPayment,
   typedData: Record<string, unknown> | undefined,
 ): Promise<X402FundingSignatureResult> {
-  return signer.signX402FundingTypedData(typedData as unknown as X402FundingTypedData | undefined, expected)
+  try {
+    return await signer.signX402FundingTypedData(typedData as unknown as X402FundingTypedData | undefined, expected)
+  } catch (err) {
+    // #3281: the x402 arm's shape refusals come from the shared SDK guard;
+    // give them the same structured envelopes the unbound branch uses.
+    if (err instanceof HavenTypedDataRefusedError && !(err instanceof HavenTypedDataNotAllowedError)) {
+      throw new HavenTypedDataNotAllowedError(err.message)
+    }
+    if (err instanceof HavenUserOpBindingError) {
+      throw new HavenUserOpBindingRefusedError(err.message)
+    }
+    throw err
+  }
 }
 
 function toExpectedX402(raw: {

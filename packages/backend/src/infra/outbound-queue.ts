@@ -254,10 +254,12 @@ export async function submitRecorded(
  * Some providers refuse the `pending` block tag outright. dRPC's Base plans
  * route it only to flashblocks-capable upstreams and answer "no available
  * upstreams … No label `flashblocks`" when there are none, while serving
- * `latest` normally. Every relayer send died at this read on dev from
- * 2026-09-25: account deploys at first budget activation and at a fresh
- * agent's first erc7710 authorize, sweeps, passport attestations and revokes,
- * lane cancels and the bump worker's orphan re-sends.
+ * `latest` normally. Every relayer send without an explicit nonce died at
+ * this read on dev from 2026-09-25: account deploys at first budget activation
+ * and at a fresh agent's first erc7710 authorize, sweeps, passport
+ * attestations and revokes, and the bump worker's orphan re-sends. Lane
+ * cancels and same-nonce replacements pass an explicit nonce and never get
+ * here.
  *
  * On THAT refusal only, the nonce is derived without the node's mempool view:
  * start at the chain's `latest` count (same provider, so #1533's single nonce
@@ -281,8 +283,10 @@ export async function submitRecorded(
  * take that nonce and either be rejected, or — with fees at least 10% higher
  * on both fields — silently REPLACE our own unrecorded transaction. A live
  * row whose transaction was DROPPED at N = `latest` is stepped over, so later
- * sends take N+1, N+2 … and stall behind the hole until an operator clears N
- * (`modules/passport/attestation.ts` describes that stall). None of these can
+ * sends take N+1, N+2 … and stall behind the hole until the bump worker
+ * re-sends N (rebroadcast-safe submitters) or an operator clears it (a
+ * `passport_attest`, or a lane past its bump cap;
+ * `modules/passport/attestation.ts` describes that stall). None of these can
  * misdirect funds: a nonce orders the relayer's own transactions, it does not
  * choose what they do. Any other error from the `pending` read propagates
  * unchanged: a dead endpoint is not papered over here.

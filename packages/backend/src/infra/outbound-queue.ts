@@ -389,7 +389,7 @@ export async function sendRawViaFallback(chainId: number, raw: string): Promise<
   try {
     return String(await fallback.send('eth_sendRawTransaction', [raw]))
   } catch (err) {
-    throw fallbackSendError(err)
+    throw fallbackSendError(err, secretSegments(fallback._getConnection().url))
   }
 }
 
@@ -399,7 +399,16 @@ export async function sendRawViaFallback(chainId: number, raw: string): Promise<
  * and message (kept so revert and nonce classification still work), with any
  * URL in the text replaced. `info`, `request` and `response` are never copied.
  */
-export function fallbackSendError(err: unknown): Error {
+/**
+ * The key-like pieces of an endpoint URL — path segments and query values of
+ * 12+ characters — so a provider that echoes its key WITHOUT the URL (say
+ * `dkey=<key>` in a JSON-RPC message) is still scrubbed.
+ */
+function secretSegments(url: string): string[] {
+  return url.split(/[/?&=#]/).filter((part) => part.length >= 12 && !part.includes(':'))
+}
+
+export function fallbackSendError(err: unknown, secrets: string[] = []): Error {
   const e = err as {
     code?: unknown
     shortMessage?: unknown
@@ -407,7 +416,11 @@ export function fallbackSendError(err: unknown): Error {
     error?: { code?: unknown; message?: unknown }
     info?: { error?: { code?: unknown; message?: unknown } }
   } | null
-  const scrub = (text: string) => text.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)\]}]+/gi, '<fallback-url>')
+  const scrub = (text: string) =>
+    secrets.reduce(
+      (acc, secret) => acc.split(secret).join('<redacted>'),
+      text.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)\]}]+/gi, '<fallback-url>'),
+    )
   // ethers keeps the JSON-RPC error body in `error` or `info.error` — only
   // that body's code and message are copied, never the rest of `info`.
   const body = e?.error ?? e?.info?.error

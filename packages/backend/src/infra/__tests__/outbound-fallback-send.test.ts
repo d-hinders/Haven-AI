@@ -96,6 +96,19 @@ describe('sendRawViaFallback (#2769)', () => {
     expect(JSON.stringify(err)).not.toContain(SECRET)
   })
 
+  it('a key the provider echoes WITHOUT its URL is scrubbed too', async () => {
+    answer = (_method, id) => ({
+      status: 200,
+      body: JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32000, message: `invalid dkey=${SECRET}` } }),
+    })
+    const { sendRawViaFallback } = await import('../outbound-queue.js')
+
+    const err = (await sendRawViaFallback(CHAIN_ID, '0x02abcdef').catch((e: unknown) => e)) as Error
+
+    expect(err.message).toContain('invalid dkey=<redacted>')
+    expect(JSON.stringify(err)).not.toContain(SECRET)
+  })
+
   it('an accepted send returns the node-reported hash, over the pinned network (no eth_chainId)', async () => {
     const hash = '0x' + 'ab'.repeat(32)
     answer = (_method, id) => ({ status: 200, body: JSON.stringify({ jsonrpc: '2.0', id, result: hash }) })

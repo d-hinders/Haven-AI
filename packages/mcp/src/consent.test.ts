@@ -87,7 +87,7 @@ describe('consent gate', () => {
   it('renders wallet, delegate, and chain in the consent block', () => {
     const hash = computeConsentHash(input)
     const block = renderConsentBlock(input, hash)
-    expect(block).toContain('Haven wallet (Safe): 0xSafe')
+    expect(block).toContain('Haven wallet: 0xSafe')
     expect(block).toContain('Delegate (local signer): 0xDelegate')
     expect(block).toContain('Chain ID:  100')
     expect(block).toContain('Haven API: https://haven.example')

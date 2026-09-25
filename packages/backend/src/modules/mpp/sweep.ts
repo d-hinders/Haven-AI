@@ -84,9 +84,10 @@ interface DelegateSweepRow {
 
 /**
  * `POST /sweep/prepare` — reads the delegate's stranded USDC and returns an
- * EIP-3009 `TransferWithAuthorization` (delegate → the agent's own Safe) plus
- * Haven's binding signature. The edge signer signs it; `submitSweep` relays
- * it. The delegate never needs ETH and the hosted server never holds the key.
+ * EIP-3009 `TransferWithAuthorization` (delegate → the agent's account (Haven
+ * wallet)) plus Haven's binding signature. The edge signer signs it;
+ * `submitSweep` relays it. The delegate never needs ETH and the hosted server
+ * never holds the key.
  */
 export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResult> {
   // Agent auth normally rejects this state. Keep the money path fail-closed
@@ -107,7 +108,10 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
     }
   }
   if (!agent.delegate_address || !agent.account_address) {
-    return { statusCode: 422, body: { error: 'Agent is missing a delegate or Safe address.' } }
+    return {
+      statusCode: 422,
+      body: { error: "Agent is missing a delegate or the agent's account (Haven wallet) address." },
+    }
   }
 
   const token = sweepUsdcAddress(agent.chain_id)
@@ -269,7 +273,10 @@ export async function submitSweep(
     return { statusCode: 409, body: { error: 'Prepared sweep `from` no longer matches the agent delegate.' } }
   }
   if (!sameAddress(expected.to, agent.account_address)) {
-    return { statusCode: 409, body: { error: 'Prepared sweep `to` no longer matches the agent Safe.' } }
+    return {
+      statusCode: 409,
+      body: { error: "Prepared sweep `to` no longer matches the agent's account (Haven wallet)." },
+    }
   }
 
   let recovered: string

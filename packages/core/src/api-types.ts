@@ -2557,8 +2557,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Prepare a gasless USDC sweep from the delegate wallet to the Safe.
-         * @description Reads the delegate EOA's stranded USDC and returns an EIP-3009 TransferWithAuthorization (delegate → the agent's own Safe) plus Haven's authorization binding. The edge signer signs the authorization with haven_sign_sweep_delegate; POST /machine-payments/sweep/submit relays it. The delegate never needs ETH and Haven never holds the key. Returns { nothing_stranded: true } when the delegate is empty.
+         * Prepare a gasless USDC sweep from the delegate wallet to the agent's account (Haven wallet).
+         * @description Reads the delegate EOA's stranded USDC and returns an EIP-3009 TransferWithAuthorization (delegate → the agent's account (Haven wallet)) plus Haven's authorization binding. The edge signer signs the authorization with haven_sign_sweep_delegate; POST /machine-payments/sweep/submit relays it. The delegate never needs ETH and Haven never holds the key. Returns { nothing_stranded: true } when the delegate is empty.
          */
         post: operations["prepareDelegateSweep"];
         delete?: never;
@@ -4215,7 +4215,7 @@ export type components = {
             /** Format: date-time */
             created_at: string;
         };
-        /** @description EIP-3009 TransferWithAuthorization fields for a delegate → Safe USDC sweep. */
+        /** @description EIP-3009 TransferWithAuthorization fields for a delegate → the agent's account (Haven wallet) USDC sweep. */
         SweepAuthorization: {
             /** @example 0x1111111111111111111111111111111111111111 */
             from: string;

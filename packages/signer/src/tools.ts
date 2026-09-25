@@ -362,12 +362,13 @@ const SIGN_X402_DESCRIPTION = [
 
 const SIGN_SWEEP_DELEGATE_DESCRIPTION = [
   'Sign a Haven-prepared gasless USDC sweep that recovers stranded funds from the delegate',
-  'wallet back to your Haven wallet. The delegate key never leaves this process and this tool',
-  'never broadcasts — it returns only an EIP-3009 signature that Haven\'s relayer submits and',
+  "wallet back to the agent's account (Haven wallet). The delegate key never leaves this process and this",
+  "tool never broadcasts — it returns only an EIP-3009 signature that Haven's relayer submits and",
   'pays gas for. Pass the authorization and expected_auth returned by the hosted',
-  'haven_sweep_delegate tool. The signer verifies Haven authored the authorization and that it',
-  'pays out to your own Safe before signing, then returns { signature } to hand back to',
-  'mcp__haven__haven_sweep_delegate to complete recovery.',
+  'haven_sweep_delegate tool. The signer verifies Haven authored the authorization; the',
+  "destination is checked against the agent's account (Haven wallet) from the local credential",
+  "when the credential carries one, and otherwise rests on Haven's binding signature. Then it",
+  'returns { signature } to hand back to mcp__haven__haven_sweep_delegate to complete recovery.',
 ].join(' ')
 
 export const toolDescriptions: Record<SignerToolName, string> = {
@@ -830,7 +831,8 @@ export function createToolHandlers(
         const result = await signer.signSweepAuthorization({
           authorization: args.authorization,
           expectedAuth: args.expected_auth,
-          // Cross-check `to` against the Safe in the local credential when present.
+          // Cross-check `to` against the agent's account (Haven wallet) from the
+          // local credential, when the credential carries one.
           expectedSafe: options.audit?.accountAddress,
         })
         await auditSigning(

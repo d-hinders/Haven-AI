@@ -90,8 +90,9 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      it. Reuses the SDK's `selectStandardPaymentOption` +
      `toStandardPaymentRequirements` + the `x402` library.
    - `signSweepAuthorization(authorization, expectedAuth)` → verifies Haven's
-     authenticated recovery context, confirms the delegate and optional local
-     Safe destination, and signs a Base-USDC EIP-3009 sweep authorization.
+     authenticated recovery context, confirms the delegate and — when the
+     local credential carries the agent's account (Haven wallet) address —
+     the destination, and signs a Base-USDC EIP-3009 sweep authorization.
    - Returns signatures/headers only — never the key.
 
 2. **Local stdio MCP signer** — a thin MCP server exposing sign-only tools

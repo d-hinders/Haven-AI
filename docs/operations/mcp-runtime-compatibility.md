@@ -1031,6 +1031,44 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.5.0-alpha.0 release, 2026-09-25):** the manifest table
+> above is re-pinned by the bump to `0.5.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`; the four numbers were not copied by hand. **Re-read, not
+> rubber-stamped**: the Node floor (`>= 22.0.0`, CI on LTS 24 via `.nvmrc`) and
+> the Codex and Claude Code rows are unchanged.
+>
+> **MINOR, because the signer now refuses things it used to sign.** Every break
+> in this release narrows what a delegate key will sign (epic #3284), and every
+> one moves **fail-closed** — a refusal, never a different signature. The two
+> the signer's CHANGELOG marks BREAKING: `haven_sign`'s unbound branch signs
+> only a bound direct-payment UserOp and **x402 expected-context v1 is retired**
+> (#3272), and the x402 arm signs only a guarded funding leg or a verified
+> settlement child (#3281). Alongside them, `haven_sign` refuses a bare
+> `payload_hash` (#3169) and the signer CLI refuses unknown options (#3173). The
+> SDK's `signForData` refuses the same shapes (#3283), so `mcp`'s payment tools
+> inherit the narrowing through it. None of this is visible to a declaration
+> diff — the lesson the 0.4.0 note above records applies again, one layer in:
+> these are runtime refusals, and the CHANGELOGs are what name them.
+>
+> **The v1 retirement's skew, verified rather than assumed.** The signer's
+> `SUPPORTED_X402_EXPECTED_VERSIONS` goes `[1, 2, 3]` → `[2, 3]`. The risky
+> direction is a new signer against the backend still on `main` at cut time
+> (`fe717b58`), which selects `payerDelegate ? 3 : typedDataHash ? 2 : 1` — so
+> v1 is emittable there, where `dev` selects `payerDelegate ? 3 : 2`. Re-read at
+> the cut: `main` has exactly three `signX402ExpectedContext` call sites
+> (`delegation-authorize.ts` twice, `replay.ts` once). The first two pass
+> `typedDataDigest(...)` of a value they always build; the replay site passes
+> `typedDataDigest(sign_data.typed_data)`, which returns `undefined` only when
+> `typed_data` is absent — and the #1138 comment above that call records that a
+> delegation-rail intent always carries it. A row without it would be a
+> retired-rail row, and retired rails answer 410 before any replay. So the
+> note's earlier claim holds: **a new signer meeting an old backend's v1 is not
+> a live case.** The other direction is unaffected: an old signer against the
+> new backend receives only v2/v3, which it has always supported.
+>
+> `last-verified` is **not** bumped: this note re-reads the manifest rows and the
+> v1 skew claim, and nothing else in the document.
+
 > **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** the manifest table
 > above is re-pinned by the bump to `0.4.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`; the four numbers were not copied by hand. **Re-read, not
@@ -1165,10 +1203,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.4.0-alpha.0` |
-| `@haven_ai/mcp` | `0.4.0-alpha.0` |
-| `@haven_ai/sdk` | `0.4.0-alpha.0` |
-| `@haven_ai/signer` | `0.4.0-alpha.0` |
+| `@haven_ai/connect` | `0.5.0-alpha.0` |
+| `@haven_ai/mcp` | `0.5.0-alpha.0` |
+| `@haven_ai/sdk` | `0.5.0-alpha.0` |
+| `@haven_ai/signer` | `0.5.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

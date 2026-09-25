@@ -127,12 +127,13 @@ payment rail — and the receipt side now carries the transaction feed's names
 (`paymentProofStatus`, `x402MerchantAddress`, `x402ResourceUrl`, `source`),
 decided at `mapPaymentReceipt` only (owner decision 1: the transactions wire
 is frozen, the receipts wire stays snake_case, nothing moves in the backend).
-The old receipt names are deprecated twins for one full release; the removal
-condition — all three release clocks (`@haven_ai/sdk` `latest`, `@haven_ai/mcp`
-`latest`, the hosted mcp-server deploy's `serverInfo.version` on `initialize`)
-read at or past the release that names the twins, against the registry and
-the live handshake — is written on the mapper and repeated
-on each twin's row in #3131's vocabulary map (declared beside the guard;
+The old receipt names (`rail`, `proofStatus`, `resourceUrl`,
+`merchantAddress`) were dual-emitted as deprecated twins for one full release
+(`0.5.0-alpha.0`) and removed by #3306 once all three release clocks —
+`@haven_ai/sdk` `latest`, `@haven_ai/mcp` `latest`, the hosted mcp-server
+deploy's `serverInfo.version` on `initialize` — read `0.5.0-alpha.1`; a receipt
+row now carries only the transaction feed's names. The pairs are declared in
+#3131's vocabulary map (beside the guard;
 [`cli-json-conventions.md`](../product/cli-json-conventions.md) covers it),
 whose open count is now 0. Three pairs stay divergent on purpose — `txHash`/`hash`,
 `amountRaw`/`value`, `amount`/`valueFormatted` — with their reasons in the same

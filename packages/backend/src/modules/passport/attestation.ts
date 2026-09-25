@@ -235,9 +235,10 @@ export const anchorOnChain: Anchor = async (
   // ~180 s after this broadcast. It no longer is. The re-mint now needs
   // positive evidence that this transaction can never mine, and the only
   // thing that counts is its nonce being consumed by something else; see
-  // `classifyAnchorTxLiveness` below. Leaving the record `broadcast` is what
-  // makes that evidence available at all — the nonce this branch stamped is
-  // the fact the probe reads.
+  // `classifyAnchorTxLiveness` below. Keeping the stamped nonce on the record
+  // is what makes that evidence available at all — the probe reads it from a
+  // `broadcast` row, and equally from one the bump worker later closed
+  // `failed` as consumed (#3293: `markFailed` keeps the row's nonce).
   if (!receipt && (!waitError || isWaitTimeout(waitError))) {
     throw new PassportAnchorUnconfirmedError(tx.hash, PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS)
   }

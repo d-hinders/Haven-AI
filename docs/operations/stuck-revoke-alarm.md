@@ -243,7 +243,9 @@ the lane has capped out does it become yours:
 ERROR outbound-bump: nonce lane stuck after 3 replacements — INCIDENT, not retrying
 ```
 
-Since [#3293](https://github.com/d-hinders/Haven-AI/issues/3293) the INCIDENT means the lane really is held. A row whose nonce another transaction already consumed doesn't reach it: the relayer's mined nonce as of a settled block is past N, no node knows the row's hash, and its receipt is still null. The worker closes that row `failed` and logs:
+Since [#3293](https://github.com/d-hinders/Haven-AI/issues/3293) a row whose nonce another transaction already consumed is closed rather than alarmed about, but **only once that consumption is visible at a settled block**. The relayer's mined nonce as of the settled block must be past N, no node the relayer provider answers from knows the row's hash, and its receipt is still null. On Base Sepolia, `finalized` trailed the head by about 19 minutes when this was measured.
+
+So an INCIDENT within about 20 minutes of a same-nonce race can be a false alarm that closes itself. That race can be a bumped revoke or sweep whose earlier transaction mined, or a lane cancel that lost to the attest. Before you treat such an INCIDENT as yours, or run a cancel, check on the explorer whether nonce N already mined. If it did, wait for the next settled tick. An INCIDENT that outlives the finality lag means the lane really is held. When the worker does close the row, it logs:
 
 ```
 WARN  outbound-bump: stale broadcast whose nonce was consumed by another transaction — closed failed, not bumped

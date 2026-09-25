@@ -14,7 +14,7 @@
  * that does not understand the tag degrades to something conservative rather
  * than to reading the head. At 2 s blocks this is ~10 minutes of burial,
  * comfortably past any ordinary reorg, and the latency costs nothing for
- * either caller — both are passport anchors that have already been stuck for
+ * any reader: each is judging a transaction that has already been stuck for
  * minutes.
  *
  * Three readers share it, and deliberately so: #1745's nonce read (is the

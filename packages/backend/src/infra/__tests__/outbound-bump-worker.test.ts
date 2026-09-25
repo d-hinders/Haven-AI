@@ -313,6 +313,15 @@ describe('runOutboundBumpTick — a stale row whose nonce another transaction co
     expect(result.closedMined).toBe(1)
   })
 
+  it('the receipt RE-READ finds a REVERTED receipt → closed failed as reverted, no bump', async () => {
+    const statuses: Array<0 | 1 | null> = [null, 0]
+    const d = consumed({ getReceiptStatus: vi.fn(async () => statuses.shift() ?? null) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markFailed).toHaveBeenCalledWith('row-1', expect.stringMatching(/^mined and reverted/))
+    expect(result.closedFailed).toBe(1)
+    expect(d.sendRaw).not.toHaveBeenCalled()
+  })
+
   it('the settled nonce is read ONCE per tick, however many rows need it', async () => {
     const d = consumed({ listUnmined: vi.fn(async () => [row({ id: 'a' }), row({ id: 'b', nonce: '40' }), row({ id: 'c', nonce: '41' })]) })
     await runOutboundBumpTick(84532, d, log)

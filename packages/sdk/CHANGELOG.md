@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+## 0.5.0-alpha.1 — 2026-09-25
+
 - **Client identity on Haven API requests (#3303, epic #3302).** Every Haven API request now carries `X-Haven-Client: <package>/<version>`, `@haven_ai/sdk/<version>` by default. An embedding package names itself with the new `HavenClientConfig.clientIdentity`. The transport writes the header last, so neither `defaultHeaders` nor a request context can override it. The backend may answer an outdated client with a `client_update` hint (`HavenClientUpdate`): read the one the current `withRequestContext` dispatch received with the new `HavenClient.clientUpdate()`. Below a minimum the deployment has explicitly set, the payment-initiating routes answer 426 `client_outdated`, surfaced as a `HavenApiError` with that body. New exports: `SDK_VERSION` (bump-managed, never hand-edit), `HAVEN_CLIENT_HEADER`, `SDK_CLIENT_IDENTITY`, `havenClientIdentity`, `readClientUpdate` and the `HavenClientUpdate` type. `HAVEN_CLIENT_HEADER`, `havenClientIdentity`, `readClientUpdate` and the type are also exported from `@haven_ai/sdk/edge`. No response is parsed differently, and nothing is refused client-side.
 
 ## 0.5.0-alpha.0 — 2026-09-25

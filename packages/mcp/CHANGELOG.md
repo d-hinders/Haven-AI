@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+## 0.5.0-alpha.1 — 2026-09-25
+
 - **Client identity and update hint (#3303, epic #3302).** Haven API requests name `@haven_ai/mcp/<version>` in `X-Haven-Client`. When the backend sends a `client_update` hint for this runtime, the tool result carries it as `client_update`, on success and failure alike, with the exact update command. A 426 `client_outdated` refusal also keeps the backend's `next_tool_omitted_reason` at the top level of the failure. No tool, schema or consent input changes, so nobody is re-prompted.
 
 ## 0.5.0-alpha.0 — 2026-09-25

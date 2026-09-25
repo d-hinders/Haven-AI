@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+## 0.5.0-alpha.1 — 2026-09-25
+
 - **Client identity (#3303, epic #3302).** Every request the connector's API client makes (setup resolve/register, status reports, the agent identity read) carries `X-Haven-Client: @haven_ai/connect/<version>` (`CONNECTOR_CLIENT_IDENTITY`), so the backend can tell an outdated connector what to run. `createConnectApiClient` takes it as an optional third argument. The read-only hosted-identity probe behind `--doctor` / `--unwire` (`probeHostedAgentIdentity`) does not send it: it can never be refused and reads no hint. No flag, output or exit code changes.
 
 ## 0.5.0-alpha.0 — 2026-09-25

@@ -1035,7 +1035,7 @@ export type paths = {
         };
         /**
          * Machine-readable funding facts for one account: what to fund, with what, where, and how much.
-         * @description Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user's own wallet or exchange — and this is the single source an agent (or the dashboard's empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token's balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any token balance ≥ its minimum). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.
+         * @description Read-only facts a human acts on (#2534). Funding is a human step — a transfer from the user's own wallet or exchange — and this is the single source an agent (or the dashboard's empty-state funding card) reads to hand that instruction over: the account address, the chain and its explorer, each token's balance and its documented `minimum_useful_human` constant, and whether the account already counts as funded (`funded`: any KNOWN token balance ≥ its minimum — a failed balance read serves the last-known figure marked stale (#3317), and a token never successfully read counts as unknown, never as unfunded). `native.needed` is always false: gas is relay-sponsored (UserOps), so no ETH/xDAI is requested. `faucet_url` is present ONLY on testnets, taken from the chain registry — a link for the human; Haven never calls a faucet. Accepts the `owner_cli` device-code session in addition to the dashboard JWT. Constructs no transfer and grants no authority.
          */
         get: operations["getAccountFunding"];
         put?: never;
@@ -4505,10 +4505,11 @@ export type components = {
              */
             address: string;
             decimals: number;
-            /** @description Human-decimal balance via formatTokenValue — '0' or <int>.<2–6 fraction digits>; '0' on balance-RPC failure. */
+            /** @description Human-decimal balance via formatTokenValue — '0' or <int>.<2–6 fraction digits>. On a failed read (#3317), the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token. */
             balance_human: string;
             /** @description Documented per-token constant from @haven_ai/core — the smallest amount worth moving for this token (one small x402 payment plus headroom). A CONSTANT, not a policy: not a spend limit, not a minimum balance check. null when no constant is documented for the symbol; then `funded` ignores the token. */
             minimum_useful_human: string | null;
+            balanceFreshness?: components["schemas"]["BalanceFreshness"];
         };
         FundingResponse: {
             /**
@@ -4525,14 +4526,17 @@ export type components = {
             tokens: components["schemas"]["FundingToken"][];
             native: {
                 symbol: string;
+                /** @description On a failed read (#3317), the last successfully read native balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read. */
                 balance_human: string;
                 /** @description Always false: gas is relay-sponsored (UserOps), so the funding instruction never asks for ETH/xDAI. */
                 needed: boolean;
+                balanceFreshness?: components["schemas"]["BalanceFreshness"];
             };
             /** @description Present ONLY on testnets, from the chain registry — where a HUMAN gets dev funds. Haven never calls a faucet. Absent (not null) on mainnets. */
             faucet_url?: string;
-            /** @description True when ANY token balance ≥ its `minimum_useful_human` constant. Native gas is not part of the question. */
+            /** @description True when ANY token's KNOWN balance ≥ its `minimum_useful_human` constant — a fresh read, or the stale last-known balance a failed read serves (#3317). A failed read with no last-known value can never make this true (or false): unknown is not unfunded. Native gas is not part of the question. */
             funded: boolean;
+            balanceFreshness?: components["schemas"]["BalanceFreshness"];
         };
         PortfolioBreakdown: {
             symbol: string;

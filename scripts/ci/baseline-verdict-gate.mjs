@@ -45,7 +45,11 @@
 //   <names>   comma- or space-separated base names or repo paths of the
 //             baselines the line covers, or `*` for a mass re-bless (a font or
 //             Playwright bump moves all of them at once — the #1760-class
-//             dispatch, declared rather than silent).
+//             dispatch, declared rather than silent). Write `*` itself: a
+//             glob (`*.png`, `dir/*.png`) covers NOTHING in a pass or a
+//             declaration. In a non-passing line any `*` in the list, beyond
+//             emphasis around a whole name, covers every baseline — a block
+//             reads as wide as its author meant it, fail closed (#3309).
 //   <reason>  why the pixels moved, at least 20 characters — a label is not a
 //             reason. The same length the copy lint and the ratchets demand of
 //             an inline marker, for the same reason: an empty or one-word
@@ -62,6 +66,12 @@
 //             the last commit that touched the PNG must be an ancestor of it
 //             (or equal), and it an ancestor of the PR head — a verdict naming
 //             a commit older than the baseline's re-commit does not count.
+//
+// A block is also read in shapes a pass is not (#3309): a table row, a
+// heading, a task-list item, an italic or backticked label, an HTML-wrapped
+// line, `design review verdict:` without the hyphen, a space before the
+// colon (BLOCK_LINE_RE). A pass in those shapes is dropped: its line shape
+// stays the one above.
 //
 // When verdicts conflict (#3301), the newest one decides, per baseline:
 //
@@ -89,7 +99,10 @@
 //
 // Declarations come from the PR body and the PR's commit messages; verdicts
 // from the PR body AND the PR's comments (#2816's verdict was posted as a
-// comment — a verdict that exists only in the thread still exists). The author
+// comment — a verdict that exists only in the thread still exists). A GitHub
+// REVIEW body is not read (#3309): submitting a review does not re-run this
+// workflow, and a `pull_request_review` trigger would run the PR's own code,
+// so a block must be posted in the body or as a comment. The author
 // writes every line the gate reads, so the gate proves the TEXT exists, not
 // who wrote it or that the review happened; it is a checklist the PR cannot
 // leave blank, not an authentication of the review. The report and the
@@ -157,6 +170,15 @@ export const DECLARATION_RE = /^\s*(?:[-*]\s*)?baseline-change:\s*(.+)$/gim
 // label may be bold: a block written in any of those shapes must still be
 // read, or the gate cannot see it (#3301).
 export const VERDICT_RE = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s*)?(?:\*\*|__)?design-review\s+verdict:(?:\*\*|__)?\s*(.+)$/gim
+// A BLOCK is read in more shapes than a pass (#3309): a table row, a heading,
+// a task-list item, an italic or backticked label, an HTML-wrapped line,
+// `design review verdict:` without the hyphen, a space before the colon. An
+// unread block lets an older pass verify, so the wider reading fails closed;
+// a pass in one of these shapes is dropped, never read — the line a pass
+// needs stays VERDICT_RE. Whole table cells, then anything but letters (and
+// tags, and a `[ ]`/`[x]` box) may precede the label, so a sentence that
+// merely mentions the label is not a line.
+export const BLOCK_LINE_RE = /^(?:\s*\|(?:[^|\n]*\|)*?)?(?:[^A-Za-z\n]|<[^>\n]*>|\[[ xX]\])*design[-\s]*review\s+verdict[\s*_`]*:[\s*_`]*(.+)$/i
 
 const SHA_RE = /@\s*`?([0-9a-fA-F]{7,40})\b/
 /** The sha a verdict is bound to: only right after the `@` that ends its verdict word. */
@@ -201,6 +223,27 @@ export function parseNameList(raw) {
   return [...new Set(out)]
 }
 
+/** `**a.png**`, `*a.png*`: emphasis wrapping a whole name or list, not a glob. */
+const EMPHASIS_RE = /^(\*+)([^*](?:.*[^*])?)\1$/
+const stripEmphasis = (s) => s.replace(EMPHASIS_RE, '$2')
+
+/**
+ * Does a BLOCK's name list use a glob (#3309)? `*.png`, `**`, `*-mobile.png`,
+ * `dir/*.png` and `./*.png` each mean "all of them" to the human who typed
+ * them, while `parseNameList` reads them as `png.png`, nothing, `-mobile.png`
+ * or `.png` — names no baseline has, so the block covered nothing. Any `*`
+ * left after emphasis around a whole name or the whole list is stripped
+ * counts. Read for blocks only: a pass or a declaration with the same names
+ * keeps covering nothing (`parseNameList` is shared and unchanged), because
+ * widening those would verify, not veto.
+ */
+export function listHasGlob(raw) {
+  const text = stripEmphasis(String(raw ?? '').replace(/\]\([^)]*\)/g, ']').replace(/^[\s(]+|[\s.,;:)]+$/g, ''))
+  return text
+    .split(LIST_SPLIT_RE)
+    .some((part) => stripEmphasis(part.replace(/[^A-Za-z0-9._\-/*]/g, '').replace(/^\.+|\.+$/g, '')).includes('*'))
+}
+
 /**
  * All `baseline-change:` declarations found in the given texts, parsed.
  *
@@ -231,43 +274,61 @@ export function parseDeclarations(texts) {
  */
 export function parseVerdicts(texts) {
   const out = []
+  const strictLine = new RegExp(VERDICT_RE.source, 'i')
   for (const text of texts ?? []) {
     if (!text) continue
     for (const m of String(text).matchAll(VERDICT_RE)) {
-      const body = m[1] ?? ''
-      // The verdict word is the head of the line: the text before the first
-      // `@`, `--` separator or `baselines:` marker, whichever comes first. It
-      // is read only as a whole — a substring match over the line let `not
-      // approved`, and a baseline named `approved-mock.png`, verify (#3301).
-      // The sha is read only right after the `@` that ends the head. A pass
-      // with a malformed sha (`@ <head-sha>` pasted from a template) stays an
-      // unbound pass, and an `@` later in the line (an email in the name
-      // list, even a hex-looking one) binds nothing — so it can neither turn a
-      // pass into a block nor move a block onto a commit where it is ignored.
-      const sep = body.match(SEPARATOR_RE)
-      const markerIdx = body.toLowerCase().indexOf('baselines:')
-      const atIdx = body.indexOf('@')
-      const headEnd = Math.min(
-        atIdx === -1 ? body.length : atIdx,
-        sep ? sep.index : body.length,
-        markerIdx === -1 ? body.length : markerIdx,
-      )
-      const shaMatch = atIdx !== -1 && headEnd === atIdx ? body.slice(atIdx).match(BOUND_SHA_RE) : null
-      const word = body.slice(0, headEnd).toLowerCase().replace(/^[^a-z/]+|[^a-z/]+$/g, '')
-      const passing = PASSING_VERDICTS.has(word)
-      // The names live after the `baselines:` marker when the line follows the
-      // format; a line that only names files also counts — the word
-      // "baselines:" is the convention, not the contract, and the failure
-      // report quotes the line either way. Without the marker the names are
-      // what follows the verdict head, so the verdict word is never read as a
-      // baseline name.
-      const listIdx = body.toLowerCase().lastIndexOf('baselines:')
-      const listPart = listIdx === -1 ? body.slice(headEnd).replace(BOUND_SHA_RE, ' ') : body.slice(listIdx + 'baselines:'.length)
-      const names = parseNameList(listPart.replace(SHA_RE, ' ').replace(SEPARATOR_RE, ' '))
-      out.push({ names, sha: shaMatch ? shaMatch[1] : null, passing, raw: m[0].trim() })
+      out.push(parseVerdictBody(m[1] ?? '', m[0].trim()))
+    }
+    // The block-only shapes (#3309): a line VERDICT_RE already read is not
+    // read twice, and a pass found here is dropped.
+    for (const line of String(text).split('\n')) {
+      if (strictLine.test(line)) continue
+      const m = line.match(BLOCK_LINE_RE)
+      if (!m) continue
+      const body = m[1].replace(/<[^>]*>/g, ' ').replace(/\|/g, ' ').replace(/[\s`*_]+$/, '')
+      const v = parseVerdictBody(body, line.trim())
+      if (!v.passing) out.push(v)
     }
   }
   return out
+}
+
+/** One verdict line's text after the label, parsed. */
+function parseVerdictBody(body, raw) {
+  // The verdict word is the head of the line: the text before the first
+  // `@`, `--` separator or `baselines:` marker, whichever comes first. It
+  // is read only as a whole — a substring match over the line let `not
+  // approved`, and a baseline named `approved-mock.png`, verify (#3301).
+  // The sha is read only right after the `@` that ends the head. A pass
+  // with a malformed sha (`@ <head-sha>` pasted from a template) stays an
+  // unbound pass, and an `@` later in the line (an email in the name
+  // list, even a hex-looking one) binds nothing — so it can neither turn a
+  // pass into a block nor move a block onto a commit where it is ignored.
+  const sep = body.match(SEPARATOR_RE)
+  const markerIdx = body.toLowerCase().indexOf('baselines:')
+  const atIdx = body.indexOf('@')
+  const headEnd = Math.min(
+    atIdx === -1 ? body.length : atIdx,
+    sep ? sep.index : body.length,
+    markerIdx === -1 ? body.length : markerIdx,
+  )
+  const shaMatch = atIdx !== -1 && headEnd === atIdx ? body.slice(atIdx).match(BOUND_SHA_RE) : null
+  const word = body.slice(0, headEnd).toLowerCase().replace(/^[^a-z/]+|[^a-z/]+$/g, '')
+  const passing = PASSING_VERDICTS.has(word)
+  // The names live after the `baselines:` marker when the line follows the
+  // format; a line that only names files also counts — the word
+  // "baselines:" is the convention, not the contract, and the failure
+  // report quotes the line either way. Without the marker the names are
+  // what follows the verdict head, so the verdict word is never read as a
+  // baseline name.
+  const listIdx = body.toLowerCase().lastIndexOf('baselines:')
+  const listPart = listIdx === -1 ? body.slice(headEnd).replace(BOUND_SHA_RE, ' ') : body.slice(listIdx + 'baselines:'.length)
+  const listText = listPart.replace(SHA_RE, ' ').replace(SEPARATOR_RE, ' ')
+  const names = parseNameList(listText)
+  // A block's glob covers every baseline (#3309); a pass's covers nothing.
+  if (!passing && !names.includes('*') && listHasGlob(listText)) names.push('*')
+  return { names, sha: shaMatch ? shaMatch[1] : null, passing, raw }
 }
 
 /**
@@ -417,6 +478,8 @@ export function evaluate({ pr, files, declarationTexts, verdictTexts, lastTouch 
     `A non-passing verdict (\`changes requested\`), named or \`*\`, at or after a pass vetoes`,
     `it: re-review the fixed PNG and post a new \`passed\` NAMING THE FILE at a later sha (a`,
     `\`*\` pass never clears a block that names the file).`,
+    `For "all baselines" write \`*\`: a glob such as \`*.png\` covers nothing in a pass. A block`,
+    `posted only as a GitHub review body is never read — post it in the body or a comment.`,
     ``,
     `Per file:`,
     ``,

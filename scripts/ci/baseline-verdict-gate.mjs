@@ -166,15 +166,16 @@ export const PASSING_VERDICTS = new Set(['passed', 'approved'])
  * One line of the declaration format. Exported for the playbook's testability
  * and so the self-test and the report cannot restate the spelling.
  */
-export const DECLARATION_RE = /^[^\S\r\n]*(?:[-*][^\S\r\n]*)?baseline-change:\s*(.+)$/gim
+export const DECLARATION_RE = /^[^\S\r\n\u2028\u2029]*(?:[-*][^\S\r\n\u2028\u2029]*)?baseline-change:\s*(.+)$/gim
 // A verdict line may sit in a quote, a bullet or a numbered list, and the
 // label may be bold: a block written in any of those shapes must still be
 // read, or the gate cannot see it (#3301). Before the label, whitespace is
-// `[^\S\r\n]` — any space but a line break, NBSP included — never `\s`:
+// `[^\S\r\n\u2028\u2029]` — any space but a line break (U+2028/U+2029
+// start a line for `^` too), NBSP included — never `\s`:
 // `^\s*` spans line breaks, and a comment of blank lines took seconds
 // (#3309). After the colon it stays `\s*`, as at base: a status on a later
 // line (blank lines between) is read, and there the run is scanned once.
-export const VERDICT_RE = /^[^\S\r\n]*(?:>[^\S\r\n]*)*(?:(?:[-*+]|\d+[.)])[^\S\r\n]*)?(?:\*\*|__)?design-review\s+verdict:(?:\*\*|__)?\s*(.+)$/gim
+export const VERDICT_RE = /^[^\S\r\n\u2028\u2029]*(?:>[^\S\r\n\u2028\u2029]*)*(?:(?:[-*+]|\d+[.)])[^\S\r\n\u2028\u2029]*)?(?:\*\*|__)?design-review\s+verdict:(?:\*\*|__)?\s*(.+)$/gim
 // A BLOCK is read in more shapes than a pass (#3309): a table row (the label
 // in its own cell, with or without the colon), a heading, a task-list item,
 // an italic or backticked label, an HTML-wrapped line, an emoji shortcode

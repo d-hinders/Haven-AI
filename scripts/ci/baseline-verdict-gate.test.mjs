@@ -595,7 +595,7 @@ describe('block shapes and globs (#3309)', () => {
   test('adversarial runs parse in linear time — raw, in a strict line, in a loose line, before the label', () => {
     // Every run a regex here could go super-linear on, 60k long (a comment
     // holds 65,536): blank lines once took 28 s through `^\s*` (#3309).
-    const runs = [' ', '*', '.', '](', '\n', '<', '[ ] ', '|', ':', '_', '-', '@', ',', '> ', '#']
+    const runs = [' ', '*', '.', '](', '\n', '<', '[ ] ', '|', ':', '_', '-', '@', ',', '> ', '#', '\u00a0', '\u2028', '\u2029']
     const t0 = performance.now()
     for (const c of runs) {
       const r = c.repeat(Math.ceil(60000 / c.length)).slice(0, 60000)

@@ -427,6 +427,26 @@ describe('verifiedFor — conflicting verdicts (#3301)', () => {
       assert.equal(verifiedFor('a.png', vs, ctx), false, nm)
     }
     assert.deepEqual(parseNameList('`*`'), ['*'])
+    for (const star of ['*.', '(*).', '`*`.']) assert.deepEqual(parseNameList(star), ['*'], star)
+    assert.deepEqual(parseNameList('[a.png](https://x/y.png), A.PNG'), ['a.png'])
+  })
+
+  test('a `*.` block, a case-variant name and a linked name all still block', () => {
+    for (const nm of ['*.', 'A.PNG', '[a.png](https://example.com/a.png)']) {
+      const vs = [v('passed @ bb00000 -- baselines: a.png'), v(`changes requested @ cc00000 -- baselines: ${nm}`)]
+      assert.equal(verifiedFor('a.png', vs, ctx), false, nm)
+    }
+  })
+
+  test('a block in a quote, a numbered list or with a bold label is still read', () => {
+    for (const prefix of ['**design-review verdict:**', '> design-review verdict:', '1. design-review verdict:', '> - design-review verdict:', '__design-review verdict:__']) {
+      const [blk] = parseVerdicts([`${prefix} changes requested @ cc00000 -- baselines: a.png`])
+      assert.ok(blk, prefix)
+      assert.equal(blk.passing, false, prefix)
+      assert.equal(blk.sha, 'cc00000', prefix)
+      const vs = [v('passed @ bb00000 -- baselines: a.png'), blk]
+      assert.equal(verifiedFor('a.png', vs, ctx), false, prefix)
+    }
     assert.deepEqual(parseNameList('`a.png`, (b.png).'), ['a.png', 'b.png'])
   })
 
@@ -751,7 +771,7 @@ describe('mutation proofs (each gating branch can fire)', () => {
       'design-review verdict: changes requested @ cc00000 -- baselines: `topbar-desktop.png`',
     ])
     assert.equal(evaluate(ticked).verdict, 'fail')
-    const mutated = await mutant(`const kept = rawPart.replace(/[^A-Za-z0-9._\\-/*]/g, '')`, `const kept = rawPart`)
+    const mutated = await mutant(`const kept = rawPart.replace(/[^A-Za-z0-9._\\-/*]/g, '').replace(/^\\.+|\\.+$/g, '').toLowerCase()`, `const kept = rawPart`)
     assert.equal(mutated(ticked).verdict, 'pass')
   })
 

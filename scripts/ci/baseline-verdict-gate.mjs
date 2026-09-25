@@ -78,7 +78,8 @@
 //     not on the head, describes a different image and is ignored — the same
 //     binding a pass has to meet.
 //
-// `--` and `—` both work as the separator; matching is on the BASE NAME, the
+// `--` and `—` both work as the separator; matching is on the BASE NAME, case-
+// insensitively and with surrounding markdown stripped (#3301), the
 // same convention `parseExpected` in baseline-audit.mjs uses, for the same
 // reason: the lines are typed by a human about files whose directory prefix
 // carries no information (no duplicate base names exist across the 85 PNGs —
@@ -152,7 +153,10 @@ export const PASSING_VERDICTS = new Set(['passed', 'approved'])
  * and so the self-test and the report cannot restate the spelling.
  */
 export const DECLARATION_RE = /^\s*(?:[-*]\s*)?baseline-change:\s*(.+)$/gim
-export const VERDICT_RE = /^\s*(?:[-*]\s*)?design-review\s+verdict:\s*(.+)$/gim
+// A verdict line may sit in a quote, a bullet or a numbered list, and the
+// label may be bold: a block written in any of those shapes must still be
+// read, or the gate cannot see it (#3301).
+export const VERDICT_RE = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s*)?(?:\*\*|__)?design-review\s+verdict:(?:\*\*|__)?\s*(.+)$/gim
 
 const SHA_RE = /@\s*`?([0-9a-fA-F]{7,40})\b/
 /** The sha a verdict is bound to: only right after the `@` that ends its verdict word. */
@@ -175,12 +179,15 @@ export function baselineName(path) {
  * `parseExpected` does — typed by a human under mild irritation.
  */
 export function parseNameList(raw) {
-  const parts = String(raw ?? '').split(LIST_SPLIT_RE).map((s) => s.trim()).filter(Boolean)
+  // A markdown link's target is not a name: `[a.png](url)` names a.png.
+  const text = String(raw ?? '').replace(/\]\([^)]*\)/g, ']')
+  const parts = text.split(LIST_SPLIT_RE).map((s) => s.trim()).filter(Boolean)
   const out = []
   for (const rawPart of parts) {
-    // Markdown around a name (`a.png`, (a.png), a.png., **a.png**) is not
-    // part of it: a block written that way must name the same file (#3301).
-    const kept = rawPart.replace(/[^A-Za-z0-9._\-/*]/g, '')
+    // Markdown around a name (`a.png`, (a.png), a.png., **a.png**, *.) is not
+    // part of it, and case is not either (every committed baseline name is
+    // lower-case): a block written that way must name the same file (#3301).
+    const kept = rawPart.replace(/[^A-Za-z0-9._\-/*]/g, '').replace(/^\.+|\.+$/g, '').toLowerCase()
     if (kept === '*') {
       out.push('*')
       continue
@@ -189,7 +196,7 @@ export function parseNameList(raw) {
     if (!part) continue
     const base = part.split('/').pop()
     if (!base) continue
-    out.push(base.toLowerCase().endsWith('.png') ? base : `${base}.png`)
+    out.push(base.endsWith('.png') ? base : `${base}.png`)
   }
   return [...new Set(out)]
 }
@@ -364,7 +371,7 @@ export function evaluate({ pr, files, declarationTexts, verdictTexts, lastTouch 
     declarations.some((d) => (d.names.includes('*') || d.names.includes(name)) && d.reason.length >= MIN_REASON_CHARS)
   const missing = []
   for (const path of pngs.modified) {
-    const name = baselineName(path)
+    const name = baselineName(path).toLowerCase()
     const declared = declaredForName(name)
     const verified = verifiedFor(name, verdicts, {
       lastTouchSha: lastTouch[path] ?? null,
@@ -374,7 +381,7 @@ export function evaluate({ pr, files, declarationTexts, verdictTexts, lastTouch 
     if (!declared || !verified) missing.push({ path, needsVerdict: true, declared, verified })
   }
   for (const path of pngs.added) {
-    const name = baselineName(path)
+    const name = baselineName(path).toLowerCase()
     const declared = declaredForName(name)
     if (!declared) missing.push({ path, needsVerdict: false, declared, verified: false })
   }

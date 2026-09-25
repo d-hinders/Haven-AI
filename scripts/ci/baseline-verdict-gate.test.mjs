@@ -705,6 +705,9 @@ describe('block shapes and globs (#3309)', () => {
       '- design-review verdict:\n  changes requested @ cc00000 -- baselines: a.png',
       'design-review verdict:\r\nchanges requested @ cc00000 -- baselines: a.png',
       'design-review verdict:\n\nchanges requested @ cc00000 -- baselines: a.png',
+      'design-review verdict:\n  \nchanges requested @ cc00000 -- baselines: a.png',
+      'design-review verdict:\u00a0\nchanges requested @ cc00000 -- baselines: a.png',
+      '**design-review verdict:**\u00a0\nchanges requested @ cc00000 -- baselines: a.png',
     ]) {
       const blocks = parseVerdicts([text])
       assert.equal(blocks.length, 1, JSON.stringify(text))
@@ -713,6 +716,14 @@ describe('block shapes and globs (#3309)', () => {
     const [pass] = parseVerdicts(['design-review verdict:\npassed @ cc00000 -- baselines: a.png'])
     assert.equal(verifiedFor('a.png', [pass], ctx), true)
     assert.equal(parseDeclarations(['baseline-change:\na.png -- a reason that is long enough to count']).length, 1)
+    // NBSP before the label is whitespace, as at base — for a pass and a declaration too.
+    assert.equal(verifiedFor('a.png', parseVerdicts(['\u00a0design-review verdict: passed @ cc00000 -- baselines: a.png']), ctx), true)
+    assert.equal(parseDeclarations(['\u00a0baseline-change: a.png -- a reason that is long enough to count']).length, 1)
+  })
+
+  test('the separator needs whitespace on both sides, as SEPARATOR_RE did', () => {
+    assert.equal(parseDeclarations(['baseline-change: a.png --a reason that is long enough to count']).length, 0)
+    assert.equal(parseDeclarations(['baseline-change: a.png\u00a0—\u00a0a reason that is long enough to count']).length, 1)
   })
 
   test('underscore emphasis around a name in a BLOCK names the file', () => {

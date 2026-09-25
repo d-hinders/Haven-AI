@@ -646,6 +646,12 @@ describe('block shapes and globs (#3309)', () => {
     }
     const star = parseVerdicts(['**design-review verdict:** changes requested @ cc00000 -- baselines: **'])
     assert.ok(star[0].names.includes('*'))
+    // A trailing `*` after a name that is not a whole `.png` may be the glob: kept.
+    for (const line of ['*design-review verdict: changes requested @ cc00000 -- baselines: topbar*', '**design-review verdict: changes requested @ cc00000 -- baselines: topbar**']) {
+      const blocks = parseVerdicts([line])
+      assert.ok(blocks[0].names.includes('*'), line)
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, line)
+    }
   })
 
   test('in a PASS and in a declaration the same globs cover nothing, exactly as before', () => {

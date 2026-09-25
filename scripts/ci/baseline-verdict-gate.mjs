@@ -48,8 +48,9 @@
 //             dispatch, declared rather than silent). Write `*` itself: a
 //             glob (`*.png`, `dir/*.png`) covers NOTHING in a pass or a
 //             declaration. In a non-passing line any `*` in the list, beyond
-//             emphasis around a whole name, covers every baseline — a block
-//             reads as wide as its author meant it, fail closed (#3309).
+//             emphasis around a whole name or the whole line, covers every
+//             baseline — a block reads as wide as its author meant it,
+//             fail closed (#3309).
 //   <reason>  why the pixels moved, at least 20 characters — a label is not a
 //             reason. The same length the copy lint and the ratchets demand of
 //             an inline marker, for the same reason: an empty or one-word
@@ -200,15 +201,16 @@ function blockPrefixOk(prefix) {
 /**
  * Strip the closing half of emphasis that opened before the label and wraps
  * the whole line (`**design-review verdict: … b.png**`): left on the last
- * name it reads as a glob (#3309). Only when a name character precedes it,
- * so a list that IS `**` or `*` keeps its wildcard.
+ * name it reads as a glob (#3309). Only when what remains ends in a whole
+ * `.png` name: `baselines: **` keeps its wildcard, and in `*… topbar*` the
+ * trailing `*` may be the glob, so it stays (fail closed).
  */
 function closeLineEmphasis(line, body) {
   const open = line.match(/([*_]+)design[-\s]*review/i)?.[1] ?? ''
   const trimmed = body.replace(/\s+$/, '')
   if (!open || !trimmed.endsWith(open)) return body
   const rest = trimmed.slice(0, -open.length)
-  return /[A-Za-z0-9.]$/.test(rest) ? rest : body
+  return /\.png$/i.test(rest) ? rest : body
 }
 
 const SHA_RE = /@\s*`?([0-9a-fA-F]{7,40})\b/

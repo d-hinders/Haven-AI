@@ -8,7 +8,12 @@ alone.
 
 ## Unreleased
 
+## 0.5.0-alpha.0 — 2026-09-25
+
 - `--doctor` no longer needs `--runtime` (#3210): the argument parser used to refuse a flagless `--doctor` before the doctor ran, which left #3120's record resolution reachable only by library callers. A flagless `--doctor` now checks the runtime recorded in `last-connect-outcome.json`, and with no resolvable record reports the existing `failed` "Runtime is unknown — the runtime config was NOT checked" verdict (exit 1). `--repair` still requires `--runtime` — it rewrites that config, so the runtime is named, never inherited — and its refusal message now says so (a whitespace-only value counts as absent). On the newly reachable path, a record-resolved runtime is named with its source on the `runtime_config` verdict, `--repair` hints carry `--runtime <runtime>` plus the allowed values instead of a bare `--doctor --repair` the parser would refuse, and the `restart` check no longer env-detects a runtime nobody named. The report schema (`version: 1`), check ids and exit-code semantics are unchanged; a flagless `--doctor --json` now emits a `DoctorReport` where it emitted the parse-failure record.
+
+- **A retired agent directory can no longer keep a spendable key (#3259).** `writeAgentTombstone` mirrors each retirement into the tombstone ledger after writing the wrapper and `TOMBSTONE.json`. When that mirror failed it threw, and `--replace` caught the throw and skipped `teardownLocalKeyMaterial` — so a directory that read `retired` still held a usable key, and wiring-collision never retried it. The mirror is now best-effort: `--replace` warns, names the ledger, and tears the key down regardless. `--tombstone` still exits 0 and reports the mirror failure; `--unwire --json` gains an additive `mirror_error`, and the `--replace` setup outcome gains an additive `retirement_mirror_errors`. Errors carry the errno code only, never the OS message, so no local path leaks.
+- **The tombstone ledger follows the credential root (#3251).** `--tombstone`, `--unwire` and `--replace` previously wrote every retirement into the ambient `~/.haven/tombstones` whatever root held the retired directory; a custom root now keeps its ledger inside itself, at `<root>/.tombstones` (never beside it, since a named root's parent may be `/`, home, or read-only). The default root still maps to `~/.haven/tombstones`, so an install that never passed `--credentials-dir` sees no change. `--doctor` reads the ledger of the root it scans.
 
 ## 0.4.0-alpha.0 — 2026-09-19
 

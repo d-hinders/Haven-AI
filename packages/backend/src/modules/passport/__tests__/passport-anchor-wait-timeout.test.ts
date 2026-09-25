@@ -25,12 +25,23 @@
  * `wait()` therefore HANGS these tests rather than quietly passing them.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Interface } from 'ethers'
 
 const TX_HASH = '0x' + 'cd'.repeat(32)
 const UID = '0x' + 'ab'.repeat(32)
+/**
+ * #3294 re-point: what the mined receipt's `Attested` log carries, kept
+ * DISTINCT from the staticCall stub so the recorded UID can only come from
+ * the log. The old stub agreed by construction and could not catch the
+ * prediction being recorded.
+ */
+const MINED_UID = '0x' + 'ef'.repeat(32)
+const RELAYER = '0x' + '11'.repeat(20)
 
 /** Which ending the stubbed transaction gets. */
 let waitOutcome: 'timeout' | 'revert' | 'mined' | 'null-receipt' | 'network-error' = 'timeout'
+/** Logs the staged mined receipt carries — emptied to prove criterion 2. */
+let minedLogs: Array<{ address: string; topics: string[]; data: string }> = []
 let waitCalls: Array<[confirms: number | undefined, timeoutMs: number | undefined]> = []
 
 const minedSpy = vi.fn(async () => {})
@@ -58,7 +69,9 @@ const submitSpy = vi.fn(async (params: { recordId: string | null }) => {
         err.code = 'NETWORK_ERROR'
         throw err
       }
-      if (waitOutcome === 'mined') return { status: 1 }
+      if (waitOutcome === 'mined') {
+        return { status: 1, logs: minedLogs.map((log) => ({ ...log, topics: [...log.topics] })) }
+      }
       if (waitOutcome === 'null-receipt') return null
       // 'timeout' — never mines. Without a deadline it never settles at all.
       if (timeoutMs == null) return await new Promise<never>(() => {})
@@ -78,7 +91,7 @@ vi.mock('../../../infra/relayer.js', async () => {
   const actual = await vi.importActual<typeof import('../../../infra/relayer.js')>(
     '../../../infra/relayer.js',
   )
-  return { ...actual, getRelayer: () => ({ address: '0x' + '11'.repeat(20) }) }
+  return { ...actual, getRelayer: () => ({ address: RELAYER }) }
 })
 
 vi.mock('ethers', async () => {
@@ -96,6 +109,7 @@ vi.mock('ethers', async () => {
 
 const { anchorOnChain, PassportAnchorUnconfirmedError, PASSPORT_ANCHOR_CONFIRM_TIMEOUT_MS } =
   await import('../attestation.js')
+const { getEasDeployment } = await import('../schema.js')
 
 const CLAIM = {
   agentEoa: '0x' + '22'.repeat(20),
@@ -111,6 +125,18 @@ beforeEach(() => {
   process.env.AGENT_PASSPORT_SCHEMA_UID_84532 = UID
   waitOutcome = 'timeout'
   waitCalls = []
+  // The default mined receipt carries OUR Attested log, with the MINED uid —
+  // distinct from the staticCall stub (#3294).
+  const iface = new Interface([
+    'event Attested(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schemaUID)',
+  ])
+  const encoded = iface.encodeEventLog('Attested', [
+    '0x' + '22'.repeat(20),
+    RELAYER,
+    MINED_UID,
+    UID,
+  ])
+  minedLogs = [{ address: getEasDeployment(84532).eas, topics: [...encoded.topics], data: encoded.data }]
   vi.clearAllMocks()
   vi.useFakeTimers()
 })
@@ -203,8 +229,24 @@ describe('passport anchor wait timeout (#1735)', () => {
     waitOutcome = 'mined'
     const result = (await anchorAndExpire()) as { txHash: string; attestationUid: string }
     expect(result.txHash).toBe(TX_HASH)
-    expect(result.attestationUid).toBe(UID)
+    // #3294: the recorded UID is the LOG's, not the staticCall stub's — the
+    // two stubs deliberately disagree now.
+    expect(result.attestationUid).toBe(MINED_UID)
+    expect(result.attestationUid).not.toBe(UID)
     expect(minedSpy).toHaveBeenCalledTimes(1)
     expect(failedSpy).not.toHaveBeenCalled()
+  })
+
+  // #3294 criterion 2: a status-1 receipt with no provable Attested log is
+  // NOT recorded as anchored under the predicted UID — it closes failed and
+  // throws, the ordinary retryable path.
+  it('a mined tx with no Attested log never falls back to the prediction', async () => {
+    waitOutcome = 'mined'
+    minedLogs = []
+    const err = (await anchorAndExpire()) as Error
+    expect(err).not.toBeInstanceOf(PassportAnchorUnconfirmedError)
+    expect(err.message).toMatch(/no readable Attested log/)
+    expect(minedSpy).not.toHaveBeenCalled()
+    expect(failedSpy).toHaveBeenCalledTimes(1)
   })
 })

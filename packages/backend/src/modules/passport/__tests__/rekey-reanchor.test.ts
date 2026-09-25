@@ -33,6 +33,7 @@ import {
   anchorForPassport,
   isStaleAnchor,
   passportStanding,
+  setAnchorUidRepair,
   setRevocationProbe,
   setRevoker,
 } from '../revocation.js'
@@ -50,6 +51,11 @@ const TREASURY = '0x' + 'b'.repeat(40)
 const NEW_UID = '0x' + '22'.repeat(32)
 /** `agent_passports_uid_idx` is unique, so each seeded agent needs its own. */
 const oldUidFor = (n: number) => '0x' + n.toString(16).padStart(64, '1')
+/**
+ * #3294: the uid the anchor receipt ACTUALLY carries — deliberately different
+ * from the stored prediction (`oldUidFor`), which is what pre-fix rows hold.
+ */
+const REAL_UID = '0x' + 'ee'.repeat(32)
 const RECEIPT_KEY = '0x' + '11'.repeat(32)
 const REVOKE_TX = '0x' + '33'.repeat(32)
 const ANCHOR_TX = '0x' + '44'.repeat(32)
@@ -115,6 +121,7 @@ describeDb('#1699 — passport re-anchoring on re-key', () => {
     setAnchorLiveness(null)
     setRevoker(null)
     setRevocationProbe(null)
+    setAnchorUidRepair(null)
     setReceiptSigningKey(RECEIPT_KEY)
     process.env.AGENT_PASSPORT_SCHEMA_UID_84532 = '0x' + '1'.repeat(64)
   })
@@ -124,6 +131,7 @@ describeDb('#1699 — passport re-anchoring on re-key', () => {
     setAnchorLiveness(null)
     setRevoker(null)
     setRevocationProbe(null)
+    setAnchorUidRepair(null)
     setReceiptSigningKey(null)
     vi.restoreAllMocks()
   })
@@ -362,6 +370,52 @@ describeDb('#1699 — passport re-anchoring on re-key', () => {
 
       expect(await reconcileReanchor(agentId, userId)).toBe('anchored')
       expect(revoker).not.toHaveBeenCalled()
+    })
+
+    // #3294 criterion 5: a PRE-FIX row stores the staticCall prediction, so
+    // retiring the stored uid loops on `NotFound()` forever. The retire's
+    // repair gate re-derives the receipt's uid, swaps the row to it, and
+    // revokes THAT — and `resetForReanchor` must key on the repaired uid,
+    // which is exactly what `revokedUid` carries.
+    it('a phantom-UID row is repaired and the REAL uid is what gets revoked', async () => {
+      const { agentId, userId, oldUid } = await seedAnchoredAgent()
+      await rekeyTo(agentId, NEW_DELEGATE)
+
+      // The probe cannot see the stored uid — the exact signature of the
+      // phantom: EAS answers every getAttestation with the zeroed struct.
+      setRevocationProbe(async (_chain, uid) =>
+        uid === REAL_UID
+          ? { state: 'live', txHash: null } // the real attestation exists, unrevoked
+          : { state: 'unknown', txHash: null }, // the stored prediction resolves to nothing
+      )
+      const revoked: string[] = []
+      setRevoker(async (_chain, uid) => {
+        revoked.push(uid)
+        return { txHash: REVOKE_TX }
+      })
+      setAnchor(async () => ({ attestationUid: NEW_UID, txHash: ANCHOR_TX }))
+      // The repair seam, faithful to the real implementation: it CAS-swaps the
+      // row to the receipt's uid via the real repository function, against the
+      // real database.
+      setAnchorUidRepair(async (_chain, agentId, row) =>
+        row.tx_hash === ANCHOR_TX
+          ? {
+              repaired: await repo.repairAnchoredUid(agentId, row.attestation_uid, REAL_UID, ANCHOR_TX),
+              uid: REAL_UID,
+              reason: 'test receipt',
+            }
+          : { repaired: false, uid: null, reason: 'not our anchor tx' },
+      )
+
+      expect(await reconcileReanchor(agentId, userId)).toBe('anchored')
+
+      // The REAL uid was revoked, not the stored prediction.
+      expect(revoked).toEqual([REAL_UID])
+      expect(revoked).not.toContain(oldUid)
+      // And the row is re-anchored on the new key with a fresh uid.
+      const row = await repo.findByAgent(agentId)
+      expect(row?.status).toBe('anchored')
+      expect(row?.attestation_uid).toBe(NEW_UID)
     })
 
     it('an agent with NO passport is untouched by a re-key', async () => {

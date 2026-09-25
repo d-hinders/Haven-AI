@@ -21,7 +21,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/modules/accounting/api-key-flow.ts
   - packages/backend/src/routes/accounting-webhooks.ts
-last-verified: "2026-09-24"
+last-verified: "2026-09-25"
 ---
 
 # Dev environment
@@ -688,3 +688,19 @@ project owner — collaborators have Viewer access, not env-var write access.
 > a malformed value. The shadow/enforce semantics, `enforcedModules` and the
 > generated route-module table are unchanged (no route file added or moved).
 > Nothing else in this file's coverage was touched; this note is the only edit.
+
+> **Re-verified #3294 (2026-09-25):** `index.ts` gains two wiring lines and one
+> sweep phase, none of them route work. The wiring: `setAnchorUidRepair` joins
+> the other passport seams beside `setRevocationProbe` (it degrades to the
+> pre-#3294 submit when unwired, so no boot path changes), and
+> `repairAnchoredUids` is imported from the passport barrel. The phase: inside
+> the existing leader-gated passport sweep, a `phase('anchor-repair', …)` runs
+> BETWEEN the issuance retry phase and the revocation phase — a `limit`ed,
+> `updated_at`-paced batch (`repairAnchoredUids()`), so a repair-triggered
+> revoke shares the one relayer lane through the revocation sweep's ordinary
+> backoff rather than stampeding it; phase isolation keeps its failure away
+> from the safety-critical revocation half, as for issuance. No route file is
+> added or moved, `enforcedModules` is untouched, and the shadow/enforce
+> semantics this document describes are unchanged. Nothing else in this file's
+> coverage was touched; this note and the `last-verified` date are the only
+> edits.

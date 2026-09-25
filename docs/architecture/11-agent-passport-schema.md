@@ -220,6 +220,36 @@ that receipt. Re-minting would create a second live attestation with the first
 permanently invisible to Haven. The on-chain wait is bounded (120s) so it
 cannot outlive the anchoring claim's 600s stale window.
 
+### The recorded UID is the mined one, never a prediction (#3294)
+
+The anchor reads the UID it records from the mined receipt's `Attested` log —
+the chain's own answer, proven ours by contract address, schema UID and
+attester. A pre-send `attest.staticCall` still runs, but only as the free
+revert check it has always been commented as: EAS derives a UID from inputs
+that include the block the transaction lands in, so the value a prediction
+returns at the pre-send block is not the UID the mint emits. Recording the
+prediction (the behaviour before [#3294](https://github.com/d-hinders/Haven-AI/issues/3294))
+pointed every directly-minted row at a UID that never existed on-chain —
+revoking it reverted `NotFound()` forever while the agent's real attestation
+stayed live, and merchants were handed an `attestation_uid` that resolves to
+nothing. A mined transaction whose receipt carries no provable `Attested` log
+is never recorded under a guessed UID: the anchor closes the outbound record
+`failed` and throws, and the #1043 retry re-reads that same receipt.
+
+Rows anchored before the fix are **repaired from their own anchor receipt**:
+the repair re-derives the UID from the receipt's `Attested` log keyed by the
+row's persisted `tx_hash`, swaps it in through a compare-and-set (a row that
+moved mid-repair — revoked, reset, re-anchored — refuses and defers to the
+next pass), and never guesses: a row with no `tx_hash`, or whose receipt
+cannot be read or carries no proven log, is left unchanged and reported. The
+repair runs as a paced, idempotent sweep step (a bounded batch per tick, a row
+revisited at most hourly) and the revocation reconcile consults it before
+spending gas on a UID the chain cannot see — a repaired row's revoke targets
+the real UID and converges through the ordinary backoff. The re-anchor path
+inherits the same gate: the retire repairs the row and revokes the REAL
+attestation, then hands the row back to issuance keyed on the uid that was
+actually retired.
+
 Two limits on "never re-minted", stated because the unqualified version is not
 true today:
 
@@ -797,6 +827,14 @@ chain directly. Those two fields are safe to accept from an agent precisely
 because they are checkable against a source the agent does not control. The URL
 is not. Authority comes from the pinned issuer (`GET /passport/issuer`) and the
 receipt signature, never from where the link pointed.
+
+Since [#3294](https://github.com/d-hinders/Haven-AI/issues/3294) the served
+`attestation_uid` is the UID the mint transaction actually emitted (read from
+its `Attested` log), so it resolves on EAS by construction. Rows anchored
+before that fix carried the pre-send prediction, which resolves to nothing —
+the repair re-derives those from the anchor receipt, so a UID that stops
+resolving and later resolves again reflects the row being repaired, not the
+agent's standing changing (standing was never derived from the chain).
 
 Haven emits `verify_url` only when it can be honest about it — a configured
 `HAVEN_API_URL` **and** a live verifier (`PASSPORT_RECEIPT_SIGNING_KEY`; that

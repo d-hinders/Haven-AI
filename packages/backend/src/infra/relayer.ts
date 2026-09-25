@@ -1,4 +1,4 @@
-import { JsonRpcProvider, Wallet, formatEther, parseEther, type Provider } from 'ethers'
+import { JsonRpcProvider, Network, Wallet, formatEther, parseEther, type Provider } from 'ethers'
 import { relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from '../domain/chains.js'
 import { secondaryRpcUrl } from './chain/rpc-transport.js'
@@ -122,9 +122,15 @@ export function getProvider(chainId: number): JsonRpcProvider {
   return provider
 }
 
-/** The ONE place an ethers provider is constructed (`rpc-transport-guard`). */
-function newEthersProvider(url: string): JsonRpcProvider {
-  return new JsonRpcProvider(url, undefined, { batchMaxCount: 1, staticNetwork: true })
+/**
+ * The ONE place an ethers provider is constructed (`rpc-transport-guard`).
+ * The primary passes no network (detected once, then static). The fallback
+ * pins it: an unreachable fallback must not start ethers' 1 s `eth_chainId`
+ * detection retry, which never stops, and a pinned network also stops the
+ * fallback's own `eth_chainId` answer from being trusted.
+ */
+function newEthersProvider(url: string, network?: Network): JsonRpcProvider {
+  return new JsonRpcProvider(url, network, { batchMaxCount: 1, staticNetwork: true })
 }
 
 const fallbackBroadcastProviders = new Map<number, JsonRpcProvider>()
@@ -142,7 +148,7 @@ export function getFallbackBroadcastProvider(chainId: number): JsonRpcProvider |
   if (!url) return null
   let provider = fallbackBroadcastProviders.get(chainId)
   if (!provider) {
-    provider = newEthersProvider(url)
+    provider = newEthersProvider(url, Network.from(chainId))
     fallbackBroadcastProviders.set(chainId, provider)
   }
   return provider

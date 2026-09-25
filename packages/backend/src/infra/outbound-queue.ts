@@ -347,6 +347,9 @@ export async function broadcastSigned(
   } catch (err) {
     if (!isPendingTagRefusal(err)) throw err
     const tx = Transaction.from(raw)
+    // Read the block BEFORE sending, as ethers' own broadcast does alongside
+    // its send: a failed read then fails cleanly with nothing re-sent.
+    const blockNumber = await provider.getBlockNumber()
     const hash = await sendFallback(chainId, raw)
     if (hash.toLowerCase() !== tx.hash?.toLowerCase()) {
       throw new Error(
@@ -358,8 +361,10 @@ export async function broadcastSigned(
         `broadcast ${hash} through the fallback provider (#2769)`,
     )
     // Mirrors ethers' own broadcastTransaction: wrap the signed transaction on
-    // the primary provider, replaceable from the current block.
-    const blockNumber = await provider.getBlockNumber()
+    // the primary provider, replaceable from the current block. The signed
+    // Transaction carries every field formatTransactionResponse would (hash,
+    // from, to, nonce, chainId, signature; blockNumber/blockHash null) except
+    // gasPrice, null here vs undefined there, which no caller reads.
     return new TransactionResponse(tx as unknown as TransactionResponseParams, provider).replaceableTransaction(
       blockNumber,
     )
@@ -369,7 +374,10 @@ export async function broadcastSigned(
 /**
  * `eth_sendRawTransaction` through the chain's configured second provider
  * (`getFallbackBroadcastProvider` in `relayer.ts`). Its URL carries a provider
- * API key, so it is never logged or put into an error message.
+ * API key, and ethers puts the request URL into a non-2xx error's message and
+ * into its enumerable `info.requestUrl` / `request` — which reach the
+ * `outbound_txs` error column, logs and an operator response. So a failure is
+ * rethrown by {@link fallbackSendError}, rebuilt from safe fields only.
  */
 export async function sendRawViaFallback(chainId: number, raw: string): Promise<string> {
   const fallback = getFallbackBroadcastProvider(chainId)
@@ -378,7 +386,52 @@ export async function sendRawViaFallback(chainId: number, raw: string): Promise<
       `outbound-queue: the RPC refused the broadcast on chain ${chainId} and no fallback provider is configured`,
     )
   }
-  return String(await fallback.send('eth_sendRawTransaction', [raw]))
+  try {
+    return String(await fallback.send('eth_sendRawTransaction', [raw]))
+  } catch (err) {
+    throw fallbackSendError(err)
+  }
+}
+
+/**
+ * A fallback send failure, rebuilt so no URL — and so no API key — can leave
+ * it: ethers' short message and code, and the JSON-RPC error body's own code
+ * and message (kept so revert and nonce classification still work), with any
+ * URL in the text replaced. `info`, `request` and `response` are never copied.
+ */
+export function fallbackSendError(err: unknown): Error {
+  const e = err as {
+    code?: unknown
+    shortMessage?: unknown
+    message?: unknown
+    error?: { code?: unknown; message?: unknown }
+    info?: { error?: { code?: unknown; message?: unknown } }
+  } | null
+  const scrub = (text: string) => text.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)\]}]+/gi, '<fallback-url>')
+  // ethers keeps the JSON-RPC error body in `error` or `info.error` — only
+  // that body's code and message are copied, never the rest of `info`.
+  const body = e?.error ?? e?.info?.error
+  const rpc =
+    body && typeof body === 'object'
+      ? {
+          code: body.code,
+          message: typeof body.message === 'string' ? scrub(body.message) : undefined,
+        }
+      : undefined
+  const base =
+    typeof e?.shortMessage === 'string'
+      ? e.shortMessage
+      : typeof e?.message === 'string'
+        ? e.message
+        : String(err)
+  const detail = rpc?.message ? ` (rpc: ${rpc.message})` : ''
+  const out = new Error(`outbound-queue: fallback broadcast failed: ${scrub(base)}${detail}`) as Error & {
+    code?: unknown
+    error?: { code?: unknown; message?: string }
+  }
+  if (e?.code !== undefined) out.code = e.code
+  if (rpc) out.error = rpc
+  return out
 }
 
 /**

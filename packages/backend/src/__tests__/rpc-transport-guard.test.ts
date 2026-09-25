@@ -105,6 +105,22 @@ describe('every backend viem RPC transport goes through rpcTransport (#3255)', (
     expect(matchingLines(JSON_RPC_PROVIDER).filter((m) => m.rel === RELAYER)).toHaveLength(1)
   })
 
+  it('the relayer wallet binds only to the primary; the broadcast fallback has one consumer (#2769)', () => {
+    // relayer.ts holds two providers since #2769: the primary (the single
+    // signing/nonce view) and the fallback that only re-sends signed bytes.
+    // The wallet must never bind to the fallback, and only the outbound queue
+    // may reach it.
+    // A provider-bound wallet (two arguments); `new Wallet(key)` only signs.
+    const wallets = matchingLines(/new Wallet\([^)]*,/)
+    expect(wallets.map((m) => [m.rel, m.line.trim()])).toEqual([
+      [RELAYER, 'relayer = new Wallet(key, getProvider(chainId))'],
+    ])
+    const consumers = files
+      .filter(({ rel, text }) => rel !== RELAYER && /getFallbackBroadcastProvider/.test(text))
+      .map((f) => f.rel)
+    expect(consumers).toEqual(['infra/outbound-queue.ts'])
+  })
+
   it('the disabledDelegations heal reader stays on the dedicated endpoint only', () => {
     // A false heal marks a row revoked without an owner signature (the kill
     // switch), so no failover node may answer it. Literal pin on the one call.

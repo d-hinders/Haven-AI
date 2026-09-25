@@ -383,7 +383,9 @@ npm run ops:cancel-stuck-lane -w packages/backend -- <outbound-row-id>
 
 It re-checks precondition 4 itself: below the bump cap it refuses with
 `automated_recovery_owns_it` and sends nothing (#2769). It does not check
-preconditions 1, 2, 3 or 5 — those stay yours.
+preconditions 1, 2, 3 or 5 — those stay yours. On a capped lane nothing
+re-sends the cancel if it sticks; the output says so and prints the cancel
+row's id to re-run the command with.
 
 - **Do this even if the transaction has vanished from the mempool.** A dropped
   transaction does not free its own nonce here: its row is still `broadcast`,

@@ -319,6 +319,8 @@ describeDb('operator lane cancel frees the wedge (#1743 Option A)', () => {
     const result = await cancelStuckOutboundLane(stuck.id, deps)
     if (result.outcome !== 'cancel_broadcast') throw new Error(`expected cancel_broadcast, got ${JSON.stringify(result)}`)
     expect(result.nonce).toBe(String(STUCK_NONCE))
+    // One attempt counted after the claim, under the cap: the worker owns the cancel.
+    expect(result.workerResends).toBe(true)
 
     // Exactly one broadcast reached the chain: the cancel, at the stuck
     // nonce, to the relayer itself, carrying nothing.
@@ -481,6 +483,8 @@ describeDb('operator lane cancel frees the wedge (#1743 Option A)', () => {
     const result = await cancelStuckOutboundLane(sweep.id, deps)
     if (result.outcome !== 'cancel_broadcast') throw new Error(`expected cancel_broadcast, got ${JSON.stringify(result)}`)
     expect(result.nonce).toBe(String(STUCK_NONCE))
+    // The claim put the lane past the cap: nothing will re-send this cancel.
+    expect(result.workerResends).toBe(false)
     expect(broadcasts).toHaveLength(1)
     expect(broadcasts[0].nonce).toBe(STUCK_NONCE)
     expect(broadcasts[0].to?.toLowerCase()).toBe(wallet.address.toLowerCase())
@@ -493,6 +497,49 @@ describeDb('operator lane cancel frees the wedge (#1743 Option A)', () => {
     expect(stuck.replaced_by).toBe(cancel.id)
     expect(cancel.status).toBe('broadcast')
     expect(cancel.nonce).toBe(String(STUCK_NONCE))
+  })
+
+  it('#2769: workerResends is exact at the boundary — an attest one attempt below the cap gets a cancel the worker will NOT re-send', async () => {
+    const stuck = await insertStuckAttest()
+    for (let i = 0; i < MAX_BUMPS_PER_NONCE - 1; i++) {
+      const attempt = await enqueueOutboundTx({ chainId: CHAIN, submitter: LANE_CANCEL_SUBMITTER, toAddress: EAS, data: '0x' })
+      await markOutboundTxFailed(attempt.id, 'lane cancel broadcast failed: fixture', undefined, BigInt(STUCK_NONCE))
+    }
+    const { deps } = cancelHarness()
+    const result = await cancelStuckOutboundLane(stuck.id, deps)
+    if (result.outcome !== 'cancel_broadcast') throw new Error(`expected cancel_broadcast, got ${JSON.stringify(result)}`)
+    // The claim is the cap-th attempt, so the worker would only alert on this cancel.
+    expect(await countLaneAttemptsAtNonce(CHAIN, BigInt(STUCK_NONCE))).toBe(MAX_BUMPS_PER_NONCE)
+    expect(result.workerResends).toBe(false)
+  })
+
+  it('#2769: a cancel that sticks on a capped lane is NOT re-sent by the worker — the outcome says so, and a re-trigger on the cancel row is accepted', async () => {
+    const sweep = await insertStuckSweep(MAX_BUMPS_PER_NONCE)
+    const failing = cancelHarness({ broadcastError: 'upstream unavailable' })
+
+    const first = await cancelStuckOutboundLane(sweep.id, failing.deps)
+    if (first.outcome !== 'cancel_stamped_send_unconfirmed') {
+      throw new Error(`expected cancel_stamped_send_unconfirmed, got ${JSON.stringify(first)}`)
+    }
+    expect(first.workerResends).toBe(false)
+
+    // Aged past the stale threshold, the stuck cancel is only alerted on.
+    await db.query(`UPDATE outbound_txs SET updated_at = NOW() - INTERVAL '10 minutes' WHERE id = $1`, [first.cancelRowId])
+    const tickBroadcasts: unknown[] = []
+    const tick = await runOutboundBumpTick(CHAIN, realRepoDeps(tickBroadcasts), log)
+    expect(tick.alerted).toBe(1)
+    expect(tick.bumped).toBe(0)
+    expect(tickBroadcasts).toEqual([])
+
+    // The operator re-runs the trigger on the cancel row: accepted, one new cancel at N.
+    const working = cancelHarness()
+    const second = await cancelStuckOutboundLane(first.cancelRowId, working.deps)
+    if (second.outcome !== 'cancel_broadcast') throw new Error(`expected cancel_broadcast, got ${JSON.stringify(second)}`)
+    expect(second.nonce).toBe(String(STUCK_NONCE))
+    expect(working.broadcasts).toHaveLength(1)
+    const rows = await rowsFor(CHAIN)
+    expect(rows.find((r) => r.id === first.cancelRowId)!.status).toBe('replaced')
+    expect(rows.find((r) => r.id === second.cancelRowId)!.status).toBe('broadcast')
   })
 
   it('a PRE-STAMP failure closes the cancel attempt failed AT the nonce and ROLLS THE CLAIM BACK — the wedge stays loud and the trigger re-runnable', async () => {

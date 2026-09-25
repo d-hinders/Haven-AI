@@ -199,8 +199,9 @@ warning. Operator response:
    the outbound pipeline (`infra/outbound-lane-cancel.ts`): nonce, chain and
    wallet come from the stuck row itself, and the cancel gets a durable
    `outbound_txs` record the bump worker reconciles like any other broadcast —
-   including fee-replacing the cancel itself if it sticks. Running it twice is
-   safe; the second run is refused.
+   including fee-replacing the cancel itself if it sticks, unless the lane was
+   already at the bump cap (the command's output says which). Running it twice
+   is safe; the second run is refused.
 
    Once the cancel mines, the stuck attest can never mine — its nonce is spent
    — and issuance recovers **on its own**: the next sweep tick sees the burned
@@ -254,10 +255,16 @@ clears it, and refuses while the lane is still below the cap:
    ([`stuck-revoke-alarm.md`](stuck-revoke-alarm.md) §4) is the reason to look
    first, above all for a `passport_attest`.
 3. Run `npm run ops:cancel-stuck-lane -w packages/backend -- <row-id>` for
-   that row. The burned payload's owner retries on a fresh record: the sweep
-   is re-run, the deploy is re-attempted at the next activation, and
-   `reconcileRevocation` submits a fresh revoke.
-4. Rows above N whose own lanes also capped during the outage stay stuck after
+   that row. The burned payload's owner retries on a fresh record:
+   `reconcileRevocation` submits a fresh revoke, and the deploy is
+   re-attempted at the next activation or erc7710 authorize. A sweep is not
+   retried automatically: its funds stay visible as stranded on the delegate
+   until the agent sweeps again.
+4. **Nothing re-sends this cancel.** The lane was already at the cap, and the
+   command says so in its output. If the cancel has not mined after three
+   minutes, which is what another RPC outage looks like, re-run the command
+   with the cancel row's id, which it prints.
+5. Rows above N whose own lanes also capped during the outage stay stuck after
    N clears. Repeat from step 1 until the lowest live row mines on its own.
 
 > **Fixed by [#1745](https://github.com/d-hinders/Haven-AI/issues/1745) — this

@@ -103,10 +103,19 @@
  *
  * Burning a capped rebroadcast-safe payload is safe for the same reason the
  * worker was allowed to re-send it: each owner retries on a fresh record. A
- * sweep is re-run (the EIP-3009 authorization is single-use, so a late
- * duplicate reverts and moves nothing); a hybrid deploy is re-attempted at the
- * next activation (CREATE2, idempotent); `reconcileRevocation` submits a
- * fresh revoke. Nothing is re-keyed off the burned row's hash.
+ * hybrid deploy is re-attempted at the next activation or erc7710 authorize
+ * (CREATE2, idempotent); `reconcileRevocation` submits a fresh revoke. A
+ * sweep is not retried automatically: the relay throw marks the sweep failed
+ * and the stranded event stays open, so the funds stay visible on the
+ * delegate until the agent sweeps again (the EIP-3009 authorization is
+ * single-use, so a late duplicate reverts and moves nothing). Nothing is
+ * re-keyed off the burned row's hash.
+ *
+ * On a capped lane the cancel itself starts PAST the cap — the claim below
+ * adds one more counted attempt at N — so the worker only alerts on a cancel
+ * that sticks. The outcome's `workerResends` says so, and the operator
+ * re-runs the trigger on the cancel row's id, which is accepted for the same
+ * reason: a capped `lane_cancel` is a capped rebroadcast-safe row.
  */
 
 import {
@@ -124,24 +133,34 @@ import type { OutboundTxRow } from './repositories/outbound-txs.js'
  * REBROADCAST-SAFE payload — broadcasting it twice moves nothing, its hash
  * keys no recovery — so the tag is listed in
  * {@link REBROADCAST_SAFE_SUBMITTERS} and a fee-stuck cancel self-heals
- * through the ordinary bump path instead of becoming a second wedge.
+ * through the ordinary bump path instead of becoming a second wedge — while
+ * its lane is below the cap. A cancel on a lane already at the cap (every
+ * #2769 cancel of a rebroadcast-safe row) starts past it, so the worker only
+ * alerts on it; `workerResends` on the outcome says which case this is.
  */
 export const LANE_CANCEL_SUBMITTER = 'lane_cancel'
 
 export type LaneCancelOutcome =
-  /** The cancel is stamped and broadcast at the stuck nonce. */
-  | { outcome: 'cancel_broadcast'; cancelRowId: string; txHash: string; nonce: string }
+  /**
+   * The cancel is stamped and broadcast at the stuck nonce. `workerResends`:
+   * whether the bump worker will fee-replace the cancel if it sticks. False on
+   * a lane already at the cap — then nothing re-sends it, and a cancel that
+   * does not mine needs this trigger re-run on the CANCEL row's id.
+   */
+  | { outcome: 'cancel_broadcast'; cancelRowId: string; txHash: string; nonce: string; workerResends: boolean }
   /**
    * The cancel row is durably stamped at the stuck nonce, but the send call
    * itself threw — an AMBIGUOUS failure (an RPC timeout can lose the response
    * to a broadcast the node accepted). The row is deliberately left
-   * `broadcast`: the bump worker's unmined scan owns it from here
-   * (`lane_cancel` is rebroadcast-safe, so the stored calldata is re-sent
-   * with bumped fees until a receipt closes it). Loud and self-healing —
-   * never marked `failed`, which no scan would ever revisit (review finding:
-   * that would wedge the lane SILENTLY, worse than the pre-#1743 baseline).
+   * `broadcast`, never marked `failed`, which no scan would ever revisit
+   * (review finding: that would wedge the lane SILENTLY, worse than the
+   * pre-#1743 baseline). Below the cap (`workerResends`) the bump worker's
+   * unmined scan owns it from here: `lane_cancel` is rebroadcast-safe, so the
+   * stored calldata is re-sent with bumped fees until a receipt closes it. At
+   * the cap the worker only alerts, and the operator re-runs this trigger on
+   * the cancel row's id (#2769).
    */
-  | { outcome: 'cancel_stamped_send_unconfirmed'; cancelRowId: string; nonce: string; detail: string }
+  | { outcome: 'cancel_stamped_send_unconfirmed'; cancelRowId: string; nonce: string; detail: string; workerResends: boolean }
   /** Chain-first: the "stuck" attest actually mined — closed, no cancel needed. */
   | { outcome: 'closed_mined'; rowId: string }
   /** Chain-first: it mined and reverted — closed, the lane is already free. */
@@ -230,8 +249,8 @@ export async function cancelStuckOutboundLane(
   // is the bump worker's to replace while it still will: bump, don't burn.
   // Once the lane is at the worker's cap the worker has stopped for good and
   // handed the lane to the operator — this trigger is that hand-off (#2769).
+  const attempts = await deps.countLaneAttempts(row.chain_id, BigInt(row.nonce))
   if (REBROADCAST_SAFE_SUBMITTERS.has(row.submitter)) {
-    const attempts = await deps.countLaneAttempts(row.chain_id, BigInt(row.nonce))
     if (attempts < MAX_BUMPS_PER_NONCE) {
       return refuse(
         'automated_recovery_owns_it',
@@ -277,6 +296,9 @@ export async function cancelStuckOutboundLane(
   )
 
   const nonce = BigInt(row.nonce)
+  // The claim below counts as one more attempt at N, so the cancel starts at
+  // attempts + 1; the worker fee-replaces it only while that is under the cap.
+  const workerResends = attempts + 1 < MAX_BUMPS_PER_NONCE
   const self = deps.relayerAddress(row.chain_id)
   const cancel = await deps.enqueue({
     chainId: row.chain_id,
@@ -312,7 +334,13 @@ export async function cancelStuckOutboundLane(
       undefined,
       deps.chain,
     )
-    return { outcome: 'cancel_broadcast', cancelRowId: cancel.id, txHash: sent.hash, nonce: nonce.toString() }
+    return {
+      outcome: 'cancel_broadcast',
+      cancelRowId: cancel.id,
+      txHash: sent.hash,
+      nonce: nonce.toString(),
+      workerResends,
+    }
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)
     // WHERE the throw happened decides what the cancel row may become
@@ -338,6 +366,7 @@ export async function cancelStuckOutboundLane(
         cancelRowId: cancel.id,
         nonce: nonce.toString(),
         detail,
+        workerResends,
       }
     }
     // Pre-stamp throw: nothing was signed into the lane, so the claim is no

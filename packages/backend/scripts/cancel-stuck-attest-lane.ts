@@ -36,6 +36,18 @@ import { cancelStuckOutboundLane, productionLaneCancelDeps } from '../src/infra/
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/** What happens to the payload whose nonce was burned, by who owned it. */
+const AFTERMATH =
+  'A passport_attest: if the cancel mines, the sweep re-anchors on its own (#1745); if the attest wins the race ' +
+  'instead, its receipt recovery closes on the original anchor (#1043). A sweep, deploy or revoke: its owner ' +
+  'retries on a fresh record — a revoke by the next reconcile, a deploy at the next activation or erc7710 ' +
+  'authorize, a sweep only when the agent sweeps again (its funds stay visible as stranded until then). '
+
+/** The lane was already at the bump cap, so nothing will re-send the cancel (#2769). */
+const CAPPED_CANCEL = (cancelRowId: string): string =>
+  'This lane was already at the bump cap, so the bump worker will NOT re-send the cancel. If it has not mined ' +
+  `after 3 minutes (the stale threshold), re-run this command with the cancel row's id: ${cancelRowId}.`
+
 async function main(): Promise<number> {
   const id = process.argv[2]
   if (!id || !UUID_RE.test(id)) {
@@ -48,17 +60,20 @@ async function main(): Promise<number> {
     case 'cancel_broadcast':
       console.log(
         `CANCEL BROADCAST at nonce ${result.nonce} (tx ${result.txHash}, outbound row ${result.cancelRowId}).\n` +
-          'Nothing further to do: if the cancel mines, the sweep re-anchors on its own (#1745); ' +
-          'if the original attest wins the race instead, its receipt recovery closes on the original anchor (#1043). ' +
-          'The bump worker owns the cancel row from here (fee-replaces it if it sticks, closes it from the receipt).',
+          AFTERMATH +
+          (result.workerResends
+            ? 'The bump worker owns the cancel row from here (fee-replaces it if it sticks, closes it from the receipt).'
+            : CAPPED_CANCEL(result.cancelRowId)),
       )
       return 0
     case 'cancel_stamped_send_unconfirmed':
       console.log(
         `CANCEL STAMPED at nonce ${result.nonce} (outbound row ${result.cancelRowId}) but the send call errored: ${result.detail}\n` +
-          'The error is ambiguous (the node may have accepted the transaction), so the row is left broadcast and ' +
-          'the bump worker owns it: it re-broadcasts the stored calldata with bumped fees until a receipt closes it. ' +
-          'Watch the worker logs; nothing further to run by hand.',
+          'The error is ambiguous (the node may have accepted the transaction), so the row is left broadcast. ' +
+          (result.workerResends
+            ? 'The bump worker owns it: it re-broadcasts the stored calldata with bumped fees until a receipt closes it. ' +
+              'Watch the worker logs; nothing further to run by hand.'
+            : CAPPED_CANCEL(result.cancelRowId)),
       )
       return 0
     case 'closed_mined':

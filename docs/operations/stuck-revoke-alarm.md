@@ -350,7 +350,11 @@ the stuck revoke can never mine.
   transaction does not free its own nonce here: its row is still `broadcast`,
   and migration 061's partial `UNIQUE (chain_id, nonce) WHERE status =
   'broadcast'` refuses the stamp, so `submitRecorded` re-reads the same nonce
-  and fails with `could not win a nonce lane`.
+  and fails with `could not win a nonce lane`. On an RPC that refuses the
+  `pending` tag (#2769) the symptom differs: later sends step over the live
+  row, broadcast at N+1, N+2 … and never confirm, and the bump worker raises
+  INCIDENTs at those nonces. The nonce to cancel is still the lowest live
+  one, N.
 - **Do not hand-broadcast the stored revoke calldata, and do not hand-run a
   fee bump.** A hand-run bump leaves no `outbound_txs` record, so nothing
   downstream can see it — the same objection that makes it forbidden for

@@ -45,6 +45,7 @@ vi.mock('../../modules/accounting/legacy/index.js', () => ({
 }))
 
 import accountingRoutes from '../accounting.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const USER = 'user-1'
 
@@ -65,6 +66,10 @@ describe('accounting routes — route-level invariants', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/accounting.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(accountingRoutes, { prefix: '/accounting' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
@@ -216,20 +221,41 @@ describe('accounting routes — route-level invariants', () => {
 
   // --- PUT /categories -----------------------------------------------------
 
+  // #3030: the shape refusals below are the spec's (`required`, the BAS
+  // `pattern`), answered by the enforced module as the 400 envelope before
+  // the handler. Mutation: drop the module from enforcedModules → the missing
+  // resourceUrl reaches the handler and throws on `.trim()` of undefined
+  // (500), the non-BAS account is written (mockQuery called).
   it('PUT /categories requires a resourceUrl', async () => {
     const res = await authed('PUT', '/accounting/categories', { account: '4000' })
     expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(res.json().details).toContain('resourceUrl')
     expect(mockQuery).not.toHaveBeenCalled()
   })
 
   it('PUT /categories rejects a non-BAS account number', async () => {
     const res = await authed('PUT', '/accounting/categories', { resourceUrl: 'https://api.x', account: 'nope' })
     expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(res.json().details).toContain('body/account')
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  it('PUT /categories still refuses a resourceUrl that is blank after trimming (semantic, not shape)', async () => {
+    // minLength 1 admits '  '; the handler's trim is the only guard for it.
+    const res = await authed('PUT', '/accounting/categories', { resourceUrl: '   ', account: '4000' })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'resourceUrl is required' })
     expect(mockQuery).not.toHaveBeenCalled()
   })
 
   it('PUT /categories upserts the override scoped to the caller', async () => {
-    const res = await authed('PUT', '/accounting/categories', { resourceUrl: ' https://api.x ', account: ' 4000 ' })
+    // `account` is sent as the spec's BAS pattern requires (the handler used
+    // to trim ' 4000 '; the pattern refuses the spaces now, and no client
+    // sends them — `useAccounting.setAccount` has no caller); `resourceUrl`
+    // keeps its trim.
+    const res = await authed('PUT', '/accounting/categories', { resourceUrl: ' https://api.x ', account: '4000' })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ resourceUrl: 'https://api.x', account: '4000' })
     const [, params] = mockQuery.mock.calls[0]
@@ -240,8 +266,21 @@ describe('accounting routes — route-level invariants', () => {
   // --- DELETE /categories --------------------------------------------------
 
   it('DELETE /categories requires a resourceUrl', async () => {
+    // #3030: `required: true` on the query parameter — the envelope, not the
+    // handler's own 400.
     const res = await authed('DELETE', '/accounting/categories')
     expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(res.json().details).toContain('resourceUrl')
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  it('GET /reconcile refuses a non-ISO period bound with the envelope, and reads a conformant one unchanged (#3030)', async () => {
+    // The handler's ISO_DATE_RE guard moved into the spec as a `pattern` on
+    // `from`/`to` (three operations). Mutation: drop the pattern → 200 here.
+    const bad = await authed('GET', '/accounting/reconcile?from=yesterday')
+    expect(bad.statusCode).toBe(400)
+    expect(bad.json().details).toContain('querystring/from')
     expect(mockQuery).not.toHaveBeenCalled()
   })
 

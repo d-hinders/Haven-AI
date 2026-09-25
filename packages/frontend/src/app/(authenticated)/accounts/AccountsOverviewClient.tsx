@@ -10,7 +10,8 @@ import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import NetworkPill from '@/components/NetworkPill'
-import { timeAgo } from '@/lib/format'
+import { formatFiat, timeAgo } from '@/lib/format'
+import { BalanceFreshnessIndicator } from '@/components/haven'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -28,25 +29,15 @@ import { truncateAddress } from '@/components/haven'
 // drill in. Setting the default account lives on `/accounts/<id>` only, since
 // #2374 dropped the card's unlabelled star. Shared legacy Safe COMPONENTS
 // elsewhere are deletion slice #1989's scope, not this one's.
-// ── Per-Safe card (handles its own portfolio fetch) ────────────────
+// ── Per-account card (handles its own portfolio fetch) ────────────────
 
-function formatFiat(value: number, currency: 'USD' | 'EUR'): string {
-  const symbol = currency === 'USD' ? '$' : '€'
-  if (value === 0) return `${symbol}0.00`
-  if (value < 0.01) return `< ${symbol}0.01`
-  return `${symbol}${value.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`
-}
-
-interface SafeCardProps {
-  safe: SmartAccount
+interface AccountCardProps {
+  account: SmartAccount
   isActive: boolean
   showActiveBadge: boolean
   agentCount: number
   showDefaultBadge: boolean
-  currency: 'USD' | 'EUR'
+  currency: 'USD' | 'EUR' | 'SEK'
   staggerIndex: number
   onClick: () => void
   onSetActive: () => void
@@ -54,11 +45,11 @@ interface SafeCardProps {
 
 // Number of top-token rows we surface on the card before collapsing the rest
 // into a "+N more" footnote. Three keeps the card height predictable across a
-// row of cards regardless of how many tokens any single Safe holds.
+// row of cards regardless of how many tokens any single account holds.
 const TOP_TOKENS_PREVIEW = 3
 
-function SafeCard({
-  safe,
+function AccountCard({
+  account,
   isActive,
   showActiveBadge,
   agentCount,
@@ -67,30 +58,38 @@ function SafeCard({
   staggerIndex,
   onClick,
   onSetActive,
-}: SafeCardProps) {
+}: AccountCardProps) {
   const {
     totalUsd,
     totalEur,
+    totalSek,
     breakdown,
     loading: portfolioLoading,
-  } = usePortfolio(safe.account_address, { chainId: safe.chain_id })
-  const fiatTotal = currency === 'USD' ? totalUsd : totalEur
+  } = usePortfolio(account.account_address, { chainId: account.chain_id })
+  // #3295: the freshest — actually, the oldest — degraded marker among the
+  // card's tokens. Any stale/unavailable token means the card's total is
+  // computed partly from last-known values, so the whole total gets the
+  // indicator; "Unavailable" only when some token has never been read.
+  const degradedFreshness = breakdown.find((item) => item.balanceFreshness)?.balanceFreshness
+  // SEK (#3127): `?? 0` as on every currency here — the wire's `totalSek` /
+  // `sekValue` are optional and an absent key must degrade to 0, not crash.
+  const fiatTotal = currency === 'USD' ? totalUsd : currency === 'EUR' ? totalEur : totalSek
 
   // The breakdown comes back sorted by value, but make it explicit so we never
   // accidentally show dust above a meaningful holding.
   const sortedBreakdown = [...breakdown].sort((a, b) => {
-    const aValue = currency === 'USD' ? a.usdValue : a.eurValue
-    const bValue = currency === 'USD' ? b.usdValue : b.eurValue
-    return bValue - aValue
+    const aValue = currency === 'USD' ? a.usdValue : currency === 'EUR' ? a.eurValue : a.sekValue
+    const bValue = currency === 'USD' ? b.usdValue : currency === 'EUR' ? b.eurValue : b.sekValue
+    return (bValue ?? 0) - (aValue ?? 0)
   })
   const visibleTokens = sortedBreakdown.slice(0, TOP_TOKENS_PREVIEW)
   const hiddenTokenCount = Math.max(0, sortedBreakdown.length - TOP_TOKENS_PREVIEW)
 
   return (
     <Link
-      href={`/accounts/${safe.id}`}
+      href={`/accounts/${account.id}`}
       onClick={onClick}
-      aria-label={safe.name}
+      aria-label={account.name}
       className={`v2-animate-stagger block ${entityCardClassName({ selected: isActive })} p-5 sm:p-6`}
       style={{
         ['--v2-stagger-delay' as string]: `${staggerIndex * 60}ms`,
@@ -148,10 +147,10 @@ function SafeCard({
       <div className="mb-2 flex items-start gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <h3
-            title={safe.name}
+            title={account.name}
             className="min-w-0 truncate text-base font-semibold text-[var(--v2-ink)]"
           >
-            {safe.name}
+            {account.name}
           </h3>
           {/*
             ONE badge group, not two siblings — this is #2235's fix.
@@ -218,10 +217,10 @@ function SafeCard({
 
           AND IT REMOVES A REAL ASYMMETRY, which is the part that was not a
           matter of taste. The detail page gates the same action on
-          `!safe.is_default && (user?.accounts?.length ?? 0) > 1`
+          `!account.is_default && (user?.accounts?.length ?? 0) > 1`
           (`AccountDetailClient.tsx`), and BOTH of this card's badges carry the
-          same `safes.length > 1` term (see the call site below). The star was
-          gated on `!safe.is_default` alone, so it was the one place that would
+          same `accounts.length > 1` term (see the call site below). The star was
+          gated on `!account.is_default` alone, so it was the one place that would
           render a set-default control on a page holding a single account —
           where the word `default` appears nowhere, because both badges are
           suppressed at one account, and where the action cannot do anything.
@@ -283,7 +282,7 @@ function SafeCard({
               type="button"
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSetActive() }}
               className="relative rounded-md px-2 py-1 text-xs font-medium text-[var(--v2-brand)] hover:bg-[var(--v2-brand-soft)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-['']"
-              aria-label={`Set ${safe.name} as active`}
+              aria-label={`Set ${account.name} as active`}
             >
               Set active
             </button>
@@ -297,25 +296,33 @@ function SafeCard({
           4mo ago` measures ~255px in a 265px card, which is exactly why
           #2235's `default` could not join it. */}
       <div className="mb-5 flex flex-wrap items-center gap-2 text-xs text-[var(--v2-ink-3)]">
-        <NetworkPill chainId={safe.chain_id ?? DEFAULT_CHAIN_ID} />
+        <NetworkPill chainId={account.chain_id ?? DEFAULT_CHAIN_ID} />
         <span aria-hidden="true">{'\u00b7'}</span>
-        <span>Added {timeAgo(safe.created_at)}</span>
+        <span>Added {timeAgo(account.created_at)}</span>
       </div>
 
-      {/* Fiat total */}
+      {/* Fiat total — carries the stale indicator when any token's balance
+          read failed (#3295): the figure is the last-known value, not a
+          fresh one, and "Unavailable" only replaces it when nothing is
+          known. A clean read renders no indicator at all. */}
       <div className="mb-4" role="status" aria-busy={portfolioLoading} aria-live="polite">
         {portfolioLoading ? (
           <Skeleton className="h-7 w-28" />
         ) : (
-          <p className="v2-tabular text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">
-            {formatFiat(fiatTotal, currency)}
-          </p>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <p className="v2-tabular text-2xl font-semibold tracking-tight text-[var(--v2-ink)]">
+              {formatFiat(fiatTotal, currency)}
+            </p>
+            {degradedFreshness && (
+              <BalanceFreshnessIndicator freshness={degradedFreshness} size="compact" />
+            )}
+          </div>
         )}
       </div>
 
       {/* Token breakdown preview — up to 3 top holdings plus a "+N more"
           overflow. Reserves a small minimum height so cards in the same row
-          stay aligned even when one Safe is empty. */}
+          stay aligned even when one account is empty. */}
       <div className="mb-4 min-h-[68px] space-y-1.5">
         {portfolioLoading ? (
           <>
@@ -330,7 +337,7 @@ function SafeCard({
         ) : (
           <>
             {visibleTokens.map((item) => {
-              const fiatValue = currency === 'USD' ? item.usdValue : item.eurValue
+              const fiatValue = currency === 'USD' ? item.usdValue : currency === 'EUR' ? item.eurValue : item.sekValue
               return (
                 <div
                   key={item.symbol}
@@ -341,7 +348,7 @@ function SafeCard({
                     <span className="v2-tabular text-[var(--v2-ink-3)]">{item.formatted}</span>
                   </span>
                   <span className="v2-tabular flex-shrink-0 text-[var(--v2-ink-3)]">
-                    {formatFiat(fiatValue, currency)}
+                    {formatFiat(fiatValue ?? 0, currency)}
                   </span>
                 </div>
               )
@@ -372,7 +379,7 @@ function SafeCard({
 
 export default function AccountsOverviewClient() {
   const { activeAccount, setActiveAccount } = useAuth()
-  const { accounts: safes } = useAccounts()
+  const { accounts: accounts } = useAccounts()
   const { agents } = useAgents()
   const { currency } = usePreferences()
 
@@ -392,9 +399,9 @@ export default function AccountsOverviewClient() {
       <PageHeader
         title="Accounts"
         subtitle={
-          safes.length > 0 ? (
+          accounts.length > 0 ? (
             <>
-              <span className="v2-tabular">{safes.length}</span> {safes.length === 1 ? 'account' : 'accounts'} linked
+              <span className="v2-tabular">{accounts.length}</span> {accounts.length === 1 ? 'account' : 'accounts'} linked
             </>
           ) : undefined
         }
@@ -410,8 +417,8 @@ export default function AccountsOverviewClient() {
         </div>
       )}
 
-      {/* Safe cards grid */}
-      {safes.length === 0 ? (
+      {/* Account cards grid */}
+      {accounts.length === 0 ? (
         // An empty state with no next step would be a dead end, which the
         // design system forbids — so this one explains itself instead. There
         // is no "Add account" button any more (#1984: the Safe rail is
@@ -428,18 +435,18 @@ export default function AccountsOverviewClient() {
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {safes.map((safe, index) => (
-            <SafeCard
-              key={safe.id}
-              safe={safe}
-              isActive={activeAccount?.id === safe.id}
-              showActiveBadge={activeAccount?.id === safe.id && safes.length > 1}
-              agentCount={agentCountByAccount.get(safe.id) ?? 0}
-              showDefaultBadge={!!safe.is_default && safes.length > 1}
+          {accounts.map((account, index) => (
+            <AccountCard
+              key={account.id}
+              account={account}
+              isActive={activeAccount?.id === account.id}
+              showActiveBadge={activeAccount?.id === account.id && accounts.length > 1}
+              agentCount={agentCountByAccount.get(account.id) ?? 0}
+              showDefaultBadge={!!account.is_default && accounts.length > 1}
               currency={currency}
               staggerIndex={index}
-              onClick={() => setActiveAccount(safe)}
-              onSetActive={() => setActiveAccount(safe)}
+              onClick={() => setActiveAccount(account)}
+              onSetActive={() => setActiveAccount(account)}
             />
           ))}
         </div>

@@ -7,7 +7,7 @@ import {
   registeredSignerToolNames,
   type SignerConsentDecision,
 } from './consent.js'
-import { isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk'
+import { havenClientIdentity, isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk/edge'
 import { createEdgeSigner, type EdgeSigner } from './core.js'
 import { loadSignerCredentials, type SignerCredentials } from './credentials.js'
 import {
@@ -20,7 +20,7 @@ import {
 import { loadHavenIdentity } from './sign-context.js'
 
 export const SIGNER_NAME = '@haven_ai/signer'
-export const SIGNER_VERSION = '0.4.0-alpha.0'
+export const SIGNER_VERSION = '0.5.0-alpha.1'
 
 export interface SignerOptions {
   /** Path to a Haven credential JSON file (delegate_key is read from it). */
@@ -131,13 +131,17 @@ export function buildSignerMcpServer(
       accountAddress: options.credentials?.accountAddress,
       chainId: options.credentials?.chainId,
     },
-    // #1263: the payment_id signing path — the ONLY network call this server
-    // can make, an authenticated read of a signing context from Haven, using
+    // #1263: the payment_id signing path — the ONLY network path this server
+    // has: up to two authenticated reads of a signing context from Haven (x402,
+    // then direct for haven_sign, #3271), using
     // the agent identity the connector stores next to the signer credential.
     // The signer CORE stays network-free; fetched bytes still pass the same
     // binding verification + digest re-derivation as tool-argument bytes.
     signContext: {
       loadIdentity: () => loadHavenIdentity(credentialsPath),
+      // #3303: the backend refuses a signer below a minimum it has set, at
+      // sign-context — the one place this signer meets it.
+      clientIdentity: havenClientIdentity(SIGNER_NAME, SIGNER_VERSION),
     },
   })
   const registerTool = (server as unknown as {
@@ -190,10 +194,14 @@ export async function runSignerStdioServer(options: SignerOptions = {}): Promise
   if (!options.skipConsent) {
     const decision = await runSignerConsentGate(signer, credentials, options)
     if (!decision.ok) {
+      // #3173: an MCP host shows only this message (and "Connection closed");
+      // the consent block above went to stderr. Name the connector's doctor,
+      // which diagnoses exactly this state, so the operator has a next step.
       const err: NodeJS.ErrnoException = new Error(
-        decision.reason === 'env_var_mismatch'
+        (decision.reason === 'env_var_mismatch'
           ? 'Haven edge signer consent acknowledgement does not match the current configuration.'
-          : 'Haven edge signer requires a one-time consent acknowledgement before starting.',
+          : 'Haven edge signer requires a one-time consent acknowledgement before starting.') +
+          ' See the consent block above; if the Haven connector wired this signer, run: npx @haven_ai/connect --doctor',
       )
       err.code = 'HAVEN_SIGNER_NO_CONSENT'
       throw err

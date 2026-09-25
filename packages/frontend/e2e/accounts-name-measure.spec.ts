@@ -369,7 +369,7 @@ test('/accounts: two accounts — the name survives its chrome at both widths', 
 
     // Non-vacuity: this is a claim about the badge layout, so the badges have
     // to be there. `testSafe` is the seeded ACTIVE account and the default
-    // one, and both badges are gated on `safes.length > 1` — the whole reason
+    // one, and both badges are gated on `accounts.length > 1` — the whole reason
     // the #2223 defect was invisible on a one-account fixture.
     expect(reading.badges.sort(), `@${width}px: the card renders ${JSON.stringify(reading.badges)}`)
       .toEqual(['Active', 'default'])
@@ -915,7 +915,7 @@ test('/accounts: the single-account case is unchanged — no badges, name in ful
  * nowhere — and that is the state in which the card's old set-default star was
  * at its worst:
  *
- *   - both badges are gated on `safes.length > 1`, so the word `default`
+ *   - both badges are gated on `accounts.length > 1`, so the word `default`
  *     renders NOWHERE on the page;
  *   - `/accounts/<id>` gates its own "Set as default" on
  *     `!safe.is_default && (user?.accounts?.length ?? 0) > 1`, so the detail page
@@ -965,7 +965,7 @@ test('/accounts: a lone NON-default account offers no set-default control', asyn
     // neither badge renders, whatever `is_default` says.
     expect(
       reading.badges,
-      `@${width}px: a lone account rendered ${JSON.stringify(reading.badges)} — both badges are gated on \`safes.length > 1\``,
+      `@${width}px: a lone account rendered ${JSON.stringify(reading.badges)} — both badges are gated on \`accounts.length > 1\``,
     ).toEqual([])
     expect(
       reading.truncated,

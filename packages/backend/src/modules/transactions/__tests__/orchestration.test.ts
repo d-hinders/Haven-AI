@@ -14,6 +14,7 @@ function enriched(overrides: Partial<EnrichedTransaction> = {}): EnrichedTransac
     decimals: 18,
     direction: 'out',
     timestamp: 1000,
+    timestampSource: 'block',
     blockNumber: 100,
     isError: false,
     chainId: 8453,
@@ -97,7 +98,7 @@ describe('aggregateAccountTransactions (module internals, no HTTP)', () => {
     vi.resetModules()
   })
 
-  it('tags each fetched transaction with its own Safe and collects per-Safe failures', async () => {
+  it('tags each fetched transaction with its own account and collects per-account failures', async () => {
     // The top-level `import { filterEnrichedTransactions, paginateByOffset }` above
     // already cached the real (unmocked) '../aggregate.js' transitively — reset
     // the module registry BEFORE mocking so the dynamic import below picks up
@@ -121,6 +122,7 @@ describe('aggregateAccountTransactions (module internals, no HTTP)', () => {
               decimals: 18,
               direction: 'in',
               timestamp: 1,
+              timestampSource: 'block',
               blockNumber: 1,
               isError: false,
             },
@@ -153,7 +155,7 @@ describe('aggregateAccountTransactions (module internals, no HTTP)', () => {
     })
   })
 
-  it('a thrown fetch error is caught, logged, and counted as a failed Safe — not propagated', async () => {
+  it('a thrown fetch error is caught, logged, and counted as a failed account — not propagated', async () => {
     vi.resetModules()
     vi.doMock('../aggregate.js', () => ({
       fetchAccountTransactions: vi.fn(async () => {

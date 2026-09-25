@@ -97,17 +97,49 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
   }
 }
 
+/**
+ * #3134 (epic #3130, owner decision 1): the receipt surface converges on the
+ * TRANSACTION feed's names for the four concepts the two surfaces share —
+ * `paymentProofStatus`, `x402MerchantAddress`, `x402ResourceUrl`, `source` —
+ * at this mapper only. The backend receipts wire stays snake_case and the
+ * transactions wire is frozen, so the survivor is the transaction-side name
+ * in every pair; the argument per pair is in `scripts/ci/vocabulary-map.json`.
+ *
+ * DUAL-EMIT, one full release. The old receipt names (`proofStatus`,
+ * `merchantAddress`, `resourceUrl`, `rail`) are emitted beside the new ones so
+ * a published client reading the old name keeps working. REMOVAL CONDITION,
+ * written here where the twin is minted (precedent:
+ * `packages/backend/src/middleware/retired-safe-names.ts`): delete the four
+ * old keys — and their `singleSurface.receipt` rows in the vocabulary map,
+ * and invert the tests that pin their presence — only when ALL THREE clocks
+ * have moved past the release whose CHANGELOG names these twins:
+ * `npm view @haven_ai/sdk dist-tags` reads a `latest` at or above it,
+ * `npm view @haven_ai/mcp dist-tags` reads a `latest` at or above it, and the
+ * hosted mcp-server deploy reports a `serverInfo.version` on MCP `initialize`
+ * (`HOSTED_SERVER_VERSION` in `packages/mcp-server/src/server.ts`) at or past
+ * the release that shipped them — each read against the registry / the live
+ * server's handshake (which needs an agent API key: the hosted `initialize`
+ * is behind `Authorization: Bearer`, and `/healthz` carries no version),
+ * never inferred from a green promotion (a promotion can be half green;
+ * mcp-server is not on npm). Until then this comment is the
+ * contract, and the guard's `singleSurface.receipt` rows are what keep the
+ * twins from reading as undeclared divergence.
+ */
 export function mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentReceipt {
   const receipt: HavenPaymentReceipt = {
     id: raw.id,
     paymentId: raw.payment_id,
+    source: raw.rail,
     rail: raw.rail,
+    paymentProofStatus: raw.proof_status,
     proofStatus: raw.proof_status,
     txHash: raw.tx_hash,
     fundingTxHash: raw.funding_tx_hash ?? null,
     settlementTxHash: raw.settlement_tx_hash ?? null,
     chainId: raw.chain_id,
+    x402ResourceUrl: raw.resource_url,
     resourceUrl: raw.resource_url,
+    x402MerchantAddress: raw.merchant_address,
     merchantAddress: raw.merchant_address,
     payerAddress: raw.payer_address,
     parties: mapParties(raw.parties),
@@ -131,6 +163,11 @@ export function mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentRece
 
   if ('payment_intent_id' in raw) {
     receipt.paymentIntentId = raw.payment_intent_id ?? null
+  }
+  // #3132: carried when the backend states it; the mapper otherwise drops
+  // every key it does not name, which is why the declaration is per row.
+  if (raw.scope) {
+    receipt.scope = { source: raw.scope.source, filter: raw.scope.filter }
   }
   if ('approval_request_id' in raw) {
     receipt.approvalRequestId = raw.approval_request_id ?? null

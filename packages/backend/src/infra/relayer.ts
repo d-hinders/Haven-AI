@@ -1,6 +1,7 @@
-import { JsonRpcProvider, Wallet, formatEther, parseEther, type Provider } from 'ethers'
+import { JsonRpcProvider, Network, Wallet, formatEther, parseEther, type Provider } from 'ethers'
 import { relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from '../domain/chains.js'
+import { secondaryRpcUrl } from './chain/rpc-transport.js'
 
 const providers = new Map<number, JsonRpcProvider>()
 const relayers = new Map<number, Wallet>()
@@ -13,15 +14,24 @@ const relayers = new Map<number, Wallet>()
 // Confirmation waits MUST stay outside it so payments confirm in parallel.
 //
 // Since #1559 (epic #1554) this is no longer the only — or the main — line of
-// defence. Queue-lane submitters (sweep, hybrid deploy, passport, the bump
-// worker) go through `outbound-queue.ts`'s `submitRecorded`: sign → STAMP the
+// defence. Every relayer broadcast goes through `outbound-queue.ts`'s
+// `submitRecorded`. The inline submitters (sweep, hybrid deploy, passport
+// attest and revoke) and lane cancel pass a record id: sign → STAMP the
 // durable row under the partial UNIQUE (chain, nonce) live-broadcast index →
-// broadcast. Postgres arbitrates nonce lanes there, so those submitters are
-// cross-replica safe; this lock remains as the cheap in-process belt inside
-// that pipeline, and as the ONLY serialisation for the Safe-bound legacy
-// sites (safe-deploy/exec, the chain-read module, the deployers) — which retire
-// with #1440. Until they do, multi-replica remains gated on THEM, not on the
-// queue lane.
+// broadcast, so Postgres arbitrates the nonce lane and a stamped submission is
+// cross-replica safe. The bump worker passes a null id — it stamps its own
+// rows — and runs under its leader lock: a same-nonce replacement re-uses the
+// row's explicit nonce, an orphan re-send reads a fresh one. Here this lock
+// is the cheap in-process belt. The Safe-bound sites that once relied on the
+// lock alone were deleted with the rail (#1440).
+//
+// Two paths still pick a FRESH nonce under this lock alone, unstamped:
+// an inline submitter whose `openOutboundRecord` failed open (a database
+// error, by the policy in `outbound-queue.ts`'s header), and the bump
+// worker's orphan re-send (the leader lock serialises bump ticks, not other
+// replicas' inline sends). Across replicas either can collide with a stamped
+// send — a failed broadcast, not a misdirected one — so multi-replica
+// correctness is closed EXCEPT on those two paths.
 const sendLocks = new Map<number, Promise<unknown>>()
 
 export async function withRelayerSendLock<T>(
@@ -73,12 +83,73 @@ export async function getRelayerFeeOverrides(
  * observe their own traffic. The wallet bound to one drifted six nonces
  * behind the chain while the other kept submitting. A lock cannot fix nonce
  * provenance; a single view can.
+ *
+ * #3255 deliberately left this provider OFF the failover transport the viem
+ * clients use (`infra/chain/rpc-transport.ts`): a pending transaction
+ * broadcast to one node is invisible to a second, and the log scanners and
+ * receipt verifier behind `relayer-reads.ts` would read "no log" from a
+ * lagging fallback rather than fail. A quota-dead `RPC_URL_BASE*` still fails
+ * the ethers side; configuring a healthy endpoint is the remedy there. The one
+ * provider refusal handled in code is dRPC's "No label `flashblocks`" (#2769),
+ * at two points. On the `pending` nonce read, `readNextRelayerNonce` in
+ * `outbound-queue.ts` walks up from this same provider's `latest` count over
+ * the live-broadcast ledger. On `eth_sendRawTransaction`, `broadcastSigned`
+ * sends the identical signed bytes through the configured second provider
+ * (`RPC_URL_BASE*_FALLBACK`), while every read and receipt wait stays here.
+ *
+ * JSON-RPC batching is OFF (`batchMaxCount: 1`). By default ethers bundles
+ * every call made within about 10 ms into ONE request of up to 100 calls.
+ * dRPC's free plan, the dev primary since 2026-09-24, refuses any batch over
+ * three and returns code 31 on every item ("Batch of more than 3 requests are
+ * not allowed on free plan"). Whether a read landed in a large batch depended
+ * on what else fired in the same 10 ms. As a result, dashboard balances
+ * flickered to zero, and sweep relays and account deploys failed
+ * intermittently (#2769). Providers bill per call either way, so batching
+ * saved only round trips.
+ *
+ * `staticNetwork: true` goes with it. Without it, ethers sends an
+ * `eth_chainId` before each call, which used to travel inside the same batch.
+ * With batching off, that would double the request count on a rate-limited
+ * free plan. With it, the chain is detected once, on first use, and then
+ * cached.
  */
 export function getProvider(chainId: number): JsonRpcProvider {
   let provider = providers.get(chainId)
   if (!provider) {
-    provider = new JsonRpcProvider(getChain(chainId).rpcUrl)
+    provider = newEthersProvider(getChain(chainId).rpcUrl)
     providers.set(chainId, provider)
+  }
+  return provider
+}
+
+/**
+ * The ONE place an ethers provider is constructed (`rpc-transport-guard`).
+ * The primary passes no network (detected once, then static). The fallback
+ * pins it: an unreachable fallback must not start ethers' 1 s `eth_chainId`
+ * detection retry, which never stops, and a pinned network also stops the
+ * fallback's own `eth_chainId` answer from being trusted.
+ */
+function newEthersProvider(url: string, network?: Network): JsonRpcProvider {
+  return new JsonRpcProvider(url, network, { batchMaxCount: 1, staticNetwork: true })
+}
+
+const fallbackBroadcastProviders = new Map<number, JsonRpcProvider>()
+
+/**
+ * The provider for the chain's configured second endpoint
+ * (`RPC_URL_BASE*_FALLBACK`), or null when none is configured (#2769). It is
+ * used for ONE thing: re-sending an already signed raw transaction that the
+ * primary refused with dRPC's flashblocks error (`broadcastSigned` in
+ * `outbound-queue.ts`). The relayer wallet is never bound to it, so it never
+ * picks a nonce, signs, or answers a read: the single nonce view above holds.
+ */
+export function getFallbackBroadcastProvider(chainId: number): JsonRpcProvider | null {
+  const url = secondaryRpcUrl(chainId)
+  if (!url) return null
+  let provider = fallbackBroadcastProviders.get(chainId)
+  if (!provider) {
+    provider = newEthersProvider(url, Network.from(chainId))
+    fallbackBroadcastProviders.set(chainId, provider)
   }
   return provider
 }
@@ -88,9 +159,11 @@ export function getProvider(chainId: number): JsonRpcProvider {
  * for that chain — `RELAYER_PRIVATE_KEY_<chainId>` with a global
  * `RELAYER_PRIVATE_KEY` fallback (#640). This is the signer that submits
  * relayed transactions on that chain — delegator activation, passport
- * attestations, sweeps and owner-signed Safe `exec` relays — so it must resolve
- * per chain to honour the per-chain relayer isolation; otherwise a single
- * backend serving multiple chains would exec on every chain with the same key.
+ * attestations and revocations, sweeps, and the outbound queue's own fee bumps
+ * and stuck-lane cancels — so it must resolve per chain to honour the
+ * per-chain relayer isolation; otherwise a single backend serving multiple
+ * chains would submit on every chain with the same key. Agent payments are
+ * NOT among them: those are paymaster-sponsored UserOps (`rails/delegation-rail.ts`).
  * Cached per chainId.
  */
 export function getRelayer(chainId: number): Wallet {

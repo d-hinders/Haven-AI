@@ -28,6 +28,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
   - packages/frontend/src/components/transactions/**
+  - packages/frontend/src/components/haven/LabelChip.tsx
   - packages/frontend/src/__tests__/capture-viewports.test.ts
   - packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts
   - packages/frontend/src/__tests__/showcase-permanently-open-pin.test.ts
@@ -90,7 +91,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-09-10"
+last-verified: "2026-09-21"
 ---
 
 # Haven Design System
@@ -1074,6 +1075,24 @@ The decision taken: **the MCP wiring outranks the last-activity stamp on a narro
 
 Proven by rendered geometry in `e2e/agent-card-mcp-chip-measure.spec.ts`: at 390 the chip must render at least its own `scrollWidth` (re-measured at runtime, so the bar is not a literal tuned to one renderer) and the stamp's top must sit at or below the block's bottom; a 768 control arm pins the breakpoint in both directions. Mutation-proven by reverting the two classes: the 390 arm goes red on the mechanism guard (measured on the revert: stamp top 263px against block bottom 347px, and the chip 38.5px of its 113px natural width) while the 768 control stays green. `e2e/agent-card-fit-measure.spec.ts` stays green alongside — the width handed to the block comes from the stamp's own line, not from letting the card overflow its track again.
 
+### Agent label chips (#3167)
+
+`LabelChip` is a categorisation pill an agent carries — never a status. Shape:
+`rounded-full px-1.5 py-0.5 text-xs font-medium`, same language as the card
+header's status pill, filled by one of four palette names (`neutral`, `brand`,
+`success`, `debit`) mapped to the v2 soft-tint pairs in § 1 *Semantic* via
+`lib/label-colors.ts` — no raw hex, so chips flip with dark mode like every
+other tinted surface. Warning and danger are deliberately NOT in the palette: a
+"prod" chip in the danger tint would read as a failing agent, and the semantic
+tones stay scoped to their meanings. `LabelChipRow` shows at most three chips
+and folds the rest into a `+N` counter (plain text, not a control — the tag
+editor is where the full set is visible), and renders nothing for an unlabelled
+agent, so an unlabelled list is pixel-identical to pre-label UI. `LabelOptionRow`
+is the picker line: the shared `Checkbox` owns the row and the chip rides in as
+its label node, so a picker row reads exactly like the chip the agent will
+carry. A label is the user's own ad-hoc word ("prod", "finance") — it never
+borrows status language, and it never encodes authority. Recorded on `/design-system` → *Agent label chips*.
+
 ### Modal (`ui/Modal`)
 
 Every dialog in the app is this one shell — eleven direct importers, three of
@@ -1842,3 +1861,16 @@ gate's one-level-indirection blind spot by adopting that type (#1858).
 Marketing/landing surfaces are exempt from the lint gates (intentionally bespoke); the product app and `/design-system` stay fully gated.
 
 **Escape markers (reviewed exceptions).** One placement rule for the line-scanning gates: put the marker on the offending line **or the line directly above** — `design-lint-disable-line` (design-lint) and `// copy-lint-ignore` (copy-lint) both work either way (shared helper: `scripts/lib/lint-escapes.mjs`). The coupling gate's `// design-system-exempt: <reason>` is different by design — it exempts an *export*, sits as a trailing comment on the export line, and requires the colon + reason. Use escapes sparingly; each one is a standing reviewed exception.
+
+Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
+token table was checked mechanically against `globals.css`: all 16 rows match
+the light and dark definitions exactly, zero mismatches. The dark-mode
+sections (#2927–#2929) already describe the shipped three-part work, and the
+theme picker reads "Settings → Theme" with the row rendering `Theme`
+(`SettingsClient.tsx`, `t.settings.theme.label`), matching the product README.
+Intervening commits that touched covered files (#3147 marketing dark sweep,
+#3167 labels + `LabelChip`, #3197 AgentCard wrapper, #3204/#3205 analytics
+primitives and `Row.tsx`) changed components inside the documented system; the
+doc's token, typography, and gate claims needed no rewrite. `StatTile` and the
+`/analytics` work it shipped remain consistent with the § Statistics tile
+guidance.

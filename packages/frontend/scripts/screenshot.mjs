@@ -745,7 +745,12 @@ export const FIXTURE_USER = {
   // produce. The harness caught this itself ("a fixture-shape gap or a real
   // client bug"), which is what that check is for.
   accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'delegator_hybrid' }],
-  currency_preference: 'USD',
+  // #3127 (finding 8): 'SEK' — the served default (migration 091) and the
+  // no-preference fallback the dashboard renders. Every screenshot this
+  // harness takes is therefore a SEK render; the figures below serve real
+  // SEK values so the captures photograph the currency the product serves,
+  // not a USD render wearing a SEK label.
+  currency_preference: 'SEK',
   created_at: '2026-05-01T10:00:00.000Z',
 }
 
@@ -881,6 +886,15 @@ export const FIXTURE_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '250.000000', reset_period_min: 10080,
     }],
+    // #3167: labels ride on every agent read — the showcase agent carries two,
+    // so the /agents screenshot photographs chips and the "+N" overflow rule.
+    labels: [
+      { id: 'lbl-research', name: 'prod', color: 'brand', created_at: '2026-09-01T09:00:00.000Z' },
+      { id: 'lbl-x402', name: 'x402', color: 'success', created_at: '2026-09-01T09:05:00.000Z' },
+    ],
+    // #3164: the showcase agent is unfiled (top level) — the screenshot
+    // dataset carries no organizations, so the tree does not render here.
+    organization_id: null,
   },
   {
     id: 'agent-retired', name: 'Data-feed agent',
@@ -910,14 +924,49 @@ export const FIXTURE_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '500.000000', reset_period_min: 1440,
     }],
+    // #3167: the paused agent is unlabelled — the empty state photographs too.
+    labels: [],
+    // #3164: the paused agent is filed under DevOps (a sub-organization), so
+    // the /agents screenshot photographs a tree with two depths and a
+    // mid-tree count.
+    organization_id: 'org-devops',
+  },
+]
+
+// #3164: the organization tree behind the /agents screenshot — "Company A →
+// Tech Agents / Marketing, Tech Agents → DevOps", the issue's own example.
+// The showcase agent (above) stays top level so the tree's "Top level" row
+// and the unfiled card photograph together.
+export const FIXTURE_ORGANIZATIONS = [
+  {
+    id: 'org-company', parent_organization_id: null, name: 'Company A',
+    created_at: '2026-09-01T09:00:00.000Z', updated_at: '2026-09-01T09:00:00.000Z',
+    agent_count: 0,
+  },
+  {
+    id: 'org-tech', parent_organization_id: 'org-company', name: 'Tech Agents',
+    created_at: '2026-09-01T09:00:00.000Z', updated_at: '2026-09-01T09:00:00.000Z',
+    agent_count: 0,
+  },
+  {
+    id: 'org-devops', parent_organization_id: 'org-tech', name: 'DevOps',
+    created_at: '2026-09-01T09:00:00.000Z', updated_at: '2026-09-01T09:00:00.000Z',
+    agent_count: 1,
+  },
+  {
+    id: 'org-marketing', parent_organization_id: 'org-company', name: 'Marketing',
+    created_at: '2026-09-01T09:00:00.000Z', updated_at: '2026-09-01T09:00:00.000Z',
+    agent_count: 0,
   },
 ]
 
 const FIXTURE_PORTFOLIO = {
-  totalUsd: 12_640.55, totalEur: 11_690.21,
+  // #3127 (finding 8): SEK joins the priced totals — ~10.76 SEK/USD — with
+  // the token rows' `sekValue` summing to it.
+  totalUsd: 12_640.55, totalEur: 11_690.21, totalSek: 136_050.75,
   breakdown: [
-    { symbol: 'USDC', balance: '11890550000', formatted: '11,890.55', usdValue: 11_890.55, eurValue: 10_996.57 },
-    { symbol: 'ETH', balance: '250000000000000000', formatted: '0.25', usdValue: 750.0, eurValue: 693.64 },
+    { symbol: 'USDC', balance: '11890550000', formatted: '11,890.55', usdValue: 11_890.55, eurValue: 10_996.57, sekValue: 127_970.41 },
+    { symbol: 'ETH', balance: '250000000000000000', formatted: '0.25', usdValue: 750.0, eurValue: 693.64, sekValue: 8_080.34 },
   ],
 }
 const FIXTURE_BALANCES = {
@@ -927,9 +976,12 @@ const FIXTURE_BALANCES = {
   ],
 }
 export const FIXTURE_OVERVIEW = {
-  totals: { usd: 12_640.55, eur: 11_690.21 },
-  change: { available: true, usdAmount: 214.3, eurAmount: 198.2, usdPercent: 1.7, eurPercent: 1.7 },
-  metrics: { connectedAgents: 2, monthlyAgentSpendUsd: 482.5, monthlyAgentSpendEur: 446.3, successfulTransactions: 37, activeAccounts: 1 },
+  // #3127 (finding 8): the SEK figures the served default renders. ~10.76
+  // SEK/USD, and `sekAmount`/`sekPercent` a real post-backfill swing so the
+  // hero's change line renders in every capture this harness takes.
+  totals: { usd: 12_640.55, eur: 11_690.21, sek: 136_050.75 },
+  change: { available: true, usdAmount: 214.3, eurAmount: 198.2, usdPercent: 1.7, eurPercent: 1.7, sekAmount: 2_285.4, sekPercent: 1.7 },
+  metrics: { connectedAgents: 2, monthlyAgentSpendUsd: 482.5, monthlyAgentSpendEur: 446.3, monthlyAgentSpendSek: 5_192.5, successfulTransactions: 37, activeAccounts: 1 },
   // #2120: 0, not 1. `routes/dashboard.ts:84` hardcodes `actionableApprovals
   // = 0` (and mirrors it into `pendingApprovals`) — the queue died with the
   // AllowanceModule rail and `approval_requests` is dropped. Both fields
@@ -1681,7 +1733,15 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
   if (pathname.startsWith('/portfolio/')) return FIXTURE_PORTFOLIO
   if (pathname.startsWith('/balances/')) return FIXTURE_BALANCES
-  if (pathname === '/agents') return { agents: FIXTURE_AGENTS }
+  if (pathname === '/agents') {
+    return { agents: FIXTURE_AGENTS, organizations: FIXTURE_ORGANIZATIONS }
+  }
+  // #3164: the org tree is its own read (`useOrganizations` → GET
+  // /organizations) — without this case it falls through to the fallback and
+  // the tree never renders in captures.
+  if (pathname === '/organizations') {
+    return { organizations: FIXTURE_ORGANIZATIONS }
+  }
   // `/approvals` is NOT keyed here. #1989 deleted the route and #2055
   // deregistered the backend endpoint outright — the "still a live, READABLE
   // endpoint" this fixture used to claim stopped being true with the table
@@ -2970,6 +3030,12 @@ function setAccountingFeedStage(next) {
  * than no scenario at all.
  */
 async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
+  // Virtual clock at the fixture's anchor day: the agents table's "Last
+  // payment: 2h ago" caption reads the real clock, and against a fixture
+  // pinned to 2026-07-10 the real clock printed "2mo ago" beside "4 payments"
+  // in a 30-day window (#3204). The rest of the page reads server figures
+  // and is unaffected.
+  await page.clock.install({ time: new Date('2026-07-10T14:00:00.000Z') })
   await page.goto(`${BASE_URL}/analytics`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.evaluate(() => document.fonts.ready)
   await dismissMobileSidebar(page, vp)
@@ -3089,9 +3155,10 @@ export const SCENARIOS = {
       await accountedActions.getByRole('button', { name: 'Connect', exact: true }).click()
       const apiKeyDialog = page.getByTestId('api-key-connect-modal')
       await apiKeyDialog.getByRole('heading', { name: 'Connect Accounted with an API key' }).waitFor({ timeout: 15_000 })
-      // The steps are the evidence: where the keys page is, the two scopes
-      // verbatim, the revoke note.
-      await apiKeyDialog.getByText(/Tick exactly companies:read, documents:write\./).waitFor({ timeout: 15_000 })
+      // The steps are the evidence: where the keys page is, the three scopes
+      // verbatim (#3019 added webhooks:manage — connect creates the three
+      // event subscriptions), the revoke note.
+      await apiKeyDialog.getByText(/Tick exactly companies:read, documents:write, webhooks:manage\./).waitFor({ timeout: 15_000 })
       await apiKeyDialog.getByText(/revoke the key in your Accounted dashboard/).waitFor({ timeout: 15_000 })
       await apiKeyDialog.locator('input[type="password"]').waitFor({ timeout: 15_000 })
       await card.scrollIntoViewIfNeeded()
@@ -5041,6 +5108,54 @@ export const SCENARIOS = {
         // the retry action C's spec calls for (one error state with retry).
         await page.getByText(/could not load|try again/i).first().waitFor({ timeout: 15_000 })
       })
+    },
+  },
+
+  // #3127 (finding 8): the SEK default renders end to end. The harness's
+  // own session above is now the SEK user, so this scenario photographs the
+  // three fiat surfaces the finding names, in the currency the served
+  // default puts on them, for the design-reviewer pass.
+  'currency-preference-sek': {
+    description:
+      '#3127 finding 8: the SEK no-preference default (migration 091) rendering on the three fiat surfaces — the /dashboard hero with its SEK total and change line, the Settings → Preferences card with the kr SEK radio active, and the account detail page priced in SEK',
+    async run({ page, vp, shoot }) {
+      // ── /dashboard: the hero is a SEK hero ────────────────────────────────
+      // `sv-SE` renders `136\u00a0050,75\u00a0kr` (NBSP group + decimal
+      // separators); getByText normalizes the node side, so the needles are
+      // plain-space and the exact bytes are not re-pinned here — the unit
+      // suite owns the byte-level voice.
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('Total balance').waitFor({ timeout: 20_000 })
+      await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
+      // The change line renders the SEK swing, not the quiet caption. The
+      // percent keeps `formatPercent`'s plain `toFixed` decimal point — the
+      // same mixed voice the unit test and the visual spec pin. `\s` rather
+      // than literal spaces: sv-SE's separators are NBSPs and a regex is
+      // tested against the node's raw text (string needles normalize, this
+      // does not).
+      await page.getByText(/2\s*285,40\s*kr\s*\(\+1\.70%\)\s*today/).first().waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'dashboard')
+
+      // ── Settings → Preferences: the kr SEK radio active ──────────────────
+      await page.goto(`${BASE_URL}/settings`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const preferences = page.locator('section', { has: page.getByRole('heading', { name: 'Preferences', exact: true }) })
+      await preferences.waitFor({ timeout: 20_000 })
+      const sekRadio = preferences.getByRole('radio', { name: 'kr SEK' })
+      await sekRadio.waitFor({ timeout: 20_000 })
+      const checked = await sekRadio.getAttribute('aria-checked')
+      if (checked !== 'true') {
+        throw new Error(`currency-preference-sek: the Settings radio reads aria-checked=${checked} — the session is not the SEK user`)
+      }
+      await shoot(preferences, 'settings-preferences')
+
+      // ── /accounts/<id>: the account priced in SEK ────────────────────────
+      await page.goto(`${BASE_URL}/accounts/safe-fixture`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('Value (SEK)').waitFor({ timeout: 20_000 })
+      await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'account-detail')
     },
   },
 }

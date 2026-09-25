@@ -1,8 +1,28 @@
 import { createHash } from 'node:crypto'
-import { appendFile, mkdir } from 'node:fs/promises'
+import { appendFile, lstat, mkdir, rename } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, resolve } from 'node:path'
+import { OWNER_ONLY_MODE, tightenIfFilePermissive, type PermissionLog } from './file-mode.js'
 import type { SignerToolName } from './tools.js'
+
+/**
+ * #3172: the sidecar is bounded. When it reaches this size the current file is
+ * renamed to `<path>.1` (replacing the previous `.1`) and a fresh file starts,
+ * so at most two generations — the live file and one predecessor — ever exist.
+ * 8 MiB is roughly 30 000 entries at the ~270-byte row size; nothing in the
+ * signer reads the file back, so the bound protects the disk and the reader's
+ * patience, never a signing decision.
+ */
+export const AUDIT_ROTATE_BYTES = 8 * 1024 * 1024
+
+export interface AppendAuditOptions {
+  /** Where permission notices go; defaults to stderr. */
+  log?: PermissionLog
+  /** Rotation threshold in bytes; exported default `AUDIT_ROTATE_BYTES`. */
+  rotateAtBytes?: number
+  platform?: NodeJS.Platform
+}
+
 
 export interface SigningAuditEntry {
   version: 1
@@ -37,9 +57,35 @@ export function defaultSigningAuditPath(credentialsPath?: string): string {
 export async function appendSigningAuditEntry(
   entry: SigningAuditEntry,
   path: string,
+  options: AppendAuditOptions = {},
 ): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
-  await appendFile(path, `${JSON.stringify(entry)}\n`, 'utf8')
+  const rotateAt = options.rotateAtBytes ?? AUDIT_ROTATE_BYTES
+  const existing = await lstat(path).catch(() => null)
+  if (existing) {
+    // Tighten BEFORE rotating, on every append (the lstat above is the only
+    // cost, and it is already paid): a pre-#3172 0644 sidecar is fixed in
+    // place, and if it rotates next, `rename` carries 0600 into `.1` — the
+    // history is never left world-readable. Idempotent, so the notice fires
+    // once per permissive occurrence, not once per process (#3172 review).
+    await tightenIfFilePermissive('audit sidecar', path, options.log, options.platform, existing)
+    if (existing.size >= rotateAt) {
+      // Rotate BEFORE appending so the live file never exceeds the bound by
+      // more than one row. `rename` replaces the previous `.1` atomically, but
+      // the decision to rotate is not: two signer PROCESSES at the bound can
+      // both pass the size check, and the slower one may rename the faster
+      // one's fresh live file over `.1`, discarding the predecessor
+      // generation. The current entry is never lost (appendFile re-creates
+      // the live file), only older history, and this is an advisory log —
+      // so the loser's ENOENT is swallowed and a produced signature is never
+      // thrown away over it. Two processes on one credential is the #1694
+      // multi-agent shape; the loss needs one of them a full cycle behind.
+      await rename(path, `${path}.1`).catch(() => {})
+    }
+  }
+  // `mode` applies only when the file is created: a new sidecar is owner-only
+  // from its first byte, like the credential it sits beside (#3172).
+  await appendFile(path, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: OWNER_ONLY_MODE })
 }
 
 export function createSigningAuditEntry(

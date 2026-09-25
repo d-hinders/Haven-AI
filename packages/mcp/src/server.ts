@@ -1,6 +1,12 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { HavenClient, isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk'
+import {
+  HavenClient,
+  havenClientIdentity,
+  isSupportedNodeVersion,
+  unsupportedNodeVersionMessage,
+  type HavenClientUpdate,
+} from '@haven_ai/sdk'
 import { loadCredentials, type HavenCredentialFile } from './credentials.js'
 import {
   createToolHandlers,
@@ -67,6 +73,9 @@ export async function resolveHavenClient(options: HavenMcpServerOptions = {}): P
     apiKey: credentials.apiKey,
     delegateKey: credentials.delegateKey,
     baseUrl: credentials.apiUrl,
+    // #3303: name this package, not the SDK inside it, so the backend's
+    // update hint and refusal speak about what the user actually installed.
+    clientIdentity: havenClientIdentity(MCP_NAME, MCP_VERSION),
   })
   return { client, credentials }
 }
@@ -87,7 +96,7 @@ export async function createHavenMcpServer(options: HavenMcpServerOptions = {}):
  * `agent_tool_invocations` rows are always attributed to the right tool.
  */
 export const MCP_NAME = '@haven_ai/mcp'
-export const MCP_VERSION = '0.4.0-alpha.0'
+export const MCP_VERSION = '0.5.0-alpha.1'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -134,7 +143,7 @@ export function buildMcpServer(haven: HavenClient): McpServer {
       toolSchemas[name],
       async (args: unknown) =>
         haven.withRequestContext({ 'X-Haven-MCP-Tool': name }, async () =>
-          toMcpResult(await handlers[name](args)),
+          toMcpResult(withClientUpdate(await handlers[name](args), haven.clientUpdate())),
         ),
     )
   }
@@ -211,6 +220,16 @@ export async function runConsentGate(
     credentialsPath,
     writeAck: options.writeAck,
   })
+}
+
+/**
+ * #3303: attach the backend's `client_update` hint — the one THIS dispatch's
+ * own requests received — to the tool result, so an agent on an outdated
+ * runtime reads the update command on the call it made, success or failure.
+ */
+export function withClientUpdate(payload: ToolPayload, hint: HavenClientUpdate | undefined): ToolPayload {
+  if (!hint || payload.client_update) return payload
+  return { ...payload, client_update: hint }
 }
 
 function toMcpResult(payload: ToolPayload) {

@@ -8,6 +8,7 @@ import type { PortfolioResponse, PortfolioBreakdown } from '@/types/transactions
 interface UsePortfolioReturn {
   totalUsd: number
   totalEur: number
+  totalSek: number
   breakdown: PortfolioBreakdown[]
   loading: boolean
   error: string | null
@@ -24,6 +25,7 @@ export function usePortfolio(
 ): UsePortfolioReturn {
   const [totalUsd, setTotalUsd] = useState(0)
   const [totalEur, setTotalEur] = useState(0)
+  const [totalSek, setTotalSek] = useState(0)
   const [breakdown, setBreakdown] = useState<PortfolioBreakdown[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -35,6 +37,7 @@ export function usePortfolio(
     if (!accountAddress) {
       setTotalUsd(0)
       setTotalEur(0)
+      setTotalSek(0)
       setBreakdown([])
       setError(null)
       setLoading(false)
@@ -57,6 +60,7 @@ export function usePortfolio(
         // `.toLocaleString` on these; an absent key took `/accounts` down (#3093 review).
         setTotalUsd(data.totalUsd ?? 0)
         setTotalEur(data.totalEur ?? 0)
+        setTotalSek(data.totalSek ?? 0)
         // `?? []` — an absent key must degrade, not crash the route (#3093).
         setBreakdown(data.breakdown ?? [])
         if (silent) setError(null)
@@ -95,5 +99,5 @@ export function usePortfolio(
     void fetchPortfolio(true)
   })
 
-  return { totalUsd, totalEur, breakdown, loading, error, refetch: fetchPortfolio }
+  return { totalUsd, totalEur, totalSek, breakdown, loading, error, refetch: fetchPortfolio }
 }

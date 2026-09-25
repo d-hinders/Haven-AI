@@ -31,6 +31,8 @@ vi.mock('../../db.js', () => ({
 }))
 
 import { buildApp } from '../../__tests__/helpers.js'
+import { openapiSpec } from '../../openapi/spec.js'
+import { PASSWORD_BOUNDS } from '../auth.js'
 
 /** users.id is a UUID column; fixtures must look like one (#1446). */
 const USER_UUID = '7a3c9e21-4b58-4d06-8f13-2e6a5c9d0b74'
@@ -95,7 +97,9 @@ describe('Auth routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toBe('Invalid email address')
+      // #3030: `email` is required by the spec — the enforced module's envelope.
+      expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+      expect(response.json().details).toContain('email')
     })
 
     it('returns 400 for invalid email', async () => {
@@ -105,8 +109,31 @@ describe('Auth routes', () => {
         payload: { name: 'Ada Lovelace', email: 'not-an-email', password: 'password123' },
       })
 
+      // Semantic, kept in the handler (#3030): the spec states no email
+      // pattern, so the form of the address is still the handler's refusal.
       expect(response.statusCode).toBe(400)
       expect(response.json().error).toBe('Invalid email address')
+    })
+
+    it('the spec\'s password bounds are the handler\'s constants, and a declared `via` is accepted (#3030)', async () => {
+      // The handler's own length checks were deleted when the module was
+      // enforced; the spec is the only guard now, so it must state the bounds
+      // the product promises. Mutation: change PASSWORD_BOUNDS.min → red.
+      const op = (openapiSpec.paths as Record<string, Record<string, unknown>>)['/auth/signup'].post as {
+        requestBody: { content: { 'application/json': { schema: { properties: Record<string, { minLength?: number; maxLength?: number }> } } } }
+      }
+      const props = op.requestBody.content['application/json'].schema.properties
+      expect(props.password).toMatchObject({ minLength: PASSWORD_BOUNDS.min, maxLength: PASSWORD_BOUNDS.max })
+      // `via` (#2522) had been sent by the dashboard undeclared; it is in the
+      // spec now, and a conformant signup carrying it is unchanged.
+      expect(props.via).toMatchObject({ type: 'string' })
+      // Keyed on the SQL, not positional (the db-mock ratchet, #1227).
+      mockQuery.mockImplementation(async (sql: string) => {
+        if (/SELECT id FROM users/i.test(String(sql))) return { rows: [] }
+        return { rows: [{ id: 'user-1', email: 'test@example.com', name: 'Ada Lovelace', wallet_address: null, currency_preference: 'USD', created_at: new Date() }] }
+      })
+      const res = await app.inject({ method: 'POST', url: '/auth/signup', payload: { name: 'Ada Lovelace', email: 'test@example.com', password: 'password123', via: 'agent' } })
+      expect(res.statusCode).toBe(201)
     })
 
     it('returns 400 for overlong email', async () => {
@@ -121,7 +148,9 @@ describe('Auth routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toBe('Invalid email address')
+      // #3030: `maxLength: 255` is the spec's — the enforced module's envelope.
+      expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+      expect(response.json().details).toContain('body/email')
     })
 
     it('returns 400 for short password (< 8 chars)', async () => {
@@ -132,7 +161,12 @@ describe('Auth routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toBe('Password must be at least 8 characters')
+      // #3030: the password bounds are the spec's (`minLength: 8`), the
+      // enforced module's envelope; the dashboard form validates the same
+      // bounds before it sends (signup/page.tsx), so the message it shows is
+      // its own. Mutation: drop the module from enforcedModules → 201.
+      expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+      expect(response.json().details).toContain('body/password')
     })
 
     it('returns 400 for overlong password', async () => {
@@ -147,7 +181,8 @@ describe('Auth routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toBe('Password must be 128 characters or fewer')
+      expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+      expect(response.json().details).toContain('body/password')
     })
 
     it('returns 409 when email already exists', async () => {
@@ -430,8 +465,8 @@ describe('Auth routes', () => {
   })
 })
 
-describe('safes payload carries the rail (#1069)', () => {
-  it('the session safes SELECT includes account_type — the modal branches on it', async () => {
+describe('accounts payload carries the rail (#1069)', () => {
+  it('the session accounts SELECT includes account_type — the modal branches on it', async () => {
     // The #1069 fix originally landed in /user's SELECT — but AuthContext
     // reads /auth/me, so the Connect modal never saw account_type and
     // delegation accounts still dead-ended at the wallet approval. Pin the

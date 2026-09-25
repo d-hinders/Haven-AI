@@ -76,11 +76,18 @@ const NO_FLOOR: AnalyticsOverviewResponse = {
   basis: { ...POPULATED.basis, refusals_recorded_from: null },
 }
 
+/** A populated window with payments but no refusals at all — a real production
+ *  state (an account whose agents stayed inside every budget). */
+const NO_REFUSALS: AnalyticsOverviewResponse = {
+  ...POPULATED,
+  totals: { ...POPULATED.totals, refused_count: 0, refused_attempts: 0, refused_amount: '0', refused_previous_count: 0 },
+}
+
 function settled(overrides: Record<string, unknown> = {}) {
   return { data: POPULATED, loading: false, failed: false, refetch: mockRefetch, ...overrides }
 }
 
-function preferences(currency: 'USD' | 'EUR' = 'USD') {
+function preferences(currency: 'USD' | 'EUR' | 'SEK' = 'USD') {
   mockUsePreferences.mockReturnValue({ currency, setCurrency: vi.fn(), saving: false })
 }
 
@@ -278,42 +285,62 @@ describe('Analytics — the populated page', () => {
     expect(tile.textContent).toMatch(/2 refused payments · across 3 attempts/)
     expect(tile.textContent).toMatch(/\$3\.00 attempted/)
     // The limit of the count, stated rather than left to be inferred: what
-    // the runtime refused on its own never reached this ledger — and neither
-    // did the budget refusal the hosted tools raise at prepare (#3055).
-    expect(tile.textContent).toMatch(/Price-cap refusals in your agent/)
-    expect(tile.textContent).toMatch(/budget refusals raised when Haven's hosted tools prepare a purchase/)
+    // the runtime refused on its own never reached this ledger. The hosted
+    // prepare-time budget refusal is NOT named any more — #3109 gave it a
+    // writer (`source: 'hosted_prepare'`) so the tile counts it, and the
+    // footnote must not tell the reader those rows do not exist (#3055 revert).
+    // Since #3204 the caveat lives ONCE under the grid, not on the tile: the
+    // tile keeps its own basis (count, attempts, amount) and stays the height
+    // of its neighbours. Mutation: join the caveat back into the tile → red.
+    const caveats = screen.getByTestId('analytics-refusal-caveats')
+    expect(caveats.textContent).toMatch(/Price-cap refusals in your agent's runtime are not recorded\./)
+    expect(tile.textContent).not.toMatch(/Price-cap refusals/)
+    expect(caveats.textContent).not.toMatch(/hosted tools/)
+    expect(caveats.textContent).not.toMatch(/prepare a purchase/)
     // The phrasing the issue retires: the quote tools quote and refuse
     // nothing, so a footnote that blames the quote describes a refusal no
     // code path raises.
+    expect(caveats.textContent).not.toMatch(/quote/i)
     expect(tile.textContent).not.toMatch(/quote/i)
   })
 
   it('names the ledger floor when the endpoint reports one, and stays silent when it does not (#3013)', () => {
     // The populated fixture carries `refusals_recorded_from: '2026-05-28'`:
     // the renderer formats it (en-GB day + short month) and the clause sits
-    // inside the Refused tile — the count above it stays the truth for the
-    // part of the window the ledger covers. The expected label below is the
-    // same expression the production formatter uses, so this pin follows the
-    // formatter rather than restating it.
+    // in the page-level caveat line under the tile grid (#3204) — the count
+    // on the tile stays the truth for the part of the window the ledger
+    // covers. The expected label below is the same expression the production
+    // formatter uses, so this pin follows the formatter rather than restating it.
     render(<AnalyticsClient />)
-    const tile = screen.getByTestId('stat-tile-refused')
+    const caveats = screen.getByTestId('analytics-refusal-caveats')
     const expected = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(
       new Date('2026-05-28'),
     )
-    expect(tile.textContent).toMatch(new RegExp(`Refusals are recorded from ${expected}\\.`))
+    expect(caveats.textContent).toMatch(new RegExp(`Refusals are recorded from ${expected}\\.`))
+  })
+
+  it('a populated window with zero refusals says so on the tile and still carries the page caveats (#3204)', () => {
+    mockUseAnalyticsOverview.mockReturnValue(settled({ data: NO_REFUSALS }))
+    render(<AnalyticsClient />)
+    const tile = screen.getByTestId('stat-tile-refused')
+    expect(within(tile).getByText('0')).toBeTruthy()
+    expect(tile.textContent).toMatch(/No refusals in this window/)
+    expect(tile.textContent).not.toMatch(/attempted/)
+    expect(screen.getByTestId('analytics-refusal-caveats').textContent).toMatch(/Price-cap refusals/)
   })
 
   it('renders NO floor line from a null `refusals_recorded_from` — an empty ledger names no day', () => {
     mockUseAnalyticsOverview.mockReturnValue(settled({ data: NO_FLOOR }))
     render(<AnalyticsClient />)
     const tile = screen.getByTestId('stat-tile-refused')
-    expect(tile.textContent).not.toMatch(/Refusals are recorded from/)
-    // The rest of the refusal sentence stays: the count and BOTH unrecorded
-    // classes are independent of the ledger floor — an empty ledger does not
-    // make the two paths the page cannot see any more visible (#3055).
+    const caveats = screen.getByTestId('analytics-refusal-caveats')
+    expect(caveats.textContent).not.toMatch(/Refusals are recorded from/)
+    // The rest of the refusal sentence stays: the count and the one
+    // unrecorded class are independent of the ledger floor — an empty ledger
+    // does not make the path the page cannot see any more visible (#3055).
     expect(tile.textContent).toMatch(/2 refused payments/)
-    expect(tile.textContent).toMatch(/Price-cap refusals in your agent/)
-    expect(tile.textContent).toMatch(/budget refusals raised when Haven's hosted tools prepare a purchase/)
+    expect(caveats.textContent).toMatch(/Price-cap refusals in your agent's runtime are not recorded\./)
+    expect(caveats.textContent).not.toMatch(/hosted tools/)
   })
 
   it('renders the budget bands as a count of agents over their own budgets', () => {
@@ -460,6 +487,19 @@ describe('Analytics — the currency is the one the Settings surface owns', () =
     render(<AnalyticsClient />)
     expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('30d', 'usd')
     expect(screen.getByTestId('stat-tile-spent').textContent).toMatch(/\$324\.75/)
+  })
+
+  it('sends sek on the wire for a SEK preference and renders sv-SE figures in the tiles (#3127)', () => {
+    // SEK is the served default and the currency no user could previously
+    // select; the tile must show the endpoint's figure in the currency's own
+    // locale voice — "324,75 kr", never a USD figure relabelled "kr".
+    preferences('SEK')
+    render(<AnalyticsClient />)
+    expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('30d', 'sek')
+    const tile = screen.getByTestId('stat-tile-spent')
+    expect(tile.textContent).toContain('324,75\u00a0kr')
+    expect(tile.textContent).not.toContain('$')
+    expect(tile.textContent).not.toContain('€')
   })
 })
 

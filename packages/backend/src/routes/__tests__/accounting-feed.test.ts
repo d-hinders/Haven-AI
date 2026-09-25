@@ -72,8 +72,14 @@ vi.mock('../../modules/accounting/index.js', () => ({
 }))
 
 import accountingFeedRoutes from '../accounting-feed.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const USER = 'user-1'
+
+// A payment id is a uuid (payment_intents.id) and, since #3030, the spec's
+// `paymentId` path parameter says so on this module too — 'pay-1' would be
+// refused before the handler. Every fixture reads this one value.
+const PAY = '4d1e2c3b-5a69-4c7d-8e9f-0a1b2c3d4e5f'
 
 describe('reporting routes', () => {
   let app: FastifyInstance
@@ -81,6 +87,10 @@ describe('reporting routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/accounting-feed.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(accountingFeedRoutes, { prefix: '/accounting/feed' })
     token = app.jwt.sign({ sub: USER, email: 'ada@example.com' })
@@ -200,8 +210,8 @@ describe('reporting routes', () => {
       expectMatchesSpec('GET', '/accounting/feed/status', status.json())
 
       expect((await authed('POST', '/accounting/feed/sync')).statusCode).toBe(404)
-      expect((await authed('GET', '/accounting/feed/verify/pay-1')).statusCode).toBe(404)
-      expect((await authed('POST', '/accounting/feed/reopen/pay-1')).statusCode).toBe(404)
+      expect((await authed('GET', `/accounting/feed/verify/${PAY}`)).statusCode).toBe(404)
+      expect((await authed('POST', `/accounting/feed/reopen/${PAY}`)).statusCode).toBe(404)
       expect(orchestratorMocks.syncUser).not.toHaveBeenCalled()
       expect(fortnoxMocks.verifyPushedPayment).not.toHaveBeenCalled()
     })
@@ -309,7 +319,7 @@ describe('reporting routes', () => {
   describe('GET /verify/:paymentId (#1362)', () => {
     it('is hard-gated like /sync: 404 when unavailable, no provider read', async () => {
       entitlementMocks.accountingFeedAvailable.mockResolvedValue(false)
-      const res = await authed('GET', '/accounting/feed/verify/pay-1')
+      const res = await authed('GET', `/accounting/feed/verify/${PAY}`)
       expect(res.statusCode).toBe(404)
       expect(fortnoxMocks.verifyPushedPayment).not.toHaveBeenCalled()
     })
@@ -323,10 +333,10 @@ describe('reporting routes', () => {
           total: 10.42, checked_at: '2026-08-12T14:00:00.000Z',
         },
       })
-      const res = await authed('GET', '/accounting/feed/verify/pay-1')
+      const res = await authed('GET', `/accounting/feed/verify/${PAY}`)
       expect(res.statusCode).toBe(200)
       expect(res.json()).toMatchObject({ registered: true, booked: false, invoice_number: 11 })
-      expect(fortnoxMocks.verifyPushedPayment).toHaveBeenCalledWith(USER, 'pay-1')
+      expect(fortnoxMocks.verifyPushedPayment).toHaveBeenCalledWith(USER, PAY)
       expectMatchesSpec('GET', '/accounting/feed/verify/{paymentId}', res.json())
     })
 
@@ -334,7 +344,7 @@ describe('reporting routes', () => {
       fortnoxMocks.verifyPushedPayment.mockResolvedValue({
         ok: false, error_code: 'not_pushed', status: 'failed',
       })
-      const res = await authed('GET', '/accounting/feed/verify/pay-1')
+      const res = await authed('GET', `/accounting/feed/verify/${PAY}`)
       expect(res.statusCode).toBe(409)
       expect(res.json()).toMatchObject({ error_code: 'not_pushed', status: 'failed' })
       expect(res.json().error).toMatch(/not been pushed/)
@@ -354,7 +364,7 @@ describe('reporting routes', () => {
 
     it('is hard-gated: 404 when unavailable, no verification and no write', async () => {
       entitlementMocks.accountingFeedAvailable.mockResolvedValue(false)
-      const res = await authed('POST', '/accounting/feed/reopen/pay-1')
+      const res = await authed('POST', `/accounting/feed/reopen/${PAY}`)
       expect(res.statusCode).toBe(404)
       expect(fortnoxMocks.verifyPushedPayment).not.toHaveBeenCalled()
       expect(fortnoxMocks.reopenPushedPayment).not.toHaveBeenCalled()
@@ -363,11 +373,11 @@ describe('reporting routes', () => {
     it('reopens ONLY when the provider confirms the invoice is gone — on the ACTIVE connection\'s provider', async () => {
       fortnoxMocks.verifyPushedPayment.mockResolvedValue(GONE)
       fortnoxMocks.reopenPushedPayment.mockResolvedValue({ reopened: true })
-      const res = await authed('POST', '/accounting/feed/reopen/pay-1')
+      const res = await authed('POST', `/accounting/feed/reopen/${PAY}`)
       expect(res.statusCode).toBe(200)
-      expect(res.json()).toMatchObject({ reopened: true, payment_id: 'pay-1' })
+      expect(res.json()).toMatchObject({ reopened: true, payment_id: PAY })
       expect(fortnoxMocks.reopenPushedPayment).toHaveBeenCalledWith(
-        USER, 'fortnox', 'pay-1', expect.stringMatching(/no longer exists/),
+        USER, 'fortnox', PAY, expect.stringMatching(/no longer exists/),
       )
       expectMatchesSpec('POST', '/accounting/feed/reopen/{paymentId}', res.json())
     })
@@ -379,7 +389,7 @@ describe('reporting routes', () => {
         verification: { ...GONE.verification, missing: 'foreign_invoice' as const },
       })
       fortnoxMocks.reopenPushedPayment.mockResolvedValue({ reopened: true })
-      const res = await authed('POST', '/accounting/feed/reopen/pay-1')
+      const res = await authed('POST', `/accounting/feed/reopen/${PAY}`)
       expect(res.statusCode).toBe(200)
       const reason = String(fortnoxMocks.reopenPushedPayment.mock.calls[0][3])
       expect(reason).toMatch(/different external invoice number/)
@@ -395,7 +405,7 @@ describe('reporting routes', () => {
         provider: 'fortnox',
         verification: { ...GONE.verification, registered: true, missing: null, booked: false },
       })
-      const res = await authed('POST', '/accounting/feed/reopen/pay-1')
+      const res = await authed('POST', `/accounting/feed/reopen/${PAY}`)
       expect(res.statusCode).toBe(409)
       expect(res.json()).toMatchObject({ error_code: 'invoice_exists', invoice_number: 11 })
       expect(fortnoxMocks.reopenPushedPayment).not.toHaveBeenCalled()
@@ -409,7 +419,7 @@ describe('reporting routes', () => {
       fortnoxMocks.reopenPushedPayment.mockResolvedValue({
         reopened: false, error_code: 'previous_company', switched_at: '2026-09-11T10:00:00.000Z', company_name: 'Old Company AB',
       })
-      const res = await authed('POST', '/accounting/feed/reopen/pay-1')
+      const res = await authed('POST', `/accounting/feed/reopen/${PAY}`)
       expect(res.statusCode).toBe(409)
       expect(res.json()).toMatchObject({ error_code: 'previous_company', switched_at: '2026-09-11T10:00:00.000Z' })
       expect(res.json().error).toContain('belongs to the previous company')
@@ -420,14 +430,14 @@ describe('reporting routes', () => {
 
     it('maps verification refusals and the raced row-state honestly', async () => {
       fortnoxMocks.verifyPushedPayment.mockResolvedValue({ ok: false, error_code: 'not_pushed', status: 'failed' })
-      let res = await authed('POST', '/accounting/feed/reopen/pay-1')
+      let res = await authed('POST', `/accounting/feed/reopen/${PAY}`)
       expect(res.statusCode).toBe(409)
       expect(res.json().error_code).toBe('not_pushed')
 
       // Verification says gone, but the row moved before the flip (raced).
       fortnoxMocks.verifyPushedPayment.mockResolvedValue(GONE)
       fortnoxMocks.reopenPushedPayment.mockResolvedValue({ reopened: false, error_code: 'not_pushed' })
-      res = await authed('POST', '/accounting/feed/reopen/pay-1')
+      res = await authed('POST', `/accounting/feed/reopen/${PAY}`)
       expect(res.statusCode).toBe(409)
       expect(res.json().error_code).toBe('not_pushed')
     })
@@ -461,6 +471,23 @@ describe('reporting routes', () => {
       expect(orchestratorMocks.syncUser).toHaveBeenCalledTimes(1)
       expect(orchestratorMocks.syncUser).toHaveBeenCalledWith(USER)
       expectMatchesSpec('POST', '/accounting/feed/sync', res.json())
+    })
+  })
+
+  describe('request validation (#3030, enforced module)', () => {
+    it('refuses a non-uuid paymentId with the 400 envelope once the feed is on — and still 404s while it is off', async () => {
+      // `requireAccountingFeed` is an onRequest hook, so it answers before
+      // validation: a disabled feed hides the route's shape as before.
+      setAvailability(false)
+      expect((await authed('GET', '/accounting/feed/verify/pay-1')).statusCode).toBe(404)
+      setAvailability(true)
+      // Mutation: drop the module from enforcedModules → verifyPushedPayment
+      // is called with 'pay-1'.
+      const res = await authed('GET', '/accounting/feed/verify/pay-1')
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+      expect(res.json().details).toContain('params/paymentId')
+      expect(fortnoxMocks.verifyPushedPayment).not.toHaveBeenCalled()
     })
   })
 })

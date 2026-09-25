@@ -53,8 +53,8 @@ import { findExecutionRailForAgent } from '../infra/repositories/smart-accounts.
 import { getChain } from '../domain/chains.js'
 
 export interface ExecutionRailState {
-  /** `smart_accounts.execution_rail` for the agent's Safe (null = no row / legacy). */
-  safeExecutionRail: string | null
+  /** `smart_accounts.execution_rail` for the agent's account (null = no row / legacy). */
+  executionRail: string | null
   chainId: number
 }
 
@@ -88,8 +88,8 @@ export type ExecutionRailDecision =
  * would have closed the string and left the null.
  */
 export function resolveExecutionRail(state: ExecutionRailState): ExecutionRailDecision {
-  if (state.safeExecutionRail === 'session_key') return { rail: 'retired_session' }
-  if (state.safeExecutionRail === 'delegation') return { rail: 'delegation' }
+  if (state.executionRail === 'session_key') return { rail: 'retired_session' }
+  if (state.executionRail === 'delegation') return { rail: 'delegation' }
   return { rail: 'retired_allowance' }
 }
 
@@ -226,7 +226,7 @@ export function allowanceModuleRailRetired(kind: 'account' | 'intent'): {
 
 /**
  * Load the rail state for an agent. The query lives in
- * `infra/repositories/user-safes.ts` (`FIND_EXECUTION_RAIL_FOR_AGENT_SQL`, #999):
+ * `infra/repositories/smart-accounts.ts` (`FIND_EXECUTION_RAIL_FOR_AGENT_SQL`, #999):
  * LEFT JOIN through `agents.account_id` so a missing Safe row yields null →
  * legacy (fail-closed), never an error — see the repository's note on the
  * #745/#757 join regression.
@@ -236,7 +236,7 @@ export async function loadExecutionRailState(agent: {
   chain_id: number
 }): Promise<ExecutionRailState> {
   return {
-    safeExecutionRail: await findExecutionRailForAgent(agent.id),
+    executionRail: await findExecutionRailForAgent(agent.id),
     chainId: agent.chain_id,
   }
 }

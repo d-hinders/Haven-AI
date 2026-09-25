@@ -8,10 +8,10 @@
  *
  * Prospects (`listing_status: coming_soon`, seeded by #3080) are the one
  * thing NOT public: they are listed only to an authenticated dashboard user,
- * only when `HAVEN_MARKETPLACE_PROSPECTS` is on and no mainnet chain is
- * listed (`modules/catalog/marketplace-scope.ts`), and `GET /merchants/{slug}`
- * answers 404 — not 403 — to every other caller, so the URL does not confirm
- * the row exists (epic decision 12).
+ * only when `HAVEN_MARKETPLACE_PROSPECTS` is on and `HAVEN_MARKETPLACE_CHAIN_IDS`
+ * itself names a testnet (`modules/catalog/marketplace-scope.ts`; decision 12
+ * as amended by decision 14), and `GET /merchants/{slug}` answers 404 — not
+ * 403 — to every other caller, so the URL does not confirm the row exists.
  *
  * Nothing here creates payments, signatures, or any state change.
  */

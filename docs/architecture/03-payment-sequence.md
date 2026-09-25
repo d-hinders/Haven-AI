@@ -45,11 +45,11 @@ Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backen
 > and it is no longer behaviour you could find in the tree.
 >
 > **What still works for one of these accounts**, because it bears on reading
-> this diagram: `POST /safe/exec`, which accepts an owner-signed execution and
-> relays it for gas only. It is a lower-level access path, not a Haven
-> self-serve exit for every legacy owner: a known wallet owner may use Safe's
-> own owner-capable interface, while passkey-only and unknown-owner states
-> receive no promise that Safe's interface can move funds for them.
+> this diagram: nothing inside Haven. `POST /safe/exec`, which relayed an
+> owner-signed execution for gas, was the last live path, and #2847 deleted it
+> (it answers 404). A known wallet owner may use Safe's own owner-capable
+> interface, while passkey-only and unknown-owner states receive no promise
+> that Safe's interface can move funds for them.
 > **Approver management is gone as of #1988**: Haven no longer constructs
 > owner-change transactions, so the preventive half of #1229's recovery is no
 > longer offered. Where a legacy Safe has a known wallet owner, that owner can

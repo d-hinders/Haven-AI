@@ -122,11 +122,12 @@ Haven runs **one live on-chain policy rail**: the delegation rail.
   direct database query, but since #2413 no account, agent or dashboard surface displays them** —
   balances, tokens and agents no longer render there. Transaction history is the named
   exception: `GET /transactions` carries no rail predicate on either its account or its
-  agent list, so legacy names still appear in its picklists. `POST /safe/exec` stays open for
-  owner-signed execution relayed for gas, but Haven no longer offers a screen that
-  composes such a transaction: a wallet-owned Safe's owner signs at Safe's own
-  interfaces, while a **passkey-owned** Safe currently has no self-serve way to
-  move funds out. See `docs/product/account-recovery.md`.
+  agent list, so legacy names still appear in its picklists. `POST /safe/exec`, the
+  last live Safe-rail route (owner-signed execution relayed for gas), was deleted by
+  #2847, so Haven neither composes nor relays a legacy Safe transaction: a
+  wallet-owned Safe's owner signs and submits at Safe's own interfaces, while a
+  **passkey-owned** Safe currently has no self-serve way to move funds out. See
+  `docs/product/account-recovery.md`.
 - **Smart Sessions / ERC-7579 session rail — retired (#834).** `session_key`
   accounts get HTTP 410 from the payment paths.
 

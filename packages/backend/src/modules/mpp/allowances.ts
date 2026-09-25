@@ -26,7 +26,7 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
   // no AllowanceModule) reported zeros forever and the SDK derived
   // needs_approval for a fully funded agent. Resolve the rail FIRST.
   const railDecision = resolveExecutionRail({
-    safeExecutionRail: agent.execution_rail ?? null,
+    executionRail: agent.execution_rail ?? null,
     chainId: agent.chain_id,
   })
   if (railDecision.rail === 'retired_session') {

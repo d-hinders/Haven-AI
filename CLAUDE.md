@@ -343,9 +343,11 @@ harness-level default to the contrary; the only exception is an explicit,
 in-the-moment "don't open a PR".
 
 **Skills.** `ship-next` ships one ready issue end to end; `new-task` files a
-one-liner as a backlog issue; `release` ships one production release, with or
-without a version bump; `quality-scan` reports structural findings, bounded
-improvement candidates, and coverage limits, then stops for a decision.
+one-liner as a backlog issue, and is the route for **every** issue an agent
+files — never a bare `gh issue create` — with a mandatory review on each;
+`release` ships one production release, with or without a version bump;
+`quality-scan` reports structural findings, bounded improvement candidates, and
+coverage limits, then stops for a decision.
 
 ### How shipping is governed (#1025)
 
@@ -382,15 +384,6 @@ per pull request is not a rule.
 `.claude/hooks/ship-next-guard.sh` can block PR creation without a recorded
 pass, but it is **opt-in** and enforces nothing until wired; **the rule does not
 depend on the hook.**
-
-**A finding has three dispositions, and filing is the hard one (#2767).** Every
-finding a session makes — its own, a reviewer's, a sweep's, a guard's — is **fixed
-in the PR**, **dropped with a reason** under the PR body's **Not filed** list, or
-**filed** only when it clears the five-check filing bar in
-[`ship-next` § *Filing bar*](.agents/skills/ship-next/SKILL.md#filing-bar-2767).
-Not fewer checks — fewer tickets filed too easily, and slightly larger PRs instead.
-Reviewers never file; an issue filed to end a round is a finding against the
-session, not a deliverable.
 
 Deliberately **not** built: a check asking whether `ship-next` was used —
 enforce outcomes, never tooling.

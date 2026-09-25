@@ -20,7 +20,7 @@ covers:
   - packages/frontend/src/lib/__tests__/served-docs.test.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-09-12"
+last-verified: "2026-09-21"
 ---
 
 # Documentation-quality system
@@ -185,8 +185,8 @@ filter — is what makes the blocking column above true.
   but no `qa-freshness` re-run.
 - **The staleness audit is read at promotion (#2638).**
   [`../operations/promoting-dev-to-main.md`](../operations/promoting-dev-to-main.md)
-  requires a disposition for every ranked doc — fix, drop with a reason, or file
-  above the bar ([`ship-next` § *Filing bar*](../../.agents/skills/ship-next/SKILL.md#filing-bar-2767)).
+  requires a disposition for every ranked doc — fix, file, or accept with a
+  reason in the promotion PR.
   Non-contract docs are deliberately allowed to drift on `dev` between
   promotions, and this is the one place that drift is swept.
 - **What none of these establish** is that the prose which remains is *true*.

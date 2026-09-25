@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getAddress } from 'ethers'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
 // #1444: validate the real payload against the spec's own schema.
@@ -659,6 +660,23 @@ describe('machine payment routes', () => {
     expect(findCall(/FROM machine_payment_evidence e/)!.params).toEqual([AGENT.id, 3, null])
   })
 
+  it('#3132: every receipt row states its scope — { source: agent, filter: null } — and the pre-#3132 row still validates', async () => {
+    const rows = ['aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000002'].map((id) => receiptRow(id))
+    primeDb(AUTH, receiptsTotal(2), [/FROM machine_payment_evidence e/, () => ({ rows })])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?limit=5',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    const body = response.json() as { receipts: Array<Record<string, unknown>> }
+    expect(body.receipts).toHaveLength(2)
+    for (const receipt of body.receipts) expect(receipt.scope).toEqual({ source: 'agent', filter: null })
+    expectMatchesSpec('GET', '/machine-payments/receipts', body)
+    // Additive: a row without `scope` (an older backend's shape) still matches the contract.
+    expectMatchesSpec('GET', '/machine-payments/receipts', { ...body, receipts: body.receipts.map(({ scope: _s, ...rest }) => rest) })
+  })
+
   it('#3128: a page that ends exactly at limit is the last page — has_more false, next_cursor null (no off-by-one)', async () => {
     const rows = ['aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000002'].map((id) => receiptRow(id))
     primeDb(AUTH, receiptsTotal(2), [/FROM machine_payment_evidence e/, () => ({ rows })])
@@ -795,6 +813,8 @@ describe('machine payment routes', () => {
       next_cursor: null,
       receipts: [{
         id: '44444444-4444-4444-4444-444444444444',
+        // #3132: per-row list scope — agent-scoped by the principal, unfiltered.
+        scope: { source: 'agent', filter: null },
         settlement_scheme: 'eip3009',
         budget_delegation_hash: null,
         payment_id: PAYMENT_ID,
@@ -810,9 +830,9 @@ describe('machine payment routes', () => {
         settlement_tx_hash: null,
         chain_id: 8453,
         resource_url: challenge.resource,
-        merchant_address: RECIPIENT.toLowerCase(),
-        payer_address: AGENT.account_address.toLowerCase(),
-        settlement_address: RECIPIENT.toLowerCase(),
+        merchant_address: RECIPIENT, // #3307: checksummed at the read boundary
+        payer_address: getAddress(AGENT.account_address),
+        settlement_address: RECIPIENT,
         token_symbol: 'USDC',
         token_address: USDC,
         amount_raw: '10000',
@@ -830,10 +850,10 @@ describe('machine payment routes', () => {
         updated_at: '2026-05-15T12:00:01.000Z',
         // #2960: additive alongside `payer_address` above (`treasury_account` only).
         parties: {
-          treasury_account: AGENT.account_address.toLowerCase(),
+          treasury_account: getAddress(AGENT.account_address),
           delegate: AGENT.delegate_address,
           delegate_account: null,
-          merchant: RECIPIENT.toLowerCase(),
+          merchant: RECIPIENT,
         },
       }],
     })
@@ -904,10 +924,10 @@ describe('machine payment routes', () => {
       }>
     }
     expect(body.receipts[0].parties).toEqual({
-      treasury_account: AGENT.account_address.toLowerCase(),
+      treasury_account: getAddress(AGENT.account_address), // #3307
       delegate: AGENT.delegate_address,
-      delegate_account: delegateAccount,
-      merchant: RECIPIENT.toLowerCase(),
+      delegate_account: getAddress(delegateAccount),
+      merchant: RECIPIENT,
     })
     // #2998: erc7710 — one transaction, `tx_hash` IS the settlement, no
     // funding leg.
@@ -1037,7 +1057,7 @@ describe('machine payment routes', () => {
       token: 'USDC',
       tx_hash: TX_HASH,
       resource_url: challenge.resource,
-      merchant_address: RECIPIENT.toLowerCase(),
+      merchant_address: RECIPIENT, // #3307: agent-facing, checksummed
       payer_address: AGENT.delegate_address,
       amount_atomic: '10000',
       asset: USDC,
@@ -1049,7 +1069,7 @@ describe('machine payment routes', () => {
         asset: USDC,
         network: challenge.network.name,
         resource_url: challenge.resource,
-        merchant_address: RECIPIENT.toLowerCase(),
+        merchant_address: RECIPIENT, // #3307: the rail context is checksummed too
         description: challenge.description,
         idempotency_key: 'mpp_demo:test',
         challenge_id: challenge.challengeId,
@@ -1059,7 +1079,7 @@ describe('machine payment routes', () => {
         treasury_account: AGENT.account_address,
         delegate: AGENT.delegate_address,
         delegate_account: null,
-        merchant: RECIPIENT.toLowerCase(),
+        merchant: RECIPIENT,
       },
     })
     expectMatchesSpec('GET', '/machine-payments/{id}/status', response.json())

@@ -196,11 +196,30 @@ export function warnPublicRpc(input: {
   return resolved
 }
 
+/**
+ * The shared public Base nodes, one literal each (#2511/#2615). They are the
+ * default when the dedicated variable is unset, and the last leg of the
+ * failover transport when it is set (#3255, `infra/chain/rpc-transport.ts`).
+ */
+export const PUBLIC_RPC_BASE = 'https://mainnet.base.org'
+export const PUBLIC_RPC_BASE_SEPOLIA = 'https://sepolia.base.org'
+
+/**
+ * #3255: an optional SECOND dedicated endpoint per chain (a second provider
+ * account), tried after `RPC_URL_BASE*` fails and before the public node.
+ * Unset, blank or whitespace-only is "no secondary", with no warning: the
+ * public node still stands behind the primary. Trimmed for the same
+ * dashboard-paste reason `warnPublicRpc` trims.
+ */
+export function parseRpcFallbackUrl(raw: string | undefined): string {
+  return raw?.trim() ?? ''
+}
+
 /** #2511, kept as a named call site so the Sepolia consequence has one home. */
 export function warnPublicBaseSepoliaRpc(raw: string | undefined): string {
   return warnPublicRpc({
     envVar: 'RPC_URL_BASE_SEPOLIA',
-    publicUrl: 'https://sepolia.base.org',
+    publicUrl: PUBLIC_RPC_BASE_SEPOLIA,
     raw,
     consequence:
       'When that shared endpoint has an outage, qa-dev fails on it (502 bodies carrying ' +
@@ -218,7 +237,7 @@ export function warnPublicBaseSepoliaRpc(raw: string | undefined): string {
 export function warnPublicBaseMainnetRpc(raw: string | undefined): string {
   return warnPublicRpc({
     envVar: 'RPC_URL_BASE',
-    publicUrl: 'https://mainnet.base.org',
+    publicUrl: PUBLIC_RPC_BASE,
     raw,
     consequence:
       'This is the node every Base MAINNET settlement, account deploy and caveat-enforcer read ' +
@@ -343,6 +362,10 @@ export const config = {
   // Chain-specific RPC URLs
   rpcUrlBase: warnPublicBaseMainnetRpc(process.env.RPC_URL_BASE),
   rpcUrlBaseSepolia: warnPublicBaseSepoliaRpc(process.env.RPC_URL_BASE_SEPOLIA),
+  // #3255: optional second provider per chain, behind the dedicated URL and
+  // ahead of the public node in the failover transport. Never logged.
+  rpcUrlBaseFallback: parseRpcFallbackUrl(process.env.RPC_URL_BASE_FALLBACK),
+  rpcUrlBaseSepoliaFallback: parseRpcFallbackUrl(process.env.RPC_URL_BASE_SEPOLIA_FALLBACK),
 
   // Optional (features degrade gracefully without these)
   gnosisscanApiKey: process.env.GNOSISSCAN_API_KEY ?? '',
@@ -379,9 +402,11 @@ export const config = {
     .filter((n) => Number.isInteger(n) && n > 0),
 
   // Prospects — merchants we are talking to, `listing_status: coming_soon`,
-  // seeded by #3080 — are listed only when this is on AND the marketplace
-  // lists no mainnet chain (the second line of defence lives in the route:
-  // a copied env cannot publish them on prod). Default off.
+  // seeded by #3080 — are listed only when this is on AND
+  // `HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet (decision 14,
+  // `modules/catalog/marketplace-scope.ts`; the deploy-chain fallback never
+  // counts, so a copied flag cannot publish them on prod, whose list is
+  // `8453`). Dev runs it on standing beside the mainnet merchants. Default off.
   marketplaceProspectsEnabled: parseBooleanFlag(
     'HAVEN_MARKETPLACE_PROSPECTS',
     process.env.HAVEN_MARKETPLACE_PROSPECTS,
@@ -536,8 +561,8 @@ export function parseAccountingEntitlementMode(raw: string | undefined | null): 
  * The request-validation plugin's mode (#3029, epic #3028).
  *
  *   off     — no schema is injected and no route is observed, EXCEPT a module
- *             in the plugin's `enforcedModules` (`index.ts` sets
- *             `['routes/contacts.ts', 'routes/merchants.ts']`), which stays
+ *             in the plugin's `enforcedModules` (`index.ts` lists every
+ *             enforced module — every non-money module since #3030), which stays
  *             enforced whatever the mode is. Keyed on the route FILE since
  *             #3135 — a mount prefix could not flip the four modules sharing
  *             `/agents` independently.

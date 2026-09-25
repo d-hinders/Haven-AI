@@ -16,7 +16,7 @@ import type { AreaPoint } from '../AreaChart'
  *
  * The fixture's balance FALLS over the range (1 240 → 1 120), which is the
  * direction the page actually shows when agents have been spending: the
- * annotation reads `spent 120.00 USD`, the claim the issue asks for ("the
+ * annotation reads `spent 120.00` (the formatter already carries the currency), the claim the issue asks for ("the
  * range's spend annotated as the endpoint delta"), and not a signed number
  * the reader has to interpret.
  *
@@ -111,13 +111,61 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
       expect(y).toBeGreaterThan(14)
       expect(y).toBeLessThan(190)
     }
-    // And the scale did not fall to a zero floor: the gridline labels the
-    // reader sees are multiples of 500 (the nice step of this range), which
-    // only a data-anchored scale prints. A zero-based scale of the same
-    // height would print 200 / 400 / 600 / 800 / 1000 / 1200. The labels
-    // print through the caller's formatter, so they carry its grouping.
+    // And the ticks live INSIDE the plot, between the padded floor and the
+    // ceiling: for a 1,100–1,240 balance (pad 6% of the 140 range) the nice
+    // step over the range is 50, so the reader sees 1,050 / 1,100 / 1,150 /
+    // 1,200 — labels that bracket the data. Until #3204 the ticks came from
+    // the zero-based scale (500 / 1,000 here), both below the padded floor, so
+    // no gridline reached the plot and the labels were positioned under the
+    // card; a level-relative pad term then still gave a 100-step. The labels
+    // print through `formatTick` (here the same formatter), so they carry its
+    // grouping.
     const tickLabels = screen.getAllByTestId('chart-tick-label').map((el) => el.textContent)
-    expect(tickLabels).toEqual(['500.00', '1,000.00'])
+    expect(tickLabels).toEqual(['1,050.00', '1,100.00', '1,150.00', '1,200.00'])
+    // The line uses the plot: its vertical extent is at least half the plot
+    // height (14 → 190 is 176). Mutation: put the `|max| * 3%` pad term back
+    // → the data's 140 becomes ~15% of a 500-wide span → red.
+    const extent = Math.max(...ys) - Math.min(...ys)
+    expect(extent).toBeGreaterThan(176 * 0.5)
+    // Every tick's label sits within the svg's height (0–100%), never below it.
+    for (const el of screen.getAllByTestId('chart-tick-label')) {
+      const top = Number.parseFloat((el as HTMLElement).style.top)
+      expect(top).toBeGreaterThanOrEqual(0)
+      expect(top).toBeLessThanOrEqual(100)
+    }
+  })
+
+  it('prints ticks through formatTick when given one, and widens the gutter on the narrow treatment (#3204)', () => {
+    // The gutter is a fraction of the svg width; at 390 the desktop 48/640 is
+    // ~21 CSS px and a currency tick drawn into it ran under the line; the
+    // bar chart's 78 (~33 px) was measured short of `12 600 kr` (53.4 px)
+    // as well. 128 is a ~56 px gutter at 390. The label is anchored by its
+    // right edge with no width, so any overflow grows left into the card
+    // padding, never right into the plot. Callers pass a compact formatter
+    // on top. Mutation: drop PAD_NARROW, put 78 back, or box the label with
+    // a width again → red.
+    renderChart({ narrow: true, formatTick: (v: number) => `${Math.round(v)}` })
+    const labels = screen.getAllByTestId('chart-tick-label')
+    expect(labels.map((el) => el.textContent)).toEqual(['1050', '1100', '1150', '1200'])
+    const style = (labels[0] as HTMLElement).style
+    expect(Number.parseFloat(style.right)).toBeCloseTo(((640 - (128 - 6)) / 640) * 100, 2)
+    expect(Number.parseFloat(style.right)).toBeLessThan(((640 - (100 - 6)) / 640) * 100)
+    expect(style.width).toBe('')
+    expect(style.left).toBe('')
+    expect(labels[0]).toHaveClass('whitespace-nowrap')
+  })
+
+  it('prints distinct integer ticks for a flat series (#3204 round 2)', () => {
+    // An idle account (no movement for the window) has max === min. The
+    // pad floor decides the step: a floor of 1 gave a ±1 span, a 0.5 step
+    // and — through the compact no-cents formatter the balance chart uses —
+    // two gridlines sharing one label (12 342 / 12 342). Mutation: floor
+    // back to 1 → red.
+    const flat = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `d${d}`, value: 12342.17 }))
+    renderChart({ formatTick: (v: number) => `${Math.round(v)}` }, flat)
+    const labels = screen.getAllByTestId('chart-tick-label').map((el) => el.textContent)
+    expect(labels.length).toBeGreaterThanOrEqual(3)
+    expect(new Set(labels).size).toBe(labels.length)
   })
 
   it('fills under the line without drawing over it, closing on the baseline', () => {
@@ -145,7 +193,10 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
     // The delta is endpoint-to-endpoint, not the sum of movements, and it
     // reads as a spent figure rather than a signed number: the balance fell
     // by 120, and a range of payments spent 120.
-    expect(screen.getByTestId('area-delta')).toHaveTextContent('spent 120.00 USD')
+    // Exact, not a substring: the formatter already carries the currency, and
+    // "spent 120.00 USD" (or "298,43 kr SEK") is the #3204 double-currency
+    // defect. Mutation: append `{currency}` again → red.
+    expect(screen.getByTestId('area-delta').textContent?.trim()).toBe('spent 120.00')
   })
 
   it('names the direction of the delta, including the two edges', () => {
@@ -160,7 +211,7 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
       { label: 'Wed 10', value: 210 },
     ])
     expect(container.querySelector('[data-testid="area-delta"]')).toHaveTextContent(
-      'gained 110.00 USD',
+      'gained 110.00',
     )
   })
 
@@ -188,7 +239,11 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
       // tests, not renders), and a second query would count both charts.
       const { unmount } = renderChart({ narrow }, points)
       const labels = screen.getAllByTestId('chart-x-label')
-      expect(labels.map((el) => el.textContent)).toEqual(['d0', 'd7', 'd14', 'd21', 'd29'])
+      // The narrow list drops day 7 as well (#3204 round 3): the start
+      // label is left-anchored and needs two label-widths to its neighbour.
+      expect(labels.map((el) => el.textContent)).toEqual(
+        narrow ? ['d0', 'd14', 'd21', 'd29'] : ['d0', 'd7', 'd14', 'd21', 'd29'],
+      )
       const boxes = labels.map((el) => {
         const x = Number.parseFloat(el.style.left)
         const label = el.textContent ?? ''
@@ -240,7 +295,13 @@ describe('AreaChart — what a reader who cannot see the chart is told', () => {
     // element, whose subtree assistive technology is not shown, would read
     // as a chart with no data table at all — silently.
     expect(table.closest('[role="img"]')).toBeNull()
-    expect(table.className).toContain('sr-only')
+    // Visually hidden through a WRAPPER, never the table itself: `sr-only`'s
+    // `height: 1px` is a minimum for a <table>, so the table rendered full
+    // height under the card's `overflow-hidden` and every screenshot capture
+    // reported ~800px of clipped content (#3204). Mutation: put `sr-only`
+    // back on the table → red.
+    expect(table.className).not.toContain('sr-only')
+    expect(table.parentElement?.className).toContain('sr-only')
     expect([...table.querySelectorAll('thead th')].map((th) => th.textContent)).toEqual([
       'Day',
       'Balance (USD)',
@@ -265,7 +326,7 @@ describe('AreaChart — the reveal, the mobile half, the sparse half', () => {
     expect(screen.queryByTestId('chart-tooltip')).toBeNull()
     fireEvent.keyDown(svg, { key: 'ArrowRight' }) // → Tue 9
     expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Tue 9/)
-    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/USD 1,100\.00/)
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/1,100\.00/)
     fireEvent.keyDown(svg, { key: 'End' })
     expect(screen.getByTestId('chart-tooltip')).toHaveTextContent(/Thu 11/)
     fireEvent.keyDown(svg, { key: 'Escape' })
@@ -350,13 +411,9 @@ describe('AreaChart — the reveal, the mobile half, the sparse half', () => {
     renderChart({ narrow: true }, many)
     const labels = screen.getAllByTestId('chart-x-label')
     expect(labels.length).toBeLessThanOrEqual(5)
-    expect(labels.map((el) => el.textContent?.trim())).toEqual([
-      'd0',
-      'd18',
-      'd36',
-      'd54',
-      'd89',
-    ])
+    // Day 18 drops (#3204 round 3): 18/89 of the narrow plot is less than
+    // the two label-widths the left-anchored start label needs.
+    expect(labels.map((el) => el.textContent?.trim())).toEqual(['d0', 'd36', 'd54', 'd89'])
     fireEvent.keyDown(document.querySelector('svg')!, { key: 'End' })
     const tip = screen.getByTestId('chart-tooltip')
     expect(tip.className).not.toMatch(/absolute/)

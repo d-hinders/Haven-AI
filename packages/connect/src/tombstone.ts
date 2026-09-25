@@ -35,7 +35,7 @@
 import { chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { connectorRerunCommand } from '@haven_ai/sdk'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { redactSecrets } from './redact.js'
 import { ConnectError } from './connect-error.js'
 
@@ -76,6 +76,34 @@ export interface WriteTombstoneInput {
  */
 export function defaultTombstonesDir(baseDir?: string): string {
   return join(baseDir ?? join(homedir(), '.haven'), 'tombstones')
+}
+
+/** The ledger directory name used INSIDE a custom credential root. */
+export const ROOT_TOMBSTONES_DIRNAME = '.tombstones'
+
+/**
+ * The ledger for a credential ROOT — the directory that holds the agent
+ * directories (`--credentials-dir`, default `~/.haven/agents`). The default
+ * root keeps `~/.haven/tombstones`, unchanged. Any other root keeps its ledger
+ * INSIDE itself, at `<root>/.tombstones` — never beside it: the parent of a
+ * root the user named may be `/`, their home, or read-only, and the mirror
+ * write is fatal to a retirement (#3251 review). Every enumerator over a root
+ * gates on files inside an agent directory (`identity.json`, a sidecar, a
+ * parked key), so the ledger directory is never mistaken for an agent.
+ *
+ * `homeDir` names the home whose `.haven/agents` is the default root — the
+ * doctor passes its own, never the ambient one.
+ */
+export function tombstonesDirForCredentialRoot(credentialRoot?: string, homeDir: string = homedir()): string {
+  if (!credentialRoot) return defaultTombstonesDir(join(homeDir, '.haven'))
+  const root = resolve(credentialRoot)
+  if (root === resolve(homeDir, '.haven', 'agents')) return defaultTombstonesDir(join(homeDir, '.haven'))
+  return join(root, ROOT_TOMBSTONES_DIRNAME)
+}
+
+/** The ledger for an agent DIRECTORY: its parent is its credential root. */
+export function tombstonesDirForAgentDirectory(directory: string, homeDir: string = homedir()): string {
+  return tombstonesDirForCredentialRoot(dirname(resolve(directory)), homeDir)
 }
 
 const MIRROR_MODE = 0o600
@@ -154,10 +182,17 @@ function tombstoneScript(info: TombstoneInfo): string {
  *
  * Returns the tombstone info plus the MIRROR path (`recordPath`), so callers
  * can point at the record that outlives the directory.
+ *
+ * The mirror is BEST-EFFORT (#3259). The in-place TOMBSTONE.json is the
+ * authoritative record and is already on disk when the mirror is written, so
+ * a mirror failure must not read as "not retired": it used to throw here,
+ * and `--replace` then skipped the key teardown, leaving a directory that
+ * looked retired and could still spend. A failed mirror returns
+ * `recordPath: null` and `mirrorError`, and every caller reports it.
  */
 export async function writeAgentTombstone(
   input: WriteTombstoneInput,
-): Promise<TombstoneInfo & { recordPath: string }> {
+): Promise<WrittenTombstone> {
   // The directory must already exist: a mistyped path would otherwise be
   // silently created and reported as a successful retirement. (#1681 review)
   const dirStat = await stat(input.directory).catch(() => null)
@@ -199,11 +234,26 @@ export async function writeAgentTombstone(
   // tombstoned twice) overwrite — latest retirement wins, in-place records
   // remain authoritative.
   const root = input.tombstonesDir ?? defaultTombstonesDir()
-  await mkdir(root, { recursive: true, mode: 0o700 })
   const recordPath = join(root, `${info.agent_id}.json`)
-  await writeFile(recordPath, record, { mode: MIRROR_MODE })
+  try {
+    await mkdir(root, { recursive: true, mode: 0o700 })
+    await writeFile(recordPath, record, { mode: MIRROR_MODE })
+  } catch (err) {
+    // The errno CODE only — never the raw OS message, which carries local
+    // path detail and would reach `--json` stdout (#2175 discipline).
+    const code = (err as NodeJS.ErrnoException | null)?.code
+    return { ...info, recordPath: null, mirrorError: typeof code === 'string' && /^E[A-Z]+$/.test(code) ? code : 'mirror_write_failed' }
+  }
   return { ...info, recordPath }
 }
+
+/**
+ * A written tombstone. `recordPath` is the surviving mirror, or `null` when the
+ * mirror could not be written — then `mirrorError` is the errno code (e.g.
+ * `EACCES`, or `mirror_write_failed` when there is none), and the
+ * retirement still stands on the in-place TOMBSTONE.json (#3259).
+ */
+export type WrittenTombstone = TombstoneInfo & { recordPath: string | null; mirrorError?: string }
 
 /** The tombstone record for a directory, or null when it is not tombstoned. */
 export async function readAgentTombstone(directory: string): Promise<TombstoneInfo | null> {

@@ -8,8 +8,12 @@ import {
   ensureSignerConsent,
   renderSignerConsentBlock,
   SIGNER_ACK_ENV,
+  SIGNER_CONSENT_SURFACE_VERSION,
   type SignerConsentInput,
+  registeredSignerToolNames,
+  toolSummaries,
 } from './consent.js'
+import { toolDescriptions } from './tools.js'
 
 function captureWriter() {
   const chunks: string[] = []
@@ -65,8 +69,40 @@ describe('signer consent gate', () => {
     expect(block).toContain("read-only fetch of a pending payment's signing")
     expect(block).toContain('never sends the key')
     expect(block).toContain('cannot show a live allowance summary')
+    // #3279: the spend gate is the agent's signed budget delegation, not the
+    // retired Safe rail. The phrase must stay on one source line so the
+    // toContain holds, and the retired rail's name must not come back.
+    expect(block).toContain("The agent's signed budget delegation is the real spend gate")
+    expect(block).not.toContain('Safe')
+    expect(block).toContain('pause or revoke agent authority outside this signer')
     expect(block).toContain('haven_sign')
     expect(block).toContain(`${SIGNER_ACK_ENV}=${hash}`)
+  })
+
+  it('#3173: summarises every registered tool in one line each — never the agent-facing description — and names the connector doctor', () => {
+    const names = registeredSignerToolNames()
+    const block = renderSignerConsentBlock({ ...input, toolNames: names }, computeSignerConsentHash({ ...input, toolNames: names }))
+    for (const name of names) {
+      expect(toolSummaries[name]).toBeTruthy()
+      expect(toolSummaries[name]).not.toContain('\n')
+      expect(block).toContain(`  - ${name}: ${toolSummaries[name]}`)
+      // The full description is LLM prose; its distinctive clauses must not be in the human block.
+      expect(block).not.toContain(toolDescriptions[name].slice(0, 60))
+    }
+    expect(block.length).toBeLessThan(2500)
+    expect(block).toContain('npx @haven_ai/connect --doctor')
+    expect(block).toContain("failed 'Signer stdio handshake' check")
+    expect(block).toContain('local_signer_ack_required')
+    expect(block).toContain('--ack-local-tools')
+  })
+
+  it('#3173: the summaries and the doctor hint are outside the consent hash — the fixture hash is pinned', () => {
+    // Pinned literal: the same fixture hashed to this before #3173 rewrote the
+    // block, so any drift in the block's prose that leaked into the hash — or
+    // a surface-version bump — goes red here, where recomputing twice would not.
+    const hash = computeSignerConsentHash(input)
+    expect(hash).toBe('094465953abf89ad')
+    expect(renderSignerConsentBlock(input, hash)).toContain(`Consent hash: ${hash}`)
   })
 
   it('makes missing wallet metadata explicit', () => {
@@ -167,5 +203,16 @@ describe('consent surface version (#1263)', () => {
       .digest('hex')
       .slice(0, 16)
     expect(computeSignerConsentHash({ ...input, toolNames: [...input.toolNames] })).not.toBe(v1Style)
+  })
+
+  it('#3279: the surface version stays 2 — copy edits never re-prompt', () => {
+    // The rule (consent.ts, the version's own JSDoc): bump ONLY when what the
+    // signer can DO changes in a way the consent text describes — #1263's
+    // read-only signing-context fetch was v1 → v2 for exactly that reason.
+    // This rename is copy only: the hash covers identity, tool names and the
+    // surface version, never the text, so a bump here would re-prompt every
+    // install for nothing. Pin the value so an accidental bump is a review
+    // conversation instead of a silent consent reset.
+    expect(SIGNER_CONSENT_SURFACE_VERSION).toBe(2)
   })
 })

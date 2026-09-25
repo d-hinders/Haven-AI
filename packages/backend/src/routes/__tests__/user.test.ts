@@ -145,7 +145,9 @@ describe('User routes', () => {
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toBe('Invalid Ethereum address')
+      // #3030: the address pattern is the spec's — the enforced module's envelope.
+      expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+      expect(response.json().details).toContain('body/wallet_address')
     })
 
     it('returns 401 without auth', async () => {

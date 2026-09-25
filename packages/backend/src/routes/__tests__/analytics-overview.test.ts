@@ -81,7 +81,9 @@ vi.mock('../../infra/repositories/payment-refusals.js', () => ({
   firstRefusalDayForUser: mockFirstRefusalDayForUser,
 }))
 
-import analyticsOverviewRoutes from '../analytics-overview.js'
+import analyticsOverviewRoutes, { ANALYTICS_OVERVIEW_ENUMS } from '../analytics-overview.js'
+import { openapiSpec } from '../../openapi/spec.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 function emptyFixtures(userId: string) {
@@ -90,10 +92,12 @@ function emptyFixtures(userId: string) {
     spent_eur: '9.00',
     spent_previous_usd: '5.00',
     spent_previous_eur: '4.50',
+    spent_sek: '95.00',
+    spent_previous_sek: '47.50',
     payments_counted: '1',
   })
   mockCountUnsettledSubmittedForUser.mockResolvedValue(0)
-  mockListByDaySpendForUser.mockResolvedValue([{ day: '2030-06-01', agent_id: AGENT_UUID, usd: '10.00', eur: '9.00' }])
+  mockListByDaySpendForUser.mockResolvedValue([{ day: '2030-06-01', agent_id: AGENT_UUID, usd: '10.00', eur: '9.00', sek: '95.00' }])
   mockListPerAgentSpendForUser.mockResolvedValue([
     {
       agent_id: AGENT_UUID,
@@ -101,6 +105,7 @@ function emptyFixtures(userId: string) {
       status: 'active',
       spent_usd: '10.00',
       spent_eur: '9.00',
+      spent_sek: '95.00',
       payments: '1',
       last_payment_at: '2030-06-01T12:00:00.000Z',
     },
@@ -111,8 +116,10 @@ function emptyFixtures(userId: string) {
   mockSumFeesTotalsForUser.mockResolvedValue({
     fee_usd: '0',
     fee_eur: '0',
+    fee_sek: '0',
     fee_usd_previous: '0',
     fee_eur_previous: '0',
+    fee_sek_previous: '0',
     fee_rows: '0',
   })
   mockListGasEventsByChainForUser.mockResolvedValue([])
@@ -124,6 +131,7 @@ function emptyFixtures(userId: string) {
     refused_count: '0',
     refused_amount_usd: '0',
     refused_amount_eur: '0',
+    refused_amount_sek: '0',
   })
   mockListRefusalsByDayForUser.mockResolvedValue([])
   mockFirstRefusalDayForUser.mockResolvedValue(null)
@@ -152,6 +160,7 @@ function fullFixtures(userId: string) {
       merchant_key: MERCHANT_ADDRESS,
       spent_usd: '10.00',
       spent_eur: '9.00',
+      spent_sek: '95.00',
       payments: '1',
       agent_ids: [AGENT_UUID],
       first_seen: '2030-06-01T12:00:00.000Z',
@@ -159,7 +168,7 @@ function fullFixtures(userId: string) {
     },
   ])
   mockListBalanceByDayForUser.mockResolvedValue([
-    { snapshot_date: '2030-06-01', total_usd: '100.00', total_eur: '90.00' },
+    { snapshot_date: '2030-06-01', total_usd: '100.00', total_eur: '90.00', total_sek: '950.00' },
   ])
   mockListActiveDelegationsForUser.mockResolvedValue([
     {
@@ -184,6 +193,10 @@ describe('GET /analytics/overview', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/analytics-overview.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(analyticsOverviewRoutes, { prefix: '/analytics' })
     token = app.jwt.sign({ sub: USER, email: 'user@example.com' })
@@ -219,14 +232,81 @@ describe('GET /analytics/overview', () => {
     expect(mockSumTotalsSpendForUser).not.toHaveBeenCalled()
   })
 
-  it('400s on a range outside the enum', async () => {
+  // #3030: both refusals are the spec's enums, answered by the enforced
+  // module as the 400 envelope; the handler's own checks are gone. Mutation:
+  // drop the module from enforcedModules → `range=14d` is a 500 (undefined
+  // days) and `currency=gbp` reaches the repository.
+  it('400s on a range outside the enum, and on a missing range', async () => {
     const res = await call('/analytics/overview?range=14d', token)
     expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(res.json().details).toContain('querystring/range')
+    expect((await call('/analytics/overview', token)).statusCode).toBe(400)
+    expect(mockSumTotalsSpendForUser).not.toHaveBeenCalled()
   })
 
-  it('400s on an unrecognized currency', async () => {
-    const res = await call('/analytics/overview?range=30d&currency=sek', token)
+  it('400s on an unrecognized currency — and on upper-case, which the handler used to lower-case', async () => {
+    const res = await call('/analytics/overview?range=30d&currency=gbp', token)
     expect(res.statusCode).toBe(400)
+    expect(res.json().details).toContain('querystring/currency')
+    // The dashboard sends the lower-cased wire form (useAnalyticsOverview);
+    // the spec enum is lower-case, so `USD` is off-spec now.
+    expect((await call('/analytics/overview?range=30d&currency=USD', token)).statusCode).toBe(400)
+    expect(mockSumTotalsSpendForUser).not.toHaveBeenCalled()
+  })
+
+  it('the spec enums ARE the handler\'s tables (#3030 — the handler no longer checks)', () => {
+    const op = (openapiSpec.paths as Record<string, Record<string, unknown>>)['/analytics/overview'].get as {
+      parameters: Array<{ name: string; required?: boolean; schema: { enum?: string[] } }>
+    }
+    const byName = Object.fromEntries(op.parameters.map((p) => [p.name, p]))
+    expect(byName.range.required).toBe(true)
+    expect(byName.range.schema.enum).toEqual(ANALYTICS_OVERVIEW_ENUMS.range)
+    expect(byName.currency.schema.enum).toEqual(ANALYTICS_OVERVIEW_ENUMS.currency)
+  })
+
+  it('accepts sek as a display currency (#3127 round 2)', async () => {
+    const res = await call('/analytics/overview?range=30d&currency=sek', token)
+    expect(res.statusCode).toBe(200)
+    expect(res.json().currency).toBe('sek')
+  })
+
+  it('currency=sek reads the booked sek_value columns for every money figure, never re-converted from usd (#3127 round 2)', async () => {
+    const res = await call('/analytics/overview?range=30d&currency=sek&tz=UTC', token)
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.currency).toBe('sek')
+    // Every figure below is a DISTINCT booked sek_value column — none is the
+    // usd figure relabeled (the defect #3127 was filed for).
+    expect(body.totals.spent).toBe('95.00')
+    expect(body.totals.spent_previous).toBe('47.50')
+    expect(body.totals.refused_amount).toBe('0')
+    expect(body.by_day[0].spent_by_agent[AGENT_UUID]).toBe('95.00')
+    // agents[].spent is a booked-value STRING like every other money field here
+    // (only the share denominator runs through Number()).
+    expect(body.agents[0].spent).toBe('95.00')
+  })
+
+  it('currency=sek omits balance_by_day days whose total_sek predates migration 090 (NULL) rather than charting a fabricated 0', async () => {
+    mockListBalanceByDayForUser.mockResolvedValue([
+      // Pre-090 day: no SEK figure stored. Zeroing it would fabricate a swing.
+      { snapshot_date: '2030-05-30', total_usd: '100.00', total_eur: '90.00', total_sek: null },
+      // Post-090 day: the booked SEK figure.
+      { snapshot_date: '2030-06-01', total_usd: '110.00', total_eur: '99.00', total_sek: '1045.00' },
+    ])
+    const res = await call('/analytics/overview?range=30d&currency=sek&tz=UTC', token)
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.balance_by_day).toEqual([{ date: '2030-06-01', value: '1045.00' }])
+
+    // The same days under usd/eur keep BOTH days — the nullable column only
+    // affects the SEK series.
+    const usdRes = await call('/analytics/overview?range=30d&currency=usd&tz=UTC', token)
+    expect(usdRes.statusCode).toBe(200)
+    expect(usdRes.json().balance_by_day).toEqual([
+      { date: '2030-05-30', value: '100.00' },
+      { date: '2030-06-01', value: '110.00' },
+    ])
   })
 
   it('400s on an unrecognized IANA time zone', async () => {
@@ -310,6 +390,7 @@ describe('GET /analytics/overview', () => {
     mockAggregateRefusalAmountForUser.mockResolvedValue({
       refused_count: '2',
       refused_amount_usd: '15.50',
+      refused_amount_sek: '147.00',
       refused_amount_eur: '14.00',
     })
     const res = await call('/analytics/overview?range=30d&currency=usd', token)

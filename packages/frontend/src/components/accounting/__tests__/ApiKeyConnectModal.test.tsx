@@ -24,6 +24,7 @@ import {
   ACCOUNTED_DASHBOARD_PATH,
   ACCOUNTED_SCOPE_COMPANIES_READ,
   ACCOUNTED_SCOPE_DOCUMENTS_WRITE,
+  ACCOUNTED_SCOPE_WEBHOOKS_MANAGE,
 } from '@/components/accounting/accounted-copy'
 
 vi.mock('@/hooks/useScrollEdgeCue', () => ({ useScrollEdgeCue: () => false }))
@@ -48,10 +49,12 @@ describe('ApiKeyConnectModal', () => {
   it('renders the dashboard steps with the EXACT scope tokens and the keys path', () => {
     renderModal()
     expect(dialog()).toHaveTextContent(/Connect Accounted with an API key/)
-    // The two scope identifiers, verbatim, from the copy module — the same
-    // source the backend's key-creation page uses.
+    // The three scope identifiers, verbatim, from the copy module — the same
+    // source the backend's key-creation page uses. #3019 adds webhooks:manage
+    // (connect creates the three event subscriptions).
     expect(dialog()).toHaveTextContent(new RegExp(ACCOUNTED_SCOPE_COMPANIES_READ.replace(':', '\\:')))
     expect(dialog()).toHaveTextContent(new RegExp(ACCOUNTED_SCOPE_DOCUMENTS_WRITE.replace(':', '\\:')))
+    expect(dialog()).toHaveTextContent(new RegExp(ACCOUNTED_SCOPE_WEBHOOKS_MANAGE.replace(':', '\\:')))
     expect(dialog()).toHaveTextContent(new RegExp(ACCOUNTED_DASHBOARD_PATH.replace('/', '/')))
     // Step 1 links to the dashboard keys page (new tab — the user leaves Haven only to mint the key).
     const link = screen.getByRole('link', { name: new RegExp(ACCOUNTED_DASHBOARD_PATH.replace('/', '/')) })

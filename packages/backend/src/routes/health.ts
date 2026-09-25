@@ -3,8 +3,13 @@ import { matchesOpsToken } from '../middleware/ops-token.js'
 import type { AccountingOpsCounters } from '../modules/accounting/index.js'
 import { requestValidationOpsSnapshot, type RequestValidationSnapshot } from '../openapi/request-validation.js'
 
-type RelayerStatus = ReturnType<typeof import('../infra/relayer-balance-monitor.js')['getRelayerBalanceStatus']>
-type PassportStatus = ReturnType<typeof import('../modules/passport/index.js')['passportReadiness']>
+import type { RelayerBalanceStatus } from '../infra/relayer-balance-monitor.js'
+import type { PassportReadiness } from '../modules/passport/index.js'
+
+// Named by the modules that produce them (#3030: the `typeof import(...)`
+// forms these replaced counted against the request-schemas gauge).
+type RelayerStatus = RelayerBalanceStatus[]
+type PassportStatus = PassportReadiness
 
 export interface HealthRouteOptions {
   checkDatabase: () => Promise<unknown>
@@ -13,28 +18,31 @@ export interface HealthRouteOptions {
   trustProxyHops: number
   opsToken: string
   /**
-   * The accounting feed's two on-call numbers (#2872): exhausted sync rows
-   * and connections needing a re-consent. Two aggregate queries, no per-user
-   * data. Behind the same operator token as everything else here.
+   * The accounting feed's on-call numbers (#2872, widened by #3019):
+   * exhausted sync rows, connections needing a user's hand, and the
+   * Accounted webhook receiver's in-process counters. Two aggregate
+   * queries plus an in-memory read, no per-user data. Behind the same
+   * operator token as everything else here.
    */
   getAccountingCounters: () => Promise<AccountingOpsCounters>
 }
 
 /**
- * What `/health/ops` reports for `accounting`: the two counters, or — when the
- * aggregate queries throw — both `null` with `unavailable: true`. The siblings
- * on the payload are in-memory reads that cannot throw; the counters are the
- * one database round-trip, and a database that is down must not take the
- * relayer and passport diagnostics with it (that is exactly when on-call
- * reads them).
+ * What `/health/ops` reports for `accounting`: the counters, or — when the
+ * aggregate queries throw — all three `null` with `unavailable: true`. The
+ * siblings on the payload are in-memory reads that cannot throw; the two
+ * integer counters are the database round-trip, and a database that is down
+ * must not take the relayer and passport diagnostics with it (that is
+ * exactly when on-call reads them).
  */
 export type HealthOpsAccounting =
   | (AccountingOpsCounters & { unavailable?: false })
-  | { exhaustedSyncs: null; connectionsNeedingAttention: null; unavailable: true }
+  | { exhaustedSyncs: null; connectionsNeedingAttention: null; webhookCounters: null; unavailable: true }
 
 const ACCOUNTING_UNAVAILABLE: HealthOpsAccounting = {
   exhaustedSyncs: null,
   connectionsNeedingAttention: null,
+  webhookCounters: null,
   unavailable: true,
 }
 
@@ -76,7 +84,7 @@ export function registerHealthRoutes(app: FastifyInstance, options: HealthRouteO
       accounting = await options.getAccountingCounters()
     } catch (err) {
       // The error's class only — never its message, which can carry SQL or a host name.
-      request.log.warn({ errName: err instanceof Error ? err.name : typeof err }, 'health/ops accounting counters unavailable')
+      request.log.warn({ errName: err instanceof Error ? err.name : 'non-error' }, 'health/ops accounting counters unavailable')
       accounting = ACCOUNTING_UNAVAILABLE
     }
 

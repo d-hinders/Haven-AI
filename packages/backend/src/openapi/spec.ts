@@ -6,6 +6,17 @@ import {
   AgentPaymentRail,
 } from '../domain/agent-payment-taxonomy.js'
 
+/** The accounting period bounds: an ISO date prefix. The handlers always
+ *  refused anything else (`ISO_DATE_RE` in routes/accounting.ts); since #3030
+ *  the enforced module refuses it here, so the spec states it. */
+const ISO_DATE_PREFIX = '^\\d{4}-\\d{2}-\\d{2}'
+/** `/transactions` filters (#3030): `agentId` is an agent's uuid or the
+ *  literal `user`; `tokenKey` is `<chainId>:<address|native>`. Both were
+ *  handler refusals before the module was enforced. */
+const UUID_PATTERN = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+const AGENT_FILTER_PATTERN = `^(user|${UUID_PATTERN})$`
+const TOKEN_KEY_PATTERN = '^[1-9][0-9]*:(native|0x[0-9a-fA-F]{40})$'
+
 const address = {
   type: 'string',
   pattern: '^0x[0-9a-fA-F]{40}$',
@@ -66,6 +77,19 @@ const transactionBaseProperties = {
   decimals: { type: 'integer' },
   direction: { type: 'string', enum: ['in', 'out'] },
   timestamp: { type: 'integer' },
+  timestampSource: {
+    type: 'string',
+    enum: ['block', 'confirmed_at', 'created_at'],
+    description:
+      "#3132: which column produced `timestamp` — never a silent substitution. 'block' on explorer-derived rows; on an x402-synthesized row 'confirmed_at' when the intent carries one, else 'created_at' (the intent's creation time, NOT a settlement time). Read `confirmedAt` for the recorded confirmation time.",
+  },
+  confirmedAt: {
+    // Inline (not the `isoDateTime` helper): this object is declared above it.
+    type: ['string', 'null'],
+    format: 'date-time',
+    description:
+      '#3132: the recorded confirmation time of an x402-synthesized row, null when the intent has none — the same nullable value `GET /receipts` reports as `confirmed_at`. Absent on explorer-derived rows.',
+  },
   blockNumber: { type: ['integer', 'null'], description: 'On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero.' },
   isError: { type: 'boolean' },
   tokenAddress: address,
@@ -127,6 +151,34 @@ const transactionBaseProperties = {
    */
   fxRateSek: { type: ['string', 'null'] },
   fxSource: { type: ['string', 'null'] },
+  // #3127: the converted amount in the user's preferred currency, that
+  // currency named as a FIELD, and the rate it was struck at — additive to
+  // the SEK-named originals above, which stay on the wire unchanged. Struck
+  // from the same stored book-time capture as `amountSek` (the SEK columns,
+  // or the row's `fx_rates` map frozen at settlement), never a serve-time
+  // price read, so provenance stays auditable. Null follows the currency:
+  // SEK mirrors `amountSek`; USD/EUR additionally need a usable rate in the
+  // row's book-time rate map (pre-082 rows and price-outage rows yield
+  // null). Null is "not ready to convert", never another currency. The
+  // currency enum is the offered set (`PUT /user/preferences`), whose SEK
+  // entry is the no-preference default — the enum and the served currency
+  // agree since #3127.
+  convertedAmount: { type: ['string', 'null'] },
+  convertedCurrency: {
+    type: 'string',
+    enum: ['SEK', 'USD', 'EUR'],
+    description: 'The currency `convertedAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set. SEK mirrors `amountSek`; USD/EUR are struck from the row’s book-time rate map (`machine_payment_evidence.fx_rates`, migration 082) and are null when no rate was captured there.',
+  },
+  convertedFxRate: { type: ['string', 'null'] },
+  // #3127: the row's own stored book-time rate map (migration 082), carried
+  // for auditability — the same capture `convertedFxRate` names the one used
+  // rate out of. Keys are the settlement-time supported ledger currencies;
+  // null on pre-082 rows and raw transfers.
+  fxRates: {
+    type: ['object', 'null'],
+    additionalProperties: { type: 'number' },
+    description: 'Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row.',
+  },
   // #2870: accounting-feed state joined from the sync ledger by
   // `paymentId`. PRESENT only when the feed is available to the
   // account, the user has a provider connection, and a sync row exists
@@ -639,8 +691,8 @@ const accountingConnection = {
     authKind: { type: 'string', enum: ['oauth2', 'api_key'] },
     status: {
       type: 'string',
-      enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
-      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider\'s required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.',
+      enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'needs_attention', 'disconnected'],
+      description: 'Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider\'s required scopes, or by a push whose create call was refused for scope (#2865). `needs_attention` (#3019) is the webhook half failing independently of the feed — the key validates and pushes work, but the subscriptions could not be created (a `webhook subscription failed` registration) or the deployment states no public API origin (`no public API origin configured`); a reconnect after fixing the deployment state resolves it. A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.',
     },
     statusReason: { type: ['string', 'null'] },
     isActiveDestination: { type: 'boolean', description: 'Exactly one connection per user is where settled payments go.' },
@@ -853,6 +905,34 @@ const spendTotals = {
       token: { type: ['string', 'null'] },
       total_spent: { type: ['string', 'null'] },
       tx_count: { type: 'integer' },
+    },
+  },
+} as const
+
+/**
+ * #3303 (epic #3302): the client-version refusal. Only below a minimum the
+ * deployment has explicitly set, only at the payment-initiating routes and
+ * (for the signer) sign-context, and always before anything is written.
+ */
+const clientOutdatedResponse = {
+  description:
+    'Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this ' +
+    'deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` ' +
+    'updates it; retry the same request afterwards.',
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        required: ['error', 'error_code', 'client_update', 'next_action', 'next_tool_omitted_reason'],
+        properties: {
+          error: { type: 'string' },
+          error_code: { type: 'string', enum: ['client_outdated'] },
+          client_update: { $ref: '#/components/schemas/ClientUpdate' },
+          next_action: { type: 'string', enum: [AgentPaymentNextAction.StopAndTellUser] },
+          next_tool_omitted_reason: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
     },
   },
 } as const
@@ -1146,6 +1226,7 @@ export const openapiSpec = {
   tags: [
     { name: 'Health' },
     { name: 'Agents' },
+    { name: 'Organizations' },
     { name: 'Connect Agent 2' },
     { name: 'Payments' },
     {
@@ -1156,6 +1237,11 @@ export const openapiSpec = {
     { name: 'Machine payments' },
     { name: 'Transactions' },
     { name: 'Delegations' },
+    {
+      name: 'Webhooks',
+      description:
+        'Inbound provider callbacks (#3019). Authenticated by a per-connection capability URL token plus the provider HMAC signature — never a session.',
+    },
   ],
   paths: {
     '/openapi.json': {
@@ -1238,7 +1324,12 @@ export const openapiSpec = {
           'Both are stored hashed; the grant expires in 10 minutes.',
         security: [],
         requestBody: {
-          required: false,
+          // Required since #3030: the plugin validates whatever arrives against
+          // the object schema (an absent body is not an object), and the one
+          // client — the CLI — always sends `{ client_label }`, so declaring
+          // the body optional described a shape the enforced route could not
+          // honour.
+          required: true,
           content: {
             'application/json': {
               schema: {
@@ -1246,11 +1337,11 @@ export const openapiSpec = {
                 properties: {
                   client_label: {
                     type: 'string',
-                    maxLength: 80,
                     description:
                       'What the client calls itself, shown on the approval screen. Free text ' +
-                      'from an unauthenticated caller: bounded and stripped of control ' +
-                      'characters server-side, and rendered as text, never as markup.',
+                      'from an unauthenticated caller: TRUNCATED to 80 characters and stripped of control ' +
+                      'characters server-side (never refused for length — a long hostname must not fail ' +
+                      '`haven login`, #3030), and rendered as text, never as markup.',
                   },
                 },
                 additionalProperties: false,
@@ -1441,6 +1532,115 @@ export const openapiSpec = {
         },
       },
     },
+    // ── Agent organizations (#3164) ──────────────────────────────────────
+    // The per-user folder tree agents file into. DISPLAY/CATEGORIZATION
+    // ONLY: no path here changes delegation authority, budgets, or on-chain
+    // enforcement, and nothing in the money path reads these tables.
+    '/organizations': {
+      get: {
+        tags: ['Organizations'],
+        operationId: 'listOrganizations',
+        summary: "List the signed-in user's organizations.",
+        description:
+          'Flat rows with parent ids; the caller builds the tree. Multiple roots are allowed (one per company); a null parent is the top level. `agent_count` is the number of agents filed DIRECTLY under the folder — sub-organization members are not counted.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The user’s organizations, name-sorted.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/OrganizationListResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      post: {
+        tags: ['Organizations'],
+        operationId: 'createOrganization',
+        summary: 'Create an organization, optionally inside another one.',
+        description:
+          'The name must be unique among siblings under the same parent (case-insensitively); a repeat is a 409. Omit `parent_organization_id` to create a top-level organization.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateOrganizationRequest' },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'The created organization. A new folder has no members yet.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Organization' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
+    '/organizations/{id}': {
+      put: {
+        tags: ['Organizations'],
+        operationId: 'updateOrganization',
+        summary: 'Rename an organization and/or move it inside another one.',
+        description:
+          'Rename changes the name everywhere it renders, never which agents file under it. The move is expressed by `parent_organization_id`: present means move (null = the top level), absent means keep. Moving into the organization’s own subtree is refused with 400 — it would make the folder its own ancestor. A rename or move onto a sibling name that already holds is a 409.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/OrganizationId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateOrganizationRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The updated organization.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Organization' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Organizations'],
+        operationId: 'deleteOrganization',
+        summary: 'Delete an organization; its contents move up one level.',
+        description:
+          'Deleting never orphans anything: the folder’s sub-organizations and member agents take the deleted folder’s own parent (agents of a deleted root return to the top level). Agents are never deleted, hidden, or changed in any way beyond the placement. The response is `{ ok: true }`.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/OrganizationId' }],
+        responses: {
+          '200': {
+            description: 'Deleted. The contents were promoted one level up.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DeleteOrganizationResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     '/agents': {
       get: {
         tags: ['Agents'],
@@ -1538,6 +1738,15 @@ export const openapiSpec = {
                 properties: {
                   name: { type: 'string', description: 'Trimmed.' },
                   description: { type: 'string', description: 'Trimmed.' },
+                  /**
+                   * #3164: file the agent under one of the user's
+                   * organizations, or null for the top level. Absent keeps
+                   * the current placement. DISPLAY ONLY.
+                   */
+                  organization_id: {
+                    anyOf: [uuid, { type: 'null' }],
+                    description: 'The organization to file the agent under; null = the top level.',
+                  },
                 },
               },
             },
@@ -1680,6 +1889,146 @@ export const openapiSpec = {
           '400': errorResponse,
           '200': {
             description: 'Agent revoked.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SuccessResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    // ── Agent labels (#3167) ────────────────────────────────────────────────
+    // Display/categorization ONLY: nothing in the delegation, budget, or
+    // on-chain enforcement path may read agent labels.
+    '/agents/{id}/labels': {
+      put: {
+        tags: ['Agents'],
+        operationId: 'replaceAgentLabels',
+        summary: "Replace an agent's labels with the given set.",
+        description:
+          'Full replacement: the agent ends up carrying exactly the labels named, in any order, duplicates collapsed. Labels are the user\'s own display tags; deleting a label elsewhere removes it from every agent without touching the agents themselves. The response carries the agent\'s labels as they now are, so a client re-renders without a second call. Repeating an id is accepted and collapses to one (#3200) — the set is what the label_ids array names distinctly, and a duplicated id is not a missing label.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ReplaceAgentLabelsRequest' },
+            },
+          },
+        },
+        responses: {
+          '400': errorResponse,
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '200': {
+            description: 'The agent\'s labels after the replacement.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentLabelsResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    // ── Label vocabulary (#3167) ────────────────────────────────────────────
+    '/labels': {
+      get: {
+        tags: ['Agents'],
+        operationId: 'listLabels',
+        summary: "List the signed-in user's labels.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The label vocabulary, name-sorted.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/LabelListResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+      post: {
+        tags: ['Agents'],
+        operationId: 'createLabel',
+        summary: 'Create a label (or re-use one of the same name).',
+        description:
+          "Names are one per user on the lowercased name: creating \"Prod\" when \"prod\" exists re-uses that label rather than failing. An omitted colour keeps the existing label's colour (#3200) — the fold onto an existing row recolours only when the request explicitly names a colour; a genuinely new label takes the palette's neutral entry.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateLabelRequest' },
+            },
+          },
+        },
+        responses: {
+          '400': errorResponse,
+          '201': {
+            description: 'The label as it now exists.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Label' },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/labels/{id}': {
+      put: {
+        tags: ['Agents'],
+        operationId: 'updateLabel',
+        summary: 'Rename and/or recolor a label.',
+        description:
+          "Agents carrying the label follow it — a rename changes the name everywhere it renders, never which agents carry it. A rename onto a name another of the user's labels already holds is a 409.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/LabelId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateLabelRequest' },
+            },
+          },
+        },
+        responses: {
+          '400': errorResponse,
+          '200': {
+            description: 'The label as it now is.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/Label' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+      delete: {
+        tags: ['Agents'],
+        operationId: 'deleteLabel',
+        summary: 'Delete a label.',
+        description:
+          'Removes the label and its assignments (every agent loses the tag). Agents are never deleted or altered by this — only the label and the join rows go.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/LabelId' }],
+        responses: {
+          '400': errorResponse,
+          '200': {
+            description: 'Deleted. The agents that carried it keep everything else.',
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/SuccessResponse' },
@@ -3098,7 +3447,7 @@ export const openapiSpec = {
         tags: ['Dashboard'],
         operationId: 'updateUserPreferences',
         summary: 'Set the display-currency preference.',
-        description: 'Display only — it changes no balance, no price and no settlement asset.',
+        description: 'Names the currency a transaction’s converted amount (`convertedAmount`) is struck in. Display only — it changes no balance, no price and no settlement asset.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -3107,7 +3456,12 @@ export const openapiSpec = {
               schema: {
                 type: 'object',
                 required: ['currency_preference'],
-                properties: { currency_preference: { type: 'string', enum: ['USD', 'EUR'] } },
+                // #3127: SEK joins the set — the served default had no way to
+                // be selected, so the enum and the served currency disagreed.
+                // Kept in lockstep with `domain/transaction-currency.ts`'s
+                // `TRANSACTION_CURRENCIES`, the same list the transaction
+                // path converts against.
+                properties: { currency_preference: { type: 'string', enum: ['SEK', 'USD', 'EUR'] } },
               },
             },
           },
@@ -3149,8 +3503,8 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'format', in: 'query', schema: { type: 'string', enum: ['sie'] }, description: "Defaults to 'sie'; anything else is a 400." },
-          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date (YYYY-MM-DD…).' },
-          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date (YYYY-MM-DD…).' },
+          { name: 'from', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date (YYYY-MM-DD…).' },
+          { name: 'to', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date (YYYY-MM-DD…).' },
           { name: 'company', in: 'query', schema: { type: 'string' }, description: "Company name in the file header; defaults to 'Haven'." },
         ],
         responses: {
@@ -3177,8 +3531,8 @@ export const openapiSpec = {
           'Read-only diagnosis, never a fix: it classifies each entry and counts the classes, so a user can see WHY a period will not balance before trying to book it. Note the camelCase byStatus/paymentId/txHash/settledAt fields — this report comes from the accounting module, not from SQL rows.',
         security: [{ DashboardJwt: [] }],
         parameters: [
-          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
-          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+          { name: 'from', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date.' },
+          { name: 'to', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date.' },
         ],
         responses: {
           '200': {
@@ -3363,7 +3717,7 @@ export const openapiSpec = {
                         displayName: { type: 'string' },
                         status: {
                           type: 'string',
-                          enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'disconnected'],
+                          enum: ['connected', 'needs_reauthorisation', 'revoked_at_provider', 'scope_missing', 'needs_attention', 'disconnected'],
                         },
                         companyName: { type: ['string', 'null'] },
                         lastPushAt: { type: ['string', 'null'], format: 'date-time' },
@@ -3433,7 +3787,7 @@ export const openapiSpec = {
         description:
           'Strictly read-only (#1362): it confirms whether the supplier invoice still exists and whether a human has booked it, and asserts nothing — the non-asserting principle is untouched. A payment that was never pushed, a disconnected provider, or a sync row with no invoice reference all answer 409 with a machine-readable error_code, because none of them is a verification result.',
         security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string' }, description: 'Haven payment id.' }],
+        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Haven payment id (a uuid, as every other `paymentId` path parameter says — #3030).' }],
         responses: {
           '200': {
             description: "The provider's verdict.",
@@ -3468,7 +3822,7 @@ export const openapiSpec = {
         description:
           "The ONLY path that flips a pushed row back to retryable, and it is conditional on the PROVIDER, not on the caller's say-so (#1365): the server re-runs the read-back and reopens only when the invoice is confirmed gone, or when a number collision proves the invoice at that number is not ours. **An invoice that still exists refuses with 409 and writes nothing** — that is the double-post guard, and reopening against a live invoice would duplicate it. A row that moved between the check and the flip (raced by a concurrent sync) also refuses rather than pretending. After a successful reopen, the next sync re-claims and re-pushes through the normal retry path.",
         security: [{ DashboardJwt: [] }],
-        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string' }, description: 'Haven payment id.' }],
+        parameters: [{ name: 'paymentId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Haven payment id (a uuid, as every other `paymentId` path parameter says — #3030).' }],
         responses: {
           '200': {
             description: 'Row reopened for retry.',
@@ -3523,6 +3877,64 @@ export const openapiSpec = {
     // Verify, reopen, sync and status keep their feed-scoped home under
     // `/accounting/feed/*` (review, 2026-09-11): they act on the ACTIVE
     // destination, so there is no provider-scoped duplicate of them here.
+    '/accounting/webhooks/accounted/{token}': {
+      post: {
+        tags: ['Webhooks'],
+        operationId: 'accountedWebhookCallback',
+        summary: 'PUBLIC Accounted webhook callback — authenticated by the capability token + the HMAC signature, not by a session.',
+        description:
+          "Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (a webhook carries no credential header).",
+        security: [],
+        parameters: [{ name: 'token', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['status'],
+                  properties: { status: { type: 'string' }, counted: { type: 'string' }, deliveryId: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': { description: 'Bad or malformed signature, or a stale timestamp.' },
+          '404': { description: 'No connection carries this token.' },
+        },
+      },
+    },
+    // The trailing-slash twin of the callback path, registered so Fastify's
+    // redirect never answers the provider with a 3xx (a 3xx or a 410
+    // auto-disables the subscription). Same handler, same contract, own
+    // operationId because the generator indexes by operation.
+    '/accounting/webhooks/accounted/{token}/': {
+      post: {
+        tags: ['Webhooks'],
+        operationId: 'accountedWebhookCallbackTrailingSlash',
+        summary: 'PUBLIC Accounted webhook callback (trailing-slash twin — the same handler; never a redirect).',
+        description:
+          'Registered EXPLICITLY so the provider never meets Fastify\'s trailing-slash redirect: a 3xx would hand it a URL the subscription was not registered with, and a 410 would auto-disable the subscription without replay (#3019). Identical contract to `accountedWebhookCallback`.',
+        security: [],
+        parameters: [{ name: 'token', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['status'],
+                  properties: { status: { type: 'string' }, counted: { type: 'string' }, deliveryId: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': { description: 'Bad or malformed signature, or a stale timestamp.' },
+          '404': { description: 'No connection carries this token.' },
+        },
+      },
+    },
     '/accounting/providers': {
       get: {
         tags: ['Dashboard'],
@@ -3713,7 +4125,7 @@ export const openapiSpec = {
               schema: {
                 type: 'object',
                 required: ['since'],
-                properties: { since: { type: 'string', format: 'date-time', description: 'ISO date or date-time; the new feed-from floor.', examples: ['2026-01-01'] } },
+                properties: { since: { type: 'string', pattern: ISO_DATE_PREFIX, description: 'ISO date or date-time; the new feed-from floor. (#3030: was declared `format: date-time`, which refused the plain date the description — and the dashboard — send; the pattern states the prefix and the handler decides parseability, the 2020 floor and the future bound.)', examples: ['2026-01-01'] } },
               },
             },
           },
@@ -3805,8 +4217,8 @@ export const openapiSpec = {
           "The one Fortnox-shaped path left after #2862 replaced `/accounting/fortnox/*` with the provider-generic connections above: it is provider-specific by nature. The asserting counterpart to the accounting feed: it pushes FINISHED vouchers rather than drafts, which is exactly what #491/#492 moved away from. **410 is the normal answer on a default deployment.** When enabled, it reports per-entry outcomes rather than failing the batch: an entry with no book-time SEK amount is unbookable and counted as skipped, and a provider error is collected into failures with its payment id — so a partial push is visible as a partial push instead of an exception.",
         security: [{ DashboardJwt: [] }],
         parameters: [
-          { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
-          { name: 'to', in: 'query', schema: { type: 'string' }, description: 'ISO date.' },
+          { name: 'from', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date.' },
+          { name: 'to', in: 'query', schema: { type: 'string', pattern: ISO_DATE_PREFIX }, description: 'ISO date.' },
         ],
         responses: {
           '200': {
@@ -4203,6 +4615,7 @@ export const openapiSpec = {
                   name: { type: 'string', minLength: 1, maxLength: 80, description: 'Trimmed; control characters are rejected.' },
                   email: { type: 'string', maxLength: 255 },
                   password: { type: 'string', minLength: 8, maxLength: 128 },
+                  via: { type: 'string', description: 'Agent hand-off marker (#2522): the dashboard sends `agent` when the signup came from an agent-initiated link. Sanitised server-side to `agent` or nothing; any other value is ignored. Declared in #3030 — the dashboard had been sending it undeclared.' },
                 },
               },
             },
@@ -4353,7 +4766,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
-          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 9007199254740991, default: 0 } },
         ],
         responses: {
           '200': {
@@ -4415,7 +4828,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
-          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 9007199254740991, default: 0 } },
         ],
         responses: {
           '200': {
@@ -4526,7 +4939,7 @@ export const openapiSpec = {
         operationId: 'getAnalyticsOverview',
         summary: 'One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.',
         description:
-          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one \"based on N payments\" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz`. Delegation-rail accounts only.",
+          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one \"based on N payments\" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. The same honesty applies to the SEK SUMS under `currency=sek` (#3127, round-3 review): the totals, per-agent, top-merchant and fees figures sum `sek_value`, which is NULL for a confirmed row whose book-time SEK could not be captured or backfilled — those rows are still counted in `basis.payments_counted` but contribute nothing to any SEK sum, so a SEK total can sit below the basis it is computed over. USD and EUR are unaffected (their booking predates the capture gate). Delegation-rail accounts only.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           {
@@ -4539,8 +4952,9 @@ export const openapiSpec = {
           {
             name: 'currency',
             in: 'query',
-            schema: { type: 'string', enum: ['usd', 'eur'], default: 'usd' },
-            description: 'Display currency — a sum of already-booked values, never re-converted.',
+            schema: { type: 'string', enum: ['usd', 'eur', 'sek'], default: 'usd' },
+            description:
+              'Display currency — a sum of already-booked values, never re-converted. SEK reads the `sek_value` column booked beside usd/eur by the same confirm UPDATE (#3127); days snapshotted before that column existed carry no SEK figure in `balance_by_day` and are omitted rather than zeroed.',
           },
           {
             name: 'tz',
@@ -4569,7 +4983,7 @@ export const openapiSpec = {
                         previous_to: { type: 'string', format: 'date-time' },
                       },
                     },
-                    currency: { type: 'string', enum: ['usd', 'eur'] },
+                    currency: { type: 'string', enum: ['usd', 'eur', 'sek'] },
                     basis: {
                       type: 'object',
                       required: [
@@ -5232,7 +5646,9 @@ export const openapiSpec = {
         // from `routes/payments.ts` with the approval_requests replay fallback
         // (#2055, the comment at its old site). The 409 below is the reachable
         // replay outcome that was never documented.
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           '201': {
             description: 'Payment intent requires the agent signature.',
             content: {
@@ -5307,6 +5723,48 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': agentAuthForbidden,
           '404': errorResponse,
+        },
+      },
+    },
+    '/payments/{id}/sign-context': {
+      get: {
+        tags: ['Payments'],
+        operationId: 'getDirectPaymentSignContext',
+        summary: 'Fetch the exact signing payload for a pending DIRECT delegation-rail payment.',
+        description:
+          'Read-only byte-free signing handoff (#3271, the direct sibling of GET /x402/{id}/' +
+          'sign-context from #1263): re-serves the stored delegation-rail sign_data.typed_data for ' +
+          'a plain POST /payments intent, rebuilt from the stored UserOperation exactly as the ' +
+          'idempotent replay of the create rebuilds it, so a LOCAL SIGNER can fetch exact bytes by payment_id instead of an ' +
+          'agent re-emitting a multi-KB EIP-712 payload. Constructs and signs nothing new. An ' +
+          'x402/MPP intent id is refused here (fetch GET /x402/{id}/sign-context instead), and a ' +
+          'direct intent id is refused there — each surface serves only its own rail\'s shape.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ $ref: '#/components/parameters/PaymentId' }, { $ref: '#/components/parameters/HavenClient' }],
+        responses: {
+          '426': clientOutdatedResponse,
+          // #1464: a malformed uuid in the path is a 400 (central 22P02
+          // mapping in infra/http-error-handler.ts), not a 500.
+          '400': errorResponse,
+          '200': {
+            description: 'The rebuilt direct sign_data — identical to what the idempotent replay serves.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DirectSignContext' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '403': agentAuthForbidden,
+          '404': errorResponse,
+          '409': errorResponse,
+          '410': {
+            ...errorResponse,
+            description:
+              'The intent is pinned to a retired rail — the AllowanceModule rail (#1986) or the ' +
+              'session rail (#834) — or it has expired (with the same lazy-expire GET /x402/{id}/' +
+              'sign-context performs). A retired-rail intent is refused whatever its status.',
+          },
         },
       },
     },
@@ -5457,7 +5915,9 @@ export const openapiSpec = {
             },
           },
         },
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           '200': {
             description: 'Existing or resumed x402 state.',
             content: {
@@ -5501,8 +5961,10 @@ export const openapiSpec = {
             schema: { type: 'string' },
             description: 'Payment intent id from the quote/authorize response.',
           },
+          { $ref: '#/components/parameters/HavenClient' },
         ],
         responses: {
+          '426': clientOutdatedResponse,
           // #1464: a malformed uuid in the path is a 400 (central 22P02
           // mapping in infra/http-error-handler.ts), not a 500.
           '400': errorResponse,
@@ -5569,7 +6031,9 @@ export const openapiSpec = {
             },
           },
         },
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           // #2105: this alias is registered to the SAME `authorizeX402Handler`
           // as POST /x402/authorize, so its status set is identical. The 202 it
           // documented is unreachable for the same reason (see the note there);
@@ -5869,7 +6333,9 @@ export const openapiSpec = {
         // entirely. `handleSend` returns exactly one of the three refusals below
         // and `resolveExecutionRail`'s union has no fourth member, so there is
         // no success response left to describe.
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           '400': {
             ...errorResponse,
             description:
@@ -6101,9 +6567,9 @@ export const openapiSpec = {
       post: {
         tags: ['Machine payments'],
         operationId: 'prepareDelegateSweep',
-        summary: 'Prepare a gasless USDC sweep from the delegate wallet to the Safe.',
+        summary: "Prepare a gasless USDC sweep from the delegate wallet to the agent's account (Haven wallet).",
         description:
-          'Reads the delegate EOA\'s stranded USDC and returns an EIP-3009 TransferWithAuthorization (delegate → the agent\'s own Safe) plus Haven\'s authorization binding. ' +
+          "Reads the delegate EOA's stranded USDC and returns an EIP-3009 TransferWithAuthorization (delegate → the agent's account (Haven wallet)) plus Haven's authorization binding. " +
           'The edge signer signs the authorization with haven_sign_sweep_delegate; POST /machine-payments/sweep/submit relays it. The delegate never needs ETH and Haven never holds the key. ' +
           'Returns { nothing_stranded: true } when the delegate is empty.',
         security: [{ AgentApiKey: [] }],
@@ -6183,9 +6649,9 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'accountId', in: 'query', schema: uuid, description: 'Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none.' },
-          { name: 'agentId', in: 'query', schema: { type: 'string' } },
-          { name: 'tokenKey', in: 'query', schema: { type: 'string', examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] } },
-          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+          { name: 'agentId', in: 'query', schema: { type: 'string', pattern: AGENT_FILTER_PATTERN }, description: "An agent id, or the literal `user` for payments the account holder made directly (#3030: the handler always refused anything else; the spec now says so)." },
+          { name: 'tokenKey', in: 'query', schema: { type: 'string', pattern: TOKEN_KEY_PATTERN, examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] }, description: '`<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler.' },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 9007199254740991, default: 0 }, description: 'Bounded to a safe integer (#3030: the handler used to cap it; ajv reads `1e400` as an integer).' },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
         ],
@@ -6217,10 +6683,10 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'accountId', in: 'query', schema: uuid, description: 'Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none.' },
-          { name: 'agentId', in: 'query', schema: { type: 'string' } },
-          { name: 'tokenKey', in: 'query', schema: { type: 'string', examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] } },
+          { name: 'agentId', in: 'query', schema: { type: 'string', pattern: AGENT_FILTER_PATTERN }, description: "An agent id, or the literal `user` for payments the account holder made directly (#3030: the handler always refused anything else; the spec now says so)." },
+          { name: 'tokenKey', in: 'query', schema: { type: 'string', pattern: TOKEN_KEY_PATTERN, examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] }, description: '`<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler.' },
           { name: 'direction', in: 'query', schema: { type: 'string', enum: ['in', 'out'] } },
-          { name: 'chainId', in: 'query', schema: { type: 'integer', examples: [8453] } },
+          { name: 'chainId', in: 'query', schema: { type: 'integer', minimum: 1, examples: [8453] } },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
         ],
         responses: {
@@ -6277,8 +6743,8 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'accountAddress', in: 'path', required: true, schema: address },
-          { name: 'chain_id', in: 'query', schema: { type: 'integer' } },
-          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'chain_id', in: 'query', schema: { type: 'integer', minimum: 1 } },
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 9007199254740991, default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
         ],
@@ -6316,7 +6782,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'accountAddress', in: 'path', required: true, schema: address },
-          { name: 'chain_id', in: 'query', schema: { type: 'integer' }, description: 'Required when the same address is linked on more than one chain.' },
+          { name: 'chain_id', in: 'query', schema: { type: 'integer', minimum: 1 }, description: 'Required when the same address is linked on more than one chain. A chain id is positive (#3030: the handlers always refused 0 and negatives; the spec now says so).' },
         ],
         responses: {
           '200': {
@@ -6337,7 +6803,7 @@ export const openapiSpec = {
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'accountAddress', in: 'path', required: true, schema: address },
-          { name: 'chain_id', in: 'query', schema: { type: 'integer' }, description: 'Required when the same address is linked on more than one chain.' },
+          { name: 'chain_id', in: 'query', schema: { type: 'integer', minimum: 1 }, description: 'Required when the same address is linked on more than one chain. A chain id is positive (#3030: the handlers always refused 0 and negatives; the spec now says so).' },
         ],
         responses: {
           '200': {
@@ -6482,7 +6948,7 @@ export const openapiSpec = {
         summary: 'List curated payable services agents can discover and pay.',
         description:
           'Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. ' +
-          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: \'test-fixture\'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.',
+          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and every whitespace-separated search word must match the product name, description, or category. Blank search is rejected after trimming, non-empty search is capped at 120 characters, and searches with more than 8 words return 400; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: \'test-fixture\'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.',
         security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
         parameters: [
           { name: 'category', in: 'query', schema: { type: 'string' } },
@@ -6490,7 +6956,8 @@ export const openapiSpec = {
             name: 'search',
             in: 'query',
             schema: { type: 'string', minLength: 1, maxLength: 120 },
-            description: 'Whitespace is trimmed/collapsed. Blank search after trimming returns 400.',
+            description:
+              'Whitespace is trimmed/collapsed. Every word must match the product name, description, or category. Blank search after trimming returns 400; searches over 8 words also return 400.',
           },
           { name: 'rail', in: 'query', schema: { type: 'string', enum: ['x402', 'mpp'] } },
         ],
@@ -6606,7 +7073,7 @@ export const openapiSpec = {
         operationId: 'listMerchants',
         summary: 'List the marketplace\'s merchants.',
         description:
-          'The sell side of the catalog (#3078, epic #3077): every live merchant with at least one non-delisted offer on a chain this deployment lists (HAVEN_MARKETPLACE_CHAIN_IDS, else HAVEN_DEPLOY_CHAIN_IDS, else every chain) or a verified self-submitted offer, ordered real merchants first, then test merchants. Readable without a credential, like `GET /catalog`. `coming_soon` prospects appear only for an authenticated dashboard user when HAVEN_MARKETPLACE_PROSPECTS is on and no mainnet chain is listed. Read-only; nothing here creates payments or signatures.',
+          'The sell side of the catalog (#3078, epic #3077): every live merchant with at least one non-delisted offer on a chain this deployment lists (HAVEN_MARKETPLACE_CHAIN_IDS, else HAVEN_DEPLOY_CHAIN_IDS, else every chain) or a verified self-submitted offer, ordered real merchants first, then test merchants. Readable without a credential, like `GET /catalog`. `coming_soon` prospects appear only for an authenticated dashboard user when HAVEN_MARKETPLACE_PROSPECTS is on and HAVEN_MARKETPLACE_CHAIN_IDS itself names a testnet chain (epic #3077 decision 14; the HAVEN_DEPLOY_CHAIN_IDS fallback never counts, so prod, whose list is 8453, cannot show them). Read-only; nothing here creates payments or signatures.',
         security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
         responses: {
           '200': {
@@ -6684,7 +7151,39 @@ export const openapiSpec = {
       },
     },
     parameters: {
+      // #3303 (epic #3302): the client-version signal.
+      HavenClient: {
+        name: 'X-Haven-Client',
+        in: 'header',
+        required: false,
+        // Deliberately unconstrained: a missing, malformed or unknown value is
+        // treated as "no header" and never refused, so the spec must not
+        // refuse one either.
+        schema: { type: 'string' },
+        description:
+          'The calling published client and its version, `<package>/<version>` (for example ' +
+          '`@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector\'s read-only identity ' +
+          'probe excepted). When the client is ' +
+          'below the version this deployment recommends, any JSON-object response carries a ' +
+          '`client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment ' +
+          'has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at ' +
+          'the payment-initiating routes (the signer: at sign-context). A missing or unparseable ' +
+          'value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never ' +
+          'refused.',
+      },
       AgentId: {
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: uuid,
+      },
+      LabelId: {
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: uuid,
+      },
+      OrganizationId: {
         name: 'id',
         in: 'path',
         required: true,
@@ -6704,6 +7203,25 @@ export const openapiSpec = {
       },
     },
     schemas: {
+      ClientUpdate: {
+        type: 'object',
+        description:
+          '#3303: the backend\'s update hint for an outdated published client. `required: true` ' +
+          'means the client is below a minimum this deployment set and will be refused at its ' +
+          'refusal points; `upgrade_command` is the exact command that updates it, on this ' +
+          'deployment\'s channel.',
+        required: ['package', 'current', 'recommended', 'min_version', 'required', 'upgrade_command', 'notes_url'],
+        properties: {
+          package: { type: 'string', examples: ['@haven_ai/mcp'] },
+          current: { type: 'string', examples: ['0.4.0-alpha.0'] },
+          recommended: { type: ['string', 'null'] },
+          min_version: { type: ['string', 'null'] },
+          required: { type: 'boolean' },
+          upgrade_command: { type: 'string', examples: ['npx -y @haven_ai/connect@alpha'] },
+          notes_url: { type: ['string', 'null'] },
+        },
+        additionalProperties: false,
+      },
       HybridAccountSigners: {
         type: 'object',
         description:
@@ -6820,7 +7338,7 @@ export const openapiSpec = {
             type: 'string',
             enum: ['live', 'coming_soon'],
             description:
-              '`coming_soon` is a prospect Haven is talking to — shown only to an authenticated dashboard user on a deployment that lists no mainnet chain and has HAVEN_MARKETPLACE_PROSPECTS on; never an agreement, never payable, never in an agent read or the credential-less shape.',
+              '`coming_soon` is a prospect Haven is talking to — shown only to an authenticated dashboard user on a deployment whose HAVEN_MARKETPLACE_CHAIN_IDS itself names a testnet chain and has HAVEN_MARKETPLACE_PROSPECTS on (epic #3077 decision 14); never an agreement, never payable, never in an agent read or the credential-less shape.',
           },
           is_test_merchant: { type: 'boolean' },
           offer_count: {
@@ -7130,7 +7648,7 @@ export const openapiSpec = {
       },
       HealthOpsResponse: {
         type: 'object',
-        required: ['relayer', 'passport', 'trustProxy', 'accounting'],
+        required: ['relayer', 'passport', 'trustProxy', 'accounting', 'request_validation'],
         properties: {
           relayer: {
             type: 'array',
@@ -7205,21 +7723,63 @@ export const openapiSpec = {
           accounting: {
             type: 'object',
             description:
-              'Accounting-feed on-call counters (#2872), deployment-wide, read live from two aggregate ' +
-              'queries. `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the ' +
+              'Accounting-feed on-call counters (#2872, widened by #3019). `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the ' +
               'attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: ' +
-              'connections in `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — only the ' +
-              "user's re-consent resolves them. Thresholds: docs/operations/accounting-feed.md. " +
-              'The counters are the one database read on this payload: when the queries throw, both ' +
-              'are `null` and `unavailable` is `true` while the in-memory siblings still answer.',
-            required: ['exhaustedSyncs', 'connectionsNeedingAttention'],
+              'connections in `needs_reauthorisation`, `scope_missing`, `revoked_at_provider` or `needs_attention` — only the ' +
+              "user's re-consent (or, for `needs_attention`, a reconnect after the deployment fix) resolves them. `webhookCounters`: " +
+              'the Accounted webhook receiver\u2019s nine per-answer-class counters (received / bad_signature / stale / unknown_token / duplicate / ' +
+              'processed / feature_off / unknown_type / confirmed) — IN-PROCESS, process-lifetime, reset on restart; the durable facts are the ' +
+              '`accounting_webhook_deliveries` rows, not these. Thresholds: docs/operations/accounting-feed.md. ' +
+              'The two integer counters are the one database read on this payload: when the queries throw, both ' +
+              'are `null` (and `webhookCounters` with them) and `unavailable` is `true` while the in-memory siblings still answer.',
+            required: ['exhaustedSyncs', 'connectionsNeedingAttention', 'webhookCounters'],
             properties: {
               exhaustedSyncs: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
               connectionsNeedingAttention: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+              webhookCounters: {
+                anyOf: [
+                  {
+                    type: 'object',
+                    required: ['received', 'bad_signature', 'stale', 'unknown_token', 'duplicate', 'processed', 'feature_off', 'unknown_type', 'confirmed'],
+                    properties: {
+                      received: { type: 'integer', minimum: 0 },
+                      bad_signature: { type: 'integer', minimum: 0 },
+                      stale: { type: 'integer', minimum: 0 },
+                      unknown_token: { type: 'integer', minimum: 0 },
+                      duplicate: { type: 'integer', minimum: 0 },
+                      processed: { type: 'integer', minimum: 0 },
+                      feature_off: { type: 'integer', minimum: 0 },
+                      unknown_type: { type: 'integer', minimum: 0 },
+                      confirmed: { type: 'integer', minimum: 0 },
+                    },
+                    additionalProperties: false,
+                  },
+                  { type: 'null' },
+                ],
+              },
               unavailable: {
                 type: 'boolean',
-                description: 'Present and `true` only when the counters could not be read; the two integers are then `null`.',
+                description: 'Present and `true` only when the counters could not be read; the two integers and `webhookCounters` are then `null`.',
               },
+            },
+            additionalProperties: false,
+          },
+          request_validation: {
+            type: 'object',
+            description:
+              'The request-validation plugin\'s shadow counters (#3029, epic #3028) — served since the plugin shipped, declared here since #3208. ' +
+              'IN-PROCESS: they start at `since` (the plugin install, one per process) and dev redeploys on every merge, so a reading is only as wide as that window. ' +
+              '`seenByRoute` (#3208) is what makes a zero readable: a shadowed route with `seen: 0` in the window is NOT PROVEN, never clean. ' +
+              'Enforced routes are absent from `seenByRoute` — they refuse for real. The same events ride the log stream (`request_validation.would_refuse`, `would_coerce`, `seen`), which survives deploys; `scripts/ci/shadow-reading.mjs` aggregates them.',
+            required: ['mode', 'wouldRefuse', 'wouldCoerce', 'byRouteField', 'coerceByRouteField', 'since', 'seenByRoute'],
+            properties: {
+              mode: { type: 'string', enum: ['off', 'shadow', 'enforce'] },
+              wouldRefuse: { type: 'integer', minimum: 0, description: 'Would-be refusals in the window; at most one per request.' },
+              wouldCoerce: { type: 'integer', minimum: 0, description: 'Body FIELDS ajv rewrote and #3082 restored; one per field, never summed with `wouldRefuse`.' },
+              byRouteField: { type: 'object', additionalProperties: { type: 'integer', minimum: 0 }, description: 'Keyed `METHOD /path field`.' },
+              coerceByRouteField: { type: 'object', additionalProperties: { type: 'integer', minimum: 0 }, description: 'Keyed `METHOD /path field`.' },
+              since: { type: 'string', format: 'date-time', description: 'When these counters started — the process\'s plugin install.' },
+              seenByRoute: { type: 'object', additionalProperties: { type: 'integer', minimum: 0 }, description: 'Requests that reached validation per SHADOWED route (`METHOD /path`), whatever the verdict.' },
             },
             additionalProperties: false,
           },
@@ -7230,6 +7790,142 @@ export const openapiSpec = {
         type: 'object',
         required: ['success'],
         properties: { success: { type: 'boolean' } },
+        additionalProperties: false,
+      },
+      /**
+       * Agent label (#3167). A tag in the user's own vocabulary, carried by
+       * zero or more agents. DISPLAY/CATEGORIZATION ONLY — nothing in the
+       * delegation, budget, or on-chain enforcement path may read it.
+       * `color` is one of the shared palette's names (core's
+       * `LABEL_COLORS`), never raw CSS: the frontend maps each name onto the
+       * v2 token pair it belongs to, so chips follow the active theme.
+       */
+      Label: {
+        type: 'object',
+        required: ['id', 'name', 'color', 'created_at'],
+        properties: {
+          id: uuid,
+          /**
+           * The label's name, lowercased (one name per user on lower(name);
+           * "Prod" and "prod" are the same label). Max 64 characters.
+           */
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          color: { type: 'string', enum: ['neutral', 'brand', 'success', 'debit'] },
+          created_at: isoDateTime,
+        },
+      },
+      LabelListResponse: {
+        type: 'object',
+        required: ['labels'],
+        properties: {
+          labels: { type: 'array', items: { $ref: '#/components/schemas/Label' } },
+        },
+        additionalProperties: false,
+      },
+      CreateLabelRequest: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          color: { type: 'string', enum: ['neutral', 'brand', 'success', 'debit'] },
+        },
+        additionalProperties: false,
+      },
+      UpdateLabelRequest: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          color: { type: 'string', enum: ['neutral', 'brand', 'success', 'debit'] },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * Agent organization (#3164) — one node of the user's folder tree.
+       * DISPLAY/CATEGORIZATION ONLY: nothing in the delegation, budget, or
+       * on-chain enforcement path may read it. `agent_count` counts agents
+       * filed DIRECTLY under the folder (sub-organization members are not
+       * folded in — the tree renders the count on the node the agents sit in).
+       */
+      Organization: {
+        type: 'object',
+        required: ['id', 'parent_organization_id', 'name', 'created_at', 'updated_at', 'agent_count'],
+        properties: {
+          id: uuid,
+          /** The parent folder, or null for a top-level organization. */
+          parent_organization_id: { anyOf: [uuid, { type: 'null' }] },
+          /** Trimmed; unique among siblings under the same parent, case-insensitively. Max 64 characters. */
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          created_at: isoDateTime,
+          updated_at: isoDateTime,
+          agent_count: { type: 'integer', minimum: 0 },
+        },
+        additionalProperties: false,
+      },
+      OrganizationListResponse: {
+        type: 'object',
+        required: ['organizations'],
+        properties: {
+          organizations: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/Organization' },
+          },
+        },
+        additionalProperties: false,
+      },
+      CreateOrganizationRequest: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          /** Omit for a top-level organization. Must be an organization the caller owns. */
+          parent_organization_id: uuid,
+        },
+        additionalProperties: false,
+      },
+      UpdateOrganizationRequest: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 64 },
+          /**
+           * Three-state by presence: the key present (null included) MOVES —
+           * null is the top level; the key absent keeps the current parent.
+           */
+          parent_organization_id: { anyOf: [uuid, { type: 'null' }] },
+        },
+        additionalProperties: false,
+        description: 'Rename and/or move. An empty object is accepted and changes nothing.',
+      },
+      DeleteOrganizationResponse: {
+        type: 'object',
+        required: ['ok'],
+        properties: {
+          ok: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * FULL REPLACEMENT is the mutation: the agent ends up carrying exactly
+       * this set. An empty array clears the agent's labels — that is the
+       * editor's "remove every chip", not a refused no-op.
+       */
+      ReplaceAgentLabelsRequest: {
+        type: 'object',
+        required: ['label_ids'],
+        properties: {
+          label_ids: {
+            type: 'array',
+            items: uuid,
+            maxItems: 32,
+          },
+        },
+        additionalProperties: false,
+      },
+      AgentLabelsResponse: {
+        type: 'object',
+        required: ['labels'],
+        properties: {
+          labels: { type: 'array', items: { $ref: '#/components/schemas/Label' } },
+        },
         additionalProperties: false,
       },
       AgentConnectionSetupState: {
@@ -7371,6 +8067,11 @@ export const openapiSpec = {
               'RETIRED (#2914) and REFUSED, not accepted — declared here only so the request-validation layer agrees with the handler, which applies the same reliance rule as `POST /agents`: `safe_id` alone refuses, both-and-matching is accepted, both-and-disagreeing refuses. Undeclared under `additionalProperties: false` it would be rejected by ajv before the handler ever ran.',
           },
           runtime: { type: 'string' },
+          local_mcp: {
+            type: 'boolean',
+            description:
+              'Legacy local-MCP opt-in (#3032: sent by the dashboard, `useAgentConnectionSetup.ts`, whenever the owner picked local MCP). `true` with an explicit runtime outside Claude Code / Codex / Cowork is refused with 400; otherwise it records the preference.',
+          },
           allowances: {
             type: 'array',
             items: { $ref: '#/components/schemas/AgentConnectionAllowanceInput' },
@@ -7520,6 +8221,11 @@ export const openapiSpec = {
               "#2528: how the connector was invoked — 'json' when `--json` was passed, 'prose' otherwise. The connector is the only party that can report this: the request is identical over the wire either way. Optional, because a connector older than #2528 sends nothing and registers unchanged; an unrecognised value is refused with 400 rather than stored, since this dimension segments the onboarding funnel and a value nothing recognises must not enter it silently. Case and surrounding whitespace are normalised before storage.",
           },
           connector_version: { type: 'string' },
+          mcp_server_name: {
+            type: 'string',
+            description:
+              'The MCP server name the connector wired this agent under (#3032: sent by `@haven_ai/connect`, `api.ts` `registerSetup`). Normalised server-side: trimmed, and an empty, over-64-character or otherwise malformed name is stored as null rather than refused.',
+          },
           connector_context: { $ref: '#/components/schemas/AgentConnectionConnector' },
           install_capabilities: {
             type: 'object',
@@ -7635,6 +8341,16 @@ export const openapiSpec = {
           next_user_action: { type: 'string' },
           error_code: { type: ['string', 'null'] },
           environment_label: { type: 'string' },
+          skill_installed: {
+            type: 'boolean',
+            description: 'Whether the connector installed the Haven agent skill for this runtime (#3032: sent by `@haven_ai/connect`, `api.ts`).',
+          },
+          superseded_agent_ids: {
+            type: ['array', 'null'],
+            items: { type: 'string' },
+            description:
+              'Other agent directories the connector found on this machine (#2561, #3032: sent by `@haven_ai/connect`, `api.ts` `updateInstallStatus`). A tri-state: a list (found these), `[]` (scanned, found none), `null` (the scan could not run). Not trusted beyond its shape: entries are trimmed, path- or secret-shaped strings dropped, and the list capped server-side rather than refused.',
+          },
         },
         additionalProperties: false,
       },
@@ -7700,7 +8416,8 @@ export const openapiSpec = {
         required: [
           'id', 'name', 'delegate_address',
           'account_id', 'account_address', 'account_name', 'account_chain_id',
-          'api_key_prefix', 'status', 'created_at', 'allowances',
+          'api_key_prefix', 'status', 'created_at', 'allowances', 'labels',
+          'organization_id',
         ],
         properties: {
           id: uuid,
@@ -7723,6 +8440,23 @@ export const openapiSpec = {
            */
           archived_at: { anyOf: [isoDateTime, { type: 'null' }] },
           allowances: { type: 'array', items: { $ref: '#/components/schemas/AgentAllowance' } },
+          /**
+           * #3167: the labels this agent carries, name-sorted. Derived per
+           * read (joined from agent_label_assignments), so it is never stale
+           * and needs no second round trip. DISPLAY ONLY — categorization
+           * for the list surface and the #3165 filter facet; nothing in the
+           * delegation, budget, or on-chain enforcement path may read it.
+           * Always present (an unlabelled agent carries `[]`).
+           */
+          labels: { type: 'array', items: { $ref: '#/components/schemas/Label' } },
+          /**
+           * #3164: the organization this agent files under (the user's
+           * folder tree; null = the top level, outside every folder).
+           * DISPLAY/CATEGORIZATION ONLY — the same boundary as `labels`:
+           * nothing in the delegation, budget, or on-chain enforcement path
+           * may read it.
+           */
+          organization_id: { anyOf: [uuid, { type: 'null' }] },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
           /**
@@ -7854,6 +8588,58 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      // #3271: the direct-payment byte-free sign-context response
+      // (`GET /payments/{id}/sign-context`). Deliberately its own schema, not
+      // a reuse of `paymentSignData` — that shape's `sign_data` also carries
+      // `components`/`instructions`, fields the intent's ORIGINAL create/
+      // replay response already gave the caller and this handoff does not
+      // repeat.
+      DirectSignContext: {
+        type: 'object',
+        required: [
+          'payment_id',
+          'status',
+          'expires_at',
+          'direct_sign_context_version',
+          'sign_data',
+        ],
+        properties: {
+          payment_id: uuid,
+          status: { type: 'string', enum: ['pending_signature'] },
+          expires_at: isoDateTime,
+          direct_sign_context_version: {
+            type: 'integer',
+            enum: [1],
+            description:
+              'DIRECT_SIGN_CONTEXT_VERSION from @haven_ai/sdk (`userop-binding.ts`) — the version ' +
+              'every client\'s assertUserOpTypedDataBinding pins against.',
+          },
+          sign_data: {
+            type: 'object',
+            required: ['hash', 'signature_scheme', 'typed_data'],
+            properties: {
+              hash: {
+                type: 'string',
+                pattern: '^0x[0-9a-fA-F]{64}$',
+                description:
+                  'The stored ERC-4337 v0.7 UserOperation hash. Present for the integrity check ' +
+                  '(#3271) — do NOT sign it directly; sign typed_data.',
+              },
+              signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+              typed_data: {
+                type: 'object',
+                additionalProperties: true,
+                description:
+                  'The EIP-712 PackedUserOperation payload to sign VERBATIM, byte-identical to the ' +
+                  'typed_data the original POST /payments (or its idempotent replay) returned for ' +
+                  'this intent.',
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
       // ── PendingApproval / X402PendingApproval (REMOVED, #2105) ──────────────
       //
       // Both schemas are deleted, not tombstoned, and the distinction is the
@@ -7949,6 +8735,11 @@ export const openapiSpec = {
       },
       Parties: partiesSchema,
       AgentPaymentStatus: agentPaymentStatus,
+      // #3031 note: this option's `maxTimeoutSeconds` stays `integer` while
+      // `X402AuthorizeRequest`'s is `number, minimum: 1`. Not a contradiction —
+      // this schema describes the MERCHANT's advertised option inside the
+      // free-form `paymentRequired` blob and is never compiled against a
+      // request body; the request rule is the other one.
       X402PaymentOption: {
         type: 'object',
         required: ['scheme', 'network', 'amount', 'asset', 'payTo', 'maxTimeoutSeconds'],
@@ -7997,13 +8788,49 @@ export const openapiSpec = {
           url: { type: 'string', format: 'uri' },
           payTo: address,
           merchantPayTo: address,
-          amount: { type: 'string', description: 'Atomic token amount from the x402 challenge.' },
+          amount: {
+            type: 'string',
+            pattern: '^[0-9]+$',
+            description:
+              'Atomic token amount from the x402 challenge. Digits only; the route additionally refuses zero (`isPositiveDecimalAtomicAmount`), which JSON Schema does not express.',
+          },
           asset: address,
           network: { type: 'string', examples: ['base', 'eip155:8453'] },
           description: { type: 'string' },
-          maxTimeoutSeconds: { type: 'integer' },
+          // #3031: `integer` was the spec's claim, never the route's rule —
+          // the handler accepted any finite number and clamped it. Stated as
+          // it behaves. `minimum: 1` restores the HARMFUL half of the deleted
+          // rung ('maxTimeoutSeconds must be a finite number'): with ajv
+          // coercion on, `null` and `false` arrive as 0, and 0 SURVIVES the
+          // `?? 300` default in `modules/x402/delegation-authorize.ts`, so the
+          // settlement child would silently expire in 60 s (the clamp floor in
+          // `x402-delegation.ts`) instead of 300 — and, with `paymentRequired`
+          // alongside, trip #3117's option match with a message blaming the
+          // merchant's challenge. The FINITENESS half is deliberately left to
+          // the clamp: `1e400` parses to `Infinity`, passes `minimum: 1`
+          // (measured) and `Math.min(…, MAX_SETTLEMENT_WINDOW_SECONDS)` turns
+          // it into 600 — harmless, and a `maximum` that refused it would also
+          // refuse a plain `900`, which is accepted and clamped today and
+          // which no shadow reading covers. Two inputs the old rung passed and
+          // this floor refuses: `-1` and `0.5` (both clamped to 60 before).
+          maxTimeoutSeconds: { type: 'number', minimum: 1 },
           category: { type: 'string' },
-          idempotencyKey: { type: 'string', maxLength: 128 },
+          idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
+          // #3031: both fields are SENT by the published SDK (`sdk/client.ts`
+          // → `x402-erc7710.ts`) and READ by the handler, and neither was
+          // declared. On a closed schema that is not a cosmetic gap: enforcing
+          // without them refuses every erc7710 payment, and a compiler with
+          // `removeAdditional: true` (which this plugin deliberately does not
+          // set) would strip the facilitator pin and silently reroute to 3009.
+          settlementScheme: { type: 'string', enum: ['erc7710', 'eip3009'] },
+          facilitatorAddresses: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 16,
+            items: address,
+            description:
+              "#1058: the erc7710 challenge entry's extra.facilitatorAddresses — the facilitator pin carried into the settlement child delegation.",
+          },
           signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
           mcpCallContext: {
             type: 'object',
@@ -8075,9 +8902,9 @@ export const openapiSpec = {
                 properties: {
                   version: {
                     type: 'integer',
-                    enum: [1, 2, 3],
+                    enum: [2, 3],
                     description:
-                      'Contents-derived, never chosen: 1 = hash-only (legacy rail); 2 = commits to the EIP-712 typedDataHash (delegation rail, #1138); 3 = additionally binds the payer identity (#1690). The enum previously claimed [1] while v2 had shipped — corrected here.',
+                      'Contents-derived, never chosen: 2 = commits to the EIP-712 typedDataHash (delegation rail, #1138); 3 = additionally binds the payer identity (#1690). Version 1 (hash-only, retired Safe rail) is never emitted since #3272 — signX402ExpectedContext requires typedDataHash — and the signer refuses it.',
                   },
                   message: {
                     type: 'string',
@@ -8526,6 +9353,8 @@ export const openapiSpec = {
           // #2960: additive — `payer_address` above is `parties.treasury_account`
           // only; this carries the other three.
           parties: { $ref: '#/components/schemas/Parties' },
+          // #3132: per row, because the SDK discards the envelope.
+          scope: { $ref: '#/components/schemas/ListScope' },
         },
         additionalProperties: true,
       },
@@ -8576,7 +9405,7 @@ export const openapiSpec = {
       },
       SweepAuthorization: {
         type: 'object',
-        description: 'EIP-3009 TransferWithAuthorization fields for a delegate → Safe USDC sweep.',
+        description: "EIP-3009 TransferWithAuthorization fields for a delegate → the agent's account (Haven wallet) USDC sweep.",
         required: ['from', 'to', 'value', 'validAfter', 'validBefore', 'nonce', 'token', 'chainId'],
         properties: {
           from: address,
@@ -8669,7 +9498,7 @@ export const openapiSpec = {
         additionalProperties: false,
       },
       Transaction: {
-        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
+        description: 'Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields (since #3132 it does carry the base-shape `timestampSource` / `confirmedAt`). Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why.',
         type: 'object',
         required: [...transactionBaseRequired, 'chainId', 'accountId', 'accountAddress', 'accountName'],
         properties: {
@@ -8679,7 +9508,19 @@ export const openapiSpec = {
           accountAddress: address,
           accountName: { type: 'string' },
           agentId: uuid,
+          scope: { $ref: '#/components/schemas/ListScope' },
         },
+      },
+      ListScope: {
+        description:
+          "#3132 (owner decision 3 on #3130): what population a list row came from and what narrowed it, as two values — one value cannot say both. `source: 'wallet'` is the aggregated feed (every account's explorer window plus synthesized confirmed intents; sweeps and funding legs included); `'agent'` is the receipts view (this agent's evidence rows only). `filter` names the IDENTITY-axis narrowing applied on top (whose money / which wallet: agent, account, both), or null; token, direction and chain narrowing are deliberately not named here. `agentId=user` counts as agent-axis narrowing and selects outbound rows with NO agent attribution. `agentId` on the wallet feed NARROWS a wallet-scoped query; it does not make it the receipts view.",
+        type: 'object',
+        required: ['source', 'filter'],
+        properties: {
+          source: { type: 'string', enum: ['wallet', 'agent'] },
+          filter: { type: ['string', 'null'], enum: ['agent', 'account', 'account+agent', null] },
+        },
+        additionalProperties: false,
       },
       TransactionsPageResponse: {
         description: 'Per-account paginated transaction list (`GET /transactions/{accountAddress}`). Items carry no account scope — the account is the path parameter.',
@@ -8700,11 +9541,35 @@ export const openapiSpec = {
         properties: {
           symbol: { type: 'string' },
           address: { type: ['string', 'null'], description: 'Token contract address; null for the chain-native token (exactly one entry).' },
-          balance: { type: 'string', description: "Raw base units; '0' when the RPC lookup failed." },
+          balance: { type: 'string', description: "Raw base units. On a failed read, the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token." },
           formatted: { type: 'string' },
           decimals: { type: 'integer' },
+          balanceFreshness: { $ref: '#/components/schemas/BalanceFreshness' },
         },
         additionalProperties: false,
+      },
+      BalanceFreshness: {
+        type: 'object',
+        description: 'Present only when this entry\'s balance read FAILED (#3295). Absent on a clean read. The balance string it marks is still additive: the last-known value when one exists (status stale), else the filler \'0\' (status unavailable).',
+        oneOf: [
+          {
+            type: 'object',
+            required: ['status', 'asOf'],
+            properties: {
+              status: { type: 'string', enum: ['stale'] },
+              asOf: { type: 'string', format: 'date-time', description: 'When the served value was last successfully read from the chain.' },
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['status'],
+            properties: {
+              status: { type: 'string', enum: ['unavailable'] },
+            },
+            additionalProperties: false,
+          },
+        ],
       },
       BalancesResponse: {
         type: 'object',
@@ -8765,10 +9630,20 @@ export const openapiSpec = {
         required: ['symbol', 'balance', 'formatted', 'usdValue', 'eurValue'],
         properties: {
           symbol: { type: 'string' },
-          balance: { type: 'string', description: "Raw base units; '0' on RPC failure." },
+          balance: { type: 'string', description: "Raw base units. On a failed read, the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token." },
           formatted: { type: 'string' },
-          usdValue: { type: 'number', description: '0 when the price feed failed.' },
+          usdValue: {
+            type: 'number',
+            description:
+              'When the price feed fails, valued at the last good price this server instance has seen for the token; 0 only if it has none (#3297).',
+          },
           eurValue: { type: 'number' },
+          sekValue: {
+            type: 'number',
+            description:
+              'Same one price read as usd/eur (#3127 round 2). When the price feed fails, the last good price this server instance has seen; 0 only if it has none (#3297).',
+          },
+          balanceFreshness: { $ref: '#/components/schemas/BalanceFreshness' },
         },
         additionalProperties: false,
       },
@@ -8778,6 +9653,7 @@ export const openapiSpec = {
         properties: {
           totalUsd: { type: 'number' },
           totalEur: { type: 'number' },
+          totalSek: { type: 'number' },
           breakdown: { type: 'array', items: { $ref: '#/components/schemas/PortfolioBreakdown' } },
         },
         additionalProperties: false,
@@ -8869,7 +9745,17 @@ export const openapiSpec = {
           totals: {
             type: 'object',
             required: ['usd', 'eur'],
-            properties: { usd: { type: 'number' }, eur: { type: 'number' } },
+            properties: {
+              usd: { type: 'number' },
+              eur: { type: 'number' },
+              // #3127 round 2: additive optional keys — the display path now
+              // prices the default currency (SEK) beside the historical pair.
+              // Optional, not required, so a pre-round-2 consumer reads the
+              // same response unchanged (same compatibility posture as the
+              // transaction feed's converted triple: additive, nothing to
+              // dual-emit).
+              sek: { type: 'number' },
+            },
             additionalProperties: false,
           },
           change: {
@@ -8877,10 +9763,13 @@ export const openapiSpec = {
             required: ['available', 'usdAmount', 'eurAmount', 'usdPercent', 'eurPercent'],
             properties: {
               available: { type: 'boolean', description: 'true iff a yesterday snapshot existed to diff against.' },
-              usdAmount: { type: 'number' },
-              eurAmount: { type: 'number' },
+              usdAmount: { type: ['number', 'null'], description: 'Null when balanceFreshness below is unavailable: the totals are understated by an unknown amount, so no swing may be claimed.' },
+              eurAmount: { type: ['number', 'null'], description: 'Null when balanceFreshness below is unavailable, as usdAmount.' },
+              sekAmount: { type: ['number', 'null'], description: 'Null when yesterday’s snapshot predates migration 090 (no SEK baseline stored) or when balanceFreshness below is unavailable — the client reports the change as unavailable rather than reading a fabricated swing.' },
               usdPercent: { type: 'number', description: '0 when unavailable or the previous total was 0.' },
               eurPercent: { type: 'number' },
+              sekPercent: { type: 'number', description: '0 when the SEK baseline is missing or the previous total was 0.' },
+              balancesFreshness: { $ref: '#/components/schemas/BalanceFreshness', description: 'Present only when at least one of the totals\' balance reads failed (#3295): stale with the oldest served as-of time, or unavailable when some token has no known value. Absent on a clean read.' },
             },
             additionalProperties: false,
           },
@@ -8891,6 +9780,7 @@ export const openapiSpec = {
               connectedAgents: { type: 'integer', description: "Agents with status 'active' only." },
               monthlyAgentSpendUsd: { type: 'number' },
               monthlyAgentSpendEur: { type: 'number' },
+              monthlyAgentSpendSek: { type: 'number' },
               successfulTransactions: { type: 'integer' },
               activeAccounts: { type: 'integer', description: 'All linked Safes, regardless of activity.' },
             },

@@ -103,6 +103,9 @@ export function assertWithinMaxAmount(
   }
 }
 
+/** The opening sentence of the no-cap refusal on a tool that would spend. */
+const UNCAPPED_PAID_CALL_REFUSAL = 'A spending cap is REQUIRED before a paid merchant call.'
+
 /**
  * Phase 1 of the cap contract: validate the SHAPE of the caller's cap fields
  * with no network access at all, so a contradictory request is refused before
@@ -112,7 +115,17 @@ export function assertWithinMaxAmount(
  */
 export function readMaxAmountCap(
   args: Record<string, unknown>,
-  opts: { required: boolean },
+  opts: {
+    required: boolean
+    /**
+     * #3213: the sentence the no-cap refusal opens with. The default is the
+     * paid-call copy every purchase tool shares; a READ-ONLY caller
+     * (haven_check_funds) passes its own, because "before a paid merchant
+     * call … No merchant was contacted" on a sufficiency check told the
+     * agent it had just tried to buy something.
+     */
+    uncappedRefusal?: string
+  },
 ): MaxAmountCap {
   const atomic = args.max_amount as string | undefined
   const human = args.max_amount_human as string | undefined
@@ -140,9 +153,10 @@ export function readMaxAmountCap(
     throw new HostedToolError({
       code: 'INVALID_INPUT',
       message:
-        'A spending cap is REQUIRED before a paid merchant call. Pass max_amount_human ' +
-        '(whole tokens, e.g. "1" for 1 USDC — recommended) or max_amount (atomic units). ' +
-        'No merchant was contacted and no funds were moved.',
+        (opts.uncappedRefusal ?? UNCAPPED_PAID_CALL_REFUSAL) +
+        ' Pass max_amount_human (whole tokens, e.g. "1" for 1 USDC — recommended) or ' +
+        'max_amount (atomic units).' +
+        (opts.uncappedRefusal ? '' : ' No merchant was contacted and no funds were moved.'),
       statusCode: 400,
       nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again' }),
     })

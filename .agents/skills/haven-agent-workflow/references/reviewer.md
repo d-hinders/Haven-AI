@@ -7,8 +7,11 @@ PR body, skip this isolation guard: the reviewer receives the named
 `git diff origin/dev...<sha>` and CI results at that SHA instead. A prose finding is
 a `nit` unless it changes a reader-actionable rule, required check, or operator step.
 On a fix, re-review only `git diff <last-verdict-sha>...HEAD` and record both SHAs in
-the verdict. The lane is the only exception; its scope and the required verdict form are in
+the verdict. The lane's scope and the required verdict form are in
 [`ship-next` § *Proportionality lane*](../../ship-next/SKILL.md#proportionality-lane-2798).
+Outside the lane, the same delta scoping applies from round two on, but you decide
+it from the diff: any hunk not tied to an open finding means a full pass
+([`ship-next` § *Independent Review*](../../ship-next/SKILL.md#independent-review) step 2).
 
 A verdict is a claim about a specific tree at a specific commit. Establish that
 binding **first**, by running the guard rather than by trusting the handoff:
@@ -77,11 +80,6 @@ verdict-carrying facts; silence is the thing that leaves them behind.
 
 Default posture:
 - Read only unless the captain explicitly asks for a patch.
-- **Never file an issue.** Your finding is fixed or dropped by the author — dropped
-  means one line under **Not filed** in the PR body with the reason — and filed only
-  when it clears the *Filing bar* in [`ship-next`](../../ship-next/SKILL.md#filing-bar-2767),
-  which is the author's call to make and to record, not yours (#2767). Label
-  severity; do not recommend "file a follow-up" as a disposition.
 - Prioritize bugs, security risks, behavioral regressions, unclear money movement, confusing agent authority, and missing tests.
 - Findings come first, ordered by severity, with file and line references.
 - If there are no serious findings, say that clearly and mention residual risk or test gaps.

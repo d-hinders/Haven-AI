@@ -32,6 +32,8 @@ import {
   failedOrRejectedStatus,
 } from '@/lib/payment-status'
 import EditAgentModal from '@/components/EditAgentModal'
+import LabelsManagerModal from '@/components/LabelsManagerModal'
+import { LabelChipRow } from '@/components/haven/LabelChip'
 import DelegationBudgetCard, { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
 import AgentPassportCard from '@/components/AgentPassportCard'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
@@ -300,11 +302,11 @@ export default function AgentDetailClient({ agentId }: Props) {
     refetch,
   } = useAgents()
   const agent = agents.find((item) => item.id === agentId) ?? null
-  const safe = useMemo(
+  const account = useMemo(
     () => user?.accounts.find((item) => item.id === agent?.account_id) ?? null,
     [agent?.account_id, user?.accounts],
   )
-  const chainId = safe?.chain_id ?? agent?.account_chain_id ?? DEFAULT_CHAIN_ID
+  const chainId = account?.chain_id ?? agent?.account_chain_id ?? DEFAULT_CHAIN_ID
   const chainConfig = useMemo(() => {
     try {
       return getChainConfig(chainId)
@@ -361,6 +363,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   const [removeOpen, setRemoveOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [replaceKeyOpen, setReplaceKeyOpen] = useState(false)
+  const [labelsManagerOpen, setLabelsManagerOpen] = useState(false)
 
 
   // #1701/#1699: only an anchored attestation is retired and reissued. Pending
@@ -411,7 +414,7 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
 
   const currentAgent = rotatedKeyPatch ? { ...agent, ...rotatedKeyPatch } : agent
-  const walletName = currentAgent.account_name ?? safe?.name ?? 'Unassigned Haven wallet'
+  const walletName = currentAgent.account_name ?? account?.name ?? 'Unassigned Haven wallet'
   const networkName = chainConfig?.name ?? 'Unknown network'
   const budgetLines = currentAgent.allowances.map((allowance) => {
     const decimals =
@@ -542,6 +545,9 @@ export default function AgentDetailClient({ agentId }: Props) {
                   <DropdownMenuItem onSelect={openEditAgent}>
                     Edit agent
                   </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setLabelsManagerOpen(true)}>
+                    Manage labels
+                  </DropdownMenuItem>
                   <DropdownMenuItem onSelect={openUpdateBudget}>Update budget</DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => setCredentialsOpen(true)}>
@@ -556,6 +562,16 @@ export default function AgentDetailClient({ agentId }: Props) {
           </div>
         }
       />
+
+      {/* Labels (#3167): the chips this agent carries, under the title block.
+          Display only — the editor (Edit agent) and the vocabulary manager
+          (Manage labels, in the menu) are where labels change. Renders nothing
+          for an unlabelled agent. */}
+      {currentAgent.labels.length > 0 && (
+        <div className="mt-1.5">
+          <LabelChipRow labels={currentAgent.labels} />
+        </div>
+      )}
 
       {/* Second on a phone, first from `lg` (#2821).
 
@@ -647,10 +663,10 @@ export default function AgentDetailClient({ agentId }: Props) {
           {/* #1089: backup & recovery moved to the account page — it's an
               account capability, not an agent one. This is a pointer, not a
               second copy of the controls. */}
-          {safe ? (
+          {account ? (
             <Card hover={false} className="mt-6 p-2">
               <Row
-                href={`/accounts/${safe.id}`}
+                href={`/accounts/${account.id}`}
                 title="Backup & recovery"
                 subtitle="Manage the ways this account can be approved"
                 trailing={<Icon icon={ArrowRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}
@@ -957,6 +973,17 @@ export default function AgentDetailClient({ agentId }: Props) {
         recentPayments={activity.filter(isPaymentActivityItem)}
         hasAnchoredPassport={passport?.status === 'anchored' && passport.attestation_uid !== null}
         onCompleted={() => {
+          refetch()
+        }}
+      />
+
+      {/* Manage labels (#3167): rename, recolour, delete the vocabulary.
+          A delete or rename changes what agent reads return, so agents are
+          refetched when the manager reports a change. */}
+      <LabelsManagerModal
+        open={labelsManagerOpen}
+        onClose={() => setLabelsManagerOpen(false)}
+        onLabelsChanged={() => {
           refetch()
         }}
       />

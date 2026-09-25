@@ -14,6 +14,7 @@ import {
   selectX402SettlementScheme,
   x402AuthorizationAmount,
 } from './x402.js'
+import { chainIdForNetwork, type SettlementChildExpectation } from './settlement-child.js'
 
 /**
  * The erc7710 direct-settlement lifecycle (#1619, epic #1613).
@@ -42,7 +43,15 @@ import {
  */
 
 export type PaymentPoster = <T>(path: string, body: Record<string, unknown>) => Promise<T>
-export type DataSigner = (signData: SignData) => Promise<string>
+/**
+ * Signs a `sign_data` payload. The erc7710 path passes the second argument:
+ * what the merchant's own 402 says the settlement child must implement, so
+ * the child is verified against something Haven did not produce (#3283).
+ */
+export type DataSigner = (
+  signData: SignData,
+  settlementExpectation?: SettlementChildExpectation,
+) => Promise<string>
 export type RailReader = () => Promise<{ executionRail?: string }>
 
 export interface X402Erc7710Options {
@@ -107,7 +116,10 @@ export class X402Erc7710 {
       )
     }
     const prepared = await this.prepare(paymentRequired, options)
-    const signature = await this.signForData(prepared.signData)
+    const signature = await this.signForData(
+      prepared.signData,
+      settlementExpectationFromQuote(prepared.settlement),
+    )
     const paymentHeader = await this.submit(prepared.paymentId, signature)
     return { ...prepared.settlement, paymentHeader }
   }
@@ -300,5 +312,34 @@ export class X402Erc7710 {
       )
     }
     return settled.payment_header
+  }
+}
+
+/**
+ * #3283: what the settlement child must implement, taken from the MERCHANT'S
+ * 402 option this path selected — payee, exact amount, token, chain and the
+ * advertised facilitators — never from the `/x402/authorize` response, so a
+ * compromised Haven API cannot restate the expectation to match a child it
+ * rewrote. `signForData` adds the agent's own account as the required
+ * delegator.
+ */
+export function settlementExpectationFromQuote(
+  settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>,
+): SettlementChildExpectation {
+  const chainId = chainIdForNetwork(settlement.network)
+  if (chainId === undefined) {
+    throw new HavenSigningError(
+      `Refusing to sign the x402 settlement child: the merchant's network ${JSON.stringify(settlement.network)} ` +
+        'is not one this SDK can verify a settlement child on.',
+    )
+  }
+  return {
+    merchantTo: settlement.merchantPayTo,
+    amount: settlement.amountAtomic,
+    asset: settlement.asset,
+    chainId,
+    ...(settlement.facilitatorAddresses && settlement.facilitatorAddresses.length > 0
+      ? { redeemers: settlement.facilitatorAddresses }
+      : {}),
   }
 }

@@ -27,6 +27,8 @@ import {
   selectParkedRuns,
   pollParkedRuns,
   renderParkedSection,
+  parseMoved,
+  renderMovedSection,
   STICKY_MARKER,
 } from './baseline-push-followup.mjs'
 
@@ -132,8 +134,25 @@ describe('buildComment — carries what a first-time reader needs', () => {
     assert.ok(body.startsWith(STICKY_MARKER))
   })
 
-  test('says the baselines are FINE — the red must not read as "your images are broken"', () => {
-    assert.match(body, /correct and already pushed/)
+  test('MUTATION PROOF (#3233): never vouches for the images — regenerated is not reviewed', () => {
+    // It said "correct and already pushed" and "Nothing about the images is
+    // wrong", and was posted on #3222 over baselines that had captured a
+    // regression. The workflow cannot know the render is right.
+    assert.doesNotMatch(body, /correct and already pushed/)
+    assert.doesNotMatch(body, /Nothing about the images is wrong/i)
+    assert.doesNotMatch(body, /baselines are \*\*correct/i)
+    assert.match(body, /Regenerated is not reviewed/)
+    assert.match(body, /still needs a design review before merge — its old and new image, where both exist/)
+    assert.match(body, /ship-playbooks\/frontend\.md#4-verification/)
+  })
+
+  test('names the visual baselines, not only /design-system (#3233)', () => {
+    assert.doesNotMatch(body, /`\/design-system` baselines/)
+    assert.match(body, /visual baselines were regenerated/)
+  })
+
+  test('the red still reads as the parked checks, not as broken images', () => {
+    assert.match(body, /this PR's checks will never start on their own/)
   })
 
   test('states the real mechanism: created then parked, not never delivered', () => {
@@ -183,6 +202,42 @@ describe('buildComment — carries what a first-time reader needs', () => {
 
   test('never emits a token value — it is not even passed one', () => {
     assert.doesNotMatch(body, /gh[pous]_[A-Za-z0-9]{16,}/)
+  })
+})
+
+describe('moved baselines — the comment lists what was regenerated (#3233)', () => {
+  const base = { repo: 'o/r', branch: 'b', sha: 'abc123def456', runUrl: 'https://example.invalid/run/1' }
+
+  test('parseMoved reads the audit output and refuses anything else as null', () => {
+    assert.deepEqual(parseMoved('[{"name":"a-desktop.png","status":"modified"}]'), [{ name: 'a-desktop.png', status: 'modified' }])
+    assert.deepEqual(parseMoved('[]'), [])
+    // An entry without a name is dropped, never rendered as `undefined`.
+    assert.deepEqual(parseMoved('[{"status":"modified"},null,{"name":"a.png"}]'), [{ name: 'a.png', status: 'changed' }])
+    for (const raw of [undefined, '', 'not json', '{"name":"x"}', 'null']) {
+      assert.equal(parseMoved(raw), null, `expected null for ${JSON.stringify(raw)}`)
+    }
+  })
+
+  test('lists each regenerated baseline with its status', () => {
+    const body = buildComment({ ...base, moved: [{ name: 'agents-list-mobile.png', status: 'modified' }, { name: 'new-desktop.png', status: 'added' }] })
+    assert.match(body, /Regenerated in this push \(2\)/)
+    assert.match(body, /- `agents-list-mobile\.png` \(modified\)/)
+    assert.match(body, /- `new-desktop\.png` \(added\)/)
+  })
+
+  test('links the before/after artifact when the workflow passes one, and only an https URL (#3234)', () => {
+    const url = 'https://github.com/o/r/actions/runs/1/artifacts/2'
+    const body = buildComment({ ...base, moved: [{ name: 'a.png', status: 'modified' }], artifactUrl: url })
+    assert.match(body, /Before\/after images of each: \[baseline-before-after\]\(https:\/\/github\.com\/o\/r\/actions\/runs\/1\/artifacts\/2\)/)
+    assert.doesNotMatch(buildComment({ ...base, moved: [], artifactUrl: '' }), /Before\/after images/)
+    assert.doesNotMatch(buildComment({ ...base, moved: [], artifactUrl: 'javascript:alert(1)' }), /Before\/after images/)
+  })
+
+  test('an unreadable list says so and points at the run — it never reads as "nothing to review"', () => {
+    const text = renderMovedSection({ moved: null, runUrl: 'https://example.invalid/run/1' })
+    assert.match(text, /could not be read here/)
+    assert.match(text, /https:\/\/example\.invalid\/run\/1/)
+    assert.doesNotMatch(buildComment({ ...base }), /Regenerated in this push/)
   })
 })
 
@@ -484,7 +539,10 @@ if (args[0] === 'pr' && args[1] === 'list') { process.stdout.write('[{"number":7
 if (args[0] === 'api') {
   // Order matters: a POST/PATCH also targets a /comments path, so the write
   // must be recognised before the read.
-  if (args.includes('--method')) { process.stdout.write('{}'); process.exit(0) }
+  if (args.includes('--method')) {
+    require('node:fs').writeFileSync('posted.txt', joined)
+    process.stdout.write('{}'); process.exit(0)
+  }
   if (joined.includes('actions/runs')) {
     process.stdout.write(JSON.stringify({ workflow_runs: [
       { id: 11, name: 'CI', html_url: 'https://example.invalid/11', conclusion: 'action_required' },
@@ -502,6 +560,7 @@ process.exit(64)
       files: { 'bin/gh': GH_SHIM },
       chmod: { 'bin/gh': 0o755 },
       binOnPath: true,
+      readBack: ['posted.txt'],
       env: {
         GITHUB_REPOSITORY: 'owner/repo',
         GITHUB_REF_NAME: 'feature/x',
@@ -520,6 +579,18 @@ process.exit(64)
     // pass this as a deadlock detected with no follow-up attempted.
     assert.match(out, /Parked runs found: 1/)
     assert.match(out, /Sticky comment created on #7\./)
+  })
+
+  test('the POSTED comment lists the moved baselines the workflow passed in (#3233)', () => {
+    const { status, out, wrote } = run({
+      BASELINES_COMMITTED: 'true',
+      HAS_PUSH_TOKEN: 'false',
+      MOVED_BASELINES: '[{"name":"agents-list-filtered-mobile.png","status":"modified"}]',
+    })
+    assert.equal(status, 1, out)
+    const posted = wrote['posted.txt'] ?? ''
+    assert.match(posted, /agents-list-filtered-mobile\.png` \(modified\)/)
+    assert.doesNotMatch(posted, /correct and already pushed/)
   })
 
   test('ACCEPTS: nothing was committed, so there is nothing to deadlock (exit 0)', () => {

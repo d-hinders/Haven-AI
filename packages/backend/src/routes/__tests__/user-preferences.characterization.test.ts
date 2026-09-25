@@ -22,6 +22,8 @@ vi.mock('../../db.js', () => ({
 }))
 
 import { buildApp } from '../../__tests__/helpers.js'
+import { openapiSpec } from '../../openapi/spec.js'
+import { TRANSACTION_CURRENCIES } from '../../domain/transaction-currency.js'
 
 describe('user preferences (characterization, #1167)', () => {
   let app: FastifyInstance
@@ -61,7 +63,7 @@ describe('user preferences (characterization, #1167)', () => {
       )
     })
 
-    it('falls back to USD when the user row has no preference', async () => {
+    it('falls back to SEK when the user row has no preference', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [{ currency_preference: null }] })
 
       const response = await app.inject({
@@ -71,11 +73,17 @@ describe('user preferences (characterization, #1167)', () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual({ currency_preference: 'USD' })
+      // #3127: the fallback MOVED from USD to SEK — deliberately. SEK is the
+      // currency the transaction feed has always served and still serves by
+      // default (domain/transaction-currency.ts), so the preference endpoint
+      // and the feed must answer a no-preference user the same currency. The
+      // characterization this test keeps is the fallback SHAPE: a null column
+      // and a missing row fall back identically, never 500 and never null.
+      expect(response.json()).toEqual({ currency_preference: 'SEK' })
     })
 
-    it('falls back to USD when no user row comes back at all', async () => {
-      // The `?? 'USD'` guard on an EMPTY result set — the case a repository
+    it('falls back to SEK when no user row comes back at all', async () => {
+      // The `?? 'SEK'` guard on an EMPTY result set — the case a repository
       // that returns null for "no rows" must keep answering identically.
       mockQuery.mockResolvedValueOnce({ rows: [] })
 
@@ -86,7 +94,7 @@ describe('user preferences (characterization, #1167)', () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual({ currency_preference: 'USD' })
+      expect(response.json()).toEqual({ currency_preference: 'SEK' })
     })
 
     it('returns 401 without auth', async () => {
@@ -118,22 +126,32 @@ describe('user preferences (characterization, #1167)', () => {
       expect(String(mockQuery.mock.calls[0][0])).toMatch(/WHERE id = \$2/)
     })
 
-    it('accepts USD as well as EUR', async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [{ currency_preference: 'USD' }] })
+    it('accepts each offered currency and writes it — EUR, USD, SEK (#3127)', async () => {
+      // One row per offered currency, EUR first (the original pair), SEK last:
+      // SEK was refused before #3127 while the feed served SEK to every user —
+      // the one currency no one could select. Each iteration queues its own
+      // single-row reply and indexes the call THIS inject produced.
+      for (const currency of ['EUR', 'USD', 'SEK']) {
+        const before = mockQuery.mock.calls.length
+        mockQuery.mockResolvedValueOnce({ rows: [{ currency_preference: currency }] })
 
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/user/preferences',
-        headers: { authorization: `Bearer ${token}` },
-        payload: { currency_preference: 'USD' },
-      })
+        const response = await app.inject({
+          method: 'PUT',
+          url: '/user/preferences',
+          headers: { authorization: `Bearer ${token}` },
+          payload: { currency_preference: currency },
+        })
 
-      expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual({ currency_preference: 'USD' })
-      // Was a pure echo (#1208): with no params assertion, a route that
-      // hardcoded 'EUR' into the write — or wrote nothing the mock could
-      // see — still returned whatever the mock said. Pin what was WRITTEN.
-      expect(mockQuery.mock.calls[0][1]).toEqual(['USD', 'user-1'])
+        expect(response.statusCode).toBe(200)
+        expect(response.json()).toEqual({ currency_preference: currency })
+        // Was a pure echo (#1208): with no params assertion, a route that
+        // hardcoded 'EUR' into the write — or wrote nothing the mock could
+        // see — still returned whatever the mock said. Pin what was WRITTEN,
+        // and that the write is a user-scoped UPDATE, for every offered
+        // currency.
+        expect(mockQuery.mock.calls[before][1]).toEqual([currency, 'user-1'])
+        expect(String(mockQuery.mock.calls[before][0])).toMatch(/UPDATE users\b/)
+      }
     })
 
     it('rejects an unsupported currency without touching the database', async () => {
@@ -141,11 +159,16 @@ describe('user preferences (characterization, #1167)', () => {
         method: 'PUT',
         url: '/user/preferences',
         headers: { authorization: `Bearer ${token}` },
-        payload: { currency_preference: 'SEK' },
+        // GBP is captured in the book-time rate map but deliberately NOT
+        // offered as a preference (#3127) — widening the offered set is a
+        // product decision, not a loop unroll over ledger currencies.
+        payload: { currency_preference: 'GBP' },
       })
 
       expect(response.statusCode).toBe(400)
-      expect(response.json().error).toBe('Invalid currency. Must be USD or EUR.')
+      // #3030: the enum is the spec's — the enforced module's envelope.
+      expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+      expect(response.json().details).toContain('body/currency_preference')
       expect(mockQuery).not.toHaveBeenCalled()
     })
 
@@ -160,5 +183,13 @@ describe('user preferences (characterization, #1167)', () => {
       expect(response.statusCode).toBe(400)
       expect(mockQuery).not.toHaveBeenCalled()
     })
+  })
+
+  it('the spec\'s currency enum IS TRANSACTION_CURRENCIES (#3030 — the handler no longer checks)', () => {
+    // Mutation: add a currency to TRANSACTION_CURRENCIES without the spec → red.
+    const op = (openapiSpec.paths as Record<string, Record<string, unknown>>)['/user/preferences'].put as {
+      requestBody: { content: { 'application/json': { schema: { properties: { currency_preference: { enum: string[] } } } } } }
+    }
+    expect(op.requestBody.content['application/json'].schema.properties.currency_preference.enum).toEqual([...TRANSACTION_CURRENCIES])
   })
 })

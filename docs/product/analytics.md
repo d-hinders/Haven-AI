@@ -8,11 +8,18 @@ covers:
   - packages/frontend/src/components/analytics/MerchantsTable.tsx
   - packages/frontend/src/components/analytics/SpendSection.tsx
   - packages/frontend/src/components/ui/StackedBarChart.tsx
+  - packages/frontend/src/components/ui/AreaChart.tsx
+  - packages/frontend/src/components/charts/chart-scale.ts
+  - packages/frontend/src/components/ui/StatTile.tsx
+  - packages/frontend/src/components/analytics/AgentsTable.tsx
+  - packages/frontend/src/lib/analytics-format.ts
   - packages/frontend/src/lib/analytics-series.ts
   - packages/frontend/src/components/analytics/BalanceSection.tsx
   - packages/backend/src/routes/analytics-overview.ts
   - packages/backend/src/infra/repositories/analytics.ts
-last-verified: "2026-09-17"
+  - packages/backend/src/modules/mpp/budget-precheck.ts
+  - packages/backend/src/routes/machine-payments.ts
+last-verified: "2026-09-21"
 ---
 
 # Analytics
@@ -26,7 +33,7 @@ page deliberately does not do, so a reader can tell an honest zero from a
 missing number.
 
 The page renders from one endpoint, `GET /analytics/overview`
-(`range=7d|30d|90d`, `currency=usd|eur`, `tz=<IANA zone>`), so every tile on
+(`range=7d|30d|90d`, `currency=usd|eur|sek`, `tz=<IANA zone>`), so every tile on
 the page describes the same range, the same currency and the same set of
 payments — one loading state, one "based on N payments" basis. The endpoint
 (#2946), the page shell (#2947), the chart primitives (#2948) and their wiring
@@ -44,7 +51,14 @@ settlement evidence are not counted") instead of silently shrinking N.
 in the range, and — when they differ — how many attempts those refusals
 represent. The amount shown is the attempted amount. The page never says
 "saved": a refusal is a payment that did not happen, and treating every
-attempted amount as money saved would flatter the number.
+attempted amount as money saved would flatter the number. The tile carries
+only that basis; the two caveats that apply to the whole page — the day the
+refusal ledger starts recording, and the price-cap refusals the ledger never
+sees — are one line under the tile grid, not in the tile (#3204: joined into
+the tile they ran five to seven lines and made it twice its neighbours'
+height). The change chips on every tile write their percentage in the
+display currency's locale, so a `kr` figure sits beside `+15,9 %`, not
+`+15.9%`.
 
 **Budget used.** What each agent's own budget allows and how much of it is
 gone. The used amount is read from the chain per delegation, in token units,
@@ -61,7 +75,8 @@ whether the flag is on so the tile cannot go stale in either direction.
 with no payment and no refusal is not drawn, so the axis is the days that
 carry a figure, not the calendar — stacked by agent, in the display currency;
 a marker cap above a bar means the guardrails refused at least one payment
-that day (the tooltip and the data table say how many). The bars are the same
+that day (the tooltip and the data table say how many; the legend names the
+cap beside the agent rows whenever a day in the range has one). The bars are the same
 booked values the Spent tile sums, bucketed server-side in the page's time
 zone. Agents are ordered by spend, then id, and an agent that appears on the
 chart keeps one colour across the chart, its legend and the swatch beside its
@@ -99,6 +114,36 @@ somewhere that shows something else.
 **Balance over time.** The total value of the tokens in your Haven account,
 as Haven's daily snapshots recorded it at each day's end, in the display
 currency. This is a record of what was held, not a live portfolio valuation.
+Under the SEK display currency, days snapshotted before the SEK column
+existed (migration 090) are omitted from the series rather than drawn as
+zero — the page distinguishes a day with no SEK figure from a day that was
+actually worth nothing. The chart does not start at zero: its floor is
+padded just under the range's lowest day (6 % of the range, never a share
+of the balance itself) and its ticks are computed over that range
+(`chartScaleRange`), so a 300 kr movement on a 12 000 kr balance spans most
+of the plot's height and the gridline labels bracket the data — 12 300 /
+12 400 / 12 500 / 12 600 for a 12 342–12 641 series — rather than sitting
+below the floor (#3204: the ticks came from the zero-based bar-chart scale,
+so no gridline reached the plot, the labels were positioned under the card,
+and the line read as flat). Tick labels are compact (no öre/cents) and the
+phone treatment widens the label gutter to 128 of the drawing's 640 units
+(≈56 px of label room at 390 — the gutter less its 6-unit inset, on the
+300 px drawing — measured against `12 600 kr` at 53 px; the spend chart's
+78 gave ≈34 px and the label's end spilled into the plot), so the widest
+supported tick sits clear of the line. A tick the gutter cannot hold (a
+320 px phone) is anchored by its right edge, so any overflow grows left
+into the card padding, never into the plot. The narrower plot also moved
+the first two date labels to a word-space apart at 390 ("11 Jun 18 Jun" read
+as one run): the balance chart anchors its start label at its left edge,
+so the shared label rule gives that chart's first pair two label-widths —
+a 30-day range at 390 labels days 1, 15, 22 and 30, a 90-day range days
+1, 37, 55 and 90. The spend chart centres every label on its bar and keeps
+its weekly labels; the product's 7/30/90-day ranges are unchanged on
+desktop. A flat series pads by ±2 so every
+integer tick stays distinct (±1 stepped by 0,5 and printed one label twice
+without the öre). The annotation and
+the tooltip print the amount once, in the display currency's own format
+("gained 298,43 kr"), never with the currency code appended again.
 
 ## Which payments count, and why
 
@@ -119,9 +164,13 @@ not in the sum.
 
 - **Currency basis.** Figures are shown in the currency preference from
   Settings. Values are booked at confirmation and never re-converted at
-  display time: the EUR page and the USD page are two sums over two booked
+  display time: the EUR, USD and SEK pages are three sums over three booked
   columns, not one sum and an exchange rate. A payment's booked value does
-  not move after confirmation.
+  not move after confirmation. Under the SEK display currency, a payment
+  whose book-time SEK value could not be captured or backfilled is counted
+  in the payment basis but contributes nothing to the SEK sums — the page's
+  basis line can therefore exceed what the SEK figures sum to, and that is
+  the honest reading, not a defect.
 - **Day buckets.** Days are bucketed server-side in the time zone the page
   sends (the browser's zone, validated as a real IANA zone; `UTC` on any
   failure to send one), so a payment at 00:30 Stockholm time lands in the
@@ -134,13 +183,15 @@ not in the sum.
   migration 086 (14 September 2026). A range reaching before that date simply
   has no refusal rows for the days before it — the page shows an honest empty
   there, and neither it nor the API claims a coverage floor it cannot read.
-  Refusals are recorded with attempts. Two kinds of refusal never reach the
-  ledger, and the page says so rather than letting the count imply them: a
-  price cap your agent's own runtime applies (it declines before asking
-  Haven, so there is no request for a row to describe), and a budget refusal
-  the hosted MCP raises while preparing a purchase, before any payment has
-  been set up. A payment a rate limit holds back is throttling, not a
-  refusal, and it is not counted as one.
+  Refusals are recorded with attempts. One kind of refusal never reaches the
+  ledger, and the page says so rather than letting the count imply it: a
+  price cap. Your agent's own runtime may apply one before asking Haven (no
+  request, so no row), and the hosted prepare step applies the agent's stated
+  cap against the live quote too — that refusal is by policy not written
+  either. A budget refusal the hosted MCP raises while preparing a purchase
+  IS recorded and counted (the hosted prepare step writes its own refusal
+  row for the budget branch, not for the cap branch). A payment a rate limit
+  holds back is throttling, not a refusal, and it is not counted as one.
 - **Sponsored gas.** Haven relays agent payments, and the relay's network fee
   is paid by Haven. The page shows this as a count — "Haven sponsored N
   operations' gas" — of relayed operations on value-bearing chains. It is
@@ -163,9 +214,10 @@ not in the sum.
 - It is not an accounting record. The accounting feed and your accountant own
   the books; Analytics is a spending overview, and its numbers are not
   bookings.
-- It does not show the refusals the ledger never sees — a price cap your
-  agent's own runtime applies, and a budget refusal the hosted MCP raises at
-  prepare. Its count is only ever refusals the ledger recorded.
+- It does not show the refusal the ledger never sees — a price cap your
+  agent's own runtime applies. Its count is only ever refusals the ledger
+  recorded, which since the hosted prepare step gained its writer includes the
+  budget refusals raised there — not the cap refusals raised at the same step.
 
 ## In the demo
 

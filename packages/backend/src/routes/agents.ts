@@ -38,6 +38,8 @@ import {
   rotateAgentApiKey,
   updateAgentProfile,
 } from '../infra/repositories/agents.js'
+import { listLabelsForAgents } from '../infra/repositories/agent-labels.js'
+import { findOrganizationForUser } from '../infra/repositories/agent-organizations.js'
 
 /**
  * #2914 (naming epic #2906 phase 5, the contraction): an agent carries the
@@ -79,6 +81,12 @@ interface CreateAgentBody {
 interface UpdateAgentBody {
   name?: string
   description?: string
+  /**
+   * #3164: file the agent under an organization (a uuid the user owns) or
+   * back to the top level (`null`). Absent keeps the current placement —
+   * same three-state semantics the label and org PUT bodies use.
+   */
+  organization_id?: string | null
 }
 
 // ── Routes ─────────────────────────────────────────────────────────
@@ -106,12 +114,18 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       .map((a) => a.id)
     const derivedByAgent = await deriveDelegationAllowances(delegationAgentIds)
 
+    // #3167: labels ride along on the same read — one round trip for the
+    // cards and the #3165 filter facet. DISPLAY ONLY; never read by the
+    // delegation, budget, or enforcement path.
+    const labelsByAgent = await listLabelsForAgents(agentRows.map((a) => a.id))
+
     const agents = agentRows.map((agent) => ({
       ...agent,
       allowances:
         agent.account_type === 'delegator_hybrid'
           ? (derivedByAgent.get(agent.id) ?? [])
           : [],
+      labels: labelsByAgent.get(agent.id) ?? [],
     }))
 
     return { agents }
@@ -131,13 +145,15 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     if (agent.account_type === 'delegator_hybrid') {
       // Live budget = the active delegations, not an onboarding mirror (#1090).
       const derived = await deriveDelegationAllowances([id])
-      return { ...agent, allowances: derived.get(id) ?? [] }
+      const labels = (await listLabelsForAgents([id])).get(id) ?? []
+      return { ...agent, allowances: derived.get(id) ?? [], labels }
     }
 
     // Legacy rail retired (#1440/#2020): no allowance config to show.
     return {
       ...agent,
       allowances: [],
+      labels: (await listLabelsForAgents([id])).get(id) ?? [],
     }
   })
 
@@ -303,6 +319,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         // Always empty since #2020 — kept for response-shape compatibility;
         // budgets arrive later as delegation grants.
         allowances: [],
+        // A brand-new agent carries no labels yet (#3167).
+        labels: [],
         passport_requested: passportChainId != null,
       })
     } catch (err) {
@@ -321,13 +339,26 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { id } = request.params
-      const { name, description } = request.body
+      const { name, description, organization_id } = request.body
+
+      // #3164: a target organization must exist AND belong to the caller —
+      // the same "not found or not yours" 404 contract every id on this
+      // surface uses. Refused before the write so a foreign uuid never
+      // reaches the FK as a 500.
+      if (organization_id !== undefined && organization_id !== null) {
+        const target = await findOrganizationForUser(organization_id, sub)
+        if (!target) {
+          return reply.code(404).send({ error: 'Organization not found' })
+        }
+      }
 
       const updated = await updateAgentProfile(
         id,
         sub,
         name?.trim() ?? null,
         description?.trim() ?? null,
+        undefined,
+        organization_id,
       )
 
       if (!updated) {
@@ -345,6 +376,9 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       return {
         ...updated,
         allowances,
+        // #3167: the identity edit modal also edits labels, so the response
+        // carries them for a re-render without a second call.
+        labels: (await listLabelsForAgents([id])).get(id) ?? [],
       }
     },
   )

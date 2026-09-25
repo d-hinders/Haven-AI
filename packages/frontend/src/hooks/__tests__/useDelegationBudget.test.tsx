@@ -401,6 +401,260 @@ describe('revokeAll (#1402 remove step 1)', () => {
   })
 })
 
+describe('editBudget — REPLACE composition (#3166)', () => {
+  const OLD_HASH = '0x' + 'ab'.repeat(32)
+  const NEW_HASH = '0x' + 'be'.repeat(32)
+  const INPUT = {
+    tokenAddress: ('0x' + 'cc'.repeat(20)) as never,
+    budgetAtomic: '2000',
+    periodSeconds: 86_400,
+  }
+  const DELEGATION_MESSAGE = { delegate: '0xd', delegator: '0xa', authority: '0x0', caveats: [], salt: '1' }
+
+  /** build → activate → revoke-prepare → revoke-submit, all green. */
+  function mockHappyPath() {
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({
+          delegation_hash: NEW_HASH,
+          version: 2,
+          signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: DELEGATION_MESSAGE },
+        })
+      }
+      if (url.endsWith('/activate')) return Promise.resolve({ activated: true })
+      if (url.endsWith('/revoke')) {
+        return Promise.resolve({
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: '0xr',
+          user_operation: { nonce: '9n' },
+        })
+      }
+      if (url.endsWith('/revoke/submit')) return Promise.resolve({ revoked: true })
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'aa'.repeat(100))
+    mockSignUserOp.mockResolvedValue('0x' + 'bb'.repeat(100))
+  }
+
+  it('success: build → owner signs new grant → activate → owner signs revoke → submit; no rekey/rotate call is EVER made', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockHappyPath()
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true })
+    })
+    // Wire order: the old delegation hash goes ONLY to the revoke routes.
+    const urls = mockPost.mock.calls.map((c) => String(c[0]))
+    expect(urls).toEqual([
+      expect.stringContaining('/delegations/build'),
+      expect.stringContaining(`/delegations/${NEW_HASH}/activate`),
+      expect.stringContaining(`/delegations/${OLD_HASH}/revoke`),
+      expect.stringContaining(`/delegations/${OLD_HASH}/revoke/submit`),
+    ])
+    // The delegate key and local signer are untouched: no rotate/rekey/recover
+    // endpoint is called anywhere in the composition.
+    expect(urls.some((u) => /rekey|rotate|recover|signer/i.test(u))).toBe(false)
+    // Both signatures are OWNER signatures made client-side.
+    expect(mockSignDelegation).toHaveBeenCalledWith(PASSKEY_SIGNERS, DELEGATION_MESSAGE)
+    expect(mockSignUserOp).toHaveBeenCalledWith(PASSKEY_SIGNERS, { nonce: '9n' })
+  })
+
+  it('prefill-ish expiry: opts.expires_at rides the build body when given', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockHappyPath()
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      await result.current.editBudget(OLD_HASH, INPUT, { expiresAt: 4_102_444_800 })
+    })
+    const build = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/build'))!
+    expect(build[1]).toMatchObject({ expires_at: 4_102_444_800 })
+  })
+
+  it('abandoned at the NEW-grant signature: cancelled, nothing activated, nothing revoked', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({
+          delegation_hash: NEW_HASH,
+          version: 2,
+          signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: DELEGATION_MESSAGE },
+        })
+      }
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    mockSignDelegation.mockRejectedValue(new Error('User rejected the request'))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({ ok: false, reason: 'cancelled' })
+    })
+    expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/activate'))).toBe(false)
+    expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/revoke'))).toBe(false)
+  })
+
+  it('build refused (e.g. re-key in flight): the backend 409 travels as refused with its own sentence', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.reject(
+          new Error(
+            'A key rotation is in flight for this agent — finish or abandon the re-key before granting a new budget',
+          ),
+        )
+      }
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({
+        ok: false,
+        reason: 'refused',
+        detail:
+          'A key rotation is in flight for this agent — finish or abandon the re-key before granting a new budget',
+      })
+    })
+    expect(mockSignDelegation).not.toHaveBeenCalled()
+    expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/activate'))).toBe(false)
+  })
+
+  it('activation raced a revoke-all (409 no longer pending): failed, old state untouched, no revoke attempted', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({
+          delegation_hash: NEW_HASH,
+          version: 2,
+          signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: DELEGATION_MESSAGE },
+        })
+      }
+      if (url.endsWith('/activate')) return Promise.reject(new Error('Delegation is no longer pending'))
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'aa'.repeat(100))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({ ok: false, reason: 'failed' })
+    })
+    expect(mockPost.mock.calls.some((c) => String(c[0]).endsWith(`/delegations/${OLD_HASH}/revoke`))).toBe(false)
+  })
+
+  it("the old budget was ALREADY revoked before the stop: still success (oldDelegationRevoked: false), no stop ceremony", async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({
+          delegation_hash: NEW_HASH,
+          version: 2,
+          signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: DELEGATION_MESSAGE },
+        })
+      }
+      if (url.endsWith('/activate')) return Promise.resolve({ activated: true })
+      if (url.endsWith('/revoke')) {
+        return Promise.reject(new Error('Already revoked — the delegation was disabled on-chain and the record has been reconciled.'))
+      }
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'aa'.repeat(100))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: false })
+    })
+    expect(mockSignUserOp).not.toHaveBeenCalled()
+    expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/revoke/submit'))).toBe(false)
+  })
+
+  it('stop signature cancelled AFTER the new grant is live: revoke_unfinished names the live budget', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({
+          delegation_hash: NEW_HASH,
+          version: 2,
+          signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: DELEGATION_MESSAGE },
+        })
+      }
+      if (url.endsWith('/activate')) return Promise.resolve({ activated: true })
+      if (url.endsWith('/revoke')) {
+        return Promise.resolve({
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: '0xr',
+          user_operation: { nonce: '9n' },
+        })
+      }
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'aa'.repeat(100))
+    mockSignUserOp.mockRejectedValue(new Error('User rejected the request'))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({ ok: false, reason: 'revoke_unfinished', newDelegationHash: NEW_HASH })
+    })
+    // The stop was prepared but never submitted — the owner finishes it later.
+    expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/revoke/submit'))).toBe(false)
+  })
+
+  it('revoke submit fails AFTER the new grant is live: same revoke_unfinished partial state', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({
+          delegation_hash: NEW_HASH,
+          version: 2,
+          signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: DELEGATION_MESSAGE },
+        })
+      }
+      if (url.endsWith('/activate')) return Promise.resolve({ activated: true })
+      if (url.endsWith('/revoke')) {
+        return Promise.resolve({
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: '0xr',
+          user_operation: { nonce: '9n' },
+        })
+      }
+      if (url.endsWith('/revoke/submit')) return Promise.reject(new Error('Batch revocation failed'))
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'aa'.repeat(100))
+    mockSignUserOp.mockResolvedValue('0x' + 'bb'.repeat(100))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({ ok: false, reason: 'revoke_unfinished', newDelegationHash: NEW_HASH })
+    })
+  })
+
+  it('is edit-in-place only: it never calls revokeAll or touches other budgets', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockHappyPath()
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      await result.current.editBudget(OLD_HASH, INPUT)
+    })
+    const urls = mockPost.mock.calls.map((c) => String(c[0]))
+    expect(urls.some((u) => u.includes('/revoke-all'))).toBe(false)
+  })
+})
+
 describe('useDelegationBudget visible-only polling (#2732)', () => {
   beforeEach(() => {
     mockGet.mockReset()

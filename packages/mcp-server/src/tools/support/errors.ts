@@ -226,12 +226,37 @@ export function normalizeError(err: unknown): ToolFailure {
     }
   }
   if (err instanceof HavenApiError) {
+    // #3214: the #3102 rule — no hosted refusal carries a bare next_action —
+    // now covers the generic branches too. A 5xx (or status-less) upstream
+    // answer is usually transient — the live 500 that filed this re-ran the
+    // same quote with the same arguments and succeeded — so the step says
+    // retry the same call once; no tool is named because normalizeError sees
+    // every tool's errors (the message and the agent's own last call say
+    // which), and the idempotency key, where the tool has one, must not
+    // change. A 4xx is the call refused as made: retrying it the same way
+    // cannot succeed.
+    const step =
+      err.statusCode !== undefined && err.statusCode < 500
+        ? refusalNextStep({
+            nextAction: AgentPaymentNextAction.StopAndTellUser,
+            nextTool: null,
+            nextToolOmittedReason:
+              'the upstream call was refused as made (4xx); re-calling it the same way cannot succeed, so tell the user what failed',
+          })
+        : refusalNextStep({
+            nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+            nextTool: null,
+            nextToolOmittedReason:
+              'the upstream call failed transiently; re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user',
+          })
     return {
       success: false,
       code: err.code,
       message: err.message,
       statusCode: err.statusCode,
       paymentId: err.paymentId,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
     }
   }
   if (err instanceof HavenError) {
@@ -241,11 +266,33 @@ export function normalizeError(err: unknown): ToolFailure {
       message: err.message,
       statusCode: err.statusCode,
       paymentId: err.paymentId,
+      // #3214: a client-side Haven failure (no upstream answer to retry) —
+      // the step says stop rather than send the agent into a doomed retry.
+      next_action: AgentPaymentNextAction.StopAndTellUser,
+      ...nextStepWireFields(
+        refusalNextStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: null,
+          nextToolOmittedReason:
+            'the client failed before an upstream answer (code and message say how); re-calling it the same way will fail the same way, so tell the user',
+        }),
+      ),
     }
   }
   return {
     success: false,
     code: 'UNKNOWN_ERROR',
     message: err instanceof Error ? err.message : String(err),
+    // #3214: even a refusal with no code or status carries the family —
+    // the agent is told to stop instead of reading the dead end as an answer.
+    next_action: AgentPaymentNextAction.StopAndTellUser,
+    ...nextStepWireFields(
+      refusalNextStep({
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason:
+          'the failure had no recognizable shape (no code, no status); re-calling it the same way will fail the same way, so tell the user',
+      }),
+    ),
   }
 }

@@ -12,6 +12,12 @@ import {
   type TransactionFilterAgentRow,
 } from '../../infra/repositories/transaction-history.js'
 import { getChain } from '../../domain/chains.js'
+import {
+  DEFAULT_TRANSACTION_CURRENCY,
+  transactionCurrencyOrDefault,
+  type TransactionCurrency,
+} from '../../domain/transaction-currency.js'
+import { findCurrencyPreference } from '../../infra/repositories/users.js'
 import { fetchAccountTransactions } from './aggregate.js'
 import { toCanonicalAddress } from './normalize.js'
 import { compareEnrichedTransactions, enrichedTransactionIdentityKey } from './ordering.js'
@@ -44,7 +50,7 @@ export interface AggregateAccountTransactionsResult {
 
 /** Fans `fetchAccountTransactions` out across every account, tagging each transaction with its account. */
 export async function aggregateAccountTransactions(
-  safes: SmartAccountRow[],
+  accounts: SmartAccountRow[],
   log: FastifyBaseLogger,
   fresh: boolean,
 ): Promise<AggregateAccountTransactionsResult> {
@@ -52,18 +58,18 @@ export async function aggregateAccountTransactions(
   const failedAccountIds: string[] = []
   let truncated = false
 
-  for (const safe of safes) {
+  for (const account of accounts) {
     try {
       const { transactions, hadFailures, truncated: accountTruncated } = await fetchAccountTransactions({
-        accountId: safe.id,
-        accountAddress: safe.account_address,
-        chainId: safe.chain_id,
+        accountId: account.id,
+        accountAddress: account.account_address,
+        chainId: account.chain_id,
         log,
         fresh,
       })
 
       if (hadFailures) {
-        failedAccountIds.push(safe.id)
+        failedAccountIds.push(account.id)
       }
 
       if (accountTruncated) {
@@ -73,8 +79,8 @@ export async function aggregateAccountTransactions(
       for (const tx of transactions) {
         merged.push({
           ...tx,
-          chainId: safe.chain_id,
-          accountId: safe.id,
+          chainId: account.chain_id,
+          accountId: account.id,
           // #3129: the third place an address reaches the wire row. The two
           // ROW producers normalise, but `accountAddress` is attached here,
           // during assembly, so it skipped the boundary entirely. It is
@@ -82,14 +88,14 @@ export async function aggregateAccountTransactions(
           // happens to write it that way — every lookup is
           // `LOWER(account_address) = LOWER($2)`, so nothing enforces it, and
           // one row written lowercase would put both forms in one response.
-          accountAddress: toCanonicalAddress(safe.account_address),
-          accountName: safe.name,
+          accountAddress: toCanonicalAddress(account.account_address),
+          accountName: account.name,
         })
       }
     } catch (err) {
-      failedAccountIds.push(safe.id)
+      failedAccountIds.push(account.id)
       log.warn(
-        { err, accountId: safe.id, accountAddress: safe.account_address, chainId: safe.chain_id },
+        { err, accountId: account.id, accountAddress: account.account_address, chainId: account.chain_id },
         'Account transaction aggregation failed',
       )
     }
@@ -101,10 +107,11 @@ export async function aggregateAccountTransactions(
 /** x402-merge, sort, dedupe, and agent-enrich the full merged feed (pre-filter, pre-paginate). */
 export async function mergeSortDedupeAndEnrich(
   userId: string,
-  safes: SmartAccountRow[],
+  accounts: SmartAccountRow[],
   merged: EnrichedTransaction[],
+  currency: TransactionCurrency = DEFAULT_TRANSACTION_CURRENCY,
 ): Promise<EnrichedTransaction[]> {
-  const mergedWithX402 = await mergeX402Transactions(userId, safes, merged)
+  const mergedWithX402 = await mergeX402Transactions(userId, accounts, merged)
 
   mergedWithX402.sort(compareEnrichedTransactions)
 
@@ -116,7 +123,17 @@ export async function mergeSortDedupeAndEnrich(
     return true
   })
 
-  return enrichTransactionsWithAgents(userId, deduped)
+  return enrichTransactionsWithAgents(userId, deduped, currency)
+}
+
+/**
+ * The currency this user's converted amounts are struck in (#3127): their
+ * stored `currency_preference`, or SEK when none is set — the documented
+ * default, not an inherited one. One preference read per request, on the
+ * same scoped repository read `/user/preferences` serves.
+ */
+export async function resolveTransactionCurrency(userId: string): Promise<TransactionCurrency> {
+  return transactionCurrencyOrDefault(await findCurrencyPreference(userId))
 }
 
 export interface TransactionFilterOptions {
@@ -189,6 +206,12 @@ export interface AccountTransactionsPageParams {
   fresh: boolean
   page: number
   limit: number
+  /**
+   * The currency the converted triple is struck in (#3127). The route
+   * resolves it from the user's preference and passes it in — this pipeline
+   * stays preference-blind like the rest of the module.
+   */
+  currency?: TransactionCurrency
 }
 
 export interface AccountTransactionsPage {
@@ -207,7 +230,7 @@ export interface AccountTransactionsPage {
 export async function buildAccountTransactionsPage(
   params: AccountTransactionsPageParams,
 ): Promise<AccountTransactionsPage> {
-  const { userId, accountId, accountAddress, chainId, log, fresh, page, limit } = params
+  const { userId, accountId, accountAddress, chainId, log, fresh, page, limit, currency = DEFAULT_TRANSACTION_CURRENCY } = params
   const { transactions: allTransactions } = await fetchAccountTransactions({
     accountId,
     accountAddress,
@@ -241,7 +264,7 @@ export async function buildAccountTransactionsPage(
       // normalising it would add a call that guarantees nothing. (The same
       // raw value also becomes `ownedAccount.account_address` below: that is
       // the one path by which it could reach a row, and it does not, because
-      // `mergeX402Transactions` reads only `safe.id` from those rows and each
+      // `mergeX402Transactions` reads only `account.id` from those rows and each
       // x402 row takes its own `accountAddress` from the normalised
       // `row.account_address`.) The other two input sites are the
       // `fetchAccountTransactions` calls in `aggregateAccountTransactions`
@@ -257,7 +280,7 @@ export async function buildAccountTransactionsPage(
   const start = (page - 1) * limit
   const paginated = enrichedAllTransactions.slice(start, start + limit)
 
-  const attributed = await enrichTransactionsWithAgents(userId, paginated)
+  const attributed = await enrichTransactionsWithAgents(userId, paginated, currency)
   // #2870: after agent enrichment — that is what puts `paymentId` on raw
   // explorer rows — and over the PAGE only, so this is one ledger query.
   const transactions = await enrichTransactionsWithAccounting(userId, attributed, log)
@@ -276,7 +299,7 @@ export interface TransactionFilterTokenOption {
 }
 
 export interface TransactionFilterResult {
-  safes: SmartAccountRow[]
+  accounts: SmartAccountRow[]
   agents: TransactionFilterAgentRow[]
   tokens: TransactionFilterTokenOption[]
 }
@@ -286,66 +309,66 @@ export async function resolveTransactionFilters(
   log: FastifyBaseLogger,
   fresh: boolean,
 ): Promise<TransactionFilterResult> {
-  const [safes, agents] = await Promise.all([
+  const [accounts, agents] = await Promise.all([
     listBasicAccountsForUser(userId),
     listAgentsForTransactionFilters(userId),
   ])
 
   const tokenOptions = new Map<string, TransactionFilterTokenOption>()
 
-  for (const safe of safes) {
-    const chain = getChain(safe.chain_id)
+  for (const account of accounts) {
+    const chain = getChain(account.chain_id)
     const nativeToken = Object.values(chain.tokens).find((token) => token.address === null)!
-    const nativeKey = `${safe.chain_id}:native`
+    const nativeKey = `${account.chain_id}:native`
     tokenOptions.set(nativeKey, {
       key: nativeKey,
       symbol: nativeToken.symbol,
       address: null,
-      chainId: safe.chain_id,
+      chainId: account.chain_id,
       isNative: true,
     })
   }
 
   const tokenResults = await Promise.all(
-    safes.map(async (safe) => {
+    accounts.map(async (account) => {
       try {
         const { transactions } = await fetchAccountTransactions({
-          accountId: safe.id,
-          accountAddress: safe.account_address,
-          chainId: safe.chain_id,
+          accountId: account.id,
+          accountAddress: account.account_address,
+          chainId: account.chain_id,
           log,
           fresh,
         })
 
-        return { safe, transactions }
+        return { account, transactions }
       } catch (err) {
         log.warn(
-          { err, accountId: safe.id, accountAddress: safe.account_address, chainId: safe.chain_id },
+          { err, accountId: account.id, accountAddress: account.account_address, chainId: account.chain_id },
           'Transaction filter token collection failed',
         )
-        return { safe, transactions: [] as Transaction[] }
+        return { account, transactions: [] as Transaction[] }
       }
     }),
   )
 
-  for (const { safe, transactions } of tokenResults) {
+  for (const { account, transactions } of tokenResults) {
     for (const tx of transactions) {
       if (tx.type !== 'erc20' || !tx.tokenAddress) continue
-      const key = `${safe.chain_id}:${tx.tokenAddress.toLowerCase()}`
+      const key = `${account.chain_id}:${tx.tokenAddress.toLowerCase()}`
       if (tokenOptions.has(key)) continue
 
       tokenOptions.set(key, {
         key,
         symbol: tx.asset,
         address: tx.tokenAddress.toLowerCase(),
-        chainId: safe.chain_id,
+        chainId: account.chain_id,
         isNative: false,
       })
     }
   }
 
   try {
-    const x402Transactions = await fetchConfirmedX402Transactions(userId, safes)
+    const x402Transactions = await fetchConfirmedX402Transactions(userId, accounts)
     for (const tx of x402Transactions) {
       if (tx.type !== 'erc20' || !tx.tokenAddress) continue
       const key = `${tx.chainId}:${tx.tokenAddress.toLowerCase()}`
@@ -369,5 +392,5 @@ export async function resolveTransactionFilters(
     return a.symbol.localeCompare(b.symbol)
   })
 
-  return { safes, agents, tokens }
+  return { accounts, agents, tokens }
 }

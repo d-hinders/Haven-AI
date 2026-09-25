@@ -11,7 +11,7 @@
  * directory, and the shared signer-action core in `lib/` may not reach the
  * pool. Follows the conventions `agent-passports.ts` set for #985: explicit
  * `executor` last defaulting to the pool, domain-shaped arguments, and the
- * scoping key as a required parameter — `userSafeId` IS the tenant scope
+ * scoping key as a required parameter — `accountId` IS the tenant scope
  * here, so it is never defaulted or inferred.
  */
 
@@ -22,7 +22,7 @@ export type { Executor }
 
 /** Record a newly enrolled passkey against the account. */
 export async function addAccountPasskey(
-  userSafeId: string,
+  accountId: string,
   passkey: { keyId: string; x: string; y: string },
   executor: Executor = pool,
 ): Promise<void> {
@@ -30,42 +30,42 @@ export async function addAccountPasskey(
     `INSERT INTO hybrid_account_passkeys (account_id, key_id, public_key_x, public_key_y)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT DO NOTHING`,
-    [userSafeId, passkey.keyId, passkey.x, passkey.y],
+    [accountId, passkey.keyId, passkey.x, passkey.y],
   )
 }
 
 /** Drop a passkey that has been removed on-chain. */
 export async function removeAccountPasskey(
-  userSafeId: string,
+  accountId: string,
   keyId: string,
   executor: Executor = pool,
 ): Promise<void> {
   await executor.query(
     `DELETE FROM hybrid_account_passkeys WHERE account_id = $1 AND LOWER(key_id) = LOWER($2)`,
-    [userSafeId, keyId],
+    [accountId, keyId],
   )
 }
 
 /** Record the EOA owner an account has just transferred ownership to. */
 export async function setAccountOwnerAddress(
-  userSafeId: string,
+  accountId: string,
   ownerAddress: string,
   executor: Executor = pool,
 ): Promise<void> {
   await executor.query(
     `UPDATE smart_accounts SET owner_address = $1 WHERE id = $2`,
-    [ownerAddress.toLowerCase(), userSafeId],
+    [ownerAddress.toLowerCase(), accountId],
   )
 }
 
 /** Clear the EOA owner after an on-chain transferOwnership(address(0)) (#1087). */
 export async function clearAccountOwnerAddress(
-  userSafeId: string,
+  accountId: string,
   executor: Executor = pool,
 ): Promise<void> {
   await executor.query(
     `UPDATE smart_accounts SET owner_address = NULL WHERE id = $1`,
-    [userSafeId],
+    [accountId],
   )
 }
 
@@ -89,14 +89,14 @@ export interface AccountPasskeyRow {
 }
 
 /**
- * `userSafeId` IS the tenant scope here (see the header). Ordered by
+ * `accountId` IS the tenant scope here (see the header). Ordered by
  * enrollment time so the derived owner config is deterministic.
  */
 export async function listAccountPasskeys(
-  userSafeId: string,
+  accountId: string,
   executor: Executor = pool,
 ): Promise<AccountPasskeyRow[]> {
-  const result = await executor.query<AccountPasskeyRow>(LIST_ACCOUNT_PASSKEYS_SQL, [userSafeId])
+  const result = await executor.query<AccountPasskeyRow>(LIST_ACCOUNT_PASSKEYS_SQL, [accountId])
   return result.rows
 }
 

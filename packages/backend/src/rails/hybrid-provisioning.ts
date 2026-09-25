@@ -17,13 +17,13 @@
  *   both may be combined (EOA + N passkeys) which #836 (recovery) will use.
  */
 
-import { http, createPublicClient, zeroAddress, type Address, type LocalAccount } from 'viem'
+import { createPublicClient, zeroAddress, type Address, type LocalAccount } from 'viem'
 import { KEYED_LOCK_NAMESPACES, withKeyedAdvisoryLock } from '../platform/leader-lock.js'
 import { toAccount } from 'viem/accounts'
 import { Implementation, toMetaMaskSmartAccount } from '@metamask/smart-accounts-kit'
-import { getChain } from '../domain/chains.js'
 
 import { getDelegationContracts, chainForId } from './delegation-contracts.js'
+import { rpcTransport } from '../infra/chain/rpc-transport.js'
 
 export interface PasskeySigner {
   /** WebAuthn credential id (hex or base64url-derived hex, per the kit). */
@@ -63,7 +63,7 @@ async function buildWatchOnlyAccount(chainId: number, owner: HybridOwnerConfig) 
 
   const client = createPublicClient({
     chain: chainForId(chainId),
-    transport: http(getChain(chainId).rpcUrl),
+    transport: rpcTransport(chainId),
   })
   const account = await toMetaMaskSmartAccount({
     client: client as never, // two viem instances in the type graph — runtime-identical
@@ -182,9 +182,15 @@ export async function ensureHybridDeployed(
   attribution?: { agentId?: string | null; userId?: string | null },
 ): Promise<EnsureDeployedResult> {
   if (expectedAddress) {
+    // Through the failover transport (#3255): a lagging fallback node can
+    // answer a freshly deployed account with `0x`. That is fail-open by
+    // design, and costs relayer gas but moves no funds: the deploy below
+    // either reverts, or (when the signer set changed since provisioning,
+    // #891) deploys a spurious account at the address the CURRENT signers
+    // derive, and activation then refuses on the address mismatch.
     const client = createPublicClient({
       chain: chainForId(chainId),
-      transport: http(getChain(chainId).rpcUrl),
+      transport: rpcTransport(chainId),
     })
     const existing = await client.getBytecode({ address: expectedAddress })
     if (existing && existing !== '0x') {

@@ -23,6 +23,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
+// The double below replaces only the FETCHING half of the accounts barrel;
+// the route also reads the pure freshness combiner from it (#3295), which
+// stays real so the marker math this file pins is the production math.
+import { combineBalanceFreshness } from '../../modules/accounts/balance-freshness.js'
 
 const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -35,6 +39,7 @@ const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(()
     ),
     fetchAccountTransactions: vi.fn(),
     mergeX402Transactions: vi.fn(),
+    resolveTransactionCurrency: vi.fn(async () => 'SEK'),
   },
   fiatMocks: { getFiatValuesForTokenAmount: vi.fn() },
 }))
@@ -42,14 +47,17 @@ const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(()
 vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
-vi.mock('../../modules/accounts/index.js', () => portfolioMocks)
+vi.mock('../../modules/accounts/index.js', () => ({
+  ...portfolioMocks,
+  combineBalanceFreshness,
+}))
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 vi.mock('../../modules/transactions/index.js', () => transactionMocks)
 
 import dashboardRoutes from '../dashboard.js'
 
-const SAFE = {
-  id: 'safe-1',
+const ACCOUNT = {
+  id: 'account-1',
   account_address: '0x1111111111111111111111111111111111111111',
   chain_id: 8453,
   name: 'Main account',
@@ -60,9 +68,9 @@ const AGENT = {
   id: 'agent-1',
   name: 'Research agent',
   status: 'active',
-  account_id: SAFE.id,
-  account_name: SAFE.name,
-  account_chain_id: SAFE.chain_id,
+  account_id: ACCOUNT.id,
+  account_name: ACCOUNT.name,
+  account_chain_id: ACCOUNT.chain_id,
   account_type: null,
 }
 
@@ -78,7 +86,7 @@ function snapshotDate(offsetDays = 0): string {
  * everything else answers empty, matching the route's happy path.
  */
 function installQueryMock(overrides: {
-  safes?: unknown[]
+  accounts?: unknown[]
   agents?: unknown[]
   snapshots?: unknown[]
   paymentSpend?: unknown[]
@@ -88,7 +96,7 @@ function installQueryMock(overrides: {
       return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
     }
     if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
-      return Promise.resolve({ rows: overrides.safes ?? [SAFE] })
+      return Promise.resolve({ rows: overrides.accounts ?? [ACCOUNT] })
     }
     if (sql.includes('FROM agents a')) {
       return Promise.resolve({ rows: overrides.agents ?? [] })
@@ -136,12 +144,17 @@ describe('dashboard aggregates (characterization, #1167)', () => {
     portfolioMocks.fetchPortfolioForAccount.mockReset()
     transactionMocks.fetchAccountTransactions.mockReset()
     transactionMocks.mergeX402Transactions.mockReset()
+    transactionMocks.resolveTransactionCurrency.mockClear()
     fiatMocks.getFiatValuesForTokenAmount.mockReset()
 
-    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({ totalUsd: 100, totalEur: 92 })
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
+      totalUsd: 100,
+      totalEur: 92,
+      totalSek: 920,
+    })
     transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
     transactionMocks.mergeX402Transactions.mockResolvedValue([])
-    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0, eur: 0 })
+    fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0, eur: 0, sek: 0 })
   })
 
   async function getOverview() {
@@ -161,7 +174,9 @@ describe('dashboard aggregates (characterization, #1167)', () => {
       expect(response.statusCode).toBe(200)
       const inserts = callsMatching('INSERT INTO user_daily_portfolio_snapshots')
       expect(inserts).toHaveLength(1)
-      expect(inserts[0][1]).toEqual(['user-1', snapshotDate(0), 100, 92])
+      // The SEK total rides the same first-write: one price read books all
+      // three currencies beside each other (#3127 round 2).
+      expect(inserts[0][1]).toEqual(['user-1', snapshotDate(0), 100, 92, 920])
     })
 
     it("does NOT re-write the snapshot when today's row already exists", async () => {
@@ -191,7 +206,7 @@ describe('dashboard aggregates (characterization, #1167)', () => {
     it("derives amounts and percentages from yesterday's snapshot", async () => {
       installQueryMock({
         snapshots: [
-          { snapshot_date: snapshotDate(-1), total_usd: '80', total_eur: '75' },
+          { snapshot_date: snapshotDate(-1), total_usd: '80', total_eur: '75', total_sek: '740' },
         ],
       })
 
@@ -200,8 +215,10 @@ describe('dashboard aggregates (characterization, #1167)', () => {
       expect(body.change.available).toBe(true)
       expect(body.change.usdAmount).toBeCloseTo(20, 10)
       expect(body.change.eurAmount).toBeCloseTo(17, 10)
+      expect(body.change.sekAmount).toBeCloseTo(180, 10)
       expect(body.change.usdPercent).toBeCloseTo(25, 10)
       expect(body.change.eurPercent).toBeCloseTo((17 / 75) * 100, 10)
+      expect(body.change.sekPercent).toBeCloseTo((180 / 740) * 100, 10)
     })
 
     it('reports change as unavailable and zeroed when yesterday has no snapshot', async () => {
@@ -213,9 +230,29 @@ describe('dashboard aggregates (characterization, #1167)', () => {
         available: false,
         usdAmount: 100,
         eurAmount: 92,
+        // No SEK baseline either — the wire carries null, not a fabricated 0.
+        sekAmount: null,
         usdPercent: 0,
         eurPercent: 0,
+        sekPercent: 0,
       })
+    })
+
+    it('reports the SEK change as unavailable when yesterday predates migration 090 (total_sek NULL) — never a fabricated -100% (#3127 round 2)', async () => {
+      installQueryMock({
+        snapshots: [
+          { snapshot_date: snapshotDate(-1), total_usd: '80', total_eur: '75', total_sek: null },
+        ],
+      })
+
+      const body = (await getOverview()).json()
+
+      expect(body.change.available).toBe(true)
+      expect(body.change.sekAmount).toBe(null)
+      expect(body.change.sekPercent).toBe(0)
+      // The pre-090 day prices the usd/eur pair exactly as before.
+      expect(body.change.usdAmount).toBeCloseTo(20, 10)
+      expect(body.change.eurAmount).toBeCloseTo(17, 10)
     })
 
     it('reports a zero percentage rather than dividing by a zero baseline', async () => {
@@ -240,7 +277,7 @@ describe('dashboard aggregates (characterization, #1167)', () => {
     it('sums the payment aggregate alone — the approval aggregate is gone (#2055)', async () => {
       installQueryMock({
         paymentSpend: [
-          { token_symbol: 'USDC', usd_sum: '10', eur_sum: '9', fallback_amount: '0' },
+          { token_symbol: 'USDC', usd_sum: '10', eur_sum: '9', sek_sum: '95', fallback_amount: '0', fallback_amount_sek: '0' },
         ],
       })
 
@@ -248,14 +285,15 @@ describe('dashboard aggregates (characterization, #1167)', () => {
 
       expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(10, 10)
       expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(9, 10)
+      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(95, 10)
       expect(fiatMocks.getFiatValuesForTokenAmount).not.toHaveBeenCalled()
     })
 
     it('prices rows carrying a fallback amount through the fiat lookup', async () => {
-      fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 2, eur: 1.8 })
+      fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 2, eur: 1.8, sek: 18 })
       installQueryMock({
         paymentSpend: [
-          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', fallback_amount: '2' },
+          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '0', fallback_amount: '2', fallback_amount_sek: '0' },
         ],
       })
 
@@ -264,6 +302,60 @@ describe('dashboard aggregates (characterization, #1167)', () => {
       expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenCalledWith('USDC', '2')
       expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(2, 10)
       expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(1.8, 10)
+      // A zero `fallback_amount_sek` prices NO SEK fallback even though the
+      // same fiat read returned one — SEK is booked or NULL, never re-priced
+      // from the USD/EUR bucket (#3127 round-3 review).
+      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(0, 10)
+    })
+
+    it('does NOT double-count a row migration 090 backfilled — the probe fixture, result 21 vs truth 10.5 pre-fix (#3127 round-3 review)', async () => {
+      // The reviewer's probe: one confirmed row with a backfilled
+      // `sek_value` of 10.5 and no booked USD/EUR. The pre-fix accumulator
+      // collected the row's token amount through `fallback_amount` (whose
+      // predicate never looks at `sek_value`), handed it to the fiat lookup,
+      // and added the read's SEK on top of `sek_sum` — 21 where the truth is
+      // 10.5. On the local dev DB this row shape is the common one after
+      // migration 090 (117 of 657 confirmed intents backfilled, 18 carry
+      // usd_value), and the suite stayed green with the probe present.
+      fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0.1, eur: 0.09, sek: 10.5 })
+      installQueryMock({
+        paymentSpend: [
+          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '10.5', fallback_amount: '1', fallback_amount_sek: '0' },
+        ],
+      })
+
+      const body = (await getOverview()).json()
+
+      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(10.5, 10)
+      // The USD/EUR re-price still runs for the same row — the buckets are
+      // independent, the SEK half of the read is what may not land.
+      expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(0.1, 10)
+      expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(0.09, 10)
+    })
+
+    it('prices SEK from its own NULL-sek_value bucket, once, alongside an independent USD/EUR bucket', async () => {
+      // One row booked SEK (backfilled) needing the USD/EUR re-price, plus
+      // one row with `sek_value` still NULL needing the SEK re-price: each
+      // bucket prices its own rows exactly once. One shared fiat answer
+      // serves both reads (the ratchet forbids positional mocks here): the
+      // SEK figure each row contributes comes from the read its OWN bucket
+      // triggered, which the call-count assertions below pin.
+      fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: 0.1, eur: 0.09, sek: 1 })
+      installQueryMock({
+        paymentSpend: [
+          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '10.5', fallback_amount: '1', fallback_amount_sek: '0' },
+          { token_symbol: 'USDC', usd_sum: '0', eur_sum: '0', sek_sum: '0', fallback_amount: '0', fallback_amount_sek: '1' },
+        ],
+      })
+
+      const body = (await getOverview()).json()
+
+      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenCalledTimes(2)
+      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenNthCalledWith(1, 'USDC', '1')
+      expect(fiatMocks.getFiatValuesForTokenAmount).toHaveBeenNthCalledWith(2, 'USDC', '1')
+      expect(body.metrics.monthlyAgentSpendSek).toBeCloseTo(11.5, 10)
+      expect(body.metrics.monthlyAgentSpendUsd).toBeCloseTo(0.1, 10)
+      expect(body.metrics.monthlyAgentSpendEur).toBeCloseTo(0.09, 10)
     })
 
     it('scopes the month-to-date aggregate to the authenticated user', async () => {

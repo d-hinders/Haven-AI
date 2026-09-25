@@ -23,8 +23,8 @@
  */
 import { describe, it, expect } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
-import { hashTypedData } from 'viem'
-import { buildX402ExpectedMessage } from '@haven_ai/sdk'
+import { addressFromKey, buildX402ExpectedMessage } from '@haven_ai/sdk'
+import { buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 import { createEdgeSigner } from './core.js'
 import { createToolHandlers, type ToolPayload } from './tools.js'
 
@@ -42,7 +42,6 @@ const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
 const PAYMENT_ID = 'pay_funded_retry'
-const FUNDING_HASH = '0x' + 'cd'.repeat(32)
 
 /**
  * The merchant's own EIP-712 domain, carried through the rebuild by
@@ -68,13 +67,19 @@ const PAYMENT_REQUIRED = {
   ],
 }
 
-/** Stands in for the funding UserOp typed data the rebuild re-serves. */
-const TYPED_DATA = {
-  domain: { name: 'HavenFundedRetry', version: '1', chainId: 8453 },
-  types: { Payload: [{ name: 'hash', type: 'bytes32' }] },
-  primaryType: 'Payload',
-  message: { hash: FUNDING_HASH },
-}
+// #3281: a REAL funding leg (the shared builder) — this key's own account
+// redeeming one budget delegation, transferring the quoted amount of the
+// quoted token to this key's own delegate EOA. Stands in for the funding
+// UserOp typed data the rebuild re-serves; the toy 'Payload' fixture the
+// x402 arm now refuses.
+const FUNDING = buildFundingLegUserOp({
+  delegate: addressFromKey(TEST_KEY) as `0x${string}`,
+  asset: PAYMENT_REQUIRED.accepts[0].asset as `0x${string}`,
+  amount: PAYMENT_REQUIRED.accepts[0].amount,
+  chainId: 8453, // PAYMENT_REQUIRED.accepts[0].network ('base')
+})
+const TYPED_DATA = FUNDING.typedData
+const FUNDING_HASH = FUNDING.payloadHash as string
 
 /** The window the funded-retry rebuild mints: `now + 10 minutes`. */
 const FRESH_WINDOW = new Date(Date.now() + 10 * 60 * 1000).toISOString()
@@ -96,7 +101,7 @@ async function fundedRetryContext(expiresAt: string) {
     asset: PAYMENT_REQUIRED.accepts[0].asset,
     network: PAYMENT_REQUIRED.accepts[0].network,
     expiresAt,
-    typedDataHash: hashTypedData(TYPED_DATA as never),
+    typedDataHash: FUNDING.digest,
   }
   const message = buildX402ExpectedMessage(context as never)
   const account = privateKeyToAccount(BINDING_KEY)

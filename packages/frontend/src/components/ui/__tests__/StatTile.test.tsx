@@ -1,4 +1,4 @@
-import { render, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { StatTile } from '../StatTile'
 
@@ -231,5 +231,19 @@ describe('StatTile — the caption of the chip', () => {
     const t = mount(<StatTile label="Spent" value="$324.75" polarity="neutral" delta={15.9} />)
     expect(t.chip()?.textContent).toBe('+15.9%')
     expect(within(t.container as HTMLElement).queryByText(/^vs previous/)).toBeNull()
+  })
+})
+
+describe('delta locale (#3204)', () => {
+  it('writes the percentage in the caller\'s locale so the chip matches the figure beside it', () => {
+    // sv-SE: decimal comma and a (non-breaking) space before the sign.
+    // Mutation: hard-code `en-US` in the formatter → red.
+    render(<StatTile label="Spent" value="324,75 kr" polarity="neutral" delta={15.94} deltaLocale="sv-SE" />)
+    expect(screen.getByText(/\+15,9\s?%/)).toBeInTheDocument()
+  })
+
+  it('defaults to en-US, keeping every existing caller\'s output', () => {
+    render(<StatTile label="Spent" value="$324.75" polarity="neutral" delta={15.94} />)
+    expect(screen.getByText('+15.9%')).toBeInTheDocument()
   })
 })

@@ -22,6 +22,7 @@ type ClientBoundary = {
 const boundary: ClientBoundary = {
   publicMethods: [
     'authorizeX402',
+    'clientUpdate', // #3303
     'completeX402MerchantCall',
     'createIntent',
     'createX402Intent',
@@ -107,6 +108,7 @@ const boundary: ClientBoundary = {
     "async submitX402Erc7710(paymentId: string, signature: string): Promise<string>",
     "async sweepDelegate(): Promise<SweepResult>",
     "async waitForConfirmation(paymentId: string): Promise<PaymentResult>",
+    "clientUpdate(): HavenClientUpdate | undefined",
     "constructor(config: HavenClientConfig)",
     "readonly delegateAddress: string | undefined",
     "sign(hash: string): string",
@@ -130,7 +132,9 @@ const boundary: ClientBoundary = {
   privateTotalCeiling: 4,
   localImports: [
     './account-reads.js',
+    './client-identity.js', // #3303: the HavenClientUpdate type clientUpdate() returns
     './delegate-sweep.js',
+    './direct-payment-guard.js', // #3283: the signing-surface allowlist signForData runs
     './haven-api-transport.js',
     './mcp-merchant-transport.js',
     './merchant-completion.js',
@@ -141,6 +145,7 @@ const boundary: ClientBoundary = {
     './sweep.js',
     './tool-adapter.js',
     './types.js',
+    './userop-binding.js',
     './x402-erc7710.js',
     './x402-funding-leg.js',
     './x402-protocol.js',
@@ -427,13 +432,18 @@ describe('HavenClient structural boundary', () => {
       // see how long the SDK waited before saying so.
       'DEFAULT_CONFIRMATION_TIMEOUT_MS',
       'DEFAULT_NEXT_TOOL_BY_ACTION', // #3101
+      'DIRECT_SIGN_CONTEXT_VERSION', // #3271
       'DISCOVERY_MAX_BYTES',
+      'ENTRY_POINT_V07', // #3271
       'ERC7710_ASSET_TRANSFER_METHOD',
       'HAVEN_AGENT_RUNBOOK_MD',
+      'HAVEN_CLIENT_HEADER', // #3303
       'HAVEN_CONNECTOR_CHANNEL',
       'HAVEN_MINIMUM_NODE_VERSION',
       'HAVEN_SKILL_BODY_MD',
       'HAVEN_SKILL_MD',
+      'HYBRID_DELEGATOR_DOMAIN_NAME', // #3271
+      'HYBRID_DELEGATOR_DOMAIN_VERSION', // #3271
       'HavenApiError',
       'HavenClient',
       'HavenError',
@@ -441,14 +451,20 @@ describe('HavenClient structural boundary', () => {
       'HavenPaymentStateError',
       'HavenSigningError',
       'HavenTimeoutError',
+      'HavenTypedDataRefusedError', // #3283
       'HavenUnsupportedSignerVersionError',
+      'HavenUserOpBindingError', // #3271
       'HavenZeroSettlementHashError',
       'INSECURE_RETRY_TARGET_CODE', // #3097
       'MERCHANT_DISCOVERY_PATHS',
       'MerchantTimeoutError',
       'NEXT_TOOL_SERVER_NAMES', // #3101
       'NEXT_TOOL_SERVER_ROLES', // #3101
+      'PACKED_USER_OPERATION_FIELDS', // #3271
       'RECEIPT_VERSION',
+      'ROOT_AUTHORITY', // #3283
+      'SDK_CLIENT_IDENTITY', // #3303
+      'SDK_VERSION', // #3303
       'SIGNER_UPDATE_FALLBACK',
       'SKILL_FOLDER_NAME',
       'SWEEP_BASE_CHAIN_ID',
@@ -457,6 +473,7 @@ describe('HavenClient structural boundary', () => {
       'SWEEP_BASE_USDC_ADDRESS',
       'SignerRefusalCode',
       'TRANSFER_WITH_AUTHORIZATION_TYPES',
+      'TYPED_DATA_NOT_ALLOWED', // #3283
       'X402AlreadySettledError',
       'X402PaymentHeaderValidationError',
       'X402UnexpectedStatusError',
@@ -468,7 +485,9 @@ describe('HavenClient structural boundary', () => {
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
       'addressFromKey',
+      'assertBoundDirectPaymentUserOp', // #3283
       'assertSecureX402RetryTarget', // #3097
+      'assertUserOpTypedDataBinding', // #3271
       'buildSweepAuthorizationMessage',
       'buildSweepTypedData',
       'buildX402ExpectedMessage',
@@ -480,21 +499,26 @@ describe('HavenClient structural boundary', () => {
       'decodeBase64Json',
       'decodeBase64Utf8',
       'defaultNextToolFor', // #3101
+      'deriveDelegateAccountAddress', // #3283
       'discoverMerchantMcpUrl',
       'encodeBase64Json',
       'encodeBase64Utf8',
       'encodePaymentProof',
+      'havenClientIdentity', // #3303
       'havenTools',
       'isConnectorChannel',
       'isErc7710Option',
+      'isPackedUserOperationTypedData', // #3271
       'isSecureX402RetryTarget', // #3097
       'isSupportedNodeVersion',
       'isSweepableChain',
       'isZeroSettlementTxHash', // #2970
       'normalizePaymentRequired',
+      'packedUserOperationHash', // #3271
       'parseNextTool', // #3101
       'parsePaymentRequired',
       'parsePaymentRequiredResponse',
+      'readClientUpdate', // #3303
       'readX402ReceiptPayer',
       'renderNextTool', // #3101
       'resolveConnectorChannel',
@@ -515,6 +539,7 @@ describe('HavenClient structural boundary', () => {
       'unsupportedNodeVersionMessage',
       'validateStandardX402PaymentHeader',
       'verifyPaymentReceipt',
+      'verifySettlementChild', // #3283
       'verifySignature',
       'x402AssetTransferMethod',
       'x402AuthorizationAmount',
@@ -532,6 +557,7 @@ describe('HavenClient structural boundary', () => {
       'apiKey: string',
       'baseUrl?: string',
       'chainRpcs?: Record<number, string>',
+      'clientIdentity?: string', // #3303
       'confirmationTimeout?: number',
       'defaultHeaders?: Record<string, string>',
       'delegateKey?: string',
@@ -564,6 +590,8 @@ describe('HavenClient structural boundary', () => {
       'HavenCatalogMerchant', // #3078
       'HavenCatalogSubmission',
       'HavenClientConfig',
+      'HavenClientUpdate', // #3303
+      'HavenListScope',
       'HavenPaymentReceipt',
       'HavenPaymentReceiptsPage', // #3128
       'MachinePaymentRail',
@@ -589,6 +617,7 @@ describe('HavenClient structural boundary', () => {
       'ReceiptVerification',
       'ResumeAuthorizedX402Input',
       'ResumeX402PaymentInput',
+      'SettlementChildExpectation', // #3283
       'SharedToolKey',
       'SignData',
       'SweepAuthorization',

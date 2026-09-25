@@ -84,7 +84,7 @@ export const GATE_MAP_PATH = process.env.PREFLIGHT_GATE_MAP
  * Only the `on:` block counts. A workflow can mention `pull_request` in a job
  * condition, a `concurrency:` group, a comment or a `gh` command line without
  * being triggered by one. Measured at ce79bf0c, a whole-file grep for the
- * string — the obvious shortcut — misclassifies exactly three of the nineteen
+ * string — the obvious shortcut — misclassifies exactly three
  * workflows: `claim-assignee.yml`, `morning-report-note.yml` and
  * `update-visual-baselines.yml`, none of which run on a pull request. Their
  * steps would join every builder's battery.

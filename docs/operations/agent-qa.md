@@ -22,7 +22,9 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - docs/bug-reports/_run-report-template.md
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
-last-verified: "2026-09-14"
+  - packages/demo-merchant-mcp/src/x402.ts
+  - packages/demo-merchant-mcp/src/http.ts
+last-verified: "2026-09-19"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -1215,7 +1217,8 @@ previous run's and A0's.
 
 A required skipped scenario makes the overall report partial/blocked even
 though the harness can exit zero. Copy the generated table into the full report
-template and file a GitHub issue for a reproducible failure. Include the Actions
+template and file a GitHub issue for a reproducible failure (an agent files it
+through the `new-task` skill). Include the Actions
 run URL and transaction/payment identifiers, but never API or private keys.
 
 ## What this session cannot see, and what to ask for
@@ -1417,12 +1420,23 @@ distinguishes have opposite causes:
 
   The unknown-session half was closed by #1578: a paid retry carrying a
   pre-restart session id now gets **HTTP 404 with JSON-RPC error `-32001`
-  ("Session not found")** — BEFORE the payment gate, so no authorization is
+  (message beginning "Session not found")** — BEFORE the payment gate, so no authorization is
   consumed. That response is a session problem, never a payment refusal:
   payment refusals are 402s carrying a reason. The client remedy is to
   re-initialize and retry with the SAME payment header, which then settles
-  exactly once. A bare re-challenge from a lost session should no longer
-  occur; if one appears, it is a regression, not a known mode.
+  exactly once. Since #3171 the 404 says so itself: its message begins
+  "Session not found. Nothing was settled here" and `error.data` carries
+  `{ reason: 'session_expired', settled: false, next_action:
+  'reinitialize_then_retry_same_payment_header' }`; the SDK's paid retry
+  (local `fetch()`/`payX402Quote()`/`resumeX402Payment()` and the hosted
+  `completeX402MerchantCall()` alike) reads that data, re-initializes and
+  resends the same header once. Once dev's demo merchant AND the hosted MCP
+  are both running the #3171 build, a run should no longer surface this 404 as
+  `merchant_status=404` after funding; until both are deployed, a bare
+  `-32001` 404 on dev is still the #2769 mode, not a regression. The merchant
+  also sweeps sessions idle longer than 30 minutes (`sessionIdleTtlMs`), which
+  answer the same 404. A bare re-challenge from a lost session should no
+  longer occur; if one appears, it is a regression, not a known mode.
 
   Note this is detected by the challenge's `error` reading the x402 default
   `"Payment required"`, **not** by the key being absent: the `PaymentRequired`
@@ -1453,7 +1467,13 @@ merchant log shows `ERC20: transfer amount exceeds balance`. That is a
 reverts during gas estimation, so it never becomes a transaction and leaves no
 trace on-chain. Since #1519 the merchant checks `authorizationState` and
 `balanceOf` before submitting and reports both cases in plain language, so this
-should not recur; if something like it does, take the funding `tx_hash` from
+should not recur. Since #3170 the erc7710 `submit` does the same once the
+submit rejects: chain-truth first (the #1515 already-settled check), then a
+proven revert is a payer-side 402 naming the next action, never a
+merchant-side fault — while a failure of the merchant's own key or node
+(nonce, fee, RPC) still is one, with its #2979 `reason_code`. If something
+like it does recur, take the funding
+`tx_hash` from
 the QA failure line and look at what follows it on the delegate's ERC-20 tab
 before assuming Haven is at fault.
 

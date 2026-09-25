@@ -6,6 +6,7 @@ import { authRateLimit } from '../middleware/rate-limit.js'
 import { config } from '../config.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 import { normalizeViaMarker } from '../domain/handoff-links.js'
+import { DEFAULT_TRANSACTION_CURRENCY } from '../domain/transaction-currency.js'
 import { OWNER_CLI_PURPOSE } from '../middleware/owner-cli.js'
 import {
   DEVICE_CODE_TTL_MS,
@@ -56,8 +57,10 @@ const SALT_ROUNDS = 10
 const ABSENT_USER_PASSWORD_HASH = bcrypt.hashSync(randomBytes(32).toString('hex'), SALT_ROUNDS)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MAX_EMAIL_LENGTH = 255
-const MIN_PASSWORD_LENGTH = 8
-const MAX_PASSWORD_LENGTH = 128
+/** The password bounds live in the spec (`minLength: 8`, `maxLength: 128` on
+ *  POST /auth/signup) and are enforced there since #3030; exported so the
+ *  test can pin the spec to them. */
+export const PASSWORD_BOUNDS = { min: 8, max: 128 } as const
 const MAX_NAME_LENGTH = 80
 const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F]/
 
@@ -78,9 +81,11 @@ interface LoginBody {
   password: string
 }
 
-function normalizeEmail(email: unknown): string | null {
-  if (typeof email !== 'string') return null
-
+// The request SHAPES (string types, the name and password bounds, required
+// fields) are the spec's, enforced before these handlers since #3030; what
+// the normalisers keep is semantic — blank after trimming, control
+// characters, the email form the spec does not state, whitespace collapse.
+function normalizeEmail(email: string): string | null {
   const normalized = email.trim().toLowerCase()
   if (
     normalized.length === 0 ||
@@ -93,9 +98,7 @@ function normalizeEmail(email: unknown): string | null {
   return normalized
 }
 
-function normalizeName(name: unknown): string | null {
-  if (typeof name !== 'string') return null
-
+function normalizeName(name: string): string | null {
   const normalized = name.trim().replace(/\s+/g, ' ')
   if (
     normalized.length === 0 ||
@@ -132,14 +135,6 @@ export default async function authRoutes(
       return reply.code(400).send({ error: 'Invalid email address' })
     }
 
-    if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
-      return reply.code(400).send({ error: 'Password must be at least 8 characters' })
-    }
-
-    if (password.length > MAX_PASSWORD_LENGTH) {
-      return reply.code(400).send({ error: 'Password must be 128 characters or fewer' })
-    }
-
     // The lookup takes the NORMALISED address: an exact match on the raw
     // input would let `ADA@Example.com` pass this check against a stored
     // `ada@example.com`, giving one person two accounts and two treasuries.
@@ -171,7 +166,11 @@ export default async function authRoutes(
         email: user.email,
         wallet_address: null,
         account_address: null,
-        currency_preference: 'USD',
+        // #3127: the row is WRITTEN with this same default (the signup INSERT
+        // now carries `currency_preference`), so the response and the column
+        // agree instead of the response hardcoding one currency while the
+        // column held another.
+        currency_preference: DEFAULT_TRANSACTION_CURRENCY,
         accounts: [],
       },
     })
@@ -215,7 +214,10 @@ export default async function authRoutes(
         email: user.email,
         wallet_address: user.wallet_address,
         account_address: user.account_address,
-        currency_preference: user.currency_preference ?? 'USD',
+        // #3127: the no-preference default is SEK — documented and deliberate
+        // (domain/transaction-currency.ts), the currency the transaction feed
+        // serves — not the inherited 'USD' this line used to answer.
+        currency_preference: user.currency_preference ?? DEFAULT_TRANSACTION_CURRENCY,
         accounts,
       },
     }
@@ -268,7 +270,7 @@ export default async function authRoutes(
       // a human on the approval screen, so it is bounded and stripped of
       // control characters here. The screen still renders it as text, never
       // as markup — two independent reasons it cannot become a lure.
-      const rawLabel = typeof request.body?.client_label === 'string' ? request.body.client_label : ''
+      const rawLabel = request.body.client_label ?? ''
       const clientLabel = rawLabel.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 80) || null
 
       await createDeviceAuthorization({ userCode, deviceCode, clientLabel, expiresAt })
@@ -291,11 +293,11 @@ export default async function authRoutes(
   //
   // It is absent from the owner_cli allow-list for the same reason `approve`
   // is — a CLI session must not be able to inspect pending grants either.
-  app.post<{ Body: { user_code?: string } }>(
+  app.post<{ Body: { user_code: string } }>(
     '/device/lookup',
-    { preHandler: authMiddleware, config: { ...authRateLimit(trustProxyHops, 'device_lookup') } },
+    { onRequest: authMiddleware, config: { ...authRateLimit(trustProxyHops, 'device_lookup') } },
     async (request, reply) => {
-      const userCode = typeof request.body?.user_code === 'string' ? request.body.user_code : ''
+      const userCode = request.body.user_code
       if (!userCode.trim()) {
         return reply.code(400).send({ error: 'user_code is required' })
       }
@@ -315,12 +317,12 @@ export default async function authRoutes(
   // must NOT reach this: a CLI session approving further CLI sessions would
   // turn one approval into an unbounded grant. It is absent from the
   // allow-list, so the default refusal covers it.
-  app.post<{ Body: { user_code?: string; deny?: boolean } }>(
+  app.post<{ Body: { user_code: string; deny?: boolean } }>(
     '/device/approve',
-    { preHandler: authMiddleware },
+    { onRequest: authMiddleware },
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const userCode = typeof request.body?.user_code === 'string' ? request.body.user_code : ''
+      const userCode = request.body.user_code
       if (!userCode.trim()) {
         return reply.code(400).send({ error: 'user_code is required' })
       }
@@ -341,11 +343,11 @@ export default async function authRoutes(
 
   // POST /auth/device/token — the CLI's poll. Unauthenticated by design: the
   // device code IS the credential.
-  app.post<{ Body: { device_code?: string } }>(
+  app.post<{ Body: { device_code: string } }>(
     '/device/token',
     { config: { ...authRateLimit(trustProxyHops, 'device_token') } },
     async (request, reply) => {
-      const deviceCode = typeof request.body?.device_code === 'string' ? request.body.device_code : ''
+      const deviceCode = request.body.device_code
       if (!deviceCode) {
         return reply.code(400).send({ error: 'invalid_request' })
       }

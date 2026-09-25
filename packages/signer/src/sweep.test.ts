@@ -10,6 +10,7 @@ import {
   type SweepExpectedAuth,
 } from '@haven_ai/sdk'
 import { createEdgeSigner } from './core.js'
+import { toolDescriptions } from './tools.js'
 
 /** Recover the EIP-712 signer of a sweep authorization (viem). */
 async function recoverSweepAddress(auth: SweepAuthorization, signature: string): Promise<string> {
@@ -102,7 +103,7 @@ describe('signSweepAuthorization', () => {
     ).rejects.toThrow(/`from` does not match this delegate/)
   })
 
-  it('rejects when `to` does not match the credential Safe', async () => {
+  it('rejects when `to` does not match the credential account', async () => {
     const signer = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
     const auth = baseAuthorization({ to: '0x000000000000000000000000000000000000bEEF' })
     await expect(
@@ -111,15 +112,15 @@ describe('signSweepAuthorization', () => {
         expectedAuth: await bindingFor(auth),
         expectedSafe: SAFE,
       }),
-    ).rejects.toThrow(/`to` does not match the Safe/)
+    ).rejects.toThrow(/`to` does not match the agent's account/)
   })
 
   // #2247: `expectedSafe` is absent whenever no account address reaches the
   // signer — `HAVEN_DELEGATE_KEY` set without `HAVEN_ACCOUNT_ADDRESS` (the
-  // README quickstart), a credential whose `safe_address` is null, or an embedder
-  // calling `resolveEdgeSigner({ delegateKey })`. These two pin what that costs
-  // and what still holds, so neither can be changed silently.
-  it('signs with `expectedSafe` absent even when `to` is not the credential Safe', async () => {
+  // README quickstart), a credential whose account address is null, or an
+  // embedder calling `resolveEdgeSigner({ delegateKey })`. These two pin what
+  // that costs and what still holds, so neither can be changed silently.
+  it('signs with `expectedSafe` absent even when `to` is not the credential account', async () => {
     const signer = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
     // A destination that the `expectedSafe`-supplied test above refuses.
     const elsewhere = '0x000000000000000000000000000000000000bEEF'
@@ -136,9 +137,10 @@ describe('signSweepAuthorization', () => {
 
   it('still pins `to` to the Haven binding when `expectedSafe` is absent', async () => {
     const signer = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
-    // Haven bound a sweep to the Safe; the authorization presented for signing
-    // redirects `to`. With no local Safe to compare against, the binding
-    // signature is the only thing left standing — and it must still refuse.
+    // Haven bound a sweep to the agent's account (Haven wallet); the
+    // authorization presented for signing redirects `to`. With no local
+    // account to compare against, the binding signature is the only thing
+    // left standing — and it must still refuse.
     const bound = baseAuthorization()
     const redirected = baseAuthorization({ to: '0x000000000000000000000000000000000000bEEF' })
     await expect(
@@ -165,5 +167,20 @@ describe('signSweepAuthorization', () => {
     await expect(
       signer.signSweepAuthorization({ authorization: auth, expectedAuth: await bindingFor(auth) }),
     ).rejects.toThrow(/verifier is not configured/)
+  })
+
+  it('#3279: the sweep tool description states the conditional destination check', () => {
+    // The description must name the destination as the agent's account (Haven
+    // wallet) and must NOT overclaim an unconditional destination check:
+    // `expectedSafe` runs only when the local credential carries an account
+    // address (#2247); otherwise the destination rests on Haven's binding
+    // signature.
+    const description = toolDescriptions.haven_sign_sweep_delegate
+    expect(description).toContain("the agent's account (Haven wallet)")
+    expect(description).not.toContain('Safe')
+    expect(description).not.toMatch(/always checks/i)
+    expect(description).not.toMatch(/unconditionally/i)
+    expect(description).toContain('when the credential carries one')
+    expect(description).toContain("Haven's binding signature")
   })
 })

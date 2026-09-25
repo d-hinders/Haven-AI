@@ -4,12 +4,14 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import {
+  addressFromKey,
   buildX402ExpectedMessage,
   buildSweepAuthorizationMessage,
   HavenUnsupportedSignerVersionError,
   SignerRefusalCode,
   SIGNER_UPDATE_FALLBACK,
 } from '@haven_ai/sdk'
+import { buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 import {
   assertSupportedBindingVersion,
   createEdgeSigner,
@@ -22,6 +24,7 @@ import {
   SIGNER_CAPABILITY_KEY,
   type SignerCompatibility,
 } from './capabilities.js'
+import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
 import { buildSignerMcpServer } from './server.js'
 import { createToolHandlers } from './tools.js'
 
@@ -77,6 +80,17 @@ const EXPECTED_BASE = {
   network: PAYMENT_REQUIRED.accepts[0].network,
   expiresAt: '2099-01-01T00:00:00.000Z',
 }
+
+// #3281: a REAL funding leg (the shared builder) matching PAYMENT_REQUIRED's
+// quote — this key's own account transferring the quoted amount of the
+// quoted token to this key's own delegate EOA. The toy 'Payload' fixture the
+// x402 arm now refuses.
+const REAL_FUNDING = buildFundingLegUserOp({
+  delegate: addressFromKey(TEST_KEY) as `0x${string}`,
+  asset: PAYMENT_REQUIRED.accepts[0].asset as `0x${string}`,
+  amount: PAYMENT_REQUIRED.accepts[0].amount,
+  chainId: 8453, // PAYMENT_REQUIRED's network ('base')
+})
 
 /**
  * A context whose binding message and signature are entirely VALID — only the
@@ -216,11 +230,23 @@ describe('assertSupportedBindingVersion structured fields (#1309)', () => {
   })
 })
 
-describe('x402 funding under an unknown expected-context version (#1143)', () => {
-  it('refuses the bare-hash path with the actionable error, and signs nothing', async () => {
+describe('x402 funding under an unknown expected-context version (#1143, #3272)', () => {
+  // #3272 (criterion 8): the bare-hash path (`signX402FundingHash`) is
+  // retired outright — every x402 funding intent is typed data now. What
+  // remains of the property this section tested: an unknown version is
+  // refused with the actionable error and signs nothing, whether or not
+  // typed data was even supplied.
+  const typedData = {
+    domain: { chainId: 84532, name: 'HybridDeleGator', version: '1' },
+    types: { Payload: [{ name: 'sender', type: 'address' }] },
+    primaryType: 'Payload',
+    message: { sender: '0x98ffBf30459a98FD80fAce18f519967769641F76' },
+  }
+
+  it('refuses with the actionable error, and signs nothing — even with no typed data supplied', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
     const expected = await expectedWithVersion(UNKNOWN_X402_VERSION)
-    expect(() => signer.signX402FundingHash(FUNDING_HASH, expected)).toThrow(
+    await expect(signer.signX402FundingTypedData(undefined, expected)).rejects.toThrow(
       new RegExp(`supports x402 expected context versions up to ${Math.max(
         ...SUPPORTED_X402_EXPECTED_VERSIONS,
       )}, and Haven sent version ${UNKNOWN_X402_VERSION}`),
@@ -229,22 +255,18 @@ describe('x402 funding under an unknown expected-context version (#1143)', () =>
 
   it('reports the version, not a downstream symptom', async () => {
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const expected = await expectedWithVersion(UNKNOWN_X402_VERSION)
+    const expected = await expectedWithVersion(UNKNOWN_X402_VERSION, {
+      typedDataHash: hashTypedData(typedData as Parameters<typeof hashTypedData>[0]),
+    })
     // Regression guard on ORDERING: the old code would have reached the
     // recomputed-message comparison and blamed the binding, which is the exact
     // mis-diagnosis the stale docs table recorded.
-    expect(() => signer.signX402FundingHash(FUNDING_HASH, expected)).not.toThrow(
-      /authentication message is invalid/,
-    )
+    await expect(
+      signer.signX402FundingTypedData(typedData as never, expected),
+    ).rejects.not.toThrow(/authentication message is invalid/)
   })
 
   it('refuses the typed-data path too', async () => {
-    const typedData = {
-      domain: { chainId: 84532, name: 'HybridDeleGator', version: '1' },
-      types: { Payload: [{ name: 'sender', type: 'address' }] },
-      primaryType: 'Payload',
-      message: { sender: '0x98ffBf30459a98FD80fAce18f519967769641F76' },
-    }
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
     const expected = await expectedWithVersion(UNKNOWN_X402_VERSION, {
       typedDataHash: hashTypedData(typedData as Parameters<typeof hashTypedData>[0]),
@@ -418,15 +440,10 @@ describe('tool boundary surfaces the skew instead of a Zod string (#1143)', () =
 
     it('a compatible signer still signs unchanged — the structured refusal adds no new refusal path', async () => {
       // v1 signs over the bare hash; v2 commits to EIP-712 typed data (#1138) —
-      // exercise both real shapes this signer actually supports, not just the
-      // version number in isolation.
-      const typedData = {
-        domain: { chainId: 84532, name: 'HybridDeleGator', version: '1' },
-        types: { Payload: [{ name: 'sender', type: 'address' }] },
-        primaryType: 'Payload',
-        message: { sender: '0x98ffBf30459a98FD80fAce18f519967769641F76' },
-      }
-      const typedDataHash = hashTypedData(typedData as Parameters<typeof hashTypedData>[0])
+      // exercise the real funding-leg shape this signer actually supports, not
+      // just the version number in isolation.
+      const typedData = REAL_FUNDING.typedData
+      const typedDataHash = REAL_FUNDING.digest
       const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
       const handlers = createToolHandlers(signer)
       for (const version of SUPPORTED_X402_EXPECTED_VERSIONS) {
@@ -436,11 +453,12 @@ describe('tool boundary surfaces the skew instead of a Zod string (#1143)', () =
         // proves compatibility, not the mismatch path.
         const payerClaim = version >= 3 ? { payerDelegate: signer.delegateAddress } : {}
         const expected = await expectedWithVersion(version, {
+          payloadHash: REAL_FUNDING.payloadHash as string,
           ...(usesTypedData ? { typedDataHash } : {}),
           ...payerClaim,
         })
         const result = await handlers.haven_sign_x402({
-          payload_hash: FUNDING_HASH,
+          payload_hash: REAL_FUNDING.payloadHash as string,
           payment_required: PAYMENT_REQUIRED,
           ...(usesTypedData ? { typed_data: typedData } : {}),
           x402_expected: {
@@ -507,6 +525,7 @@ describe('signer advertises its supported versions at handshake (#1155)', () => 
     expect(advertised).toEqual({
       x402_expected_context_versions: [...SUPPORTED_X402_EXPECTED_VERSIONS],
       sweep_binding_versions: [...SUPPORTED_SWEEP_BINDING_VERSIONS],
+      direct_sign_context_versions: [...SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS],
     })
   })
 
@@ -546,9 +565,8 @@ describe('signer advertises its supported versions at handshake (#1155)', () => 
   it('advertises nothing the signing path would reject as unknown', async () => {
     // The drift guard with teeth: drive the REAL signing path with each version
     // the handshake advertises and assert the skew guard is never what rejects
-    // it. (A v2 context fails later for an unrelated reason — it must commit to
-    // typed data — which is why this asserts the absence of the skew error
-    // rather than success.) Advertising {1,2,3} while enforcing {1,2} fails here.
+    // it. (Every advertised version now requires typed data, #3272 — so this
+    // asserts the absence of the skew error rather than success.)
     const { advertised } = await handshake()
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
     const skewError = /out of date|Unsupported x402 expected context version/
@@ -557,7 +575,7 @@ describe('signer advertises its supported versions at handshake (#1155)', () => 
       const expected = await expectedWithVersion(version)
       let message = ''
       try {
-        signer.signX402FundingHash(FUNDING_HASH, expected)
+        await signer.signX402FundingTypedData(undefined, expected)
       } catch (err) {
         message = (err as Error).message
       }
@@ -568,7 +586,7 @@ describe('signer advertises its supported versions at handshake (#1155)', () => 
     const beyond = await expectedWithVersion(
       Math.max(...advertised!.x402_expected_context_versions) + 1,
     )
-    expect(() => signer.signX402FundingHash(FUNDING_HASH, beyond)).toThrow(skewError)
+    await expect(signer.signX402FundingTypedData(undefined, beyond)).rejects.toThrow(skewError)
   })
 
   it('makes a hosted-emitted version comparable before any signing call', async () => {
@@ -588,9 +606,16 @@ describe('signer advertises its supported versions at handshake (#1155)', () => 
   it('adds no refusal: a supported context still signs after the advertisement', async () => {
     // The whole feature is warn-not-block. Nothing that succeeded before may
     // fail now — the #1143 signing-time guard remains the only enforcement.
+    // #3272: version 1 is no longer a supported version to sign under (the
+    // bare-hash rail is retired) — the lowest supported version is now 2.
+    // #3281: the x402 arm now signs only a real funding-leg shape.
+    const typedData = REAL_FUNDING.typedData
     const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const expected = await expectedWithVersion(1)
-    const result = signer.signX402FundingHash(FUNDING_HASH, expected)
+    const expected = await expectedWithVersion(2, {
+      payloadHash: REAL_FUNDING.payloadHash as string,
+      typedDataHash: REAL_FUNDING.digest,
+    })
+    const result = await signer.signX402FundingTypedData(typedData as never, expected)
     expect(result.signature).toMatch(/^0x[0-9a-fA-F]+$/)
   })
 

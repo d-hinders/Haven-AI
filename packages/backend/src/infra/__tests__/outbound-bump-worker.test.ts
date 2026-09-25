@@ -5,6 +5,7 @@
  * the replacement minimum, a hot lane becomes an incident instead of a gas
  * furnace, and a non-idempotent orphan is never blindly re-broadcast.
  */
+import { makeError } from 'ethers'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   MAX_BUMPS_PER_NONCE,
@@ -49,6 +50,12 @@ function deps(overrides: Partial<BumpDeps> = {}): BumpDeps {
     markReplaced: vi.fn(async () => null),
     countLaneAttempts: vi.fn(async () => 0),
     getReceiptStatus: vi.fn(async () => null),
+    // #3293: by default the consumed-nonce check RUNS and answers "not
+    // consumed" — the settled mined nonce equals the default row's nonce (42)
+    // and no node knows the hash — so every existing case still reaches the
+    // path its name claims, instead of skipping the check on a null.
+    isTxKnown: vi.fn(async () => false),
+    settledMinedNonce: vi.fn(async () => 42n),
     currentFees: vi.fn(async () => ({ maxFeePerGas: 900n, maxPriorityFeePerGas: 90n })),
     sendRaw: vi.fn(async () => ({ hash: '0x' + 'dd'.repeat(32), nonce: 42 })),
     ...overrides,
@@ -223,6 +230,111 @@ describe('runOutboundBumpTick — stale broadcast rows', () => {
   })
 })
 
+describe('runOutboundBumpTick — a stale row whose nonce another transaction consumed (#3293)', () => {
+  const consumed = (overrides: Partial<BumpDeps> = {}) =>
+    deps({ listUnmined: vi.fn(async () => [row({})]), settledMinedNonce: vi.fn(async () => 43n), ...overrides })
+
+  it('a CAPPED row closes failed — no INCIDENT, no gas', async () => {
+    const d = consumed({ countLaneAttempts: vi.fn(async () => MAX_BUMPS_PER_NONCE) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markFailed).toHaveBeenCalledWith('row-1', expect.stringMatching(/nonce 42 consumed on-chain.*settled mined nonce 43/))
+    expect(result.closedFailed).toBe(1)
+    expect(result.alerted).toBe(0)
+    expect(d.sendRaw).not.toHaveBeenCalled()
+    expect(log.error).not.toHaveBeenCalledWith(expect.anything(), expect.stringContaining('INCIDENT'))
+  })
+
+  it('an UNCAPPED row closes before any bump work — no enqueue, no fee read, no send', async () => {
+    const d = consumed({ countLaneAttempts: vi.fn(async () => 0) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(1)
+    expect(d.enqueue).not.toHaveBeenCalled()
+    expect(d.currentFees).not.toHaveBeenCalled()
+    expect(d.sendRaw).not.toHaveBeenCalled()
+  })
+
+  it('a consumed-nonce passport_attest closes too, instead of alarming at the non-idempotent gate', async () => {
+    const d = consumed({ listUnmined: vi.fn(async () => [row({ submitter: 'passport_attest' })]) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(1)
+    expect(result.alerted).toBe(0)
+    expect(d.sendRaw).not.toHaveBeenCalled()
+  })
+
+  it('a genuinely stuck lane still alerts: settled nonce == N keeps the INCIDENT', async () => {
+    const d = consumed({ settledMinedNonce: vi.fn(async () => 42n), countLaneAttempts: vi.fn(async () => MAX_BUMPS_PER_NONCE) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.alerted).toBe(1)
+    expect(d.markFailed).not.toHaveBeenCalled()
+  })
+
+  it('settled nonce < N keeps today\'s bump', async () => {
+    const d = consumed({ settledMinedNonce: vi.fn(async () => 41n) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.bumped).toBe(1)
+    expect(result.closedFailed).toBe(0)
+  })
+
+  it('NO EVIDENCE, NO CLOSE: a transaction a node still knows is never closed', async () => {
+    const d = consumed({ isTxKnown: vi.fn(async () => true) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(0)
+    expect(result.bumped).toBe(1)
+  })
+
+  it('NO EVIDENCE, NO CLOSE: no settled block (null) keeps today\'s path', async () => {
+    const d = consumed({ settledMinedNonce: vi.fn(async () => null) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(0)
+    expect(result.bumped).toBe(1)
+  })
+
+  it('NO EVIDENCE, NO CLOSE: a throwing nonce read keeps today\'s path and is logged', async () => {
+    const d = consumed({ settledMinedNonce: vi.fn(async () => { throw new Error('rpc down') }) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(0)
+    expect(result.bumped).toBe(1)
+    expect(log.warn).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('settled nonce read failed'))
+  })
+
+  it('NO EVIDENCE, NO CLOSE: a throwing known-check keeps today\'s path', async () => {
+    const d = consumed({ isTxKnown: vi.fn(async () => { throw new Error('rpc down') }) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(0)
+    expect(result.bumped).toBe(1)
+  })
+
+  it('the receipt RE-READ wins: our own transaction mined after all → closed mined, never failed', async () => {
+    const statuses: Array<0 | 1 | null> = [null, 1]
+    const d = consumed({ getReceiptStatus: vi.fn(async () => statuses.shift() ?? null) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markMined).toHaveBeenCalledWith('row-1')
+    expect(d.markFailed).not.toHaveBeenCalled()
+    expect(result.closedMined).toBe(1)
+  })
+
+  it('the receipt RE-READ finds a REVERTED receipt → closed failed as reverted, no bump', async () => {
+    const statuses: Array<0 | 1 | null> = [null, 0]
+    const d = consumed({ getReceiptStatus: vi.fn(async () => statuses.shift() ?? null) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markFailed).toHaveBeenCalledWith('row-1', expect.stringMatching(/^mined and reverted/))
+    expect(result.closedFailed).toBe(1)
+    expect(d.sendRaw).not.toHaveBeenCalled()
+  })
+
+  it('the settled nonce is read ONCE per tick, however many rows need it', async () => {
+    const d = consumed({ listUnmined: vi.fn(async () => [row({ id: 'a' }), row({ id: 'b', nonce: '40' }), row({ id: 'c', nonce: '41' })]) })
+    await runOutboundBumpTick(84532, d, log)
+    expect(d.settledMinedNonce).toHaveBeenCalledTimes(1)
+  })
+
+  it('a row whose receipt is already known never triggers the nonce read', async () => {
+    const d = consumed({ getReceiptStatus: vi.fn(async () => 1 as const) })
+    await runOutboundBumpTick(84532, d, log)
+    expect(d.settledMinedNonce).not.toHaveBeenCalled()
+  })
+})
+
 describe('runOutboundBumpTick — orphaned queued rows', () => {
   it('re-broadcasts an idempotent orphan with a FRESH nonce and stamps the row', async () => {
     const orphan = row({ id: 'orphan-1', status: 'queued', tx_hash: null, nonce: null, submitter: 'sweep' })
@@ -236,6 +348,78 @@ describe('runOutboundBumpTick — orphaned queued rows', () => {
     // No nonce in the send: this is a NEW submission, not a replacement.
     expect(d.sendRaw).toHaveBeenCalledWith(84532, expect.not.objectContaining({ nonce: expect.anything() }))
     expect(d.markBroadcast).toHaveBeenCalledWith('orphan-1', expect.objectContaining({ nonce: 99n }))
+  })
+
+  // #3263: 388 reverting passport_revoke orphans were re-sent every lease on dev.
+  const reverting = () =>
+    makeError('execution reverted (unknown custom error)', 'CALL_EXCEPTION', {
+      action: 'estimateGas', data: '0xc5723b51', reason: null, transaction: { to: null, data: '0x' }, invocation: null, revert: null,
+    })
+
+  it('#3263: an orphan whose payload REVERTS is closed failed, and the loop moves on to the next orphan', async () => {
+    // Keyed on the PAYLOAD, not call order: the revoke's calldata reverts, the
+    // sweep's sends — whichever the loop claims first.
+    const REVOKE_DATA = '0x46926267' + '00'.repeat(32)
+    const orphanQueue = [
+      row({ id: 'orphan-rev', status: 'queued', tx_hash: null, nonce: null, submitter: 'passport_revoke', data: REVOKE_DATA }),
+      row({ id: 'orphan-ok', status: 'queued', tx_hash: null, nonce: null, submitter: 'sweep' }),
+    ]
+    const d = deps({
+      claimOrphan: vi.fn<BumpDeps['claimOrphan']>(async () => orphanQueue.shift() ?? null),
+      sendRaw: vi.fn<BumpDeps['sendRaw']>(async (_chainId, tx) => {
+        if (tx.data === REVOKE_DATA) throw reverting()
+        return { hash: '0x' + 'ff'.repeat(32), nonce: 7 }
+      }),
+    })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markFailed).toHaveBeenCalledWith('orphan-rev', 'orphan re-broadcast reverted in estimateGas (revert data 0xc5723b51)')
+    expect(result.failedOrphans).toBe(1)
+    expect(result.rebroadcastOrphans).toBe(1)
+    expect(d.markBroadcast).toHaveBeenCalledWith('orphan-ok', expect.objectContaining({ nonce: 7n }))
+    // Closed, not ALSO reported as a retryable failure.
+    expect(log.warn).not.toHaveBeenCalledWith(expect.anything(), 'outbound-bump: orphan re-broadcast failed')
+  })
+
+  it('#3263: a gas-estimation TIMEOUT (real ethers shape: CALL_EXCEPTION, data null) is left for the next lease', async () => {
+    const orphanQueue = [row({ id: 'orphan-t2', status: 'queued', tx_hash: null, nonce: null, submitter: 'sweep' })]
+    const d = deps({
+      claimOrphan: vi.fn<BumpDeps['claimOrphan']>(async () => orphanQueue.shift() ?? null),
+      sendRaw: vi.fn<BumpDeps['sendRaw']>().mockRejectedValue(
+        makeError('missing revert data', 'CALL_EXCEPTION', {
+          action: 'estimateGas', data: null, reason: null, transaction: { to: null, data: '0x' }, invocation: null, revert: null,
+        }),
+      ),
+    })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markFailed).not.toHaveBeenCalled()
+    expect(result.failedOrphans).toBe(0)
+    expect(log.warn).toHaveBeenCalledWith(expect.anything(), 'outbound-bump: orphan re-broadcast failed')
+  })
+
+  it('#3263: a TRANSIENT orphan failure is left for the next lease — never closed', async () => {
+    const orphanQueue = [row({ id: 'orphan-t', status: 'queued', tx_hash: null, nonce: null, submitter: 'sweep' })]
+    const d = deps({
+      claimOrphan: vi.fn<BumpDeps['claimOrphan']>(async () => orphanQueue.shift() ?? null),
+      sendRaw: vi.fn<BumpDeps['sendRaw']>().mockRejectedValue(
+        makeError('could not coalesce error', 'UNKNOWN_ERROR', { error: { code: 30, message: 'Request timeout on the free plan' } }),
+      ),
+    })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markFailed).not.toHaveBeenCalled()
+    expect(result.failedOrphans).toBe(0)
+    expect(result.rebroadcastOrphans).toBe(0)
+  })
+
+  it('#3263: a failing close is logged, never thrown out of the tick', async () => {
+    const orphanQueue = [row({ id: 'orphan-rev', status: 'queued', tx_hash: null, nonce: null, submitter: 'passport_revoke' })]
+    const d = deps({
+      claimOrphan: vi.fn<BumpDeps['claimOrphan']>(async () => orphanQueue.shift() ?? null),
+      sendRaw: vi.fn<BumpDeps['sendRaw']>().mockRejectedValue(reverting()),
+      markFailed: vi.fn<BumpDeps['markFailed']>().mockRejectedValue(new Error('db down')),
+    })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.failedOrphans).toBe(0)
+    expect(log.warn).toHaveBeenCalledWith(expect.anything(), 'outbound-bump: could not close a reverting orphan')
   })
 
   it('NEVER blindly re-broadcasts a passport attest — a second broadcast mints a second attestation', async () => {

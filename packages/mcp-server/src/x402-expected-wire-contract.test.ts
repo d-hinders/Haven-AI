@@ -51,6 +51,7 @@ import {
   toolSchemas as signerToolSchemas,
 } from '@haven_ai/signer'
 import { z } from 'zod/v3'
+import { buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -92,7 +93,6 @@ const RESOURCE = 'https://merchant.test/mcp'
 const AMOUNT = '1000'
 const NETWORK = 'base-sepolia'
 const PAYMENT_ID = 'pay_wire_contract'
-const FUNDING_HASH = '0x' + 'cd'.repeat(32)
 const EXPIRES_AT = '2099-01-01T00:00:00.000Z'
 
 const PAYMENT_REQUIRED: X402PaymentRequired = {
@@ -111,23 +111,24 @@ const PAYMENT_REQUIRED: X402PaymentRequired = {
 } as unknown as X402PaymentRequired
 
 /**
- * The EIP-712 payload a delegation-rail account validates. Shape only — the
- * digest is what the contract turns on, and it is re-derived from these exact
- * bytes at three independent points.
+ * #3281 (epic #3284): the x402 FUNDING LEG exactly as the backend builds it —
+ * this delegate's own account redeeming one budget delegation, transferring
+ * the quoted AMOUNT of ASSET to this delegate's own EOA on Base Sepolia. The
+ * signer's x402 arm now signs only this shape (or a verified settlement
+ * child), so the shared builder replaces the pre-#3281 2-field toy. The
+ * digest is still what the wire contract turns on, re-derived from these
+ * exact bytes at three independent points.
  */
-const TYPED_DATA = {
-  domain: { name: 'HybridDeleGator', version: '1', chainId: 84532, verifyingContract: DELEGATE_ADDR },
-  types: {
-    PackedUserOperation: [
-      { name: 'sender', type: 'address' },
-      { name: 'nonce', type: 'uint256' },
-    ],
-  },
-  primaryType: 'PackedUserOperation',
-  message: { sender: DELEGATE_ADDR, nonce: '7' },
-} as const
+const FUNDING = buildFundingLegUserOp({
+  delegate: DELEGATE_ADDR,
+  asset: ASSET as `0x${string}`,
+  amount: AMOUNT,
+  chainId: 84532,
+})
+const TYPED_DATA = FUNDING.typedData
 
 const TYPED_DATA_DIGEST = hashTypedData(TYPED_DATA as Parameters<typeof hashTypedData>[0])
+const FUNDING_HASH = FUNDING.payloadHash as string
 
 /**
  * The backend's `POST /x402` 201 body, written to mirror
@@ -271,7 +272,9 @@ afterEach(() => {
 
 describe('cross-package wire contract: producer and reconstruction are byte-identical (#1154)', () => {
   it.each([
-    ['v1 (legacy rail)', 'legacy' as const, 1],
+    // #3272 (criterion 8): v1 (legacy rail) is retired at the producer
+    // itself (`signX402ExpectedContext` now throws without typedDataHash) —
+    // there is no longer a v1 quote to build.
     ['v2 (delegation rail)', 'delegation' as const, 2],
   ])('%s — the message survives all four hops unchanged', async (_name, rail, version) => {
     const quote = await hostedQuote(rail)
@@ -289,7 +292,7 @@ describe('cross-package wire contract: producer and reconstruction are byte-iden
   })
 
   it.each([
-    ['v1 (legacy rail)', 'legacy' as const],
+    // #3272: see above — no v1 quote exists to build any more.
     ['v2 (delegation rail)', 'delegation' as const],
   ])('%s — the real signer accepts it and signs', async (_name, rail) => {
     // The behavioural half: this exercises the signer's OWN reconstruction
@@ -348,18 +351,13 @@ describe('the wire contract fails closed when a hop drifts (#1154)', () => {
   })
 })
 
-describe('v1/v2 binding matrix (#1138)', () => {
-  it('legacy-rail (v1) context → the raw hash is signed, and it succeeds', async () => {
-    const quote = await hostedQuote('legacy')
-    expect(quote.x402.expected.typed_data_hash).toBeUndefined()
-    // No typed_data on the wire at all — the hosted server only emits it when
-    // the backend declared a signature scheme.
-    expect(quote.typed_data).toBeUndefined()
-
-    const signer = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
-    const { signature } = signer.signX402FundingHash(quote.payload_hash, toCamel(quote.x402.expected))
-    expect(signature).toMatch(/^0x[0-9a-f]{130}$/i)
-  })
+describe('v1/v2 binding matrix (#1138, #3272)', () => {
+  // #3272 (criterion 8): expected-context v1 (the bare-hash rail, and
+  // `signX402FundingHash`) is retired outright — the producer itself refuses
+  // to build a v1 context (`the producer this file loads is still the real
+  // one` below), and the signer no longer exposes a raw-hash signing method
+  // at all (pinned directly in `packages/signer/src/core.test.ts`). What
+  // remains true of this matrix: the delegation rail (v2) signs.
 
   it('delegation-rail (v2) context → the typed data is signed, and it succeeds', async () => {
     const quote = await hostedQuote('delegation')
@@ -371,29 +369,9 @@ describe('v1/v2 binding matrix (#1138)', () => {
     expect(signature).toMatch(/^0x[0-9a-f]{130}$/i)
   })
 
-  it('v2 context + an attempt to RAW-sign the hash → REFUSED', async () => {
-    // The #1138 downgrade. A raw ECDSA signature over the bare 4337 hash is not
-    // what the account validates, so it would be rejected on-chain AFTER the
-    // intent was claimed — which is why this must fail here, loudly, rather
-    // than produce a signature nobody can use.
-    const quote = await hostedQuote('delegation')
-    const signer = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
-    expect(() => signer.signX402FundingHash(quote.payload_hash, toCamel(quote.x402.expected))).toThrow(
-      /must not be\s+raw-signed/,
-    )
-  })
-
-  it('v1 context + an attempt to sign typed data → REFUSED', async () => {
-    // The other half of the downgrade, and just as necessary: without a
-    // typed-data commitment Haven's declaration covers only a hash that is NOT
-    // what would be signed, so the signer would be endorsing a payload it
-    // cannot check.
-    const quote = await hostedQuote('legacy')
-    const signer = createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER })
-    await expect(
-      signer.signX402FundingTypedData(TYPED_DATA as never, toCamel(quote.x402.expected)),
-    ).rejects.toThrow(/does not commit to it/)
-  })
+  // #3272: "raw-sign the hash" and "v1 context + sign typed data" both
+  // required a v1 context, which the producer no longer builds
+  // (`signX402FundingHash` is also gone — pinned in the signer package).
 
   it('typed data whose digest ≠ the committed one → REFUSED', async () => {
     // The payload was altered in transit (or Haven declared a different one).
@@ -411,12 +389,29 @@ describe('v1/v2 binding matrix (#1138)', () => {
     expect((result as { message: string }).message).toMatch(/does not match the digest Haven committed to/)
   })
 
-  it('a v2 context whose auth.version was tampered to 1 → REFUSED', async () => {
-    // The version is derived from the context's CONTENTS on both sides, so a
-    // rewritten version cannot select a weaker rule set — the recomputed
-    // message simply stops matching.
+  it('a v2 context whose auth.version was tampered to 1 → REFUSED as an unsupported (retired) version', async () => {
+    // #3272: 1 is no longer merely "the wrong version" — it is a version
+    // this signer does not support at all any more, so the version-skew
+    // check refuses it before the content-derivation ever runs.
     const quote = await hostedQuote('delegation')
     quote.x402.expected.auth.version = 1
+    const result = await localSigner().haven_sign_x402({
+      payload_hash: quote.payload_hash,
+      x402_expected: quote.x402.expected,
+      payment_required: PAYMENT_REQUIRED,
+      typed_data: quote.typed_data,
+    })
+    expect(result.success).toBe(false)
+    expect((result as { code: string }).code).toBe('UNSUPPORTED_EXPECTED_CONTEXT_VERSION')
+  })
+
+  it('a v2 context whose auth.version was tampered to 3 → REFUSED as an invalid message (content-derived, not caller-chosen)', async () => {
+    // The version-skew check above answers "do we understand this version at
+    // all"; THIS case is for a version we DO understand, but which the
+    // content does not actually encode — the recomputed message simply stops
+    // matching, exactly as it did for the pre-#3272 tamper-to-1 case.
+    const quote = await hostedQuote('delegation')
+    quote.x402.expected.auth.version = 3
     const result = await localSigner().haven_sign_x402({
       payload_hash: quote.payload_hash,
       x402_expected: quote.x402.expected,
@@ -444,7 +439,7 @@ describe('the producer this file loads is still the real one', () => {
   it('derives the binding version from the context, never accepts one', () => {
     // Announcing a version the message does not match is precisely the
     // downgrade the signer rejects.
-    expect(source).toMatch(/context\.typedDataHash \? 2 : 1/)
+    expect(source).toMatch(/context\.payerDelegate \? 3 : 2/)
   })
 })
 
@@ -453,7 +448,7 @@ describe('the MCP tool-schema boundary (#1143)', () => {
   // where the #1143 skew surfaced as a Zod rejection. So the schema is pinned
   // separately, against the REAL hosted quote rather than a fixture.
   it.each([
-    ['v1', 'legacy' as const],
+    // #3272: no v1 quote exists to build any more (see above).
     ['v2', 'delegation' as const],
   ])('accepts the real %s hosted quote shape verbatim', async (_name, rail) => {
     const quote = await hostedQuote(rail)

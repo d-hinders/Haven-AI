@@ -65,7 +65,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     doc: 'packages/sdk/README.md',
     owner: '@d-hinders',
     status: 'current',
-    covers: ['packages/sdk/src/**'],
+    covers: ['packages/sdk/src/**', 'packages/sdk/package.json', 'packages/sdk/tsup.config.ts'],
     // #2341: re-verified and EDITED (every merchant-retry header instruction,
     // six sites). #2330 made them all say "both names" — correct then, and
     // wrong on erc7710 the moment #2341 scoped the send by scheme. This is the
@@ -100,13 +100,20 @@ export const GOVERNED_PACKAGE_DOCS = [
     // sixth entry, `haven_sweep_delegate`, is deliberately absent from the
     // table — the sweep is native, not a tool schema). Exports, header-name
     // rule, idempotency and resume sections re-read against src/client.ts.
-    'last-verified': '2026-09-15',
+    // #3171: the MCP/SSE paragraph gained the unknown-session recovery rule
+    // (re-initialize once + same header, only on the merchant's stated
+    // settled-nothing guarantee), verified against mcp-merchant-transport.ts
+    // deliverPaymentRecoveringSession and its two callers. Nothing else in
+    // the README re-verified in this pass.
+    // #3173: § Install gained the two-entry paragraph (`@haven_ai/sdk/edge`),
+    // verified against package.json exports, tsup.config.ts and edge.ts.
+    'last-verified': '2026-09-20',
   },
   {
     doc: 'packages/signer/README.md',
     owner: '@d-hinders',
     status: 'current',
-    covers: ['packages/signer/src/**'],
+    covers: ['packages/signer/src/**', 'packages/sdk/src/edge.ts', 'packages/sdk/src/edge-imports.test.ts'],
     // #2515: EDITED, scope = the one connector command example. `@alpha` became
     // `<channel>`, with the sentence beside it still naming `@alpha` as what
     // production hands out. Same reason as the connect README: this file ships in
@@ -171,7 +178,15 @@ export const GOVERNED_PACKAGE_DOCS = [
     // names (account_address first; safe_address/safeAddress read
     // permanently; env HAVEN_ACCOUNT_ADDRESS then the two pre-#2908 names).
     // Rest of the README NOT re-verified.
-    'last-verified': '2026-09-12',
+    // #3172: § "Local audit" re-verified and EDITED (sidecar mode 0600, tighten-before-rotate,
+    // in-place tighten, 8 MiB rotation to <path>.1, payload_hash bounded to a
+    // 32-byte hash on the schema, a failed audit write never fails a produced
+    // signature) against audit.ts, file-mode.ts and tools.ts.
+    // Nothing else in the README re-verified in this pass.
+    // #3173: new § "Startup, CLI options and the consent screen" verified
+    // against cli-args.ts, consent.ts, server.ts, core.ts (lazy x402) and the
+    // measured numbers in the PR; nothing else re-verified.
+    'last-verified': '2026-09-20',
   },
   {
     doc: 'packages/mcp/README.md',
@@ -200,6 +215,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
+    // #3210: EDITED, scope = the `--doctor` / `--repair` section's runtime-flag
+    // paragraph and the added flagless `--doctor` example (`--runtime` optional
+    // for `--doctor`, required for `--repair`). Nothing else re-verified. Prior:
     // #2515: EDITED, scope = the command examples only. Every
     // `npx @haven_ai/connect@alpha` became `@haven_ai/connect@<channel>`, and the
     // paragraph under the first example now defines `<channel>` as a placeholder
@@ -230,7 +248,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // with no prior phase to quote, so they rely on the general caveat already
     // stated once at the top of the file. Nothing else re-verified. Prior:
     // '2026-09-01' carried no provenance note.
-    'last-verified': '2026-09-04',
+    'last-verified': '2026-09-21',
   },
   {
     doc: 'packages/cli/README.md',
@@ -348,7 +366,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     doc: 'packages/demo-merchant-mcp/README.md',
     owner: '@d-hinders',
     status: 'current',
-    covers: ['packages/demo-merchant-mcp/src/**'],
+    // #3170: the README states the hosted relay's 500-character window, so a
+    // change to that slice must re-implicate it.
+    covers: ['packages/demo-merchant-mcp/src/**', 'packages/mcp-server/src/tools/paid-mcp-completion.ts'],
     // #2403: the § "Extensions echo" fixture paragraph re-verified and EDITED.
     // It enumerated the echo-rule tests as a fixed list of four; #2401 made it
     // five and #2403 adds more, so the sentence now names the BRANCHES pinned
@@ -371,7 +391,15 @@ export const GOVERNED_PACKAGE_DOCS = [
     // the issue. Nothing else in the README re-verified in this pass (the
     // Products table, hosted URLs and Run sections were read only far enough
     // to place the section).
-    'last-verified': '2026-09-02',
+    // #3170: the paragraph after the reason-code catalog (erc7710 submit
+    // revert = payer-side decision; the wrapper-is-not-proof rule) added and
+    // verified against x402.ts isContractRevert and its tests; the #2979
+    // catalog paragraph re-read, not edited. Nothing else re-verified.
+    // #3171: new § "Sessions: unknown-session 404, idle TTL, and what a
+    // redeploy does" verified against http.ts (SESSION_NOT_FOUND_RECOVERY,
+    // SESSION_NOT_FOUND_MESSAGE, DEFAULT_SESSION_IDLE_TTL_MS, sweepIdleSessions)
+    // and http-session-restart.test.ts. Nothing else re-verified.
+    'last-verified': '2026-09-19',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

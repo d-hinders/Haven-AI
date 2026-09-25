@@ -27,14 +27,7 @@ Mechanism and the guard's limits live in [`ai-agent-workflow.md` § Review Isola
    `docs/**` · `packages/**/*.md` (the copy that ships to npm — outside every net on #2422 round 3) · code comments and JSDoc (`config.ts` was #2422's fifth-round survivor; `capabilities.ts` #2242's) · fixtures and tests (`allowance-format.test.ts`, #2408 pass 3) · skill and prompt text under `.agents/**` and `.claude/**` · CASP shards under `docs/regulatory/casp-changelog/`.
 3. **Positive control before you trust a zero.** Show the same grep finding a known hit — the retired phrase in the shard or diff that quotes it — before reporting that a phrase family has no other copies (#2242: `grep -nE 'fetch\('` returned nothing because the call site is `fetchImpl(`; a zero from an untested instrument is not evidence).
 4. Then take the coupling gate's list as the **floor**: `npm run docs:coupling` (strict, CI-equivalent; reads uncommitted work) or `node scripts/docs/coupling-gate.mjs --changed=<files>`. A ⚠️ `contract: true` finding is blocking; the rest are advisory. Read every implicated doc. The eight governed `packages/**` READMEs carry no front-matter — their `covers:` rows live in `scripts/docs/package-docs.mjs` (#2088); every other `packages/**/*.md` is in that manifest's exempt map by decision, so do not file it as missing front-matter. Mapping rules: [`docs-quality-system.md`](../../../../docs/contributing/docs-quality-system.md).
-5. **A hit's disposition is the author's, and it is never "file it" (#2767).** The
-   claim sweep keeps its full scope; what changes is where a hit goes. A `contract:
-   true` finding blocks and is fixed in this PR. A hit in a non-contract doc is fixed
-   in place when small, or **dropped** — one line under **Not filed** in the PR body
-   with the reason — never filed as its own issue. You report the hit and the
-   smallest correct update; the author fixes or drops. The *could not verify* list
-   (return item 6) stays exactly as it is.
-6. For each implicated doc and each sweep hit, check the claim against the changed code: **now-wrong** (behaviour, value, path, default, flow step the diff changed), **now-required** (a capability, endpoint, env var or state the doc should mention), **broken-ref** (a file or symbol renamed or removed). Also sanity-check the gravity files (`CLAUDE.md`, `AGENTS.md`, `README.md`, `ABOUT_HAVEN.md`) when the diff touches a surface they summarise.
+5. For each implicated doc and each sweep hit, check the claim against the changed code: **now-wrong** (behaviour, value, path, default, flow step the diff changed), **now-required** (a capability, endpoint, env var or state the doc should mention), **broken-ref** (a file or symbol renamed or removed). Also sanity-check the gravity files (`CLAUDE.md`, `AGENTS.md`, `README.md`, `ABOUT_HAVEN.md`) when the diff touches a surface they summarise.
 
 ### 2b. The no-claims exit (#2638)
 
@@ -60,9 +53,23 @@ The exit exists because the default was costing a full claim-sweep on diffs with
 
 Start from what the gate already derived: since PR #2478 `npm run docs:coupling` prints `[doc-to-code]` lines naming the covered code a changed doc's claims should be re-checked against — re-derive only what the gate missed. For any new or edited `contract: true` doc, walk its body and for each behavioural claim name the file that makes it true. The `covers:` list must contain that file. Report **derived vs declared** as two lists with the difference — #2425 was born with 5 entries while its body depended on 12, and a change to any of the other seven would never have re-implicated the doc.
 
+**Before recommending a `covers:` entry on a `contract: true` doc, measure how often that path changes** (`git log --oneline --since=<date>T00:00:00Z --until=<date>T23:59:59Z origin/dev -- <path> | wc -l` — give the times: a bare date takes its time of day from the clock, and moves the count). On a contract doc every change to a covered path blocks until the doc is edited or re-verified, so a hot path bought as coverage is paid for on every PR that touches it. Where the path is hot, prefer #2678's net-reducing remedy — reword the claim so it no longer asserts that file's contents — and say which you chose. On PR #3221 this role recommended adding `packages/backend/src/openapi/spec.ts` and `packages/backend/src/index.ts` to a 2,100-line contract doc; they changed 68 and 23 times on `dev` from 2026-09-01T00:00:00Z to 2026-09-22T23:59:59Z (measured at `63dfa828`), and the builder reworded the two sentences instead.
+
 ## 4. Re-run every re-runnable figure (#2421, #2423, #2444)
 
 Any count, pass/fail total, byte size or version quoted in the diff — body, shard, comment, `last-verified` note — is reproduced from its instrument at the reviewed head, and the command is quoted next to the result. The shard said "39 passed"; the one command a reviewer re-ran returned 38/1 (#2421). "27 files" became 30, 32, 33 (#2423). A figure you cannot reproduce is a **finding**, not a nit, and the fix to prefer is *name the test* over *state the number*.
+
+**A behavioural claim is executed, not read — above all in a compliance
+artifact.** "Pinned by its own test" means you find that test by name and run it;
+"input X is refused" or "X arrives as Y" means you send X and look. A claim about
+what an earlier commit or pull request said is checked against the artifact at
+that SHA (`git show <sha>:<path>`), not against the PR body describing it.
+PR #3221's CASP shard carried two behavioural claims that were false, both
+readable as true: at `d9d70cca` it said the new ordering was "pinned by its own
+test", and that test first appears at `9bd70181`; at `9bd70181` it said
+`maxTimeoutSeconds: Infinity` "arrives as `0`", corrected at `05a250d0` because
+`1e400` parses to `Infinity` and is accepted. The commit messages of `9bd70181`
+and `05a250d0` record both as findings of the review rounds that ran them.
 
 A root with no `node_modules` cannot re-run anything, and every verdict that says so has turned this step into a permanent *could not verify* line. Get a runnable copy: `git worktree add --detach <root> <sha>` then `npm ci` inside the root — it is disposable, and the guard stays ACCEPTED. For a figure that needs a live service, the captain re-runs it on request; quote the command you asked for and the output you were handed, labelled as captain-run.
 

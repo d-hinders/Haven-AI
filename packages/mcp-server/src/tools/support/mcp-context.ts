@@ -48,12 +48,16 @@ export function delegationSignFields(signData: {
         typed_data: signData.typed_data,
         // #1255: the same payload as ONE opaque base64 string. A redemption
         // UserOp's callData makes typed_data a multi-KB nested object, and an
-        // agent re-emitting it between tool calls can truncate or reshape it —
-        // the signer's digest check then refuses (correctly) and the payment
-        // dies with no defect anywhere in the chain. The b64 form is copied
-        // as a single string; the signer decodes it into the SAME digest
-        // verification, so transport gets safer while the trust model is
-        // unchanged.
+        // agent re-emitting it between tool calls can truncate or reshape it.
+        // Since #3271 the signer runs the UserOp binding check (the v0.7 hash
+        // recomputed from this typed data's own message + domain against
+        // payload_hash, plus the pinned domain/EntryPoint constants) on a
+        // relayed direct payload exactly as it does on a fetched one, and
+        // refuses a mismatch before signing — before #3271 a corrupted relay
+        // signed anyway and only failed on-chain (AA24, #3271's own
+        // reproduction). The b64 form is copied as a single string; the
+        // signer decodes it into the SAME check, so transport gets safer
+        // while the trust model is unchanged.
         ...(signData.typed_data
           ? {
               typed_data_b64: Buffer.from(JSON.stringify(signData.typed_data)).toString('base64'),

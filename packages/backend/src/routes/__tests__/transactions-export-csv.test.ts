@@ -15,6 +15,7 @@ import fastifyJwt from '@fastify/jwt'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { ethers } from 'ethers'
 import transactionRoutes from '../transactions.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import pool from '../../db.js'
 import { TRANSACTION_CSV_COLUMNS } from '../../modules/transactions/index.js'
 
@@ -223,12 +224,6 @@ function x402Rows(count: number) {
   }))
 }
 
-interface DbRows {
-  smart_accounts?: unknown[]
-  contacts?: unknown[]
-  payment_intents?: unknown[]
-}
-
 function routeDbQueries(rows: DbRows = {}) {
   return vi.spyOn(pool, 'query').mockImplementation(
     (async (sql: unknown) => {
@@ -236,9 +231,21 @@ function routeDbQueries(rows: DbRows = {}) {
       if (text.includes('FROM smart_accounts')) return { rows: rows.smart_accounts ?? [] }
       if (text.includes('FROM contacts')) return { rows: rows.contacts ?? [] }
       if (text.includes('FROM payment_intents')) return { rows: rows.payment_intents ?? [] }
+      // #3127: the export reads the user's currency_preference to name the
+      // reporting_currency column (the amount stays a fixed-SEK branch).
+      if (text.includes('SELECT currency_preference FROM users')) {
+        return { rows: rows.currency_preference ? [{ currency_preference: rows.currency_preference }] : [] }
+      }
       return { rows: [] }
     }) as never,
   )
+}
+
+interface DbRows {
+  smart_accounts?: unknown[]
+  contacts?: unknown[]
+  payment_intents?: unknown[]
+  currency_preference?: string
 }
 
 const BOTH_SAFES = [
@@ -290,6 +297,10 @@ describe('GET /transactions/export.csv', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/transactions.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(transactionRoutes, { prefix: '/transactions' })
   })
@@ -359,6 +370,42 @@ describe('GET /transactions/export.csv', () => {
     expect(inbound[header.indexOf('settled_at')]).toBe('2026-05-08T11:49:59.000Z')
     // No fee ledger exists (#386), so the reserved column is present and empty.
     expect(inbound[header.indexOf('fee_sek')]).toBe('')
+  })
+
+  it('appends the #3127 currency columns: fixed SEK reporting, the feed currency named beside it', async () => {
+    stubExplorers()
+    routeDbQueries({ smart_accounts: BOTH_SAFES, currency_preference: 'EUR' })
+
+    const response = await get('?fresh=1')
+    const { header, records } = parseCsv(response.body.slice(1))
+
+    // The two appended columns carry the DELIBERATE branch: the file reports
+    // in fixed SEK (the accounting semantics this export exists for), while
+    // the reader can still see which currency the user's dashboard feed
+    // converts in — which does NOT move the amounts here. The amounts
+    // themselves stay in amount_sek, untouched.
+    expect(header.slice(-2)).toEqual(['reporting_currency', 'converted_currency'])
+    for (const record of records) {
+      expect(record[header.indexOf('reporting_currency')]).toBe('SEK')
+      expect(record[header.indexOf('converted_currency')]).toBe('EUR')
+    }
+    // Indices of every pre-#3127 column are unchanged (append-only contract).
+    expect(header.indexOf('amount_sek')).toBe(9)
+    expect(header.indexOf('fx_rate')).toBe(10)
+  })
+
+  it('answers converted_currency SEK for a user with no preference — the effective feed currency', async () => {
+    stubExplorers()
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
+
+    const response = await get('?fresh=1')
+    const { header, records } = parseCsv(response.body.slice(1))
+
+    expect(records[0][header.indexOf('reporting_currency')]).toBe('SEK')
+    // Not empty: with no preference the feed converts in SEK (the
+    // documented default), so that IS the effective currency the columns
+    // describe — the file and the feed agree by construction.
+    expect(records[0][header.indexOf('converted_currency')]).toBe('SEK')
   })
 
   it('applies the direction filter server-side, over the whole result set', async () => {
@@ -433,10 +480,11 @@ describe('GET /transactions/export.csv', () => {
     expect(byAccountId.headers['x-export-row-count']).toBe('1')
   })
 
-  it('400s an invalid ?accountId=', async () => {
+  it('400s an invalid ?accountId= — the spec\'s uuid, as the envelope (#3030)', async () => {
     const response = await get('?accountId=not-a-uuid')
     expect(response.statusCode).toBe(400)
-    expect(response.json()).toEqual({ error: 'Invalid accountId' })
+    expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(response.json().details).toContain('querystring/accountId')
   })
 
   it('resolves the counterparty name from the address book', async () => {
@@ -543,21 +591,34 @@ describe('GET /transactions/export.csv', () => {
     expect(response.headers['x-export-row-count']).toBe('10000')
   })
 
+  // #3030: the SHAPE refusals are the spec's (uuid, `user`-or-uuid,
+  // `<chain>:<address|native>`, the `direction` enum, a positive integer),
+  // answered as the 400 envelope by the enforced module before the handler;
+  // an unsupported chain is still the handler's own refusal. Mutation: drop
+  // the module from enforcedModules → `direction=sideways` exports (200).
   it.each([
-    ['?accountId=not-a-uuid', 'Invalid accountId'],
-    ['?agentId=not-a-uuid', 'Invalid agentId'],
-    ['?tokenKey=nonsense', 'Invalid tokenKey'],
-    ['?direction=sideways', 'Invalid direction'],
-    ['?chainId=abc', 'Invalid chainId'],
-    ['?chainId=999999', 'Unsupported chain: 999999'],
-  ])('rejects %s', async (query, error) => {
+    ['?accountId=not-a-uuid', 'querystring/accountId'],
+    ['?agentId=not-a-uuid', 'querystring/agentId'],
+    ['?tokenKey=nonsense', 'querystring/tokenKey'],
+    ['?direction=sideways', 'querystring/direction'],
+    ['?chainId=abc', 'querystring/chainId'],
+  ])('rejects %s with the envelope', async (query, field) => {
     stubExplorers()
     routeDbQueries({ smart_accounts: BOTH_SAFES })
 
     const response = await get(`${query}&fresh=1`)
 
     expect(response.statusCode).toBe(400)
-    expect(response.json()).toMatchObject({ error })
+    expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(response.json().details).toContain(field)
+  })
+
+  it('rejects ?chainId=999999 — a well-shaped chain Haven does not serve (semantic, kept in the handler)', async () => {
+    stubExplorers()
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
+    const response = await get('?chainId=999999&fresh=1')
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({ error: 'Unsupported chain: 999999' })
   })
 
   it('returns a header-only file when the user has no accounts', async () => {

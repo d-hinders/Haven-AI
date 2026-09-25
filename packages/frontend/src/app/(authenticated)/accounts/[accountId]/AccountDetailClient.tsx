@@ -35,24 +35,19 @@ import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ExternalDetailsLink } from '@/components/haven'
+import { BalanceFreshnessIndicator } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { getExplorerUrl, getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { truncate } from '@/lib/format'
+// #3127 (finding 6): the shared formatter — this page's inline copy was the
+// third drift site that let /accounts render `kr13,000.50` while this page
+// rendered `13 000,50 kr` for the same figure.
+import { formatFiat, truncate } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { formatAgentLastActivity } from '@/lib/agent-last-seen'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
-
-function formatFiatValue(value: number, currency: 'USD' | 'EUR'): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-  }).format(value)
-}
-
 
 function formatResetPeriod(minutes: number): string {
   if (minutes === 1440) return 'per day'
@@ -93,18 +88,18 @@ export default function AccountDetailClient() {
   const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents()
 
-  // Find this Safe from user's list
-  const safe = user?.accounts?.find((s) => s.id === accountId)
-  const accountAddress = safe?.account_address ?? null
-  const chainId = safe?.chain_id ?? DEFAULT_CHAIN_ID
+  // Find this account from user's list
+  const account = user?.accounts?.find((s) => s.id === accountId)
+  const accountAddress = account?.account_address ?? null
+  const chainId = account?.chain_id ?? DEFAULT_CHAIN_ID
 
-  // Keep the active Safe in sync with the route. Runs as an effect so we
+  // Keep the active account in sync with the route. Runs as an effect so we
   // never call setState during render.
   useEffect(() => {
-    if (safe && activeAccount?.id !== safe.id) {
-      setActiveAccount(safe)
+    if (account && activeAccount?.id !== account.id) {
+      setActiveAccount(account)
     }
-  }, [safe, activeAccount, setActiveAccount])
+  }, [account, activeAccount, setActiveAccount])
 
   const accountNamesByAddress = new Map<string, string>()
   for (const account of user?.accounts ?? []) {
@@ -125,6 +120,7 @@ export default function AccountDetailClient() {
   const {
     totalUsd,
     totalEur,
+    totalSek,
     breakdown,
     loading: portfolioLoading,
     error: portfolioError,
@@ -147,10 +143,19 @@ export default function AccountDetailClient() {
     refresh: refetchTx,
   } = useTransactionsFeed({ accountId }, 10)
 
-  const totalFiat = currency === 'EUR' ? totalEur : totalUsd
+  // SEK (#3127): the portfolio hook now exposes the wire's `totalSek`, so the
+  // headline and per-token rows read the SEK figures the endpoint prices —
+  // never a USD value relabelled "kr".
+  const totalFiat = currency === 'EUR' ? totalEur : currency === 'SEK' ? totalSek : totalUsd
   const chain = getChainConfig(chainId)
-  const formattedTotal = formatFiatValue(totalFiat, currency)
+  const formattedTotal = formatFiat(totalFiat, currency)
   const balanceUnavailable = Boolean(portfolioError || balancesError)
+  // #3295: a token whose balance read failed renders its last-known value
+  // with the stale indicator beside it — the headline carries the same
+  // marker when any token under it is degraded. "Unavailable" (the word)
+  // stays reserved for the WHOLE-portfolio failure states above; per-token
+  // unavailability shows inside the token row instead of erasing the row.
+  const degradedFreshness = breakdown.find((item) => item.balanceFreshness)?.balanceFreshness
   const [renameOpen, setRenameOpen] = useState(false)
   const [removeOpen, setRemoveOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
@@ -172,8 +177,8 @@ export default function AccountDetailClient() {
   }
 
   const handleRename = async (name: string) => {
-    if (!safe) return
-    await renameAccount(safe.id, name)
+    if (!account) return
+    await renameAccount(account.id, name)
     setRenameOpen(false)
   }
 
@@ -197,11 +202,11 @@ export default function AccountDetailClient() {
   //    replacement and has nothing to do with the sweep this refusal means.
   //    The phrasing follows the sweep screen's own vocabulary instead.
   const handleRemoveConfirmed = async () => {
-    if (!safe) return
+    if (!account) return
     setRemoving(true)
     setRemoveError(null)
     try {
-      await removeAccount(safe.id)
+      await removeAccount(account.id)
       router.push('/accounts')
     } catch (err) {
       setRemoveError(
@@ -233,7 +238,7 @@ export default function AccountDetailClient() {
   }
 
   // While auth context is still hydrating `user.accounts`, avoid flashing
-  // "Account not found" — the safe lookup will resolve once safes load.
+  // "Account not found" — the account lookup will resolve once accounts load.
   if (authLoading || !user) {
     return (
       <div role="status" aria-busy="true" aria-label="Loading account" className="max-w-5xl py-16 flex items-center justify-center gap-2">
@@ -243,7 +248,7 @@ export default function AccountDetailClient() {
     )
   }
 
-  if (!safe) {
+  if (!account) {
     return (
       <div className="max-w-5xl py-16 text-center">
         <p className="text-sm text-[var(--v2-ink-3)]">Account not found</p>
@@ -254,13 +259,13 @@ export default function AccountDetailClient() {
   return (
     <div className="max-w-5xl space-y-6">
       <PageHeader
-        title={safe.name}
+        title={account.name}
         subtitle={
           'Control the funds, agent access, and recent activity for this Haven wallet.'
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {safe.is_default && (user?.accounts?.length ?? 0) > 1 ? (
+            {account.is_default && (user?.accounts?.length ?? 0) > 1 ? (
               <StatusBadge tone="brand">Default</StatusBadge>
             ) : null}
             <StatusBadge>{chain.name}</StatusBadge>
@@ -286,7 +291,7 @@ export default function AccountDetailClient() {
               Account-level settings live behind a kebab menu so they don't
               compete visually with the transactional Send/Receive buttons.
               "Rename" + "Remove" are direct actions; "Set as default" only
-              appears when this isn't already the default Safe.
+              appears when this isn't already the default account.
             */}
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -299,11 +304,11 @@ export default function AccountDetailClient() {
                 <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
                   Rename
                 </DropdownMenuItem>
-                {!safe.is_default && (user?.accounts?.length ?? 0) > 1 ? (
+                {!account.is_default && (user?.accounts?.length ?? 0) > 1 ? (
                   <DropdownMenuItem
                     onSelect={() => {
-                      void setDefault(safe.id)
-                      toast.success(`${safe.name} is now your default account`)
+                      void setDefault(account.id)
+                      toast.success(`${account.name} is now your default account`)
                     }}
                   >
                     Set as default
@@ -331,9 +336,14 @@ export default function AccountDetailClient() {
                   Unavailable
                 </p>
               ) : (
-                <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-                  {formattedTotal}
-                </p>
+                <div className="mt-2 flex flex-wrap items-baseline gap-3">
+                  <p className="text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+                    {formattedTotal}
+                  </p>
+                  {degradedFreshness && (
+                    <BalanceFreshnessIndicator freshness={degradedFreshness} />
+                  )}
+                </div>
               )}
             </div>
             <p className="max-w-sm text-sm leading-relaxed text-[var(--v2-ink-2)]">
@@ -388,7 +398,7 @@ export default function AccountDetailClient() {
                 </span>
               </div>
               {breakdown.map((item) => {
-                const fiatValue = currency === 'EUR' ? item.eurValue : item.usdValue
+                const fiatValue = currency === 'EUR' ? item.eurValue : currency === 'SEK' ? item.sekValue : item.usdValue
                 return (
                   <div
                     key={item.symbol}
@@ -397,9 +407,18 @@ export default function AccountDetailClient() {
                     <span className="text-sm text-[var(--v2-ink)]">{item.symbol}</span>
                     <span className="text-sm text-[var(--v2-ink-2)] text-right font-mono v2-tabular">
                       {item.formatted}
+                      {/* #3295: this token's read failed — the figure is the
+                          last-known balance, and the row says how old it is.
+                          Never an unmarked zero: an entry that has never been
+                          read shows "Unavailable" beside the filler. */}
+                      {item.balanceFreshness && (
+                        <span className="ml-2">
+                          <BalanceFreshnessIndicator freshness={item.balanceFreshness} size="compact" />
+                        </span>
+                      )}
                     </span>
                     <span className="text-sm text-[var(--v2-ink)] text-right v2-tabular">
-                      {formatFiatValue(fiatValue, currency)}
+                      {formatFiat(fiatValue ?? 0, currency)}
                     </span>
                   </div>
                 )
@@ -514,7 +533,7 @@ export default function AccountDetailClient() {
       {/* #1089: backup & recovery is an account capability, not an agent one —
           it works from the moment the account exists, with no agent required. */}
       <AccountSignersCard
-        accountAddress={safe.account_address}
+        accountAddress={account.account_address}
         chainId={chainId}
         userEmail={user?.email ?? ''}
       />
@@ -551,7 +570,7 @@ export default function AccountDetailClient() {
             </div>
           </div>
           {/* #2413: "Required approvals" and "Approvers" lived here. Both were
-              fed by the Safe-details read that this slice deletes, and both
+              fed by the account-details read that this slice deletes, and both
               were already inert for a delegation account — the hook behind
               them was gated to the retired rail. Delegation signers are shown
               by AccountSignersCard above, which is the live control. */}
@@ -637,12 +656,12 @@ export default function AccountDetailClient() {
       )}
       <ReceiveFundsModal
         open={receiveOpen}
-        safe={safe}
+        account={account}
         onClose={() => setReceiveOpen(false)}
       />
       {renameOpen && (
         <RenameModal
-          safe={safe}
+          account={account}
           onClose={() => setRenameOpen(false)}
           onRename={handleRename}
           loading={accountsLoading}
@@ -652,7 +671,7 @@ export default function AccountDetailClient() {
         open={removeOpen}
         onCancel={closeRemoveDialog}
         onConfirm={handleRemoveConfirmed}
-        title={`Remove ${safe.name}?`}
+        title={`Remove ${account.name}?`}
         body={(
           <div className="space-y-3">
             <p>
@@ -672,18 +691,18 @@ export default function AccountDetailClient() {
 }
 
 function RenameModal({
-  safe,
+  account,
   onClose,
   onRename,
   loading,
 }: {
-  safe: SmartAccount
+  account: SmartAccount
   onClose: () => void
   onRename: (name: string) => Promise<void>
   loading: boolean
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const [name, setName] = useState(safe.name)
+  const [name, setName] = useState(account.name)
   const [error, setError] = useState('')
   useFocusTrap(panelRef, true)
   useEscapeToClose(true, onClose, { enabled: !loading })

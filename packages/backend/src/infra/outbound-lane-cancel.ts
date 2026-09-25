@@ -23,12 +23,14 @@
  *   finds the UID and the passport closes on the ORIGINAL anchor; the
  *   liveness probe's receipt re-read says `live` even while the nonce reads
  *   consumed. The chain's nonce moved past N, so later submitters stamp at
- *   N+1… and the lane flows. The cancel row itself can never mine: the bump
- *   worker's ticks re-attempt it (`lane_cancel` is rebroadcast-safe), each
- *   attempt fails "nonce too low" and is closed `failed` at the nonce, and
- *   after `MAX_BUMPS_PER_NONCE` the lane raises the worker's incident alert
- *   — the bounded, loud residual of a lost race, and the operator's cue to
- *   confirm on the explorer that the attest mined. No re-mint, no duplicate.
+ *   N+1… and the lane flows. The cancel row itself can never mine. Once the
+ *   attest's mining is SETTLED, the bump worker's next stale tick sees the
+ *   consumed nonce and closes the cancel row `failed` silently, with no bump
+ *   attempt and no incident (#3293). Before that, a tick may still
+ *   re-attempt it (`lane_cancel` is rebroadcast-safe): the attempt fails
+ *   "nonce too low" and is closed `failed` at the nonce. The capped incident
+ *   alert is therefore no longer the expected outcome of a lost race; seeing
+ *   it means the settled nonce has NOT passed N. No re-mint, no duplicate.
  * - CANCEL WINS: the nonce is durably burned, which is precisely the ONE
  *   positive fact `classifyAnchorTxLiveness` (#1745) accepts as death — the
  *   next sweep tick re-mints exactly once through `claimForAnchoring`

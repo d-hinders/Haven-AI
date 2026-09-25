@@ -19,8 +19,9 @@ vi.mock('@/context/AuthContext', () => ({ useAuth: () => mockUseAuth() }))
 vi.mock('@/hooks/useAccounts', () => ({ useAccounts: () => mockUseAccounts() }))
 vi.mock('@/hooks/useAgents', () => ({ useAgents: () => mockUseAgents() }))
 vi.mock('@/hooks/usePreferences', () => ({ usePreferences: () => mockUsePreferences() }))
+const { mockUsePortfolio } = vi.hoisted(() => ({ mockUsePortfolio: vi.fn() }))
 vi.mock('@/hooks/usePortfolio', () => ({
-  usePortfolio: () => ({ totalUsd: 0, totalEur: 0, breakdown: [], loading: false }),
+  usePortfolio: (...args: unknown[]) => mockUsePortfolio(...args),
 }))
 vi.mock('@/hooks/useDeployableChains', () => ({
   useDeployableChains: () => ({
@@ -38,7 +39,7 @@ vi.mock('@rainbow-me/rainbowkit', () => ({
 
 import AccountsOverviewClient from '../AccountsOverviewClient'
 
-function safe(id: string, name: string, chainId: number, isDefault = false) {
+function account(id: string, name: string, chainId: number, isDefault = false) {
   return {
     id,
     account_address: `0x${id.padEnd(40, '0')}`,
@@ -49,14 +50,15 @@ function safe(id: string, name: string, chainId: number, isDefault = false) {
   }
 }
 
-const BASE = safe('base1', 'Base account', 8453, true)
-const SEPOLIA = safe('sep1', 'Sepolia account', 84532)
+const BASE = account('base1', 'Base account', 8453, true)
+const SEPOLIA = account('sep1', 'Sepolia account', 84532)
 
 describe('AccountsOverviewClient — active account (#629)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
+    mockUsePortfolio.mockReturnValue({ totalUsd: 0, totalEur: 0, totalSek: 0, breakdown: [], loading: false })
     mockUseAccounts.mockReturnValue({
       accounts: [BASE, SEPOLIA],
       loading: false,
@@ -96,6 +98,49 @@ describe('AccountsOverviewClient — active account (#629)', () => {
       `haven-reviewer` on this change.
     */
     expect(mockSetActiveSafe).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * #3127: a SEK preference must show SEK figures read from the portfolio
+   * hook's `totalSek` / `sekValue` — the pre-#3127 card had no SEK branch and
+   * served the USD figure.
+   *
+   * Review round 2, finding 6: this test USED to pin the card's own prefix
+   * formatter (`kr13,000.50`) as "deliberately unlike" the dashboard — the
+   * pin that licensed a USD-style total wearing a SEK label one click from
+   * the surface that does it right. The divergence is gone: all three fiat
+   * surfaces now render through the ONE shared `lib/format.ts` `formatFiat`,
+   * so this card renders the same sv-SE suffix voice as `/dashboard` and
+   * `/accounts/[id]` — `13 000,50 kr`, NBSP included — and this test pins
+   * that unified output instead.
+   */
+  it('renders SEK figures from the portfolio hook when the preference is SEK', () => {
+    mockUsePreferences.mockReturnValue({ currency: 'SEK' })
+    mockUsePortfolio.mockReturnValue({
+      totalUsd: 1234.56,
+      totalEur: 1100,
+      totalSek: 13000.5,
+      breakdown: [
+        { symbol: 'USDC', balance: '1000000', formatted: '1.00', usdValue: 1, eurValue: 0.92, sekValue: 9.4 },
+      ],
+      loading: false,
+    })
+    render(<AccountsOverviewClient />)
+
+    const activeCard = screen.getByLabelText('Base account')
+    // getByText needles are PLAIN-SPACE: RTL's normalizer collapses the
+    // sv-SE NBSPs on the node side but not in the needle. The exact NBSP
+    // bytes are pinned separately below via textContent.
+    expect(within(activeCard).getByText('13 000,50 kr')).toBeInTheDocument()
+    expect(within(activeCard).getByText('9,40 kr')).toBeInTheDocument()
+    // Byte-exact pin: the unified formatter's output is NBSP-separated
+    // (`13\u00a0000,50\u00a0kr`), not a plain-space lookalike.
+    const totals = within(activeCard).getAllByText(/kr$/).map((el) => el.textContent)
+    expect(totals).toContain('13\u00a0000,50\u00a0kr')
+    expect(totals).toContain('9,40\u00a0kr')
+    // The USD/EUR figures stay off the card.
+    expect(within(activeCard).queryByText('$1,234.56')).toBeNull()
+    expect(within(activeCard).queryByText('1.100,00 €')).toBeNull()
   })
 })
 
@@ -175,10 +220,10 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
  *     it also fails on the labelled `Set default` variant the decision
  *     rejected, and on a kebab item added to the card later.
  *  3. **The state where it mattered most gets its own case.** A single
- *     NON-default account: both badges are gated on `safes.length > 1`, so the
+ *     NON-default account: both badges are gated on `accounts.length > 1`, so the
  *     word `default` renders nowhere on the page, and `/accounts/<id>` hides
  *     its own set-default action in exactly this state — while the card's star
- *     was gated on `!safe.is_default` alone and rendered anyway.
+ *     was gated on `!account.is_default` alone and rendered anyway.
  *
  * The `default` BADGE is deliberately NOT swept up: it is a `span`, and the
  * chip that NAMES the state stays. Only the control that SET it from the card
@@ -227,7 +272,7 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
   })
 
   it('offers no set-default control for a lone NON-default account either', () => {
-    const LONE = safe('lone1', 'Lone account', 8453, false)
+    const LONE = account('lone1', 'Lone account', 8453, false)
     mockUseAccounts.mockReturnValue({ accounts: [LONE], loading: false })
     /*
       `activeAccount: null` — no account selected yet — and that is load-bearing

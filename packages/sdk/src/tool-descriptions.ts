@@ -69,7 +69,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Prefer this over the quote+pay split when the agent just wants the paid resource and does not need to inspect the price first. If you already have a quote from haven_quote_x402, use haven_pay_x402_quote instead. Do not use for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
     behavior:
-      'Calls the URL, parses any HTTP 402 x402 challenge, signs the payment locally, then retries the original request with the signed payment header (sent under PAYMENT-SIGNATURE, plus the legacy X-PAYMENT on the EIP-3009 path only) and returns the merchant response. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later. If the resource returns a non-402 status, returns it unchanged without contacting Haven.',
+      'Calls the URL, parses any HTTP 402 x402 challenge (or, since #3118, a native-MCP payment-required tool result under HTTP 200), signs the payment locally, then retries the original request with the signed payment header (sent under PAYMENT-SIGNATURE, plus the legacy X-PAYMENT on the EIP-3009 path only) and returns the merchant response. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later. If the resource returns a non-402 status with no payment-required tool result, returns it unchanged without contacting Haven.',
     nextActionGuidance:
       'Preserve the returned resume_state or paymentId — either identifies this payment if you need to ask about it later. ' +
       'This tool performs the merchant retry itself, so do not wait on a signal while the call is in flight. ' +
@@ -80,7 +80,7 @@ export const toolDescriptions = {
     summary:
       'Resume an x402 payment whose Haven-side authorization already succeeded but whose merchant retry did not complete.',
     behavior:
-      'Accepts either resume_state or payment_id, validates the original x402 details against the authorized Haven funding, and retries the merchant request with the signed payment header (sent under PAYMENT-SIGNATURE, plus the legacy X-PAYMENT on the EIP-3009 path only). No new Haven payment is created.',
+      'Accepts either resume_state or payment_id, validates the x402 details against the authorized funding, and retries the merchant request with the signed payment header (PAYMENT-SIGNATURE, plus legacy X-PAYMENT on EIP-3009 only; also params._meta on an MCP tools/call body). No new Haven payment is created.',
     nextActionGuidance:
       'Only call this after haven_get_payment_status reports nextAction=retry_original_x402_request — that means Haven\'s funding leg confirmed but no merchant response was ever recorded, most often because the process crashed between funding and the merchant retry. ' +
       'Any other nextAction reports a conflict instead of retrying, so do not call this speculatively. ' +
@@ -138,9 +138,9 @@ export const toolDescriptions = {
     summary:
       'List machine-payment receipts, newest first, by page.',
     selectionGuidance:
-      'For transaction history or payment evidence; use the allowance tool instead for remaining allowance or what-can-I-spend questions.',
+      "This agent's payment evidence, not the wallet's transaction history (sweeps, funding legs, other agents); use the allowance tool instead for remaining allowance or what-can-I-spend questions.",
     behavior:
-      "Page: { receipts, total, hasMore, nextCursor }; total 0 = none exist (no indexing delay); hasMore = cut at limit, send nextCursor as cursor. parties.treasuryAccount is Haven's authoritative payer. protocolReceiptPayload is the merchant's PAYMENT-RESPONSE, relayed verbatim: merchant-controlled, unverified, not Haven's record; payer may differ from payerAddress. Proof header values are omitted.",
+      "Page { receipts, total, hasMore, nextCursor }; hasMore: pass nextCursor as cursor. parties.treasuryAccount is Haven's authoritative payer. protocolReceiptPayload is the merchant's PAYMENT-RESPONSE relayed verbatim: merchant-controlled, unverified, not Haven's record; payer may differ from payerAddress. Proof header values omitted.",
     nextActionGuidance: '',
   },
   verifyReceipt: {
@@ -228,9 +228,9 @@ export const toolDescriptions = {
       'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. ' +
       'Do NOT use to check whether funds are held before sending — use haven_check_funds.',
     behavior:
-      'Sends the requested amount by redeeming the agent\'s on-chain budget delegation, account to recipient with no funding leg. ' +
-      'Budget, recipient and expiry are enforced on-chain while the transfer is prepared, so a request outside them is declined before any money moves and before the agent is asked to sign — it is never queued for a human to approve later. ' +
-      'The agent\'s signing key signs the account\'s typed data; Haven never receives the key.',
+      'Sends the amount by redeeming the agent\'s on-chain budget delegation, account to recipient with no funding leg. ' +
+      'Budget, recipient and expiry are enforced on-chain while the transfer is prepared, so a request outside them is declined before any money moves or any signing — never queued for a human to approve. ' +
+      'The agent\'s signing key signs the account\'s typed data, refusing any that mismatches the payment\'s hash; Haven never receives the key.',
     nextActionGuidance:
       'On a decline, report the reason to the user and ask them to grant or raise the budget in Haven — there is nothing to poll and no approval will arrive. ' +
       'After a successful send, poll haven_get_payment_status until nextAction=none.',

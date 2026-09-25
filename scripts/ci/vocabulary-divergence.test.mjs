@@ -131,7 +131,7 @@ test('transaction scanner reads top-level keys only, not nested ones', () => {
 test('a commented-out field on either surface is not reported as live', () => {
   // Commenting a field out rather than deleting it kept it looking live, so the
   // `stale` direction went SILENT — and `stale` is the direction that fires
-  // when #3134 converges a pair and someone forgets to remove its row. Both
+  // when a pair converges and someone forgets to remove its row. Both
   // surface scanners read a stripped copy now; they were the two the stripper
   // never reached.
   //
@@ -230,7 +230,7 @@ test('a new undeclared field on either surface is reported, with its surface', (
 })
 
 test('a map entry whose field left its surface is reported as stale', () => {
-  // #3134 converges a pair and forgets to remove its row: the map keeps
+  // a pair converges and someone forgets to remove its row: the map keeps
   // describing a divergence that no longer exists.
   const transaction = scanTransactionSurface(TRANSACTION_SRC)
   delete transaction.valueFormatted

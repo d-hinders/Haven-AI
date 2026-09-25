@@ -8,25 +8,43 @@
  * is a client that would have sent the wrong thing to a different backend.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ethers } from 'ethers'
 import { HavenClient } from './client.js'
 import { HavenApiError } from './types.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
-import SETTLEMENT_PAYLOAD from './__fixtures__/settlement-delegation-payload.json' with { type: 'json' }
+import FIXTURE_CHILD from './__fixtures__/settlement-delegation-payload.json' with { type: 'json' }
+import { deriveDelegateAccountAddress } from './delegate-account.js'
+import { HavenTypedDataRefusedError } from './direct-payment-guard.js'
+import { ROOT_AUTHORITY } from './settlement-child.js'
 
 const DELEGATE_KEY = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d'
 const DELEGATE = new ethers.Wallet(DELEGATE_KEY).address
 const MERCHANT = '0x3333333333333333333333333333333333333333'
 const FACILITATOR = '0x4444444444444444444444444444444444444444'
-const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+// #3283: the 402 below and the child the harness returns describe the SAME
+// payment, because `signForData` now verifies the child against the
+// merchant's 402 before signing. The fixture child is a real
+// `buildSettlementDelegation` payload on Base Sepolia (payee 0x3333…, 1000
+// atomic USDC, facilitator 0x4444…), so the 402 quotes exactly that.
+const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+
+/** The fixture child re-delegated FROM this test key's own account — the only child signForData signs. */
+const SETTLEMENT_PAYLOAD = (() => {
+  const td = JSON.parse(JSON.stringify(FIXTURE_CHILD)) as typeof FIXTURE_CHILD
+  td.message.delegator = deriveDelegateAccountAddress(DELEGATE as `0x${string}`)
+  return td
+})()
+
+/** The fixture's expiry is a fixed timestamp (2026-08-27); freeze the clock inside its window. */
+const FIXTURE_EXPIRY_SEC = 0x6a80709b
 
 function option(over: Partial<X402PaymentOption> = {}): X402PaymentOption {
   return {
     scheme: 'exact',
-    network: 'eip155:8453',
+    network: 'eip155:84532',
     asset: USDC,
-    amount: '20000',
+    amount: '1000',
     payTo: MERCHANT,
     maxTimeoutSeconds: 300,
     ...over,
@@ -86,7 +104,12 @@ function harness(opts: { rail?: 'delegation' | 'legacy'; scheme?: string } = {})
 }
 
 describe('settleX402Erc7710 (#1454)', () => {
-  beforeEach(() => vi.restoreAllMocks())
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime((FIXTURE_EXPIRY_SEC - 60) * 1000)
+  })
+  afterEach(() => vi.useRealTimers())
 
   it('completes authorize -> sign -> settle and returns the merchant header', async () => {
     const { client, posts } = harness()
@@ -340,5 +363,72 @@ describe('settleX402Erc7710 (#1454)', () => {
         )
         .toLowerCase(),
     ).toBe(DELEGATE.toLowerCase())
+  })
+})
+
+/**
+ * #3283 (epic #3284) criterion 4: a compromised Haven API serves the erc7710
+ * path a child that would capture the agent's account. Today it signs.
+ */
+describe('settleX402Erc7710 verifies the child against the merchant 402 (#3283)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime((FIXTURE_EXPIRY_SEC - 60) * 1000)
+  })
+  afterEach(() => vi.useRealTimers())
+
+  function serving(child: unknown) {
+    const { client, posts } = harness()
+    vi.spyOn(client as never, 'post').mockImplementation((async (...args: unknown[]) => {
+      posts.push({ path: args[0] as string, body: args[1] as Record<string, unknown> })
+      if (args[0] === '/x402') {
+        return {
+          payment_id: 'pay_1',
+          sign_data: { hash: '0x' + '11'.repeat(32), signature_scheme: 'eip712_delegation', typed_data: child },
+        }
+      }
+      return { payment_header: 'eyJ4NDAyVmVyc2lvbiI6Mn0=' }
+    }) as never)
+    return { client, posts }
+  }
+
+  it('refuses a ROOT-authority, caveat-free child delegated by the agent account, and settles nothing', async () => {
+    const td = JSON.parse(JSON.stringify(SETTLEMENT_PAYLOAD)) as typeof SETTLEMENT_PAYLOAD
+    td.message.authority = ROOT_AUTHORITY
+    td.message.caveats = []
+    const { client, posts } = serving(td)
+    await expect(client.settleX402Erc7710(paymentRequired([erc7710Option()]))).rejects.toThrow(/ROOT delegation/)
+    expect(posts.map((p) => p.path)).toEqual(['/x402'])
+  })
+
+  it('refuses a child whose payee Haven rewrote, checked against the 402 payTo, and settles nothing', async () => {
+    const td = JSON.parse(JSON.stringify(SETTLEMENT_PAYLOAD)) as typeof SETTLEMENT_PAYLOAD
+    const pin = td.message.caveats.find((c) => c.enforcer.toLowerCase() === '0xc2b0d624c1c4319760c96503ba27c347f3260f55')!
+    pin.terms = pin.terms.slice(0, 2 + 64 + 24) + '9'.repeat(40)
+    const { client, posts } = serving(td)
+    await expect(client.settleX402Erc7710(paymentRequired([erc7710Option()]))).rejects.toThrow(
+      /pays a different address/,
+    )
+    expect(posts.map((p) => p.path)).toEqual(['/x402'])
+  })
+
+  it('refuses a child for a larger amount than the 402 quoted', async () => {
+    const td = JSON.parse(JSON.stringify(SETTLEMENT_PAYLOAD)) as typeof SETTLEMENT_PAYLOAD
+    const amt = td.message.caveats.find((c) => c.enforcer.toLowerCase() === '0xf100b0819427117ecf76ed94b358b1a5b5c6d2fc')!
+    amt.terms = amt.terms.slice(0, 2 + 40) + (2000).toString(16).padStart(64, '0')
+    const { client } = serving(td)
+    await expect(client.settleX402Erc7710(paymentRequired([erc7710Option()]))).rejects.toThrow(/amount does not match/)
+  })
+
+  it('a direct signForData call on a child with no expectation is refused, not signed', async () => {
+    const { client } = harness()
+    await expect(
+      (client as unknown as { signForData(d: unknown): Promise<string> }).signForData({
+        hash: '0x' + '11'.repeat(32),
+        signature_scheme: 'eip712_delegation',
+        typed_data: SETTLEMENT_PAYLOAD,
+      }),
+    ).rejects.toBeInstanceOf(HavenTypedDataRefusedError)
   })
 })

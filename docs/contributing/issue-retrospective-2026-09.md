@@ -11,7 +11,7 @@ covers:
   - docs/operations/package-dev-channel.md
   - packages/backend/src/openapi/spec.test.ts
   - docs/quality/issue-classification-2026-09.csv
-last-verified: "2026-09-09"
+last-verified: "2026-09-21"
 ---
 
 # The 600-issue retrospective (2026-09-03)
@@ -196,9 +196,9 @@ see it is enforced rather than merely written down.
 
 | | Guideline | Landed in |
 |---|---|---|
-| **C1** | A removal PR ships with a claim sweep, and the sweep's commands are in the body. The sweep's hits are finished in the PR that triggered it — fixed or dropped under **Not filed**, not filed as a follow-up (#2767). | `ship-next` *Implement*, `doc-reviewer` §2 |
+| **C1** | A removal PR ships with a claim sweep, and the sweep's commands are in the body. | `ship-next` *Implement*, `doc-reviewer` §2 |
 | **C2** | Schedule the residue at the start, and gate the retired vocabulary in CI so the epic can finish. | `quality-scan` block 4 |
-| **C3** | When a title says "still", widen the net — do not just fix the instance. The widened net is swept in the PR that triggered it, and a "still" of an open issue widens that issue rather than filing a sibling (#2767). | `ship-next` *Implement* (#2512), *Filing bar* (#2767). Not landed when this document was written; the row said so and named the issue, which is why it exists. |
+| **C3** | When a title says "still", widen the net — do not just fix the instance. | `ship-next` *Implement* (#2512). Not landed when this document was written; the row said so and named the issue, which is why it exists. |
 
 ### D — Reviews
 
@@ -230,7 +230,7 @@ Added 2026-09-06 from a single-session retrospective, [`session-retrospective-20
 
 | | Guideline | Landed in |
 |---|---|---|
-| **H1** | A correction is a new claim. Verify the replacement sentence against its instrument, never against the sentence it replaces. | Stated only. Not mechanisable by a script, and said so rather than claimed. |
+| **H1** | A correction is a new claim. Verify the replacement sentence against its instrument, never against the sentence it replaces. | Stated, not mechanised: `ship-next` *Independent Review* step 2 (#3225, after two corrections on 2026-09-22 were themselves false — commits `05a250d0` and `6ceca30e`) and the reviewer role (`reviewer.md`); the doc-reviewer role's §4 holds the reviewer-side counterpart — a behavioural claim is executed, a claim about an earlier commit is checked against it. Not mechanisable by a script, and said so rather than claimed. |
 | **H2** | Before a "none found", check the instrument is looking at the column, the tree and the process you mean. | `ai-review-patterns.md` § *Instrument Self-Reference And Staleness*; the Captain Self-Check Preflight; `reviewer.md` must-check list |
 | **H3** | After editing a sentence, read it to its full stop in the rendered file — the tail that describes the old head is on the line the diff does not show. | Stated only. |
 
@@ -253,3 +253,16 @@ The three skills that carry them shipped on 2026-09-03: #2499 (`doc-reviewer`),
 of evidence for this document — across those three reviews, **every wrong
 claim was caught by an independent read, and none by a gate**. On #2500, four
 of six review rounds blocked on a sentence whose basis could not be found.
+
+Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): this is a
+dated analysis of a fixed window (#1248–#2486, 2026-08-10 to 2026-09-03), so
+its figures are records, not live claims, and were not recomputed. What was
+re-checked is that the instrument pointers above still land: the three skills
+exist at the cited paths, the guideline targets (`reviewer.md` must-check
+list, the Captain Self-Check Preflight, `ai-review-patterns.md`, the
+`quality-scan` block in `openapi/spec.test.ts`) are all still present, and the
+classification CSV still sits beside this document. The largest intervening
+change to a covered file (#3182's coordination-hygiene rewrite of
+`ship-next/SKILL.md`, the #3193 channel rotation) renamed coordination
+surfaces inside the skill; the retrospective's own text quotes no channel
+number, so nothing here went stale with it.

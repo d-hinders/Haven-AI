@@ -40,10 +40,19 @@ export interface HavenClientConfig {
   defaultHeaders?: Record<string, string>
 
   /**
+   * `<package>/<version>` naming the published package that embeds this
+   * client, sent on every Haven API request as `X-Haven-Client` (#3303) so the
+   * backend can tell an outdated client what to run. Defaults to
+   * `@haven_ai/sdk/<this SDK's version>`. It cannot be set through
+   * `defaultHeaders` — the transport writes it last.
+   */
+  clientIdentity?: string
+
+  /**
    * JSON-RPC RPC URLs keyed by EIP-155 chain ID.
    *
    * When provided for a chain, the SDK waits for ≥1 on-chain confirmation of
-   * the AllowanceModule funding tx before retrying the merchant. This prevents
+   * the funding tx (account → delegate EOA) before retrying the merchant. This prevents
    * the race where the merchant's `balanceOf(delegate)` call runs before the
    * funding block has propagated to the merchant's RPC node.
    *
@@ -316,10 +325,10 @@ export interface X402AuthorizationOptions {
  * Keyless x402 construct result.
  *
  * Returned by `createX402Intent` — the non-custodial half of an x402 payment.
- * It carries the unsigned funding hash (`signData.hash`, Safe → delegate EOA)
+ * It carries the unsigned funding payload (`signData`, account → delegate EOA)
  * plus everything the *edge* needs to build and sign the EIP-3009 merchant
  * header itself. The construct path never signs; both delegate signatures
- * (funding hash + merchant header) happen on the machine that holds the key.
+ * (funding payload + merchant header) happen on the machine that holds the key.
  */
 export interface X402Intent {
   /** Haven payment id for the funding transfer. */
@@ -329,7 +338,7 @@ export interface X402Intent {
   status: 'pending_signature'
   /** ISO 8601 expiry of the funding intent, if returned. */
   expiresAt?: string
-  /** The unsigned funding hash to sign with the delegate key (Safe → delegate EOA). */
+  /** The unsigned funding payload to sign with the delegate key (account → delegate EOA). */
   signData: SignData
   /** The selected x402 option — the edge needs this to build the EIP-3009 header. */
   accepted: X402PaymentOption
@@ -381,6 +390,11 @@ export interface X402ExpectedContext {
    * which is NOT what the account validates — binding it alone would leave the
    * edge signer unable to verify the payload it is being asked to sign. Binding
    * this digest makes Haven's declaration cover the real payload.
+   *
+   * Absent ⇒ the retired version-1 bare-hash context. Since #3272 the backend
+   * never emits one (`signX402ExpectedContext` requires this field) and
+   * `@haven_ai/signer` refuses it with its version-mismatch refusal; the field
+   * stays optional here only because the type also describes older payloads.
    */
   typedDataHash?: string
   /**
@@ -397,8 +411,9 @@ export interface X402ExpectedContext {
 
 export interface X402ExpectedAuth {
   /**
-   * 1 = hash-only (legacy rail). 2 = carries `typedDataHash` (delegation rail,
-   * #1138).
+   * 2 = carries `typedDataHash` (delegation rail, #1138). 3 = additionally binds
+   * the payer identity (#1690). 1 (hash-only, retired Safe rail) is never
+   * emitted since #3272 and the signer refuses it.
    *
    * Deliberately `number`, not a literal union (#1143). This is an **inbound**
    * value: a signer parses a context Haven produced, and a signer older than the
@@ -744,12 +759,12 @@ export interface RawHavenBalanceCoverage {
 /**
  * Affirmative spend-readiness for the authenticated agent, derived from the raw
  * agent status plus the remaining spend authority the backend reports per rail
- * (the on-chain AllowanceModule on the legacy rail; the active budget
- * delegation on the delegation rail — #1135):
+ * (the active budget delegation on the delegation rail — #1135; the retired
+ * AllowanceModule rail used an on-chain allowance instead):
  * - `ready`         — active and at least one token has remaining spend authority.
  * - `needs_approval`— active but no remaining spend authority to auto-spend.
- *                     The over-budget outcome differs by rail: on the legacy
- *                     AllowanceModule rail the payment is queued for the wallet
+ *                     The over-budget outcome differs by rail: on the retired
+ *                     AllowanceModule rail the payment was queued for the wallet
  *                     owner to approve in Haven; on the delegation rail there is
  *                     NO approval queue — an over-budget redemption reverts
  *                     on-chain, so the owner must grant or raise the budget in
@@ -840,12 +855,48 @@ export interface RawPaymentParties {
   merchant: string | null
 }
 
+/**
+ * #3132 (owner decision 3 on #3130): what population a list row came from and
+ * what narrowed it, as two values. Receipts are `{ source: 'agent', filter:
+ * null }` — this agent's evidence rows only, no query-time narrowing. The
+ * wallet feed (`GET /transactions`, the CLI's `activity list`) is
+ * `source: 'wallet'` with `filter: 'agent'` when `agentId` narrows it, and it
+ * is a DIFFERENT population (explorer window plus synthesized intents; sweeps
+ * and funding legs included), never this view. A receipt read is not a
+ * transaction-history read.
+ */
+export interface HavenListScope {
+  source: 'wallet' | 'agent'
+  filter: 'agent' | 'account' | 'account+agent' | null
+}
+
 export interface HavenPaymentReceipt {
   id: string
+  /** #3132: present when the backend states it (absent on an older backend). */
+  scope?: HavenListScope
   paymentId: string
   paymentIntentId?: string | null
   approvalRequestId?: string | null
+  /**
+   * #3134: the payment protocol this receipt settled on — one of the
+   * evidence-eligible rails (`x402`, `mpp_demo`, `mpp_crypto`, `spt`) — under the
+   * name the transactions feed uses for the same concept. Distinct from
+   * `scope.source`, which names the LIST population (#3132) — the transaction
+   * row carries the same two. Same name, narrower domain: never `'direct'`
+   * here — the feed's SQL default for an intent that names no protocol has no
+   * receipt analogue, because no protocol means no evidence row.
+   */
+  source: string
+  /** @deprecated (#3134) twin of {@link source}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
   rail: string
+  /**
+   * #3134: the evidence row's recorded proof status, under the transactions
+   * feed's name. Same name, different nullability: `string` here because a
+   * receipt IS the evidence row, `string | null` on the feed, where a row may
+   * LEFT JOIN to none (#3132) — do not share a non-null-asserting helper.
+   */
+  paymentProofStatus: string
+  /** @deprecated (#3134) twin of {@link paymentProofStatus}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
   proofStatus: string
   /**
    * @deprecated (#2998) meaning depends on the settlement scheme — the
@@ -864,7 +915,13 @@ export interface HavenPaymentReceipt {
    */
   settlementTxHash: string | null
   chainId: number
+  /** #3134: the paid resource, under the transactions feed's protocol-prefixed name (`string | null` there; a receipt always has one). */
+  x402ResourceUrl: string
+  /** @deprecated (#3134) twin of {@link x402ResourceUrl}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
   resourceUrl: string
+  /** #3134: the merchant paid, under the transactions feed's protocol-prefixed name. */
+  x402MerchantAddress: string | null
+  /** @deprecated (#3134) twin of {@link x402MerchantAddress}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
   merchantAddress: string | null
   payerAddress: string
   /** #2960: additive alongside `payerAddress` above (`parties.treasury_account` only). */
@@ -929,7 +986,7 @@ export const DEFAULT_CONFIRMATION_TIMEOUT_MS = 90_000
  * done, or as failed, are the same defect in opposite directions.
  */
 export type SweepConfirmation =
-  /** A receipt was observed. The funds are in the Safe. */
+  /** A receipt was observed. The funds are in the agent's Haven account. */
   | 'confirmed'
   /**
    * Broadcast, but no receipt within `DEFAULT_CONFIRMATION_TIMEOUT_MS` (or the
@@ -972,7 +1029,7 @@ export interface SweepEntry {
 export interface SweepResult {
   /** Address funds were swept FROM */
   fromAddress: string
-  /** Address funds were swept TO (always the originating Safe) */
+  /** Address funds were swept TO (always the agent's Haven account) */
   toAddress: string
   /** Chain the sweep occurred on */
   chainId: number
@@ -1087,9 +1144,9 @@ export const AgentPaymentNextAction = {
    */
   FundAccountOrRaiseAllowance: 'fund_account_or_raise_allowance',
   /**
-   * The delegate wallet may hold funds that were sent from the Safe but never
-   * settled to the merchant. The wallet owner should initiate a sweep to
-   * return those funds to the originating Safe.
+   * The delegate wallet may hold funds that were sent from the agent's Haven
+   * account but never settled to the merchant. The wallet owner should initiate
+   * a sweep to return those funds to that account.
    */
   SweepStrandedFunds: 'sweep_stranded_funds',
   /**
@@ -1189,7 +1246,7 @@ export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typ
  * historical `mpp_demo` rows, which remain readable.
  */
 export const AgentPaymentRail = {
-  /** Standard Haven payment from the user's Safe through an approved delegate allowance. */
+  /** Standard Haven payment from the user's account, redeemed through the agent's budget delegation. */
   Direct: 'direct',
   /** x402 HTTP 402 payment flow with a Haven funding leg and merchant retry leg. */
   X402: 'x402',
@@ -1788,6 +1845,8 @@ export interface RawHavenAllowanceSummary {
 /** @internal */
 export interface RawHavenPaymentReceipt {
   id: string
+  /** #3132: present on a backend that states list scope per row; absent on older backends. */
+  scope?: { source: 'wallet' | 'agent'; filter: 'agent' | 'account' | 'account+agent' | null }
   payment_id: string
   payment_intent_id?: string | null
   approval_request_id?: string | null

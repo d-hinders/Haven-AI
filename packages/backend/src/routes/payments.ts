@@ -16,11 +16,11 @@ import {
   releaseSubmittedClaim,
   type SendIntentReplayRow,
 } from '../infra/repositories/payment-intents.js'
-import { userOpTypedData } from '../rails/delegation-rail.js'
-import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import {
   agentPaymentStatusHttpCode,
   getAgentPaymentStatus,
+  buildDirectSignData,
+  getDirectSignContext,
 } from '../modules/payments/index.js'
 import { agentAuthMiddleware, type AgentContext } from '../middleware/agentAuth.js'
 import { moneyPathRateLimit } from '../middleware/rate-limit.js'
@@ -52,6 +52,7 @@ import {
 import { getAgentPaymentResumeState } from '../modules/payments/index.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../modules/payments/index.js'
 import { quoteFee } from '../modules/fee/index.js'
+import { toCanonicalAddress } from '../modules/transactions/index.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 
 /**
@@ -226,20 +227,23 @@ async function replayIntentBody(
   if (pi.execution_rail === 'delegation' && pi.prepared_user_op != null) {
     // #961: reconstruct the EXACT signing payload from the stored
     // UserOperation — a fresh estimation would be a different payload (new
-    // nonce/gas), and the intent pinned this one.
-    const state = deserializeUserOp(pi.prepared_user_op) as Record<string, unknown>
-    const accountAddress = await computeHybridAccountAddress(pi.chain_id, {
-      ownerAddress: agent.delegate_address as `0x${string}`,
-    })
+    // nonce/gas), and the intent pinned this one. #3271: shared with
+    // `GET /payments/:id/sign-context` (`modules/payments/
+    // direct-sign-context.ts`) so both surfaces serve identical bytes for the
+    // same row by construction.
+    const { hash, signature_scheme, typed_data, accountAddress } = await buildDirectSignData(
+      pi,
+      agent,
+    )
     return {
       payment_id: pi.id,
       status: pi.status,
       expires_at: pi.expires_at,
       idempotent_replay: true,
       sign_data: {
-        hash: pi.sign_hash,
-        signature_scheme: 'eip712_userop',
-        typed_data: userOpTypedData(state, accountAddress as `0x${string}`, pi.chain_id),
+        hash,
+        signature_scheme,
+        typed_data,
         components: {
           account: accountAddress,
           token: pi.token_address,
@@ -404,7 +408,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     // agent is asked for a signature. No coverage arithmetic, no approval
     // queue, no schedule machinery: the chain rules.
     // ── Delegation rail — the ONLY live rail (#1987) ─────────────────────
-    // This used to be `if (railState.safeExecutionRail === 'delegation')` with
+    // This used to be `if (railState.executionRail === 'delegation')` with
     // the legacy AllowanceModule flow below it. `resolveExecutionRail` returns
     // exactly `delegation | retired_session | retired_allowance` and the early
     // gate above returns for both retired answers, so reaching here IS the
@@ -717,6 +721,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           usdValue: fiatValues.usd,
           eurValue: fiatValues.eur,
           agentId: agent.id,
+          sekValue: fiatValues.sek,
         })
 
         if (!confirmed) {
@@ -787,6 +792,27 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
           null,
         )
       }
+    },
+  )
+
+  // ── GET /:id/sign-context — byte-free signing handoff for a DIRECT
+  // delegation-rail intent (#3271, the direct sibling of #1263's x402 route)
+  // ──────────────────────────────────────────────────────────────────────
+  // Read-only: re-serves the stored delegation-rail signing payload so the
+  // LOCAL SIGNER can fetch exact bytes by payment_id instead of the agent
+  // re-emitting a multi-KB EIP-712 payload by hand. `GET /x402/:id/
+  // sign-context` keeps answering its 409 for a direct payment_id with the
+  // same error_code and the same typed_data_b64 instruction (it only gains a
+  // pointer to this route), and this route 409s an x402/MPP intent the same
+  // way — old signers still get the refusal they key on. All checks and the rebuild live in the module
+  // (`getDirectSignContext`).
+  app.get<{ Params: { id: string } }>(
+    '/:id/sign-context',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const result = await getDirectSignContext(agent, request.params.id)
+      return reply.code(result.code).send(result.body)
     },
   )
 
@@ -861,7 +887,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       chain_id: intent.chain_id,
       token: intent.token_symbol,
       amount: intent.amount_human,
-      to: intent.to_address,
+      // #3307: Haven-owned addresses are EIP-55 checksummed at the read
+      // boundary, the same rule as the receipt, payment status and the
+      // transactions feed (#3129). Storage stays lowercase.
+      to: toCanonicalAddress(intent.to_address),
       tx_hash: intent.tx_hash,
       explorer_url: intent.tx_hash ? getExplorerUrl(intent.chain_id, 'tx', intent.tx_hash) : null,
       fee: buildResponseFee(intent),
@@ -903,7 +932,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         status: intent.status,
         token: intent.token_symbol,
         amount: intent.amount_human,
-        to: intent.to_address,
+        to: toCanonicalAddress(intent.to_address), // #3307
         tx_hash: intent.tx_hash,
         created_at: intent.created_at,
         confirmed_at: intent.confirmed_at,

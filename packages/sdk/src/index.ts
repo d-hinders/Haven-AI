@@ -53,6 +53,18 @@ export {
   isConnectorChannel,
 } from './connector-channel.js'
 
+// Client identity on Haven API requests (#3303, epic #3302): the
+// `X-Haven-Client` header every published package sends, and the
+// `client_update` hint the backend answers with when that package is behind.
+export {
+  SDK_VERSION,
+  HAVEN_CLIENT_HEADER,
+  SDK_CLIENT_IDENTITY,
+  havenClientIdentity,
+  readClientUpdate,
+  type HavenClientUpdate,
+} from './client-identity.js'
+
 // The Node.js floor every published Haven package enforces (#1161). Shared here
 // because connect (at setup), signer and mcp (at startup) all need the same
 // number, and a copy per package is how it drifted to begin with.
@@ -128,6 +140,7 @@ export type {
   HavenBalanceCoverage,
   PostPurchaseAllowanceSummary,
   HavenPaymentReceipt,
+  HavenListScope,
   HavenPaymentReceiptsPage,
   SweepResult,
   SweepEntry,
@@ -231,6 +244,26 @@ export type {
   SweepSubmitResult,
   SweepTypedData,
 } from './sweep.js'
+export {
+  DIRECT_SIGN_CONTEXT_VERSION,
+  ENTRY_POINT_V07,
+  HYBRID_DELEGATOR_DOMAIN_NAME,
+  HYBRID_DELEGATOR_DOMAIN_VERSION,
+  PACKED_USER_OPERATION_FIELDS,
+  HavenUserOpBindingError,
+  assertUserOpTypedDataBinding,
+  isPackedUserOperationTypedData,
+  packedUserOperationHash,
+} from './userop-binding.js'
+
+// #3283 (epic #3284): the signing-surface guard `signForData` and the signer share.
+export { deriveDelegateAccountAddress } from './delegate-account.js'
+export {
+  HavenTypedDataRefusedError,
+  TYPED_DATA_NOT_ALLOWED,
+  assertBoundDirectPaymentUserOp,
+} from './direct-payment-guard.js'
+export { ROOT_AUTHORITY, verifySettlementChild, type SettlementChildExpectation } from './settlement-child.js'
 
 // #1328: mpp.ts's demo challenge/proof helpers (parseMachinePaymentChallenge,
 // parseMachinePaymentChallengeResponse, buildMachinePaymentIdempotencyKey,

@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { HavenClient } from '@haven_ai/sdk'
+import { HavenClient, havenClientIdentity } from '@haven_ai/sdk'
 import { hostedConnectorRerunCommand } from './connector-channel.js'
 import {
   assertHostedToolRegistry,
@@ -12,7 +12,7 @@ import {
 } from './tools.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.4.0-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.5.0-alpha.1'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -25,10 +25,12 @@ export const HOSTED_SERVER_VERSION = '0.4.0-alpha.0'
 export const HOSTED_INSTRUCTIONS = [
   'Haven hosted MCP server: keyless. It constructs and relays payments and never',
   'holds or receives a signing key — signing happens only in the local',
-  'haven-signer MCP server. Call haven_get_agent first, every session: identity,',
-  'spend_authority_readiness, and live remaining budget in one call. That signal',
-  'covers hosted identity + on-chain spend authority ONLY — it cannot see the',
-  'local signer; a signer tool call (tools/list suffices) is the signer check.',
+  'haven-signer MCP server. Call haven_get_agent at the start of every session:',
+  'identity, spend_authority_readiness, and live remaining budget in one call.',
+  'That signal covers hosted identity + on-chain spend authority ONLY — it cannot',
+  'see the local signer; a signer tool call (tools/list suffices) is the signer',
+  'check. When catalog discovery is needed, haven_discover_tools can run in',
+  'parallel with haven_get_agent — neither waits on the other.',
   '',
   'For a catalogued MCP merchant, use haven_discover_tools to find a catalog_id,',
   'then haven_quote_catalog_purchase when you need its live price before choosing',
@@ -55,6 +57,19 @@ export const HOSTED_INSTRUCTIONS = [
   'next_tool and next_tool_server name a server you do not have. Use',
   'next_tool_server_role (hosted | signer) with next_tool_name, and resolve the',
   'role against your OWN configured servers.',
+  '',
+  'For a plain-HTTP x402 merchant (a catalog row with protocol: http, or any',
+  'https paywall), call haven_quote_x402, then haven_pay_x402_quote with',
+  '{ payment_required, url: request_url, max_amount_human | max_amount } —',
+  "url is the quote's request_url, never its resource_url, which is the",
+  "merchant's own declaration and may differ. Then follow the pay response's",
+  'signer and scheme-specific guidance. EIP-3009 (funding leg): haven_sign_x402,',
+  'then haven_submit, then retry the merchant yourself with the returned',
+  'payment_header (both header names, below), then haven_report_x402_outcome.',
+  'erc7710: haven_sign, then haven_submit with settlement_scheme "erc7710", then',
+  'retry the merchant yourself with the payment_header haven_submit returns',
+  '(PAYMENT-SIGNATURE only) — there is no outcome report on this path: confirmed',
+  'already means the merchant settled. The outcome report is EIP-3009-only.',
   '',
   'When YOU retry a merchant yourself (the plain-HTTP x402 path), always set',
   'PAYMENT-SIGNATURE (x402 v2) to the payment_header. A strict v2 merchant reads',
@@ -137,6 +152,10 @@ export function createHostedHavenClient(options: HostedClientOptions): HavenClie
     apiKey: options.apiKey,
     baseUrl: options.baseUrl,
     chainRpcs,
+    // #3303: the hosted server is Haven-deployed and outside the five
+    // published packages, so the backend's compat table never hints or refuses
+    // it; naming it keeps its requests from reading as a bare SDK embedder's.
+    clientIdentity: havenClientIdentity('@haven_ai/mcp-server', HOSTED_SERVER_VERSION),
     // Intentionally NO delegateKey. See custody invariant in
     // docs/architecture/06-hosted-mcp-connect-flow.md.
   })

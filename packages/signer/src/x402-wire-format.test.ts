@@ -16,20 +16,21 @@ import { describe, it, expect } from 'vitest'
 import { x402ResourceServer } from '@x402/core/server'
 import type { PaymentPayload, PaymentRequirements } from '@x402/core/types'
 import { privateKeyToAccount } from 'viem/accounts'
-import { recoverTypedDataAddress } from 'viem'
+import { hashTypedData, recoverTypedDataAddress } from 'viem'
 import {
+  addressFromKey,
   buildX402ExpectedMessage,
   normalizePaymentRequired,
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
   X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
 } from '@haven_ai/sdk'
+import { buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 import { createEdgeSigner } from './core.js'
 
 // Well-known test keys (Hardhat accounts). Never used for real funds.
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const BINDING_KEY = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
 const BINDING_SIGNER = privateKeyToAccount(BINDING_KEY).address
-const FUNDING_HASH = '0x' + 'cd'.repeat(32)
 
 // Base USDC, verbatim checksummed — EIP-712 hashes are byte-sensitive.
 const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
@@ -88,22 +89,36 @@ function decodeHeader(header: string): DecodedHeader {
   return JSON.parse(Buffer.from(header, 'base64').toString('utf8')) as DecodedHeader
 }
 
+// #3281: a REAL funding leg (the shared builder) — this key's own account
+// redeeming one budget delegation, transferring the quoted amount of the
+// quoted token to this key's own delegate EOA. The toy 'Funding' fixture the
+// x402 arm now refuses.
+const FUNDING = buildFundingLegUserOp({
+  delegate: addressFromKey(TEST_KEY) as `0x${string}`,
+  asset: ACCEPTED.asset as `0x${string}`,
+  amount: ACCEPTED.amount,
+  chainId: 8453, // ACCEPTED.network ('eip155:8453')
+})
+const FUNDING_TYPED_DATA = FUNDING.typedData
+const FUNDING_DIGEST = FUNDING.digest
+
 async function expectedX402() {
   const context = {
     paymentId: 'pay_x402_wire',
-    payloadHash: FUNDING_HASH,
+    payloadHash: FUNDING.payloadHash as string,
     resourceUrl: PAYMENT_REQUIRED.resource.url,
     merchantTo: ACCEPTED.payTo,
     amount: ACCEPTED.amount,
     asset: ACCEPTED.asset,
     network: ACCEPTED.network,
+    typedDataHash: FUNDING_DIGEST,
   }
   const message = buildX402ExpectedMessage(context)
   const account = privateKeyToAccount(BINDING_KEY)
   return {
     ...context,
     auth: {
-      version: 1 as const,
+      version: 2 as const,
       message,
       signature: await account.signMessage({ message }),
       signer: account.address,
@@ -113,7 +128,7 @@ async function expectedX402() {
 
 async function buildHeader(paymentRequired = PAYMENT_REQUIRED): Promise<{ header: DecodedHeader; delegateAddress: string }> {
   const signer = createEdgeSigner(TEST_KEY, { x402BindingSigner: BINDING_SIGNER })
-  const funding = signer.signX402FundingHash(FUNDING_HASH, await expectedX402())
+  const funding = await signer.signX402FundingTypedData(FUNDING_TYPED_DATA as never, await expectedX402())
   const result = await signer.buildX402PaymentHeader(paymentRequired, funding.x402Binding)
   return { header: decodeHeader(result.paymentHeader), delegateAddress: signer.delegateAddress }
 }

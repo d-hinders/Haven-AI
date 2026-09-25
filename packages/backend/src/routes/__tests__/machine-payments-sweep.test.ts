@@ -130,8 +130,8 @@ describe('machine payment sweep routes', () => {
   const headers = { authorization: 'Bearer sk_agent_test' }
 
   describe('POST /sweep/prepare', () => {
-    it('fails closed when the agent no longer has a bound Safe', async () => {
-      primeDb([/api_key_hash = \$1/, () => ({ rows: [{ ...AGENT, has_bound_safe: false }] })])
+    it('fails closed when the agent no longer has a bound account', async () => {
+      primeDb([/api_key_hash = \$1/, () => ({ rows: [{ ...AGENT, has_bound_account: false }] })])
 
       const res = await app.inject({ method: 'POST', url: '/machine-payments/sweep/prepare', headers })
 

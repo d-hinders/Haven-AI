@@ -15,6 +15,13 @@ import {
   McpMerchantTransport,
 } from './mcp-merchant-transport.js'
 import type { CapturedMerchantResponse } from './mcp-merchant-transport.js'
+import {
+  MCP_X402_PAYMENT_RESPONSE_META_KEY,
+  X402_RETRY_REJECTED_STATUS,
+  encodeMcpSettlementReceipt,
+  extractMcpPaymentRequired,
+  mcpSettlementFromToolResult,
+} from './mcp-merchant-transport.js'
 import { x402PaymentHeaderNamesSent } from './x402.js'
 import { buildExplorerUrl, x402PayerAddress } from './x402-protocol.js'
 import { paymentStateStatusCode } from './payment-state.js'
@@ -132,13 +139,33 @@ export class MerchantCompletion {
     }
 
     // 5. Retry with a merchant-verifiable x402 EIP-3009 payment header.
-    const retryResponse = await this.merchantTransport.deliverPayment(
+    // #3171: if the merchant's session is gone (expired, or it restarted
+    // between the challenge and this retry) and it SAYS nothing was settled,
+    // re-initialize and resend the same header once instead of reporting a
+    // 404 as a rejection after funding.
+    const retryResponse = await this.merchantTransport.deliverPaymentRecoveringSession(
       url,
       initialInit,
       receipt.paymentHeader,
+      () => this.merchantTransport.initialize(url, initialInit),
     )
 
-    if (!retryResponse.ok) {
+    // #3118: a profile merchant refuses under HTTP 200 with an `isError: true`
+    // payment-required tool result or a `_meta["x402/payment-response"]` of
+    // `success: false` (#3155 review B2 — the same two signals the hosted
+    // completion reads). Either is a rejection after funding exactly like a
+    // non-2xx answer; the thrown status is 402 (what the merchant said
+    // in-band) while the captured `merchant_status` keeps the real 200.
+    // NOT gated on the request body (#3155 review r6): this read runs AFTER
+    // the funding leg moved money, and a merchant that mixes dialects (HTTP-402
+    // challenge, profile-style refusal on the paid answer) must still be seen.
+    // The content-type gate inside readToolResult keeps binary/streaming paid
+    // resources unbuffered.
+    const toolResult = retryResponse.ok ? await this.merchantTransport.readToolResult(retryResponse) : undefined
+    const inBandChallenge = toolResult ? extractMcpPaymentRequired(toolResult) : undefined
+    const metaSettlement = toolResult ? mcpSettlementFromToolResult(toolResult) : undefined
+    const inBandRejection = inBandChallenge !== undefined || metaSettlement?.success === false
+    if (!retryResponse.ok || inBandRejection) {
       const merchant = await captureMerchantResponse(retryResponse)
       await this.recordRetryRejected({
         rail: 'x402',
@@ -154,7 +181,7 @@ export class MerchantCompletion {
 
       throw new HavenApiError(
         'x402 retry failed after Haven funded the delegate wallet; reconciliation may be required.',
-        merchant.merchant_status,
+        inBandRejection ? X402_RETRY_REJECTED_STATUS : merchant.merchant_status,
         {
           marker: 'x402_retry_rejected_after_funding',
           payment_id: receipt.paymentId,
@@ -167,7 +194,16 @@ export class MerchantCompletion {
       )
     }
 
-    const merchantSettlement = parseMerchantSettlement(retryResponse.headers.get('PAYMENT-RESPONSE'))
+    // #3155 review S1: the `_meta` settlement is the receipt when there is no
+    // header, re-encoded so the one existing decoder reads both forms.
+    const headerReceipt = retryResponse.headers.get('PAYMENT-RESPONSE')
+    const protocolReceiptHeader = headerReceipt ?? (metaSettlement ? encodeMcpSettlementReceipt(metaSettlement) : undefined)
+    const protocolReceiptHeaderName = headerReceipt
+      ? 'PAYMENT-RESPONSE'
+      : metaSettlement
+        ? `_meta.${MCP_X402_PAYMENT_RESPONSE_META_KEY}`
+        : undefined
+    const merchantSettlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
     if (receipt.merchant && merchantSettlement.settlementTxHash) {
       receipt.merchant.settlementTxHash = merchantSettlement.settlementTxHash
       receipt.merchant.settlementExplorerUrl = buildExplorerUrl(
@@ -186,8 +222,8 @@ export class MerchantCompletion {
       selectedPayment: receipt.accepted as unknown as Record<string, unknown>,
       paymentProofHeaderName: x402PaymentHeaderNamesSent(receipt.paymentHeader),
       paymentProofHeader: receipt.paymentHeader,
-      protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
-      protocolReceiptHeader: retryResponse.headers.get('PAYMENT-RESPONSE') ?? undefined,
+      protocolReceiptHeaderName,
+      protocolReceiptHeader,
     })
 
     await this.reportMerchantReceipt(receipt.paymentId, retryResponse)

@@ -10,8 +10,9 @@ import { scopesFromStatusReason } from './provider.js'
 
 /**
  * Operations signals for the accounting feed (#2872, epic #2858): the
- * structured log events on-call greps for and the two counters `/health/ops`
- * exposes. Nothing here decides anything — it is what the module SAYS about
+ * structured log events on-call greps for and the counters `/health/ops`
+ * exposes (two feed aggregates read live, plus the in-process webhook
+ * counters since #3019). Nothing here decides anything — it is what the module SAYS about
  * what it did.
  *
  * ## The events
@@ -54,6 +55,8 @@ export const ACCOUNTING_EVENT = {
   connectionNeedsAttention: 'accounting.connection.needs_attention',
   /** The sweep's tick threw outside a run (leader election, an unhandled error) — `retry-sweep.ts`, always at `warn`. */
   sweepFailed: 'accounting.sweep.failed',
+  /** A reconnect could not delete (some of) the previous webhook subscriptions at the provider — `api-key-flow.ts`, always at `warn`. The reconnect still proceeds; the orphans dispatch to a retired token until the provider retires them (runbook: dead subscriptions). */
+  webhookTeardownFailed: 'accounting.webhook.teardown_failed',
 } as const
 
 export type OpsEventLevel = 'info' | 'warn'
@@ -133,15 +136,70 @@ export function reasonPrefix(reason: string | null): string | null {
 export interface AccountingOpsCounters {
   /** `failed` sync rows at the retry cap — the sweep has given up; a human presses Sync now after fixing the cause. */
   exhaustedSyncs: number
-  /** Connections in `needs_reauthorisation` / `scope_missing` / `revoked_at_provider` — only a re-consent resolves them. */
+  /** Connections in `needs_reauthorisation` / `scope_missing` / `revoked_at_provider` / `needs_attention` — only a re-consent resolves them. */
   connectionsNeedingAttention: number
+  /**
+   * #3019: the Accounted webhook receiver's in-process counters — received /
+   * bad_signature / stale / unknown_token / duplicate / processed /
+   * feature_off / unknown_type / confirmed. Process-lifetime, reset on
+   * restart; the DURABLE facts are the `accounting_webhook_deliveries` rows.
+   */
+  webhookCounters: AccountingWebhookCounters
 }
 
-/** The two `/health/ops` numbers — one aggregate query each, no per-user data. */
+/** The receiver's counters (#3019 item 4), one key per answer class. */
+export interface AccountingWebhookCounters {
+  received: number
+  bad_signature: number
+  stale: number
+  unknown_token: number
+  duplicate: number
+  processed: number
+  feature_off: number
+  unknown_type: number
+  confirmed: number
+}
+
+/**
+ * The counter store. In-process on purpose: the route is hot-path-cheap and
+ * the durable ledger is the table — a replica restart resets these, and the
+ * deliveries table is what "what did we receive" is answered from. Exported
+ * so the route and the ops surface read the SAME numbers.
+ */
+const webhookCounters: AccountingWebhookCounters = {
+  received: 0,
+  bad_signature: 0,
+  stale: 0,
+  unknown_token: 0,
+  duplicate: 0,
+  processed: 0,
+  feature_off: 0,
+  unknown_type: 0,
+  confirmed: 0,
+}
+
+export function incrementAccountingWebhookCounter(name: keyof AccountingWebhookCounters): number {
+  webhookCounters[name] += 1
+  return webhookCounters[name]
+}
+
+/** Read the counters (a snapshot copy — callers cannot mutate the store). */
+export function getAccountingWebhookCounters(): AccountingWebhookCounters {
+  return { ...webhookCounters }
+}
+
+/** Tests only: reset the process-lifetime counters between cases. */
+export function resetAccountingWebhookCountersForTests(): void {
+  for (const key of Object.keys(webhookCounters) as (keyof AccountingWebhookCounters)[]) {
+    webhookCounters[key] = 0
+  }
+}
+
+/** The `/health/ops` numbers — one aggregate query each, no per-user data. */
 export async function getAccountingOpsCounters(db?: Executor): Promise<AccountingOpsCounters> {
   const [exhaustedSyncs, connectionsNeedingAttention] = await Promise.all([
     countExhaustedSyncs(db),
     countConnectionsNeedingAttention(db),
   ])
-  return { exhaustedSyncs, connectionsNeedingAttention }
+  return { exhaustedSyncs, connectionsNeedingAttention, webhookCounters: getAccountingWebhookCounters() }
 }

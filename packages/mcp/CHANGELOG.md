@@ -8,6 +8,16 @@ alone.
 
 ## Unreleased
 
+## 0.5.0-alpha.1 — 2026-09-25
+
+- **Client identity and update hint (#3303, epic #3302).** Haven API requests name `@haven_ai/mcp/<version>` in `X-Haven-Client`. When the backend sends a `client_update` hint for this runtime, the tool result carries it as `client_update`, on success and failure alike, with the exact update command. A 426 `client_outdated` refusal also keeps the backend's `next_tool_omitted_reason` at the top level of the failure. No tool, schema or consent input changes, so nobody is re-prompted.
+
+## 0.5.0-alpha.0 — 2026-09-25
+
+- **Consent label copy fix (#3279).** The first-launch consent screen prints `Haven wallet: <address>` instead of `Haven wallet (Safe): <address>`, and the `accountAddress` field JSDoc loses the retired rail's name. Copy only: **the consent hash is unchanged** — `computeConsentHash` covers identity, the tool set and the allowance summary, never the rendered text, so nobody is re-prompted; the label pin test is retargeted to the new wording, not removed. The spend-gate wording on the same screen ("the real spend gate — enforced by the agent's signed delegation") was already correct and stays.
+- **Behaviour change, via `@haven_ai/sdk` (#3283):** `haven_send` and the x402 payment tools (`haven_pay_x402`, `haven_pay_x402_quote`, `haven_pay_mcp_tool`) now refuse, before anything is signed or submitted, a served UserOp that is not this delegate key's own direct-payment shape. So is an erc7710 settlement child that does not match the merchant's 402, is a root grant, is delegated by another account, or has no 402 expectation to check it against. Every such refusal is the SDK's `HavenTypedDataRefusedError`, code `TYPED_DATA_NOT_ALLOWED`. Separately, `haven_send` inherits #3271's direct-payment binding check: a served UserOp whose typed data does not hash to its own `payload_hash` is refused with `HavenUserOpBindingError`, code `USEROP_BINDING_MISMATCH`. No tool, argument, schema or description changed on this package.
+- `haven_list_receipts` rows gain `source`, `paymentProofStatus`, `x402ResourceUrl` and `x402MerchantAddress` (#3134, via `@haven_ai/sdk`'s `mapPaymentReceipt`) beside the deprecated `rail`, `proofStatus`, `resourceUrl`, `merchantAddress`, which stay for one full release (removal condition in the SDK CHANGELOG entry). No tool, argument, schema or description changed on this package; the change is carried by the SDK dependency.
+
 ## 0.4.0-alpha.0 — 2026-09-19
 
 - #3128: `haven_list_receipts` accepts `cursor` and returns `{ receipts, total, hasMore, nextCursor }` instead of a bare array (via the SDK's `listReceiptsPage`).

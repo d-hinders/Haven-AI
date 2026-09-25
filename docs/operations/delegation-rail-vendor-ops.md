@@ -175,7 +175,13 @@ warning. Operator response:
 
 1. Read the row's `tx_hash` from the alert and check it on the explorer.
    **Mined** (either status) → the next bump tick closes the record itself from
-   the receipt; nothing to do but confirm it cleared.
+   the receipt; nothing to do but confirm it cleared. **Dropped, with the
+   relayer's nonce already past it** → since
+   [#3293](https://github.com/d-hinders/Haven-AI/issues/3293) the bump tick
+   closes the record `failed` itself once that is visible at a settled block
+   (log: `… nonce was consumed by another transaction — closed failed`). The
+   lane was never blocked by it, and issuance's liveness probe then reads the
+   burned nonce as death and re-anchors.
 2. **Still pending, or dropped** → the lane needs a same-nonce replacement that
    is NOT another attest: a 0-value relayer self-send at that nonce with bumped
    fees. Since [#1743](https://github.com/d-hinders/Haven-AI/issues/1743) this

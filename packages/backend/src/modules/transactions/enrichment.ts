@@ -10,11 +10,21 @@ import {
 } from '../../infra/repositories/transaction-history.js'
 import { toCanonicalAddress } from './normalize.js'
 import { paymentAgentIdentityKey } from './ordering.js'
+import { convertedTransactionAmount } from './currency.js'
+import { DEFAULT_TRANSACTION_CURRENCY, type TransactionCurrency } from '../../domain/transaction-currency.js'
 import type { EnrichedTransaction } from './types.js'
 
+/**
+ * `currency` is the user's preference (#3127) — read by the caller (the route,
+ * per request) and applied here, at the LAST step before a row reaches the
+ * wire, so the converted triple is computed over the fully attributed row
+ * exactly once. Defaults to SEK: a caller that has not converted (internal
+ * callers, and the historical signature) keeps today's shape.
+ */
 export async function enrichTransactionsWithAgents(
   userId: string,
   transactions: EnrichedTransaction[],
+  currency: TransactionCurrency = DEFAULT_TRANSACTION_CURRENCY,
 ): Promise<EnrichedTransaction[]> {
   const txHashes = Array.from(
     new Set(transactions.map((tx) => tx.hash.toLowerCase())),
@@ -43,6 +53,7 @@ export async function enrichTransactionsWithAgents(
         amountSek: string | null
         fxRateSek: string | null
         fxSource: string | null
+        fxRates: Record<string, number> | null
         settlementScheme?: string | null
       }
     >()
@@ -72,6 +83,7 @@ export async function enrichTransactionsWithAgents(
           amountSek: row.amount_sek,
           fxRateSek: row.fx_rate_sek,
           fxSource: row.fx_source,
+          fxRates: row.fx_rates,
         },
       )
     }
@@ -97,6 +109,7 @@ export async function enrichTransactionsWithAgents(
           amountSek: null,
           fxRateSek: null,
           fxSource: null,
+          fxRates: null,
         },
       )
     }
@@ -127,6 +140,18 @@ export async function enrichTransactionsWithAgents(
         amountSek: agent?.amountSek ?? tx.amountSek,
         fxRateSek: agent?.fxRateSek ?? tx.fxRateSek,
         fxSource: agent?.fxSource ?? tx.fxSource,
+        fxRates: agent?.fxRates ?? tx.fxRates,
+        // #3127: the converted triple rides every enriched row — the user's
+        // preference applied HERE, after attribution, so a pre-attributed
+        // confirmed x402 row and a match-merged one carry it alike. The
+        // token amount is the row's own `valueFormatted` (the same figure
+        // `ledgerAmount` multiplies); SEK never re-derives from it.
+        ...convertedTransactionAmount(
+          agent?.amountSek ?? tx.amountSek,
+          tx.valueFormatted,
+          agent?.fxRates ?? tx.fxRates,
+          currency,
+        ),
         settlementScheme: agent?.settlementScheme ?? tx.settlementScheme,
         initiatedBy: attributedAgentId
           ? 'agent'

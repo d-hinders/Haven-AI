@@ -48,6 +48,7 @@ const RAW_TWIN = {
   decimals: 6,
   direction: 'out' as const,
   timestamp: 1_752_470_400,
+  timestampSource: 'block' as const,
   blockNumber: 21_000_000,
   isError: false,
   tokenAddress: '0xusdc',
@@ -76,12 +77,13 @@ const X402_ROW: X402PaymentIntentRow = {
   amount_sek: null,
   fx_rate_sek: null,
   fx_source: null,
+  fx_rates: null,
   settlement_scheme: 'eip3009',
   confirmed_at: '2026-08-01T00:00:00.000Z',
   created_at: '2026-08-01T00:00:00.000Z',
 }
 
-/** Enrichment-match payment intent (matched by hash + safe + chain). */
+/** Enrichment-match payment intent (matched by hash + account + chain). */
 const PI_ROW: PaymentIntentAgentRow = {
   id: 'pi-2',
   tx_hash: '0xmatched',
@@ -97,6 +99,7 @@ const PI_ROW: PaymentIntentAgentRow = {
   amount_sek: null,
   fx_rate_sek: null,
   fx_source: null,
+  fx_rates: null,
 }
 
 /** Delegate-sweep attribution row returned by `findDelegateSweepAgentMatches`. */

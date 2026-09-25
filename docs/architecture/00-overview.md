@@ -66,7 +66,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-09-12"
+last-verified: "2026-09-21"
 ---
 
 # Haven — Architecture Overview
@@ -104,7 +104,7 @@ with no funding leg and no approval queue. Deep dive:
 
 | Package | One-liner |
 |---|---|
-| `@haven/backend` | Fastify API: auth, Haven wallets, agents, budgets, payments, x402/MPP, receipts, catalog, the provider-generic accounting module (`modules/accounting/` — connections, the non-asserting feed, the retry sweep, Fortnox as the live connector; epic #2858, [runbook](../operations/accounting-feed.md)), and [OpenAPI](05-agent-api-openapi.md). The retired rail’s approval queue was deleted outright by #2055 — routes deregistered, `approval_requests` dropped. |
+| `@haven/backend` | Fastify API: auth, Haven wallets, agents, budgets, payments, x402/MPP, receipts, catalog, the provider-generic accounting module (`modules/accounting/` — connections, the non-asserting feed, the retry sweep, Fortnox and Accounted as the live connectors, the Accounted webhook receiver; epic #2858, [runbook](../operations/accounting-feed.md)), and [OpenAPI](05-agent-api-openapi.md). The retired rail’s approval queue was deleted outright by #2055 — routes deregistered, `approval_requests` dropped. |
 | `@haven/frontend` | Next.js dashboard: onboarding, wallets, delegation agent rules, activity, custody/recovery, catalog, and the guarded accounting feed (`/accounting`; connections managed from a Settings card as of #2868, PR #2903); legacy Safe accounts are not rendered at all since #2413 — the account and agent list queries filter to `account_type = 'delegator_hybrid'`, so their rows persist in the database but reach no account, agent or dashboard screen. No approvals surface: `ApprovalQueue`, the `/approvals` route, the sidebar entry and its count badge were deleted by #1989/#2055. |
 | `@haven_ai/sdk` | TypeScript agent client plus shared signing, x402, sweep, and payment-state primitives used by direct integrations and the MCP/signer packages. |
 | `@haven_ai/connect` | Connector CLI: generates the delegate key and API key locally, registers the public signing address/proof and API-key hash, stores local credentials, writes runtime config, and returns the user to Haven to approve a delegation agent's budget. |
@@ -181,3 +181,21 @@ For trust boundaries and who-talks-to-who, start at
 > of sending the route into the ErrorBoundary. No endpoint, flow or
 > behaviour this document describes changes. Scope of this note: those
 > expressions. Nothing else in this document was re-verified.
+
+Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`). The
+accounting one-liner above was updated: Accounted is a second live connector
+since #3019 (`registry.ts` `id: 'accounted'`, `availability: 'live'`,
+`accounted-connector.ts`, `accounted-webhooks.ts`), so "Fortnox as the live
+connector" no longer matched the code. Everything else re-checked at this head:
+the delegation-rail lines (one live rail, sponsored UserOp, no funding leg),
+the custody line, the component table (facade/keyless/signed-only per package),
+the connect-flow tool names (`haven_get_agent`, `haven_get_allowances` still
+the pre-payment reads in `mcp-server/src/tools/state-direct-recovery.ts`), the
+runtime profiles (claude-code, codex-cli, codex-desktop, cursor, vscode,
+vscode-insiders, claude-desktop, hermes, other in
+`connect/src/runtime-registry.ts`), the Hermes credential paths, the chain
+facts, and the docker entry points. The heavy intervening drift (#3134 SDK
+vocabulary convergence at the mapper, #3173 signer cold start and
+`@haven_ai/sdk/edge`, #3155 the x402 MCP transport profile, #3167 agent
+labels, #3127 currency preference, #3202 marketplace prospects) changed the
+packages' internals without moving any boundary this overview states.

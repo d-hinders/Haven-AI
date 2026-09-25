@@ -15,7 +15,6 @@
  */
 
 import type { FastifyInstance } from 'fastify'
-import { isAddress } from '@haven_ai/core'
 import { publicIssuerRateLimit, publicVerifyRateLimit } from '../middleware/rate-limit.js'
 import {
   verifyPassport,
@@ -24,8 +23,6 @@ import {
   RECEIPT_TTL_SECONDS,
   RECEIPT_VERSION,
 } from '../modules/passport/index.js'
-
-const UID_RE = /^0x[0-9a-fA-F]{64}$/
 
 export default async function passportVerifyRoutes(app: FastifyInstance): Promise<void> {
   /**
@@ -74,12 +71,9 @@ export default async function passportVerifyRoutes(app: FastifyInstance): Promis
       if ((address && uid) || (!address && !uid)) {
         return reply.code(400).send({ error: 'Provide exactly one of `address` or `uid`' })
       }
-      if (address && !isAddress(address)) {
-        return reply.code(400).send({ error: 'Invalid address' })
-      }
-      if (uid && !UID_RE.test(uid)) {
-        return reply.code(400).send({ error: 'Invalid attestation UID' })
-      }
+      // Shape is the spec's since #3030 (the `address` pattern, the 32-byte
+      // uid pattern), refused before the handler; `@haven_ai/core`'s
+      // `isAddress` is that same pattern, so nothing is checked twice here.
 
       const result = await verifyPassport(address ? { address } : { attestationUid: uid as string })
 

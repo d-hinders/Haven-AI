@@ -21,6 +21,17 @@ and managing the account from the shell with `@haven_ai/cli`.
 npm install @haven_ai/sdk@alpha
 ```
 
+The package has three entries. `@haven_ai/sdk` is the full client. `@haven_ai/sdk/edge`
+(#3173) is the ethers-free subset the local signer imports — error classes, the
+typed-next-step builder, the x402 message builders, viem-based key helpers, and
+(#3283) the signing-surface guard: `assertBoundDirectPaymentUserOp`, the
+redemption guard, `deriveDelegateAccountAddress` and `verifySettlementChild` —
+and loads in about a third of the time; use it when you need those helpers
+without the HTTP client. A class imported from either entry is the same class.
+`@haven_ai/sdk/test-support` (#3283) holds test fixture builders shared by
+Haven's own packages; it is not a signing API, nothing at runtime imports it,
+and it carries no semver guarantee.
+
 ## Quick Start
 
 ```typescript
@@ -106,8 +117,18 @@ const intent = await haven.createIntent({
   to: '0xabc...',
 })
 
-// Step 2: Sign the hash (or sign externally)
-const signature = haven.sign(intent.signData.hash)
+// Step 2: Sign externally. On the delegation rail (the only rail that pays)
+// the account validates the EIP-712 typed data in intent.signData.typed_data,
+// never the bare hash — a signature over signData.hash is rejected on-chain
+// (AA24). Sign that typed data with your delegate key (viem signTypedData),
+// after checking it with assertUserOpTypedDataBinding(typed_data, hash) AND
+// assertBoundDirectPaymentUserOp(typed_data, yourDelegateAddress) — the
+// first proves the typed data matches the hash, the second that it is your
+// own account redeeming your budget delegation, not a self-call (#3283).
+// There is no public HavenClient method for this step yet; pay() does both
+// for you. HavenClient.sign(hash) and signUserOpTypedDataForDelegation are
+// verbatim primitives: they check nothing.
+const signature = await signTypedDataWithYourDelegateKey(intent.signData.typed_data)
 
 // Step 3: Submit the signature
 await haven.submitSignature(intent.paymentId, signature)
@@ -146,6 +167,23 @@ if (apiResponse.status === 402) {
   console.log(receipt.explorerUrl)
 }
 ```
+
+**MCP merchants, both dialects (#3118).** A merchant may serve x402 over MCP
+in Haven's HTTP layering (HTTP 402 with the `PAYMENT-REQUIRED` header or JSON
+body, payment in `PAYMENT-SIGNATURE` / `X-PAYMENT`, settlement in
+`PAYMENT-RESPONSE`) or in the official x402 MCP transport profile (a tool
+result with `isError: true` and the `PaymentRequired` as `structuredContent`,
+payment in `params._meta["x402/payment"]`, settlement in
+`result._meta["x402/payment-response"]`). `fetch()`, `quoteX402()`,
+`quoteMcpX402()` and `completeX402MerchantCall()` handle both: a payment-
+required tool result quotes like a 402, the paid retry carries the header and
+— for a `tools/call` body — the `_meta` object, and settlement is read from the
+header first, the `_meta` second. An in-band refusal (an `isError` challenge on
+the paid retry, or `success: false`) is a rejection even under HTTP 200. An
+ordinary tool error, or a successful result that merely resembles a challenge,
+is never paid for. The tool-result challenge is read only from a response
+declaring `application/json` or `text/event-stream`; any other content type is
+passed through untouched rather than buffered.
 
 ### Idempotency: what the key guarantees, and what it costs
 
@@ -228,7 +266,7 @@ const data = await response.json()
 
 Merchant-verified x402 retries use the official EIP-3009 `exact` scheme on Base USDC (`base` / `eip155:8453`). `haven.fetch()` sends the payment under `PAYMENT-SIGNATURE` (the x402 v2 name), and on the EIP-3009 bridge also under `X-PAYMENT` (v1), so a merchant on either version reads it. **On erc7710 it sends the v2 name ALONE**: that payload is always x402 v2, and its header carries a whole delegation chain, so duplicating it overflows the merchant's header limit and the request is refused with HTTP 431. If you build the retry yourself, follow the same rule. Haven's older tx-hash proof helper remains exported for Haven-native integrations; it is a different payload that happens to have shared the v2 name, and it is not what `haven.fetch()` sends.
 
-For standard x402, the `x402-wallet` identity is the agent delegate wallet, because that is the wallet that signs and settles the merchant payment. Integrations that scope access by Haven wallet/Safe address should use a Haven-native flow instead of standard merchant x402.
+For standard x402, the `x402-wallet` identity is the agent delegate wallet, because that is the wallet that signs and settles the merchant payment. Integrations that scope access by Haven wallet address should use a Haven-native flow instead of standard merchant x402.
 
 ## AI Agent Integration
 
@@ -561,6 +599,18 @@ the payment is bridged, then resume with the same `payment_id` and retry the
 original `tools/call`, setting BOTH `PAYMENT-SIGNATURE` (x402 v2) and `X-PAYMENT` (v1) to the header. Use a stable `idempotencyKey` for the
 user intent so fresh merchant quotes or sessions do not become duplicate Haven
 payments.
+
+If the merchant's session is gone by the time the paid retry arrives (it
+expired, or the merchant restarted), a merchant that answers HTTP 404 with
+JSON-RPC `-32001` **and** `error.data = { settled: false, next_action:
+'reinitialize_then_retry_same_payment_header' }` is stating its own guarantee
+that nothing was settled; since #3171 `fetch()`, `payX402Quote()`,
+`resumeX402Payment()` and `completeX402MerchantCall()` act on exactly that
+shape — re-initialize once and resend the SAME payment header on the new
+session. A bare `-32001` without the data, any other 404, a failed
+re-initialize, or a second 404 is returned to you unchanged and, after
+funding, recorded as a rejection as before: the SDK never resends on an
+inference, only on the merchant's stated guarantee.
 
 See [`examples/mcp-x402-sse.ts`](./examples/mcp-x402-sse.ts) for a complete
 MCP flow with initialize, `mcp-session-id`, JSON-RPC `tools/call`, quote

@@ -32,6 +32,8 @@ function stubHaven() {
       return { paymentId: 'pay_1', status: 'executed', txHash: '0xabc' }
     }),
     withRequestContext: async (_ctx: unknown, run: () => Promise<unknown>) => run(),
+    // #3303: the dispatch wrapper reads the backend's update hint after every tool.
+    clientUpdate: () => undefined,
   } as unknown as HavenClient
   return { haven, seen }
 }

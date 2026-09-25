@@ -35,7 +35,7 @@ describe('readDisabledDelegationHashes — double-confirmed heals (#1423)', () =
       [H2, [true, false]], // transient glitch: first read lies, second corrects
     ])
     const readFlag = vi.fn(async (hash: `0x${string}`) => answers.get(hash)!.shift()!)
-    const disabled = await readDisabledDelegationHashes(84532, 'http://unused', [H1, H2], readFlag)
+    const disabled = await readDisabledDelegationHashes(84532, [H1, H2], readFlag)
     expect([...disabled]).toEqual([H1])
     // H2's flip-flop cost a confirmation read but confirmed nothing.
     expect(readFlag).toHaveBeenCalledTimes(4)
@@ -43,14 +43,14 @@ describe('readDisabledDelegationHashes — double-confirmed heals (#1423)', () =
 
   it('all-negative first pass never issues a confirmation round', async () => {
     const readFlag = vi.fn(async () => false)
-    const disabled = await readDisabledDelegationHashes(84532, 'http://unused', [H1, H2], readFlag)
+    const disabled = await readDisabledDelegationHashes(84532, [H1, H2], readFlag)
     expect(disabled.size).toBe(0)
     expect(readFlag).toHaveBeenCalledTimes(2)
   })
 
   it('an empty hash list reads nothing', async () => {
     const readFlag = vi.fn()
-    expect((await readDisabledDelegationHashes(84532, 'http://unused', [], readFlag)).size).toBe(0)
+    expect((await readDisabledDelegationHashes(84532, [], readFlag)).size).toBe(0)
     expect(readFlag).not.toHaveBeenCalled()
   })
 })

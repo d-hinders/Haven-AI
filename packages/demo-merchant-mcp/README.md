@@ -220,6 +220,35 @@ Endpoints:
   boolean (`ok` is true unless `status` is `fail`). A read failure reports
   `ok: null` + `error` instead of taking health down.
 
+### Sessions: unknown-session 404, idle TTL, and what a redeploy does (#1578, #3171)
+
+`POST /mcp` with an `mcp-session-id` this process does not hold answers HTTP
+404 with JSON-RPC `-32001` BEFORE the payment gate (#1578), so a one-use
+payment authorization is never consumed for a session-less response. Since
+#3171 that 404 tells the buyer what it could not otherwise know: the message
+begins `Session not found. Nothing was settled here` and `error.data` is
+`{ reason: 'session_expired', settled: false, next_action:
+'reinitialize_then_retry_same_payment_header' }`. That is the merchant's own
+guarantee, and the Haven SDK acts on exactly that shape: it re-initializes once
+and resends the SAME payment header on the new session, which then settles
+exactly once (`src/http-session-restart.test.ts`). `initialize` is exempt from
+the guard even with a stale id attached, so the recovery door is always open.
+
+The session store is memory-only (`Map` in `http.ts`) — deliberately, this is
+a demo merchant with no shared state. Two consequences, both written here
+because they are observable: **a redeploy forgets every session at once**, so
+every in-flight buyer gets the 404 above on its next call and recovers through
+it; and since #3171 a session idle longer than `sessionIdleTtlMs` (default
+30 minutes, `DEFAULT_SESSION_IDLE_TTL_MS`; `0` disables) is closed and
+forgotten by a lazy sweep on the next request, answering the same 404 — before
+that, every `initialize` from anyone on the internet stayed resident until the
+client happened to close it. Keep the TTL longer than the slowest settlement:
+the idle clock is stamped when a request starts, and closing a session cuts
+its open response streams. The sweep is linear in resident sessions and there
+is still no cap on how many an unauthenticated `initialize` burst can mint
+inside one TTL window; a demo merchant accepts that. One refusal shape, one
+remedy, for both causes.
+
 ### `/mcp` settlement-readiness gate (#2979)
 
 `/healthz` reporting the `fail` band was not enough on its own: before #2979,
@@ -256,6 +285,30 @@ The existing merchant-fault 402 body (the #1517 fault-class message) also now
 carries a `reason_code` additively — `settlement_wallet_out_of_gas`,
 `settlement_rpc_unreachable`, or `merchant_fault` — so a client can branch on
 it without parsing the message prose. The message text itself is unchanged.
+
+Since #3170 an ERC-7710 redemption that REVERTS at submit (the simulation
+passed moments earlier) is no longer one of those faults: the merchant first
+asks the chain whether the settlement child already moved the money (the #1515
+already-settled decision, served) and otherwise refuses it as a payer-side
+DECISION — a 402 whose `error` names the revert, then the next action (nothing
+settled; re-quote, pay with a fresh authorization), then the likely causes (the
+child's transfer-amount caveat exhausted, the delegator short of the price, the
+child redeemed elsewhere). No `reason_code` rides a decision. Only a PROVEN
+revert takes that branch — viem's `ContractFunctionRevertedError` carrying
+decoded data, an error signature or an "execution reverted" reason, the
+node's `ExecutionRevertedError` (minus geth's "gas required exceeds
+allowance", which viem files there although it means the merchant's key
+cannot pay for gas), or a non-viem client's error message naming a revert or
+an enforcer; viem wraps every `writeContract` failure in
+`ContractFunctionExecutionError`, so the wrapper alone is not proof. Everything
+else the merchant's own settlement key or node can fail with — nonce too low,
+fee cap, "already known", a JSON-RPC rate limit or internal error, an
+unreachable RPC, gas — keeps its fault classification and `reason_code`, the
+same split #1519 drew for the EIP-3009 rail's pre-submit checks. The next
+action is placed first and the revert reason flattened to printable ASCII and
+capped at 120 characters (so the cap survives JSON escaping) because the
+hosted server relays the first 500 characters of this body
+(`packages/mcp-server/src/tools/paid-mcp-completion.ts`).
 
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
 `SETTLEMENT_PRIVATE_KEY` is the gas-funded key that submits USDC

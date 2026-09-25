@@ -116,8 +116,8 @@ export const FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL = `SELECT id, is_default FROM s
  * default/unlink manage whatever the user once linked. The funding endpoint is
  * a DELEGATION-rail surface — it tells a human how to fund the account their
  * agent spends from — so it scopes like the surviving account lists
- * (`DELEGATION_RAIL_ONLY`): a legacy Safe row answers 404 exactly as it does
- * on `GET /user/safes`, rather than funding instructions for a rail nothing
+ * (`DELEGATION_RAIL_ONLY`): a legacy-rail row answers 404 exactly as it does
+ * on `GET /user/accounts`, rather than funding instructions for a rail nothing
  * new joins. `chain_id` comes back with the row so the route runs ONE query
  * instead of an ownership probe plus a list read.
  */
@@ -161,8 +161,8 @@ export async function listAccountsWithTypeForUser(
   return result.rows
 }
 
-// `findSafeIdByAddressAndChain` (import duplicate detection), `countSafesForUser`
-// (first-Safe-becomes-default) and `findOwnedSafe` (the approver routes'
+// `findAccountIdByAddressAndChain` (import duplicate detection), `countAccountsForUser`
+// (first-account-becomes-default) and `findOwnedAccount` (the approver routes'
 // ownership check) are DELETED with their callers (#1988). `findOwnedAccountAddress`
 // and `findOwnedAccountDefaultFlag` below are the ownership checks the SURVIVING
 // routes run — rename, re-default and unlink.
@@ -252,17 +252,25 @@ export async function renameAccountForUser(
   return result.rows[0] ?? null
 }
 
+/**
+ * Clears the caller's defaults only when `$2` is an account the caller owns —
+ * so a call naming someone else's account leaves the caller's own default
+ * alone instead of leaving them with none (#3227).
+ */
 export const CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL = `UPDATE smart_accounts SET is_default = false, updated_at = NOW()
-           WHERE user_id = $1`
+           WHERE user_id = $1
+             AND EXISTS (SELECT 1 FROM smart_accounts owned WHERE owned.id = $2 AND owned.user_id = $1)`
 
 export const SET_ACCOUNT_DEFAULT_SQL = `UPDATE smart_accounts SET is_default = true, updated_at = NOW()
-           WHERE id = $1`
+           WHERE id = $1 AND user_id = $2`
 
 /**
  * Point the user's default at `accountId` and keep the legacy mirror in sync —
- * one transaction, exactly the route's BEGIN/COMMIT block. The caller has
- * already verified ownership (`findOwnedAccountAddress`); the clear is scoped to
- * `userId`, the set is by id, verbatim from the route.
+ * one transaction, exactly the route's BEGIN/COMMIT block. The route checks
+ * ownership first (`findOwnedAccountAddress`), and every statement here is
+ * tenant-scoped as well (#3227): for an account `userId` does not own, the
+ * clear and the set match no row and the mirror is left untouched — a silent
+ * no-op, the same posture as `renameAccountForUser`.
  */
 export async function setDefaultAccountForUser(
   accountId: string,
@@ -271,19 +279,20 @@ export async function setDefaultAccountForUser(
   db: Executor = pool,
 ): Promise<void> {
   await withTransaction(db, async (tx) => {
-    await tx.query(CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL, [userId])
-    await tx.query(SET_ACCOUNT_DEFAULT_SQL, [accountId])
+    await tx.query(CLEAR_DEFAULT_ACCOUNTS_FOR_USER_SQL, [userId, accountId])
+    const set = await tx.query(SET_ACCOUNT_DEFAULT_SQL, [accountId, userId])
+    if (set.rowCount !== 1) return
     await tx.query(SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL, [accountAddress, userId])
   })
 }
 
-export const ORPHAN_AGENTS_FOR_ACCOUNT_SQL = `UPDATE agents SET account_id = NULL, updated_at = NOW() WHERE account_id = $1`
+export const ORPHAN_AGENTS_FOR_ACCOUNT_SQL = `UPDATE agents SET account_id = NULL, updated_at = NOW() WHERE account_id = $1 AND user_id = $2`
 
 // `ORPHAN_SELF_SIGN_AGENTS_FOR_ACCOUNT_SQL` was removed here (#2851, epic
 // #1440's final slice): `self_sign_agents` no longer exists as of migration
 // `083_drop_dead_safe_rail_tables.ts`, so there is nothing left to orphan.
 
-export const DELETE_USER_ACCOUNT_SQL = `DELETE FROM smart_accounts WHERE id = $1`
+export const DELETE_USER_ACCOUNT_SQL = `DELETE FROM smart_accounts WHERE id = $1 AND user_id = $2`
 
 /** Serialize Safe unlink with delegation creation/activation on its agents. */
 export const LOCK_AGENTS_FOR_ACCOUNT_SQL = `SELECT id FROM agents
@@ -330,7 +339,10 @@ export const CLEAR_LEGACY_USER_ACCOUNT_ADDRESS_SQL = `UPDATE users SET account_a
  * the default (`wasDefault`, read by the caller's ownership check) — promote
  * the oldest remaining Safe and re-point the legacy mirror, or clear the
  * mirror when none remain. Returning false means the Safe was kept intact
- * because a delegation, recovery sweep, or re-key is still in flight.
+ * because a delegation, recovery sweep, or re-key is still in flight — or
+ * because `userId` does not own it: the orphan and the delete are
+ * tenant-scoped (#3227), so that call matches no row, removes nothing and
+ * promotes nothing.
  *
  * Used to also orphan leftover `self_sign_agents` rows here, before the
  * delete, because their `NO ACTION` FK would otherwise block it. That step
@@ -354,8 +366,9 @@ export async function deleteAccountForUser(
     ])
     if (inFlightRekey.rows[0]?.in_flight === true) return false
 
-    await tx.query(ORPHAN_AGENTS_FOR_ACCOUNT_SQL, [accountId])
-    await tx.query(DELETE_USER_ACCOUNT_SQL, [accountId])
+    await tx.query(ORPHAN_AGENTS_FOR_ACCOUNT_SQL, [accountId, userId])
+    const deleted = await tx.query(DELETE_USER_ACCOUNT_SQL, [accountId, userId])
+    if (deleted.rowCount !== 1) return false
 
     if (wasDefault) {
       const next = await tx.query<{ id: string; account_address: string }>(
@@ -482,7 +495,7 @@ export async function findExecutionRailForAgent(
 }
 
 /**
- * The SESSION payload's safes projection (moved from `routes/auth.ts`, #1180).
+ * The SESSION payload's accounts projection (moved from `routes/auth.ts`, #1180).
  *
  * A third variant, and deliberately so: it is the union of the other two —
  * `is_default` and `created_at` from `LIST_ACCOUNTS_FOR_USER_SQL` plus
@@ -506,7 +519,7 @@ export const LIST_SESSION_ACCOUNTS_FOR_USER_SQL = `SELECT us.id, us.account_addr
        GROUP BY us.id
        ORDER BY us.created_at ASC`
 
-/** One row of the session payload's `safes` array. */
+/** One row of the session payload's `accounts` array. */
 export interface SessionAccountRow {
   id: string
   account_address: string
@@ -520,7 +533,7 @@ export interface SessionAccountRow {
    * repository serves FACTS; the auth route maps them through the predicate
    * (`modules/accounts/mainnet-gate.ts`) so chain classification lives in
    * exactly one place. Passkey count is the delegation-rail signer table
-   * (`hybrid_account_passkeys`); legacy-rail safes count 0 there, and their
+   * (`hybrid_account_passkeys`); legacy-rail accounts count 0 there, and their
    * signer truth stays on-chain (the dashboard reads it via approvers).
    */
   owner_address: string | null

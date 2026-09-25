@@ -33,8 +33,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
  *    (`middleware/owner-cli.ts`), not by a route-local marker. Agent API keys
  *    (`sk_agent_…`) are a different door entirely — they never reach this
  *    module's `authMiddleware`, and the test asserts the refusal.
- * 2. Resolution. The Safe id is a UUID the caller names; every lookup is
- *    scoped to the JWT subject, so another user's Safe (or an unknown id)
+ * 2. Resolution. The account id is a UUID the caller names; every lookup is
+ *    scoped to the JWT subject, so another user's account (or an unknown id)
  *    is a 404 that reveals nothing.
  * 3. The funding payload itself: the chain facts from `@haven_ai/core`
  *    (name, explorer), the `faucet_url` on a testnet and its absence on
@@ -63,10 +63,11 @@ vi.mock('../../infra/chain/index.js', async (importOriginal) => {
 })
 
 import userAccountsRoutes from '../user-accounts.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
-const SAFE_ID = 'd2c47f10-9a83-4e61-8b25-7c3f0e91a4d6'
-const SAFE_ID_OTHER = 'e3d58f21-ab94-4f72-8c36-8d4f1f02b5e7'
-const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
+const ACCOUNT_ID = 'd2c47f10-9a83-4e61-8b25-7c3f0e91a4d6'
+const ACCOUNT_ID_OTHER = 'e3d58f21-ab94-4f72-8c36-8d4f1f02b5e7'
+const ACCOUNT_ADDRESS = '0x1111111111111111111111111111111111111111'
 const USER = 'user-1'
 
 /** USDC balances are 6-decimal; 25 USDC = 25_000_000 atomic. */
@@ -74,8 +75,8 @@ const USDC_MINIMUM_ATOMIC = 5_000_000n
 
 function ownershipRow(overrides: Record<string, unknown> = {}) {
   return {
-    id: SAFE_ID,
-    account_address: SAFE_ADDRESS,
+    id: ACCOUNT_ID,
+    account_address: ACCOUNT_ADDRESS,
     chain_id: 8453,
     ...overrides,
   }
@@ -96,6 +97,10 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module(s) enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/user-accounts.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     // #2914: one mount now, matching production (`index.ts`) — `#2907`'s
     // dual registration is gone.
@@ -127,7 +132,7 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
     mockPoolQuery.mockResolvedValue({ rows: [] })
     const res = await app.inject({
       method: 'GET',
-      url: `/user/accounts/${SAFE_ID}/funding`,
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
     })
     expect(res.statusCode).toBe(401)
     expect(mockPoolQuery).not.toHaveBeenCalled()
@@ -139,7 +144,7 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
 
     const res = await app.inject({
       method: 'GET',
-      url: `/user/accounts/${SAFE_ID}/funding`,
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
       headers: auth(),
     })
     expect(res.statusCode).toBe(200)
@@ -152,7 +157,7 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
 
     const res = await app.inject({
       method: 'GET',
-      url: `/user/accounts/${SAFE_ID}/funding`,
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
       headers: auth(ownerCliToken),
     })
     expect(res.statusCode).toBe(200)
@@ -167,7 +172,7 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
     // the funding read.
     const res = await app.inject({
       method: 'GET',
-      url: `/user/accounts/${SAFE_ID}/funding`,
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
       headers: { authorization: 'Bearer sk_agent_testkey000000000000000000000' },
     })
     expect(res.statusCode).toBe(401)
@@ -176,12 +181,12 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
 
   // ── Resolution ───────────────────────────────────────────────────
 
-  it('404s another user’s Safe without leaking its existence', async () => {
+  it('404s another user’s account without leaking its existence', async () => {
     mockPoolQuery.mockResolvedValue({ rows: [] })
 
     const res = await app.inject({
       method: 'GET',
-      url: `/user/accounts/${SAFE_ID}/funding`,
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
       headers: auth(),
     })
     expect(res.statusCode).toBe(404)
@@ -207,13 +212,13 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
 
     const res = await app.inject({
       method: 'GET',
-      url: `/user/accounts/${SAFE_ID}/funding`,
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
       headers: auth(),
     })
     expect(res.statusCode).toBe(200)
     expect(mockPoolQuery).toHaveBeenCalledTimes(1)
     const body = res.json()
-    expect(body.account_address).toBe(SAFE_ADDRESS)
+    expect(body.account_address).toBe(ACCOUNT_ADDRESS)
     expect(body.chain).toEqual({ id: 8453, name: 'Base', explorer_url: 'https://basescan.org' })
     expect(body.native).toEqual({ symbol: 'ETH', balance_human: expect.any(String), needed: false })
     // Mainnets carry no faucet.
@@ -234,7 +239,7 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
 
     const res = await app.inject({
       method: 'GET',
-      url: `/user/accounts/${SAFE_ID}/funding`,
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
       headers: auth(),
     })
     expect(res.statusCode).toBe(200)
@@ -244,12 +249,12 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
   it('carries faucet_url on Base Sepolia and omits it on Gnosis', async () => {
     mockPoolQuery
       .mockResolvedValueOnce({ rows: [ownershipRow({ chain_id: 84532 })] })
-      .mockResolvedValueOnce({ rows: [ownershipRow({ chain_id: 100, id: SAFE_ID_OTHER })] })
+      .mockResolvedValueOnce({ rows: [ownershipRow({ chain_id: 100, id: ACCOUNT_ID_OTHER })] })
     mockGetChainClient.mockReturnValue(chainClientWithUsdc(0n))
 
     const sepolia = await app.inject({
       method: 'GET',
-      url: `/user/accounts/${SAFE_ID}/funding`,
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
       headers: auth(),
     })
     expect(sepolia.statusCode).toBe(200)
@@ -259,7 +264,7 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
 
     const gnosis = await app.inject({
       method: 'GET',
-      url: `/user/accounts/${SAFE_ID}/funding`,
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
       headers: auth(),
     })
     expect(gnosis.statusCode).toBe(200)

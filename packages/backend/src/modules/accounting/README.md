@@ -42,9 +42,13 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    as `scope_missing` naming the missing scopes (not a refusal), and the
    same connect-url + callback on an existing connection is the re-consent
    path — the row is updated, `settings`, `feed_from`, the active flag and
-   the sync history are kept. `api_key`: nothing at all — `api-key-flow.ts`
-   validates the key by calling your connector's `getCompanyInfo` and stores
-   it encrypted.
+   the sync history are kept. `api_key`: `api-key-flow.ts` validates the
+   key by calling your connector's `getCompanyInfo` and stores it encrypted;
+   for a provider that declares webhooks (Accounted, #3019) the same flow
+   then registers the three delivery-confirmation subscriptions against
+   the public API origin, tears the previous ones down on a reconnect, and
+   flags the row `needs_attention` when that half fails — the feed keeps
+   working (`accounted-webhooks.ts`).
 3. **Connector.** Implement `AccountingConnector` against the provider's API.
    The invariants the contract carries, in the order they usually bite:
    - `pushTransaction` must send **no VAT, account or rows** — the accountant
@@ -135,8 +139,9 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      generic flows and the orchestrator already do; a connector normally
      never writes a status at all (it reports `connectionStatus` on its
      result). The wrapper is what emits `accounting.connection.needs_attention`
-     for `needs_reauthorisation` / `scope_missing` / `revoked_at_provider`,
-     and the `/health/ops` counter counts the same three states — a write
+     for `needs_reauthorisation` / `scope_missing` / `revoked_at_provider` /
+     `needs_attention`, and the `/health/ops` counter counts the same four
+     states — a write
      that bypasses it is a state on-call cannot see.
    - **Retries are the sweep's, not yours (#2866).** A thrown error or a
      `failed` result lands in the ledger and `retry-sweep.ts` re-feeds the
@@ -203,3 +208,12 @@ is retried in seconds and a replayed grant is not undone.
 asserting voucher push, dark behind `HAVEN_LEGACY_BOOKKEEPING_ENABLED` (410 by
 default). It pushes finished Fortnox vouchers — provider-specific by nature,
 and exactly what the feed moved away from (#491/#492).
+
+`POST /accounting/webhooks/accounted/:token` (in
+`routes/accounting-webhooks.ts`, verified and processed by
+`accounted-webhooks.ts`, #3019): the Accounted delivery-confirmation
+receiver. The route is public (the capability token in the URL plus the
+HMAC signature are the authentication), the signature scheme, the event
+vocabulary and the retry cadence are Accounted's own, and `connections.ts`
+names the provider directly when it resolves a token — a second webhook
+provider would add its own receiver rather than generalise this one.

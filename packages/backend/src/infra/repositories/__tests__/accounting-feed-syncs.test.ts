@@ -28,6 +28,7 @@ import {
   RETRY_BACKOFF_BASE_MS,
   RETRY_BACKOFF_CAP_MS,
   STALE_PENDING_CLAIM_MS,
+  confirmAccountedDocumentDelivery,
 } from '../accounting-feed-syncs.js'
 import { upsertConnection, setStatus } from '../accounting-connections.js'
 
@@ -158,6 +159,36 @@ describeDb('accounting-feed-syncs repository (#1365)', () => {
     // The other side: the owner still sees it.
     const own = await listSyncsForPaymentIds(otherUser, ['pay-shared'])
     expect(own.map((r) => r.payment_id)).toEqual(['pay-shared'])
+  })
+
+  it('MUTATION PROOF: confirmAccountedDocumentDelivery never crosses tenants (#3019, PR #3196 S1)', async () => {
+    // Two tenants pushed a document with the SAME provider id (Accounted
+    // document ids are per company, so a collision across tenants is the
+    // normal case, not a corner). Dropping `AND user_id = $3` from
+    // CONFIRM_ACCOUNTED_DOCUMENT_SQL stamps BOTH rows here.
+    const a = await seedUser()
+    const b = await seedUser()
+    await claimSync(a, 'accounted', 'pay-a')
+    await markPushed(a, 'accounted', 'pay-a', 'accounted:document:doc-77')
+    await claimSync(b, 'accounted', 'pay-b')
+    await markPushed(b, 'accounted', 'pay-b', 'accounted:document:doc-77')
+
+    expect(await confirmAccountedDocumentDelivery(a, 'doc-77')).toBe(true)
+
+    const rowA = (await getSyncState(a, 'accounted', 'pay-a'))!
+    const rowB = (await getSyncState(b, 'accounted', 'pay-b'))!
+    expect(rowA.delivery_confirmed_at).not.toBeNull()
+    expect(rowB.delivery_confirmed_at).toBeNull()
+    // The confirmation is its own column: `error` stays null (S2).
+    expect(rowA.error).toBeNull()
+    expect(rowA.status).toBe('pushed')
+
+    // Unknown document, or a row that is not pushed: false, nothing stamped.
+    expect(await confirmAccountedDocumentDelivery(a, 'doc-none')).toBe(false)
+    await claimSync(b, 'accounted', 'pay-c')
+    await markFailed(b, 'accounted', 'pay-c', 'timeout')
+    expect(await confirmAccountedDocumentDelivery(b, 'doc-77')).toBe(true)
+    expect((await getSyncState(b, 'accounted', 'pay-c'))!.delivery_confirmed_at).toBeNull()
   })
 
   it('listSyncsForPaymentIds with no payment ids never touches the pool', async () => {

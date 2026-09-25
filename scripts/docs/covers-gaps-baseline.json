@@ -144,7 +144,6 @@
   ],
   "docs/operations/agent-qa.md": [
     "packages/backend/src/openapi/qa-seed-routes.test.ts",
-    "packages/demo-merchant-mcp/src/x402.ts",
     "packages/frontend/e2e/fixtures/haven-api.ts",
     "packages/mcp-server/src/server.ts",
     "packages/signer/package.json",
@@ -169,15 +168,6 @@
   "docs/operations/mainnet-canary.md": [
     "packages/backend/src/rails/delegation-contracts.ts",
     "packages/demo-merchant-mcp/src/erc7710.test.ts"
-  ],
-  "docs/operations/mcp-runtime-compatibility.md": [
-    "packages/frontend/src/hooks/useAgentConnectionSetupStatus.ts",
-    "packages/sdk/package.json",
-    "packages/sdk/src/agent-guidance.ts",
-    "packages/sdk/src/connector-channel.ts",
-    "packages/sdk/src/skill-content.ts",
-    "scripts/release-bump.test.mjs",
-    "scripts/verify-connect-bundle.mjs"
   ],
   "docs/operations/promoting-dev-to-main.md": [
     "packages/backend/src/db/migrate.ts"

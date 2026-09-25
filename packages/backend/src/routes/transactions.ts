@@ -19,44 +19,39 @@ import {
   filterEnrichedTransactions,
   mergeSortDedupeAndEnrich,
   paginateByOffset,
+  resolveTransactionCurrency,
   resolveTransactionFilters,
   transactionsToCsv,
   type ParsedTokenFilter,
 } from '../modules/transactions/index.js'
+import type { ListScope } from '../modules/transactions/index.js'
 import { CSV_BOM } from '../domain/csv.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 /** Own-account name lookup key — address is case-insensitive, chain is not. */
 function accountNameKey(address: string, chainId: number): string {
   return `${address.toLowerCase()}:${chainId}`
 }
 
-function parsePositiveInt(
-  value: string | undefined,
-  fallback: number,
-  min: number,
-  max: number,
-): number | null {
-  if (value === undefined) return fallback
-  const parsed = parseInt(value, 10)
-  if (Number.isNaN(parsed) || parsed < min || parsed > max) {
-    return null
-  }
-  return parsed
+/**
+ * The bounds (`minimum`/`maximum`) and the defaults are the spec's, enforced
+ * and injected before the handler since #3030; ajv has coerced the value to
+ * a number by the time it arrives. The fallback only covers a caller that
+ * mounted the module without the plugin.
+ */
+function readInt(value: number | string | undefined, fallback: number): number {
+  return value === undefined ? fallback : Number(value)
 }
 
+/** The spec's `direction` enum, enforced before the handler (#3030); an alias
+ *  because a quoted union inside a route generic hides the path literal from
+ *  `generate-route-modules`. */
+type TransferDirection = 'in' | 'out'
+
+/** Shape (`integer, minimum: 1`) is the spec's since #3030; support is not. */
 function parseChainId(value: unknown): number | null {
   if (value === undefined) return null
-  if (Array.isArray(value)) return Number.NaN
-
-  const raw = String(value).trim()
-  if (!/^[1-9]\d*$/.test(raw)) return Number.NaN
-
-  const chainId = Number(raw)
-  return Number.isSafeInteger(chainId) ? chainId : Number.NaN
+  return Number(value)
 }
 
 function parseFreshFlag(value: string | undefined): boolean {
@@ -106,13 +101,9 @@ export default async function transactionRoutes(
     }
   }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const offset = parsePositiveInt(request.query.offset, 0, 0, Number.MAX_SAFE_INTEGER)
-    const limit = parsePositiveInt(request.query.limit, 25, 1, 100)
+    const offset = readInt(request.query.offset, 0)
+    const limit = readInt(request.query.limit, 25)
     const fresh = parseFreshFlag(request.query.fresh)
-
-    if (offset === null || limit === null) {
-      return reply.code(400).send({ error: 'Invalid pagination params' })
-    }
 
     // #2914: `safeId` is retired. It stays DECLARED so it can be REFUSED —
     // Fastify drops an undeclared query key silently, and a filter that
@@ -125,30 +116,22 @@ export default async function transactionRoutes(
       return reply.code(400).send(retiredSafeQuery('safeId', 'accountId', safeIdVerdict.reason))
     }
 
+    // Shapes are the spec's since #3030 (`accountId` uuid, `agentId` `user`
+    // or a uuid, `tokenKey` `<chain>:<native|address>`); what is checked here
+    // is ownership and support — the id must be the caller's, the chain one
+    // Haven serves.
     const accountFilterId = request.query.accountId
-
-    if (accountFilterId && !UUID_RE.test(accountFilterId)) {
-      return reply.code(400).send({ error: 'Invalid accountId' })
-    }
-
-    if (
-      request.query.agentId &&
-      request.query.agentId !== 'user' &&
-      !UUID_RE.test(request.query.agentId)
-    ) {
-      return reply.code(400).send({ error: 'Invalid agentId' })
-    }
 
     const tokenFilter = parseTokenKey(request.query.tokenKey)
     if (request.query.tokenKey && !tokenFilter) {
       return reply.code(400).send({ error: 'Invalid tokenKey' })
     }
 
-    let safes = await listBasicAccountsForUser(sub)
+    let accounts = await listBasicAccountsForUser(sub)
 
     if (accountFilterId) {
-      safes = safes.filter((safe) => safe.id === accountFilterId)
-      if (safes.length === 0) {
+      accounts = accounts.filter((account) => account.id === accountFilterId)
+      if (accounts.length === 0) {
         return reply.code(400).send({ error: 'Invalid accountId' })
       }
     }
@@ -160,7 +143,7 @@ export default async function transactionRoutes(
       }
     }
 
-    if (safes.length === 0) {
+    if (accounts.length === 0) {
       return {
         transactions: [],
         total: 0,
@@ -173,12 +156,14 @@ export default async function transactionRoutes(
       }
     }
 
-    const { merged, failedAccountIds, truncated } = await aggregateAccountTransactions(
-      safes,
-      request.log,
-      fresh,
-    )
-    const enriched = await mergeSortDedupeAndEnrich(sub, safes, merged)
+    // #3127: the converted triple on every row is struck in the user's
+    // preferred currency — the setting the product offered and then ignored.
+    // One preference read per request, alongside the account read.
+    const [currency, aggregate] = await Promise.all([
+      resolveTransactionCurrency(sub),
+      aggregateAccountTransactions(accounts, request.log, fresh),
+    ])
+    const enriched = await mergeSortDedupeAndEnrich(sub, accounts, aggregate.merged, currency)
     const filtered = filterEnrichedTransactions(enriched, {
       agentId: request.query.agentId,
       tokenFilter,
@@ -187,20 +172,32 @@ export default async function transactionRoutes(
     // #2870: the accounting badge rides the PAGE, not the whole feed — one
     // ledger query per response, and none for an unentitled account.
     const enrichedPage = await enrichTransactionsWithAccounting(sub, paginated, request.log)
+    // #3132 (owner decision 3): every row states its population and its
+    // narrowing as two values. The feed is WALLET-scoped by construction —
+    // `agentId` / `accountId` narrow it, they do not turn it into the
+    // agent-scoped receipts view (different populations, different row
+    // classes), and the two-value shape says so without prose.
+    // `agentId=user` narrows too (rows with no agent attribution) — any agent
+    // axis value is a query-time narrowing of the wallet feed.
+    const agentNarrowed = Boolean(request.query.agentId)
+    const scope: ListScope = {
+      source: 'wallet',
+      filter: agentNarrowed && accountFilterId ? 'account+agent' : agentNarrowed ? 'agent' : accountFilterId ? 'account' : null,
+    }
     return {
       // One account name. The `safeName` twin outlived #2914 by exactly one
       // release so `@haven_ai/cli` on `latest` would not print every ACCOUNT
       // cell blank; `latest` is 0.3.0-alpha.0 now and reads `accountName`.
-      transactions: enrichedPage,
+      transactions: enrichedPage.map((tx) => ({ ...tx, scope })),
       total: filtered.length,
       offset,
       limit,
       hasMore,
-      partialFailure: failedAccountIds.length > 0,
-      failedAccountIds: Array.from(new Set(failedAccountIds)),
+      partialFailure: aggregate.failedAccountIds.length > 0,
+      failedAccountIds: Array.from(new Set(aggregate.failedAccountIds)),
       // #2882: the rows above are capped at the explorer window per account,
       // so `total` is the truncated count, not the account's history.
-      truncated,
+      truncated: aggregate.truncated,
     }
   })
 
@@ -209,10 +206,6 @@ export default async function transactionRoutes(
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
       const { paymentId } = request.params
-
-      if (!UUID_RE.test(paymentId)) {
-        return reply.code(400).send({ error: 'Invalid paymentId' })
-      }
 
       const evidence = await findMachinePaymentEvidenceDetail(paymentId, sub)
       if (!evidence) {
@@ -251,7 +244,7 @@ export default async function transactionRoutes(
       accountId?: string
       agentId?: string
       tokenKey?: string
-      direction?: string
+      direction?: TransferDirection
       chainId?: string
       fresh?: string
     }
@@ -264,19 +257,11 @@ export default async function transactionRoutes(
       return reply.code(400).send(retiredSafeQuery('safeId', 'accountId', safeIdVerdict.reason))
     }
 
+    // Shapes are the spec's since #3030 (`accountId` uuid, `agentId` `user`
+    // or a uuid, `tokenKey` `<chain>:<native|address>`); what is checked here
+    // is ownership and support — the id must be the caller's, the chain one
+    // Haven serves.
     const accountFilterId = request.query.accountId
-
-    if (accountFilterId && !UUID_RE.test(accountFilterId)) {
-      return reply.code(400).send({ error: 'Invalid accountId' })
-    }
-
-    if (
-      request.query.agentId &&
-      request.query.agentId !== 'user' &&
-      !UUID_RE.test(request.query.agentId)
-    ) {
-      return reply.code(400).send({ error: 'Invalid agentId' })
-    }
 
     const tokenFilter = parseTokenKey(request.query.tokenKey)
     if (request.query.tokenKey && !tokenFilter) {
@@ -284,14 +269,8 @@ export default async function transactionRoutes(
     }
 
     const direction = request.query.direction
-    if (direction !== undefined && direction !== 'in' && direction !== 'out') {
-      return reply.code(400).send({ error: 'Invalid direction' })
-    }
 
     const chainId = parseChainId(request.query.chainId)
-    if (Number.isNaN(chainId)) {
-      return reply.code(400).send({ error: 'Invalid chainId' })
-    }
     if (chainId !== null && !isSupportedChain(chainId)) {
       return reply.code(400).send({ error: `Unsupported chain: ${chainId}` })
     }
@@ -299,12 +278,12 @@ export default async function transactionRoutes(
     // Kept unfiltered for name resolution below: a transfer between two of
     // the user's own accounts must still name the far side when the export is
     // scoped to one of them, exactly as the dashboard table does.
-    const allSafes = await listBasicAccountsForUser(sub)
-    let safes = allSafes
+    const allAccounts = await listBasicAccountsForUser(sub)
+    let accounts = allAccounts
 
     if (accountFilterId) {
-      safes = safes.filter((safe) => safe.id === accountFilterId)
-      if (safes.length === 0) {
+      accounts = accounts.filter((account) => account.id === accountFilterId)
+      if (accounts.length === 0) {
         return reply.code(400).send({ error: 'Invalid accountId' })
       }
     }
@@ -317,9 +296,16 @@ export default async function transactionRoutes(
     }
 
     let filtered: Awaited<ReturnType<typeof mergeSortDedupeAndEnrich>> = []
-    if (safes.length > 0) {
-      const { merged } = await aggregateAccountTransactions(safes, request.log, fresh)
-      const enriched = await mergeSortDedupeAndEnrich(sub, safes, merged)
+    if (accounts.length > 0) {
+      // #3127: the export reads the preference too — the file's
+      // `converted_currency` column names the currency the user's dashboard
+      // feed converts in. The AMOUNTS stay the fixed-SEK branch (below);
+      // this read names that column, nothing more.
+      const [currency, aggregateResult] = await Promise.all([
+        resolveTransactionCurrency(sub),
+        aggregateAccountTransactions(accounts, request.log, fresh),
+      ])
+      const enriched = await mergeSortDedupeAndEnrich(sub, accounts, aggregateResult.merged, currency)
       filtered = filterEnrichedTransactions(enriched, {
         agentId: request.query.agentId,
         tokenFilter,
@@ -348,7 +334,7 @@ export default async function transactionRoutes(
     const contacts = await listContactsForUser(sub)
     const contactNames = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
     const accountNames = new Map(
-      allSafes.map((safe) => [accountNameKey(safe.account_address, safe.chain_id), safe.name]),
+      allAccounts.map((account) => [accountNameKey(account.account_address, account.chain_id), account.name]),
     )
 
     const csv = transactionsToCsv(filtered, {
@@ -357,6 +343,15 @@ export default async function transactionRoutes(
         if (contactName) return contactName
         return accountNames.get(accountNameKey(address, addressChainId)) ?? null
       },
+      // #3127: the accounting export stays a FIXED-currency file. Deliberate,
+      // not the default everywhere: the feed was built (epic 026, #2871)
+      // around one reporting currency, the accountants' importers are keyed
+      // on it, and `amount_sek` is the stored book-time column — a
+      // preference-driven amount would re-express a filed figure instead of
+      // reporting one. The user's currency_preference (read above) names the
+      // column so the reader still sees how the file relates to what the
+      // dashboard serves them; the AMOUNT does not follow it.
+      reportingCurrency: 'SEK',
     })
 
     return reply
@@ -373,13 +368,13 @@ export default async function transactionRoutes(
     const { sub } = request.user as { sub: string }
     const fresh = parseFreshFlag(request.query.fresh)
 
-    const { safes, agents, tokens } = await resolveTransactionFilters(sub, request.log, fresh)
+    const { accounts, agents, tokens } = await resolveTransactionFilters(sub, request.log, fresh)
 
     return {
       // #2914's last retired RESPONSE name. It was not twinned like the other
       // two and no published package ever read it — the dashboard is the only
       // consumer, and it ships from the same promotion as this backend.
-      accounts: safes.map((account) => ({
+      accounts: accounts.map((account) => ({
         id: account.id,
         name: account.name,
         address: account.account_address,
@@ -406,22 +401,10 @@ export default async function transactionRoutes(
   }>('/:accountAddress', async (request, reply) => {
     const { accountAddress: address } = request.params
     const { sub } = request.user as { sub: string }
-    const page = parsePositiveInt(request.query.page, 1, 1, Number.MAX_SAFE_INTEGER)
-    const limit = parsePositiveInt(request.query.limit, 25, 1, 100)
+    const page = readInt(request.query.page, 1)
+    const limit = readInt(request.query.limit, 25)
     const fresh = parseFreshFlag(request.query.fresh)
     const requestedChainId = parseChainId(request.query.chain_id)
-
-    if (page === null || limit === null) {
-      return reply.code(400).send({ error: 'Invalid pagination params' })
-    }
-
-    if (!ETH_ADDRESS_RE.test(address)) {
-      return reply.code(400).send({ error: 'Invalid address' })
-    }
-
-    if (Number.isNaN(requestedChainId)) {
-      return reply.code(400).send({ error: 'Invalid chain_id' })
-    }
 
     if (requestedChainId !== null && !isSupportedChain(requestedChainId)) {
       return reply.code(400).send({ error: `Unsupported chain: ${requestedChainId}` })
@@ -447,6 +430,8 @@ export default async function transactionRoutes(
       fresh,
       page,
       limit,
+      // #3127: same converted triple as the multi-account feed.
+      currency: await resolveTransactionCurrency(sub),
     })
 
     return {

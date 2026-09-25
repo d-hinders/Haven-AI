@@ -1,14 +1,14 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { retiredSafeInflowHandler } from '../middleware/safe-inflow-retired.js'
+import { retiredSafeInflowHandler, retiredSafeInflowRoute } from '../middleware/safe-inflow-retired.js'
 import { retiredSafePathHandler } from './user-accounts-retired.js'
+import { DEFAULT_TRANSACTION_CURRENCY, type TransactionCurrency } from '../domain/transaction-currency.js'
 import {
   findCurrencyPreference,
   updateCurrencyPreference,
   updateUserName,
   updateUserWalletAddress,
 } from '../infra/repositories/users.js'
-import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
 /**
  * #2914 (naming epic #2906 phase 5, the contraction): these responses carry
@@ -40,16 +40,18 @@ interface WalletBody {
 }
 
 interface PreferencesBody {
-  currency_preference: string
+  /** The spec's enum, enforced before the handler (#3030). */
+  currency_preference: TransactionCurrency
 }
 
 interface ProfileBody {
   name: string
 }
 
-function normalizeName(name: unknown): string | null {
-  if (typeof name !== 'string') return null
-
+// Shape (string, 1–80) is the spec's, enforced before the handler since
+// #3030; blank-after-trim, whitespace collapse and control characters stay
+// here — no schema states them.
+function normalizeName(name: string): string | null {
   const normalized = name.trim().replace(/\s+/g, ' ')
   if (
     normalized.length === 0 ||
@@ -86,10 +88,8 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
     const { wallet_address } = request.body
     const { sub } = request.user as { sub: string }
 
-    if (!wallet_address || !ETH_ADDRESS_RE.test(wallet_address)) {
-      return reply.code(400).send({ error: 'Invalid Ethereum address' })
-    }
-
+    // The address pattern is the spec's (`wallet_address: address`), refused
+    // before the handler since #3030.
     const updated = await updateUserWalletAddress(wallet_address, sub)
     if (!updated) return userRowVanished()
     return updated
@@ -108,13 +108,17 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
 
   // PUT /user/account — RETIRED (#1984, epic #1440): importing an account is
   // closed with the Safe rail. `updateUserAccount` in `openapi/spec.ts`.
-  app.put('/account', retiredSafeInflowHandler('import'))
+  app.put('/account', retiredSafeInflowRoute('import'), retiredSafeInflowHandler('import'))
 
   // GET /user/preferences
   app.get('/preferences', async (request) => {
     const { sub } = request.user as { sub: string }
 
-    return { currency_preference: (await findCurrencyPreference(sub)) ?? 'USD' }
+    // #3127: the no-preference default is SEK — documented and deliberate
+    // (domain/transaction-currency.ts), the currency the transaction feed
+    // serves. The characterization test pins the fallback SHAPE (null row and
+    // missing row both fall back), not the currency.
+    return { currency_preference: (await findCurrencyPreference(sub)) ?? DEFAULT_TRANSACTION_CURRENCY }
   })
 
   // PUT /user/preferences
@@ -122,10 +126,15 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
     const { currency_preference } = request.body
     const { sub } = request.user as { sub: string }
 
-    if (!currency_preference || !['USD', 'EUR'].includes(currency_preference)) {
-      return reply.code(400).send({ error: 'Invalid currency. Must be USD or EUR.' })
-    }
-
+    // #3127: SEK joins the offered set — it is the currency every converted
+    // transaction amount is struck in by default, so it was the one currency
+    // no user could actually select. The list is the shared
+    // `TRANSACTION_CURRENCIES` from `domain/transaction-currency.ts`, the
+    // same list the transaction path converts against, so the enum and the
+    // served currency cannot drift apart again.
+    // The enum is the spec's, refused before the handler since #3030; the
+    // test suite pins that enum to `TRANSACTION_CURRENCIES` so the spec and
+    // the conversion path cannot drift apart.
     const updated = await updateCurrencyPreference(currency_preference, sub)
 
     if (!updated) userRowVanished()

@@ -22,7 +22,7 @@ covers:
   - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
   - .claude/commands/qa-explore-agent-onboarding.md
-last-verified: "2026-09-15"
+last-verified: "2026-09-21"
 ---
 
 <!--
@@ -105,6 +105,15 @@ npm run test:e2e:mobile -w packages/frontend
 npm run test:e2e:live -w packages/frontend
 npm run qa:dev -w packages/qa-agent
 ```
+
+The commands and artifact paths in this template were re-verified against the
+repos on 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the five
+script names above in `packages/frontend/package.json` and
+`packages/qa-agent/package.json`, and both Playwright `outputDir` values in
+`playwright.config.ts` / `playwright.live.config.ts`. The intervening commits
+(#3204/#3205 analytics e2e, #3173 connect cold start, #3194 ci.yml docs notes)
+changed the suites and covered code, not the template's fields, tables or
+artifact layout.
 
 ## Agent Connection — When In Scope
 

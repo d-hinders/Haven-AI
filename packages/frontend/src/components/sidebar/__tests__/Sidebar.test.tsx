@@ -176,7 +176,7 @@ describe('Sidebar', () => {
       user: {
         name: 'Ada Lovelace',
         email: 'ada@example.com',
-        safes: [
+        accounts: [
           { id: 's1', account_type: 'legacy_safe' },
           { id: 's2', account_type: 'delegator_hybrid' },
         ],
@@ -526,7 +526,7 @@ describe('Sidebar drawer across the desktop breakpoint (#2586)', () => {
   beforeEach(() => {
     mockUsePathname.mockReturnValue('/dashboard')
     mockUseAuth.mockReturnValue({
-      user: { name: 'Ada Lovelace', email: 'ada@example.com', safes: [] },
+      user: { name: 'Ada Lovelace', email: 'ada@example.com', accounts: [] },
       logout: vi.fn(),
     })
     mockAccountingFeed.mockReset().mockReturnValue(feed(feedStatus()))

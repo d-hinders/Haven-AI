@@ -35,6 +35,7 @@ import { feedSettledPaymentBestEffort } from '../accounting/index.js'
 import { isProtocolPaymentRail } from './rail-dispatch.js'
 import { observeErc7710Settlement } from '../x402/settlement-observed.js'
 import { withParties } from '../../openapi/party-model.js'
+import { toCanonicalAddress } from '../transactions/index.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
 import { isZeroSettlementTxHash } from '@haven_ai/sdk'
 
@@ -629,7 +630,27 @@ function deriveReceiptTxHashes(row: {
   return { funding_tx_hash: row.tx_hash, settlement_tx_hash: settlementTxHash }
 }
 
+/**
+ * #3132 (owner decision 3 on #3130): every receipt row states its population
+ * and narrowing as two values. Receipts are AGENT-scoped by the authenticated
+ * principal — evidence rows of this agent only — and `GET /receipts` applies
+ * no query-time narrowing (`limit`/`cursor` page, they do not filter), so the
+ * filter is `null`. The wallet feed's `{ source: 'wallet', filter: 'agent' }`
+ * is a different population narrowed, never this view.
+ */
+export const RECEIPT_LIST_SCOPE = { source: 'agent', filter: null } as const
+
 export function mapEvidence(row: MachinePaymentEvidenceRow) {
+  // #3307: Haven-owned addresses are EIP-55 checksummed at this read
+  // boundary, as the transactions feed does since #3129 — storage stays
+  // `LOWER(...)` (the evidence upsert), so an agent reconciling a receipt
+  // against its transaction row with `===` no longer sees a false mismatch.
+  // Canonicalised HERE, in this caller's arguments, not inside `withParties`:
+  // that helper also builds the signed receipt bundle, whose bytes are signed
+  // and deliberately stay as they are (owner decision on #3307). `tx_hash` is a
+  // hash, and the relayed merchant objects stay byte-for-byte (#3125).
+  const merchantAddress = toCanonicalAddress(row.merchant_address)
+  const payerAddress = toCanonicalAddress(row.payer_address)
   return withParties(
     {
       id: row.id,
@@ -644,11 +665,11 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       ...deriveReceiptTxHashes(row),
       chain_id: row.chain_id,
       resource_url: row.resource_url,
-      merchant_address: row.merchant_address,
-      payer_address: row.payer_address,
-      settlement_address: row.settlement_address,
+      merchant_address: merchantAddress,
+      payer_address: payerAddress,
+      settlement_address: toCanonicalAddress(row.settlement_address),
       token_symbol: row.token_symbol,
-      token_address: row.token_address,
+      token_address: toCanonicalAddress(row.token_address),
       amount_raw: row.amount_raw,
       amount_human: row.amount_human,
       challenge_id: row.challenge_id,
@@ -676,10 +697,10 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       // `row.payer_address` is `machine_payment_evidence.payer_address`,
       // written from `intent.account_address` (`modules/mpp/evidence.ts`'s
       // own evidence-base write) — the treasury, not the delegate.
-      account_address: row.payer_address ?? null,
-      delegate_address: row.intent_delegate_address ?? null,
-      delegate_account_address: row.intent_delegate_account_address ?? null,
-      merchant_address: row.merchant_address ?? null,
+      account_address: payerAddress ?? null,
+      delegate_address: toCanonicalAddress(row.intent_delegate_address) ?? null,
+      delegate_account_address: toCanonicalAddress(row.intent_delegate_account_address) ?? null,
+      merchant_address: merchantAddress ?? null,
     },
   )
 }

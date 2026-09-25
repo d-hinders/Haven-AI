@@ -18,6 +18,7 @@ vi.mock('../../modules/accounts/index.js', () => ({
 }))
 
 import portfolioRoutes from '../portfolio.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
 const PORTFOLIO = {
@@ -31,6 +32,10 @@ describe('portfolio routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/portfolio.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(portfolioRoutes, { prefix: '/portfolio' })
   })
@@ -119,10 +124,27 @@ describe('portfolio routes', () => {
       headers: { authorization: `Bearer ${token}` },
     })
 
+    // #3030: the shape refusal is the spec's (`integer, minimum: 1`), answered
+    // by the enforced module as the 400 envelope; the handler never runs.
     expect(response.statusCode).toBe(400)
-    expect(response.json().error).toBe('Invalid chain_id')
+    expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    expect(response.json().details).toContain('querystring/chain_id')
     expect(mockQuery).not.toHaveBeenCalled()
     expect(mockFetchPortfolioForAccount).not.toHaveBeenCalled()
+  })
+
+  it('refuses a malformed address and a non-positive chain_id with the 400 envelope, before any query (#3030)', async () => {
+    // Both were hand-rolled 400s before the module was enforced; the spec's
+    // `address` pattern and `chain_id: integer, minimum: 1` are the guards
+    // now. Mutation: drop the module from enforcedModules → the malformed
+    // address reaches the ownership lookup (mockQuery called).
+    const token = signToken({ sub: 'user-1', email: 'test@example.com' })
+    for (const url of ['/portfolio/not-an-address', `/portfolio/${SAFE_ADDRESS}?chain_id=0`, `/portfolio/${SAFE_ADDRESS}?chain_id=-8453`]) {
+      const response = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${token}` } })
+      expect(response.statusCode, url).toBe(400)
+      expect(response.json()).toMatchObject({ error: 'Request does not match the API spec', statusCode: 400, error_code: 'invalid_request' })
+    }
+    expect(mockQuery).not.toHaveBeenCalled()
   })
 
   it('rejects unsupported chains before ownership lookup', async () => {

@@ -4,13 +4,14 @@ status: current
 covers:
   - .github/CODEOWNERS
   - .github/workflows/dev-gate.yml
+  - .github/workflows/pr-ownership-gate.yml
   - .github/ISSUE_TEMPLATE/loop-task.md
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-09-18"
+last-verified: "2026-09-20"
 ---
 
 # Autonomous PR loop
@@ -32,7 +33,7 @@ and only comes back to you for a real decision, a blocking review finding, a
 live work overlap, or stuck CI.
 
 Pieces:
-- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default. Code claims in a filed body are measured commands at a named commit, and an epic additionally gets one spec-review pass plus a verdict comment before partners are pinged — the skill's [§ *Epic review*](../../.agents/skills/new-task/SKILL.md).
+- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default, and the default route for **every** issue an agent files — never a bare `gh issue create`. Code claims in a filed body are measured commands at a named commit, and **every** filed issue — single task or epic — gets one independent spec-review pass plus a verdict comment before it is queued, shipped or announced — the skill's [§ *Issue review*](../../.agents/skills/new-task/SKILL.md#issue-review).
 - **`ship-next`** ([canonical skill](../../.agents/skills/ship-next/SKILL.md)) — **execute**: does **one** PR end-to-end, then stops. `ship-next "<task>"` is `new-task` + ship in one go.
 - **Client adapters** — Claude Code exposes thin `/new-task` and `/ship-next` wrappers; `/loop /ship-next` re-invokes one item at a time. Other clients invoke the canonical skills through their supported skill and delegation mechanisms.
 - **haven-reviewer** — the per-PR quality gate.
@@ -181,9 +182,8 @@ PR go through before handing it the whole queue.
   if the design-review / haven-reviewer UI pass raises a **`blocking`** or
   **`should-fix`** UX, copy, or design-system finding, the loop **pauses** even if
   CI is green. A **`nit`** does not pause since [#2636](https://github.com/d-hinders/Haven-AI/issues/2636)
-  — it is fixed in place when it is a one-line change, or dropped under **Not filed**
-  with its screenshot (#2767); the severity table and the reasoning are in that
-  playbook, not here.
+  — it is fixed in place when it is a one-line change, or filed as a follow-up with
+  its screenshot; the severity table and the reasoning are in that playbook, not here.
 
   Clearing that pause is the reviewer's call, not the user's (#1968) —
   fix, re-capture the screenshots, re-run the pass that raised it, and a clean
@@ -207,18 +207,6 @@ PR go through before handing it the whole queue.
   (migrations are irreversible in prod; `__tests__/` is not a schema change).
 - Auto-merge does not bypass anything: GitHub still requires all configured
   status checks. If CI fails, the merge simply doesn't happen.
-
-**What happens to a finding (#2767).** Every finding a session makes — its own,
-a reviewer's, a sweep's, a guard's — ends in one of three dispositions: **fixed in
-the PR**, **dropped with a reason** under the PR body's **Not filed** list, or
-**filed** only when it clears the five-check filing bar in
-[`ship-next` § *Filing bar*](../../.agents/skills/ship-next/SKILL.md#filing-bar-2767)
-— the bar is stated there once and not restated here. Filing is not a way to
-finish a round: #2767's hand count over the issues API on 2026-09-08 (not
-re-derivable from `git log`) was 195 issues filed against 199 PRs merged in the
-week to 2026-09-08, 141 of the 195 citing another issue filed the same week, and
-the promotion digest now prints the filed-per-closed ratio and the
-product share of merges every run so the trend is visible.
 
 ## Money-path safety model (read this)
 
@@ -432,7 +420,16 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      contexts: the context list above is unchanged. Do **not**
      require **Docs links & style (advisory)** — it is the deliberately
      non-gating half of `docs.yml` (#1023) — and do **not** require **Vercel
-     Preview Comments**, which isn't a quality gate.
+     Preview Comments**, which isn't a quality gate. **Pending operator step
+     (#3179):** add **PR ownership gate** (`.github/workflows/pr-ownership-gate.yml`)
+     to this ruleset's required contexts — it fails a PR that would close an
+     issue another session holds. Because *Haven automerge rules* targets both
+     branches, that makes it the **16th** required context on `dev` and the
+     **20th** on `main`. Until the owner adds it, the check runs and reports on
+     every PR but does not block; this list, the *Effective per branch* table
+     below (15 / 19), `branch-and-release-flow.md` § Promotion to production ("19 … the 15")
+     and `promoting-dev-to-main.md` ("19 … the 15") all describe the counts AS
+     APPLIED — update all four when the step is done. The workflow uses `pull_request_target` so the default branch's copy of the script judges (it therefore cannot run on the PR that adds it); once the context is required, a PR for which the workflow does not run at all would have no check run and could not merge — a different failure than red, worth knowing when reading a stuck PR.
 
      Two settings on this ruleset changed on 2026-09-07 under
      [#2632](https://github.com/d-hinders/Haven-AI/issues/2632)'s owner step O1/O2,
@@ -539,7 +536,7 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
 
    | | `dev` | `main` |
    |---|---|---|
-   | Required contexts | **15** (all from *Haven automerge rules*) | **19** (those 15 + `gate`, `qa-freshness`, Design visual regression, Frontend browser smoke) |
+   | Required contexts | **15** (all from *Haven automerge rules*; a 16th, **PR ownership gate**, is pending — #3179, see One-time setup) | **19** (those 15 + `gate`, `qa-freshness`, Design visual regression, Frontend browser smoke; 20 once the pending step is applied) |
    | Branch must be up to date | **no** | **yes** |
    | Allowed merge method | **squash only** | **merge commit only** |
 

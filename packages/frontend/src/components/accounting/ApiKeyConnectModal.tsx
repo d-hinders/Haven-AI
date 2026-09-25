@@ -8,7 +8,7 @@
  * the company it belongs to (`POST /accounting/connections/:provider/api-key`,
  * the route added with the api-key flow). The modal carries the three
  * dashboard steps — where the keys page is, which scopes to tick
- * (`companies:read` + `documents:write`, interpolated from
+ * (`companies:read` + `documents:write` + `webhooks:manage`, interpolated from
  * `accounted-copy.ts` so the identifiers are spelled exactly once), and that
  * a key is shown only after creation — plus the dashboard-revoke note: a key
  * is revoked in Accounted's dashboard, so disconnect here clears the stored

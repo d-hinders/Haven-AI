@@ -7,9 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   mockUseAuth,
   mockUseAgents,
+  mockRouterPush,
 } = vi.hoisted(() => ({
   mockUseAuth: vi.fn(),
   mockUseAgents: vi.fn(),
+  mockRouterPush: vi.fn(),
 }))
 
 vi.mock('@/context/AuthContext', () => ({
@@ -18,6 +20,10 @@ vi.mock('@/context/AuthContext', () => ({
 
 vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
+}))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockRouterPush, replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
 }))
 
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
@@ -68,25 +74,28 @@ describe('useAgentPanelState', () => {
     vi.useRealTimers()
   })
 
-  describe('agentUsesActiveAccount', () => {
-    it('matches by account_id first', () => {
+  /**
+   * #3168: the card's "Details" action routes through `handleViewDetails`,
+   * which is a client-side router push — the same navigation every card gets,
+   * regardless of which account the agent belongs to (the old
+   * `canUseWalletActions` fork is gone with the modal it guarded).
+   */
+  describe('handleViewDetails (#3168)', () => {
+    it('pushes /agents/{id} through the Next router', () => {
       const { result } = renderHook(() => useAgentPanelState())
-      expect(result.current.agentUsesActiveAccount(baseAgent({ account_id: 'safe-1' }))).toBe(true)
-      expect(result.current.agentUsesActiveAccount(baseAgent({ account_id: 'safe-other' }))).toBe(false)
+      act(() => {
+        result.current.handleViewDetails(baseAgent({ id: 'agent-42' }))
+      })
+      expect(mockRouterPush).toHaveBeenCalledTimes(1)
+      expect(mockRouterPush).toHaveBeenCalledWith('/agents/agent-42')
     })
 
-    it('falls back to address + chain when there is no account_id', () => {
+    it('pushes the agent id that was passed, not the active account id', () => {
       const { result } = renderHook(() => useAgentPanelState())
-      expect(
-        result.current.agentUsesActiveAccount(
-          baseAgent({ account_id: null as unknown as string, account_address: SAFE.account_address.toUpperCase(), account_chain_id: 100 }),
-        ),
-      ).toBe(true)
-      expect(
-        result.current.agentUsesActiveAccount(
-          baseAgent({ account_id: null as unknown as string, account_address: SAFE.account_address, account_chain_id: 8453 }),
-        ),
-      ).toBe(false)
+      act(() => {
+        result.current.handleViewDetails(baseAgent({ id: 'agent-other' }))
+      })
+      expect(mockRouterPush).toHaveBeenCalledWith('/agents/agent-other')
     })
   })
 

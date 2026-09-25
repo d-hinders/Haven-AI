@@ -106,7 +106,7 @@ export async function runCli(
     // identity for the agent id, replaces the wrapper with a truth-telling
     // tombstone, touches NO key material, and tells the user what the
     // tombstone cannot do for them: restart every long-lived host.
-    const { writeAgentTombstone } = await import('./tombstone.js')
+    const { writeAgentTombstone, tombstonesDirForAgentDirectory } = await import('./tombstone.js')
     const { readFile } = await import('node:fs/promises')
     const { join } = await import('node:path')
     try {
@@ -120,11 +120,16 @@ export async function runCli(
         // A directory whose identity no longer parses can still be retired —
         // the tombstone then names it as unknown, which is honest.
       }
+      const ledgerDir = tombstonesDirForAgentDirectory(parsed.tombstone.directory)
       const info = await writeAgentTombstone({
         directory: parsed.tombstone.directory,
         agentId,
         reason: parsed.tombstone.reason ?? 'retired by operator via --tombstone',
         replacedBy: parsed.tombstone.replacedBy,
+        // #3251: the ledger of the root that holds the retired directory —
+        // ~/.haven/agents/<x> → ~/.haven/tombstones, exactly as before; a
+        // directory under any other root → <root>/.tombstones.
+        tombstonesDir: ledgerDir,
       })
       if (parsed.json) {
         io.stdout(`${redactSecrets(JSON.stringify({ tombstoned: true, ...info }))}\n`)
@@ -135,13 +140,23 @@ export async function runCli(
             'agent page if you have not already.\n',
         )
         io.stdout(
-          `A surviving tombstone record was mirrored to ${redactSecrets(info.recordPath)}\n`,
+          info.recordPath !== null
+            ? `A surviving tombstone record was mirrored to ${redactSecrets(info.recordPath)}\n`
+            : // #3259: the directory IS tombstoned; only the surviving copy failed.
+              redactSecrets(
+                `! The surviving tombstone record could NOT be written to ${ledgerDir} (${info.mirrorError}). The in-place ` +
+                  'TOMBSTONE.json stands, but --doctor will not list this retirement once the directory is deleted.\n',
+              ),
         )
         io.stdout(
           'Restart EVERY long-lived MCP host (gateway, TUI workers, editors): each holds the ' +
             'wiring snapshot from its own start time, and the tombstone only speaks when a stale ' +
-            'host next probes the old path. The mirrored record keeps this retirement observable ' +
-            'even after the agent directory itself is deleted.\n',
+            'host next probes the old path.' +
+            // #3259 review: never claim a copy that the line above says was not written.
+            (info.recordPath !== null
+              ? ' The mirrored record keeps this retirement observable even after the agent directory itself is deleted.'
+              : '') +
+            '\n',
         )
       }
       return 0
@@ -159,12 +174,14 @@ export async function runCli(
     // config it appears in + the Hermes dotenv key. Refuses — never guesses —
     // when the bare pair is provably another agent's.
     const { unwireAgent } = await import('./unwire.js')
+    const { tombstonesDirForAgentDirectory } = await import('./tombstone.js')
     const { homedir } = await import('node:os')
     const { join } = await import('node:path')
     const homeDir = homedir()
     const root = parsed.options.credentialsDir ?? join(homeDir, '.haven', 'agents')
     const directory =
       parsed.unwireDir ?? (parsed.options.serverName ? join(root, parsed.options.serverName) : root)
+    const ledgerDir = tombstonesDirForAgentDirectory(directory, homeDir)
     try {
       const result = await unwireAgent({
         directory,
@@ -173,6 +190,13 @@ export async function runCli(
         replacedBy: parsed.unwire.replacedBy,
         destroyKeyMaterial: parsed.unwire.destroyKeyMaterial,
         homeDir,
+        // #3251: the ledger of the root that holds the directory being
+        // retired. Derived from the RESOLVED directory, not from
+        // --credentials-dir: `--unwire --credentials-dir <path>` names the agent
+        // directory itself, not a root. ~/.haven/agents/<slug> →
+        // ~/.haven/tombstones, exactly as before; any other root →
+        // <root>/.tombstones.
+        tombstonesDir: ledgerDir,
       })
       const failures = result.runtimes.filter((r) => r.status === 'refused' || r.status === 'unreadable')
       // #3123: a retained teardown is a refusal too — the wiring is gone, the
@@ -187,6 +211,8 @@ export async function runCli(
               slug: result.slug ?? null,
               directory: result.directory,
               tombstoned: result.tombstoned,
+              // #3259: additive — present only when the surviving ledger record failed.
+              ...(result.mirrorError !== undefined ? { mirror_error: result.mirrorError } : {}),
               runtimes: result.runtimes.map((r) => ({
                 runtime: r.runtime,
                 label: r.label,
@@ -212,6 +238,12 @@ export async function runCli(
             ? '  · Tombstoned first: any long-lived host still resolving the old wrapper gets the HAVEN-TOMBSTONE diagnosis.\n'
             : '  · Directory was already tombstoned.\n',
         )
+        if (result.mirrorError !== undefined) {
+          io.stdout(redactSecrets(
+            `  ! Surviving tombstone record: NOT written to ${ledgerDir} (${result.mirrorError}) — the in-place tombstone stands; ` +
+              '--doctor will not list this retirement once the directory is deleted.\n',
+          ))
+        }
         for (const r of result.runtimes) {
           const mark = r.status === 'removed' ? '✓' : r.status === 'clean' ? '–' : '✗'
           io.stdout(redactSecrets(`  ${mark} ${r.label}: ${r.status}${r.detail ? ` — ${r.detail}` : ''}\n`))
@@ -359,6 +391,9 @@ export async function runCli(
   }
   if (parsed.doctor || parsed.repair) {
     const { runDoctor, runRepair } = await import('./doctor.js')
+    // '' is the doctor's "no flag given" input: it resolves the runtime from
+    // the setup record, else reports it unknown (#3120). Reachable for
+    // --doctor since #3210; --repair never gets here without a flag (args.ts).
     const runtime = parsed.options.runtime ?? ''
     const credentialsDir = parsed.options.credentialsDir
     try {

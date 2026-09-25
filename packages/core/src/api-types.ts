@@ -185,6 +185,54 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/organizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the signed-in user's organizations.
+         * @description Flat rows with parent ids; the caller builds the tree. Multiple roots are allowed (one per company); a null parent is the top level. `agent_count` is the number of agents filed DIRECTLY under the folder — sub-organization members are not counted.
+         */
+        get: operations["listOrganizations"];
+        put?: never;
+        /**
+         * Create an organization, optionally inside another one.
+         * @description The name must be unique among siblings under the same parent (case-insensitively); a repeat is a 409. Omit `parent_organization_id` to create a top-level organization.
+         */
+        post: operations["createOrganization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rename an organization and/or move it inside another one.
+         * @description Rename changes the name everywhere it renders, never which agents file under it. The move is expressed by `parent_organization_id`: present means move (null = the top level), absent means keep. Moving into the organization’s own subtree is refused with 400 — it would make the folder its own ancestor. A rename or move onto a sibling name that already holds is a 409.
+         */
+        put: operations["updateOrganization"];
+        post?: never;
+        /**
+         * Delete an organization; its contents move up one level.
+         * @description Deleting never orphans anything: the folder’s sub-organizations and member agents take the deleted folder’s own parent (agents of a deleted root return to the top level). Agents are never deleted, hidden, or changed in any way beyond the placement. The response is `{ ok: true }`.
+         */
+        delete: operations["deleteOrganization"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents": {
         parameters: {
             query?: never;
@@ -306,6 +354,71 @@ export type paths = {
          */
         post: operations["revokeAgent"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace an agent's labels with the given set.
+         * @description Full replacement: the agent ends up carrying exactly the labels named, in any order, duplicates collapsed. Labels are the user's own display tags; deleting a label elsewhere removes it from every agent without touching the agents themselves. The response carries the agent's labels as they now are, so a client re-renders without a second call. Repeating an id is accepted and collapses to one (#3200) — the set is what the label_ids array names distinctly, and a duplicated id is not a missing label.
+         */
+        put: operations["replaceAgentLabels"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the signed-in user's labels. */
+        get: operations["listLabels"];
+        put?: never;
+        /**
+         * Create a label (or re-use one of the same name).
+         * @description Names are one per user on the lowercased name: creating "Prod" when "prod" exists re-uses that label rather than failing. An omitted colour keeps the existing label's colour (#3200) — the fold onto an existing row recolours only when the request explicitly names a colour; a genuinely new label takes the palette's neutral entry.
+         */
+        post: operations["createLabel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/labels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rename and/or recolor a label.
+         * @description Agents carrying the label follow it — a rename changes the name everywhere it renders, never which agents carry it. A rename onto a name another of the user's labels already holds is a 409.
+         */
+        put: operations["updateLabel"];
+        post?: never;
+        /**
+         * Delete a label.
+         * @description Removes the label and its assignments (every agent loses the tag). Agents are never deleted or altered by this — only the label and the join rows go.
+         */
+        delete: operations["deleteLabel"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1007,7 +1120,7 @@ export type paths = {
         get: operations["getUserPreferences"];
         /**
          * Set the display-currency preference.
-         * @description Display only — it changes no balance, no price and no settlement asset.
+         * @description Names the currency a transaction’s converted amount (`convertedAmount`) is struck in. Display only — it changes no balance, no price and no settlement asset.
          */
         put: operations["updateUserPreferences"];
         post?: never;
@@ -1159,6 +1272,46 @@ export type paths = {
          * @description The ONLY path that flips a pushed row back to retryable, and it is conditional on the PROVIDER, not on the caller's say-so (#1365): the server re-runs the read-back and reopens only when the invoice is confirmed gone, or when a number collision proves the invoice at that number is not ours. **An invoice that still exists refuses with 409 and writes nothing** — that is the double-post guard, and reopening against a live invoice would duplicate it. A row that moved between the check and the flip (raced by a concurrent sync) also refuses rather than pretending. After a successful reopen, the next sync re-claims and re-pushes through the normal retry path.
          */
         post: operations["reopenAccountingFeedPush"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/webhooks/accounted/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * PUBLIC Accounted webhook callback — authenticated by the capability token + the HMAC signature, not by a session.
+         * @description Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (a webhook carries no credential header).
+         */
+        post: operations["accountedWebhookCallback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/accounting/webhooks/accounted/{token}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * PUBLIC Accounted webhook callback (trailing-slash twin — the same handler; never a redirect).
+         * @description Registered EXPLICITLY so the provider never meets Fastify's trailing-slash redirect: a 3xx would hand it a URL the subscription was not registered with, and a 410 would auto-disable the subscription without replay (#3019). Identical contract to `accountedWebhookCallback`.
+         */
+        post: operations["accountedWebhookCallbackTrailingSlash"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1654,7 +1807,7 @@ export type paths = {
         };
         /**
          * One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.
-         * @description Everything the `/analytics` page renders in one round trip, so the page has one loading state and one "based on N payments" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz`. Delegation-rail accounts only.
+         * @description Everything the `/analytics` page renders in one round trip, so the page has one loading state and one "based on N payments" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. The same honesty applies to the SEK SUMS under `currency=sek` (#3127, round-3 review): the totals, per-agent, top-merchant and fees figures sum `sek_value`, which is NULL for a confirmed row whose book-time SEK could not be captured or backfilled — those rows are still counted in `basis.payments_counted` but contribute nothing to any SEK sum, so a SEK total can sit below the basis it is computed over. USD and EUR are unaffected (their booking predates the capture gate). Delegation-rail accounts only.
          */
         get: operations["getAnalyticsOverview"];
         put?: never;
@@ -2009,6 +2162,26 @@ export type paths = {
         };
         /** Fetch direct payment intent status. */
         get: operations["getPaymentIntent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/payments/{id}/sign-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the exact signing payload for a pending DIRECT delegation-rail payment.
+         * @description Read-only byte-free signing handoff (#3271, the direct sibling of GET /x402/{id}/sign-context from #1263): re-serves the stored delegation-rail sign_data.typed_data for a plain POST /payments intent, rebuilt from the stored UserOperation exactly as the idempotent replay of the create rebuilds it, so a LOCAL SIGNER can fetch exact bytes by payment_id instead of an agent re-emitting a multi-KB EIP-712 payload. Constructs and signs nothing new. An x402/MPP intent id is refused here (fetch GET /x402/{id}/sign-context instead), and a direct intent id is refused there — each surface serves only its own rail's shape.
+         */
+        get: operations["getDirectPaymentSignContext"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2384,8 +2557,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Prepare a gasless USDC sweep from the delegate wallet to the Safe.
-         * @description Reads the delegate EOA's stranded USDC and returns an EIP-3009 TransferWithAuthorization (delegate → the agent's own Safe) plus Haven's authorization binding. The edge signer signs the authorization with haven_sign_sweep_delegate; POST /machine-payments/sweep/submit relays it. The delegate never needs ETH and Haven never holds the key. Returns { nothing_stranded: true } when the delegate is empty.
+         * Prepare a gasless USDC sweep from the delegate wallet to the agent's account (Haven wallet).
+         * @description Reads the delegate EOA's stranded USDC and returns an EIP-3009 TransferWithAuthorization (delegate → the agent's account (Haven wallet)) plus Haven's authorization binding. The edge signer signs the authorization with haven_sign_sweep_delegate; POST /machine-payments/sweep/submit relays it. The delegate never needs ETH and Haven never holds the key. Returns { nothing_stranded: true } when the delegate is empty.
          */
         post: operations["prepareDelegateSweep"];
         delete?: never;
@@ -2593,7 +2766,7 @@ export type paths = {
         };
         /**
          * List curated payable services agents can discover and pay.
-         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and search matches product name, description, or category. Blank search is rejected after trimming and non-empty search is capped at 120 characters; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.
+         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and every whitespace-separated search word must match the product name, description, or category. Blank search is rejected after trimming, non-empty search is capped at 120 characters, and searches with more than 8 words return 400; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.
          */
         get: operations["listCatalog"];
         put?: never;
@@ -2670,7 +2843,7 @@ export type paths = {
         };
         /**
          * List the marketplace's merchants.
-         * @description The sell side of the catalog (#3078, epic #3077): every live merchant with at least one non-delisted offer on a chain this deployment lists (HAVEN_MARKETPLACE_CHAIN_IDS, else HAVEN_DEPLOY_CHAIN_IDS, else every chain) or a verified self-submitted offer, ordered real merchants first, then test merchants. Readable without a credential, like `GET /catalog`. `coming_soon` prospects appear only for an authenticated dashboard user when HAVEN_MARKETPLACE_PROSPECTS is on and no mainnet chain is listed. Read-only; nothing here creates payments or signatures.
+         * @description The sell side of the catalog (#3078, epic #3077): every live merchant with at least one non-delisted offer on a chain this deployment lists (HAVEN_MARKETPLACE_CHAIN_IDS, else HAVEN_DEPLOY_CHAIN_IDS, else every chain) or a verified self-submitted offer, ordered real merchants first, then test merchants. Readable without a credential, like `GET /catalog`. `coming_soon` prospects appear only for an authenticated dashboard user when HAVEN_MARKETPLACE_PROSPECTS is on and HAVEN_MARKETPLACE_CHAIN_IDS itself names a testnet chain (epic #3077 decision 14; the HAVEN_DEPLOY_CHAIN_IDS fallback never counts, so prod, whose list is 8453, cannot show them). Read-only; nothing here creates payments or signatures.
          */
         get: operations["listMerchants"];
         put?: never;
@@ -2705,6 +2878,19 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
+        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the exact command that updates it, on this deployment's channel. */
+        ClientUpdate: {
+            /** @example @haven_ai/mcp */
+            package: string;
+            /** @example 0.4.0-alpha.0 */
+            current: string;
+            recommended: string | null;
+            min_version: string | null;
+            required: boolean;
+            /** @example npx -y @haven_ai/connect@alpha */
+            upgrade_command: string;
+            notes_url: string | null;
+        };
         /** @description A hybrid account's signer set — the exact configuration the account address was derived from. Public key material plus per-credential enrollment time (#1679); nothing secret. */
         HybridAccountSigners: {
             account_address: string;
@@ -2782,7 +2968,7 @@ export type components = {
             /** @description ISO 3166-1 alpha-2, when known. */
             country: string | null;
             /**
-             * @description `coming_soon` is a prospect Haven is talking to — shown only to an authenticated dashboard user on a deployment that lists no mainnet chain and has HAVEN_MARKETPLACE_PROSPECTS on; never an agreement, never payable, never in an agent read or the credential-less shape.
+             * @description `coming_soon` is a prospect Haven is talking to — shown only to an authenticated dashboard user on a deployment whose HAVEN_MARKETPLACE_CHAIN_IDS itself names a testnet chain and has HAVEN_MARKETPLACE_PROSPECTS on (epic #3077 decision 14); never an agreement, never payable, never in an agent read or the credential-less shape.
              * @enum {string}
              */
             listing_status: "live" | "coming_soon";
@@ -2992,16 +3178,108 @@ export type components = {
                 hops: number;
                 authRateLimitArmed: boolean;
             };
-            /** @description Accounting-feed on-call counters (#2872), deployment-wide, read live from two aggregate queries. `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: connections in `needs_reauthorisation`, `scope_missing` or `revoked_at_provider` — only the user's re-consent resolves them. Thresholds: docs/operations/accounting-feed.md. The counters are the one database read on this payload: when the queries throw, both are `null` and `unavailable` is `true` while the in-memory siblings still answer. */
+            /** @description Accounting-feed on-call counters (#2872, widened by #3019). `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: connections in `needs_reauthorisation`, `scope_missing`, `revoked_at_provider` or `needs_attention` — only the user's re-consent (or, for `needs_attention`, a reconnect after the deployment fix) resolves them. `webhookCounters`: the Accounted webhook receiver’s nine per-answer-class counters (received / bad_signature / stale / unknown_token / duplicate / processed / feature_off / unknown_type / confirmed) — IN-PROCESS, process-lifetime, reset on restart; the durable facts are the `accounting_webhook_deliveries` rows, not these. Thresholds: docs/operations/accounting-feed.md. The two integer counters are the one database read on this payload: when the queries throw, both are `null` (and `webhookCounters` with them) and `unavailable` is `true` while the in-memory siblings still answer. */
             accounting: {
                 exhaustedSyncs: number | null;
                 connectionsNeedingAttention: number | null;
-                /** @description Present and `true` only when the counters could not be read; the two integers are then `null`. */
+                webhookCounters: {
+                    received: number;
+                    bad_signature: number;
+                    stale: number;
+                    unknown_token: number;
+                    duplicate: number;
+                    processed: number;
+                    feature_off: number;
+                    unknown_type: number;
+                    confirmed: number;
+                } | null;
+                /** @description Present and `true` only when the counters could not be read; the two integers and `webhookCounters` are then `null`. */
                 unavailable?: boolean;
+            };
+            /** @description The request-validation plugin's shadow counters (#3029, epic #3028) — served since the plugin shipped, declared here since #3208. IN-PROCESS: they start at `since` (the plugin install, one per process) and dev redeploys on every merge, so a reading is only as wide as that window. `seenByRoute` (#3208) is what makes a zero readable: a shadowed route with `seen: 0` in the window is NOT PROVEN, never clean. Enforced routes are absent from `seenByRoute` — they refuse for real. The same events ride the log stream (`request_validation.would_refuse`, `would_coerce`, `seen`), which survives deploys; `scripts/ci/shadow-reading.mjs` aggregates them. */
+            request_validation: {
+                /** @enum {string} */
+                mode: "off" | "shadow" | "enforce";
+                /** @description Would-be refusals in the window; at most one per request. */
+                wouldRefuse: number;
+                /** @description Body FIELDS ajv rewrote and #3082 restored; one per field, never summed with `wouldRefuse`. */
+                wouldCoerce: number;
+                /** @description Keyed `METHOD /path field`. */
+                byRouteField: {
+                    [key: string]: number;
+                };
+                /** @description Keyed `METHOD /path field`. */
+                coerceByRouteField: {
+                    [key: string]: number;
+                };
+                /**
+                 * Format: date-time
+                 * @description When these counters started — the process's plugin install.
+                 */
+                since: string;
+                /** @description Requests that reached validation per SHADOWED route (`METHOD /path`), whatever the verdict. */
+                seenByRoute: {
+                    [key: string]: number;
+                };
             };
         };
         SuccessResponse: {
             success: boolean;
+        };
+        Label: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            color: "neutral" | "brand" | "success" | "debit";
+            /** Format: date-time */
+            created_at: string;
+        };
+        LabelListResponse: {
+            labels: components["schemas"]["Label"][];
+        };
+        CreateLabelRequest: {
+            name: string;
+            /** @enum {string} */
+            color?: "neutral" | "brand" | "success" | "debit";
+        };
+        UpdateLabelRequest: {
+            name?: string;
+            /** @enum {string} */
+            color?: "neutral" | "brand" | "success" | "debit";
+        };
+        Organization: {
+            /** Format: uuid */
+            id: string;
+            parent_organization_id: string | null;
+            name: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            agent_count: number;
+        };
+        OrganizationListResponse: {
+            organizations: components["schemas"]["Organization"][];
+        };
+        CreateOrganizationRequest: {
+            name: string;
+            /** Format: uuid */
+            parent_organization_id?: string;
+        };
+        /** @description Rename and/or move. An empty object is accepted and changes nothing. */
+        UpdateOrganizationRequest: {
+            name?: string;
+            parent_organization_id?: string | null;
+        };
+        DeleteOrganizationResponse: {
+            ok: boolean;
+        };
+        ReplaceAgentLabelsRequest: {
+            label_ids: string[];
+        };
+        AgentLabelsResponse: {
+            labels: components["schemas"]["Label"][];
         };
         /**
          * @description Connect Agent 2 setup state. Pending/proposed states are not payment authority.
@@ -3072,6 +3350,8 @@ export type components = {
              */
             safe_id?: string;
             runtime?: string;
+            /** @description Legacy local-MCP opt-in (#3032: sent by the dashboard, `useAgentConnectionSetup.ts`, whenever the owner picked local MCP). `true` with an explicit runtime outside Claude Code / Codex / Cowork is refused with 400; otherwise it records the preference. */
+            local_mcp?: boolean;
             allowances?: components["schemas"]["AgentConnectionAllowanceInput"][];
             /** @description Opt in to an L0 Agent Passport for the agent this setup creates. Default false. */
             issue_passport?: boolean;
@@ -3137,6 +3417,8 @@ export type components = {
              */
             run_mode?: "json" | "prose";
             connector_version?: string;
+            /** @description The MCP server name the connector wired this agent under (#3032: sent by `@haven_ai/connect`, `api.ts` `registerSetup`). Normalised server-side: trimmed, and an empty, over-64-character or otherwise malformed name is stored as null rather than refused. */
+            mcp_server_name?: string;
             connector_context?: components["schemas"]["AgentConnectionConnector"];
             install_capabilities?: {
                 can_write_runtime_config?: boolean;
@@ -3210,6 +3492,10 @@ export type components = {
             next_user_action?: string;
             error_code?: string | null;
             environment_label?: string;
+            /** @description Whether the connector installed the Haven agent skill for this runtime (#3032: sent by `@haven_ai/connect`, `api.ts`). */
+            skill_installed?: boolean;
+            /** @description Other agent directories the connector found on this machine (#2561, #3032: sent by `@haven_ai/connect`, `api.ts` `updateInstallStatus`). A tri-state: a list (found these), `[]` (scanned, found none), `null` (the scan could not run). Not trusted beyond its shape: entries are trimmed, path- or secret-shaped strings dropped, and the list capped server-side rather than refused. */
+            superseded_agent_ids?: string[] | null;
         };
         UpdateConnectorInstallStatusResponse: {
             /** Format: uuid */
@@ -3258,6 +3544,8 @@ export type components = {
             created_at: string;
             archived_at?: string | null;
             allowances: components["schemas"]["AgentAllowance"][];
+            labels: components["schemas"]["Label"][];
+            organization_id: string | null;
             mcp_last_seen_at?: string | null;
             mcp_server_name?: string | null;
             has_stranded_funds?: boolean;
@@ -3355,6 +3643,29 @@ export type components = {
                     amount: string;
                 };
                 instructions: string;
+            };
+        };
+        DirectSignContext: {
+            /** Format: uuid */
+            payment_id: string;
+            /** @enum {string} */
+            status: "pending_signature";
+            /** Format: date-time */
+            expires_at: string;
+            /**
+             * @description DIRECT_SIGN_CONTEXT_VERSION from @haven_ai/sdk (`userop-binding.ts`) — the version every client's assertUserOpTypedDataBinding pins against.
+             * @enum {integer}
+             */
+            direct_sign_context_version: 1;
+            sign_data: {
+                /** @description The stored ERC-4337 v0.7 UserOperation hash. Present for the integrity check (#3271) — do NOT sign it directly; sign typed_data. */
+                hash: string;
+                /** @enum {string} */
+                signature_scheme: "eip712_userop";
+                /** @description The EIP-712 PackedUserOperation payload to sign VERBATIM, byte-identical to the typed_data the original POST /payments (or its idempotent replay) returned for this intent. */
+                typed_data: {
+                    [key: string]: unknown;
+                };
             };
         };
         PaymentIntentStatus: {
@@ -3521,7 +3832,7 @@ export type components = {
             payTo: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             merchantPayTo?: string;
-            /** @description Atomic token amount from the x402 challenge. */
+            /** @description Atomic token amount from the x402 challenge. Digits only; the route additionally refuses zero (`isPositiveDecimalAtomicAmount`), which JSON Schema does not express. */
             amount: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             asset: string;
@@ -3534,6 +3845,10 @@ export type components = {
             maxTimeoutSeconds?: number;
             category?: string;
             idempotencyKey?: string;
+            /** @enum {string} */
+            settlementScheme?: "erc7710" | "eip3009";
+            /** @description #1058: the erc7710 challenge entry's extra.facilitatorAddresses — the facilitator pin carried into the settlement child delegation. */
+            facilitatorAddresses?: string[];
             signature?: string;
             /** @description #1307: the merchant MCP-tool call this quote was made against (haven_pay_mcp_tool). Persisted so GET /x402/{id}/merchant-call-context can rehydrate it at settle/complete time. */
             mcpCallContext?: {
@@ -3584,10 +3899,10 @@ export type components = {
             resource_url?: string;
             x402_expected_auth: {
                 /**
-                 * @description Contents-derived, never chosen: 1 = hash-only (legacy rail); 2 = commits to the EIP-712 typedDataHash (delegation rail, #1138); 3 = additionally binds the payer identity (#1690). The enum previously claimed [1] while v2 had shipped — corrected here.
+                 * @description Contents-derived, never chosen: 2 = commits to the EIP-712 typedDataHash (delegation rail, #1138); 3 = additionally binds the payer identity (#1690). Version 1 (hash-only, retired Safe rail) is never emitted since #3272 — signX402ExpectedContext requires typedDataHash — and the signer refuses it.
                  * @enum {integer}
                  */
-                version: 1 | 2 | 3;
+                version: 2 | 3;
                 /** @description Haven-signed expected x402 context. Includes expiresAt when the funding window is time-bound. */
                 message: string;
                 signature: string;
@@ -3863,6 +4178,7 @@ export type components = {
             /** Format: date-time */
             updated_at: string;
             parties?: components["schemas"]["Parties"];
+            scope?: components["schemas"]["ListScope"];
         } & {
             [key: string]: unknown;
         };
@@ -3912,7 +4228,7 @@ export type components = {
             /** Format: date-time */
             created_at: string;
         };
-        /** @description EIP-3009 TransferWithAuthorization fields for a delegate → Safe USDC sweep. */
+        /** @description EIP-3009 TransferWithAuthorization fields for a delegate → the agent's account (Haven wallet) USDC sweep. */
         SweepAuthorization: {
             /** @example 0x1111111111111111111111111111111111111111 */
             from: string;
@@ -3988,6 +4304,16 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
+            /**
+             * @description #3132: which column produced `timestamp` — never a silent substitution. 'block' on explorer-derived rows; on an x402-synthesized row 'confirmed_at' when the intent carries one, else 'created_at' (the intent's creation time, NOT a settlement time). Read `confirmedAt` for the recorded confirmation time.
+             * @enum {string}
+             */
+            timestampSource?: "block" | "confirmed_at" | "created_at";
+            /**
+             * Format: date-time
+             * @description #3132: the recorded confirmation time of an x402-synthesized row, null when the intent has none — the same nullable value `GET /receipts` reports as `confirmed_at`. Absent on explorer-derived rows.
+             */
+            confirmedAt?: string | null;
             /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
             blockNumber: number | null;
             isError: boolean;
@@ -4020,6 +4346,17 @@ export type components = {
             amountSek?: string | null;
             fxRateSek?: string | null;
             fxSource?: string | null;
+            convertedAmount?: string | null;
+            /**
+             * @description The currency `convertedAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set. SEK mirrors `amountSek`; USD/EUR are struck from the row’s book-time rate map (`machine_payment_evidence.fx_rates`, migration 082) and are null when no rate was captured there.
+             * @enum {string}
+             */
+            convertedCurrency?: "SEK" | "USD" | "EUR";
+            convertedFxRate?: string | null;
+            /** @description Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row. */
+            fxRates?: {
+                [key: string]: number;
+            } | null;
             accounting?: components["schemas"]["TransactionAccounting"];
         };
         /** @description Accounting-feed state for one transaction (#2870), read from the sync ledger — no live provider call. Present on a row only when the feed is available to the account, the user has a provider connection, and the payment has a sync row; absent otherwise. */
@@ -4036,7 +4373,7 @@ export type components = {
             /** @description Failure or skip reason; on a pushed row, a non-fatal note (#498). Null when clean. */
             error: string | null;
         };
-        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields. Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
+        /** @description Aggregated-feed transaction (`GET /transactions`): the shared base plus Safe/account scope. Also used by the dashboard overview preview, which never populates the payment-enrichment fields (since #3132 it does carry the base-shape `timestampSource` / `confirmedAt`). Flat, not `allOf`-composed (#2885) — see `transactionBaseProperties` above for why. */
         Transaction: {
             hash: string;
             /** @enum {string} */
@@ -4053,6 +4390,16 @@ export type components = {
             /** @enum {string} */
             direction: "in" | "out";
             timestamp: number;
+            /**
+             * @description #3132: which column produced `timestamp` — never a silent substitution. 'block' on explorer-derived rows; on an x402-synthesized row 'confirmed_at' when the intent carries one, else 'created_at' (the intent's creation time, NOT a settlement time). Read `confirmedAt` for the recorded confirmation time.
+             * @enum {string}
+             */
+            timestampSource?: "block" | "confirmed_at" | "created_at";
+            /**
+             * Format: date-time
+             * @description #3132: the recorded confirmation time of an x402-synthesized row, null when the intent has none — the same nullable value `GET /receipts` reports as `confirmed_at`. Absent on explorer-derived rows.
+             */
+            confirmedAt?: string | null;
             /** @description On-chain block, or null when the row has none recorded. Null for x402-synthesized rows: they are built from a payment intent and no block number is stored (#3129). Was 0 for those rows until #3129 — a zero that meant "unknown" but read as block zero. */
             blockNumber: number | null;
             isError: boolean;
@@ -4085,6 +4432,17 @@ export type components = {
             amountSek?: string | null;
             fxRateSek?: string | null;
             fxSource?: string | null;
+            convertedAmount?: string | null;
+            /**
+             * @description The currency `convertedAmount` is denominated in — the user’s `currency_preference`, or SEK when none is set. SEK mirrors `amountSek`; USD/EUR are struck from the row’s book-time rate map (`machine_payment_evidence.fx_rates`, migration 082) and are null when no rate was captured there.
+             * @enum {string}
+             */
+            convertedCurrency?: "SEK" | "USD" | "EUR";
+            convertedFxRate?: string | null;
+            /** @description Book-time token→currency rates frozen at settlement (`machine_payment_evidence.fx_rates`, migration 082), one per supported ledger currency with a usable quote. Null on rows settled before migration 082 and on rows with no evidence row. */
+            fxRates?: {
+                [key: string]: number;
+            } | null;
             accounting?: components["schemas"]["TransactionAccounting"];
             chainId: number;
             /** Format: uuid */
@@ -4094,6 +4452,14 @@ export type components = {
             accountName: string;
             /** Format: uuid */
             agentId?: string;
+            scope?: components["schemas"]["ListScope"];
+        };
+        /** @description #3132 (owner decision 3 on #3130): what population a list row came from and what narrowed it, as two values — one value cannot say both. `source: 'wallet'` is the aggregated feed (every account's explorer window plus synthesized confirmed intents; sweeps and funding legs included); `'agent'` is the receipts view (this agent's evidence rows only). `filter` names the IDENTITY-axis narrowing applied on top (whose money / which wallet: agent, account, both), or null; token, direction and chain narrowing are deliberately not named here. `agentId=user` counts as agent-axis narrowing and selects outbound rows with NO agent attribution. `agentId` on the wallet feed NARROWS a wallet-scoped query; it does not make it the receipts view. */
+        ListScope: {
+            /** @enum {string} */
+            source: "wallet" | "agent";
+            /** @enum {string|null} */
+            filter: "agent" | "account" | "account+agent" | null;
         };
         /** @description Per-account paginated transaction list (`GET /transactions/{accountAddress}`). Items carry no account scope — the account is the path parameter. */
         TransactionsPageResponse: {
@@ -4108,10 +4474,24 @@ export type components = {
             symbol: string;
             /** @description Token contract address; null for the chain-native token (exactly one entry). */
             address: string | null;
-            /** @description Raw base units; '0' when the RPC lookup failed. */
+            /** @description Raw base units. On a failed read, the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token. */
             balance: string;
             formatted: string;
             decimals: number;
+            balanceFreshness?: components["schemas"]["BalanceFreshness"];
+        };
+        /** @description Present only when this entry's balance read FAILED (#3295). Absent on a clean read. The balance string it marks is still additive: the last-known value when one exists (status stale), else the filler '0' (status unavailable). */
+        BalanceFreshness: {
+            /** @enum {string} */
+            status: "stale";
+            /**
+             * Format: date-time
+             * @description When the served value was last successfully read from the chain.
+             */
+            asOf: string;
+        } | {
+            /** @enum {string} */
+            status: "unavailable";
         };
         BalancesResponse: {
             /** @description Native token first, then ERC-20s in registry order. Never empty. */
@@ -4156,16 +4536,20 @@ export type components = {
         };
         PortfolioBreakdown: {
             symbol: string;
-            /** @description Raw base units; '0' on RPC failure. */
+            /** @description Raw base units. On a failed read, the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token. */
             balance: string;
             formatted: string;
-            /** @description 0 when the price feed failed. */
+            /** @description When the price feed fails, valued at the last good price this server instance has seen for the token; 0 only if it has none (#3297). */
             usdValue: number;
             eurValue: number;
+            /** @description Same one price read as usd/eur (#3127 round 2). When the price feed fails, the last good price this server instance has seen; 0 only if it has none (#3297). */
+            sekValue?: number;
+            balanceFreshness?: components["schemas"]["BalanceFreshness"];
         };
         PortfolioResponse: {
             totalUsd: number;
             totalEur: number;
+            totalSek?: number;
             breakdown: components["schemas"]["PortfolioBreakdown"][];
         };
         TransactionFilterOptionsResponse: {
@@ -4220,21 +4604,31 @@ export type components = {
             totals: {
                 usd: number;
                 eur: number;
+                sek?: number;
             };
             change: {
                 /** @description true iff a yesterday snapshot existed to diff against. */
                 available: boolean;
-                usdAmount: number;
-                eurAmount: number;
+                /** @description Null when balanceFreshness below is unavailable: the totals are understated by an unknown amount, so no swing may be claimed. */
+                usdAmount: number | null;
+                /** @description Null when balanceFreshness below is unavailable, as usdAmount. */
+                eurAmount: number | null;
+                /** @description Null when yesterday’s snapshot predates migration 090 (no SEK baseline stored) or when balanceFreshness below is unavailable — the client reports the change as unavailable rather than reading a fabricated swing. */
+                sekAmount?: number | null;
                 /** @description 0 when unavailable or the previous total was 0. */
                 usdPercent: number;
                 eurPercent: number;
+                /** @description 0 when the SEK baseline is missing or the previous total was 0. */
+                sekPercent?: number;
+                /** @description Present only when at least one of the totals' balance reads failed (#3295): stale with the oldest served as-of time, or unavailable when some token has no known value. Absent on a clean read. */
+                balancesFreshness?: components["schemas"]["BalanceFreshness"];
             };
             metrics: {
                 /** @description Agents with status 'active' only. */
                 connectedAgents: number;
                 monthlyAgentSpendUsd: number;
                 monthlyAgentSpendEur: number;
+                monthlyAgentSpendSek?: number;
                 successfulTransactions: number;
                 /** @description All linked Safes, regardless of activity. */
                 activeAccounts: number;
@@ -4383,7 +4777,11 @@ export type components = {
     };
     responses: never;
     parameters: {
+        /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+        HavenClient: string;
         AgentId: string;
+        LabelId: string;
+        OrganizationId: string;
         PaymentId: string;
         SetupId: string;
     };
@@ -4462,10 +4860,10 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
                 "application/json": {
-                    /** @description What the client calls itself, shown on the approval screen. Free text from an unauthenticated caller: bounded and stripped of control characters server-side, and rendered as text, never as markup. */
+                    /** @description What the client calls itself, shown on the approval screen. Free text from an unauthenticated caller: TRUNCATED to 80 characters and stripped of control characters server-side (never refused for length — a long hostname must not fail `haven login`, #3030), and rendered as text, never as markup. */
                     client_label?: string;
                 };
             };
@@ -4650,6 +5048,263 @@ export interface operations {
                 };
             };
             /** @description Operator diagnostics are not configured on this deployment. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listOrganizations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user’s organizations, name-sorted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationListResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    createOrganization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOrganizationRequest"];
+            };
+        };
+        responses: {
+            /** @description The created organization. A new folder has no members yet. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Organization"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    updateOrganization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["OrganizationId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateOrganizationRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated organization. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Organization"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    deleteOrganization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["OrganizationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. The contents were promoted one level up. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteOrganizationResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -4855,6 +5510,8 @@ export interface operations {
                     name?: string;
                     /** @description Trimmed. */
                     description?: string;
+                    /** @description The organization to file the agent under; null = the top level. */
+                    organization_id?: string | null;
                 };
             };
         };
@@ -5192,6 +5849,319 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Agent revoked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    replaceAgentLabels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplaceAgentLabelsRequest"];
+            };
+        };
+        responses: {
+            /** @description The agent's labels after the replacement. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLabelsResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listLabels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The label vocabulary, name-sorted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabelListResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    createLabel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateLabelRequest"];
+            };
+        };
+        responses: {
+            /** @description The label as it now exists. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Label"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    updateLabel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LabelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateLabelRequest"];
+            };
+        };
+        responses: {
+            /** @description The label as it now is. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Label"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    deleteLabel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LabelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. The agents that carried it keep everything else. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8621,7 +9591,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    currency_preference: "USD" | "EUR";
+                    currency_preference: "SEK" | "USD" | "EUR";
                 };
             };
         };
@@ -9035,7 +10005,7 @@ export interface operations {
                             provider: string;
                             displayName: string;
                             /** @enum {string} */
-                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "needs_attention" | "disconnected";
                             companyName: string | null;
                             /** Format: date-time */
                             lastPushAt: string | null;
@@ -9149,7 +10119,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Haven payment id. */
+                /** @description Haven payment id (a uuid, as every other `paymentId` path parameter says — #3030). */
                 paymentId: string;
             };
             cookie?: never;
@@ -9238,7 +10208,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Haven payment id. */
+                /** @description Haven payment id (a uuid, as every other `paymentId` path parameter says — #3030). */
                 paymentId: string;
             };
             cookie?: never;
@@ -9307,6 +10277,86 @@ export interface operations {
                         switched_at?: string;
                     };
                 };
+            };
+        };
+    };
+    accountedWebhookCallback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status: string;
+                        counted?: string;
+                        deliveryId?: string;
+                    };
+                };
+            };
+            /** @description Bad or malformed signature, or a stale timestamp. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No connection carries this token. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    accountedWebhookCallbackTrailingSlash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledged (or refused-with-a-counter — see the body). The provider stops retrying on 2xx. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status: string;
+                        counted?: string;
+                        deliveryId?: string;
+                    };
+                };
+            };
+            /** @description Bad or malformed signature, or a stale timestamp. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No connection carries this token. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -9391,10 +10441,10 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). `needs_attention` (#3019) is the webhook half failing independently of the feed — the key validates and pushes work, but the subscriptions could not be created (a `webhook subscription failed` registration) or the deployment states no public API origin (`no public API origin configured`); a reconnect after fixing the deployment state resolves it. A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
                              * @enum {string}
                              */
-                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "needs_attention" | "disconnected";
                             statusReason: string | null;
                             /** @description Exactly one connection per user is where settled payments go. */
                             isActiveDestination: boolean;
@@ -9606,10 +10656,10 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). `needs_attention` (#3019) is the webhook half failing independently of the feed — the key validates and pushes work, but the subscriptions could not be created (a `webhook subscription failed` registration) or the deployment states no public API origin (`no public API origin configured`); a reconnect after fixing the deployment state resolves it. A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
                              * @enum {string}
                              */
-                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "needs_attention" | "disconnected";
                             statusReason: string | null;
                             /** @description Exactly one connection per user is where settled payments go. */
                             isActiveDestination: boolean;
@@ -9798,10 +10848,10 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). `needs_attention` (#3019) is the webhook half failing independently of the feed — the key validates and pushes work, but the subscriptions could not be created (a `webhook subscription failed` registration) or the deployment states no public API origin (`no public API origin configured`); a reconnect after fixing the deployment state resolves it. A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
                              * @enum {string}
                              */
-                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "needs_attention" | "disconnected";
                             statusReason: string | null;
                             /** @description Exactly one connection per user is where settled payments go. */
                             isActiveDestination: boolean;
@@ -9901,8 +10951,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /**
-                     * Format: date-time
-                     * @description ISO date or date-time; the new feed-from floor.
+                     * @description ISO date or date-time; the new feed-from floor. (#3030: was declared `format: date-time`, which refused the plain date the description — and the dashboard — send; the pattern states the prefix and the handler decides parseability, the 2020 floor and the future bound.)
                      * @example 2026-01-01
                      */
                     since: string;
@@ -10028,10 +11077,10 @@ export interface operations {
                             /** @enum {string} */
                             authKind: "oauth2" | "api_key";
                             /**
-                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
+                             * @description Disconnect keeps the row as `disconnected` (history stays); `scope_missing` is set by a post-push attachment failure that needs a re-consent, by a connect whose company read was refused for scope (#2864), by a callback whose granted scope falls short of the provider's required scopes, or by a push whose create call was refused for scope (#2865). `needs_attention` (#3019) is the webhook half failing independently of the feed — the key validates and pushes work, but the subscriptions could not be created (a `webhook subscription failed` registration) or the deployment states no public API origin (`no public API origin configured`); a reconnect after fixing the deployment state resolves it. A re-consent — the same connect-url + callback on the existing connection — restores `connected` and keeps settings, feedFrom, the active flag and the sync history.
                              * @enum {string}
                              */
-                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "disconnected";
+                            status: "connected" | "needs_reauthorisation" | "revoked_at_provider" | "scope_missing" | "needs_attention" | "disconnected";
                             statusReason: string | null;
                             /** @description Exactly one connection per user is where settled payments go. */
                             isActiveDestination: boolean;
@@ -10967,6 +12016,8 @@ export interface operations {
                     name: string;
                     email: string;
                     password: string;
+                    /** @description Agent hand-off marker (#2522): the dashboard sends `agent` when the signup came from an agent-initiated link. Sanitised server-side to `agent` or nothing; any other value is ignored. Declared in #3030 — the dashboard had been sending it undeclared. */
+                    via?: string;
                 };
             };
         };
@@ -11659,8 +12710,8 @@ export interface operations {
             query: {
                 /** @description Window length ending now. */
                 range: "7d" | "30d" | "90d";
-                /** @description Display currency — a sum of already-booked values, never re-converted. */
-                currency?: "usd" | "eur";
+                /** @description Display currency — a sum of already-booked values, never re-converted. SEK reads the `sek_value` column booked beside usd/eur by the same confirm UPDATE (#3127); days snapshotted before that column existed carry no SEK figure in `balance_by_day` and are omitted rather than zeroed. */
+                currency?: "usd" | "eur" | "sek";
                 /** @description IANA time zone used to bucket `by_day`. Defaults to UTC; an unrecognized zone is a 400. */
                 tz?: string;
             };
@@ -11690,7 +12741,7 @@ export interface operations {
                             previous_to: string;
                         };
                         /** @enum {string} */
-                        currency: "usd" | "eur";
+                        currency: "usd" | "eur" | "sek";
                         basis: {
                             /** @description CONFIRMED payments summed into `totals.spent`. */
                             payments_counted: number;
@@ -13038,7 +14089,10 @@ export interface operations {
     createPaymentIntent: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -13140,6 +14194,23 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
                     };
                 };
             };
@@ -13249,6 +14320,135 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getDirectPaymentSignContext: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
+            path: {
+                id: components["parameters"]["PaymentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rebuilt direct sign_data — identical to what the idempotent replay serves. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectSignContext"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Agent authenticated but not authorized to act (#1130): `agent_pending_approval` — the key is valid but the agent awaits its first budget grant in Haven; `agent_paused` — the owner paused API-initiated transactions. `detail` carries the operator action. Contrast 401, which means the key itself is unknown or revoked. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        detail?: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The intent is pinned to a retired rail — the AllowanceModule rail (#1986) or the session rail (#834) — or it has expired (with the same lazy-expire GET /x402/{id}/sign-context performs). A retired-rail intent is refused whatever its status. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
                     };
                 };
             };
@@ -13570,7 +14770,10 @@ export interface operations {
     authorizeX402Payment: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -13673,6 +14876,23 @@ export interface operations {
                     };
                 };
             };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
+                    };
+                };
+            };
             /** @description Error response */
             429: {
                 headers: {
@@ -13708,7 +14928,10 @@ export interface operations {
     getX402SignContext: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
             path: {
                 /** @description Payment intent id from the quote/authorize response. */
                 id: string;
@@ -13798,6 +15021,23 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
                     };
                 };
             };
@@ -13904,7 +15144,10 @@ export interface operations {
     authorizeX402PaymentLegacy: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -14004,6 +15247,23 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
                     };
                 };
             };
@@ -14508,7 +15768,10 @@ export interface operations {
     sendTransfer: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -14599,6 +15862,23 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
                     };
                 };
             };
@@ -15235,8 +16515,11 @@ export interface operations {
             query?: {
                 /** @description Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none. */
                 accountId?: string;
+                /** @description An agent id, or the literal `user` for payments the account holder made directly (#3030: the handler always refused anything else; the spec now says so). */
                 agentId?: string;
+                /** @description `<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler. */
                 tokenKey?: string;
+                /** @description Bounded to a safe integer (#3030: the handler used to cap it; ajv reads `1e400` as an integer). */
                 offset?: number;
                 limit?: number;
                 fresh?: "1" | "true";
@@ -15293,7 +16576,9 @@ export interface operations {
             query?: {
                 /** @description Filter to one linked account. The retired `safeId` spelling is REFUSED with a 400 naming this parameter (#2914) rather than ignored — an ignored filter would return every row instead of none. */
                 accountId?: string;
+                /** @description An agent id, or the literal `user` for payments the account holder made directly (#3030: the handler always refused anything else; the spec now says so). */
                 agentId?: string;
+                /** @description `<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler. */
                 tokenKey?: string;
                 direction?: "in" | "out";
                 chainId?: number;
@@ -15527,7 +16812,7 @@ export interface operations {
     getAccountBalances: {
         parameters: {
             query?: {
-                /** @description Required when the same address is linked on more than one chain. */
+                /** @description Required when the same address is linked on more than one chain. A chain id is positive (#3030: the handlers always refused 0 and negatives; the spec now says so). */
                 chain_id?: number;
             };
             header?: never;
@@ -15597,7 +16882,7 @@ export interface operations {
     getAccountPortfolio: {
         parameters: {
             query?: {
-                /** @description Required when the same address is linked on more than one chain. */
+                /** @description Required when the same address is linked on more than one chain. A chain id is positive (#3030: the handlers always refused 0 and negatives; the spec now says so). */
                 chain_id?: number;
             };
             header?: never;
@@ -15921,7 +17206,7 @@ export interface operations {
         parameters: {
             query?: {
                 category?: string;
-                /** @description Whitespace is trimmed/collapsed. Blank search after trimming returns 400. */
+                /** @description Whitespace is trimmed/collapsed. Every word must match the product name, description, or category. Blank search after trimming returns 400; searches over 8 words also return 400. */
                 search?: string;
                 rail?: "x402" | "mpp";
             };

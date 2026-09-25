@@ -15,6 +15,13 @@
  * recreates the empty table) and restores it last, nested inside the 081
  * revert; the "retired copy still holds the original" assertion sits between
  * 080's restore and 081's, where the table exists again for a moment.
+ *
+ * Since 092 (#3019) widened `accounting_connections` again (`webhook_token`,
+ * the six-state CHECK), the reverts nest ONE more level: 092 is reverted
+ * OUTERMOST (its `down()` drops the column and restores the five-state CHECK,
+ * returning the table to the shape 080's own `down()` expects) and re-applied
+ * LAST — otherwise 080's `up()` would rebuild the table without the 092
+ * columns and leave this worker schema off head for the next file.
  */
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
@@ -27,6 +34,7 @@ import {
 } from '../../../infra/__tests__/helpers/db-harness.js'
 import { down, up, version } from '../080_accounting_connections.js'
 import { down as down081, up as up081 } from '../081_drop_fortnox_connections_retired.js'
+import { down as down092, up as up092 } from '../092_accounting_webhook_deliveries.js'
 import { PLAINTEXT_KEY_VERSION, decryptSecrets } from '../../../infra/secrets.js'
 
 async function tableExists(name: string): Promise<boolean> {
@@ -90,35 +98,38 @@ describeDb('080_accounting_connections (#2860)', () => {
     expect(process.env.HAVEN_SECRETS_KEY).toBeUndefined()
     let userId = ''
     await withClient(async (client) => {
-      // The seed happens in the REVERTED state and the helper's restore step IS
-      // the `up()` under test. Calling `up()` inside the body too would run it
-      // twice, and the second run correctly fails — `INSERT … FROM
-      // fortnox_connections` after that table has been renamed. That is the
-      // migration being non-idempotent on purpose: a missing source table
-      // must fail loudly, not silently copy nothing.
+      // The 092 revert is OUTERMOST: it returns the connections table to the
+      // pre-#3019 shape so 080's `down()`/`up()` operate on it exactly as
+      // written, and the innermost restore re-applies 092 last (head again).
       await withMigrationReverted(
-        () => down081(client),
+        () => down092(client),
         async () => {
           await withMigrationReverted(
-            () => down(client),
+            () => down081(client),
             async () => {
-              userId = await seedUser('mig080-copy@example.test')
-              await client.query(
-                `INSERT INTO fortnox_connections (user_id, access_token, refresh_token, token_type, scope, expires_at)
-                 VALUES ($1, 'ACCESS-plain', 'REFRESH-plain', 'Bearer', 'bookkeeping supplierinvoice', NOW() + interval '1 hour')`,
-                [userId],
+              await withMigrationReverted(
+                () => down(client),
+                async () => {
+                  userId = await seedUser('mig080-copy@example.test')
+                  await client.query(
+                    `INSERT INTO fortnox_connections (user_id, access_token, refresh_token, token_type, scope, expires_at)
+                     VALUES ($1, 'ACCESS-plain', 'REFRESH-plain', 'Bearer', 'bookkeeping supplierinvoice', NOW() + interval '1 hour')`,
+                    [userId],
+                  )
+                  await client.query(`INSERT INTO reporting_feed_syncs (user_id, provider, payment_id, status) VALUES ($1, 'fortnox', 'pay-1', 'pushed')`, [userId])
+                  await client.query(`INSERT INTO account_entitlements (user_id, entitlement) VALUES ($1, 'reporting_feed')`, [userId])
+                },
+                () => up(client),
               )
-              await client.query(`INSERT INTO reporting_feed_syncs (user_id, provider, payment_id, status) VALUES ($1, 'fortnox', 'pay-1', 'pushed')`, [userId])
-              await client.query(`INSERT INTO account_entitlements (user_id, entitlement) VALUES ($1, 'reporting_feed')`, [userId])
+              // Between 080's restore and 081's: the retired table still holds
+              // the original — 080 renamed, it did not drop.
+              const retired = await db.query(`SELECT access_token FROM fortnox_connections_retired WHERE user_id = $1`, [userId])
+              expect(retired.rows[0].access_token).toBe('ACCESS-plain')
             },
-            () => up(client),
+            () => up081(client),
           )
-          // Between 080's restore and 081's: the retired table still holds
-          // the original — 080 renamed, it did not drop.
-          const retired = await db.query(`SELECT access_token FROM fortnox_connections_retired WHERE user_id = $1`, [userId])
-          expect(retired.rows[0].access_token).toBe('ACCESS-plain')
         },
-        () => up081(client),
+        () => up092(client),
       )
     })
 
@@ -162,21 +173,27 @@ describeDb('080_accounting_connections (#2860)', () => {
   it('down() reverses every step, proving the assertions above are load-bearing', async () => {
     await withClient(async (client) => {
       await withMigrationReverted(
-        () => down081(client),
+        () => down092(client),
         async () => {
           await withMigrationReverted(
-            () => down(client),
+            () => down081(client),
             async () => {
-              expect(await tableExists('accounting_connections')).toBe(false)
-              expect(await tableExists('fortnox_connections')).toBe(true)
-              expect(await tableExists('fortnox_connections_retired')).toBe(false)
-              expect(await tableExists('reporting_feed_syncs')).toBe(true)
-              expect(await tableExists('accounting_feed_syncs')).toBe(false)
+              await withMigrationReverted(
+                () => down(client),
+                async () => {
+                  expect(await tableExists('accounting_connections')).toBe(false)
+                  expect(await tableExists('fortnox_connections')).toBe(true)
+                  expect(await tableExists('fortnox_connections_retired')).toBe(false)
+                  expect(await tableExists('reporting_feed_syncs')).toBe(true)
+                  expect(await tableExists('accounting_feed_syncs')).toBe(false)
+                },
+                () => up(client),
+              )
             },
-            () => up(client),
+            () => up081(client),
           )
         },
-        () => up081(client),
+        () => up092(client),
       )
     })
   })

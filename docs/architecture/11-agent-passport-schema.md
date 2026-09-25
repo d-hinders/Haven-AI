@@ -254,6 +254,10 @@ true today:
   that nonce, and migration 061's partial UNIQUE index on
   `(chain_id, nonce) WHERE status = 'broadcast'` refuses the stamp — the queue
   retries, re-reads the same nonce, and throws `could not win a nonce lane`.
+  (On an RPC that refuses the `pending` tag, #2769, the symptom differs but
+  the lane is just as blocked: the ledger walk steps over the attest's live
+  row, later sends broadcast at N+1, N+2 … and never confirm, and the bump
+  worker's INCIDENTs name those nonces. The one to cancel is still N.)
   So the lane #1735 already documents as blocked stays blocked, and what burns
   the nonce is the same-nonce cancel in the
   [vendor-ops runbook](../operations/delegation-rail-vendor-ops.md) §3. The

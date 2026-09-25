@@ -27,13 +27,31 @@ export const MIN_CHARTABLE_DAYS = 3
  * per treatment (#3037). One label-width, expressed the only way a pure
  * module can: a fraction of the plot. The shortest calendar label ("10 Jul")
  * is ~36px of `text-xs`, which is ~6% of the plot at desktop widths and
- * ~11% at a 390px phone — the fraction is set generously to the treatment
- * that renders smallest. The density bands above already keep most labels
- * far wider than this; the rule exists for the one place a collision can
- * actually form, the endpoint label moved next to a stride neighbour.
+ * ~15% of the SMALLEST plot either chart renders — the balance chart's
+ * 235px at a 390px phone once its tick gutter grew to 128 units (#3204;
+ * the earlier 11% was measured on a ~330px plot that no longer exists).
+ * The fraction is set to the treatment that renders smallest. The density
+ * bands above already keep most labels far wider than this; the rule
+ * exists for the two places a collision can actually form: the endpoint
+ * label moved next to a stride neighbour, and — for a caller that anchors
+ * its START label at its left edge, so the whole label sits to the right
+ * of day 0 — the first pair; see `FIRST_X_LABEL_SEPARATION_FACTOR`.
  */
 export const MIN_X_LABEL_SEPARATION_WIDE = 0.06
-export const MIN_X_LABEL_SEPARATION_NARROW = 0.11
+export const MIN_X_LABEL_SEPARATION_NARROW = 0.15
+/**
+ * A left-anchored first label needs more room than a centred pair: its full
+ * width plus half of its neighbour, plus a word-space of clear gap, is two
+ * label-widths centre to centre (a centred pair needs one). Measured at 390
+ * on the 30-day fixture (#3204 round 3): the area chart's "11 Jun" and
+ * "18 Jun" sat 6px apart — one word-space — and read as a single run. The
+ * factor applies ONLY when the caller says its start label is left-anchored
+ * (`startAnchoredLeft`): the area chart is, the bar chart centres every
+ * label on its bar and its first pair had a 24px gap at 390 — applying the
+ * factor there (round 4) cost the phone spend chart a label that never
+ * collided.
+ */
+export const FIRST_X_LABEL_SEPARATION_FACTOR = 2
 
 /**
  * The y-scale: `max` is the ceiling (never below the data), `ticks` are the
@@ -85,6 +103,39 @@ export function chartScale(dataMax: number, target = 4): ChartScale {
 }
 
 /**
+ * A scale covering `[lo, hi]` for a chart that does NOT start at zero — the
+ * balance line (#3204). `chartScale` above is zero-based by design (a bar
+ * chart's bars grow from nothing); the area chart pads its floor to the data
+ * minimum so a 300 kr movement on a 12 000 kr balance fills the plot instead
+ * of drawing a hairline. Taking that chart's ticks from the zero-based scale
+ * put every tick BELOW the padded floor: no gridline in the plot, the labels
+ * positioned hundreds of pixels under the card, and a span so wide the line
+ * hugged the baseline — the exact "nothing happened" read the padded floor
+ * exists to avoid (design review of epic #2944, 2026-09-21).
+ *
+ * The step is nice over the RANGE (`hi - lo`), the floor snaps down to a
+ * multiple of it, the ceiling up (same `+1` guard as above so the top of the
+ * data never sits on the top gridline), and every tick between them —
+ * including the floor — is returned, because on a range chart the lowest
+ * label is the reader's anchor for "how much is this". A degenerate range
+ * (`hi <= lo`, or nothing finite) returns no ticks and the input bounds; the
+ * caller's `span <= 0` branch already draws a flat line for that.
+ */
+export function chartScaleRange(lo: number, hi: number, target = 4): ChartScale & { min: number } {
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return { min: lo, max: hi, ticks: [] }
+  const step = roundNiceStep((hi - lo) / target)
+  // Dust-rounded like the ticks, so `ticks[0] === min` holds for every input
+  // (`lo = 0.3` gave `min = 0.30000000000000004` beside a tick of `0.3`).
+  const min = Number((step * Math.floor(lo / step)).toPrecision(12))
+  const max = Number((step * Math.floor(hi / step + 1)).toPrecision(12))
+  const ticks: number[] = []
+  for (let v = min; v < max - step / 2; v += step) {
+    ticks.push(Number(v.toPrecision(12)))
+  }
+  return { min, max, ticks }
+}
+
+/**
  * Which x indices carry a label.
  *
  * The issue's bands first (7d → all, 30d → every 7, 90d → every 14), then a
@@ -98,7 +149,10 @@ export function chartScale(dataMax: number, target = 4): ChartScale {
  * (the bar chart wants "Mon 8", the area chart the same day in the same
  * voice) and a scale that formats in two places drifts.
  */
-export function xLabelIndices(count: number, { narrow = false }: { narrow?: boolean } = {}): number[] {
+export function xLabelIndices(
+  count: number,
+  { narrow = false, startAnchoredLeft = false }: { narrow?: boolean; startAnchoredLeft?: boolean } = {},
+): number[] {
   if (count <= 0) return []
   let stride: number
   if (count <= 7) stride = 1
@@ -134,6 +188,16 @@ export function xLabelIndices(count: number, { narrow = false }: { narrow?: bool
   for (let i = indices.length - 2; i > 0; i--) {
     if ((indices[i + 1] - indices[i]) / (count - 1) < minSeparation) {
       indices.splice(i, 1)
+    }
+  }
+  // A caller whose start label is anchored at its left edge gets the pair
+  // (0, next) checked at the wider factor — and it is the NEXT label that
+  // drops, never day 0 (the left edge is where the range begins). Loop,
+  // because a drop moves a new neighbour into the slot; the endpoint is
+  // never a candidate (the loop stops at two labels).
+  if (startAnchoredLeft) {
+    while (indices.length > 2 && indices[1] / (count - 1) < minSeparation * FIRST_X_LABEL_SEPARATION_FACTOR) {
+      indices.splice(1, 1)
     }
   }
   return indices

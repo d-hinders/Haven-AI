@@ -23,6 +23,7 @@ vi.mock('../../db.js', () => ({
 // module, so there is nothing left to mock.
 
 import userAccountsRoutes from '../user-accounts.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 
 const SAFE_ID = '11111111-1111-1111-1111-111111111111'
 
@@ -32,6 +33,10 @@ describe('DELETE /user/accounts/:safeId', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module(s) enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/user-accounts.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
     token = app.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })
@@ -50,8 +55,9 @@ describe('DELETE /user/accounts/:safeId', () => {
   it('never issues a self-sign-agent orphan statement — the table is gone (#2851)', async () => {
     // Ownership check: a non-default Safe that belongs to the user.
     mockPoolQuery.mockResolvedValue({ rows: [{ id: SAFE_ID, is_default: false }] })
-    // Every transactional statement succeeds.
-    mockClientQuery.mockResolvedValue({ rows: [] })
+    // Every transactional statement succeeds — each write hits the owned row
+    // (#3227: the tenant-scoped DELETE reports `false` when it matches none).
+    mockClientQuery.mockResolvedValue({ rows: [], rowCount: 1 })
 
     const response = await app.inject({
       method: 'DELETE',
@@ -85,6 +91,31 @@ describe('DELETE /user/accounts/:safeId', () => {
     expect(response.statusCode).toBe(404)
     // No transaction should have started.
     expect(mockClientQuery).not.toHaveBeenCalled()
+  })
+
+  it('a concurrent second unlink by the owner (the DELETE matched nothing) answers 200, not a false 409 (#3227)', async () => {
+    // Ownership passes, then the row is gone by the time the tenant-scoped
+    // DELETE runs: the first request of a double click already removed it.
+    // The row is there for the ownership check and gone once a DELETE has run
+    // (the other request's), so this request's DELETE matches nothing.
+    let deleteRan = false
+    mockPoolQuery.mockImplementation(async () =>
+      deleteRan ? { rows: [] } : { rows: [{ id: SAFE_ID, is_default: false }] },
+    )
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (/DELETE FROM smart_accounts/.test(String(sql))) deleteRan = true
+      return { rows: [], rowCount: 0 }
+    })
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/user/accounts/${SAFE_ID}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ success: true })
+    expect(mockPoolQuery).toHaveBeenCalledTimes(2)
   })
 
   it('returns 409 and leaves the Safe linked while a delegation is pending or active', async () => {

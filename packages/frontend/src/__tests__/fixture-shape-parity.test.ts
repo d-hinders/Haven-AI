@@ -39,6 +39,7 @@ import {
 } from '../../e2e/fixtures/analytics-overview'
 import {
   testUser,
+  testUserSek,
   testSafe,
   testAgent,
   dashboardOverview,
@@ -93,6 +94,43 @@ describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
     expect(keysOf(FIXTURE_OVERVIEW.metrics)).toEqual(keysOf(dashboardOverview.metrics))
     expect(keysOf(FIXTURE_OVERVIEW.agents[0])).toEqual(keysOf(dashboardOverview.agents[0]))
     for (const t of FIXTURE_TXS) expectKeySuperset(dashboardTransaction, t, 'transaction')
+    // #3127 (finding 8): the SEK figures the SERVED DEFAULT renders exist in
+    // BOTH harnesses, with values. A harness that drops a `sek` key back out
+    // photographs `0,00 kr` under the default — the same "green tick that is
+    // a statement about an unchanged render" defect the key pins above stop
+    // for shapes, now also stopped for the SEK values.
+    expect(FIXTURE_OVERVIEW.totals.sek).toBeGreaterThan(0)
+    expect(FIXTURE_OVERVIEW.change.sekAmount).toBeGreaterThan(0)
+    expect(FIXTURE_OVERVIEW.metrics.monthlyAgentSpendSek).toBeGreaterThan(0)
+    expect(dashboardOverview.totals.sek).toBeGreaterThan(0)
+    expect(dashboardOverview.change.sekAmount).toBeGreaterThan(0)
+    expect(dashboardOverview.metrics.monthlyAgentSpendSek).toBeGreaterThan(0)
+  })
+
+  /**
+   * #3127 (finding 8): the SEK default is a FIXTURE STATE, not just a type.
+   * `testUser` keeps `currency_preference: 'USD'` — every existing spec and
+   * baseline is pinned to that render — while `testUserSek` (the served
+   * default, migration 091) is the session the currency visual spec
+   * photographs via `serveSekUser`. The screenshot harness's own session IS
+   * the SEK user, so every reviewer capture renders the default. If either
+   * half reverts, the SEK render goes dark again while every gate stays
+   * green — exactly the silent re-inversion this file exists to catch.
+   */
+  describe('the served SEK default has a fixture and a session (#3127 finding 8)', () => {
+    it('the e2e fixture carries the SEK user beside the historical USD one', () => {
+      // The historical session keeps its currency — the existing baselines
+      // are statements about THIS user's render.
+      expect(testUser.currency_preference).toBe('USD')
+      expect(testUserSek.currency_preference).toBe('SEK')
+      // Same identity and account; ONLY the preference differs.
+      expect(testUserSek.id).toBe(testUser.id)
+      expect(testUserSek.accounts).toEqual(testUser.accounts)
+    })
+
+    it('the screenshot harness session is the SEK user', () => {
+      expect(FIXTURE_USER.currency_preference).toBe('SEK')
+    })
   })
 
   /**

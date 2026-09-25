@@ -144,6 +144,8 @@ const SOURCE_VERSION_CONSTANTS = [
   { name: 'HOSTED_SERVER_VERSION', file: join(ROOT, 'packages', 'mcp-server', 'src', 'server.ts'), label: 'packages/mcp-server/src/server.ts' },
   { name: 'CONNECTOR_VERSION',     file: join(ROOT, 'packages', 'connect', 'src', 'runtime.ts'),   label: 'packages/connect/src/runtime.ts' },
   { name: 'CLI_VERSION',           file: join(ROOT, 'packages', 'cli', 'src', 'commands.ts'),      label: 'packages/cli/src/commands.ts' },
+  // #3303: the SDK's own `X-Haven-Client` identity for a bare embedder.
+  { name: 'SDK_VERSION',           file: join(ROOT, 'packages', 'sdk', 'src', 'client-identity.ts'), label: 'packages/sdk/src/client-identity.ts' },
 ]
 
 // ── Semver helpers ────────────────────────────────────────────────────────────

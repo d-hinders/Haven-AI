@@ -12,6 +12,8 @@ import {
   disconnect,
   getActiveConnection,
   getConnection,
+  getConnectionByWebhookToken,
+  setWebhookToken,
   listConnections,
   listPlaintextConnections,
   setActiveDestination,
@@ -137,6 +139,33 @@ describeDb('accounting_connections repository (#2860)', () => {
     expect(row.status_reason).toBe('invalid_grant from token endpoint')
     // …and the active read excludes it: a connection needing attention is not a destination.
     expect(await getActiveConnection(userId)).toBeNull()
+  })
+
+  it('webhook capability token: set, looked up by token alone, unique among carriers, blind to disconnected rows (#3019, PR #3196)', async () => {
+    const a = await seedUser('ac-token-a@example.test')
+    const b = await seedUser('ac-token-b@example.test')
+    await upsertConnection(a, { provider: 'accounted', authKind: 'api_key', ...encrypted(), grantedScope: null, tokenExpiresAt: null })
+    await upsertConnection(b, { provider: 'accounted', authKind: 'api_key', ...encrypted(), grantedScope: null, tokenExpiresAt: null })
+
+    const token = randomBytes(32).toString('base64url')
+    expect((await setWebhookToken(a, 'accounted', token))!.webhook_token).toBe(token)
+    // No such (user, provider) row: null, not a stray write.
+    expect(await setWebhookToken(b, 'fortnox', 'nope')).toBeNull()
+
+    // The route's lookup is BY TOKEN, any user — and resolves the owner.
+    const hit = (await getConnectionByWebhookToken(token))!
+    expect(hit.user_id).toBe(a)
+    expect(await getConnectionByWebhookToken('not-a-token')).toBeNull()
+
+    // Uniqueness is a DB fact (092's partial unique index), not a convention…
+    await expect(setWebhookToken(b, 'accounted', token)).rejects.toMatchObject({ code: '23505' })
+    // …and it is partial: two tokenless rows coexist (b never got one).
+    expect((await getConnection(b, 'accounted'))!.webhook_token).toBeNull()
+
+    // A disconnected row is invisible to the lookup even though its token
+    // column is untouched — a retired connection must not receive deliveries.
+    await disconnect(a, 'accounted', 'user disconnected')
+    expect(await getConnectionByWebhookToken(token)).toBeNull()
   })
 
   it('disconnect clears the secrets and KEEPS the row', async () => {

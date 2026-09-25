@@ -37,6 +37,7 @@ const ROW: EnrichedTransaction = {
   decimals: 6,
   direction: 'out',
   timestamp: 1_758_189_600,
+  timestampSource: 'block',
   blockNumber: 31_337,
   isError: false,
   x402MerchantAddress: MERCHANT,

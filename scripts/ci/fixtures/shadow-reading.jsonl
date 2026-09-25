@@ -1,0 +1,14 @@
+{"level":30,"time":1790035200000,"pid":100,"hostname":"h1","msg":"incoming request","reqId":"r1"}
+{"level":30,"time":1790056800000,"pid":100,"hostname":"h1","msg":"request_validation.seen","event":"request_validation.seen","route":"POST /x402","seen":500}
+{"level":30,"time":1790060400000,"pid":100,"hostname":"h1","msg":"request_validation.would_refuse","event":"request_validation.would_refuse","route":"POST /x402","field":"body/settlementScheme","message":"x"}
+{"level":30,"time":1790060400000,"pid":100,"hostname":"h1","msg":"request_validation.seen","event":"request_validation.seen","route":"POST /x402","seen":503}
+{"timestamp":"2026-09-22T08:00:00.000Z","message":"{\"level\":30,\"pid\":100,\"hostname\":\"h1\",\"msg\":\"request_validation.seen\",\"event\":\"request_validation.seen\",\"route\":\"GET /agents/:id/delegations\",\"seen\":7}","severity":"info"}
+{"level":30,"time":1790067600000,"pid":200,"hostname":"h1","msg":"Server listening at http://0.0.0.0:3001"}
+{"level":30,"time":1790067600000,"pid":300,"hostname":"h2","msg":"Server listening at http://0.0.0.0:3001"}
+{"level":30,"time":1790071200000,"pid":200,"hostname":"h1","msg":"request_validation.seen","event":"request_validation.seen","route":"POST /x402","seen":5}
+{"level":30,"time":1790071200000,"pid":200,"hostname":"h1","msg":"request_validation.seen","event":"request_validation.seen","route":"POST /x402/","seen":2}
+{"level":30,"time":1790071200000,"pid":200,"hostname":"h1","msg":"request_validation.would_coerce","event":"request_validation.would_coerce","route":"GET /agents/:id/delegations","field":"limit"}
+{"level":30,"time":1790074800000,"pid":300,"hostname":"h2","msg":"request_validation.seen","event":"request_validation.seen","route":"POST /x402","seen":10}
+{"level":30,"time":1790078400000,"pid":200,"hostname":"h1","msg":"request_validation.would_refuse","event":"request_validation.would_refuse","route":"POST /payments","field":"body/amount","message":"y"}
+not json at all
+{"level":30,"time":1790121600000,"pid":200,"hostname":"h1","msg":"request completed","reqId":"r2"}

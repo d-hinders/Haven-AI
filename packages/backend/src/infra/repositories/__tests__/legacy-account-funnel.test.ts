@@ -99,11 +99,11 @@ describeDb('legacy accounts are not listed (#2413)', () => {
   })
 
   it('an ORPHANED agent is not listed either — owner decision, not a side effect', async () => {
-    // An agent whose account was unlinked has safe_id NULL, so the LEFT JOIN
+    // An agent whose account was unlinked has account_id NULL, so the LEFT JOIN
     // gives it a NULL account_type and the predicate excludes it. That is
     // deliberate (owner call, 2026-09-02): since #2331 such an agent gets 403
     // from agentAuth on every route, and the one exemption — sweep recovery —
-    // refuses it too because has_bound_safe is false. It is a dead record.
+    // refuses it too because has_bound_account is false. It is a dead record.
     //
     // Pinned rather than left to the predicate's shape, because the honest
     // alternative (keeping it visible) is one clause away and someone will

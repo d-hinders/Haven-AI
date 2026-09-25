@@ -1,32 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient } from './client.js'
 import type { X402PaymentOption, X402PaymentRequired } from './types.js'
+import { buildValidUserOpSignData } from './__fixtures__/valid-userop.js'
 
 // The live funding-leg wire shape (#946): every sign_data the backend emits
 // carries 'eip712_userop' plus the account's typed data. Fixtures updated by
 // #2850, which retired the SDK's scheme-less bare-hash fallback — a sign_data
-// without signature_scheme is now rejected by the client.
-const userOpTypedData = {
-  domain: {
-    chainId: 8453,
-    name: 'HybridDeleGator',
-    version: '1',
-    verifyingContract: `0x${'dd'.repeat(20)}`,
-  },
-  types: {
-    PackedUserOperation: [
-      { name: 'sender', type: 'address' },
-      { name: 'nonce', type: 'uint256' },
-      { name: 'entryPoint', type: 'address' },
-    ],
-  },
-  primaryType: 'PackedUserOperation',
-  message: {
-    sender: `0x${'dd'.repeat(20)}`,
-    nonce: '1',
-    entryPoint: `0x${'ee'.repeat(20)}`,
-  },
-}
+// without signature_scheme is now rejected by the client. #3271: the typed
+// data must also be a real, self-consistent PackedUserOperation, so this uses
+// the shared synthetic-but-valid builder rather than a hand-rolled toy.
+const userOpSignData = buildValidUserOpSignData()
+const userOpTypedData = userOpSignData.typed_data
 
 // ── Shared fixtures ───────────────────────────────────────────────
 
@@ -94,7 +78,7 @@ function fundingPendingSignature(resourceUrl: string = mcpUrl): Response {
     to: delegateAddress,
     resource_url: resourceUrl,
     sign_data: {
-      hash: `0x${'11'.repeat(32)}`,
+      hash: userOpSignData.hash,
       signature_scheme: 'eip712_userop',
       typed_data: userOpTypedData,
       components: {
@@ -194,6 +178,18 @@ function agentResponse(): Response {
     delegate_address: delegateAddress,
     chain_id: 8453,
   }), { status: 200 })
+}
+
+function sessionNotFound404(withRecovery = true): Response {
+  return new Response(JSON.stringify({
+    jsonrpc: '2.0',
+    error: {
+      code: -32001,
+      message: withRecovery ? 'Session not found. Nothing was settled here — re-initialize, then retry the SAME payment header once.' : 'Session not found',
+      ...(withRecovery ? { data: { reason: 'session_expired', settled: false, next_action: 'reinitialize_then_retry_same_payment_header' } } : {}),
+    },
+    id: null,
+  }), { status: 404, headers: { 'Content-Type': 'application/json' } })
 }
 
 function headersOf(call: unknown[]): Headers {
@@ -296,6 +292,63 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     expect(response.headers.get('content-type')).toBe('application/json')
     expect(response.headers.has('mcp-session-id')).toBe(false)
     await expect(response.json()).resolves.toEqual({ content: [{ type: 'text', text: 'an image' }] })
+  })
+
+  it('#3171: a settled-nothing 404 on the paid retry re-initializes once and resends the SAME header — no rejection recorded', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(initializeOk('sess-abc'))          // 0 initialize
+      .mockResolvedValueOnce(notificationAccepted())            // 1 initialized
+      .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequiredFor(mcpUrl)), { status: 402, headers: { 'Content-Type': 'application/json' } })) // 2 probe
+      .mockResolvedValueOnce(fundingPendingSignature())         // 3 authorize
+      .mockResolvedValueOnce(fundingConfirmed())                // 4 sign → confirmed
+      .mockResolvedValueOnce(sessionNotFound404())              // 5 paid retry → the merchant restarted / expired the session
+      .mockResolvedValueOnce(initializeOk('sess-new'))          // 6 re-initialize
+      .mockResolvedValueOnce(notificationAccepted())            // 7 initialized
+      .mockResolvedValueOnce(sseResponse(                       // 8 paid retry on the new session → goods
+        sse({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: 'an image' }] } }),
+        { headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({ success: true, transaction: '0xabc', network: accepted.network })) } },
+      ))
+      .mockResolvedValueOnce(evidenceAccepted())                // 9 evidence
+
+    const response = await newClient().fetch(mcpUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'create_image' } }),
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(10)
+    expect(isInitializeCall(fetchMock.mock.calls[6])).toBe(true)
+    const first = headersOf(fetchMock.mock.calls[5])
+    const second = headersOf(fetchMock.mock.calls[8])
+    expect(first.get('mcp-session-id')).toBe('sess-abc')
+    expect(second.get('mcp-session-id')).toBe('sess-new')
+    expect(first.get('X-PAYMENT')).toBeTruthy()
+    expect(second.get('X-PAYMENT')).toBe(first.get('X-PAYMENT'))
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/machine-payments/reconciliation-events'))).toBe(false)
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ content: [{ type: 'text', text: 'an image' }] })
+  })
+
+  it('#3171: a BARE -32001 (no settled-nothing guarantee) is still a rejection after funding — no re-initialize, reconciliation recorded', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(initializeOk('sess-abc'))
+      .mockResolvedValueOnce(notificationAccepted())
+      .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequiredFor(mcpUrl)), { status: 402, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(fundingPendingSignature())
+      .mockResolvedValueOnce(fundingConfirmed())
+      .mockResolvedValueOnce(sessionNotFound404(false))
+      .mockResolvedValueOnce(reconciliationAccepted())
+
+    await expect(newClient().fetch(mcpUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'create_image' } }),
+    })).rejects.toMatchObject({ statusCode: 404 })
+
+    expect(fetchMock.mock.calls.filter(isInitializeCall)).toHaveLength(1)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/machine-payments/reconciliation-events'))).toBe(true)
   })
 
   it('uses the MCP lifecycle for a keyless hosted quote and never signs or funds', async () => {
@@ -572,6 +625,40 @@ describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
       paymentProofHeader: 'PAYMENT_HEADER_ABC',
       protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
     })
+  })
+
+  it('#3171: the hosted twin recovers a settled-nothing 404 the same way — one re-initialize, same header, ok:true', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(paymentStatusReady())              // 0 status
+      .mockResolvedValueOnce(initializeOk('sess-pay'))          // 1 initialize
+      .mockResolvedValueOnce(notificationAccepted())            // 2 initialized
+      .mockResolvedValueOnce(sessionNotFound404())              // 3 paid call → session gone
+      .mockResolvedValueOnce(initializeOk('sess-new'))          // 4 re-initialize
+      .mockResolvedValueOnce(notificationAccepted())            // 5 initialized
+      .mockResolvedValueOnce(                                   // 6 paid call → goods
+        sseResponse(sse({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: 'a joke' }] } }), {
+          headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({ transaction: '0xsettle' })) },
+        }),
+      )
+      .mockResolvedValueOnce(evidenceAccepted())                // 7 evidence
+
+    const result = await newClient().completeX402MerchantCall({
+      url: mcpUrl,
+      init: merchantInit,
+      paymentId: 'pay_123',
+      paymentHeader: 'PAYMENT_HEADER_ABC',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(8)
+    expect(headersOf(fetchMock.mock.calls[3]).get('mcp-session-id')).toBe('sess-pay')
+    expect(headersOf(fetchMock.mock.calls[6]).get('mcp-session-id')).toBe('sess-new')
+    expect(headersOf(fetchMock.mock.calls[3]).get('X-PAYMENT')).toBe('PAYMENT_HEADER_ABC')
+    expect(headersOf(fetchMock.mock.calls[6]).get('X-PAYMENT')).toBe('PAYMENT_HEADER_ABC')
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/machine-payments/reconciliation-events'))).toBe(false)
+    expect(result.ok).toBe(true)
+    expect(result.status).toBe(200)
+    expect(result.settlementTxHash).toBe('0xsettle')
   })
 
   it('does not handshake for a non-MCP merchant URL and still sends X-PAYMENT', async () => {

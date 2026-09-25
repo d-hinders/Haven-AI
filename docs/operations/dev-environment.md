@@ -9,11 +9,19 @@ covers:
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
   - packages/backend/src/config.ts
+  - packages/backend/src/modules/catalog/marketplace-scope.ts
+  - packages/backend/src/routes/merchants.ts
   - packages/backend/src/openapi/request-validation.ts
+  - scripts/ci/shadow-reading.mjs
+  - packages/backend/src/routes/health.ts
   - packages/backend/src/openapi/route-modules.generated.ts
+  - packages/backend/src/routes/agent-organizations.ts
+  - packages/frontend/src/hooks/useOrganizations.ts
   - packages/backend/scripts/generate-route-modules.ts
   - packages/backend/src/index.ts
-last-verified: "2026-09-18"
+  - packages/backend/src/modules/accounting/api-key-flow.ts
+  - packages/backend/src/routes/accounting-webhooks.ts
+last-verified: "2026-09-24"
 ---
 
 # Dev environment
@@ -226,7 +234,9 @@ Isolation rules that are non-negotiable for a payments product:
 - **`RELAYER_PRIVATE_KEY`** — since the #908 owner decision (2026-07-19) the
   SAME relayer EOA (`0xC825…9D7E`) serves Base mainnet and Base Sepolia,
   funded on both; it is gas-only either way (customer funds are unreachable
-  from it). **Gnosis (chain 100) is intentionally unfunded/dead** — the
+  from it). It submits delegator activation, passport attestations and
+  revocations, sweeps, and the outbound queue's fee bumps and lane cancels;
+  agent payments are paymaster-sponsored UserOps and never use it (#3264). **Gnosis (chain 100) is intentionally unfunded/dead** — the
   delegation rail is pinned to 8453/84532, so a zero balance there is a
   decision, not a broken relayer.
 - **Testnet RPCs by default** — `RPC_URL` → Gnosis **Chiado** (legacy config;
@@ -242,6 +252,19 @@ Isolation rules that are non-negotiable for a payments product:
   wrote through proves only that the backend agrees with itself. The backend
   logs a boot warning when its variable is unset, and the harness prints which
   endpoint CLASS it is observing through (never the URL) in its run preamble.
+- **RPC failover (#3255)** — the backend's viem clients (delegation-rail
+  prepare, account deploy checks, caveat-enforcer and budget reads) fail over
+  in order: `RPC_URL_BASE` / `RPC_URL_BASE_SEPOLIA`, then the optional
+  `RPC_URL_BASE_FALLBACK` / `RPC_URL_BASE_SEPOLIA_FALLBACK` (a second provider
+  account), then the public node. A transport failure (HTTP 429/5xx, a quota
+  error in an HTTP 200 body, a timeout) moves to the next endpoint; an
+  `eth_call` revert does not. Three things stay on `RPC_URL_BASE*` alone:
+  the `disabledDelegations` heal read, because a lying node could fake a
+  revoke; the relayer's ethers provider, because the signing wallet's nonce
+  view must stay on one node (#1533); and the log scanners and settlement
+  verifier behind that provider. The QA
+  observer (`QA_RPC_URL_BASE_SEPOLIA`) is unaffected, and still needs its own
+  endpoint, distinct from the backend's.
 
 - **Marketplace chains and prospects (#3078, epic #3077)** —
   `HAVEN_MARKETPLACE_CHAIN_IDS=84532,8453` on dev (owner decision 11: the demo
@@ -252,8 +275,11 @@ Isolation rules that are non-negotiable for a payments product:
   dashboard and credential-less reads only — an agent's `GET /catalog` sees
   its own chain regardless. `HAVEN_MARKETPLACE_PROSPECTS=true` (strict
   boolean) lists the `coming_soon` merchants of #3080 to authenticated
-  dashboard users on dev only; the route refuses to list them when any
-  mainnet chain is listed, so a copied env cannot publish them on prod.
+  dashboard users; it is set on dev standing (decision 14, 2026-09-20 — the
+  prospects sit beside the mainnet merchants once the list is back on
+  `84532,8453`, the operator step after PR #3202) and never on prod. The route
+  lists them only when `HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet,
+  so a copied flag cannot publish them on prod, whose list is `8453`.
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A
@@ -301,14 +327,30 @@ Isolation rules that are non-negotiable for a payments product:
   (#3029, epic #3028).
 
   **`enforce` is not global, despite the name.** A route is enforced only when
-  the route FILE that declares it is in the plugin's `enforcedModules`, which
-  `index.ts` sets to `['routes/contacts.ts', 'routes/merchants.ts']` —
+  the route FILE that declares it is in the plugin's `enforcedModules` —
   `mode` gates the `off` early-return and the counters and nothing else.
-  Setting `HAVEN_REQUEST_VALIDATION=enforce` today therefore refuses exactly
-  what `shadow` refuses, and since #3084 that includes off-spec
-  `/merchants/{slug}` requests (the required `slug` must match its pattern).
-  Epic #3028 slices 2–4 widen the list; the variable is not the switch
-  that does it.
+  Since #3030 (epic #3028 slice 2) `index.ts` lists **every non-money route
+  module** there — the four already-enforced ones (`contacts`, `merchants`,
+  `labels`, `agent-labels`), the 22 slice-2 files (`accounting*`,
+  `agent-activity`, `analytics*`, `auth`, `balances`, `catalog*`,
+  `dashboard`, `discovery`, `health`, `openapi`, `passkeys`,
+  `passport-verify`, `portfolio`, `safe-deploy`, `transactions`, `user`,
+  `user-accounts*`, plus `accounting-webhooks`, which #3196 landed in the
+  slice's base commit) and the bare `'index.ts'` for the inline `GET /` and
+  `GET /chains`. `routes/x402.ts` joined them in slice 3
+  (#3031) — the first money-path module, and the only one the 2026-09-22
+  shadow reading proved conformant on every operation. Eight money-path
+  modules are still shadowed (`payments`, `machine-payments`, `agents`,
+  `agent-delegations`, `agent-rekey`, `agent-passports`,
+  `agent-connection-setups`, `hybrid-accounts` — the rest of slices 3–4,
+  #3031/#3032). The reading printed NOT PROVEN for 48 of their operations —
+  15 in slice 3's three remaining modules, 33 in slice 4's five — so on dev an off-spec request to any
+  other route answers the 400 envelope. Slice 2 flipped on the epic's
+  fallback (owner decision 2026-09-21 on #3028): the in-process shadow
+  counter resets on every deploy and carried no per-route traffic (until
+  #3208), so it could not prove the 22 modules; each module's route tests (off-spec → the
+  envelope, conformant → unchanged) are the instrument, and `enforce` on
+  dev is the reading. The variable is not the switch that widens the list.
 
   **Keyed on the FILE, not the mount prefix, since #3135** (epic #3028
   decision 7). A prefix could not express the epic's slice partition:
@@ -319,9 +361,84 @@ Isolation rules that are non-negotiable for a payments product:
   `packages/backend/src/openapi/route-modules.generated.ts`; regenerate it with
   `npm run generate:route-modules` after adding, moving or renaming a route
   (`npm run check:route-modules` and the backend suite both fail on a stale
-  table). The `lint:request-schemas` gate keys its baseline entries with the
-  same string, so the gate and the runtime cannot disagree about which modules
-  are still shadowed.
+  table). New modules are born ENFORCED with their own `enforcedModules`
+  entry — #3164's `routes/agent-organizations.ts` (its own `/organizations`
+  prefix) followed the #3167 precedent exactly. The `lint:request-schemas`
+  gate keys its baseline entries with the
+  same string, so the gate and the runtime agree about which modules are
+  still shadowed — with one stated limit, closed in #3030: the gate reads a
+  module's mount prefix from `index.ts`, and until #3030 it read only the
+  `{ prefix: '…' }` shape, so a module registered bare
+  (`app.register(fooRoutes)`, mounted at the root) was invisible to it and
+  reported shadow 0 while the plugin ran it in shadow. `accounting-webhooks.ts`
+  (#3196) was exactly that for a morning; the gate reads bare registrations
+  as prefix `''` now.
+
+  **How to take a shadow reading (#3208).** Not from `/health/ops` alone:
+  its `request_validation` counters are in-process — they start at `since`
+  (the plugin install) and dev redeploys on every merge, so the 2026-09-21
+  reading covered five minutes and proved nothing (#3028 decision 8). The
+  same events ride the log stream, which survives deploys: one line per
+  would-refusal (`request_validation.would_refuse`), per coerced field
+  (`would_coerce`) and, at most once per route per minute, the route's
+  running traffic total (`request_validation.seen`). Aggregate a window of
+  the backend's logs:
+
+  ```bash
+  railway logs --service '@haven/backend' --json --since 26h --filter "request_validation" --lines 5000 > rv.jsonl
+  railway logs --service '@haven/backend' --json --lines 500 > anchor.jsonl
+  cat rv.jsonl anchor.jsonl | node scripts/ci/shadow-reading.mjs --min-window-hours 24
+  ```
+
+  (`railway logs` reads the operator's own login; no token enters the repo.
+  A saved file works too: `--file logs.jsonl`; `--module routes/x402.ts`
+  limits the rows.)
+
+  **The service is `@haven/backend` in environment `dev`** — quote it; `@` and
+  `/` are shell-significant, and `railway status --json` lists the names. This
+  runbook and #3208 both said `havenbackend-dev` until the first live reading
+  (2026-09-22) met `Service 'havenbackend-dev' not found`; the script names no
+  service, so it needed no correction. **Two fetches, because `railway logs` caps a page at 500 lines
+  whatever `--since` says** (measured: `--since 1h` → 500, `--since 24h` →
+  500), and this backend writes ~500 lines per two minutes, so one unfiltered
+  fetch buys a two-minute window. The filtered fetch carries the data (`seen`
+  is at most one line per route per minute, so 5000 rows reach well past a
+  day); the unfiltered tail anchors the window's late edge. Anchor lines parse
+  as `other` and widen the window only, never a count. `--since 26h` rather
+  than `24h` leaves room for the cap to land the oldest row inside the day. The table has one row per SHADOWED operation — every
+  operation in `route-modules.generated.ts`, not only the ones that logged —
+  with `seen`, `would_refuse` and `would_coerce` by field, and a **verdict**:
+  a route with `seen: 0` in the window is **NOT PROVEN** — the epic's rule
+  that no traffic is no proof, printed rather than left to the reader; an
+  enforced module's rows say "enforced" instead. The header states the
+  window bounds (taken from every timestamped line, so a quiet day reads as
+  a day), the line counts, the deploys, and the processes seen — traffic is
+  summed per process (`hostname:pid`, so replicas add) from the `seen`
+  line's running total; a process that started before the window is counted
+  from its first line in it (the header says how many were cut). Two things
+  the numbers under-state by design: a minute's last `seen` line is written
+  on that minute's FIRST request, so the final minute of a process is
+  under-counted by up to a minute's traffic; and a cut process with a single
+  line counts as 1. Both err towards NOT PROVEN. If the header's `not ours`
+  count equals the lines read (`lines.skipped` = `lines.read` under `--json`),
+  that is **usually just a window with no validation lines in it** — the first
+  2026-09-22 fetch read 500 traffic lines and none of ours, and
+  `grep -c request_validation` on the raw file said 0. Check that before
+  suspecting the envelope: Railway's `--json` hands the pino line FLATTENED
+  (its fields lifted to the top level beside Railway's own `timestamp`), which
+  `parseLine` reads correctly — proven by feeding two synthetic
+  `request_validation` lines in that exact shape through with real traffic and
+  watching their row appear. Only when a line you KNOW is present fails to
+  appear is the envelope the problem; then save the raw lines and pass them
+  with `--file`, or fix the one field name in `parseLine`. If it says `1 deploy(s)` on a day with merges, the CLI handed
+  you the latest deployment's stream only — export the window from Railway's
+  log explorer and pass it with `--file`. The minimum window is **24 hours**
+  unless the epic's slice says more (#3028 decision 8); `--min-window-hours`
+  prints the table and then exits 1 with a stderr note below that, so a
+  narrower window cannot pass as a reading in a pipeline. Paste the table on
+  #3028 — that is the operator step slices 3–4 (#3031, #3032) wait on.
+  `/health/ops` still carries the live snapshot, now with `since` and
+  `seenByRoute`, for a quick look between deploys.
 
   Any other value refuses the boot rather than falling
   back — a misspelled `enforce` must not silently mean `shadow`. **A mode
@@ -384,6 +501,34 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > prefix-determined and mode-independent), the `/merchants` path items in
   > the OpenAPI spec, and the read-only GET registrations in the
   > `/merchants` route module.
+
+  > **Re-verified #3019 (2026-09-20):** PR's `index.ts` change registers ONE
+  > new plugin — `app.register(accountingWebhookRoutes)` — the Accounted
+  > webhook receiver (`routes/accounting-webhooks.ts`, capability-URL token +
+  > HMAC, its own encapsulated raw-body parser so the capture stays off every
+  > other route). The doc's config claims are unaffected: the receiver reads
+  > the existing `HAVEN_ACCOUNTING_ENABLED` flag (feature off → the route
+  > still answers 200 with a counter — deliberate: a 4xx would eat the
+  > provider's ~87 h retry budget) and adds no variable. The
+  > request-validation claims hold unchanged: the webhook module is NOT in
+  > `enforcedModules` (public route, spec-documented, carries no session
+  > surface to shadow), and `route-modules.generated.ts` was regenerated in
+  > the same commit (`npm run check:route-modules` green), including the
+  > trailing-slash twin's spec entry so the provider never meets Fastify's
+  > redirect. `HAVEN_SECRETS_KEY` now also protects the three webhook
+  > signing secrets (same blob, same key) — the *Secrets at rest* section of
+  > `docs/operations/accounting-feed.md` is the reference, not this file.
+
+  > **Re-verified #3019 round 2 (PR #3196 review):** the webhook half now
+  > requires `HAVEN_API_URL` (or `PUBLIC_API_URL`) on the BACKEND deployment.
+  > The old `http://localhost:<port>` fallback is gone: with no stated origin
+  > the connect flow refuses to register any subscription and flags the
+  > connection `needs_attention` (`no public API origin configured`) instead
+  > of writing a callback URL the provider could never reach. Dev backends
+  > that exercise the webhook half must state the origin explicitly (the
+  > Railway dev backend already does); a tunnel URL works, a loopback URL
+  > does not — the provider refuses to dispatch to private/loopback addresses
+  > by policy.
 
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 
@@ -521,3 +666,25 @@ and `prod` are production; any other value is the deployment's own name.
 
 If you need an env var changed or a secret rotated in the dev projects, ping the
 project owner — collaborators have Viewer access, not env-var write access.
+
+> **Re-verified #3167 (2026-09-20):** this diff's two new route files
+> (`routes/labels.ts`, `routes/agent-labels.ts`) are born ENFORCED —
+> `enforcedModules` in `index.ts` grew by exactly those two entries, the
+> generated map (`route-modules.generated.ts`) was regenerated in the same
+> commit, and both modules carry spec request bodies the plugin can enforce.
+> The shadow/enforce semantics this document describes are unchanged; the
+> rollout moved in its own forward direction (new modules start enforced,
+> shadow residue only shrinks — `lint:request-schemas` stays green with no
+> baseline bump). Nothing else in this file's coverage was touched; the note
+> and the `last-verified` date are the only edits.
+
+> **Re-verified #3303 (2026-09-25):** `index.ts` registers one more pair of
+> root hooks, `registerClientCompatHooks` (`middleware/client-compat.ts`), after
+> the request-validation plugin. Its `preHandler` therefore runs after the
+> plugin's `preHandler` has restored the client's body; it only reads the body
+> (an idempotency key) and never mutates it, so the shadow-snapshot rule above
+> holds. The `X-Haven-Client` header it reads is declared in the spec as an
+> unconstrained optional string, so neither shadow nor enforce mode can refuse
+> a malformed value. The shadow/enforce semantics, `enforcedModules` and the
+> generated route-module table are unchanged (no route file added or moved).
+> Nothing else in this file's coverage was touched; this note is the only edit.

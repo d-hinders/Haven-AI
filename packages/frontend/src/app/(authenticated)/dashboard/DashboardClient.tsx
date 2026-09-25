@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowLeftRight, Bot, ChevronRight, DollarSign, ShieldCheck, Wallet } from 'lucide-react'
+import { ArrowLeftRight, Bot, ChevronRight, Coins, ShieldCheck, Wallet } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
@@ -17,7 +17,7 @@ import { useAccountFunding } from '@/hooks/useAccountFunding'
 import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { RESET_PERIODS } from '@/lib/budget-period'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
-import { timeAgo } from '@/lib/format'
+import { formatFiat, timeAgo } from '@/lib/format'
 import {
   transactionMovement,
   transactionStatus,
@@ -42,22 +42,18 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { BalanceFreshnessIndicator } from '@/components/haven'
 import { useToast } from '@/components/ui/Toast'
 import { TransactionActivityRow } from '@/components/haven'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import type { AggregatedTransaction } from '@/types/transactions'
 
-function formatCurrency(value: number, currency: 'USD' | 'EUR'): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)
-}
-
-function formatCompactCurrency(value: number, currency: 'USD' | 'EUR'): string {
-  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : 'en-US', {
+// #3127 (finding 6): the per-currency formatting itself lives in ONE place —
+// `lib/format.ts`'s `formatFiat`, shared with /accounts and /accounts/[id].
+// These two wrappers keep only what is dashboard-specific: the compact
+// notation for the metric tiles, and the signed change line.
+function formatCompactCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
+  return new Intl.NumberFormat(currency === 'EUR' ? 'de-DE' : currency === 'SEK' ? 'sv-SE' : 'en-US', {
     style: 'currency',
     currency,
     notation: Math.abs(value) >= 1000 ? 'compact' : 'standard',
@@ -65,9 +61,9 @@ function formatCompactCurrency(value: number, currency: 'USD' | 'EUR'): string {
   }).format(value)
 }
 
-function formatSignedCurrency(value: number, currency: 'USD' | 'EUR'): string {
+function formatSignedCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
   const sign = value > 0 ? '+' : value < 0 ? '-' : ''
-  return `${sign}${formatCurrency(Math.abs(value), currency)}`
+  return `${sign}${formatFiat(Math.abs(value), currency)}`
 }
 
 function formatPercent(value: number): string {
@@ -209,6 +205,9 @@ function DashboardHero({
   totalFiat,
   currency,
   changeAvailable,
+  sekChangeUnavailable,
+  balancesFreshness,
+  changeUnavailable,
   changeAmount,
   changePercent,
   hasAccounts,
@@ -224,9 +223,20 @@ function DashboardHero({
   loading: boolean
   unavailable: boolean
   totalFiat: number
-  currency: 'USD' | 'EUR'
+  currency: 'USD' | 'EUR' | 'SEK'
   changeAvailable: boolean
-  changeAmount: number
+  /** True when the SEK baseline for yesterday predates migration 090 — no swing may be claimed. */
+  sekChangeUnavailable: boolean
+  /**
+   * The aggregated degraded-balance marker (#3295). `stale` renders a subtle
+   * "as of …" indicator beside the headline figure; `unavailable` means some
+   * token has never been read, so the day's change is reported unavailable
+   * rather than as a swing computed from an understated total.
+   */
+  balancesFreshness?: { status: 'stale'; asOf: string } | { status: 'unavailable' }
+  /** True when some token has no known value — the change line must step aside. */
+  changeUnavailable: boolean
+  changeAmount: number | null
   changePercent: number
   hasAccounts: boolean
   hasFunds: boolean
@@ -275,27 +285,39 @@ function DashboardHero({
             </p>
           ) : (
             <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular sm:text-5xl">
-              {formatCurrency(animatedTotal, currency)}
+              {formatFiat(animatedTotal, currency)}
             </p>
-          )}
-          {/*
-            Three meta-line states under the headline number:
-            1. Watching for a deposit (user opened Receive earlier, balance
-               still 0) — shows a soft brand-tinted pill with a pulse so the
-               user knows the dashboard is actively listening.
-            2. Funded with change data — show today's signed % change.
-            3. Funded without change data, OR no change available — quiet
-               "Across all linked Haven accounts." caption.
-          */}
-          {watchingForDeposit ? (
-            <p className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[var(--v2-brand)]">
-              <span
-                aria-hidden="true"
-                className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--v2-brand)] animate-pending-pulse"
-              />
-              Watching for incoming deposits…
-            </p>
-          ) : changeAvailable ? (
+            )}
+            {/* #3295: the headline figure is the last-known balance when the
+                live read failed — a subtle indicator says how old it is, rather
+                than the number silently claiming to be current. */}
+            {balancesFreshness && (
+              <div className="mt-2">
+                <BalanceFreshnessIndicator freshness={balancesFreshness} />
+              </div>
+            )}
+            {/*
+              Three meta-line states under the headline number:
+              1. Watching for a deposit (user opened Receive earlier, balance
+                 still 0) — shows a soft brand-tinted pill with a pulse so the
+                 user knows the dashboard is actively listening.
+              2. Funded with change data — show today's signed % change.
+              3. Funded without change data, OR no change available — quiet
+                 "Across all linked Haven accounts." caption.
+              #3295 adds a fourth input: when some token has never been read
+              (unavailable), the change line steps aside entirely — no swing may
+              be claimed from a total understated by an unknown amount. A merely
+              stale set of totals still diffs normally.
+            */}
+            {watchingForDeposit ? (
+              <p className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[var(--v2-brand)]">
+                <span
+                  aria-hidden="true"
+                  className="inline-flex h-1.5 w-1.5 rounded-full bg-[var(--v2-brand)] animate-pending-pulse"
+                />
+                Watching for incoming deposits…
+              </p>
+            ) : changeAvailable && !sekChangeUnavailable && !changeUnavailable && changeAmount !== null ? (
             <p className={`mt-3 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
               {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent)}) today
             </p>
@@ -426,8 +448,15 @@ function AgentMarkIcon() {
 }
 
 function SpendIcon() {
+  // #3127 (finding 7): the mark over "Monthly agent spend" was `DollarSign`.
+  // With SEK the no-preference default, that tile read `$` over `482,50 kr`
+  // for every new signup — a currency glyph has a currency opinion, and the
+  // figure beside it now carries a different one. The tile describes AGENT
+  // SPEND, not a currency, so the mark is currency-neutral: coins, the same
+  // family the sidebar/nav icons come from. `SpendIcon` itself keeps its name
+  // and call site so the MetricCard contract is untouched.
   return (
-    <Icon icon={DollarSign} className="w-full h-full" />
+    <Icon icon={Coins} className="w-full h-full" />
   )
 }
 
@@ -618,7 +647,7 @@ function TransactionsSection({
 export default function DashboardClient() {
   const { user, activeAccount, passkeys: enrolledPasskeys } = useAuth()
   const { toast } = useToast()
-  const safes = user?.accounts ?? []
+  const accounts = user?.accounts ?? []
   const { currency } = usePreferences()
   const { contacts, error: contactsError, resolveAddress } = useContacts()
   const { agents, loading: agentsLoading, refetch: refetchAgents } = useAgents()
@@ -642,7 +671,23 @@ export default function DashboardClient() {
   // user can complete them in any order. The guide always renders the
   // canonical Fund → Agent → First payment ordering but a step completed
   // out of order shows as done regardless.
-  const fundingStateKnown = safes.length > 0 && !balancesLoading && !balancesError
+  // #3295: a failed balance read serves the last-known balance, so those
+  // figures still settle `hasAnyBalance` — a funded user is never told to
+  // fund their account because one read blipped. Only when some token has
+  // NEVER been read (status 'unavailable') AND no token shows any balance is
+  // the funding state unknown: the wire's zeros are then fillers, not
+  // figures, and an empty-looking account may not be empty.
+  const hasUnavailableBalance = balances.some(
+    (balance) => balance.balanceFreshness?.status === 'unavailable',
+  )
+  const fundingStateKnown =
+    accounts.length > 0 &&
+    !balancesLoading &&
+    !balancesError &&
+    // Unknown only when the zeros might be lying: some token was never read
+    // AND nothing shows a balance. A known balance settles it regardless of
+    // which other token is unread.
+    (!hasUnavailableBalance || hasAnyBalance)
   const dataReady = fundingStateKnown && !agentsLoading
   const hasFunds = fundingStateKnown && hasAnyBalance
 
@@ -651,15 +696,15 @@ export default function DashboardClient() {
   // enrol one teaches them to ignore the banner.
   //
   // Read from the set `AuthContext` already resolves for every delegation-rail
-  // safe on login. A plain synchronous read, so no extra request and no
+  // account on login. A plain synchronous read, so no extra request and no
   // signing-provider context — a dashboard banner has no business requiring
   // the wallet machinery `useAccountSigners` pulls in.
   // #2413: the account list is delegation-only, so "the first delegation
   // account" is just the first account.
-  const delegationSafe = safes[0]
+  const delegationAccount = accounts[0]
   const recoverySigners = getStoredHybridSigners({
-    accountAddress: delegationSafe?.account_address as Address | undefined,
-    chainId: delegationSafe?.chain_id,
+    accountAddress: delegationAccount?.account_address as Address | undefined,
+    chainId: delegationAccount?.chain_id,
   })
   // #1205: the server now answers this question — computed by
   // needsBackupSignerRecommendation next to the chain classification, so a
@@ -668,7 +713,7 @@ export default function DashboardClient() {
   // fallback for an older backend that has not sent the field yet.
   // Unknown signer set → stay silent. Nagging on a failed read is worse than
   // a late recommendation, and the next load will know.
-  const serverRecommendation = delegationSafe?.needs_backup_recommendation
+  const serverRecommendation = delegationAccount?.needs_backup_recommendation
   const missingBackup =
     serverRecommendation !== undefined && serverRecommendation !== null
       ? serverRecommendation
@@ -701,8 +746,8 @@ export default function DashboardClient() {
   // instruction to show, and the hero/`hasFunds` state already settles the
   // checklist. The hook surfaces errors instead of throwing so the card keeps
   // its general copy when the read fails, exactly as the balance read does.
-  const { funding: safeFunding } = useAccountFunding(
-    !fundingStateKnown || hasFunds ? undefined : delegationSafe?.id,
+  const { funding: fundingForOnboarding } = useAccountFunding(
+    !fundingStateKnown || hasFunds ? undefined : delegationAccount?.id,
   )
   const overviewInitialLoading = overviewLoading && !overview
   const firstAgentPaymentKnown = Boolean(overview?.onboardingProgress)
@@ -715,15 +760,15 @@ export default function DashboardClient() {
   const allOnboardingComplete =
     setupProgressReady && hasFunds && hasAgents && hasFirstAgentPayment
 
-  const defaultSafe = useMemo(
-    () => activeAccount ?? safes.find((safe) => safe.is_default) ?? safes[0] ?? null,
-    [activeAccount, safes],
+  const defaultAccount = useMemo(
+    () => activeAccount ?? accounts.find((account) => account.is_default) ?? accounts[0] ?? null,
+    [activeAccount, accounts],
   )
-  const hasDelegationAccounts = safes.length > 0
-  const agentSafe = useMemo(
+  const hasDelegationAccounts = accounts.length > 0
+  const agentAccount = useMemo(
     () =>
-      activeAccount ?? safes[0] ?? null,
-    [activeAccount, safes],
+      activeAccount ?? accounts[0] ?? null,
+    [activeAccount, accounts],
   )
 
   // Owner-initiated send from the DASHBOARD is gone (#1989, epic #1440). It was
@@ -744,7 +789,7 @@ export default function DashboardClient() {
   // with !hasFunds it drives the hero's "Watching for incoming deposits…"
   // hint so the user knows the dashboard is actively listening.
   const [hasOpenedReceive, setHasOpenedReceive] = useState(false)
-  const [actionSafeId, setActionSafeId] = useState<string | null>(null)
+  const [actionAccountId, setActionAccountId] = useState<string | null>(null)
   // In-progress dismissal is session-only — refreshing brings the checklist
   // back so we keep nudging the user toward completing setup.
   const [inProgressDismissed, setInProgressDismissed] = useState(false)
@@ -761,9 +806,9 @@ export default function DashboardClient() {
     : false
 
   useEffect(() => {
-    if (actionSafeId && safes.some((safe) => safe.id === actionSafeId)) return
-    setActionSafeId(defaultSafe?.id ?? null)
-  }, [actionSafeId, defaultSafe?.id, safes])
+    if (actionAccountId && accounts.some((account) => account.id === actionAccountId)) return
+    setActionAccountId(defaultAccount?.id ?? null)
+  }, [actionAccountId, defaultAccount?.id, accounts])
 
   // Read the persisted setup-complete dismissal once the user is known.
   useEffect(() => {
@@ -827,10 +872,10 @@ export default function DashboardClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const selectedActionSafe = safes.find((safe) => safe.id === actionSafeId) ?? defaultSafe
+  const selectedActionAccount = accounts.find((account) => account.id === actionAccountId) ?? defaultAccount
   const actionGate = useAccountOperationGate({
-    accountAddress: selectedActionSafe?.account_address as Address | undefined,
-    chainId: selectedActionSafe?.chain_id,
+    accountAddress: selectedActionAccount?.account_address as Address | undefined,
+    chainId: selectedActionAccount?.chain_id,
   })
   const requiresOtherDevice = actionGate.kind === 'passkey_on_other_device'
   // The per-account balance/details reads existed only to populate `SendModal`,
@@ -841,19 +886,48 @@ export default function DashboardClient() {
   const {
     refetch: refetchSelectedBalances,
   } = useBalances(
-    selectedActionSafe?.account_address ?? null,
-    { enabled: sendModalDataEnabled, chainId: selectedActionSafe?.chain_id },
+    selectedActionAccount?.account_address ?? null,
+    { enabled: sendModalDataEnabled, chainId: selectedActionAccount?.chain_id },
   )
 
-  const totalFiat = currency === 'EUR' ? (overview?.totals.eur ?? 0) : (overview?.totals.usd ?? 0)
-  const changeAmount = currency === 'EUR' ? (overview?.change.eurAmount ?? 0) : (overview?.change.usdAmount ?? 0)
-  const changePercent = currency === 'EUR' ? (overview?.change.eurPercent ?? 0) : (overview?.change.usdPercent ?? 0)
+  // SEK (#3127): the display side now honours the served default end to end.
+  // totals.sek / metrics.monthlyAgentSpendSek are optional on the wire and
+  // default to 0 exactly as the USD/EUR figures do while the overview loads;
+  // change.sekAmount is `null` when yesterday's snapshot predates migration
+  // 090 — no SEK baseline was stored — and the hero then reports the change
+  // as unavailable rather than reading the null as a zero swing.
+  // #3295: the same null rule now also covers a balance read that has never
+  // succeeded (balancesFreshness.status === 'unavailable') — the totals are
+  // understated by an unknown amount, so no swing may be claimed. A merely
+  // STALE set of totals still diffs normally. `change.balancesFreshness`
+  // also tells the hero to render its subtle stale indicator beside the
+  // headline figure.
+  const totalFiat = currency === 'EUR'
+    ? (overview?.totals.eur ?? 0)
+    : currency === 'SEK'
+      ? (overview?.totals.sek ?? 0)
+      : (overview?.totals.usd ?? 0)
+  const sekChangeUnavailable = currency === 'SEK' && overview?.change.sekAmount == null
+  const balancesFreshness = overview?.change.balancesFreshness
+  const changeUnavailable = balancesFreshness?.status === 'unavailable'
+  const changeAmount = currency === 'EUR'
+    ? (overview?.change.eurAmount ?? 0)
+    : currency === 'SEK'
+      ? (overview?.change.sekAmount ?? 0)
+      : (overview?.change.usdAmount ?? 0)
+  const changePercent = currency === 'EUR'
+    ? (overview?.change.eurPercent ?? 0)
+    : currency === 'SEK'
+      ? (overview?.change.sekPercent ?? 0)
+      : (overview?.change.usdPercent ?? 0)
   const monthlySpend = currency === 'EUR'
     ? (overview?.metrics.monthlyAgentSpendEur ?? 0)
-    : (overview?.metrics.monthlyAgentSpendUsd ?? 0)
+    : currency === 'SEK'
+      ? (overview?.metrics.monthlyAgentSpendSek ?? 0)
+      : (overview?.metrics.monthlyAgentSpendUsd ?? 0)
   const overviewUnavailable = Boolean(overviewError && !overview)
   const hasAttention = Boolean(overviewError)
-  // Render the guide whenever the user has at least one Safe and either:
+  // Render the guide whenever the user has at least one account and either:
   // (a) they have unfinished steps and haven't dismissed the checklist, OR
   // (b) they've just finished all three steps and haven't dismissed the celebration.
   const showOnboardingGuide =
@@ -877,17 +951,17 @@ export default function DashboardClient() {
   }
 
   function openHeroAction(action: 'receive' | 'add-funds') {
-    if (safes.length === 0) {
+    if (accounts.length === 0) {
       if (action === 'add-funds') setAddFundsOpen(true)
       return
     }
 
-    if (safes.length > 1) {
+    if (accounts.length > 1) {
       setPickerAction(action)
       return
     }
 
-    setActionSafeId(defaultSafe?.id ?? null)
+    setActionAccountId(defaultAccount?.id ?? null)
     if (action === 'receive') {
       setHasOpenedReceive(true)
       setReceiveOpen(true)
@@ -895,15 +969,15 @@ export default function DashboardClient() {
     if (action === 'add-funds') setAddFundsOpen(true)
   }
 
-  function openReceiveForDefaultSafe() {
-    if (!defaultSafe) return
-    setActionSafeId(defaultSafe.id)
+  function openReceiveForDefaultAccount() {
+    if (!defaultAccount) return
+    setActionAccountId(defaultAccount.id)
     setHasOpenedReceive(true)
     setReceiveOpen(true)
   }
 
-  function handleActionSafeSelected(accountId: string) {
-    setActionSafeId(accountId)
+  function handleActionAccountSelected(accountId: string) {
+    setActionAccountId(accountId)
     if (pickerAction === 'receive') setReceiveOpen(true)
     if (pickerAction === 'add-funds') setAddFundsOpen(true)
     setPickerAction(null)
@@ -927,9 +1001,12 @@ export default function DashboardClient() {
       totalFiat={totalFiat}
       currency={currency}
       changeAvailable={Boolean(overview?.change.available)}
+      sekChangeUnavailable={sekChangeUnavailable}
+      balancesFreshness={balancesFreshness}
+      changeUnavailable={changeUnavailable}
       changeAmount={changeAmount}
       changePercent={changePercent}
-      hasAccounts={safes.length > 0}
+      hasAccounts={accounts.length > 0}
       hasFunds={hasFunds}
       fundingStateKnown={fundingStateKnown}
       watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
@@ -978,7 +1055,7 @@ export default function DashboardClient() {
       />
       <MetricCard
         label="Active accounts"
-        value={String(overview?.metrics.activeAccounts ?? safes.length)}
+        value={String(overview?.metrics.activeAccounts ?? accounts.length)}
         href="/accounts"
         icon={<WalletIcon />}
         loading={false}
@@ -998,7 +1075,7 @@ export default function DashboardClient() {
       />
       <TransactionsSection
         transactions={overview?.transactions ?? []}
-        hasAccounts={safes.length > 0}
+        hasAccounts={accounts.length > 0}
         loading={overviewInitialLoading}
         unavailable={overviewUnavailable}
         onRetry={refetchOverview}
@@ -1028,8 +1105,8 @@ export default function DashboardClient() {
             hasFunds={hasFunds}
             hasAgents={hasAgents}
             hasFirstAgentPayment={hasFirstAgentPayment}
-            funding={safeFunding}
-            onReceiveFunds={openReceiveForDefaultSafe}
+            funding={fundingForOnboarding}
+            onReceiveFunds={openReceiveForDefaultAccount}
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
             onDismiss={dismissInProgressGuide}
@@ -1045,14 +1122,14 @@ export default function DashboardClient() {
         // "any account" render with a funded-state trigger
         // — the owner does not want this in front of the user before they
         // have funds at risk. `hasFunds` is already fail-closed: it only
-        // goes true once `fundingStateKnown` is true (safes loaded, balance
+        // goes true once `fundingStateKnown` is true (accounts loaded, balance
         // fetch not loading, no balance error), so a transient RPC failure
         // reads as "not funded", never as "funded". Dismissible exactly as
         // before, and kept to delegation-rail accounts because "Backup &
         // recovery" is where it sends you and that only exists on those
         // accounts.
         const recoveryNudge =
-          hasFunds && delegationSafe && missingBackup ? <RecoveryNudge /> : null
+          hasFunds && delegationAccount && missingBackup ? <RecoveryNudge /> : null
 
         if (isFocusedView) {
           return (
@@ -1088,7 +1165,7 @@ export default function DashboardClient() {
         onClose={() => {
           setConnectAgentOpen(false)
         }}
-        accountId={agentSafe?.id ?? null}
+        accountId={agentAccount?.id ?? null}
         onSetupUpdated={() => {
           refreshDashboardData()
         }}
@@ -1097,23 +1174,23 @@ export default function DashboardClient() {
       <DashboardActionPickerModal
         open={pickerAction !== null}
         action={pickerAction ?? 'receive'}
-        safes={safes}
+        accounts={accounts}
         onClose={() => setPickerAction(null)}
-        onSelect={handleActionSafeSelected}
+        onSelect={handleActionAccountSelected}
       />
 
 
       <ReceiveFundsModal
         open={receiveOpen}
-        safe={selectedActionSafe}
+        account={selectedActionAccount}
         onClose={() => setReceiveOpen(false)}
       />
 
       <AddFundsModal
         open={addFundsOpen}
         onClose={() => setAddFundsOpen(false)}
-        accountAddress={selectedActionSafe?.account_address}
-        chainId={selectedActionSafe?.chain_id}
+        accountAddress={selectedActionAccount?.account_address}
+        chainId={selectedActionAccount?.chain_id}
         onReceive={() => {
           setHasOpenedReceive(true)
           setReceiveOpen(true)

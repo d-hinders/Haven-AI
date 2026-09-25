@@ -5,6 +5,7 @@
  */
 import type { FastifyBaseLogger } from 'fastify'
 import type { TransactionAccountRow } from '../../infra/repositories/transaction-history.js'
+import type { TransactionCurrency } from '../../domain/transaction-currency.js'
 
 export interface Transaction {
   hash: string
@@ -17,6 +18,23 @@ export interface Transaction {
   decimals: number
   direction: 'in' | 'out'
   timestamp: number
+  /**
+   * #3132: where `timestamp` came from — never a silent substitution. `block`
+   * on explorer-derived rows (the block's timestamp); on an x402-synthesized
+   * row `confirmed_at` when the intent carries one, else `created_at` (the
+   * intent's creation time, NOT a settlement time). A consumer that needs
+   * "when this settled" reads `confirmedAt` and treats `created_at` here as
+   * "not confirmed at a known time".
+   */
+  timestampSource: 'block' | 'confirmed_at' | 'created_at'
+  /**
+   * #3132: the recorded confirmation time (ISO 8601) of an x402-synthesized
+   * row, `null` when the intent has none — the same nullable value the
+   * receipts view reports as `confirmed_at`, so the two views can no longer
+   * disagree on whether a payment has a confirmation time. Absent on
+   * explorer-derived rows.
+   */
+  confirmedAt?: string | null
   /**
    * On-chain block, or `null` when this row has none recorded (#3129).
    *
@@ -50,6 +68,38 @@ export interface Transaction {
    */
   fxRateSek?: string | null
   fxSource?: string | null
+  /**
+   * The stored book-time rate map (`machine_payment_evidence.fx_rates`,
+   * migration 082) — a rate per supported ledger currency, frozen at
+   * settlement. Present only on the machine-payment rows whose evidence row
+   * has one; absent for raw transfers and pre-082 rows. Feeds the converted
+   * triple below and rides the wire declared (`fxRates` on the spec) for
+   * auditability: `convertedFxRate` names the one rate the served amount was
+   * struck at, the map shows the whole frozen capture. (#3127)
+   */
+  fxRates?: Record<string, number> | null
+  /**
+   * The converted amount in the user's preferred currency, that currency
+   * named as a FIELD, and the rate it was struck at (#3127). Before #3127 the
+   * currency lived only in field names (`amountSek`), so a consumer had to
+   * parse an identifier to know what it was reading, and the user's
+   * `currency_preference` was never consulted.
+   *
+   * Provenance stays auditable: the figure is struck from the SAME stored
+   * book-time capture as `amountSek` — the SEK columns, or the `fx_rates`
+   * map frozen at settlement — never a serve-time price read, so a book-time
+   * figure cannot silently become a fetch-time one.
+   *
+   * Null semantics follow the currency: SEK mirrors `amountSek` exactly
+   * (null for non-machine / unpriced rows). USD/EUR additionally need a
+   * usable rate in the row's `fx_rates` map — pre-082 rows and price-outage
+   * rows yield null there. Null is "not ready to convert", never another
+   * currency. The triple is always present TOGETHER (or null together) so a
+   * consumer can branch on the amount alone.
+   */
+  convertedAmount?: string | null
+  convertedCurrency?: TransactionCurrency
+  convertedFxRate?: string | null
   /**
    * Who initiated the money movement that produced this row — recorded by
    * the backend (#2097), never derived in the frontend.
@@ -89,7 +139,24 @@ export interface TransactionAccounting {
   error: string | null
 }
 
+/**
+ * #3132 (owner decision 3 on #3130): what population a list row came from and
+ * what narrowed it, as two separate values — one value cannot say both.
+ * `source: 'wallet'` (the aggregated feed: every account's explorer window
+ * plus synthesized confirmed intents; sweeps and funding legs included) or
+ * `'agent'` (the receipts view: this agent's evidence rows only). `filter`
+ * names the query-time narrowing applied on top, or `null`. `agentId` on the
+ * wallet feed NARROWS a wallet-scoped query; it does not make it the
+ * receipts view — the populations and row classes still differ.
+ */
+export interface ListScope {
+  source: 'wallet' | 'agent'
+  filter: 'agent' | 'account' | 'account+agent' | null
+}
+
 export interface EnrichedTransaction extends Transaction {
+  /** #3132: present on every `GET /transactions` row. */
+  scope?: ListScope
   chainId: number
   accountId: string
   accountAddress: string

@@ -92,6 +92,7 @@ vi.mock('../../db.js', () => ({
 
 import safeDeployRoutes from '../safe-deploy.js'
 import userAccountsRoutes from '../user-accounts.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import userAccountsRetiredRoutes from '../user-accounts-retired.js'
 import userRoutes from '../user.js'
 import { safeRailRetired } from '../../middleware/safe-inflow-retired.js'
@@ -101,12 +102,20 @@ const USER = 'user-1'
 const SAFE_ADDRESS = '0x1111111111111111111111111111111111111111'
 const OWNER_ADDRESS = '0x2222222222222222222222222222222222222222'
 
+// A linked-account id is a uuid and the spec's path parameter says so; with
+// the module enforced (#3030) 'safe-1' is refused before the handler.
+const ACCOUNT_ID = '2f6e1a9c-8b3d-4e5f-a7c1-9d0b2e4f6a8c'
+
 describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#1988)', () => {
   let app: FastifyInstance
   let token: string
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module(s) enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/user-accounts.ts', 'routes/user.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(safeDeployRoutes, { prefix: '/safe' })
     // Mirrors index.ts's real wiring (#2914): the naming tombstone owns
@@ -221,6 +230,24 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
 
         expect(res.statusCode).toBe(401)
       })
+
+      it('answers 410 BEFORE request validation — a body the spec would refuse is still told the flow is gone (#3030)', async () => {
+        // The route modules are enforced now; the retired ops still declare
+        // their old request bodies in the spec (the fixture payloads above
+        // are off-spec against them already — `safe_address` where the
+        // spec says `account_address`). The 410 is a route-level onRequest
+        // hook (`retiredSafeInflowRoute`), so it precedes the preValidation
+        // step. Mutation: drop the options from the registration → 400
+        // envelope here.
+        const res = await app.inject({
+          method: inflow.method,
+          url: inflow.url,
+          headers: { authorization: `Bearer ${token}` },
+          payload: {},
+        })
+        expect(res.statusCode).toBe(410)
+        expect(res.json()).toEqual(safeRailRetired(inflow.kind).body)
+      })
     })
   }
 
@@ -304,7 +331,7 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
   describe('an existing account is untouched', () => {
     it('GET /user/accounts still lists the caller’s accounts', async () => {
       mockPoolQuery.mockResolvedValue({
-        rows: [{ id: 'safe-1', account_address: SAFE_ADDRESS, chain_id: 84532, is_default: true }],
+        rows: [{ id: ACCOUNT_ID, account_address: SAFE_ADDRESS, chain_id: 84532, is_default: true }],
       })
 
       const res = await app.inject({ method: 'GET', url: '/user/accounts', headers: auth() })
@@ -319,12 +346,12 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
 
     it('PUT /user/accounts/:accountId still renames an existing account', async () => {
       mockPoolQuery.mockResolvedValue({
-        rows: [{ id: 'safe-1', account_address: SAFE_ADDRESS, chain_id: 84532, name: 'Renamed' }],
+        rows: [{ id: ACCOUNT_ID, account_address: SAFE_ADDRESS, chain_id: 84532, name: 'Renamed' }],
       })
 
       const res = await app.inject({
         method: 'PUT',
-        url: '/user/accounts/safe-1',
+        url: `/user/accounts/${ACCOUNT_ID}`,
         headers: auth(),
         payload: { name: 'Renamed' },
       })
@@ -334,12 +361,12 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
     })
 
     it('PUT /user/accounts/:accountId/default still re-defaults an existing account', async () => {
-      mockPoolQuery.mockResolvedValue({ rows: [{ id: 'safe-1', account_address: SAFE_ADDRESS }] })
+      mockPoolQuery.mockResolvedValue({ rows: [{ id: ACCOUNT_ID, account_address: SAFE_ADDRESS }] })
       mockClientQuery.mockResolvedValue({ rows: [] })
 
       const res = await app.inject({
         method: 'PUT',
-        url: '/user/accounts/safe-1/default',
+        url: `/user/accounts/${ACCOUNT_ID}/default`,
         headers: auth(),
       })
 
@@ -348,11 +375,12 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
 
     it('DELETE /user/accounts/:accountId still unlinks an existing account', async () => {
       mockPoolQuery.mockResolvedValue({ rows: [{ is_default: false }] })
-      mockClientQuery.mockResolvedValue({ rows: [] })
+      // The tenant-scoped DELETE matches the owned row, as on a real database (#3227).
+      mockClientQuery.mockResolvedValue({ rows: [], rowCount: 1 })
 
       const res = await app.inject({
         method: 'DELETE',
-        url: '/user/accounts/safe-1',
+        url: `/user/accounts/${ACCOUNT_ID}`,
         headers: auth(),
       })
 
@@ -368,7 +396,8 @@ describe('Safe-rail inflow is closed (#1984) and its implementation deleted (#19
    * guard left behind that now guards an empty set. So both directions are
    * measured here. The approver paths must be GONE (404 from the router, not
    * 410: they are not a retired flow a client should be told about, they are
-   * routes that no longer exist), and `POST /safe/exec` must still be THERE.
+   * routes that no longer exist). This block used to pin `POST /safe/exec` as
+   * still THERE; #2847 deleted it, and the block below pins that instead.
    */
   describe('the approver surface is deleted (#1988)', () => {
     const APPROVER_PATHS = [

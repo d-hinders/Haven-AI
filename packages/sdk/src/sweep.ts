@@ -95,7 +95,7 @@ export interface SweepEip712Domain {
 export interface SweepAuthorization {
   /** Delegate EOA the funds are swept FROM. */
   from: string
-  /** Originating Safe the funds are swept TO. */
+  /** The agent's Haven account the funds are swept TO. */
   to: string
   /** Atomic USDC amount (decimal string). */
   value: string

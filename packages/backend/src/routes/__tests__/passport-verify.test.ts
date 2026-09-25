@@ -3,6 +3,7 @@ import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify from 'fastify'
 import { Wallet, verifyMessage } from 'ethers'
 import passportVerifyRoutes from '../passport-verify.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import {
   canonicalize,
   setReceiptSigningKey,
@@ -78,6 +79,10 @@ function mockTable(rows: Array<Record<string, unknown>>) {
 
 async function build() {
   const app = Fastify({ logger: false })
+  // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+  // module enforced — off-spec requests answer the 400 envelope before the
+  // handler, conformant ones reach it unchanged.
+  installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/passport-verify.ts'] })
   await app.register(passportVerifyRoutes, { prefix: '/passport' })
   return app
 }
@@ -259,11 +264,19 @@ describe('fail-closed and input handling', () => {
     ).toBe(400)
   })
 
-  it('rejects a malformed address or uid', async () => {
+  it('rejects a malformed address or uid — the spec\'s patterns, as the 400 envelope (#3030)', async () => {
+    // Mutation: drop the module from enforcedModules → both reach
+    // verifyPassport (the handler's own checks are gone; core's `isAddress`
+    // is the same pattern the spec carries).
     const app = await build()
-    expect((await app.inject({ url: '/passport/verify?address=nope' })).statusCode).toBe(400)
-    expect((await app.inject({ url: '/passport/verify?uid=0x1234' })).statusCode).toBe(400)
+    const addr = await app.inject({ url: '/passport/verify?address=nope' })
+    expect(addr.statusCode).toBe(400)
+    expect(addr.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+    const uid = await app.inject({ url: '/passport/verify?uid=0x1234' })
+    expect(uid.statusCode).toBe(400)
+    expect(uid.json().details).toContain('querystring/uid')
   })
+
 })
 
 describe('GET /passport/issuer', () => {

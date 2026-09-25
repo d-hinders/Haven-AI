@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import type { WiringCollision, WiringCollisionResolution } from './wiring-collision.js'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { ConnectRequestError } from './api.js'
 import type { ConnectApiClient, ConnectorStatusResponse, RegisterSetupInput, ResolvedSetup, UpdateInstallStatusInput } from './api.js'
 import { delegateKeyFromPrivateKey } from './key.js'
@@ -2222,8 +2222,11 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     messages: [],
   }))
 
-  async function runWithPriorDir(seedPrior: boolean, replaceExistingWiring?: boolean) {
+  async function runWithPriorDir(seedPrior: boolean, replaceExistingWiring?: boolean, blockLedger = false) {
     const credentialsDir = await mkdtemp(join(tmpdir(), 'haven-1688-'))
+    // #3259: a FILE where the root's ledger directory goes — the mirror write
+    // fails for any user, after TOMBSTONE.json is already in place.
+    if (blockLedger) await writeFile(join(credentialsDir, '.tombstones'), 'x')
     const oldDir = join(credentialsDir, 'agent-old-uuid')
     if (seedPrior) {
       await mkdir(oldDir, { recursive: true })
@@ -2233,7 +2236,7 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
       await writeFile(join(oldDir, 'signer.json'), JSON.stringify({ private_key: PRIVATE_KEY }))
     }
     const logs: string[] = []
-    await runConnect({
+    const result = await runConnect({
       setupToken: 'hv_setup_test',
       apiBaseUrl: 'https://api.haven.example',
       runtime: 'claude-code',
@@ -2259,11 +2262,13 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
       log: (message: string) => logs.push(message),
       redactPaths: true,
     })
-    return { output: logs.join('\n'), oldDir }
+    return { output: logs.join('\n'), oldDir, outcome: result.outcome }
   }
 
   it('MUTATION PROOF: names the superseded agent and the revoke step when a prior dir is replaced', async () => {
-    const { output, oldDir } = await runWithPriorDir(true, true)
+    const { output, oldDir, outcome } = await runWithPriorDir(true, true)
+    // #3259: a clean mirror adds no mirror-error field.
+    expect(outcome).not.toHaveProperty('retirement_mirror_errors')
 
     expect(output).toContain('agent-old')
     expect(output).toMatch(/[Rr]evoke/)
@@ -2280,6 +2285,24 @@ describe('superseded-agent heads-up at completion (#1688)', () => {
     await expect(stat(join(oldDir, 'TOMBSTONE.json'))).resolves.toBeDefined()
     await expect(stat(join(oldDir, 'signer.json'))).rejects.toThrow()
     expect(JSON.parse(await readFile(join(oldDir, 'identity.json'), 'utf8'))).toEqual({ agent_id: 'agent-old' })
+    // #3251: the ledger record follows this run's credential root, not the
+    // ambient ~/.haven/tombstones.
+    const ledger = JSON.parse(await readFile(join(dirname(oldDir), '.tombstones', 'agent-old.json'), 'utf8'))
+    expect(ledger).toMatchObject({ agent_id: 'agent-old', replaced_by: 'agent-new' })
+  })
+
+  it('REGRESSION (#3259): a failed ledger mirror still tears the prior directory down to key-less', async () => {
+    const { output, oldDir, outcome } = await runWithPriorDir(true, true, true)
+    // Tombstoned in place AND key-less — never "retired" with a spendable key.
+    await expect(stat(join(oldDir, 'TOMBSTONE.json'))).resolves.toBeDefined()
+    await expect(stat(join(oldDir, 'signer.json'))).rejects.toThrow()
+    expect(JSON.parse(await readFile(join(oldDir, 'identity.json'), 'utf8'))).toEqual({ agent_id: 'agent-old' })
+    expect(output).toContain('Retired previous agent agent-old locally')
+    expect(output).not.toContain('Could not retire previous agent')
+    // The mirror failure is said, not swallowed — in the log AND the outcome.
+    expect(output).toMatch(/surviving tombstone record for agent-old could not be written/)
+    expect(outcome.retired_agent_ids).toEqual(['agent-old'])
+    expect(outcome.retirement_mirror_errors).toEqual({ 'agent-old': expect.stringMatching(/^(ENOTDIR|EEXIST)$/) })
   })
 
   it('#2551: the same prior dir WITHOUT --replace is refused before anything is minted', async () => {

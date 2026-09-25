@@ -64,6 +64,11 @@ import {
   TransactionActivityRow,
   TransactionMovement,
   WalletIdentityBlock,
+  LabelChip,
+  LabelChipRow,
+  LabelOptionRow,
+  BalanceFreshnessIndicator,
+  WhenBalanceDegraded,
 } from '@/components/haven'
 
 /**
@@ -784,12 +789,101 @@ export default function DesignSystemPage() {
               told goes in a <code className="rounded bg-[var(--v2-surface)] px-1">role=&quot;alert&quot;</code> or{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">role=&quot;status&quot;</code> node instead.
             </p>
-            <div className="mt-5 flex flex-wrap items-center gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
               <StatusBadge tone="success">Received</StatusBadge>
               <StatusBadge tone="warning">Needs attention</StatusBadge>
               <StatusBadge tone="danger">Failed</StatusBadge>
               <StatusBadge tone="brand">Connected</StatusBadge>
               <StatusBadge>Draft</StatusBadge>
+            </div>
+          </Card>
+
+          <Card hover={false} className="p-5" data-testid="ds-label-chips">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Agent label chips</h3>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              <code className="rounded bg-[var(--v2-surface)] px-1">LabelChip</code> is the pill
+              an agent renders for each label the user has given it (#3167) —{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">LabelChipRow</code> caps the
+              row at three chips and folds the rest into a +N counter. Colours are the four
+              palette names the label API accepts, each mapped to a v2 soft-tint pair so the
+              chips flip with dark mode like every other tinted surface. A label is
+              categorisation the user owns: it never borrows the warning or danger tints,
+              and it never reads as a status.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {(
+                [
+                  { id: 'l1', name: 'prod', color: 'brand', created_at: '2026-01-01T00:00:00Z' },
+                  { id: 'l2', name: 'finance', color: 'debit', created_at: '2026-01-01T00:00:00Z' },
+                  { id: 'l3', name: 'experimental', color: 'success', created_at: '2026-01-01T00:00:00Z' },
+                  { id: 'l4', name: 'test-agents', color: 'neutral', created_at: '2026-01-01T00:00:00Z' },
+                ] as const
+              ).map((l) => (
+                <LabelChip key={l.id} label={l} />
+              ))}
+            </div>
+            <div className="mt-3" data-testid="ds-label-chip-row">
+              <LabelChipRow labels={[
+                { id: 'l1', name: 'prod', color: 'brand', created_at: '2026-01-01T00:00:00Z' },
+                { id: 'l2', name: 'finance', color: 'debit', created_at: '2026-01-01T00:00:00Z' },
+                { id: 'l3', name: 'experimental', color: 'success', created_at: '2026-01-01T00:00:00Z' },
+                { id: 'l4', name: 'test-agents', color: 'neutral', created_at: '2026-01-01T00:00:00Z' },
+                { id: 'l5', name: 'recurring', color: 'neutral', created_at: '2026-01-01T00:00:00Z' },
+              ]} />
+            </div>
+            <div className="mt-4" data-testid="ds-label-option-row">
+              <p className="mb-2 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+                <code className="rounded bg-[var(--v2-surface)] px-1">LabelOptionRow</code> is the
+                picker line the tag editor and the label manager render — the shared{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">Checkbox</code> owns the row,
+                the chip rides in as its label node, so a picker row reads exactly like the chip
+                the agent will carry.
+              </p>
+              <LabelOptionRow
+                label={{ id: 'l1', name: 'prod', color: 'brand', created_at: '2026-01-01T00:00:00Z' }}
+                checked
+                onToggle={() => {}}
+              />
+            </div>
+          </Card>
+
+          <Card hover={false} className="p-5" data-testid="ds-balance-freshness">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Balance freshness</h3>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              <code className="rounded bg-[var(--v2-surface)] px-1">BalanceFreshnessIndicator</code>{' '}
+              marks a balance that could not be read from the chain right now (#3295). Haven shows
+              the last figure it actually saw, quietly labelled with how old it is — a timestamp,
+              not an alarm — and says &ldquo;Unavailable&rdquo; only when no balance has ever been
+              read. A fresh balance renders no indicator at all. The amber is the same caution tint
+              as every other &ldquo;worth knowing, not urgent&rdquo; surface; the figure it sits
+              beside stays in the normal ink so the value itself never reads as broken.
+            </p>
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center gap-3">
+                <span className="v2-tabular text-lg font-semibold text-[var(--v2-ink)]">1 337,00 kr</span>
+                <BalanceFreshnessIndicator
+                  freshness={{ status: 'stale', asOf: new Date(Date.now() - 5 * 60_000).toISOString() }}
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-[var(--v2-ink-2)]">USDC 2.50</span>
+                <BalanceFreshnessIndicator freshness={{ status: 'unavailable' }} size="compact" />
+              </div>
+            </div>
+            <p className="mt-4 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              <code className="rounded bg-[var(--v2-surface)] px-1">WhenBalanceDegraded</code>{' '}
+              attaches extra content to a degraded figure without each call site
+              branching on the marker — its children render only when a freshness
+              marker is present.
+            </p>
+            <div className="mt-3">
+              <WhenBalanceDegraded
+                freshness={{ status: 'stale', asOf: new Date(Date.now() - 45 * 60_000).toISOString() }}
+              >
+                <p className="text-xs text-[var(--v2-ink-3)]">
+                  Shown only while the balance is degraded.
+                </p>
+              </WhenBalanceDegraded>
             </div>
           </Card>
 
@@ -1302,7 +1396,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Row — the canonical list item"
-        description="One primitive for every list row in the app. Slots: leading icon (with optional tinted circle), title, subtitle, trailing. Hover and focus styles are baked in for interactive variants. Density toggles between comfortable lists and compact panels."
+        description="One primitive for every list row in the app. Slots: leading icon (with optional tinted circle), title, subtitle, trailing. Hover and focus styles are baked in for interactive variants. Density toggles between comfortable lists, compact panels and flush (a row inside a caller-padded box)."
       >
         <Card hover={false} className="overflow-hidden">
           <Row

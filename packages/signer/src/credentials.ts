@@ -1,4 +1,5 @@
-import { readFile, stat } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
+import { warnIfFilePermissive } from './file-mode.js'
 
 /**
  * The edge signer's own credential requires *only* `delegate_key` — unlike
@@ -6,9 +7,11 @@ import { readFile, stat } from 'node:fs/promises'
  *
  * That is a claim about this credential, not about the process, and the
  * difference matters: the sentence that used to stand here ("it does not call
- * the Haven API") was retired by #1263. The MCP server layer does make one
- * authenticated call — a read-only `GET /x402/:payment_id/sign-context`, see
- * `sign-context.ts` — and it reads the `api_url` / `api_key` for it from a
+ * the Haven API") was retired by #1263. The MCP server layer does make at
+ * most two authenticated reads per signing call — a read-only
+ * `GET /x402/:payment_id/sign-context` and, for a direct payment via
+ * `haven_sign` since #3271, then `GET /payments/:payment_id/sign-context`, see
+ * `sign-context.ts` — and it reads the `api_url` / `api_key` for them from a
  * SEPARATE `identity.json` in the same directory as the credential file
  * resolved here. That is why `sourcePath` below is load-bearing rather than
  * diagnostic, and why a key supplied through `HAVEN_DELEGATE_KEY` alone (no
@@ -226,18 +229,5 @@ export async function warnIfCredentialFilePermissive(
   log: (message: string) => void = (message) => process.stderr.write(`${message}\n`),
   platform: NodeJS.Platform = process.platform,
 ): Promise<void> {
-  if (platform === 'win32') return
-  let mode: number
-  try {
-    mode = (await stat(path)).mode
-  } catch {
-    return
-  }
-  if ((mode & 0o077) !== 0) {
-    const octal = (mode & 0o777).toString(8).padStart(4, '0')
-    log(
-      `haven-signer: warning: credential file at ${path} is readable beyond the owner ` +
-        `(mode ${octal}). Run: chmod 600 ${path}`,
-    )
-  }
+  await warnIfFilePermissive('credential file', path, log, platform)
 }

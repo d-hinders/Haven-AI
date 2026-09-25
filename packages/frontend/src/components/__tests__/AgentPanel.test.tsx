@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUseAuth = vi.hoisted(() => vi.fn())
 const mockUseAgents = vi.hoisted(() => vi.fn())
+const mockUseOrganizations = vi.hoisted(() => vi.fn())
+const mockRouterPush = vi.hoisted(() => vi.fn())
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
@@ -12,11 +14,21 @@ vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
 }))
 
-vi.mock('../ConnectAgentModal', () => ({
-  default: () => null,
+// #3164: the organization list feeds the tree above the list and the
+// facet registered in the toolbar; tests that need orgs set
+// `mockUseOrganizations` directly (default: none, loading settled).
+vi.mock('@/hooks/useOrganizations', () => ({
+  useOrganizations: () => mockUseOrganizations(),
 }))
 
-vi.mock('../EditAgentModal', () => ({
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockRouterPush, replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  // #3165: the list toolbar mirrors its state to the URL.
+  usePathname: () => '/agents',
+  useSearchParams: () => new URLSearchParams(),
+}))
+
+vi.mock('../ConnectAgentModal', () => ({
   default: () => null,
 }))
 
@@ -25,6 +37,7 @@ vi.mock('../ConfirmDialog', () => ({
 }))
 
 import AgentPanel from '../AgentPanel'
+import { MCP_NOT_RECORDED_NOTE } from '../agent-panel/McpServerName'
 
 const SAFE = {
   id: 'safe-1',
@@ -48,6 +61,7 @@ function agent(overrides: Record<string, unknown> = {}) {
     status: 'active',
     created_at: '2026-05-01T00:00:00Z',
     allowances: [],
+    labels: [],
     ...overrides,
   }
 }
@@ -70,6 +84,36 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockUseAuth.mockReturnValue({ activeAccount: SAFE })
   setAgents([])
+  mockUseOrganizations.mockReturnValue({
+    organizations: [],
+    loading: false,
+    error: null,
+    fetchOrganizations: vi.fn(),
+    createOrganization: vi.fn(),
+    updateOrganization: vi.fn(),
+    deleteOrganization: vi.fn(),
+  })
+})
+
+describe('AgentPanel agent detail navigation (#3168)', () => {
+  it('routes the card Details action to /agents/{id} through the Next router', () => {
+    setAgents([agent({ id: 'agent-9' })])
+
+    render(<AgentPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open details for Research agent' }))
+    expect(mockRouterPush).toHaveBeenCalledTimes(1)
+    expect(mockRouterPush).toHaveBeenCalledWith('/agents/agent-9')
+  })
+
+  it('leaves no Edit modal affordance on the list — the detail page owns name and description editing', () => {
+    setAgents([agent()])
+
+    render(<AgentPanel />)
+
+    expect(screen.queryByRole('button', { name: 'Edit Research agent' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Open details for Research agent' })).toBeInTheDocument()
+  })
 })
 
 describe('AgentPanel rail affordances', () => {
@@ -145,5 +189,90 @@ describe('AgentPanel rail affordances', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('Old agent')).toBeVisible()
     expect(controlled).not.toHaveAttribute('hidden')
+  })
+})
+
+describe('AgentPanel list toolbar (#3165)', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue({ activeAccount: SAFE, activeChainId: SAFE.chain_id })
+  })
+
+  it('renders the toolbar above a non-empty list and filters the cards through it', () => {
+    setAgents([agent({ id: 'a1', name: 'Alpha', status: 'active' }), agent({ id: 'a2', name: 'Bravo', status: 'paused' })])
+    render(<AgentPanel />)
+    expect(screen.getByTestId('agent-list-toolbar')).toBeInTheDocument()
+    expect(screen.getByText('Alpha')).toBeInTheDocument()
+    expect(screen.getByText('Bravo')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: /Search agents/ }), { target: { value: 'brav' } })
+    expect(screen.queryByText('Alpha')).toBeNull()
+    expect(screen.getByText('Bravo')).toBeInTheDocument()
+    expect(screen.getByTestId('agent-list-count')).toHaveTextContent('1 of 2 agents shown')
+  })
+
+  it('a zero-result filter shows the reset affordance and never hides the toolbar', () => {
+    setAgents([agent({ id: 'a1', name: 'Alpha' })])
+    render(<AgentPanel />)
+    fireEvent.change(screen.getByRole('textbox', { name: /Search agents/ }), { target: { value: 'zzz' } })
+    expect(screen.getByText('No agents match these filters')).toBeInTheDocument()
+    // The toolbar must survive the zero state (mutation: gate it on the
+    // filtered length → this line goes red), and exactly ONE reset is
+    // offered — the EmptyState's; the bar's steps back.
+    expect(screen.getByTestId('agent-list-toolbar')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Clear filters' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(screen.getByText('Alpha')).toBeInTheDocument()
+  })
+
+  it('the MCP "not recorded" note follows the filtered list, not every visible agent', () => {
+    setAgents([
+      agent({ id: 'a1', name: 'Alpha', mcp_server_name: null, mcp_last_seen_at: '2026-09-01T00:00:00Z' }),
+      agent({ id: 'a2', name: 'Bravo', mcp_server_name: 'claude-desktop' }),
+    ])
+    render(<AgentPanel />)
+    expect(screen.getByText(MCP_NOT_RECORDED_NOTE)).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: /Search agents/ }), { target: { value: 'bravo' } })
+    // Alpha (the unrecorded one) is filtered out, so the note explaining its
+    // label has nothing on the page to explain. Mutation: gate the predicate
+    // on `visibleAgents` again → red.
+    expect(screen.queryByText(MCP_NOT_RECORDED_NOTE)).toBeNull()
+  })
+
+  it('no toolbar on an empty list — the empty state owns that screen', () => {
+    setAgents([])
+    render(<AgentPanel />)
+    expect(screen.queryByTestId('agent-list-toolbar')).toBeNull()
+  })
+
+  // Round-3 review (NB2): the org facet EXTENDS the built-ins — the hook's
+  // default fires only on `undefined`, so passing `[]` (no organizations)
+  // used to strip Status/Budget entirely and a shared `?status=active` link
+  // was silently ignored. Mutation: pass `orgFacets` raw again → both
+  // assertions go red (org-less users lose Status; org users lose Status
+  // AND Budget).
+  it('keeps the built-in Status/Budget facets when no organizations exist', () => {
+    setAgents([agent({ id: 'a1', name: 'Alpha' })])
+    render(<AgentPanel />)
+    expect(screen.getByRole('button', { name: /Status:/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Budget:/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Organization:/ })).toBeNull()
+  })
+
+  it('appends the Organization facet alongside Status and Budget', () => {
+    mockUseOrganizations.mockReturnValue({
+      organizations: [
+        { id: 'org-1', parent_organization_id: null, name: 'Company A', created_at: '2026-09-22T00:00:00Z', updated_at: '2026-09-22T00:00:00Z', agent_count: 0 },
+      ],
+      loading: false,
+      error: null,
+      fetchOrganizations: vi.fn(),
+      createOrganization: vi.fn(),
+      updateOrganization: vi.fn(),
+      deleteOrganization: vi.fn(),
+    })
+    setAgents([agent({ id: 'a1', name: 'Alpha' })])
+    render(<AgentPanel />)
+    expect(screen.getByRole('button', { name: /Status:/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Budget:/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Organization:/ })).toBeInTheDocument()
   })
 })

@@ -3,9 +3,9 @@
  * its named repair, secret-hygiene, and repair-then-doctor recovery — all via
  * injected deps, no network, no real signer spawn.
  */
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 import { acknowledgeLocalSignerConsent } from './signer-consent.js'
@@ -75,6 +75,34 @@ async function seedCodexConfig(homeDir: string, wrapperPath: string) {
     '[mcp_servers.haven_signer]',
     `command = "${wrapperPath}"`,
   ].join('\n'))
+}
+
+/**
+ * #3241 — deterministic primary selection for multi-directory fixtures.
+ *
+ * `discoverCredentialDirectory` picks the primary credential directory by
+ * `identity.json` mtime, newest wins (doctor.ts `candidates.sort`), and the
+ * fixtures below seed several directories in quick succession. Adjacent
+ * writes land with the SAME `mtimeMs` on the kernel's coarse clock, and the
+ * stable-sort tie-break then follows `readdir` order — the FIRST-created
+ * directory — the opposite of what the fixture intended. Which cell observed
+ * the flipped selection depended on scheduling, so a different mutation-proof
+ * cell failed per run: the fixtures share no state at all (each builds a
+ * fresh mkdtemp home), so the reported "state bleed between cells" was
+ * really selection-order nondeterminism inside one fixture.
+ *
+ * Re-stamping every seeded `identity.json` to strictly increasing
+ * millisecond timestamps, in `<homeDir>/.haven/agents/<dirNames>` order and
+ * far from the coarse-clock floor, makes "newest wins" fully deterministic:
+ * call it right after the fixture seeds its directories, listing them
+ * oldest-first.
+ */
+async function stampAgentMtimes(homeDir: string, dirNames: string[]) {
+  const base = 1_700_000_000_000
+  for (const [index, name] of dirNames.entries()) {
+    const stamp = new Date(base + index * 1_000)
+    await utimes(join(homeDir, '.haven', 'agents', name, 'identity.json'), stamp, stamp)
+  }
 }
 
 function healthyDeps(): DoctorDeps & {
@@ -679,6 +707,11 @@ describe('per-agent inventory (#1697)', () => {
       '[mcp_servers.haven-ops]', `url = "${HOSTED}"`,
       '[mcp_servers.haven-signer-ops]', `command = "${namedWrapper}"`,
     ].join('\n'))
+    // #3241: agent-1 was seeded first and must read OLDER than ops — see
+    // stampAgentMtimes. Adjacent writes tie on the coarse clock, and the
+    // readdir tie-break would keep agent-1 primary, flipping the inventory
+    // this describe block exists to pin.
+    await stampAgentMtimes(homeDir, ['agent-1', 'ops'])
     return { homeDir, dir, namedDir }
   }
 
@@ -767,6 +800,57 @@ describe('per-agent inventory (#1697)', () => {
     const dead = report.agents.find((a) => a.agentId === 'agent-dead')
     expect(dead?.classification).toBe('retired')
     expect(dead?.checks).toEqual([])
+  })
+
+  it('#2155/#3251: a retiree whose directory was deleted is still listed from the ledger beside the default root', async () => {
+    const { homeDir } = await homeWithTwoWiredAgents()
+    const goneDir = join(homeDir, '.haven', 'agents', 'gone')
+    await mkdir(goneDir, { recursive: true })
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    await writeAgentTombstone({ directory: goneDir, agentId: 'agent-gone', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+    await rm(goneDir, { recursive: true, force: true })
+
+    const report = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...depsForTwo() })
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.detail).toContain('retired records (dir removed): agent-gone (reset)')
+  })
+
+  it('#3251: an explicit --credentials-dir under the doctor\'s own ~/.haven/agents still reads ~/.haven/tombstones', async () => {
+    const { homeDir } = await homeWithTwoWiredAgents()
+    const goneDir = join(homeDir, '.haven', 'agents', 'gone')
+    await mkdir(goneDir, { recursive: true })
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    await writeAgentTombstone({ directory: goneDir, agentId: 'agent-gone', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+    await rm(goneDir, { recursive: true, force: true })
+
+    const report = await runDoctor(
+      { runtime: 'codex-cli', credentialsDir: join(homeDir, '.haven', 'agents', 'agent-1') },
+      { homeDir, ...depsForTwo() },
+    )
+    expect(report.checks.find((c) => c.id === 'superseded_agents')?.detail).toContain('retired records (dir removed): agent-gone (reset)')
+  })
+
+  it('#3251: under an explicit --credentials-dir the ledger is read inside THAT root, never from the home ledger', async () => {
+    const { homeDir } = await homeWithTwoWiredAgents()
+    // The same two agents, moved to a custom root.
+    const customRoot = join(homeDir, 'custom', 'agents')
+    await mkdir(dirname(customRoot), { recursive: true })
+    await rename(join(homeDir, '.haven', 'agents'), customRoot)
+    const { writeAgentTombstone } = await import('./tombstone.js')
+    const goneDir = join(customRoot, 'gone')
+    await mkdir(goneDir, { recursive: true })
+    await writeAgentTombstone({ directory: goneDir, agentId: 'agent-gone', reason: 'reset', tombstonesDir: join(customRoot, '.tombstones') })
+    await rm(goneDir, { recursive: true, force: true })
+    // A record in the home ledger belongs to another root and must not surface.
+    const decoyDir = join(homeDir, 'decoy')
+    await mkdir(decoyDir, { recursive: true })
+    await writeAgentTombstone({ directory: decoyDir, agentId: 'agent-decoy', reason: 'reset', tombstonesDir: join(homeDir, '.haven', 'tombstones') })
+
+    const report = await runDoctor({ runtime: 'codex-cli', credentialsDir: join(customRoot, 'agent-1') }, { homeDir, ...depsForTwo() })
+    // The ledger dir inside the root is never enumerated as an agent.
+    expect(report.agents.map((a) => a.directory)).not.toContain(join(customRoot, '.tombstones'))
+    const detail = report.checks.find((c) => c.id === 'superseded_agents')?.detail ?? ''
+    expect(detail).toContain('retired records (dir removed): agent-gone (reset)')
+    expect(detail).not.toContain('agent-decoy')
   })
 })
 
@@ -858,6 +942,15 @@ describe('classification correctness (#1697 review)', () => {
       '[mcp_servers.haven-ops]', `url = "${HOSTED}"`,
       '[mcp_servers.haven-signer-ops]', `command = "${opsWrapper}"`,
     ].join('\n'))
+
+    // #3241: the seeding order must also be the mtime order — see
+    // stampAgentMtimes. healthyHome's agent-1 directory participates in the
+    // same discovery scan, so it is stamped too: with any coarse-clock tie,
+    // readdir order puts the first-created directory first and the doctor's
+    // stable mtime sort reads THAT one as newest — the bare-pair wiring flips
+    // to it and 'agent-1' comes back 'wired' instead of 'superseded', exactly
+    // the cell this proof guards. agent-main must be strictly newest.
+    await stampAgentMtimes(homeDir, ['agent-1', 'ops', 'stray', 'agent-main'])
 
     const deps = healthyDeps()
     deps.probeHosted.mockImplementation(async () => ({ status: 'ok' as const }))
@@ -1686,10 +1779,12 @@ describe('credential address naming report (#2908)', () => {
  * in the agent credential directory (`last-connect-outcome.json`), and
  * unknown stays unknown: no fabricated pass, no truncated repair command.
  *
- * These tests drive `runDoctor`/`runRepair` directly because the shipped CLI
- * refuses flagless `--doctor` in the argument parser (args.ts) — the doctor
- * layer is where the empty-runtime path is reachable, and the premise note in
- * the PR body records that split.
+ * These tests drive `runDoctor`/`runRepair` directly: this is the doctor
+ * layer's own unit coverage of the empty-runtime path. Until #3210 it was
+ * also the ONLY way to reach it — the argument parser refused a flagless
+ * `--doctor` — so since #3210 the CLI path is pinned end to end in
+ * `cli.test.ts` instead, while `--repair`'s empty-runtime path stays
+ * library-only because the parser still requires `--runtime` for it.
  */
 describe('runtime resolution when --runtime is absent (#3120)', () => {
   it('resolves the recorded runtime from the primary directory and it reaches runtimeConfigPathFor', async () => {
@@ -1807,6 +1902,10 @@ describe('runtime resolution when --runtime is absent (#3120)', () => {
     await seedCodexConfig(homeDir, otherRuntime.wrapperPath)
     await writeFile(join(other, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'hermes' }))
     await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
+    // #3241: agent-2 was seeded second and must read NEWER than agent-1 — see
+    // stampAgentMtimes. A coarse-clock tie would leave agent-1 (first-created)
+    // as the discovered primary and resolve 'cursor' instead of 'hermes'.
+    await stampAgentMtimes(homeDir, ['agent-1', 'agent-2'])
 
     const newest = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
     expect(newest.credentialDirectory).toBe(other)
@@ -1819,15 +1918,64 @@ describe('runtime resolution when --runtime is absent (#3120)', () => {
 
   it('the restart check says "unknown" instead of "no restart requirement" when the runtime is unknown', async () => {
     const { homeDir } = await healthyHome()
-    // env: {} matters: restartRequiredForRuntime falls back to env DETECTION
-    // for an unknown runtime (registry semantics — a shell that looks like a
-    // runtime gets that runtime's answer). The doctor's own resolution never
-    // guesses, and with no detection signal the degraded detail renders.
     const report = await runDoctor({ runtime: '' }, { homeDir, env: {}, ...healthyDeps() })
     const restart = report.checks.find((c) => c.id === 'restart')
     expect(restart?.ok).toBe(true)
     expect(restart?.detail).toContain('Runtime is unknown')
     expect(restart?.detail).not.toContain('No restart requirement known')
+  })
+
+  it('the restart check never env-guesses an unknown runtime from the doctor\'s own shell (#3210 review)', async () => {
+    const { homeDir } = await healthyHome()
+    // A shell that LOOKS like Claude Code. Before #3210 review the check fell
+    // through to registry env detection and answered about a runtime nobody
+    // named; the resolution invariant says unknown stays unknown.
+    const report = await runDoctor({ runtime: '' }, { homeDir, env: { CLAUDECODE: '1' }, ...healthyDeps() })
+    const restart = report.checks.find((c) => c.id === 'restart')
+    expect(restart?.detail).toContain('Runtime is unknown')
+    expect(restart?.detail).not.toContain('restart it after any repair')
+    // With the runtime NAMED, the same env is irrelevant and the real answer renders.
+    const named = await runDoctor({ runtime: 'claude-desktop' }, { homeDir, env: { CLAUDECODE: '1' }, ...healthyDeps() })
+    expect(named.checks.find((c) => c.id === 'restart')?.detail).toContain('restart it after any repair')
+    // An UNRECOGNISED value is not a runtime either: the registry would
+    // env-detect it too, so the check answers "no requirement known" instead
+    // of the shell's runtime (round-2 review, N2).
+    const bogus = await runDoctor({ runtime: 'foo' }, { homeDir, env: { CLAUDECODE: '1' }, ...healthyDeps() })
+    expect(bogus.checks.find((c) => c.id === 'restart')?.detail).toContain('No restart requirement known')
+  })
+
+  it('a record-resolved runtime says where it came from on the runtime_config verdict; an explicit flag does not (#3210 review)', async () => {
+    const { homeDir, dir } = await healthyHome()
+    await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), JSON.stringify({ runtime: 'cursor' }))
+    const fromRecord = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    const rc = fromRecord.checks.find((c) => c.id === 'runtime_config')
+    // Names the RUNTIME and the file — the README/CHANGELOG claim is both halves.
+    expect(rc?.detail).toContain(`(Resolved 'cursor' from ${join(dir, CONNECT_OUTCOME_FILENAME)}; pass --runtime to check a different one.)`)
+    const explicit = await runDoctor({ runtime: 'cursor' }, { homeDir, ...healthyDeps() })
+    expect(explicit.checks.find((c) => c.id === 'runtime_config')?.detail).not.toContain('(Resolved ')
+  })
+
+  it('unknown runtime: no repair string is a bare `--doctor --repair`, which the parser refuses (#3210 review)', async () => {
+    // Credentials but NO prepared signer runtime, so signer_runtime and
+    // signer_process both fail with a --repair hint on the unknown path.
+    const homeDir = await mkdtemp(join(tmpdir(), 'haven-doctor-'))
+    await seedCredentials(homeDir)
+    const report = await runDoctor({ runtime: '' }, { homeDir, ...healthyDeps() })
+    const repairs = [...report.checks, ...report.agents.flatMap((a) => a.checks)]
+      .map((c) => c.repair ?? '')
+      .filter((r) => r.includes('--repair'))
+    expect(repairs.length).toBeGreaterThanOrEqual(2)
+    for (const repair of repairs) {
+      expect(repair, repair).not.toMatch(/--doctor --repair(?:\s*$|\s+[^-])/)
+      expect(repair, repair).toContain('--runtime <runtime>')
+      expect(repair, repair).toContain('one of: claude-code')
+    }
+    // ...and with the runtime known, the same hints carry the real value.
+    const known = await runDoctor({ runtime: 'codex-cli' }, { homeDir, ...healthyDeps() })
+    for (const c of known.checks) {
+      if (c.repair?.includes('--repair')) expect(c.repair).toContain('--doctor --repair --runtime codex-cli')
+    }
+    await rm(homeDir, { recursive: true, force: true })
   })
 
   it('no rendered check string ever carries a bare --runtime (the paste-truncation bug)', async () => {

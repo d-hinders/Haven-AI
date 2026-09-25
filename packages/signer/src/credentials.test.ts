@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -164,6 +164,19 @@ describe('warnIfCredentialFilePermissive', () => {
     expect(logged[0]).toContain(file)
     expect(logged[0]).toMatch(/chmod 600/)
     expect(logged[0]).toMatch(/0644/)
+  })
+
+  it('#3172: a credential reached through a symlink is judged by its target — a link to a 0600 file stays silent', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'haven-signer-perm-'))
+    const target = join(dir, 'signer.json')
+    const link = join(dir, 'signer-link.json')
+    await writeFile(target, '{}')
+    await chmod(target, 0o600)
+    await symlink(target, link)
+
+    const logged: string[] = []
+    await warnIfCredentialFilePermissive(link, (m) => logged.push(m), 'linux')
+    expect(logged).toEqual([])
   })
 
   it('skips the check on Windows where mode bits do not map cleanly', async () => {

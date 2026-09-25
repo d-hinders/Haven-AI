@@ -1,0 +1,99 @@
+name: Release the claim on merge
+
+# Posts the `🔓 RELEASE` the claim protocol asks for (AGENTS.md § Cross-session
+# agent coordination) at the one moment the repository KNOWS the work landed:
+# when a pull request merges. For every issue the PR closed it comments
+# `🔓 RELEASE #N — landed as PR #<pr> …` on the issue, unassigns everyone still
+# assigned there, and repeats the line on the coordination channel if a claim for that issue is
+# anywhere in that thread. Decision logic, fetch and every write live in
+# `scripts/ci/release-on-merge.mjs`, under `node --test` (#3177).
+#
+# ## Which issues "the PR closed"
+#
+# Candidates are GitHub's `closingIssuesReferences` (first 50) — which carries
+# only the references linked from the PR BODY (measured on PR #2314: a closing
+# keyword for #2268 in a commit message closed that issue and is absent from
+# the list) — plus the closing keywords in the title and every commit message
+# (up to 500), read with the grammar the operator-verify close guard maintains.
+# Every candidate is then read back from GitHub and released ONLY if it is
+# closed with `closed_at` in [`merged_at`, `merged_at` + 5 min] — closed BY
+# THIS MERGE (GitHub stamps the close 1–2 s after the merge; measured 2026-09-20
+# on 83 merge→close pairs over the last 100 merges into dev, the two outliers
+# being exactly a pre-closed mention and a re-close 2.5 days later). "Referenced and closed some time ago" releases nothing: during
+# review, this PR's body at the time linked #2268 (closed 2026-09-02 by a
+# person, unrelated) and the rule left it alone; the upper bound also leaves
+# alone an issue the merge closed but a person reopened and re-closed later.
+# A candidate that is a pull request is skipped. A merge into a non-default
+# branch releases nothing at all — GitHub closes nothing there — so a
+# `dev → main` promotion (thirty `Closes #` commit lines) never spams the channel.
+# Idempotent whenever the thread can be read; an unreadable read fails open to
+# one duplicate line, never to a missed release.
+#
+# ## Why a bot release
+#
+# The protocol asked the author to release "every place you claimed" after the
+# PR opened — the moment attention had already moved on. Measured 2026-09-19
+# on #1289 with a plain regex: 60 issue numbers claimed with no matching
+# RELEASE, 58 on issues that had closed via a PR (the projection's own parser
+# counts 33 — the method halves the number, not the shape). The default token
+# cannot post as the PR author, so the release is posted as
+# `github-actions[bot]`; the unassign is done here directly. The bot's comment
+# does NOT re-enter `claim-assignee.yml`: a comment posted with `GITHUB_TOKEN`
+# never triggers an `issue_comment` run (GitHub's non-recursion rule — the
+# morning report's eleven bot comments produced zero projection runs).
+#
+# ## What it will not do
+#
+# - A PR closed WITHOUT merging releases nothing: the work did not land and
+#   the claim is still live (tested; the merged filter is the whole safety).
+# - `Refs #N` (operator-verify mode) is neither a keyword nor a linked
+#   reference, so an issue held open for a human step keeps its claim.
+# - It never touches the channel's assignees, never closes or labels anything, and
+#   never fails the build: a failed read or a refused write is logged, exit 0.
+#
+# ## Trust boundary
+#
+# `pull_request` (not `pull_request_target`): a fork's PR runs with a read-only
+# token and every write is refused and logged. The event is read from the file
+# GitHub provides; comment bodies go to `gh` on stdin, never argv. The checkout
+# is pinned to the BASE branch — the head branch is deleted on merge, and the
+# script that runs is then the base's copy, not the PR's.
+#
+# First proof: this workflow's first run is the merge of the PR that adds it.
+# Watch that run (`gh run list --workflow claim-release-on-merge.yml`).
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  issues: write        # comment + unassign
+  pull-requests: read  # closingIssuesReferences
+
+jobs:
+  release:
+    name: Post the release for every issue this merge closed
+    if: >-
+      github.repository == 'd-hinders/Haven-AI' &&
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The head branch is deleted on merge; the base is durable, and its
+          # copy of the script is the one that should run after a merge.
+          ref: ${{ github.event.pull_request.base.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Decide and apply
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        # The event payload is read from the file GitHub provides, never
+        # interpolated: it carries the PR body, which is public text. Fetch,
+        # decision and every write live in the script, under `node --test`;
+        # a failed read is logged and the step exits 0.
+        run: node scripts/ci/release-on-merge.mjs --event "$GITHUB_EVENT_PATH" --apply

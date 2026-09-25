@@ -536,7 +536,8 @@ export const CONFIRM_SUBMITTED_INTENT_SQL = `UPDATE payment_intents
              tx_hash = $1,
              confirmed_at = NOW(),
              usd_value = $3,
-             eur_value = $4
+             eur_value = $4,
+             sek_value = $6
          WHERE id = $2 AND agent_id = $5 AND status = 'submitted'
          RETURNING id`
 
@@ -548,6 +549,7 @@ export async function confirmSubmittedIntent(
     usdValue: number | string | null
     eurValue: number | string | null
     agentId: string
+    sekValue: number | string | null
   },
   db: Executor = pool,
 ): Promise<boolean> {
@@ -557,6 +559,7 @@ export async function confirmSubmittedIntent(
     input.usdValue,
     input.eurValue,
     input.agentId,
+    input.sekValue,
   ])
   return result.rows.length > 0
 }
@@ -642,6 +645,11 @@ export const CONFIRM_MACHINE_INTENT_SQL = `UPDATE payment_intents
          AND status = 'pending_signature'
          AND tx_hash IS NULL
        RETURNING id`
+// Callerless since #1987 — and deliberately NOT migrated to the three-currency
+// booking (#3127): a revival that books only usd/eur would HALF-BOOK the row
+// (NULL `sek_value` beside booked siblings), which the live confirm path
+// refuses. If this statement comes back, it must book `sek_value` from the
+// same fiat read in the same UPDATE, or be deleted instead of revived.
 
 
 export const FAIL_MACHINE_INTENT_SQL = `UPDATE payment_intents

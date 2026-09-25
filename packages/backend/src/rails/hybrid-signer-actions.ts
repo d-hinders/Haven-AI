@@ -23,7 +23,6 @@ import {
   removeAccountPasskey,
   setAccountOwnerAddress,
 } from '../infra/repositories/hybrid-signers.js'
-import { getChain } from '../domain/chains.js'
 import type { HybridOwnerConfig } from './hybrid-provisioning.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
 import { redactVendorSecrets } from './execution-rail.js'
@@ -47,7 +46,7 @@ export interface SignerActionBody {
 export interface SignerActionAccount {
   accountAddress: Address
   chainId: number
-  userSafeId: string
+  accountId: string
   config: HybridOwnerConfig
   /**
    * The account's recorded single-signer waiver (#908), when loaded. Consulted
@@ -238,7 +237,6 @@ export async function prepareSignerChange(
       accountAddress: account.accountAddress,
       chainId: account.chainId,
       bundlerUrl: delegationRailBundlerUrl(account.chainId),
-      rpcUrl: getChain(account.chainId).rpcUrl,
       sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
       signWith: resolved.scheme === 'webauthn_userop' ? 'passkey' : 'owner',
     })
@@ -311,7 +309,6 @@ export async function submitSignerChange(
       accountAddress: account.accountAddress,
       chainId: account.chainId,
       bundlerUrl: delegationRailBundlerUrl(account.chainId),
-      rpcUrl: getChain(account.chainId).rpcUrl,
       sponsorshipPolicyId: process.env.DELEGATION_RAIL_SPONSORSHIP_POLICY_ID || undefined,
     })
     const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>
@@ -323,17 +320,17 @@ export async function submitSignerChange(
     )
 
     if (body.action === 'add_passkey' && body.passkey) {
-      await addAccountPasskey(account.userSafeId, {
+      await addAccountPasskey(account.accountId, {
         keyId: String(body.passkey.key_id),
         x: String(body.passkey.x),
         y: String(body.passkey.y),
       })
     } else if (body.action === 'remove_passkey' && body.passkey) {
-      await removeAccountPasskey(account.userSafeId, String(body.passkey.key_id))
+      await removeAccountPasskey(account.accountId, String(body.passkey.key_id))
     } else if (body.action === 'add_owner') {
-      await setAccountOwnerAddress(account.userSafeId, String(body.owner_address))
+      await setAccountOwnerAddress(account.accountId, String(body.owner_address))
     } else if (body.action === 'remove_owner') {
-      await clearAccountOwnerAddress(account.userSafeId)
+      await clearAccountOwnerAddress(account.accountId)
     }
     return { ok: true, txHash: result.txHash }
   } catch (err) {

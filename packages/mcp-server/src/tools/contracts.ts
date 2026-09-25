@@ -157,7 +157,7 @@ export const toolSchemas = {
   // tool answers a coverage question about a stated amount, never an
   // open-ended balance read.
   haven_check_funds: {
-    token: z.string().min(1),
+    token: z.string().min(1).describe('ERC-20 contract address (0x…) or the symbol of one of this agent\'s allowances'),
     max_amount: z
       .string()
       .regex(/^[0-9]+$/, 'max_amount must be a decimal atomic amount')
@@ -1110,7 +1110,7 @@ const SWEEP_DELEGATE_DESCRIPTION = [
 // shared fragment's summary leads verbatim so the drift test holds.
 const CHECK_FUNDS_DESCRIPTION = [
   sharedDescriptions.checkFunds.summary + '.',
-  'Pass the token contract address and exactly ONE amount spelling: max_amount_human (whole tokens, preferred) or max_amount (atomic units).',
+  'Pass the token address or allowance symbol and ONE amount spelling: max_amount_human (whole tokens, preferred) or max_amount (atomic).',
   'Returns covered: true (holds at least the amount), false (a live chain read reports less — stop and tell the user the funds are missing), or null (the read failed — unverifiable, never absence; coverage_error says why).',
   'The balance itself is deliberately not returned — a sufficiency signal, not a balance read; budget_remaining_atomic is the PERMITTED figure (haven_get_allowances).',
   'Read-only: grants no authority, moves nothing; both retired rails answer 410.',

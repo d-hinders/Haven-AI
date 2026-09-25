@@ -10,6 +10,15 @@ export {
   type X402HeaderResult,
 } from './core.js'
 
+/**
+ * #3272: the counterfactual HybridDeleGator account derivation
+ * `haven_sign`'s unbound-branch allowlist uses to decide "is this MY
+ * account". Exported so embedders and tests can compute the same address
+ * offline, without depending on `@metamask/smart-accounts-kit` (a
+ * devDependency here) at runtime.
+ */
+export { deriveDelegateAccountAddress } from '@haven_ai/sdk/edge'
+
 export {
   signerCapabilityAdvertisement,
   signerCompatibility,
@@ -60,13 +69,24 @@ export {
 } from './consent.js'
 
 export {
+  AUDIT_ROTATE_BYTES,
   appendSigningAuditEntry,
   createSigningAuditEntry,
   defaultSigningAuditPath,
   hashPayloadForAudit,
+  type AppendAuditOptions,
   type SigningAuditContext,
   type SigningAuditEntry,
 } from './audit.js'
+export {
+  OWNER_ONLY_MODE,
+  permissiveMode,
+  tightenIfFilePermissive,
+  warnIfFilePermissive,
+  type PermissionLog,
+  type PermissiveFile,
+  type TightenOutcome,
+} from './file-mode.js'
 
 // #3103: the hosted tools this signer hands off to, declared here and pinned to the hosted schemas in the hosted server's suite.
 export { SIGNER_HOSTED_HANDOFF_SHAPES } from './next-step.js'

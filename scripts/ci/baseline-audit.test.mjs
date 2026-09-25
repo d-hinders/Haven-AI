@@ -21,6 +21,7 @@ import {
   auditBaselines,
   baselineName,
   commitTrailer,
+  movedOutput,
   parseExpected,
   parseMode,
   parseStatusZ,
@@ -180,6 +181,16 @@ test('the commit trailer records the mode and the moved set', () => {
   assert.match(empty, /\(none\)/)
 })
 
+test('the moved output is one line of JSON naming each baseline and its status (#3233)', () => {
+  const result = auditBaselines({ mode: 'all', expected: ['*'], changes: [INTENDED, COLLATERAL] })
+  const parsed = JSON.parse(movedOutput(result))
+  assert.equal(parsed.length, 2)
+  assert.ok(parsed.every((m) => typeof m.name === 'string' && typeof m.status === 'string' && typeof m.path === 'string'))
+  assert.ok(parsed.some((m) => m.name === 'agentcard-banner-stranded-desktop.png'))
+  assert.doesNotMatch(movedOutput(result), /\n/)
+  assert.equal(movedOutput(auditBaselines({ mode: 'changed', expected: [], changes: [] })), '[]')
+})
+
 test('the report carries the before/after blob hashes, not just the names', () => {
   // The audit that caught #2217 was a blob-hash diff. A report that only names
   // files would not let the next reader do what its author did.
@@ -310,6 +321,11 @@ test('CLI: an undeclared full refresh exits non-zero and says so (#2722)', () =>
   // that prints correctly while writing nowhere is invisible in Actions.
   assert.match(wrote['summary.md'] ?? '', /undeclared-full-refresh|Mode `all` rewrites a baseline/)
   assert.match(wrote['output.txt'] ?? '', /^trailer=/m)
+  // #3233: the follow-up step reads this to list what was regenerated.
+  assert.match(
+    wrote['output.txt'] ?? '',
+    /^moved=\[\{"name":"dashboard\.png","path":"packages\/frontend\/e2e\/__screenshots__\/dashboard\.png","status":"(?:added|modified)"\}\]$/m,
+  )
 })
 
 test('CLI: the same moved baseline under `changed` is reported and exits 0 (#2722)', () => {

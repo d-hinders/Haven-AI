@@ -127,7 +127,8 @@ export async function listUserPasskeys(
 
 /**
  * The passkey bound to (user, safe, chain) — the ownership check the
- * passkey-Safe exec path runs before building any transaction. `userId` is
+ * passkey-Safe exec path ran before building any transaction (that path went
+ * with `POST /safe/exec` in #2847). `userId` is
  * REQUIRED.
  */
 export async function findPasskeyForAccount(
@@ -191,10 +192,10 @@ export async function bindPasskeyToAccount(
   return (result.rowCount ?? 0) > 0
 }
 
-// `bindPasskeySignerToSafe` — bind by signer ADDRESS rather than credential id,
+// `bindPasskeySignerToAccount` — bind by signer ADDRESS rather than credential id,
 // the form the approver routes had — is deleted with them (#1988). Nothing
 // else called it. `bindPasskeyToAccount` above stays: the owner-signed execution
 // route used to claim an unbound backup passkey on the fast path once it had
-// verified the signer against the Safe's live on-chain owner list, until
+// verified the signer against the account's live on-chain owner list, until
 // #2847 deleted that route; the helper has no route caller since, and goes
 // with the `user_passkeys` table in a later slice.

@@ -51,6 +51,6 @@ Stop and report on the **first failed step** rather than pressing on (a failed m
 11. Fill in run metadata, exact command/exit, per-goal pass/fail/skip, public
     evidence, artifacts, cleanup, secret review, versions, and concrete
     friction/bugs. A required skip makes the result partial/blocked.
-12. File any concrete bug as its own issue and link it from the report. Leave **Notes for the coding agent** with anything worth feeding back.
+12. File any concrete bug as its own issue through `/new-task` (backlog-only) and link it from the report. Leave **Notes for the coding agent** with anything worth feeding back.
 
 The run report (not a green check) is the deliverable — this layer's value is the friction it surfaces, not a pass/fail gate.

@@ -11,7 +11,10 @@ import {
   type MonthlySpendRow,
 } from '../infra/repositories/dashboard.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
-import { fetchPortfolioForAccount } from '../modules/accounts/index.js'
+import {
+  combineBalanceFreshness,
+  fetchPortfolioForAccount,
+} from '../modules/accounts/index.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import {
   compareTransactions,
@@ -20,6 +23,7 @@ import {
   enrichTransactionsWithAgents,
   fetchAccountTransactions,
   mergeX402Transactions,
+  resolveTransactionCurrency,
 } from '../modules/transactions/index.js'
 
 const AGENT_PREVIEW_LIMIT = 6
@@ -40,26 +44,47 @@ function computePercentChange(current: number, previous: number): number {
 
 async function accumulateMonthlySpend(
   rows: MonthlySpendRow[],
-): Promise<{ usd: number; eur: number }> {
+): Promise<{ usd: number; eur: number; sek: number }> {
   let usd = 0
   let eur = 0
+  let sek = 0
 
   for (const row of rows) {
     usd += Number(row.usd_sum ?? '0')
     eur += Number(row.eur_sum ?? '0')
+    sek += Number(row.sek_sum ?? '0')
 
+    // Two INDEPENDENT re-price buckets. `getFiatValuesForTokenAmount` prices
+    // the token amount into all three currencies, but each bucket may only
+    // land its own currency: `sek_sum` already holds every row's booked
+    // `sek_value`, and pricing SEK from the USD/EUR bucket's read is the
+    // double-count the round-3 review measured (21 vs 10.5) — migration 090
+    // backfills rows whose usd/eur are NULL, so the USD/EUR predicate
+    // collects rows SEK has already priced. The row shapes are disjoint
+    // neither way: a row can carry a booked SEK figure and still need the
+    // USD/EUR re-price, or the reverse, so neither bucket may `continue` the
+    // other.
     const fallbackAmount = Number(row.fallback_amount ?? '0')
-    if (fallbackAmount <= 0) continue
+    if (fallbackAmount > 0) {
+      const fallback = await getFiatValuesForTokenAmount(
+        row.token_symbol,
+        fallbackAmount.toString(),
+      )
+      usd += fallback.usd ?? 0
+      eur += fallback.eur ?? 0
+    }
 
-    const fallback = await getFiatValuesForTokenAmount(
-      row.token_symbol,
-      fallbackAmount.toString(),
-    )
-    usd += fallback.usd ?? 0
-    eur += fallback.eur ?? 0
+    const fallbackAmountSek = Number(row.fallback_amount_sek ?? '0')
+    if (fallbackAmountSek > 0) {
+      const sekFallback = await getFiatValuesForTokenAmount(
+        row.token_symbol,
+        fallbackAmountSek.toString(),
+      )
+      sek += sekFallback.sek ?? 0
+    }
   }
 
-  return { usd, eur }
+  return { usd, eur, sek }
 }
 
 export default async function dashboardRoutes(
@@ -71,7 +96,7 @@ export default async function dashboardRoutes(
     const { sub } = request.user as { sub: string }
 
     const [
-      safes,
+      accounts,
       agents,
       firstAgentPayment,
     ] = await Promise.all([
@@ -98,11 +123,22 @@ export default async function dashboardRoutes(
     }
 
     const currentPortfolio = await Promise.all(
-      safes.map((safe) => fetchPortfolioForAccount(safe.chain_id, safe.account_address)),
+      accounts.map((account) => fetchPortfolioForAccount(account.chain_id, account.account_address)),
+    )
+
+    // #3295: a portfolio whose balance read failed serves the last-known
+    // balances, marked stale (or unavailable when nothing was ever read).
+    // The totals already use those substituted values, so a degraded read
+    // shows the last figure we actually saw — never an understated zero.
+    const balancesDegraded = combineBalanceFreshness(
+      currentPortfolio.flatMap((portfolio) =>
+        (portfolio.breakdown ?? []).map((item) => item.balanceFreshness),
+      ),
     )
 
     const totalUsd = currentPortfolio.reduce((sum, item) => sum + item.totalUsd, 0)
     const totalEur = currentPortfolio.reduce((sum, item) => sum + item.totalEur, 0)
+    const totalSek = currentPortfolio.reduce((sum, item) => sum + item.totalSek, 0)
 
     const todayDate = getSnapshotDate(0)
     const yesterdayDate = getSnapshotDate(-1)
@@ -114,39 +150,40 @@ export default async function dashboardRoutes(
     )
 
     if (!snapshotsByDate.has(todayDate)) {
-      await insertPortfolioSnapshot(sub, todayDate, totalUsd, totalEur)
+      await insertPortfolioSnapshot(sub, todayDate, totalUsd, totalEur, totalSek)
     }
 
     const yesterdaySnapshot = snapshotsByDate.get(yesterdayDate)
     const previousUsd = Number(yesterdaySnapshot?.total_usd ?? '0')
     const previousEur = Number(yesterdaySnapshot?.total_eur ?? '0')
+    // A pre-090 snapshot carries total_sek NULL: treated as "no SEK figure for
+    // that day", not as a real zero — a zero would fabricate a -100% change.
     const changeAvailable = Boolean(yesterdaySnapshot)
-
-    // #2055: the approval-spend bucket is gone with approval_requests —
-    // monthly spend is payment_intents alone now (historical executed-approval
-    // spend disappears with the table, per the #2021 readability waiver).
+    const sekChangeAvailable = changeAvailable && yesterdaySnapshot?.total_sek != null
+    const previousSek = Number(yesterdaySnapshot?.total_sek ?? '0')
     const paymentSpendRows = await sumMonthlyPaymentSpend(sub)
     const paymentSpend = await accumulateMonthlySpend(paymentSpendRows)
 
     const monthlySpendUsd = paymentSpend.usd
     const monthlySpendEur = paymentSpend.eur
+    const monthlySpendSek = paymentSpend.sek
 
     const mergedTransactions: EnrichedTransaction[] = []
     const transactionResults = await Promise.allSettled(
-      safes.map(async (safe) => {
+      accounts.map(async (account) => {
         const { transactions } = await fetchAccountTransactions({
-          accountId: safe.id,
-          accountAddress: safe.account_address,
-          chainId: safe.chain_id,
+          accountId: account.id,
+          accountAddress: account.account_address,
+          chainId: account.chain_id,
           log: request.log,
         })
 
         return transactions.map((tx) => ({
           ...tx,
-          chainId: safe.chain_id,
-          accountId: safe.id,
-          accountAddress: safe.account_address,
-          accountName: safe.name,
+          chainId: account.chain_id,
+          accountId: account.id,
+          accountAddress: account.account_address,
+          accountName: account.name,
         }))
       }),
     )
@@ -157,16 +194,16 @@ export default async function dashboardRoutes(
         return
       }
 
-      const safe = safes[index]
+      const account = accounts[index]
       request.log.warn(
-        { err: result.reason, accountId: safe.id, chainId: safe.chain_id },
+        { err: result.reason, accountId: account.id, chainId: account.chain_id },
         'Dashboard transaction aggregation failed',
       )
     })
 
     const visibleTransactions = await mergeX402Transactions(
       sub,
-      safes,
+      accounts,
       mergedTransactions,
     )
 
@@ -183,6 +220,10 @@ export default async function dashboardRoutes(
     const enrichedTransactions = await enrichTransactionsWithAgents(
       sub,
       dedupedTransactions,
+      // The preview names its currency like the feed does (#3127 round-3
+      // review): without the preference, the same payment is SEK here and
+      // USD on /transactions for a USD user.
+      await resolveTransactionCurrency(sub),
     )
 
     const successfulTransactions = dedupedTransactions.filter((tx) => !tx.isError).length
@@ -191,20 +232,43 @@ export default async function dashboardRoutes(
       totals: {
         usd: totalUsd,
         eur: totalEur,
+        sek: totalSek,
       },
       change: {
         available: changeAvailable,
-        usdAmount: totalUsd - previousUsd,
-        eurAmount: totalEur - previousEur,
+        // #3295: when some token has no known value, the totals are
+        // understated by an unknown amount — the change is reported as
+        // unavailable (null amounts), never as a swing computed from a zero.
+        // Marked-stale tokens still diff normally: the last-known figures are
+        // on both sides of the subtraction.
+        usdAmount: balancesDegraded?.status === 'unavailable' ? null : totalUsd - previousUsd,
+        eurAmount: balancesDegraded?.status === 'unavailable' ? null : totalEur - previousEur,
+        // Null, not 0, when yesterday's snapshot predates migration 090: the
+        // wire distinguishes "no SEK figure to diff against" from "changed by
+        // exactly 0", and the frontend reports the change as unavailable
+        // rather than fabricating a -100% swing from a missing baseline.
+        sekAmount:
+          sekChangeAvailable && balancesDegraded?.status !== 'unavailable'
+            ? totalSek - previousSek
+            : null,
         usdPercent: changeAvailable ? computePercentChange(totalUsd, previousUsd) : 0,
         eurPercent: changeAvailable ? computePercentChange(totalEur, previousEur) : 0,
+        // sekPercent 0 beside sekAmount null is deliberate: the frontend
+        // branches on the AMOUNT (null = "change unavailable") and never
+        // reads the percentage in that state — the schema wants a number, so
+        // 0 is the inert filler, not a claim the change was zero.
+        sekPercent: sekChangeAvailable ? computePercentChange(totalSek, previousSek) : 0,
+        // Additive (#3295): present only when at least one token's read is
+        // stale or unavailable; absent on a clean read.
+        ...(balancesDegraded ? { balancesFreshness: balancesDegraded } : {}),
       },
       metrics: {
         connectedAgents: activeAgents.length,
         monthlyAgentSpendUsd: monthlySpendUsd,
         monthlyAgentSpendEur: monthlySpendEur,
+        monthlyAgentSpendSek: monthlySpendSek,
         successfulTransactions,
-        activeAccounts: safes.length,
+        activeAccounts: accounts.length,
       },
       actionableApprovals,
       pendingApprovals: actionableApprovals,
@@ -238,6 +302,11 @@ export default async function dashboardRoutes(
           decimals: tx.decimals,
           direction: tx.direction,
           timestamp: tx.timestamp,
+          // #3132: the preview carries the same synthesized x402 rows as the
+          // feed, so the marked fallback must reach it too (no `scope`: the
+          // preview is not a list query).
+          timestampSource: tx.timestampSource,
+          confirmedAt: tx.confirmedAt,
           blockNumber: tx.blockNumber,
           isError: tx.isError,
           tokenAddress: tx.tokenAddress,

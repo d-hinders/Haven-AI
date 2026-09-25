@@ -63,9 +63,11 @@ describe('runtimeStatusHelper for config failures (#1719)', () => {
 
   it('spells the repair command WITH --runtime, because the parser requires it', () => {
     // #1719 design review (blocking): the connector's arg parser refuses
-    // --doctor/--repair without --runtime and has no detection fallback on
-    // that path. A command missing it reproduces the failure with a second,
-    // less legible error — advice worse than none.
+    // --repair without --runtime and has no detection fallback on that path
+    // (since #3210 only --repair; a flagless --doctor resolves the runtime
+    // from the setup record — this command always carries --repair). A
+    // command missing it reproduces the failure with a second, less legible
+    // error — advice worse than none.
     expect(runtimeStatusHelper(installWith('runtime_config_unreadable'))).toContain(
       '--doctor --repair --runtime cursor',
     )

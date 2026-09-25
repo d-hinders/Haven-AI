@@ -61,7 +61,7 @@ It exposes four stdio MCP tools, all sign-only:
 
 | Tool | Does | Emits |
 |---|---|---|
-| `haven_sign` | Sign one payment. Preferred form is `{ payment_id }` alone — the signer fetches the exact payload itself. Signs an EIP-712 typed-data payload on the delegation rail (a redemption, or an erc7710 settlement child), or a bare `payload_hash` on a v1 context; for the EIP-3009 x402 bridge it also records the funding context and returns a binding | `{ signature }` or `{ signature, x402_binding }` |
+| `haven_sign` | Sign one payment. Preferred form is `{ payment_id }` alone — the signer fetches the exact payload itself. Signs only Haven-prepared payloads (#3272, #3281): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account, or — against a Haven-signed context, which it records and binds — an EIP-3009 funding leg of that same shape paying this signer's own delegate EOA, or an erc7710 settlement child from this signer's own account; other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }` or `{ signature, x402_binding }` |
 | `haven_sign_x402` | One-shot x402: funding signature **and** the merchant header in a single local call (`haven_sign` + `haven_x402_sign_header`). `{ payment_id }` alone is the preferred call | `{ signature, x402_binding, payment_header, accepted }` |
 | `haven_x402_sign_header` | Build + sign the EIP-3009 merchant payment header, only when the fresh merchant `payment_required` matches the recorded `x402_binding` | `{ payment_header, accepted }` |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless EIP-3009 sweep that recovers stranded funds from the delegate wallet back to your own account. Never broadcasts | `{ signature }` |
@@ -70,7 +70,8 @@ The `initialize` handshake advertises which binding versions this signer
 understands, under `capabilities.experimental['haven/signer-compatibility']`
 and in the MCP `instructions` string. Both are **derived** from
 `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS` in
-`src/core.ts` — the same constants the signing path enforces — so this README
+`src/core.ts` and `SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS` in
+`src/sign-context.ts` (#3271) — the same constants the signing path enforces — so this README
 deliberately does not restate the numbers. Read them from the handshake, or
 from those constants.
 
@@ -93,11 +94,106 @@ const { paymentHeader } = await signer.buildX402PaymentHeader(
 )
 ```
 
-The signer also exposes `signPaymentHash(hash)` (raw ECDSA over a legacy
-AllowanceModule funding/transfer hash) and `signX402FundingHash(hash, expected)`
-for v1 contexts, and `signSweepAuthorization(input)` for the gasless sweep. All
-six are methods on the object `createEdgeSigner` returns, not standalone
-exports.
+The signer also exposes `signSweepAuthorization(input)` for the gasless sweep.
+All four are methods on the object `createEdgeSigner` returns, not standalone
+exports. There is NO raw-hash primitive: `signPaymentHash(hash)` (raw ECDSA over
+the retired AllowanceModule rail's hash) was removed in #3169, and
+`signX402FundingHash` (the expected-context v1 bare-hash path) in #3272 — the
+signer supports expected-context versions 2 and 3 only. **Library boundary
+(#3272):** `signDelegationTypedData` is a verbatim primitive for embedders —
+it signs whatever typed data it is handed. The allowlist lives in the MCP tool
+layer: `haven_sign` signs typed data only when it is a bound direct-payment
+`PackedUserOperation` (below) or an x402 payload against a Haven-signed context,
+refuses anything else with `TYPED_DATA_NOT_ALLOWED`, and answers a bare
+`payload_hash` with `BARE_HASH_REFUSED`. An embedder that calls
+`signDelegationTypedData` directly owns that check itself. The core's
+`signX402FundingTypedData` is not a verbatim primitive: since #3281 it runs
+the x402 shape checks itself (a guarded funding leg or a verified settlement
+child only), whoever calls it.
+
+**The unbound-branch allowlist (#3272).** Without an x402 context, `haven_sign`
+signs typed data only when ALL of these hold; otherwise it refuses, with no
+signature and no audit entry (`TYPED_DATA_NOT_ALLOWED`, or
+`USEROP_BINDING_MISMATCH` when the #3271 binding check fails, or the #1476
+refusal for an unbound `Delegation`): the primary type is
+`PackedUserOperation`; it passes the #3271 binding check below; its chain has pinned delegation contracts (Base, Base Sepolia); its
+sender is THIS signer's own delegate account (the counterfactual
+HybridDeleGator for the delegate key, derived offline — `delegate-account.ts` in `@haven_ai/sdk`);
+and its `callData` is a single `execute` to the DelegationManager calling
+`redeemDelegations`, whose arguments are decoded too (`redemption-guard.ts` in `@haven_ai/sdk`):
+exactly one delegation (a single grant, never an empty or multi-link chain)
+made to this signer's own account by a different account, `SingleDefault` mode, and canonical
+encoding at every level. The argument check matters: an EMPTY permission
+context makes the DelegationManager run the execution as the account itself,
+which would reach `transferOwnership`. A delegate-wallet `TransferWithAuthorization` or `Permit`,
+a UserOp that calls the account itself (`transferOwnership`, `updateSigners`,
+`upgradeToAndCall`), a UserOp for another account, and arbitrary typed data are
+all refused. The audit log records the EIP-712 digest actually signed, not the
+caller's `payload_hash`. Since #3283 the check itself is `@haven_ai/sdk`'s
+`assertBoundDirectPaymentUserOp` (with the redemption guard, the account
+derivation and the settlement-child verifier), which this signer imports and
+which `HavenClient.signForData` runs as well — one implementation.
+
+**Direct payments (#3271).** A direct payment (`POST /payments`, surfaced as
+`haven_send` / `haven_pay`) is signed as the account's EIP-712
+`PackedUserOperation`, and Haven returns both that typed data and
+`payload_hash` — the ERC-4337 v0.7 UserOperation hash of the same operation.
+Before `haven_sign` signs one, it recomputes that hash from the typed data's
+own domain, types and message and refuses (`USEROP_BINDING_MISMATCH`) unless
+it equals `payload_hash` exactly, in the HybridDeleGator domain of the typed
+data's own sender, against the v0.7 EntryPoint. This is a **corruption**
+check: the caller supplies both values, so it proves they describe the same
+operation, never that Haven prepared it — provenance is `payment_id` (below).
+It runs whether the typed data arrived as a tool argument or by the
+`payment_id` fetch; a fetched direct context that is not a
+`PackedUserOperation` at all is refused by the same check. The x402 EIP-3009
+bridge's funding leg is checked against the Haven-signed expected context AND,
+since #3281, by this same binding check against the declared UserOp hash, the
+direct-payment allowlist and a recipient pin (a transfer of the quoted amount
+to this signer's own delegate EOA). A settlement child must be re-delegated
+from this signer's own account, never a ROOT grant. Anything else on the x402
+arm is `TYPED_DATA_NOT_ALLOWED`, however validly Haven's binding key declared
+it. The check exists because this typed data is
+multi-KB and can reach the signer through a language model relaying it by
+hand: one corrupted character used to produce a valid-looking signature over
+the wrong digest, surfacing only as an opaque `AA24 signature error` from the
+bundler, after the signature was already produced.
+
+## Startup, CLI options and the consent screen (#3173)
+
+**Startup cost.** The signer loads `@haven_ai/sdk/edge` — the ethers-free
+subset of the SDK it actually calls (error classes, typed-next-step builder,
+x402 message builders, viem-based key helpers) — never the SDK barrel, and it
+loads the `x402` package only on the merchant-header leg, on first use. Measured
+on the same machine (median of 5 cold runs, macOS, Node 22): `--help` 1.47 s →
+0.71 s; the consent refusal 1.55 s → 0.77 s; `import('@haven_ai/sdk')` 1135 ms
+versus `import('@haven_ai/sdk/edge')` 385 ms, of which viem is ~330 ms and stays
+(the signer signs typed data with it). A loader hook resolving every module at
+startup finds zero packages named `ethers` or `x402` (the SDK barrel, as a
+positive control, resolves two). Two tests keep it so: `sdk-edge-import.test.ts`
+fails if any runtime file imports the barrel or `x402/schemes` statically, and
+the SDK's `edge-imports.test.ts` fails if the subpath's import graph ever
+reaches ethers, `x402` or the HTTP client.
+
+**CLI.** `--credentials <path>` (alias `--credentials-path`), `--ack`,
+`--help`/`-h`. Any other option is
+refused with one stderr line naming `--help` and exit code 2 — before #3173 an
+unknown flag was silently ignored, so `--ack-local-tools` (the connector's
+flag, which the connector's doctor tells you to pass to the *connector*)
+produced only the consent wall. `--help` lists every registered tool (pinned
+against `toolSchemas`, so a fifth tool cannot drift out of the text) and names
+`npx @haven_ai/connect --doctor`.
+
+**Consent screen.** The first-launch block summarises each tool in one
+human-sized line (the full agent-facing descriptions are what the runtime sees,
+not what a person approves) and ends by naming the connector's doctor for the
+connector-wired case, where the doctor shows this as a failed *Signer stdio
+handshake* check (the connector's setup outcome reports it as
+`local_signer_ack_required`) and the repair is the connector's
+`--ack-local-tools`. The refusal an MCP host
+relays ("Connection closed" plus this process's exit message) names the same
+command. The consent hash covers identity, tool names and the surface version —
+not the block's prose — so neither change re-prompts an acknowledged install.
 
 ## Orchestration
 
@@ -156,6 +252,10 @@ funding confirms — so relay it promptly.
 
 ## What the signer refuses to sign
 
+(`USEROP_BINDING_MISMATCH`, the #3271 direct-payment refusal, is described
+under [Two ways to use it](#two-ways-to-use-it) and in the
+[refusal table](#sign-context-refusal-codes).)
+
 These are local, independent checks. They do not trust Haven's assertion about
 what a payload means; they re-derive it.
 
@@ -164,9 +264,9 @@ what a payload means; they re-derive it.
   `x402_binding_signer` in the credential file) so the signer can reject
   locally invented or tampered contexts before signing anything.
 - **Wrong signing mode.** The *context* selects the path, never the caller's
-  arguments: a context that commits to a typed-data digest requires the typed
-  data, one that does not requires the bare hash. A mismatch is refused rather
-  than signed into an on-chain failure.
+  arguments: a context commits to a typed-data digest and requires exactly that
+  typed data. A context without one (the retired version 1) is refused as an
+  unsupported version since #3272 — there is no bare-hash signing path.
 - **Another agent's quote.** A context naming a `payer_delegate` that is not
   this signer's own delegate is refused.
 - **An unbound delegation payload.** Typed data with `primaryType: "Delegation"`
@@ -200,7 +300,8 @@ what a payload means; they re-derive it.
 ## Sign-context refusal codes
 
 `{ payment_id }` calls (`haven_sign` / `haven_sign_x402`) fetch the exact
-signing payload from Haven (`GET /x402/:id/sign-context`, see
+signing payload from Haven (`GET /x402/:id/sign-context`, and for a direct
+payment `GET /payments/:id/sign-context` — see the #3271 paragraph below and
 [Custody](#custody)). Every refusal on that fetch is a `HavenSignContextError`
 (#3001) — a `HavenSigningError` subclass, so `instanceof HavenSigningError`
 still holds everywhere it did before, but structured like the version-mismatch
@@ -213,24 +314,46 @@ refusal class — `fallback`, `retry_with_new_quote`, `http_status`,
 names); every other row carries `next_tool_omitted_reason` with the exact
 remedy. `message` is unchanged.
 
+**#3271: `haven_sign` (never `haven_sign_x402`) has one escape from this
+table.** When the x402 fetch answers `SIGN_CONTEXT_REFUSED` with
+`http_status: 409` and `backend_error_code: 'sign_context_unavailable'` — this
+`payment_id` names a direct payment, not an x402 intent — `haven_sign` fetches
+`GET /payments/:id/sign-context` instead, same auth header, timeout and
+refusal structuring. That second fetch's own refusals reuse the codes in the
+table below with direct-payment remedies: no quote to re-run, and the
+`typed_data_b64` relay from the `haven_send` / `haven_pay` result is the
+fallback. A 409 `sign_context_unavailable` from the direct route too (an
+x402 row the x402 route could not serve, or a direct row with no stored
+signing payload) surfaces the x402 route's own refusal instead. `haven_sign_x402` never takes this branch: a direct payment
+carries no x402 context to fund a merchant retry with, so it surfaces the
+409 unchanged.
+
 | `code` | When | `next_action` | `fallback` | extra |
 |---|---|---|---|---|
 | `SIGN_CONTEXT_TIMEOUT` | The fetch (or its body read) did not finish within `SIGN_CONTEXT_TIMEOUT_MS` | `stop_and_tell_user` | `typed_data_b64` | — |
 | `SIGN_CONTEXT_UNREACHABLE` | The fetch failed before any response (DNS, connection refused, TLS, …) | `stop_and_tell_user` | `typed_data_b64` | — |
-| `SIGN_CONTEXT_MALFORMED` | The response body was missing `sign_data.typed_data` or `x402_expected` (a pre-#1263 backend) | `stop_and_tell_user` | `typed_data_b64` | — |
-| `SIGN_CONTEXT_REFUSED` (410 / `expired`) | The quote's window closed | `payment_window_expired` | — | `retry_with_new_quote: true`, `http_status`, `backend_error_code: 'expired'` |
-| `SIGN_CONTEXT_REFUSED` (other) | Unknown `payment_id` (404), `already_executed` / `not_signable` / `sign_context_unavailable` (409) | `stop_and_tell_user` | — | `http_status`, `backend_error_code` |
+| `SIGN_CONTEXT_MALFORMED` | The response body was missing `sign_data.typed_data` / `x402_expected` (a pre-#1263 backend), or — on the direct-payment fetch — an unsupported `direct_sign_context_version` or a `signature_scheme` other than `eip712_userop` | `stop_and_tell_user` | `typed_data_b64` | — |
+| `SIGN_CONTEXT_REFUSED` (x402: 410 or `expired`; direct: `expired` only) | x402: the quote's window closed. Direct: the payment's window closed — call `haven_send` / `haven_pay` again with the same `idempotency_key` | `payment_window_expired` | — | x402 only: `retry_with_new_quote: true`; both: `http_status`, and `backend_error_code: 'expired'` when the backend sent one |
+| `SIGN_CONTEXT_REFUSED` (404, direct fetch) | The `payment_id` is not this agent's, or the backend predates #3271 and has no direct route | `stop_and_tell_user` | `typed_data_b64` | `http_status`, `backend_error_code` |
+| `SIGN_CONTEXT_REFUSED` (426 `client_outdated`, #3303) | This signer is below the minimum version the Haven deployment has set (only when one is set). Nothing is signed; the prepared payment is left unsigned. Update with `client_update.upgrade_command`, restart the agent runtime, then retry the same call | `stop_and_tell_user` | — | `http_status: 426`, `backend_error_code: 'client_outdated'`, `client_update` (the update command as data); carries `next_tool_omitted_reason`, not the status read |
+| `SIGN_CONTEXT_REFUSED` (other) | Unknown `payment_id` (404, x402 fetch), `already_executed` / `not_signable` (409), a bare 410 retired-rail tombstone (direct fetch) — or `sign_context_unavailable` (409): always on `haven_sign_x402`; on `haven_sign` only when neither route can serve the row | `stop_and_tell_user` | — | `http_status`, `backend_error_code` |
+| `USEROP_BINDING_MISMATCH` | A direct payment's `PackedUserOperation` typed data (from the direct fetch, or a tool argument) does not recompute to its own `payload_hash`, or a fetched direct context is not a `PackedUserOperation` — see [Two ways to use it](#two-ways-to-use-it) above | `stop_and_tell_user` | — | no `http_status` — this is a local recomputation, not a backend refusal |
+| `TYPED_DATA_NOT_ALLOWED` | Typed data without an x402 context that is not a bound direct-payment `PackedUserOperation` (#3272): wrong chain, not this signer's own account, a call other than `execute` → DelegationManager → `redeemDelegations`, or a redemption whose delegations are empty, not made to this account, or in a non-default mode — see the allowlist paragraph above. Reachable by `payment_id` when Haven serves such a payload | `stop_and_tell_user` | — | no `http_status` — a local shape check, not a backend refusal |
 
 `fallback: 'typed_data_b64'` appears only where signing OTHER bytes is a
-remedy — a transport failure or a body this signer could not read. It is
-**not** in the default quote result since #1272: obtain it by re-running the
-SAME quote tool with the SAME `idempotency_key` plus
-`include_signing_payload: true`, then pass `typed_data_b64` (plus
-`payload_hash` / `x402_expected`) instead of `payment_id`. A backend REFUSAL
+remedy — a transport failure or a body this signer could not read, plus one
+backend refusal: a 404 from the direct-payment fetch (an older backend with
+no direct route, #3271). For x402 it is **not** in the default quote result
+since #1272: obtain it by re-running the SAME quote tool with the SAME
+`idempotency_key` plus `include_signing_payload: true`, then pass
+`typed_data_b64` (plus `payload_hash` / `x402_expected`) instead of
+`payment_id`. A direct payment's `haven_send` / `haven_pay` result always
+carries `payload_hash` + `typed_data_b64`. Any other backend REFUSAL
 carries no fallback: an expired, executed or unsignable intent cannot be
-rescued by re-signing its bytes — an expired one is re-quoted (the same
+rescued by re-signing its bytes — an expired x402 one is re-quoted (the same
 `payment_window_expired` + `retry_with_new_quote` the signer emits for
-`PAYMENT_WINDOW_EXPIRED`), the rest stop. These codes are signer-local,
+`PAYMENT_WINDOW_EXPIRED`), an expired direct one is re-sent with the same
+`idempotency_key` (no `retry_with_new_quote`), the rest stop. These codes are signer-local,
 not part of `@haven_ai/sdk`'s `AgentPaymentFailureCode` taxonomy, since they
 describe a local fetch failure, not a payment-domain outcome, and never reach
 the backend's REST/OpenAPI surface — only this package's MCP tool responses.
@@ -241,19 +364,23 @@ The delegate key is read from `HAVEN_DELEGATE_KEY` or a `--credentials` file's
 `delegate_key` (with a permissive-file warning). It stays in this process, and
 is never transmitted.
 
-**The signer makes at most one kind of network call, on one path, and it is a
-read.** Since [#1263](https://github.com/d-hinders/Haven-AI/issues/1263) the
-`{ payment_id }` form of `haven_sign` and `haven_sign_x402` performs an
-authenticated, read-only `GET /x402/:payment_id/sign-context` against Haven, so
-that agents never have to relay multi-KB EIP-712 payloads through a model's
-context window. **Only the Bearer API key goes out; the delegate key is never
-part of that request or its response.** Since #2985 that read is bounded:
-it aborts after `SIGN_CONTEXT_TIMEOUT_MS` (15 s) and reports a
-`HavenSignContextError` naming the timeout and the `typed_data_b64` fallback,
-so a hung backend cannot hang the signer — and the agent — past the funding
-window. Every refusal on this fetch (timeout, unreachable host, a non-ok
-backend response, a malformed body) is structured the same way, not just
-prose — see [Sign-context refusal codes](#sign-context-refusal-codes) below.
+**The signer makes at most two kinds of network call, both reads.** Since
+[#1263](https://github.com/d-hinders/Haven-AI/issues/1263) the `{ payment_id }`
+form of `haven_sign` and `haven_sign_x402` performs an authenticated,
+read-only `GET /x402/:payment_id/sign-context` against Haven, so that agents
+never have to relay multi-KB EIP-712 payloads through a model's context
+window. Since #3271, `haven_sign` (never `haven_sign_x402`) falls back to a
+second read — `GET /payments/:payment_id/sign-context` — only when that first
+fetch answers the backend's 409 `sign_context_unavailable`, i.e. this
+`payment_id` names a direct payment rather than an x402 intent. **Only the
+Bearer API key goes out on either read; the delegate key is never part of
+either request or response.** Since #2985 both reads are bounded: each aborts
+after `SIGN_CONTEXT_TIMEOUT_MS` (15 s) and reports a `HavenSignContextError`
+naming the timeout and the `typed_data_b64` fallback, so a hung backend cannot
+hang the signer — and the agent — past the funding window. Every refusal on
+either fetch (timeout, unreachable host, a non-ok backend response, a
+malformed body) is structured the same way, not just prose — see
+[Sign-context refusal codes](#sign-context-refusal-codes) below.
 Nothing else in the package reaches the
 network: `haven_x402_sign_header` and `haven_sign_sweep_delegate` never fetch,
 the library surface above (`createEdgeSigner` and its six signing methods, over
@@ -283,12 +410,46 @@ protected storage/runtime config.
 
 ## Local audit
 
-Every MCP signing operation appends a JSONL row locally. File-backed runs write
+Every MCP signing operation appends a JSONL row locally, best-effort (see the
+end of this section). File-backed runs write
 next to the credential as `<credential>.signer-audit.jsonl`; env-only runs use
 `~/.haven/signer-audit.jsonl`. Rows include timestamp, tool, payload hash and
 delegate address, plus the account address and chain id when the credential
 carries them. They never include the delegate key, the signature, or the x402
 payment header.
+
+Since #3172 the sidecar is owner-only and bounded. It is created `0600` — the
+mode the credential beside it is expected to have — and a sidecar found
+readable beyond its owner (every release before #3172 created it with the
+default mode, `0644` under the usual `umask 022`, or an operator loosened it
+later) is tightened to `0600` in place on the next
+append, with one stderr line per occurrence. If `chmod` is refused, the line
+names the same `chmod 600` remedy the credential warning gives. If the path
+is a symlink (or anything but a regular file) nothing is chmod-ed — that
+would hit the target — but note that audit rows are still written through
+the link to its target, so the line says to remove the link (`rm <path>`),
+not to chmod it. The check runs before rotation, so a legacy file that
+rotates carries `0600` into `.1`. When the live file reaches
+`AUDIT_ROTATE_BYTES` (8 MiB, roughly 30 000 rows) it is renamed to
+`<path>.1`, replacing the previous `.1`, and a fresh file starts — two
+generations at most. The rotation decision is not atomic across processes:
+two signer processes on one credential that both hit the bound can leave the
+predecessor generation discarded (the current entry is never lost). A failed
+audit write (disk full, read-only, two appends racing at the bound) is
+reported on stderr and never fails the signing call that already produced
+its signature — so the consent block's
+"appended for every signing operation" is a best-effort promise since #3172,
+kept unchanged in text (editing consent copy does NOT move the consent hash —
+that covers identity, tool names and the surface version, as the consent
+screen section above already says; #3279 rewords the block without
+re-prompting anyone). The
+credential check itself is unchanged in wording and still judges a symlinked
+credential by its target. The
+`payload_hash` argument itself is bounded on the tool schema to a 32-byte hash
+(`0x` + 64 hex), so the audit field is never caller-controlled free text; the
+two object arguments that do reach the file (`payment_required`,
+`authorization`) were already hashed before being written, and
+`x402_expected` is never written to the sidecar.
 
 ## Hot-wallet minimization
 

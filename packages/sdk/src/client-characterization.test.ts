@@ -1,11 +1,45 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { recoverAddress, recoverTypedDataAddress } from 'viem'
+import { ethers } from 'ethers'
 import { HavenClient } from './client.js'
 import type { HavenCatalogEntry, HavenCatalogMerchant } from './types.js'
+import directPaymentFixture from './__fixtures__/direct-payment-userop.json' with { type: 'json' }
+import { deriveDelegateAccountAddress } from './delegate-account.js'
+import { rebuildDirectUserOpForSender } from './test-support/direct-userop.js'
 
 // Hardhat account #0. Test-only and never used for real funds.
 const TEST_DELEGATE_KEY =
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
-const SIGN_HASH = `0x${'11'.repeat(32)}`
+const TEST_DELEGATE_ADDRESS = ethers.computeAddress(TEST_DELEGATE_KEY)
+
+/**
+ * Recovers the address that would have signed `hash` directly (no EIP-191
+ * prefix) — the bare-hash scheme `HavenClient.sign()` uses, and what pay()
+ * used to call before #3271. Used only to prove the OLD behaviour's recovered
+ * address is not what the NEW behaviour (signing typed data) produced.
+ */
+async function recoverBareHashSigner(signature: `0x${string}`, hash: `0x${string}`): Promise<string> {
+  return recoverAddress({ hash, signature })
+}
+
+// #3271 / #3283: a real direct-payment eip712_userop sign_data — the
+// fixture's real HybridDeleGator PackedUserOperation, re-targeted at
+// TEST_DELEGATE_KEY's own derived account. The fixture's own delegate key is
+// not available, and since #3283 signForData signs only a UserOp from this
+// key's own account (the direct-payment allowlist), so the production bytes
+// are rebuilt for this key's account and the hash recomputed: the delegator,
+// caveats, mode and execution stay exactly what the backend emitted.
+function directPaymentSignData() {
+  const { typedData, payloadHash } = rebuildDirectUserOpForSender(
+    directPaymentFixture.typed_data,
+    deriveDelegateAccountAddress(TEST_DELEGATE_ADDRESS as `0x${string}`),
+  )
+  return {
+    hash: payloadHash,
+    signature_scheme: 'eip712_userop' as const,
+    typed_data: typedData,
+  }
+}
 
 interface RecordedCall {
   url: string
@@ -77,7 +111,10 @@ function createIntentBody(paymentId = 'pay-1') {
     payment_id: paymentId,
     status: 'pending_signature',
     expires_at: '2099-01-01T00:00:00.000Z',
-    sign_data: { hash: SIGN_HASH },
+    // #3271: a delegation-rail direct payment's sign_data is EIP-712 typed
+    // data, not a bare hash — pay() now signs it through signForData, which
+    // runs the UserOp binding check before signing.
+    sign_data: directPaymentSignData(),
   }
 }
 
@@ -199,8 +236,9 @@ describe('HavenClient direct-payment facade characterization', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('creates, signs, submits, polls, and maps a confirmed direct payment', async () => {
+  it('creates, signs, submits, polls, and maps a confirmed direct payment — signing the typed data, not the bare hash (#3271)', async () => {
     vi.useFakeTimers()
+    let submittedSignature: string | undefined
     const routes = installRoutes({
       'POST https://haven.test/payments': (call) => {
         expect(JSON.parse(String(call.init.body))).toEqual({
@@ -212,9 +250,9 @@ describe('HavenClient direct-payment facade characterization', () => {
         return json(createIntentBody())
       },
       'POST https://haven.test/payments/pay-1/sign': (call) => {
-        expect(JSON.parse(String(call.init.body))).toEqual({
-          signature: expect.stringMatching(/^0x[0-9a-f]{130}$/i),
-        })
+        const body = JSON.parse(String(call.init.body)) as { signature: string }
+        expect(body.signature).toMatch(/^0x[0-9a-f]{130}$/i)
+        submittedSignature = body.signature
         return json({ status: 'submitted', tx_hash: '0xsubmitted' })
       },
       'GET https://haven.test/payments/pay-1': [
@@ -256,6 +294,28 @@ describe('HavenClient direct-payment facade characterization', () => {
       explorerUrl: 'https://basescan.org/tx/0xabc',
     })
     routes.assertAllUsed()
+
+    // #3271: pay() must sign the account's EIP-712 PackedUserOperation typed
+    // data — never intent.signData.hash directly. Prove it by direction: the
+    // submitted signature recovers to TEST_DELEGATE_KEY's address over the
+    // fixture's typed data (the behaviour this test locks in), and it does
+    // NOT recover to that address over the bare hash the old `this.sign(hash)`
+    // call would have signed instead (the behaviour #3271 replaced). If pay()
+    // regresses to signing the bare hash again, both assertions flip and this
+    // test goes red.
+    expect(submittedSignature).toBeDefined()
+    const signData = directPaymentSignData()
+    const typedDataAddress = await recoverTypedDataAddress({
+      domain: signData.typed_data.domain,
+      types: { PackedUserOperation: signData.typed_data.types.PackedUserOperation },
+      primaryType: 'PackedUserOperation',
+      message: signData.typed_data.message,
+      signature: submittedSignature as `0x${string}`,
+    } as Parameters<typeof recoverTypedDataAddress>[0])
+    expect(typedDataAddress.toLowerCase()).toBe(TEST_DELEGATE_ADDRESS.toLowerCase())
+
+    const bareHashSigner = await recoverBareHashSigner(submittedSignature as `0x${string}`, signData.hash as `0x${string}`)
+    expect(bareHashSigner.toLowerCase()).not.toBe(TEST_DELEGATE_ADDRESS.toLowerCase())
   })
 
   it('surfaces the confirmation deadline after create and submit complete', async () => {

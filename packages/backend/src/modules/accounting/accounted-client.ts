@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { ProviderError } from './provider.js'
 
 /**
@@ -273,4 +273,199 @@ export class AccountedDocumentHashMismatchError extends Error {
   ) {
     super('Accounted stored different bytes than the ones Haven uploaded (sha256 mismatch).')
   }
+}
+
+// ── Webhook subscriptions (#3019, epic #3016 slice 3) ────────────────────────
+//
+// The receiving half of the Accounted integration. A subscription is ONE
+// event type (`POST /api/v1/companies/{companyId}/webhooks` with `event_type`,
+// `webhook_url`, `name`, `description`), so the connect flow creates THREE —
+// `journal_entry.committed`, `period.locked`, `document.uploaded` — and each
+// create answers its HMAC signing secret EXACTLY ONCE (docs: "The `secret`
+// field is returned only on creation"). The secrets travel back as the return
+// value and are stored encrypted beside the API key; nothing here logs or
+// echoes one.
+//
+// `rotate-secret` and `/{id}/test` are runbook operations (the runbook uses
+// them against the sandbox; no Haven code calls them) and are deliberately
+// absent.
+
+/** The three event types Haven subscribes to, in creation order. */
+export const ACCOUNTED_WEBHOOK_EVENT_TYPES = [
+  'journal_entry.committed',
+  'period.locked',
+  'document.uploaded',
+] as const
+
+export type AccountedWebhookEventType = (typeof ACCOUNTED_WEBHOOK_EVENT_TYPES)[number]
+
+/** One webhook subscription as the provider returns it (list / create / get). */
+export interface AccountedWebhook {
+  id: string
+  name: string | null
+  event_type: string
+  webhook_url: string
+  active: boolean
+  api_version_pinned: string
+  disabled_at: string | null
+  disabled_reason: string | null
+  created_at: string
+  /** Create (and rotate) only — never present on a GET. Consumed once, then dropped. */
+  secret?: string
+}
+
+export interface AccountedWebhookResponse {
+  data: AccountedWebhook
+  meta: { request_id: string; api_version: string }
+}
+
+/**
+ * `POST /api/v1/companies/{companyId}/webhooks` — one subscription, one event
+ * type. Carries `Idempotency-Key` like every write (a fresh UUID per attempt:
+ * the key dedupes RETRIES of THIS attempt, and the caller's rollback deletes
+ * whatever a lost response left behind). The pinned API version is applied
+ * server-side at creation (`api_version_pinned`); there is no request field
+ * for it. The secret rides the answer exactly once.
+ */
+export async function accountedCreateWebhookSubscription(input: {
+  apiKey: string
+  companyId: string
+  eventType: AccountedWebhookEventType
+  callbackUrl: string
+  name: string
+  fetchImpl: typeof fetch
+}): Promise<AccountedWebhook> {
+  let res: Response
+  try {
+    res = await input.fetchImpl(
+      `${ACCOUNTED_API_BASE}/api/v1/companies/${encodeURIComponent(input.companyId)}/webhooks`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${input.apiKey}`,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'Idempotency-Key': randomUUID(),
+        },
+        body: JSON.stringify({
+          event_type: input.eventType,
+          webhook_url: input.callbackUrl,
+          name: input.name,
+        }),
+        signal: AbortSignal.timeout(ACCOUNTED_REQUEST_TIMEOUT_MS),
+      },
+    )
+  } catch (err) {
+    throw new ProviderError(`Could not reach Accounted: ${err instanceof Error ? err.message : String(err)}`, 0, 'accounted')
+  }
+  if (!res.ok) {
+    const envelope = await accountedErrorEnvelope(res)
+    const code = typeof envelope?.code === 'string' && envelope.code.length > 0 ? envelope.code : null
+    const err = new ProviderError(
+      `Accounted POST /api/v1/companies/${input.companyId}/webhooks failed (HTTP ${res.status}${code ? `: ${code}` : ''}) for ${input.eventType}.`,
+      res.status,
+      'accounted',
+    )
+    if (code) (err as ProviderError & { providerCode?: string }).providerCode = code
+    if (envelope?.details) (err as ProviderError & { details?: Record<string, unknown> }).details = envelope.details
+    throw err
+  }
+  const body = (await res.json()) as AccountedWebhookResponse
+  const webhook = body?.data
+  if (!webhook || typeof webhook.id !== 'string' || webhook.id.length === 0) {
+    throw new ProviderError(
+      `Accounted webhook creation for ${input.eventType} returned no subscription id.`,
+      res.status,
+      'accounted',
+    )
+  }
+  if (typeof webhook.secret !== 'string' || webhook.secret.length === 0) {
+    // The secret is the delivery-proof material; a create answer without one
+    // is a subscription Haven could never verify. Treated as a failure so the
+    // rollback removes it rather than storing an unverifiable triple.
+    throw new ProviderError(
+      `Accounted webhook creation for ${input.eventType} returned no signing secret — the subscription cannot be verified.`,
+      res.status,
+      'accounted',
+    )
+  }
+  return webhook
+}
+
+/**
+ * `DELETE /api/v1/companies/{companyId}/webhooks/{webhookId}` — remove one
+ * subscription. Used by the connect rollback (all-or-nothing registration)
+ * and by disconnect. A 404 counts as removed: the target is the state
+ * "no subscription", not the round trip.
+ */
+export async function accountedDeleteWebhookSubscription(input: {
+  apiKey: string
+  companyId: string
+  webhookId: string
+  fetchImpl: typeof fetch
+}): Promise<void> {
+  let res: Response
+  try {
+    res = await input.fetchImpl(
+      `${ACCOUNTED_API_BASE}/api/v1/companies/${encodeURIComponent(input.companyId)}/webhooks/${encodeURIComponent(input.webhookId)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${input.apiKey}`,
+          Accept: 'application/json',
+          'Idempotency-Key': randomUUID(),
+        },
+        signal: AbortSignal.timeout(ACCOUNTED_REQUEST_TIMEOUT_MS),
+      },
+    )
+  } catch (err) {
+    throw new ProviderError(`Could not reach Accounted: ${err instanceof Error ? err.message : String(err)}`, 0, 'accounted')
+  }
+  if (res.status === 404) return // already gone — the goal state
+  if (!res.ok) {
+    const envelope = await accountedErrorEnvelope(res)
+    const code = typeof envelope?.code === 'string' && envelope.code.length > 0 ? envelope.code : null
+    throw new ProviderError(
+      `Accounted DELETE /api/v1/companies/${input.companyId}/webhooks/${input.webhookId} failed (HTTP ${res.status}${code ? `: ${code}` : ''}).`,
+      res.status,
+      'accounted',
+    )
+  }
+}
+
+/**
+ * `GET /api/v1/companies/{companyId}/webhooks` — the subscription list (never
+ * carries secrets). The rollback sweep uses it to catch ORPHANS: a create
+ * whose response was lost left a live subscription with a secret nobody
+ * holds, and the only way to find it is by its `webhook_url`.
+ */
+export async function accountedListWebhooks(input: {
+  apiKey: string
+  companyId: string
+  fetchImpl: typeof fetch
+}): Promise<AccountedWebhook[]> {
+  let res: Response
+  try {
+    res = await input.fetchImpl(
+      `${ACCOUNTED_API_BASE}/api/v1/companies/${encodeURIComponent(input.companyId)}/webhooks`,
+      {
+        headers: {
+          Authorization: `Bearer ${input.apiKey}`,
+          Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(ACCOUNTED_REQUEST_TIMEOUT_MS),
+      },
+    )
+  } catch (err) {
+    throw new ProviderError(`Could not reach Accounted: ${err instanceof Error ? err.message : String(err)}`, 0, 'accounted')
+  }
+  if (!res.ok) {
+    throw new ProviderError(
+      `Accounted GET /api/v1/companies/${input.companyId}/webhooks failed (HTTP ${res.status}).`,
+      res.status,
+      'accounted',
+    )
+  }
+  const body = (await res.json()) as { data?: { webhooks?: AccountedWebhook[] } }
+  return body?.data?.webhooks ?? []
 }

@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest'
 import { ConnectError, isConnectError } from './connect-error.js'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -21,8 +21,11 @@ import {
   defaultTombstonesDir,
   readAgentTombstone,
   readTombstoneRecords,
+  tombstonesDirForAgentDirectory,
+  tombstonesDirForCredentialRoot,
   writeAgentTombstone,
 } from './tombstone.js'
+import { homedir } from 'node:os'
 
 const run = promisify(execFile)
 
@@ -229,5 +232,94 @@ describe('tombstone mirror (#1681 follow-up — record survives OUTSIDE the reti
 
   it('defaultTombstonesDir lives outside the per-agent dirs, under ~/.haven', () => {
     expect(defaultTombstonesDir()).toMatch(/\.haven[/\\]tombstones$/)
+  })
+})
+
+/**
+ * #3251 — the ledger follows the run's credential root. The `--tombstone`,
+ * `--unwire` and `--replace` writers never passed a ledger, so every
+ * retirement — tests included — mirrored into the real ~/.haven/tombstones.
+ */
+describe('the ledger follows the credential root (#3251)', () => {
+  it('the default root keeps the ledger at ~/.haven/tombstones', () => {
+    expect(tombstonesDirForCredentialRoot()).toBe(defaultTombstonesDir())
+    expect(tombstonesDirForCredentialRoot()).toBe(join(homedir(), '.haven', 'tombstones'))
+    // ~/.haven/agents IS the default root; naming it explicitly changes nothing.
+    expect(tombstonesDirForCredentialRoot(join(homedir(), '.haven', 'agents'))).toBe(defaultTombstonesDir())
+    expect(tombstonesDirForAgentDirectory(join(homedir(), '.haven', 'agents', 'research'))).toBe(defaultTombstonesDir())
+  })
+
+  it('a custom root keeps its ledger INSIDE itself, never beside it and never under ~/.haven', () => {
+    expect(tombstonesDirForCredentialRoot('/srv/ci/agents')).toBe('/srv/ci/agents/.tombstones')
+    expect(tombstonesDirForAgentDirectory('/srv/ci/agents/agent-old')).toBe('/srv/ci/agents/.tombstones')
+    // #3251 review: a root at the top of the filesystem must not reach for `/`'s parent.
+    expect(tombstonesDirForCredentialRoot('/agents')).toBe('/agents/.tombstones')
+    // Relative roots resolve against cwd, so the answer never depends on who reads it later.
+    expect(tombstonesDirForCredentialRoot('rel/agents')).toBe(join(process.cwd(), 'rel', 'agents', '.tombstones'))
+  })
+
+  it('the default root is judged against the home it is given, not the ambient one', () => {
+    expect(tombstonesDirForCredentialRoot('/home/u/.haven/agents', '/home/u')).toBe('/home/u/.haven/tombstones')
+    expect(tombstonesDirForAgentDirectory('/home/u/.haven/agents/research', '/home/u')).toBe('/home/u/.haven/tombstones')
+    expect(tombstonesDirForCredentialRoot(undefined, '/home/u')).toBe('/home/u/.haven/tombstones')
+    expect(tombstonesDirForCredentialRoot('/home/u/.haven/agents', '/home/other')).toBe('/home/u/.haven/agents/.tombstones')
+  })
+
+  it('REGRESSION (#3251 review): a retirement succeeds when the root\'s PARENT is not writable', async () => {
+    // Beside-the-root put the ledger in the parent — `/private/tombstones`
+    // → EACCES, after the wrapper and TOMBSTONE.json were already written.
+    if (process.getuid?.() === 0 || process.platform === 'win32') return
+    const base = await mkdtemp(join(tmpdir(), 'haven-3251-ro-parent-'))
+    const root = join(base, 'root')
+    const dir = join(root, 'agent-x')
+    await mkdir(join(dir, 'bin'), { recursive: true })
+    await writeFile(join(dir, 'bin', 'haven-signer.mjs'), '// the real wrapper')
+    await chmod(base, 0o500)
+    try {
+      const info = await writeAgentTombstone({
+        directory: dir, agentId: AGENT, reason: 'reset', tombstonesDir: tombstonesDirForAgentDirectory(dir),
+      })
+      expect(info.recordPath).toBe(join(root, '.tombstones', `${AGENT}.json`))
+    } finally {
+      await chmod(base, 0o700)
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  it('the connect suite runs against a scratch HOME, never the real one', () => {
+    const realHome = process.env.HAVEN_CONNECT_TEST_REAL_HOME
+    expect(realHome).toBeTruthy()
+    expect(homedir()).not.toBe(realHome)
+    expect(defaultTombstonesDir().startsWith(homedir())).toBe(true)
+    // tmpdir() moved under the scratch home too, so a ledger beside a
+    // mkdtemp() root is per worker, never shared across runs.
+    expect(tmpdir().startsWith(homedir())).toBe(true)
+  })
+})
+
+/**
+ * #3259 — the mirror is best-effort. TOMBSTONE.json is written first and is the
+ * authoritative record, so a mirror failure must not surface as "not
+ * retired": that is what let --replace skip the key teardown.
+ */
+describe('a failed mirror never undoes the in-place retirement (#3259)', () => {
+  it('returns recordPath null + mirrorError, with the wrapper and TOMBSTONE.json on disk', async () => {
+    const dir = await retiredDirectory()
+    const blocker = join(await mkdtemp(join(tmpdir(), 'haven-3259-')), 'a-file')
+    await writeFile(blocker, 'x')
+    const info = await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset', tombstonesDir: join(blocker, 'ledger') })
+    expect(info.recordPath).toBeNull()
+    expect(info.mirrorError).toMatch(/^(ENOTDIR|EEXIST)$/)
+    expect(await readAgentTombstone(dir)).toMatchObject({ agent_id: AGENT, reason: 'reset' })
+    expect(await readFile(join(dir, 'bin', 'haven-signer.mjs'), 'utf8')).toContain(TOMBSTONE_MARKER)
+    // Key material is still not this function's business.
+    expect(await readFile(join(dir, 'signer.json'), 'utf8')).toContain(PRIVATE_KEY)
+  })
+
+  it('a successful mirror carries no mirrorError', async () => {
+    const dir = await retiredDirectory()
+    const info = await writeAgentTombstone({ directory: dir, agentId: AGENT, reason: 'reset', tombstonesDir: await tempTombstonesDir() })
+    expect(info.recordPath).not.toBeNull()
+    expect(info).not.toHaveProperty('mirrorError')
   })
 })

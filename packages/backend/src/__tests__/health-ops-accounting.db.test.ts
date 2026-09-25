@@ -73,14 +73,28 @@ describeDb('GET /health/ops accounting counters (#2872) — real queries', () =>
     app = undefined
   })
 
-  async function read(): Promise<{ exhaustedSyncs: number; connectionsNeedingAttention: number }> {
+  async function read(): Promise<{ exhaustedSyncs: number; connectionsNeedingAttention: number; webhookCounters: Record<string, number> }> {
     const res = await app!.inject({ method: 'GET', url: '/health/ops', headers: { 'x-haven-ops-token': 'operator-secret' } })
     expect(res.statusCode).toBe(200)
     return res.json().accounting
   }
 
-  it('reads 0 / 0 on an empty deployment', async () => {
-    expect(await read()).toEqual({ exhaustedSyncs: 0, connectionsNeedingAttention: 0 })
+  it('reads 0 / 0 on an empty deployment (webhook counters zero, #3019)', async () => {
+    expect(await read()).toEqual({
+      exhaustedSyncs: 0,
+      connectionsNeedingAttention: 0,
+      webhookCounters: {
+        received: 0,
+        bad_signature: 0,
+        stale: 0,
+        unknown_token: 0,
+        duplicate: 0,
+        processed: 0,
+        feature_off: 0,
+        unknown_type: 0,
+        confirmed: 0,
+      },
+    })
   })
 
   it('exhaustedSyncs counts failed rows AT the cap across every tenant — not retryable failures, not skipped, not pushed', async () => {
@@ -96,15 +110,22 @@ describeDb('GET /health/ops accounting counters (#2872) — real queries', () =>
     expect((await read()).exhaustedSyncs).toBe(2)
   })
 
-  it('connectionsNeedingAttention counts the three re-consent states across every tenant — never connected or disconnected', async () => {
+  it('connectionsNeedingAttention counts the four attention states across every tenant — never connected or disconnected', async () => {
     const a = await seedUser()
     const b = await seedUser()
     const c = await seedUser()
+    const d = await seedUser()
     await seedConnection(a, 'fortnox', 'needs_reauthorisation')
     await seedConnection(b, 'fortnox', 'scope_missing')
     await seedConnection(c, 'fortnox', 'revoked_at_provider')
+    // #3019: the fourth state is written to a REAL row here on purpose —
+    // it proves migration 092's widened CHECK accepts it and that the
+    // counter's predicate names it, in one case. Mutation: drop
+    // `needs_attention` from the CHECK → 23514 here; drop it from
+    // NEEDS_ATTENTION_STATUSES → 3, not 4.
+    await seedConnection(d, 'accounted', 'needs_attention')
     await seedConnection(a, 'accounted', 'connected')
     await seedConnection(b, 'accounted', 'disconnected')
-    expect((await read()).connectionsNeedingAttention).toBe(3)
+    expect((await read()).connectionsNeedingAttention).toBe(4)
   })
 })

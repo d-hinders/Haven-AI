@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
 import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import { useAuth } from '@/context/AuthContext'
+import type { ApiSchema } from '@haven_ai/core'
 import type {
   PortfolioResponse,
   BalancesResponse,
@@ -13,23 +14,60 @@ import type {
 } from '@/types/transactions'
 
 /**
- * Stable stringified key for an array of Safes.
- * Used as a dependency in useEffect to avoid re-fetching unless safes actually change.
+ * The wire's balance-freshness marker (#3295) — `stale` (served the
+ * last-known balance, `asOf` = when it was read) or `unavailable` (no balance
+ * has ever been read for this token). Typed from the generated schema; the
+ * rendering primitive is `components/haven`'s `BalanceFreshnessIndicator`.
  */
-interface SafeBalanceRef {
+type BalanceFreshness = ApiSchema<'BalanceFreshness'>
+
+/**
+ * OR-merge two markers (#3295). The aggregated dashboard figures span
+ * several accounts, so a token held on two accounts merges its per-account
+ * markers: `unavailable` dominates (one unknown part understates the sum by
+ * an unknown amount); otherwise the OLDEST `asOf` wins, because the sum is
+ * at least as old as its oldest part. Same rule the backend's
+ * `combineBalanceFreshness` applies to totals — this is the frontend's own
+ * copy because the backend module is not importable from the browser bundle.
+ */
+function mergeBalanceFreshness(
+  a: BalanceFreshness | undefined,
+  b: BalanceFreshness | undefined,
+): BalanceFreshness | undefined {
+  if (!a) return b
+  if (!b) return a
+  if (a.status === 'unavailable' || b.status === 'unavailable') {
+    return { status: 'unavailable' }
+  }
+  const asOf =
+    a.status === 'stale' && b.status === 'stale'
+      ? a.asOf < b.asOf
+        ? a.asOf
+        : b.asOf
+      : a.status === 'stale'
+        ? a.asOf
+        : b.asOf
+  return { status: 'stale', asOf }
+}
+
+/**
+ * Stable stringified key for an array of Safes.
+ * Used as a dependency in useEffect to avoid re-fetching unless accounts actually change.
+ */
+interface AccountBalanceRef {
   address: string
   chainId: number
 }
 
-function useSafeAddressKey(): { addresses: string[]; balanceRefs: SafeBalanceRef[]; key: string } {
+function useAccountAddressKey(): { addresses: string[]; balanceRefs: AccountBalanceRef[]; key: string } {
   const { user } = useAuth()
   const balanceRefs = (user?.accounts ?? []).map((s) => ({
     address: s.account_address,
     chainId: s.chain_id,
   }))
-  const addresses = balanceRefs.map((safe) => safe.address)
+  const addresses = balanceRefs.map((account) => account.address)
   const key = balanceRefs
-    .map((safe) => `${safe.address.toLowerCase()}:${safe.chainId}`)
+    .map((account) => `${account.address.toLowerCase()}:${account.chainId}`)
     .join(',')
   return { addresses, balanceRefs, key }
 }
@@ -44,20 +82,20 @@ interface AggregatedPortfolioReturn {
 }
 
 export function useAggregatedPortfolio(): AggregatedPortfolioReturn {
-  const { balanceRefs, key } = useSafeAddressKey()
+  const { balanceRefs, key } = useAccountAddressKey()
   const [totalUsd, setTotalUsd] = useState(0)
   const [totalEur, setTotalEur] = useState(0)
   const [loading, setLoading] = useState(true)
   const generationRef = useRef(0)
 
-  // Keep Safe refs in a ref so refetch always uses current values
+  // Keep account refs in a ref so refetch always uses current values
   const balanceRefsRef = useRef(balanceRefs)
   balanceRefsRef.current = balanceRefs
 
   const fetchAll = useCallback(async (silent = false) => {
     const generation = ++generationRef.current
-    const safes = balanceRefsRef.current
-    if (safes.length === 0) {
+    const accounts = balanceRefsRef.current
+    if (accounts.length === 0) {
       setTotalUsd(0)
       setTotalEur(0)
       setLoading(false)
@@ -68,16 +106,16 @@ export function useAggregatedPortfolio(): AggregatedPortfolioReturn {
       // #2732: silent visible-poll ticks must not flash the skeleton.
       if (!silent) setLoading(true)
       const results = await Promise.all(
-        safes.map((safe) =>
+        accounts.map((account) =>
           api.get<PortfolioResponse>(
-            `/portfolio/${safe.address}?chain_id=${encodeURIComponent(String(safe.chainId))}`,
+            `/portfolio/${account.address}?chain_id=${encodeURIComponent(String(account.chainId))}`,
           ).catch(() => null),
         ),
       )
 
       if (generationRef.current === generation) {
-        // #2732: a silent tick with ANY failed Safe keeps the last good
-        // totals — per-Safe failures fall back to zeros, and summing those
+        // #2732: a silent tick with ANY failed account keeps the last good
+        // totals — per-account failures fall back to zeros, and summing those
         // would visibly wipe the number mid-demo. Non-silent keeps the
         // existing zero-fallback behaviour.
         if (silent && results.some((r) => r === null)) return
@@ -133,7 +171,7 @@ interface AggregatedBalancesReturn {
 }
 
 export function useAggregatedBalances(): AggregatedBalancesReturn {
-  const { balanceRefs, key } = useSafeAddressKey()
+  const { balanceRefs, key } = useAccountAddressKey()
   const [balances, setBalances] = useState<BalanceItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -144,8 +182,8 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
 
   const fetchAll = useCallback(async (silent = false) => {
     const generation = ++generationRef.current
-    const safes = balanceRefsRef.current
-    if (safes.length === 0) {
+    const accounts = balanceRefsRef.current
+    if (accounts.length === 0) {
       setBalances([])
       setError(null)
       setLoading(false)
@@ -160,14 +198,14 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
         setError(null)
       }
       const results = await Promise.all(
-        safes.map(async (safe) => {
+        accounts.map(async (account) => {
           try {
             const data = await api.get<BalancesResponse>(
-              `/balances/${safe.address}?chain_id=${encodeURIComponent(String(safe.chainId))}`,
+              `/balances/${account.address}?chain_id=${encodeURIComponent(String(account.chainId))}`,
             )
-            return { safe, balances: data.balances, error: null }
+            return { account, balances: data.balances, error: null }
           } catch (err) {
-            return { safe, balances: [], error: err }
+            return { account, balances: [], error: err }
           }
         }),
       )
@@ -176,7 +214,7 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
 
       if (results.some((result) => result.error !== null)) {
         // A failed silent tick keeps the last good balances and any visible
-        // error exactly as it was — this per-Safe failure class must not
+        // error exactly as it was — this per-account failure class must not
         // wipe the row the presenter is pointing at (#2732).
         if (silent) return
         setBalances([])
@@ -185,9 +223,18 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
       }
 
       const merged = new Map<string, BalanceItem>()
+      // #3295: the aggregated token's marker — per-account markers merged
+      // with OR (`unavailable` dominates; oldest `asOf` wins among stale).
+      const mergedFreshness = new Map<string, BalanceFreshness | undefined>()
+      let anyDegraded = false
       for (const r of results) {
         for (const b of r.balances) {
-          const balanceKey = balanceIdentityKey(b, r.safe.chainId)
+          const balanceKey = balanceIdentityKey(b, r.account.chainId)
+          mergedFreshness.set(
+            balanceKey,
+            mergeBalanceFreshness(mergedFreshness.get(balanceKey), b.balanceFreshness),
+          )
+          if (b.balanceFreshness) anyDegraded = true
           const existing = merged.get(balanceKey)
           if (existing) {
             const rawSum = BigInt(existing.balance) + BigInt(b.balance)
@@ -197,12 +244,22 @@ export function useAggregatedBalances(): AggregatedBalancesReturn {
               formatted: formatBalance(rawSum, existing.decimals),
             })
           } else {
-            merged.set(balanceKey, { ...b, chainId: r.safe.chainId })
+            merged.set(balanceKey, { ...b, chainId: r.account.chainId })
           }
         }
       }
 
-      setBalances(Array.from(merged.values()))
+      const mergedList = Array.from(merged.values())
+      if (anyDegraded) {
+        setBalances(
+          mergedList.map((item) => ({
+            ...item,
+            balanceFreshness: mergedFreshness.get(balanceIdentityKey(item, item.chainId ?? 0)),
+          })),
+        )
+      } else {
+        setBalances(mergedList)
+      }
       if (silent) setError(null)
     } catch (err) {
       if (generationRef.current === generation && !silent) {
@@ -267,7 +324,7 @@ interface AggregatedTransactionsReturn {
 }
 
 export function useAggregatedTransactions(limit = 10): AggregatedTransactionsReturn {
-  const { balanceRefs, key } = useSafeAddressKey()
+  const { balanceRefs, key } = useAccountAddressKey()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -279,8 +336,8 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
 
   const fetchAll = useCallback(async (silent = false) => {
     const generation = ++generationRef.current
-    const safes = balanceRefsRef.current
-    if (safes.length === 0) {
+    const accounts = balanceRefsRef.current
+    if (accounts.length === 0) {
       setTransactions([])
       setTotal(0)
       setError(null)
@@ -297,14 +354,14 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
       }
 
       const results = await Promise.all(
-        safes.map(async (safe) => {
+        accounts.map(async (account) => {
           try {
             const data = await api.get<TransactionsResponse>(
-              `/transactions/${safe.address}?page=1&limit=${limit}&chain_id=${encodeURIComponent(String(safe.chainId))}`,
+              `/transactions/${account.address}?page=1&limit=${limit}&chain_id=${encodeURIComponent(String(account.chainId))}`,
             )
-            return { safe, data, error: null }
+            return { account, data, error: null }
           } catch (err) {
-            return { safe, data: null, error: err }
+            return { account, data: null, error: err }
           }
         }),
       )
@@ -326,11 +383,11 @@ export function useAggregatedTransactions(limit = 10): AggregatedTransactionsRet
       let totalCount = 0
       const seen = new Set<string>()
 
-      for (const { safe, data } of results) {
+      for (const { account, data } of results) {
         if (!data) continue
         totalCount += data.total
         for (const tx of data.transactions) {
-          const txKey = transactionIdentityKey(tx, safe.chainId)
+          const txKey = transactionIdentityKey(tx, account.chainId)
           if (!seen.has(txKey)) {
             seen.add(txKey)
             all.push(tx)

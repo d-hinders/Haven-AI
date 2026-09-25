@@ -14,3 +14,9 @@ export { ApprovalRequiredBanner } from './ApprovalRequiredBanner'
 export { WalletIdentityBlock } from './WalletIdentityBlock'
 export { RiskExplainer } from './RiskExplainer'
 export { CredentialHandoffCard } from './CredentialHandoffCard'
+export { LabelChip, LabelChipRow, LabelOptionRow, type AgentLabel } from './LabelChip'
+export {
+  BalanceFreshnessIndicator,
+  WhenBalanceDegraded,
+  type BalanceFreshness,
+} from './BalanceFreshnessIndicator'

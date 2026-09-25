@@ -67,6 +67,13 @@ interface StatTileProps {
   delta?: number | null
   /** Caption for the chip (e.g. "vs previous 30 days"). */
   deltaCaption?: string
+  /**
+   * BCP-47 locale the delta percentage is written in. The value beside it is
+   * already formatted by the caller (sv-SE "324,75 kr"), and a chip that said
+   * "+15.9%" next to it mixed two decimal dialects on one tile (#3204). Default
+   * `en-US` keeps every existing caller's output.
+   */
+  deltaLocale?: string
   /** What the figure was computed over — the basis line ("based on 4 payments"). */
   footnote?: ReactNode
   className?: string
@@ -81,6 +88,7 @@ export function StatTile({
   unit,
   polarity,
   delta = null,
+  deltaLocale = 'en-US',
   deltaCaption,
   footnote,
   className = '',
@@ -102,7 +110,11 @@ export function StatTile({
     // declaration, neither direction of this figure is news.
   }
   const sign = up ? '+' : down ? '-' : ''
-  const deltaText = showDelta ? `${sign}${Math.abs(delta as number).toFixed(1)}%` : ''
+  // One decimal, locale-formatted (sv-SE writes "15,9 %" with a space before
+  // the sign; `style: 'percent'` supplies both the separator and the spacing).
+  const deltaText = showDelta
+    ? `${sign}${new Intl.NumberFormat(deltaLocale, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(Math.abs(delta as number) / 100)}`
+    : ''
 
   return (
     <div

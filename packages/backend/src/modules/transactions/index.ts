@@ -14,6 +14,7 @@
  */
 
 export type {
+  ListScope,
   EnrichedTransaction,
   FetchAccountTransactionsParams,
   FetchAccountTransactionsResult,
@@ -50,6 +51,7 @@ export {
   filterEnrichedTransactions,
   mergeSortDedupeAndEnrich,
   paginateByOffset,
+  resolveTransactionCurrency,
   resolveTransactionFilters,
   type AggregateAccountTransactionsResult,
   type OffsetPage,

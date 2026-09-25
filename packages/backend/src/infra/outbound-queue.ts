@@ -17,19 +17,32 @@
  * choosing is the layering: policy at the call site, authority in the data
  * layer.
  *
- * NOTE for #1557/#1559: when the sweep (money-path) and then the dispatcher
- * land, revisit this policy per site — a queue that has become the only lane
- * must not fail open.
+ * Revisited 2026-09-24, after #1557/#1559 made the queue the only lane: KEPT
+ * fail-open at every site, by owner decision. A failed open leaves the send
+ * unstamped (nonce guarded only by the in-process lock) and unrecorded (the
+ * bump worker cannot see it if it sticks), but it puts no funds at risk: a
+ * collision only fails a broadcast, a sweep's payload is signature-bound and
+ * its EIP-3009 nonce cannot pay twice, and the relayer itself holds only gas.
+ * The decision assumes a single backend replica. Revisit
+ * before running more than one (`docs/operations/backend-scaling.md`
+ * § Multi-replica CORRECTNESS).
  */
 
-import { Transaction, type TransactionResponse } from 'ethers'
+import {
+  Transaction,
+  TransactionResponse,
+  type Provider,
+  type TransactionResponseParams,
+} from 'ethers'
 import {
   enqueueOutboundTx,
   markOutboundTxBroadcast,
   markOutboundTxFailed,
   markOutboundTxMined,
+  listLiveBroadcastNoncesFrom,
 } from './repositories/outbound-txs.js'
-import { getRelayer, withRelayerSendLock } from './relayer.js'
+import { getFallbackBroadcastProvider, getRelayer, withRelayerSendLock } from './relayer.js'
+import { describeRevert, isDeterministicRevert } from './deterministic-revert.js'
 
 export interface OutboundBroadcastStamp {
   hash: string
@@ -58,6 +71,8 @@ export interface OutboundQueueRepo {
   markOutboundTxBroadcast: typeof markOutboundTxBroadcast
   markOutboundTxMined: typeof markOutboundTxMined
   markOutboundTxFailed: typeof markOutboundTxFailed
+  /** Optional so existing fakes need not grow it; the default is the real read. */
+  listLiveBroadcastNoncesFrom?: typeof listLiveBroadcastNoncesFrom
 }
 
 const defaultRepo: OutboundQueueRepo = {
@@ -65,6 +80,7 @@ const defaultRepo: OutboundQueueRepo = {
   markOutboundTxBroadcast,
   markOutboundTxMined,
   markOutboundTxFailed,
+  listLiveBroadcastNoncesFrom,
 }
 
 function warn(action: string, err: unknown): void {
@@ -93,6 +109,8 @@ export class OutboundFencedError extends Error {
 export interface SubmitChainDeps {
   getRelayer: typeof getRelayer
   withRelayerSendLock: typeof withRelayerSendLock
+  /** Optional so existing fakes need not grow it; the default is the real send. */
+  sendRawViaFallback?: typeof sendRawViaFallback
 }
 
 const defaultChainDeps: SubmitChainDeps = { getRelayer, withRelayerSendLock }
@@ -118,9 +136,12 @@ const defaultChainDeps: SubmitChainDeps = { getRelayer, withRelayerSendLock }
  *   whose tx never reached the mempool, which the bump worker's
  *   receipt-check→re-broadcast path self-heals from the stored calldata.
  *
- * `withRelayerSendLock` still wraps the window: it is the in-process belt
- * (cheap, and the Safe-bound legacy sites still rely on the same lane until
- * #1440), no longer the only line of defence.
+ * `withRelayerSendLock` still wraps the window: it is the in-process belt,
+ * no longer the only line of defence — except when an inline submitter's
+ * open failed open (the null-`recordId` path below), where it is the only
+ * one — and for the bump worker's orphan re-send, which also reads a fresh
+ * nonce unstamped. Its same-nonce replacements re-use an explicit nonce under
+ * its leader lock.
  *
  * A null `recordId` (the open failed open, or the bump worker stamping its
  * own rows) skips the stamp-first fence and degrades to the pre-#1559
@@ -129,6 +150,10 @@ const defaultChainDeps: SubmitChainDeps = { getRelayer, withRelayerSendLock }
  * A throw BEFORE the stamp (gas estimation, lane-attempt exhaustion) leaves
  * the row `queued`: the orphan path owns it after its age gate — same
  * resolution the pre-#1559 pre-broadcast-throw had, now with a durable row.
+ * Except (#3263) a DETERMINISTIC revert in gas estimation: that payload can
+ * never be sent as it stands, so the record is closed `failed` before the
+ * error propagates, instead of becoming an orphan re-sent every lease. Any
+ * later success goes through the submitter's own retry, on a fresh record.
  */
 export async function submitRecorded(
   params: {
@@ -153,17 +178,49 @@ export async function submitRecorded(
   return chain.withRelayerSendLock(params.chainId, async () => {
     const MAX_LANE_ATTEMPTS = 3
     for (let attempt = 0; attempt < MAX_LANE_ATTEMPTS; attempt++) {
-      const nonce = params.nonce ?? (await relayer.getNonce('pending'))
-      const populated = await relayer.populateTransaction({
-        to: params.to,
-        data: params.data,
-        value: params.valueAtomic ?? 0n,
-        nonce,
-        ...(params.maxFeePerGas !== undefined ? { maxFeePerGas: params.maxFeePerGas } : {}),
-        ...(params.maxPriorityFeePerGas !== undefined
-          ? { maxPriorityFeePerGas: params.maxPriorityFeePerGas }
-          : {}),
-      })
+      const nonce =
+        params.nonce ??
+        (await readNextRelayerNonce(
+          params.chainId,
+          relayer,
+          repo.listLiveBroadcastNoncesFrom ?? listLiveBroadcastNoncesFrom,
+        ))
+      let populated
+      try {
+        populated = await relayer.populateTransaction({
+          to: params.to,
+          data: params.data,
+          value: params.valueAtomic ?? 0n,
+          nonce,
+          ...(params.maxFeePerGas !== undefined ? { maxFeePerGas: params.maxFeePerGas } : {}),
+          ...(params.maxPriorityFeePerGas !== undefined
+            ? { maxPriorityFeePerGas: params.maxPriorityFeePerGas }
+            : {}),
+        })
+      } catch (err) {
+        // #3263: the payload reverted in gas estimation — nothing was signed
+        // or broadcast, and nothing ever will be for this record. Close it
+        // `failed` so it cannot become a `queued` orphan the bump worker
+        // re-sends forever; the submitter's own retry opens a fresh record.
+        // A transient populate failure leaves the record as it was.
+        if (params.recordId && isDeterministicRevert(err)) {
+          try {
+            // The nonce only when it was EXPLICIT (a same-nonce lane cancel or
+            // replacement), so the lane cap still counts that attempt; never
+            // the pending nonce just read, which would charge this failure to
+            // whatever transaction later lands at that nonce.
+            await repo.markOutboundTxFailed(
+              params.recordId,
+              `pre-broadcast ${describeRevert(err)}`,
+              undefined,
+              params.nonce !== undefined ? BigInt(params.nonce) : undefined,
+            )
+          } catch (markErr) {
+            warn('mark pre-broadcast revert failed', markErr)
+          }
+        }
+        throw err
+      }
       const raw = await relayer.signTransaction(populated)
       const hash = Transaction.from(raw).hash
       if (!hash) throw new Error('outbound-queue: signed transaction has no hash')
@@ -187,12 +244,220 @@ export async function submitRecorded(
         }
         if (!stamped) throw new OutboundFencedError(params.recordId)
       }
-      return provider.broadcastTransaction(raw)
+      return broadcastSigned(params.chainId, provider, raw, chain.sendRawViaFallback ?? sendRawViaFallback)
     }
     throw new Error(
       `outbound-queue: could not win a nonce lane on chain ${params.chainId} after ${MAX_LANE_ATTEMPTS} attempts`,
     )
   })
+}
+
+/**
+ * The next nonce for a fresh relayer send (#2769).
+ *
+ * Normally the node's `pending` count: it includes this relayer's
+ * transactions still in the mempool, so back-to-back sends take N, N+1, …
+ *
+ * Some providers refuse the `pending` block tag outright. dRPC's Base plans
+ * route it only to flashblocks-capable upstreams and answer "no available
+ * upstreams … No label `flashblocks`" when there are none, while serving
+ * `latest` normally. Every relayer send without an explicit nonce died at
+ * this read on dev from 2026-09-25: account deploys at first budget activation
+ * and at a fresh agent's first erc7710 authorize, sweeps, passport
+ * attestations and revokes, and the bump worker's orphan re-sends. Lane
+ * cancels and same-nonce replacements pass an explicit nonce and never get
+ * here.
+ *
+ * On THAT refusal only, the nonce is derived without the node's mempool view:
+ * start at the chain's `latest` count (same provider, so #1533's single nonce
+ * view holds) and step over every nonce this relayer holds a CONTIGUOUS live
+ * broadcast at in `outbound_txs`. Every send through {@link submitRecorded}
+ * with a record id is stamped there BEFORE it is broadcast, so the walk steps
+ * over our own in-flight sends the node will not report. It never jumps a
+ * hole: a stale row far above the count (the table has no from-address, so an
+ * earlier key's dropped send looks like ours) cannot push every later send
+ * into a gap nothing fills.
+ *
+ * The ledger read is deliberately FAIL-CLOSED, unlike {@link openOutboundRecord}:
+ * without it, `latest` alone would re-use the nonce of our own in-flight send.
+ * A database error propagates before anything is signed.
+ *
+ * Residuals. The ledger cannot see a live nonce held by an unstamped send (a
+ * failed-open record; the bump worker's orphan re-send, stamped only after
+ * this returns), nor during two transient handoffs (a lane cancel stamping
+ * after the attest it cancels left `broadcast`; the bump worker between
+ * marking a row replaced and stamping its successor). A fresh send can then
+ * take that nonce and either be rejected, or — with fees at least 10% higher
+ * on both fields — silently REPLACE our own unrecorded transaction. A live
+ * row whose transaction was DROPPED at N = `latest` is stepped over, so later
+ * sends take N+1, N+2 … and stall behind the hole until the bump worker
+ * re-sends N (rebroadcast-safe submitters) or an operator clears it (a
+ * `passport_attest`, or a lane past its bump cap;
+ * `modules/passport/attestation.ts` describes that stall). None of these can
+ * misdirect funds: a nonce orders the relayer's own transactions, it does not
+ * choose what they do. Any other error from the `pending` read propagates
+ * unchanged: a dead endpoint is not papered over here.
+ */
+export async function readNextRelayerNonce(
+  chainId: number,
+  relayer: { getNonce(blockTag?: string): Promise<number> },
+  readLedger: (chainId: number, from: bigint) => Promise<bigint[]> = listLiveBroadcastNoncesFrom,
+): Promise<number> {
+  try {
+    return await relayer.getNonce('pending')
+  } catch (err) {
+    if (!isPendingTagRefusal(err)) throw err
+    const latest = await relayer.getNonce('latest')
+    let next = BigInt(latest)
+    for (const live of await readLedger(chainId, next)) {
+      if (live === next) next += 1n
+      else if (live > next) break
+    }
+    console.warn(
+      `outbound-queue: the RPC refused the 'pending' block tag on chain ${chainId}; ` +
+        `nonce ${next} derived from latest ${latest} and the live-broadcast ledger (#2769)`,
+    )
+    return Number(next)
+  }
+}
+
+/**
+ * Broadcast the signed bytes (#2769). Normally through the relayer's own
+ * provider. dRPC's Base plans also refuse `eth_sendRawTransaction` with the
+ * same "No label `flashblocks`" body they give the `pending` read. On THAT
+ * refusal only, the identical raw transaction is sent through the chain's
+ * configured second provider (`RPC_URL_BASE_FALLBACK` /
+ * `RPC_URL_BASE_SEPOLIA_FALLBACK`, the same one the viem transport fails over
+ * to) — never the public node. The bytes are already signed and stamped: the
+ * hash is fixed, both providers forward to the same sequencer, and a second
+ * copy of the same transaction is a no-op, so this changes WHICH gateway
+ * carries the broadcast, never WHAT it is. The returned response is built on
+ * the PRIMARY provider, so `wait()` and every later read stay on the single
+ * nonce view (#1533). Any other broadcast error propagates unchanged, and so
+ * does the refusal when no second provider is configured.
+ */
+export async function broadcastSigned(
+  chainId: number,
+  provider: Provider,
+  raw: string,
+  sendFallback: (chainId: number, raw: string) => Promise<string> = sendRawViaFallback,
+): Promise<TransactionResponse> {
+  try {
+    return await provider.broadcastTransaction(raw)
+  } catch (err) {
+    if (!isPendingTagRefusal(err)) throw err
+    const tx = Transaction.from(raw)
+    // Read the block BEFORE sending, as ethers' own broadcast does alongside
+    // its send: a failed read then fails cleanly with nothing re-sent.
+    const blockNumber = await provider.getBlockNumber()
+    const hash = await sendFallback(chainId, raw)
+    if (hash.toLowerCase() !== tx.hash?.toLowerCase()) {
+      throw new Error(
+        `outbound-queue: the fallback provider returned hash ${hash}; the signed transaction is ${tx.hash}`,
+      )
+    }
+    console.warn(
+      `outbound-queue: the RPC refused eth_sendRawTransaction on chain ${chainId}; ` +
+        `broadcast ${hash} through the fallback provider (#2769)`,
+    )
+    // Mirrors ethers' own broadcastTransaction: wrap the signed transaction on
+    // the primary provider, replaceable from the current block. The signed
+    // Transaction carries every field formatTransactionResponse would (hash,
+    // from, to, nonce, chainId, signature; blockNumber/blockHash null) except
+    // gasPrice, null here vs undefined there, which no caller reads.
+    return new TransactionResponse(tx as unknown as TransactionResponseParams, provider).replaceableTransaction(
+      blockNumber,
+    )
+  }
+}
+
+/**
+ * `eth_sendRawTransaction` through the chain's configured second provider
+ * (`getFallbackBroadcastProvider` in `relayer.ts`). Its URL carries a provider
+ * API key, and ethers puts the request URL into a non-2xx error's message and
+ * into its enumerable `info.requestUrl` / `request` — which reach the
+ * `outbound_txs` error column, logs and an operator response. So a failure is
+ * rethrown by {@link fallbackSendError}, rebuilt from safe fields only.
+ */
+export async function sendRawViaFallback(chainId: number, raw: string): Promise<string> {
+  const fallback = getFallbackBroadcastProvider(chainId)
+  if (!fallback) {
+    throw new Error(
+      `outbound-queue: the RPC refused the broadcast on chain ${chainId} and no fallback provider is configured`,
+    )
+  }
+  try {
+    return String(await fallback.send('eth_sendRawTransaction', [raw]))
+  } catch (err) {
+    throw fallbackSendError(err, secretSegments(fallback._getConnection().url))
+  }
+}
+
+/**
+ * A fallback send failure, rebuilt so no URL — and so no API key — can leave
+ * it: ethers' short message and code, and the JSON-RPC error body's own code
+ * and message (kept so revert and nonce classification still work), with any
+ * URL in the text replaced. `info`, `request` and `response` are never copied.
+ */
+/**
+ * The key-like pieces of an endpoint URL — path segments and query values of
+ * 12+ characters — so a provider that echoes its key WITHOUT the URL (say
+ * `dkey=<key>` in a JSON-RPC message) is still scrubbed.
+ */
+function secretSegments(url: string): string[] {
+  return url.split(/[/?&=#]/).filter((part) => part.length >= 12 && !part.includes(':'))
+}
+
+export function fallbackSendError(err: unknown, secrets: string[] = []): Error {
+  const e = err as {
+    code?: unknown
+    shortMessage?: unknown
+    message?: unknown
+    error?: { code?: unknown; message?: unknown }
+    info?: { error?: { code?: unknown; message?: unknown } }
+  } | null
+  const scrub = (text: string) =>
+    secrets.reduce(
+      (acc, secret) => acc.split(secret).join('<redacted>'),
+      text.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)\]}]+/gi, '<fallback-url>'),
+    )
+  // ethers keeps the JSON-RPC error body in `error` or `info.error` — only
+  // that body's code and message are copied, never the rest of `info`.
+  const body = e?.error ?? e?.info?.error
+  const rpc =
+    body && typeof body === 'object'
+      ? {
+          code: body.code,
+          message: typeof body.message === 'string' ? scrub(body.message) : undefined,
+        }
+      : undefined
+  const base =
+    typeof e?.shortMessage === 'string'
+      ? e.shortMessage
+      : typeof e?.message === 'string'
+        ? e.message
+        : String(err)
+  const detail = rpc?.message ? ` (rpc: ${rpc.message})` : ''
+  const out = new Error(`outbound-queue: fallback broadcast failed: ${scrub(base)}${detail}`) as Error & {
+    code?: unknown
+    error?: { code?: unknown; message?: string }
+  }
+  if (e?.code !== undefined) out.code = e.code
+  if (rpc) out.error = rpc
+  return out
+}
+
+/**
+ * True only for a provider refusing the `pending` block tag itself — never
+ * for a timeout, a rate limit or a dead endpoint. Matches dRPC's refusal text
+ * wherever ethers put it (the top-level message quotes the RPC error body).
+ * A provider that words the refusal differently fails closed: the error
+ * propagates, as it did before this fallback existed.
+ */
+export function isPendingTagRefusal(err: unknown): boolean {
+  const e = err as { message?: unknown; error?: { message?: unknown } } | null
+  const text = [e?.message, e?.error?.message].filter((m) => typeof m === 'string').join(' ')
+  return /No label `flashblocks`/.test(text)
 }
 
 function toBigIntOrUndefined(value: unknown): bigint | undefined {

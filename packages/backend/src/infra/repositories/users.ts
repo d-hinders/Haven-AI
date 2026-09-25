@@ -23,6 +23,7 @@
 
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
+import { DEFAULT_TRANSACTION_CURRENCY } from '../../domain/transaction-currency.js'
 
 export type { Executor }
 
@@ -111,7 +112,10 @@ export const UPDATE_CURRENCY_PREFERENCE_SQL = `UPDATE users SET currency_prefere
  * `userId` is REQUIRED — tenant scope for the read.
  *
  * `null` covers both "no such user row" and "the column is null"; the route
- * applies the same `'USD'` default to either, exactly as the inline query did.
+ * applies `DEFAULT_TRANSACTION_CURRENCY` to either (`routes/user.ts`) — SEK
+ * since #3127, the documented no-preference default. Migration 091 is what
+ * makes the stored column agree: pre-existing inherited `'USD'` rows are
+ * NULLed so this fallback, not an inherited literal, decides.
  */
 export async function findCurrencyPreference(
   userId: string,
@@ -156,7 +160,7 @@ export async function updateCurrencyPreference(
 export const FIND_USER_ID_BY_EMAIL_SQL = 'SELECT id FROM users WHERE email = $1'
 
 export const INSERT_USER_SQL =
-  'INSERT INTO users (name, email, password_hash, via) VALUES ($1, $2, $3, $4) RETURNING id, name, email, created_at'
+  'INSERT INTO users (name, email, password_hash, via, currency_preference) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, created_at'
 
 export const FIND_USER_CREDENTIALS_BY_EMAIL_SQL =
   'SELECT id, name, email, password_hash, wallet_address, account_address, currency_preference FROM users WHERE email = $1'
@@ -215,6 +219,7 @@ export async function insertUser(
     normalisedEmail,
     passwordHash,
     via,
+    DEFAULT_TRANSACTION_CURRENCY,
   ])
   return result.rows[0]
 }

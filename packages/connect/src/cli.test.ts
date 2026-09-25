@@ -8,6 +8,8 @@ import * as runtime from './runtime.js'
 import * as doctorModule from './doctor.js'
 import * as unwireModule from './unwire.js'
 import { ConnectError } from './connect-error.js'
+import { CONNECT_OUTCOME_FILENAME } from './storage.js'
+import type { DoctorDeps, DoctorReport } from './doctor.js'
 
 let tempDir = ''
 
@@ -301,6 +303,10 @@ describe('--tombstone (#1681)', () => {
     expect(script).toContain('HAVEN-TOMBSTONE')
     const record = JSON.parse(await readFile(join(dir, 'TOMBSTONE.json'), 'utf8'))
     expect(record).toMatchObject({ agent_id: 'agent-old', reason: 'superseded', replaced_by: 'agent-new' })
+    // #3251: the ledger record lands inside THIS directory's root, not in the
+    // ambient ~/.haven/tombstones.
+    const ledger = JSON.parse(await readFile(join(tempDir, '.tombstones', 'agent-old.json'), 'utf8'))
+    expect(ledger).toMatchObject({ agent_id: 'agent-old', replaced_by: 'agent-new' })
     // identity.json survives byte-for-byte — connect never revokes or deletes.
     expect(await readFile(join(dir, 'identity.json'), 'utf8')).toContain('sk_agent_x')
     const out = stdout.join('')
@@ -308,6 +314,32 @@ describe('--tombstone (#1681)', () => {
     expect(out).toMatch(/Restart EVERY long-lived MCP host/)
     // The agent API key must never surface in output.
     expect(out).not.toContain('sk_agent_x')
+  })
+
+  it('#3259: an unwritable ledger still exits 0 with tombstoned:true, recordPath null and the mirror error — matching the disk', async () => {
+    const dir = await agentDir()
+    // A FILE where the root's ledger directory goes.
+    await writeFile(join(tempDir, '.tombstones'), 'x')
+    const stdout: string[] = []
+    const exitCode = await runCli(['--tombstone', dir, '--json'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
+    expect(exitCode).toBe(0)
+    const record = JSON.parse(stdout[0])
+    expect(record).toMatchObject({ tombstoned: true, agent_id: 'agent-old', recordPath: null })
+    // The errno code only — never the raw OS message with its local path (#2175).
+    expect(record.mirrorError).toMatch(/^(ENOTDIR|EEXIST)$/)
+    expect(stdout[0]).not.toContain(join(tempDir, '.tombstones', 'agent-old.json'))
+    const { readFile } = await import('node:fs/promises')
+    expect(await readFile(join(dir, 'TOMBSTONE.json'), 'utf8')).toContain('agent-old')
+
+    const text: string[] = []
+    const dir2 = join(tempDir, 'agent-old-2')
+    await mkdir(join(dir2, 'bin'), { recursive: true })
+    expect(await runCli(['--tombstone', dir2], { stdout: (m) => text.push(m), stderr: () => undefined })).toBe(0)
+    expect(text.join('')).toMatch(/surviving tombstone record could NOT be written/)
+    expect(text.join('')).not.toMatch(/was mirrored to/)
+    // #3259 review: and no later sentence claims the copy exists either.
+    expect(text.join('')).not.toMatch(/mirrored record keeps this retirement observable/)
+    expect(text.join('')).toMatch(/Restart EVERY long-lived MCP host/)
   })
 
   it('--json emits one secret-free record', async () => {
@@ -656,35 +688,176 @@ describe('every subcommand reports its failure on stdout under --json (#2184)', 
 })
 
 /**
- * #3120 premise note, pinned as behavior: the SHIPPED CLI refuses flagless
- * `--doctor` in the argument parser (args.ts, in place since #1597), so the
- * fabricated-green path the issue describes is reachable only through
- * `runDoctor` directly (library callers, tests). The doctor layer now resolves
- * the runtime from the setup record anyway — the parser guard and the doctor's
- * honest unknown-runtime verdicts are two doors to the same protection. These
- * tests pin the parser door so the split cannot silently drift.
+ * #3210 — flagless `--doctor` reaches the doctor; flagless `--repair` does not.
+ *
+ * Until #3210 the argument parser refused `--doctor` without `--runtime`
+ * (args.ts, a guard in place since #1597, when no setup record existed to
+ * resolve a runtime from). #3120 then taught the doctor to resolve the runtime
+ * from `last-connect-outcome.json` — but every real invocation still ended at
+ * the parser, so `origin: 'record'` and `origin: 'unknown'` were reachable
+ * only by calling `runDoctor` directly. The block this replaces pinned that
+ * split as "two doors to the same protection"; for the safety half that was
+ * true (the fabricated green verdict was unreachable either way), for the
+ * feature half it meant #3120's headline never reached a user.
+ *
+ * These tests drive `runCli` — parser, dispatch and doctor in ONE call chain —
+ * because the gap was precisely that the two layers were tested separately.
+ * Only the doctor's out-of-process collaborators are substituted (the hosted
+ * and signer probes, and the home directory), by handing the real `runDoctor`
+ * injected deps; the input it receives is exactly what the CLI dispatched.
+ *
+ * `--repair` keeps its explicit-runtime requirement, in the parser: it
+ * rewrites the user's editor config, so which config it rewrites is stated on
+ * the command line rather than inherited from a record on disk (the doctor's
+ * own record path for repair stays for library callers, pinned in
+ * doctor.test.ts).
  */
-describe('--doctor/--repair runtime requirement (#3120 premise note)', () => {
-  it('the parser refuses flagless --doctor, naming the flag and what it is for', async () => {
-    const stderr: string[] = []
+describe('flagless --doctor resolves the runtime from the setup record, end to end through runCli (#3210)', () => {
+  const API_KEY = 'sk_agent_1234567890abcdef1234567890abcdef'
+  const DELEGATE_ADDRESS = '0x' + 'cd'.repeat(20)
+
+  async function seedHome(record: string | undefined) {
+    tempDir = await mkdtemp(join(tmpdir(), 'haven-connect-cli-doctor-'))
+    const dir = join(tempDir, '.haven', 'agents', 'agent-1')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'identity.json'), JSON.stringify({
+      api_key: API_KEY,
+      agent_id: 'agent-1',
+      api_url: 'https://api.haven.example',
+      hosted_mcp_url: 'https://mcp.haven.example/mcp',
+    }))
+    await writeFile(join(dir, 'signer.json'), JSON.stringify({
+      version: 1,
+      delegate_key: '0x' + '11'.repeat(32),
+      delegate_address: DELEGATE_ADDRESS,
+      agent_id: 'agent-1',
+      account_address: '0x' + 'ab'.repeat(20),
+      chain_id: 84532,
+      network: 'eip155:84532',
+    }), { mode: 0o600 })
+    if (record !== undefined) await writeFile(join(dir, CONNECT_OUTCOME_FILENAME), record)
+    return { homeDir: tempDir, dir }
+  }
+
+  /**
+   * The real doctor, with its network and spawn collaborators stubbed and its
+   * home directory pointed at the seeded one. `input` is NOT rewritten: what
+   * the CLI dispatched is what the doctor resolves from.
+   */
+  function passThroughDoctor(homeDir: string) {
+    const real = doctorModule.runDoctor
+    const deps: DoctorDeps = {
+      homeDir,
+      probeHosted: async () => ({ status: 'ok' as const }),
+      probeHostedIdentity: async () => ({ status: 'ok' as const, agentId: 'agent-1', delegateAddress: DELEGATE_ADDRESS }),
+      probeSignerTools: async () => ({ status: 'ok' as const, toolNames: [], serverInfo: { name: 'haven-signer', version: '0.0.0' } }),
+    }
+    return vi.spyOn(doctorModule, 'runDoctor').mockImplementation((input) => real(input, deps))
+  }
+
+  it('with a recorded runtime and NO --runtime flag: the parser passes it through and the doctor checks the recorded runtime\'s real config file', async () => {
+    const { homeDir } = await seedHome(JSON.stringify({ schema_version: 1, outcome: 'complete', runtime: 'cursor' }))
+    const spy = passThroughDoctor(homeDir)
     const stdout: string[] = []
-    const exitCode = await runCli(['--doctor'], {
-      stdout: (m) => stdout.push(m),
-      stderr: (m) => stderr.push(m),
-    })
-    expect(exitCode).toBe(1)
-    expect(stdout).toHaveLength(0)
-    expect(stderr.join('')).toContain('--doctor/--repair need --runtime <runtime>')
+    const stderr: string[] = []
+    try {
+      const exitCode = await runCli(['--doctor', '--json'], {
+        stdout: (m) => stdout.push(m),
+        stderr: (m) => stderr.push(m),
+      })
+      // The parser no longer stands in front of the doctor: no refusal, and the
+      // doctor received the flagless input verbatim.
+      expect(stderr.join('')).not.toContain('need --runtime')
+      expect(stderr.join('')).not.toContain('needs --runtime')
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(spy.mock.calls[0]?.[0]).toEqual({ runtime: '', credentialsDir: undefined })
+      // ...and resolved the record: the report names cursor and the check
+      // looked at cursor's config file, not codex's and not "CLI-managed".
+      expect(stdout).toHaveLength(1)
+      const report = JSON.parse(stdout[0]!) as DoctorReport
+      expect(report.runtime).toBe('cursor')
+      const rc = report.checks.find((c) => c.id === 'runtime_config')
+      expect(rc?.detail).toContain(join(homeDir, '.cursor', 'mcp.json'))
+      expect(rc?.detail).not.toContain('Runtime is unknown')
+      // Exit code is the report's own verdict (other checks fail on this
+      // minimal seed), never a parser error's.
+      expect(exitCode).toBe(report.ok ? 0 : 1)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
-  it('the parser refuses flagless --repair the same way', async () => {
+  it('with NO --runtime and NO resolvable record: the doctor reports the runtime unknown as a failed check, exit 1 — not a parser error, not a green tick', async () => {
+    const { homeDir } = await seedHome(undefined)
+    const spy = passThroughDoctor(homeDir)
+    const stdout: string[] = []
     const stderr: string[] = []
-    const exitCode = await runCli(['--repair'], {
-      stdout: () => undefined,
-      stderr: (m) => stderr.push(m),
-    })
-    expect(exitCode).toBe(1)
-    expect(stderr.join('')).toContain('--doctor/--repair need --runtime <runtime>')
+    try {
+      const exitCode = await runCli(['--doctor'], {
+        stdout: (m) => stdout.push(m),
+        stderr: (m) => stderr.push(m),
+      })
+      expect(exitCode).toBe(1)
+      expect(stderr.join('')).not.toContain('need --runtime')
+      expect(stderr.join('')).not.toContain('needs --runtime')
+      expect(spy).toHaveBeenCalledTimes(1)
+      const out = stdout.join('')
+      expect(out).toContain('✗ Runtime MCP config: Runtime is unknown')
+      expect(out).toContain('The runtime config was NOT checked')
+      expect(out).toContain(CONNECT_OUTCOME_FILENAME)
+      expect(out).not.toContain('✓ Runtime MCP config')
+      // Every --repair hint on this path is runnable-with-a-fill-in, never the
+      // bare `--doctor --repair` the parser refuses (#3210 review).
+      expect(out).not.toMatch(/--doctor --repair\s*$/m)
+      for (const line of out.split('\n')) {
+        if (line.includes('--repair')) expect(line, line).toContain('--runtime <runtime>')
+      }
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('an explicit --runtime still wins over the record, through the same path', async () => {
+    const { homeDir } = await seedHome(JSON.stringify({ runtime: 'cursor' }))
+    const spy = passThroughDoctor(homeDir)
+    const stdout: string[] = []
+    try {
+      await runCli(['--doctor', '--runtime', 'codex-cli', '--json'], {
+        stdout: (m) => stdout.push(m),
+        stderr: () => undefined,
+      })
+      expect(spy.mock.calls[0]?.[0]).toEqual({ runtime: 'codex-cli', credentialsDir: undefined })
+      const report = JSON.parse(stdout[0]!) as DoctorReport
+      expect(report.runtime).toBe('codex-cli')
+      expect(report.checks.find((c) => c.id === 'runtime_config')?.detail).toContain(join(homeDir, '.codex', 'config.toml'))
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('flagless --repair is still refused by the parser, naming why, and never reaches the doctor', async () => {
+    const spy = vi.spyOn(doctorModule, 'runRepair').mockResolvedValue({ ok: true, messages: [] })
+    const doctorSpy = vi.spyOn(doctorModule, 'runDoctor')
+    const stderr: string[] = []
+    const stdout: string[] = []
+    try {
+      for (const argv of [['--repair'], ['--doctor', '--repair']]) {
+        stderr.length = 0
+        const exitCode = await runCli(argv, {
+          stdout: (m) => stdout.push(m),
+          stderr: (m) => stderr.push(m),
+        })
+        expect(exitCode, argv.join(' ')).toBe(1)
+        expect(stderr.join(''), argv.join(' ')).toContain('--repair needs --runtime <runtime>')
+        expect(stderr.join(''), argv.join(' ')).toContain('--doctor alone resolves it from the record')
+      }
+      expect(stdout).toHaveLength(0)
+      expect(spy).not.toHaveBeenCalled()
+      expect(doctorSpy).not.toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+      doctorSpy.mockRestore()
+    }
   })
 })
 
@@ -856,6 +1029,26 @@ describe('--unwire teardown outcome and --prune-signer-runtimes (#3123)', () => 
     }
   })
 
+  it('#3259: a mirror failure is surfaced additively — mirror_error in --json, a "!" line in text — and never changes the exit code', async () => {
+    const base = unwireResult({ status: 'destroyed', probe: 'ok', detail: 'Key material destroyed (probe: ok).' })
+    const spy = vi.spyOn(unwireModule, 'unwireAgent').mockResolvedValue({ ...base, mirrorError: 'ENOTDIR' })
+    try {
+      const json: string[] = []
+      expect(await runCli(['--unwire', '/home/u/.haven/agents/research', '--json'], { stdout: (m) => json.push(m), stderr: () => undefined })).toBe(0)
+      expect(JSON.parse(json[0]).mirror_error).toBe('ENOTDIR')
+      const text: string[] = []
+      expect(await runCli(['--unwire', '/home/u/.haven/agents/research'], { stdout: (m) => text.push(m), stderr: () => undefined })).toBe(0)
+      expect(text.join('')).toContain('! Surviving tombstone record: NOT written to /home/u/.haven/agents/.tombstones (ENOTDIR)')
+
+      spy.mockResolvedValue(base)
+      const clean: string[] = []
+      await runCli(['--unwire', '/home/u/.haven/agents/research', '--json'], { stdout: (m) => clean.push(m), stderr: () => undefined })
+      expect(JSON.parse(clean[0])).not.toHaveProperty('mirror_error')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   it('forced under --destroy-key-material: exit 0, the flag reaches unwireAgent, the "!" line and the ended-recovery remedy are printed', async () => {
     const spy = vi.spyOn(unwireModule, 'unwireAgent').mockResolvedValue(unwireResult({ status: 'forced', probe: 'ok', detail: 'Key material destroyed under --destroy-key-material (probe: ok).', remedy: 'Local recovery of a stranded delegate balance ends with it.' }))
     try {
@@ -863,6 +1056,13 @@ describe('--unwire teardown outcome and --prune-signer-runtimes (#3123)', () => 
       const exitCode = await runCli(['--unwire', '/home/u/.haven/agents/research', '--destroy-key-material'], { stdout: (m) => stdout.push(m), stderr: () => undefined })
       expect(exitCode).toBe(0)
       expect(spy).toHaveBeenCalledWith(expect.objectContaining({ destroyKeyMaterial: true }))
+      // #3251: the ledger follows the resolved directory's root — a root
+      // other than this home's ~/.haven/agents keeps it inside itself...
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ tombstonesDir: '/home/u/.haven/agents/.tombstones' }))
+      // ...and the default root keeps ~/.haven/tombstones, unchanged.
+      const { homedir } = await import('node:os')
+      await runCli(['--unwire', join(homedir(), '.haven', 'agents', 'research')], { stdout: () => undefined, stderr: () => undefined })
+      expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ tombstonesDir: join(homedir(), '.haven', 'tombstones') }))
       const out = stdout.join('')
       expect(out).toContain('! Key material: forced (probe: ok)')
       expect(out).toContain('Local recovery of a stranded delegate balance ends')

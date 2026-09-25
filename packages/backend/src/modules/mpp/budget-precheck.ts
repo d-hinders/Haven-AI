@@ -94,7 +94,7 @@ export async function handleBudgetPrecheck(
   // closed before anything is derived, and only the delegation rail has a
   // budget to compare against.
   const railDecision = resolveExecutionRail({
-    safeExecutionRail: agent.execution_rail ?? null,
+    executionRail: agent.execution_rail ?? null,
     chainId: agent.chain_id,
   })
   if (railDecision.rail === 'retired_session') {

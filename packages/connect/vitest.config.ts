@@ -6,5 +6,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     globalSetup: ['./vitest.global-setup.ts'],
+    // #3251: every worker gets a scratch HOME — see vitest.setup-home.ts.
+    setupFiles: ['./vitest.setup-home.ts'],
   },
 })

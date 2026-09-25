@@ -43,7 +43,11 @@ function serialize(row: Awaited<ReturnType<typeof getPassport>>) {
 }
 
 export default async function agentPassportRoutes(app: FastifyInstance): Promise<void> {
-  app.addHook('preHandler', authMiddleware)
+  // onRequest, not preHandler (#3032, as #3030 did for the enforced modules):
+  // request validation runs in preValidation, so an auth hook any later would
+  // let an anonymous caller read the schema's 400 before its 401 once this
+  // module is enforced.
+  app.addHook('onRequest', authMiddleware)
 
   /**
    * Current passport state. `passport: null` means the agent has none — the

@@ -21,9 +21,11 @@ covers:
   - packages/connect/src/prune-runtimes.ts
   - packages/connect/src/storage.ts
   - packages/signer/src/credentials.ts
+  - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
-last-verified: "2026-09-19"
+  - packages/core/src/client-compat.ts
+last-verified: "2026-09-24"
 ---
 
 # Package dev channel (`@haven_ai/*@dev`)
@@ -46,6 +48,64 @@ unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
 
+> **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
+> this doc is coupled through `routes/agent-connection-setups.ts` and
+> `middleware/retired-safe-names.ts`. The route's change is one internal
+> identifier: the `ApprovalStateInput.safeTxHash` field becomes
+> `accountTxHash` — a value the repo layer writes to the `account_tx_hash`
+> column it always wrote, not the wire input (`safe_id` stays DECLARED and
+> REFUSED with a 400 exactly as #2914 left it). The refusal machinery this
+> document depends on in `retired-safe-names.ts` is untouched (the file is not
+> in the diff). Verified against the diff: `CONNECTOR_PACKAGE`, `CLI_PACKAGE`,
+> `config.connectorChannel` and the `/discovery` response shape are unchanged,
+> and no channel, dist-tag, version-order or publish behaviour moves. Scope of
+> this note: that identifier rename — nothing else in this document was
+> re-verified.
+>
+> **Re-verification (#3271, direct sign-context, 2026-09-24):** this doc is
+> coupled through `packages/signer/src/credentials.ts`, where the only change
+> is JSDoc: it now names the signer's second read-only fetch
+> (`GET /payments/:payment_id/sign-context`, for a direct payment via
+> `haven_sign`). Credential resolution, file modes and the `identity.json`
+> lookup are unchanged, and no version, dist-tag, channel or publish behaviour
+> moves. `last-verified` re-stamped to 2026-09-24 for this note only; nothing
+> else in this document was re-verified.
+>
+> **Re-verification (#3032, connector request fields and owner-route auth
+> order, 2026-09-24):** this doc is coupled through
+> `packages/backend/src/routes/agent-connection-setups.ts`. The change moves
+> the four owner routes' auth hook from `preHandler` to `onRequest`, and
+> declares in the OpenAPI request schemas the fields the connector and
+> dashboard already send (`local_mcp`, `mcp_server_name`, `skill_installed`,
+> `superseded_agent_ids`). The setup, register and install-status flow this
+> document describes for the dev channel is unchanged, and no channel,
+> dist-tag, version-order or publish behaviour moves. Scope of this note: that
+> file — nothing else in this document was re-verified.
+>
+> **Re-verification (#3259, failed tombstone mirror, 2026-09-23):** this doc is
+> coupled through `packages/connect/src/{cli,runtime}.ts`. The change: a failed
+> ledger mirror no longer aborts a retirement, so `--replace` still removes the
+> superseded directory's key files and logs a warning, and `--tombstone` /
+> `--unwire` report the failure additively. Re-read against the diff: the
+> `--replace` guidance in step 2 ("it retires that agent's local key files") is
+> now true in the one case where it used to be false, and no channel,
+> dist-tag, version-order or publish behaviour moves. `last-verified` already
+> reads 2026-09-23. Scope of this note: that passage — nothing else in this
+> document was re-verified.
+
+> **Re-verification (#3251, tombstone ledger follows the credential root,
+> 2026-09-23):** this doc is coupled through `packages/connect/src/{cli,
+> runtime,doctor}.ts`. The change: the retirement record that `--tombstone`,
+> `--unwire` and `--replace` mirror now lands in the ledger of the credential
+> root that held the retired directory, and `--doctor` reads the ledger of the
+> root it scans. For the default root that is `~/.haven/tombstones`, as
+> before; any other root keeps it at `<root>/.tombstones/`. Re-read against the diff: the `--replace`
+> guidance in step 2 (it retires that agent's local key files; `--doctor`
+> enumerates every agent regardless of name) and the override passage
+> (`~/.haven/signer-runtime/override-<hash>`) are unchanged, and no channel,
+> dist-tag, version-order or publish behaviour moves. Scope of this note: those
+> passages — nothing else in this document was re-verified.
+
 > **Re-verification (0.2.1-alpha.0 release, 2026-09-16):** this doc is coupled
 > to the release because the bump rewrites `CONNECTOR_VERSION`
 > (`packages/connect/src/runtime.ts`), which is in this doc's `covers:` list.
@@ -65,6 +125,21 @@ and the `release` skill.
 > whole-document re-verification this release did not perform. Scope of this
 > note: `CONNECTOR_VERSION` and the channel constant's unchanged value — nothing
 > else in this document was re-verified.
+
+> **Re-verification (#3172, signer audit sidecar, 2026-09-19):** this doc is
+> coupled through `packages/signer/src/credentials.ts`, where the only change
+> is that `warnIfCredentialFilePermissive` now delegates to a shared
+> `file-mode.ts` helper (same message, same `chmod 600` hint, same Windows
+> carve-out, and still `stat` — a symlinked credential path is judged by its
+> target as before; only the sidecar check uses `lstat`) so the audit sidecar
+> can reuse it. `file-mode.ts` is added to this doc's `covers:` because that
+> claim now lives there. The credential's NAME
+> resolution — `account_address` first, the two pre-#2908 names read
+> permanently — is untouched, so the `credentials` check this document describes
+> reports exactly what it did. No channel, version-order or publish behaviour
+> is touched. `last-verified` is not re-stamped: it already reads 2026-09-19.
+> Scope of this note: that one function — nothing else in this document was
+> re-verified.
 
 > **Re-verification (#3135, request-validation flip re-key, 2026-09-18):** this
 > doc is coupled again through the same `covers:` entry on
@@ -119,6 +194,35 @@ and the `release` skill.
 > today**, and a scoped check of one constant is not a re-verification of this
 > document; #1366 rates a rubber stamp worse than a stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
 
+> **Re-verification (0.5.0-alpha.1 release, 2026-09-25):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
+> `0.5.0-alpha.0` → `0.5.0-alpha.1`, with channel `alpha` agreeing across
+> source, bundle and resolved SDK. Re-measured at `origin/dev` `20176679`:
+> `git log origin/main..origin/dev` over `publish.yml`, `release-channel.mjs`,
+> `release-snapshot-version.mjs` and `release-version-order.mjs` returns **0**
+> commits, and the bump's own diff touches **0** of them. Live dist-tags read
+> during this release: `dev` = `0.0.0-dev.202609251409.98ed67a` on all five
+> packages, below `alpha`/`latest` = `0.4.0-alpha.0`. `0.5.0-alpha.0` never
+> reached npm (see the runtime-compatibility note), so the next `alpha`/`latest`
+> is `0.5.0-alpha.1`. `last-verified` is not bumped.
+>
+> **Re-verification (0.5.0-alpha.0 release, 2026-09-25):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
+> is in this doc's `covers:`. Verified rather than asserted: the constant moved
+> `0.4.0-alpha.0` → `0.5.0-alpha.0`, and the bump's own checks report channel
+> `alpha` agreeing across the source, the built connect bundle and the SDK that
+> bundle resolves. **No channel behaviour changed** — re-measured, not carried
+> over from the 0.4.0 note: `git log origin/main..origin/dev` over
+> `publish.yml`, `release-channel.mjs`, `release-snapshot-version.mjs` and
+> `release-version-order.mjs` returns **0** commits, and this bump's own diff
+> touches **0** of them, so the `0.0.0-dev.*` snapshot path and the rule that the
+> two channels cannot cross are untouched. The `dev` tag observed during this
+> release, `0.0.0-dev.202609250737.3bd5a51`, sits below `alpha`/`latest` at
+> `0.4.0-alpha.0` exactly as the ordering rule requires; a MINOR step changes
+> nothing about that. `last-verified` deliberately NOT bumped — it already
+> reads 2026-09-24 from an earlier change, and this note re-reads only
+> `CONNECTOR_VERSION` and the channel constant's value.
+
 > **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** coupled because the
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
 > is in this doc's `covers:`. Verified rather than asserted: the constant moved
@@ -155,6 +259,11 @@ and the `release` skill.
   sorts below every real version, so no `^0.1.x` range can resolve to a snapshot
   by accident and nobody has to reason about `dev` vs `alpha` prerelease
   ordering.
+  The same property is why the backend's client-version signal (#3303)
+  **exempts** a snapshot: a `0.0.0-dev.*` version in `X-Haven-Client` is never
+  hinted or refused, whatever minimum the deployment sets
+  (`isSnapshotVersion` in `packages/core/src/client-compat.ts`), so a dev-channel
+  install keeps working against dev after a minimum is set.
 - **All five carry the same version.** The job runs the ordinary
   `scripts/release-bump.mjs` with `--snapshot` over the CI checkout, so the
   cross-package pins, connect's `runtime-manifest.ts`, the baked version
@@ -293,6 +402,31 @@ untouched. The doc is a contract doc for this change because
 there is the deletion of the two twin helpers, not the refusal machinery this
 document depends on.
 
+Re-verified again 2026-09-21 against PR #3207 (#3030, request validation
+slice 2): the only `config.ts` change is the JSDoc above
+`requestValidationMode`, whose example list of `enforcedModules` had been
+stale since #3167 and now points at `index.ts` as the list's one home; the
+key's parser, its three values and the boot refusal on any other value are
+untouched, `connectorChannel` and `/discovery` are untouched, so no claim in
+this document moved and `last-verified` is left where it is — the
+comment-only rule above.
+
+Re-verified again 2026-09-23 against #3255 (backend RPC failover):
+`config.ts` gains `PUBLIC_RPC_BASE` / `PUBLIC_RPC_BASE_SEPOLIA` (the two
+public-node literals `warnPublicRpc` already used, now named once) and
+`rpcUrlBaseFallback` / `rpcUrlBaseSepoliaFallback` (the optional
+`RPC_URL_BASE*_FALLBACK` second provider, trimmed by `parseRpcFallbackUrl`).
+`connectorChannel`, its parser and `/discovery` are untouched, so no claim in
+this document moved and `last-verified` is left where it is.
+
+Re-verified again 2026-09-20 against PR #3202 (epic #3077 decision 14):
+the only `config.ts` change is the comment above `marketplaceProspectsEnabled`,
+which now states the prospects gate as "the explicit marketplace list names a
+testnet" instead of "no mainnet listed"; the key's parser (`parseBooleanFlag`,
+the #3015 shape this document holds up), `connectorChannel` and `/discovery`
+are untouched, so no claim in this document moved and `last-verified` is left
+where it is — the comment-only rule above.
+
 Re-verified again 2026-09-17 against #3078
 (the marketplace's slice 1): `config.ts` gains `marketplaceChainIds` and
 `marketplaceProspectsEnabled` (the latter through the same `parseBooleanFlag`
@@ -389,13 +523,17 @@ throughout.
    npx -y @haven_ai/connect@dev --doctor --runtime <claude-code|codex-desktop|codex-cli>
    ```
 
-   The doctor reports the installed signer and SDK versions (the snapshot),
+   `--runtime` is optional here since #3210 — a flagless `--doctor` checks the
+   runtime the setup recorded — and stays required for `--repair`, which
+   rewrites that config. The doctor reports the installed signer and SDK
+   versions (the snapshot),
    starts the local signer for a real stdio handshake and prints its advertised
    compat versions. On the dev channel the pinned build moves often: an install
    that is intact but behind the connector's current pin is reported as an
    **advisory** (`!` marker, "intact, but outdated", both versions named) and
-   exits 0 — only a real failure exits 1 (#3121). Run `--doctor --repair` to
-   catch up when you want the newer snapshot. Its hosted MCP row proves endpoint reachability; the
+   exits 0 — only a real failure exits 1 (#3121). Run
+   `--doctor --repair --runtime <runtime>` to catch up when you want the newer
+   snapshot. Its hosted MCP row proves endpoint reachability; the
    `identity_match` row is the authenticated stored-credential check. Every
    "re-run `npx @haven_ai/connect@<tag>`" hint the
    snapshot's packages print names **`@dev`**, because the tag is a build-time
@@ -437,9 +575,10 @@ prints `RUNTIME SPEC OVERRIDE ACTIVE …` first; the install lands in
 the pinned directory) and is never reused between runs; and `--doctor` reports
 a **failing** `runtime_spec_override` check — that is the record of the override,
 not a defect. A malformed value is refused before npm runs. To return to the
-pinned manifest, unset the variables and run `--doctor --repair`. The full
-contract — the three variables, what each replaces, the sidecar and wrapper
-records — is in the connector's own README:
+pinned manifest, unset the variables and run
+`--doctor --repair --runtime <runtime>`. The full contract — the three
+variables, what each replaces, the sidecar and wrapper records — is in the
+connector's own README:
 [`packages/connect/README.md` § *Installing an unpublished signer / SDK / MCP build*](../../packages/connect/README.md#installing-an-unpublished-signer--sdk--mcp-build-haven_signer_spec-2424).
 
 Every pin and every override key leaves its directory behind when you move
@@ -457,11 +596,11 @@ only until you prune.
 > described above is unchanged (it already compared against the sidecar).
 
 > **Re-verified #3120:** the doctor/repair surfaces this loop uses keep their
-> contracts. `--doctor` (and `--doctor --repair`) now resolve the runtime from
-> the agent directory's `last-connect-outcome.json` when the `--runtime` flag
-> is absent, and an unknown runtime makes `--repair` refuse before any write or
-> npm spawn — the override flow above always names its runtime, so it never
-> enters that path. The section's commands keep explicit `--runtime <name>`
+> contracts. `--doctor` now resolves the runtime from the agent directory's
+> `last-connect-outcome.json` when the `--runtime` flag is absent; `--repair`
+> is refused by the parser without `--runtime` (#3210), so it never inherits a
+> runtime — the override flow above always names its runtime, so it never
+> enters either path. The section's commands keep explicit `--runtime <name>`
 > flags and behave exactly as written; the snapshot channel rules, the five
 > guards and `HAVEN_CONNECTOR_CHANNEL` did not move.
 
@@ -633,7 +772,7 @@ newest.
 | The run fails in the bump step with `short sha "0…" is all digits with a leading zero` | Semver forbids a leading zero in a numeric prerelease identifier, and that commit's 7-hex short SHA happens to be all digits (`release-snapshot-version.mjs`) | Nothing is wrong with the commit. Re-run the workflow on a later commit |
 | The dev dashboard's command names `@alpha` | `HAVEN_CONNECTOR_CHANNEL` is unset or empty on the dev backend | Checklist step 5 — after step 4 |
 | The dev backend or hosted MCP will not boot after setting the variable | The value is not a well-formed dist-tag | Fix or unset it; the boot log names the variable and the pattern |
-| `--doctor` fails on `runtime_spec_override` | A `HAVEN_*_SPEC` variable is set in the shell, or the last install ran under one | By design — the finding is the record. Unset and `--doctor --repair` to return to the pin |
+| `--doctor` fails on `runtime_spec_override` | A `HAVEN_*_SPEC` variable is set in the shell, or the last install ran under one | By design — the finding is the record. Unset and `--doctor --repair --runtime <runtime>` to return to the pin |
 | A `0.0.0-dev.*` version shows up on `alpha` or `latest` | Should be impossible: five guards in `publish.yml` / `release-bump.mjs` | Treat as an incident in the workflow itself, not as a bad publish; the guards are named in the workflow header |
 
 ## Not covered here

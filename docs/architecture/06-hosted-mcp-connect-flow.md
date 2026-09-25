@@ -287,12 +287,14 @@ The edge signer exposes four local, sign-only tools. Three of the four never
 reach the network; the exception is the `{ payment_id }` form of `haven_sign`
 and `haven_sign_x402`, which since #1263 fetches that payment's exact signing
 context from Haven over an authenticated, read-only
-`GET /x402/:payment_id/sign-context`. The delegate key is never part of that
+`GET /x402/:payment_id/sign-context` — and, for a direct payment via
+`haven_sign` only (since #3271), then `GET /payments/:payment_id/sign-context`
+after the x402 read answers 409. The delegate key is never part of that
 request or its response, and nothing here relays, submits, or broadcasts:
 
 | Tool | Purpose |
 |---|---|
-| `haven_sign` | Sign a prepared payment hash |
+| `haven_sign` | Sign a Haven-prepared payment: a direct-payment UserOp from the agent's own account whose only call redeems a delegation made to it, or an x402 payload against a Haven-signed context; anything else is refused (#3272) |
 | `haven_x402_sign_header` | Sign the decomposed merchant authorization |
 | `haven_sign_x402` | Sign the recommended paid-MCP funding and merchant contexts |
 | `haven_sign_sweep_delegate` | Sign a gasless delegate-to-wallet USDC sweep |

@@ -73,23 +73,34 @@ describe('agent routes', () => {
 
     // #2020: a non-delegator_hybrid agent gets `allowances: []` with NO
     // second query against `agent_allowances` — the mirror is retired with
-    // the Safe rail. A single mocked call is enough; a leftover second one
-    // would go unconsumed if the handler regressed into reading it.
-    mockQuery.mockResolvedValueOnce({
-      rows: [{
-        id: AGENT_UUID,
-        name: 'Research Agent',
-        description: null,
-        delegate_address: '0x1111111111111111111111111111111111111111',
-        account_id: SAFE_UUID,
-        account_address: '0x2222222222222222222222222222222222222222',
-        account_name: 'Main wallet',
-        account_chain_id: 8453,
-        api_key_prefix: 'sk_agent_abc',
-        status: 'active',
-        created_at: '2026-05-25T12:00:00.000Z',
-        mcp_last_seen_at: null,
-      }],
+    // the Safe rail. Content-dispatched (#1227 posture): the agent-row read
+    // and the #3167 labels ride-along are the whole query budget, and ANY
+    // other query (an agent_allowances read would be one) fails loudly.
+    mockQuery.mockImplementation(async (sql: string) => {
+      const s = String(sql)
+      if (/FROM agents/.test(s)) {
+        return {
+          rows: [{
+            id: AGENT_UUID,
+            name: 'Research Agent',
+            description: null,
+            delegate_address: '0x1111111111111111111111111111111111111111',
+            account_id: SAFE_UUID,
+            account_address: '0x2222222222222222222222222222222222222222',
+            account_name: 'Main wallet',
+            account_chain_id: 8453,
+            api_key_prefix: 'sk_agent_abc',
+            status: 'active',
+            created_at: '2026-05-25T12:00:00.000Z',
+            organization_id: null,
+            mcp_last_seen_at: null,
+          }],
+        }
+      }
+      if (/FROM agent_label_assignments/.test(s)) {
+        return { rows: [] }
+      }
+      throw new Error(`unexpected query on the by-id GET: ${s}`)
     })
 
     const response = await app.inject({
@@ -110,8 +121,9 @@ describe('agent routes', () => {
     // 'Needs setup' and links to the page where the budget grant activates.
     expect(String(mockQuery.mock.calls[0][0])).not.toContain("pending_approval")
     expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', AGENT_UUID])
-    // Only the single agent-row query — no `agent_allowances` read (#2020).
-    expect(mockQuery).toHaveBeenCalledTimes(1)
+    // The agent-row read plus the labels ride-along — still no
+    // `agent_allowances` read (#2020).
+    expect(mockQuery).toHaveBeenCalledTimes(2)
     // The populated shape is where drift would actually show.
     expectMatchesSpec('GET', '/agents/{id}', response.json())
 
@@ -203,6 +215,7 @@ describe('agent routes', () => {
             status: 'active',
             created_at: '2026-05-25T12:00:00.000Z',
             mcp_server_name: 'haven',
+            organization_id: null,
             mcp_last_seen_at: null,
           }],
         }
@@ -437,7 +450,7 @@ describe('agent creation — passport opt-in never breaks creation', () => {
       if (/INSERT INTO agents/.test(sql)) {
         // Real uuids: the response-shape round trip below validates
         // `format: uuid` on `id` / `safe_id` (#2392; the columns are UUID PKs).
-        return { rows: [{ id: AGENT_UUID, name: 'A', description: null, delegate_address: VALID_DELEGATE, account_id: SAFE_UUID, api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', mcp_last_seen_at: null }] }
+        return { rows: [{ id: AGENT_UUID, name: 'A', description: null, delegate_address: VALID_DELEGATE, account_id: SAFE_UUID, api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', organization_id: null, mcp_last_seen_at: null }] }
       }
       if (/SELECT account_address, name AS account_name/.test(sql)) {
         return { rows: [{ account_address: '0x2222222222222222222222222222222222222222', account_name: 'Main', account_chain_id: 84532 }] }

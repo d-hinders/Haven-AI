@@ -1,4 +1,4 @@
-import { createNextStepBuilder, type NextStep, type NextStepHandoff, type NextStepTarget } from '@haven_ai/sdk'
+import { createNextStepBuilder, type NextStep, type NextStepHandoff, type NextStepTarget } from '@haven_ai/sdk/edge'
 import { z } from 'zod'
 
 /**

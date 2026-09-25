@@ -26,6 +26,9 @@ import transactionRoutes from './routes/transactions.js'
 import portfolioRoutes from './routes/portfolio.js'
 import dashboardRoutes from './routes/dashboard.js'
 import agentRoutes from './routes/agents.js'
+import labelRoutes from './routes/labels.js'
+import agentLabelRoutes from './routes/agent-labels.js'
+import agentOrganizationRoutes from './routes/agent-organizations.js'
 import hybridAccountRoutes from './routes/hybrid-accounts.js'
 import agentDelegationRoutes from './routes/agent-delegations.js'
 import agentRekeyRoutes from './routes/agent-rekey.js'
@@ -71,6 +74,7 @@ import analyticsOverviewRoutes from './routes/analytics-overview.js'
 import accountingRoutes from './routes/accounting.js'
 import accountingConnectionsRoutes from './routes/accounting-connections.js'
 import accountingFeedRoutes from './routes/accounting-feed.js'
+import accountingWebhookRoutes from './routes/accounting-webhooks.js'
 import { registerConnector, startRetrySweep, getAccountingOpsCounters, setOpsEventSink } from './modules/accounting/index.js'
 import { AccountedConnector } from './modules/accounting/index.js'
 import { FortnoxConnector } from './modules/accounting/index.js'
@@ -82,6 +86,7 @@ import {
 } from './modules/catalog/index.js'
 import { ingestDiscoveredCatalog } from './modules/catalog/index.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
+import { registerClientCompatHooks } from './middleware/client-compat.js'
 import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
 // dep-lint-exempt: composition root — owns the pool for the /health liveness probe (SELECT 1) and hands it to the leader-gated catalog jobs at boot; it wires infrastructure rather than running tenant SQL
 import pool from './db.js'
@@ -117,7 +122,62 @@ app.setErrorHandler(httpErrorHandler)
 // (spiked: an encapsulated plugin's onRoute sees no later routes).
 installRequestValidation(app, {
   mode: config.requestValidationMode,
-  enforcedModules: ['routes/contacts.ts', 'routes/merchants.ts'],
+  // #3167: the label routes are born ENFORCED — new modules never enter shadow.
+  enforcedModules: [
+    // Slice 1 (#3029) proof module, and the modules born enforced since.
+    'routes/contacts.ts',
+    'routes/merchants.ts',
+    'routes/labels.ts',
+    'routes/agent-labels.ts',
+    // #3164: the organization routes are born ENFORCED — new modules never
+    // enter shadow.
+    'routes/agent-organizations.ts',
+    // Slice 2 (#3030): every non-money route module, plus the two inline
+    // routes below (`GET /`, `GET /chains` — keyed `'index.ts'`). Flipped on
+    // the epic's fallback (owner decision 2026-09-21 on #3028): the dev
+    // shadow read could not prove these modules — the counter resets on
+    // every deploy and carried no per-route traffic (until #3208) — so each module's
+    // route tests (off-spec → the 400 envelope; conformant → byte-identical)
+    // are the instrument, and `enforce` on dev is the reading. Slices 3–4
+    // (#3031/#3032) flip the money-path modules on a persisted reading.
+    'index.ts',
+    'routes/accounting.ts',
+    'routes/accounting-feed.ts',
+    'routes/accounting-connections.ts',
+    // #3196's receiver landed in this slice's base commit, registered without
+    // a prefix (its routes carry the full path); the doc review found it
+    // shadowed and unseen by the gauge, so it joins the list here.
+    'routes/accounting-webhooks.ts',
+    'routes/agent-activity.ts',
+    'routes/analytics.ts',
+    'routes/analytics-overview.ts',
+    'routes/auth.ts',
+    'routes/balances.ts',
+    'routes/catalog.ts',
+    'routes/catalog-submissions.ts',
+    'routes/dashboard.ts',
+    'routes/discovery.ts',
+    'routes/health.ts',
+    'routes/openapi.ts',
+    'routes/passkeys.ts',
+    'routes/passport-verify.ts',
+    'routes/portfolio.ts',
+    'routes/safe-deploy.ts',
+    'routes/transactions.ts',
+    'routes/user.ts',
+    'routes/user-accounts.ts',
+    'routes/user-accounts-retired.ts',
+    // #3031 (epic #3028 slice 3): the FIRST money-path module to enforce.
+    // Its five operations are the only ones the 2026-09-22 shadow reading
+    // proved conformant end to end — 24.41 h, zero would_refuse, zero
+    // would_coerce, traffic on all five (57 `POST /x402`, 57 `/authorize`,
+    // 48 `/{id}/settle`, 31 sign-context, 12 merchant-call-context). The
+    // slice's other three modules (`payments`, `agent-delegations`,
+    // `machine-payments`) keep 15 operations with NO traffic in that window
+    // and stay shadowed by owner decision (2026-09-22): a route printed
+    // NOT PROVEN is not enforced on a guess.
+    'routes/x402.ts',
+  ],
 })
 
 // --- Process-level error handlers ---
@@ -188,6 +248,15 @@ await app.register(discoveryRoutes)
 // be registered before routes that decorate request.agent so the onResponse
 // hook fires after them.
 registerAgentToolAuditHooks(app)
+
+// Client-version signal (#3303, epic #3302): a `client_update` hint on the
+// responses an outdated published client receives, and a 426
+// `client_outdated` refusal — only below a SET minimum, only at the
+// payment-initiating routes and (for the signer) sign-context. Registered
+// before the routes so its root hooks reach them; the request-validation
+// preHandler above has already restored the client's body by the time the
+// refusal hook reads its idempotency key.
+registerClientCompatHooks(app)
 
 // Record agent liveness (last_seen_at) after each authenticated agent request,
 // powering the dashboard "Connected · last seen" indicator. Registered as an
@@ -283,6 +352,15 @@ await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
 await app.register(agentRekeyRoutes, { prefix: '/agents' })
 await app.register(agentPassportRoutes, { prefix: '/agents' })
+// #3167: label assignment rides the /agents prefix as its own route FILE —
+// the request-validation rollout keys enforcedModules on the file.
+await app.register(agentLabelRoutes, { prefix: '/agents' })
+// The label vocabulary itself — GET/POST /labels, PUT/DELETE /labels/:id
+// (#3167). Same prefix rule: one route file, one enforcedModules entry.
+await app.register(labelRoutes, { prefix: '/labels' })
+// #3164: the organization tree — GET/POST /organizations, PUT/DELETE
+// /organizations/:id. Its own prefix and route file, born enforced.
+await app.register(agentOrganizationRoutes, { prefix: '/organizations' })
 // Public and unauthenticated (#974): the caller is a merchant deciding whether
 // to serve an agent, and it has no Haven account. Registered separately from
 // the dashboard-authed passport routes so the auth hook cannot be assumed.
@@ -321,6 +399,11 @@ await app.register(accountingRoutes, { prefix: '/accounting' })
 // `/accounting/connections/*`) replaced the Fortnox-shaped router.
 await app.register(accountingConnectionsRoutes, { prefix: '/accounting' })
 await app.register(accountingFeedRoutes, { prefix: '/accounting/feed' })
+// #3019: the Accounted webhook receiver. Public (the provider carries no
+// session), capability-URL token + HMAC as the credentials, and its OWN
+// encapsulated content-type parser — registering it as a plugin keeps the
+// raw-body capture off every other route.
+await app.register(accountingWebhookRoutes)
 // #496: the live Fortnox feed adapter. Registering it flips hasLiveConnector()
 // → true, which removes the Reporting page's "preview" banner. Gated on env:
 // deployments without Fortnox credentials keep the feed inert (no-op), same

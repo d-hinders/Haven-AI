@@ -50,40 +50,44 @@
  * run. Separate tests make every capture's verdict independent and make a
  * mutation's blast radius a measurement instead of an inference.
  *
- * ── Which of the ten this file reaches (#1873: all of them) ─────────────────
+ * ── Which of the nine this file reaches (#1873: all of them) ────────────────
  *
  * #1863 reached six, and said why the other five were out of reach. The
- * inventory was eleven then and is TEN now: #2258 deleted `Revoke`, so the
- * card contributes seven controls, not eight (#2687 re-derived it from the
- * seven `aria-label`s in `AgentCard.tsx`).
+ * inventory was eleven then, ten after #2258 deleted `Revoke`, and is NINE
+ * now: #3168 deleted `Edit` with the name/description modal it opened, so the
+ * card contributes six controls (#2687 had re-derived seven from the
+ * `aria-label`s in `AgentCard.tsx`).
  *
  *   Sidebar kebab popover   Profile · Settings · Log out          3/3  captured
  *   AgentCard action row    Edit · Pause · Revoke                 3/8  captured  (as #1863 measured it)
  *
- * `AgentCard`'s footer NEVER renders all seven at once — `isOperational`,
+ * `AgentCard`'s footer NEVER renders all six at once — `isOperational`,
  * `isRevoked` and `isArchived` are mutually exclusive, and `canUseWalletActions`
- * split the operational branch further (as did `isDelegationAgent`, until #2413
- * deleted it with the legacy branch) (the design pass on
- * #1831 made the same correction to that PR's "eight rings in one row"
- * framing). Against the shared `mockHavenApi` fixture's one active agent
- * exactly three render.
+ * split the operational branch further until #3168 deleted it with the Edit
+ * modal it guarded (as did `isDelegationAgent`, until #2413 deleted it with the
+ * legacy branch) (the design pass on #1831 made the same correction to that
+ * PR's "eight rings in one row" framing). Against the shared `mockHavenApi`
+ * fixture's one active agent exactly three render.
  *
  * #2264 changed WHICH three, and that is the point rather than an aside. The
  * shared fixture carried no `account_type`, so `railOf` read it as a legacy
  * Safe and the row was Edit · Pause · **Revoke** — the AllowanceModule teardown,
  * on a rail that answers HTTP 410 in production (#1986). The default is now the
- * live delegation rail, where the row is Edit · Pause · **Remove** (#1402).
- * `Revoke` has NO capture here any more, and there is nothing left to seed it
- * with: #2258 deleted the control (`rowControls` below is Edit + Pause), #2413
- * removed the legacy branch that rendered it, and #2459 deleted the legacy
- * opt-down itself — `e2e/fixtures/haven-api.ts` records that "a spec that wants
- * a retired-rail page today has nothing to opt down TO".
+ * live delegation rail, where the row is Details · Pause · **Remove** (#1402;
+ * #3168 made Details the first control on every operational card and retired
+ * Edit). `Revoke` has NO capture here any more, and there is nothing left to
+ * seed it with: #2258 deleted the control (the default row below is Details +
+ * Pause), #2413 removed the legacy branch that rendered it, and #2459 deleted
+ * the legacy opt-down itself — `e2e/fixtures/haven-api.ts` records that "a spec
+ * that wants a retired-rail page today has nothing to opt down TO".
  *
- * So this was never a scoping choice: reaching the other five is FIXTURE work,
+ * So this was never a scoping choice: reaching the others is FIXTURE work,
  * not capture work. #1873 does it, and all of them are reached.
  *
  *   control              needs                                    rendered by
- *   Details              canUseWalletActions === false            a different account_id
+ *   Details              the default first control; seeded on     every operational card
+ *                        a different account_id (the case that
+ *                        forked before #3168)
  *   Resume from pause    status: 'paused'                         the paused branch
  *   Remove (delegation)  account_type: 'delegator_hybrid', active the operational branch
  *   Remove (revoked)     status: 'revoked', not archived          the isRevoked branch
@@ -127,9 +131,9 @@
  * **Seeding a state is not the same as rendering the branch**, so every test
  * asserts the row's FULL control set before it captures (`expectRowControls`).
  * `status: 'paused'` reaching the API mock proves nothing about which of
- * `AgentCard`'s five footer branches ran; "this row holds exactly Edit, Resume
- * from pause, Remove" does. It is also what turns a future branch edit into a
- * named failure instead of a silently re-pointed baseline.
+ * `AgentCard`'s five footer branches ran; "this row holds exactly Details,
+ * Resume from pause, Remove" does. It is also what turns a future branch edit
+ * into a named failure instead of a silently re-pointed baseline.
  *
  * ── Tab traversal, and why the count is never hard-coded ─────────────────────
  *
@@ -583,7 +587,37 @@ async function openUserMenuByKeyboard(page: Page) {
  * eleven other specs, and a paused or archived agent added there would change
  * what `/agents` renders for all of them.
  */
+/**
+ * #3222 re-review: a card offers Move only when the user HAS an organization.
+ * This spec captures the focus ring on every operational control, Move
+ * included, so it seeds one; the shared fixture keeps `organizations: []` for
+ * the product-route captures. Registered per test, so it takes precedence over
+ * the shared handler (reverse registration order, as for `seedAgents`).
+ */
+async function seedOneOrganization(page: Page) {
+  await page.route('**/api/organizations', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        organizations: [
+          {
+            id: 'org-focus',
+            parent_organization_id: null,
+            name: 'Operations',
+            created_at: '2026-05-01T00:00:00Z',
+            updated_at: '2026-05-01T00:00:00Z',
+            agent_count: 0,
+          },
+        ],
+      }),
+    })
+  })
+}
+
 async function seedAgents(page: Page, agents: ReadonlyArray<Record<string, unknown>>) {
+  await seedOneOrganization(page)
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
@@ -620,7 +654,7 @@ function agentState(overrides: Record<string, unknown>) {
  * an existing baseline, silently. The row's full control set is the observable
  * that distinguishes them, and it is asserted as a SET-with-order rather than a
  * `toBeVisible()` on the one target, so a control appearing that should not
- * (Edit surviving into the `canUseWalletActions: false` branch) fails too.
+ * (an `Edit` button surviving #3168's fork removal) fails too.
  *
  * Accessible names, not text: two of these controls read "Remove" and are told
  * apart only by their agent, which is exactly the ambiguity `aria-label` exists
@@ -755,25 +789,31 @@ test.describe('driven focus-state visual regression', () => {
   // only, and the resting half is filed separately.
   //
   // #2258: `Revoke` was a legacy Safe control and is deleted with the retired
-  // agent-management surface. `Edit` and `Pause` stay for live delegation
-  // agents; their baselines capture the row with the live `Remove` control.
+  // agent-management surface. `Pause` stays for live delegation agents;
+  // #3168 retired `Edit` (the card's first action is now "Details", which
+  // navigates to the detail page), so this loop captures Pause only. The
+  // baseline captures the row with the live `Remove` control.
   const rowControls = [
-    { slug: 'edit', label: 'Edit', tone: 'brand' },
     { slug: 'pause', label: 'Pause', tone: 'brand' },
   ] as const
 
   for (const control of rowControls) {
     test(`agent card action row — ${control.label} focus indicator (${control.tone})`, async ({ page }) => {
+      await seedOneOrganization(page)
       await gotoDesktop(page, '/agents')
 
       const target = page.locator(`button[aria-label="${control.label} ${testAgent.name}"]`)
       await expect(target).toHaveCount(1)
       await expect(target).toBeVisible()
 
-      // The action row, located as the control's own parent rather than by its
-      // class string — same rule as the popover above. Asserting the count
-      // keeps "the row moved" from silently becoming "some other div".
-      const actionRow = target.locator('xpath=..')
+      // The action row, located by its stable testid rather than the
+      // control's parent: the round-3 rework (#3164) wraps each `|` with the
+      // button it introduces below `lg` (S9, no dangling pipes on a wrapped
+      // line), so a button's parent is a grouping span, not the row. The
+      // testid survives such re-groupings; the old "own parent" walk did not
+      // (measured: the resume/remove-delegation driven captures failed their
+      // control-set assertions against a span in the round-3 baseline run).
+      const actionRow = page.getByTestId('agent-card-actions')
       await expect(actionRow).toHaveCount(1)
       await expectRowControlsUnwrapped(actionRow, `AgentCard action row · ${control.label}`)
 
@@ -802,10 +842,11 @@ test.describe('driven focus-state visual regression', () => {
   const seededControls = [
     {
       slug: 'details',
-      // `canUseWalletActions` is `agentUsesActiveAccount(agent)`, which compares
-      // `agent.account_id` to the ACTIVE account (`safe-main`, seeded into
-      // localStorage by `seedAuthenticatedSession`). A second account is the only
-      // way to reach this branch — the flag is derived, never sent.
+      // #3168: the `canUseWalletActions` fork is gone, so this branch is no
+      // longer how a second account is reached — but the seed still exercises
+      // an agent on a DIFFERENT account than the active one, which is exactly
+      // the case that used to fork. Its row proves the first control is
+      // "Open details for …" here too, same as every operational card.
       agent: agentState({
         id: 'agent-other-safe',
         name: 'Ledger agent',
@@ -813,14 +854,15 @@ test.describe('driven focus-state visual regression', () => {
         account_name: 'Treasury',
       }),
       control: 'Open details for Ledger agent',
-      // #2264: `Remove` joins the row. `canUseWalletActions: false` hides Edit
-      // (and nothing else — `Revoke` is gone since #2258), but Remove is not
-      // gated at all: it renders unconditionally inside `isOperational`
-      // (#2413 deleted `isDelegationAgent`) — so on
-      // the live rail this branch is three controls, not two. It read as two
-      // only because the shared fixture was legacy by omission.
+      // #2264: `Remove` joins the row. #3168 removed the fork that hid
+      // Details behind `canUseWalletActions` (and nothing else — `Revoke` is
+      // gone since #2258), but Remove is not gated at all: it renders
+      // unconditionally inside `isOperational` (#2413 deleted
+      // `isDelegationAgent`). #3164 adds `Move` between Details and the
+      // pause/resume control on every operational card — four controls.
       rowControls: [
         'Open details for Ledger agent',
+        'Move Ledger agent to an organization',
         'Pause Ledger agent',
         'Remove Ledger agent',
       ],
@@ -832,7 +874,14 @@ test.describe('driven focus-state visual regression', () => {
       agent: agentState({ id: 'agent-paused', name: 'Paused agent', status: 'paused' }),
       control: 'Resume Paused agent',
       // #2264: Remove, not Revoke — same rail branch as the row above.
-      rowControls: ['Edit Paused agent', 'Resume Paused agent', 'Remove Paused agent'],
+      // #3168: the first control is now Details, not Edit.
+      // #3164: Move joins every operational row, Details first.
+      rowControls: [
+        'Open details for Paused agent',
+        'Move Paused agent to an organization',
+        'Resume Paused agent',
+        'Remove Paused agent',
+      ],
       tone: 'brand',
       label: 'Resume from pause',
     },
@@ -860,7 +909,15 @@ test.describe('driven focus-state visual regression', () => {
         account_type: 'delegator_hybrid',
       }),
       control: 'Remove Delegation agent',
-      rowControls: ['Edit Delegation agent', 'Pause Delegation agent', 'Remove Delegation agent'],
+      // #3168: the first control is now Details, not Edit — same substitution
+      // as the paused branch above.
+      // #3164: Move joins every operational row, Details first.
+      rowControls: [
+        'Open details for Delegation agent',
+        'Move Delegation agent to an organization',
+        'Pause Delegation agent',
+        'Remove Delegation agent',
+      ],
       tone: 'danger',
       label: 'Remove (delegation)',
     },
@@ -920,7 +977,9 @@ test.describe('driven focus-state visual regression', () => {
       await expect(target).toHaveCount(1)
       await expect(target).toBeVisible()
 
-      const actionRow = target.locator('xpath=..')
+      // Stable testid — see the pause loop above for why the parent walk
+      // cannot be used anymore (the S9 pipe-grouping spans).
+      const actionRow = page.getByTestId('agent-card-actions')
       await expect(actionRow).toHaveCount(1)
       await expectRowControls(
         actionRow,
@@ -981,7 +1040,9 @@ test.describe('driven focus-state visual regression', () => {
     await expect(target).toHaveCount(1)
     await expect(target).toBeVisible()
 
-    const actionRow = target.locator('xpath=..')
+    // Same stable testid as the desktop captures — the parent walk broke
+    // when the S9 pipe-grouping spans landed (see the pause loop above).
+    const actionRow = page.getByTestId('agent-card-actions')
     await expect(actionRow).toHaveCount(1)
 
     // The label is atomic at this width too — the whole point of pinning it.

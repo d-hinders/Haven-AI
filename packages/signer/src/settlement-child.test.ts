@@ -18,7 +18,7 @@ import {
   isSettlementChildTypedData,
   verifySettlementChild,
   type SettlementChildTypedData,
-} from './settlement-child.js'
+} from '@haven_ai/sdk/edge'
 
 /** The fixture's own values, so the "matching" expectation is not invented. */
 const MERCHANT = '0x3333333333333333333333333333333333333333'

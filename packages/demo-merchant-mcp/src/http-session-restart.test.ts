@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
 import { decodePaymentRequiredHeader, encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
-import { createDemoMerchantServer } from './http.js'
+import { SESSION_NOT_FOUND_MESSAGE, SESSION_NOT_FOUND_RECOVERY, createDemoMerchantServer } from './http.js'
 import {
   PAYMENT_REQUIRED_HEADER,
   PAYMENT_RESPONSE_HEADER,
@@ -38,7 +38,7 @@ afterEach(async () => {
   servers = []
 })
 
-async function start() {
+async function start(extra: { sessionIdleTtlMs?: number; now?: () => number } = {}) {
   const submit = vi.fn<SettlementClient['submit']>().mockResolvedValue(TX)
   const server = createDemoMerchantServer({
     merchantAddress: MERCHANT,
@@ -47,6 +47,7 @@ async function start() {
       submit,
       waitForReceipt: vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined),
     }),
+    ...extra,
   })
   servers.push(server)
   await new Promise<void>((res, rej) => {
@@ -134,11 +135,17 @@ describe('stale MCP session across a merchant restart (#1578)', () => {
     // "Restart": a fresh server with an empty session map.
     const s2 = await start()
     const staleRetry = await post(s2.url, BUY, { 'mcp-session-id': sid!, [PAYMENT_SIGNATURE_HEADER]: header })
-    const staleBody = await staleRetry.json() as { error?: { code: number; message: string } }
+    const staleBody = await staleRetry.json() as { error?: { code: number; message: string; data?: unknown } }
 
     // FAIL-CLOSED: the SDK's own unknown-session contract, and zero money moved.
     expect(staleRetry.status).toBe(404)
-    expect(staleBody.error).toMatchObject({ code: -32001, message: 'Session not found' })
+    expect(staleBody.error).toMatchObject({ code: -32001, message: SESSION_NOT_FOUND_MESSAGE })
+    expect(staleBody.error?.message).toMatch(/^Session not found/)
+    expect(staleBody.error?.message).toContain('Nothing was settled')
+    // #3171: the recovery is machine-readable — the merchant's own guarantee
+    // that the buyer may resend the same header without a status read.
+    expect(staleBody.error?.data).toEqual(SESSION_NOT_FOUND_RECOVERY)
+    expect(staleBody.error?.data).toEqual({ reason: 'session_expired', settled: false, next_action: 'reinitialize_then_retry_same_payment_header' })
     expect(s2.submit).not.toHaveBeenCalled()
 
     // The recovery door: initialize is exempt from the guard even with the
@@ -155,6 +162,49 @@ describe('stale MCP session across a merchant restart (#1578)', () => {
     expect(paid.headers.get(PAYMENT_RESPONSE_HEADER)).toBeTruthy()
     expect(text).toContain('Purchase confirmed')
     expect(s2.submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('#3171: an idle session past the TTL answers the same recovery 404 — and the same header then settles once on a fresh session', async () => {
+    let clock = 1_000_000
+    const s = await start({ sessionIdleTtlMs: 60_000, now: () => clock })
+    const initRes = await post(s.url, INIT)
+    const sid = initRes.headers.get('mcp-session-id')!
+    const challenge = await post(s.url, BUY, { 'mcp-session-id': sid })
+    expect(challenge.status).toBe(402)
+    const pr = decodePaymentRequiredHeader(challenge.headers.get(PAYMENT_REQUIRED_HEADER)!) as PaymentRequired
+    const header = await signedHeader(pr)
+
+    // Under the TTL the session is alive and the idle clock resets on use.
+    clock += 59_000
+    const alive = await post(s.url, { jsonrpc: '2.0', id: 9, method: 'tools/list' }, { 'mcp-session-id': sid })
+    expect(alive.status).toBe(200)
+    clock += 59_000
+    const stillAlive = await post(s.url, { jsonrpc: '2.0', id: 10, method: 'tools/list' }, { 'mcp-session-id': sid })
+    expect(stillAlive.status).toBe(200)
+
+    // Past the TTL with no traffic: swept, and the paid retry gets the recovery 404 BEFORE any settlement.
+    clock += 60_001
+    const expired = await post(s.url, BUY, { 'mcp-session-id': sid, [PAYMENT_SIGNATURE_HEADER]: header })
+    const body = await expired.json() as { error?: { code: number; data?: unknown } }
+    expect(expired.status).toBe(404)
+    expect(body.error).toMatchObject({ code: -32001, data: SESSION_NOT_FOUND_RECOVERY })
+    expect(s.submit).not.toHaveBeenCalled()
+
+    const reinit = await post(s.url, INIT, { 'mcp-session-id': sid })
+    const newSid = reinit.headers.get('mcp-session-id')!
+    expect(newSid).not.toBe(sid)
+    const paid = await post(s.url, BUY, { 'mcp-session-id': newSid, [PAYMENT_SIGNATURE_HEADER]: header })
+    expect(paid.status).toBe(200)
+    expect(s.submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('#3171: sessionIdleTtlMs 0 disables the sweep', async () => {
+    let clock = 0
+    const s = await start({ sessionIdleTtlMs: 0, now: () => clock })
+    const sid = (await post(s.url, INIT)).headers.get('mcp-session-id')!
+    clock = Number.MAX_SAFE_INTEGER
+    const alive = await post(s.url, { jsonrpc: '2.0', id: 9, method: 'tools/list' }, { 'mcp-session-id': sid })
+    expect(alive.status).toBe(200)
   })
 
   it('stateless calls (no session header) are untouched and still mint no reusable session', async () => {

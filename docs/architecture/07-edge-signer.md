@@ -3,6 +3,12 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/signer/**
+  - packages/sdk/src/userop-binding.ts
+  - packages/sdk/src/direct-payment-guard.ts
+  - packages/sdk/src/redemption-guard.ts
+  - packages/sdk/src/delegate-account.ts
+  - packages/sdk/src/settlement-child.ts
+  - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/mcp-server/src/boot.ts
   - packages/mcp-server/src/auth.ts
   - packages/mcp-server/src/server.ts
@@ -19,6 +25,7 @@ covers:
   - packages/sdk/src/client.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/signer.ts
+  - packages/sdk/src/edge.ts
   - packages/sdk/src/sweep.ts
   - packages/sdk/src/x402.ts
   - packages/backend/src/rails/sweep.ts
@@ -31,7 +38,7 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-18"
+last-verified: "2026-09-24"
 ---
 
 # Haven — Edge Signer
@@ -58,26 +65,47 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
 
 1. **Signer core** — framework-agnostic, no network. Loads the delegate key
    from a local secret and exposes these operations:
-   - `signPaymentHash(hash)` → raw ECDSA signature (the AllowanceModule
-     funding/transfer hash). Reuses the SDK's `signHash` + `verifySignature`.
-   - `signX402FundingHash(hash, expected)` → verifies Haven's signature over the
-     expected context, then returns the funding signature plus a process-local
+   - (removed, #3169) `signPaymentHash(hash)` — raw ECDSA over the retired
+     AllowanceModule rail's hash. It was a blind-signing oracle: a digest of an
+     EIP-3009 transfer out of the delegate wallet, or of a MetaMask
+     `Delegation`, signed valid, and the #1476 shape-keyed refusal could not
+     see a hash. `haven_sign` with a bare `payload_hash` now answers the
+     structured `BARE_HASH_REFUSED` refusal (`next_action: stop_and_tell_user`,
+     a typed step naming the inputs the signer CAN verify).
+   - (removed, #3272) `signX402FundingHash(hash, expected)` — the
+     expected-context v1 bare-hash funding path. The signer supports
+     expected-context versions 2 and 3 only.
+   - `signX402FundingTypedData(typedData, expected)` → verifies Haven's
+     signature over the expected context and that it commits to this typed
+     data's digest, then (#3281) signs only two shapes whatever the binding
+     declares: a funding-leg `PackedUserOperation` that passes the
+     direct-payment allowlist and pays the quoted amount to this signer's own
+     delegate EOA, or an erc7710 settlement child re-delegated from this
+     signer's own account (never ROOT). It then returns the funding signature
+     plus a process-local
      `x402_binding` that records the authenticated funding-intent and
      merchant-header context returned by hosted MCP.
+   - `signDelegationTypedData(typedData)` → a verbatim primitive: signs
+     whatever typed data it is handed. The allowlist that decides WHAT may be
+     signed lives in the MCP tool layer (#3272, below); an embedder calling
+     the core directly owns that check.
    - `buildX402PaymentHeader(paymentRequired, x402Binding)` → the EIP-3009
      merchant payment header for the merchant leg of an x402 payment, after
      consuming the recorded binding and checking the merchant challenge against
      it. Reuses the SDK's `selectStandardPaymentOption` +
      `toStandardPaymentRequirements` + the `x402` library.
    - `signSweepAuthorization(authorization, expectedAuth)` → verifies Haven's
-     authenticated recovery context, confirms the delegate and optional local
-     Safe destination, and signs a Base-USDC EIP-3009 sweep authorization.
+     authenticated recovery context, confirms the delegate and — when the
+     local credential carries the agent's account (Haven wallet) address —
+     the destination, and signs a Base-USDC EIP-3009 sweep authorization.
    - Returns signatures/headers only — never the key.
 
 2. **Local stdio MCP signer** — a thin MCP server exposing sign-only tools
    backed by the core. Since #1263 this layer holds the signer's ONE network
    capability: an authenticated READ of a payment's exact signing context from
-   Haven by `payment_id` (`GET /x402/:id/sign-context`), using the agent
+   Haven by `payment_id` (`GET /x402/:id/sign-context` for an x402 intent;
+   since #3271 `GET /payments/:id/sign-context` for a direct payment, fetched
+   when the x402 route answers `409 sign_context_unavailable`), using the agent
    identity (`identity.json`) the connector stores next to the signer
    credential. This exists because the alternative byte source is a language
    model re-emitting multi-KB EIP-712 payloads between tool calls — runtimes
@@ -93,8 +121,10 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    The agent client runs it locally **alongside** the hosted Haven connection.
    On first launch, or when that bound configuration changes, it requires a
    consent acknowledgement tied to the delegate, optional wallet/agent/network
-   metadata, and exposed tool set. Each signing operation appends a local audit
-   row containing context hashes but no key, signature, or merchant header.
+   metadata, and exposed tool set. Each signing operation appends, best-effort
+   (since #3172 a failed audit write is reported on stderr and never fails the
+   call), a local audit row containing context hashes but no key, signature,
+   or merchant header.
 
    **Handshake surface (#1155).** The `initialize` result also states which
    expected-context and sweep-binding versions this signer will verify —
@@ -180,27 +210,41 @@ agent runtime drives the sequence.
 
 ```
 hosted:  haven_pay        -> { payment_id, payload_hash, signature_scheme?, typed_data?, typed_data_b64? }
-local:   haven_sign       -> { signature }     (delegate key, never leaves)
+local:   haven_sign { payload_hash, typed_data_b64 } -> { signature }   (delegate key never leaves)
+         (or, on a current signer, haven_sign { payment_id }: it fetches the exact bytes itself)
 hosted:  haven_submit     -> { status, tx_hash }
 ```
 
 On a **delegation-rail** account the `haven_pay` result also carries
 `signature_scheme: 'eip712_userop'` and the account's EIP-712 payload in TWO
 transports: `typed_data` (the object) and `typed_data_b64` (the same bytes as
-one opaque base64 string, #1255). Prefer passing `typed_data_b64` to
-`haven_sign` UNCHANGED — a redemption payload is multi-KB, and an agent
-re-emitting the nested JSON between tool calls can truncate or reshape it,
-which the signer's digest check then refuses. The Hybrid account validates
-the typed data; a bare-hash signature is rejected on-chain (AA24, #1254).
-Legacy-rail results omit all three fields and `haven_sign` signs
-`payload_hash`. The `haven_pay_mcp_tool` / `haven_pay_x402_quote` results are
+one opaque base64 string, #1255). **Since #3271 a current signer also accepts
+`haven_sign({ payment_id })` for a direct payment**: it fetches the exact bytes
+itself (`GET /payments/:id/sign-context`), so nothing bulky crosses the agent's
+context. That fetch exists because the relay failed live: on 2026-09-24 a
+hand-relayed `typed_data_b64` arrived altered, the signer signed it without
+complaint, and the bundler rejected the operation (`AA24 signature error`).
+The hosted result does not name it yet: the capability-gated `next_tool`
+guidance ships after the signer release, so older signers are never pointed
+at a call they cannot complete. Until then the result's relay — pass
+`payload_hash` + `typed_data_b64` UNCHANGED — is the path, and every signer
+accepts it. On either path a current signer now runs the UserOp binding check before signing
+(`assertUserOpTypedDataBinding`, `@haven_ai/sdk`): it recomputes the v0.7
+UserOperation hash from the typed data and refuses (`USEROP_BINDING_MISMATCH`)
+unless it equals `payload_hash`, and pins the domain, field list and
+EntryPoint the hash does not cover. The Hybrid account validates the typed
+data; a bare-hash signature is rejected on-chain (AA24, #1254).
+Legacy-rail results omit all three fields, and since #3169 `haven_sign`
+REFUSES such a call (`BARE_HASH_REFUSED`) rather than signing `payload_hash`.
+The `haven_pay_mcp_tool` / `haven_pay_x402_quote` results are
 **compact by default** (#1272): they keep `signature_scheme` but omit
 `typed_data`/`typed_data_b64` unless the call sets
 `include_signing_payload=true`, because the preferred signing call needs
 neither. When the full pair IS requested, `typed_data_b64` wins when both are
 supplied — silently, so a caller that supplies both must keep them in sync: on
-the direct path (no digest check) an edited `typed_data` next to a stale
-`typed_data_b64` would sign the stale one.
+a direct payment an edited `typed_data` next to a stale `typed_data_b64` signs
+the stale one only if the stale one still matches `payload_hash` (the #3271
+binding check refuses otherwise).
 
 Merchant-facing fetches on the hosted path are bounded (#1300):
 `merchantTimeout` default 300 s, calibrated to the merchant's own
@@ -225,16 +269,31 @@ re-run the quote tool with the SAME `idempotency_key` plus
 `include_signing_payload=true`: the replay returns the ORIGINAL sign_data
 (#1207 semantics), and `typed_data_b64` / `typed_data` remain the fallback
 transport for older backends and for the fully offline core. Direct payments
-(`haven_pay`/`haven_send`) always carry the full pair — no fetch path exists
-there.
+(`haven_pay`/`haven_send`) always carry the full pair as well, for older
+signers; since #3271 they also have a fetch path (`GET /payments/:id/sign-context`).
 
 Note the trust-model asymmetry: the **x402** typed-data leg
 (`signX402FundingTypedData`) verifies a Haven-authenticated expected context
-and digest equality before signing; this **direct** leg does not — like the
-legacy raw-hash path it always mirrored, the authority boundary is the
-account's on-chain caveat enforcers (budget/recipient/expiry), not a
-client-side signing gate. Do not assume `signDelegationTypedData` carries the
-x402 leg's binding protection.
+and digest equality before signing, and since #3281 also refuses any shape
+but a guarded funding leg or a verified settlement child, so a compromised
+binding key cannot widen what it signs (epic #3284's threat model). The **direct** leg's binding check (#3271)
+is a CORRUPTION check, not an authentication: the caller supplies both the
+typed data and `payload_hash`, so the check proves they describe the same
+operation, never that Haven prepared it. The authority boundary remains the
+account's on-chain caveat enforcers (budget/recipient/expiry). What the unbound
+branch will sign at all is narrowed by #3272: `haven_sign` signs typed data
+without an x402 context only when it is a `PackedUserOperation` for this
+signer's own derived delegate account, on a chain with pinned delegation
+contracts, whose `callData` is a single `execute` to the DelegationManager
+calling `redeemDelegations` with exactly one delegation, a single grant made
+TO this account by a different account, in `SingleDefault` mode, canonically encoded — an
+empty chain would make the DelegationManager execute as the account itself.
+Anything else is refused with
+`TYPED_DATA_NOT_ALLOWED`. The core's `signDelegationTypedData` itself signs
+verbatim; the allowlist is in the tool layer. Since #3283 that allowlist, the
+redemption guard, the account derivation and the settlement-child verifier
+are one implementation in `@haven_ai/sdk` (imported here from
+`@haven_ai/sdk/edge`), which the SDK's own `HavenClient.signForData` runs too.
 
 **An over-budget direct payment is DECLINED, not queued** (#2130). The old text
 here said the result carries `payload_hash: null` and told the agent to "wait
@@ -344,6 +403,15 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
   resulting binding is process-local and is consumed after one successful
   merchant header. The fresh `payment_required` must match the authenticated
   funding-intent amount, merchant, resource URL, asset, and network.
+- Startup (#3173): the signer imports `@haven_ai/sdk/edge`, never the SDK
+  barrel, and loads `x402/schemes` only on the merchant-header leg, so no
+  `ethers` or `x402` module resolves at startup (roughly halved: `--help`
+  1.47 s → 0.71 s, consent refusal 1.55 s → 0.77 s, medians of 5 cold runs on
+  macOS / Node 22 — conditions and the import-timing split in
+  `packages/signer/README.md`). Unknown CLI options are refused
+  (exit 2, naming `--help`); `--help` lists every registered tool; the consent
+  block summarises each tool in one line and, like the no-consent exit message,
+  names `npx @haven_ai/connect --doctor` for the connector-wired case.
 - Local secret handling mirrors `@haven_ai/mcp`: key from `HAVEN_DELEGATE_KEY`
   or a credential file selected by `--credentials` / `HAVEN_CREDENTIALS`, with
   a permissive-file warning.
@@ -352,6 +420,13 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
   `<credentials>.signer-ack.json` sidecar.
 - MCP operations append JSONL audit entries next to the credential file or at
   `~/.haven/signer-audit.jsonl`. Entries omit keys, signatures, and headers.
+  Since #3172 the sidecar is created owner-only (`0600`), a permissive one is
+  tightened in place on the next append (before rotation; a symlink is warned
+  about, never chmod-ed through), the file rotates to `<path>.1` at 8 MiB (one
+  predecessor kept), a failed audit write never fails the signing call that
+  already produced its signature, and `payload_hash` / `typed_data_hash` are
+  bounded on the schema to a 32-byte hash so no audit field is
+  caller-controlled free text.
 - Connect Agent 2 creates local credential files during pairing. Registration
   sends Haven the setup token, runtime/version, public signing address and
   proof, API-key hash/prefix, and non-secret connector/install metadata. Later
@@ -360,11 +435,12 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
 
 ## Scope Notes
 
-- The edge-signer surface serves the **legacy AllowanceModule rail** — which
-  since #1986 **no longer executes payments**. The AllowanceModule-hash tools
-  described here are therefore unreachable in practice: the backend refuses
-  with HTTP 410 before it ever produces a hash to sign. The surface is
-  documented as-is for historical reference only: as of #1987 its backend code
+- The edge-signer surface ONCE served the **legacy AllowanceModule rail** —
+  which since #1986 **no longer executes payments** (the backend answers HTTP
+  410 before it ever produces a hash to sign). The AllowanceModule-hash signing
+  surface is GONE, not merely unreachable: #3169 removed `signPaymentHash` and
+  `haven_sign` refuses a bare hash. The rail's history is kept here for
+  reference only: as of #1987 its backend code
   is **deleted**, not merely refused — there is no `generateTransferHash` and
   no `executeAllowanceTransfer` left to reach. Nothing here is a path a caller
   can complete, and nothing here is a path that still exists server-side.
@@ -375,8 +451,9 @@ hosted:  haven_sweep_delegate + signature -> relayer submits, pays gas
   `signUserOpTypedDataForDelegation` — and are not exposed as edge-signer or
   hosted-MCP tools today. The retired session rail's `eip191_userop` scheme is
   refused (#834).
-- Regular payment/AllowanceModule-hash signing is chain-neutral; the
-  backend-provided payload and on-chain wallet rules define the transfer.
+- Regular payment signing is chain-neutral; the backend-provided payload and
+  on-chain wallet rules define the transfer (AllowanceModule-hash signing:
+  removed, #3169).
 - Standard merchant-verifiable x402 is exact-scheme USDC on Base and Base
   Sepolia.
 - Gasless `haven_sign_sweep_delegate` recovery currently supports canonical

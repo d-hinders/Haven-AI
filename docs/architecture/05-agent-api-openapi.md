@@ -34,7 +34,7 @@ covers:
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-09-17"
+last-verified: "2026-09-23"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -157,6 +157,23 @@ servers, connector, and selected dashboard setup flows:
   are RETIRED — the operation documents only its 410/422 refusals, #1987/#2105)
 - wallet transaction listing
 - catalog discovery
+- agent labels (#3167): `GET /labels` and `POST /labels` (the user's tag
+  vocabulary — a `name` unique per user on its lowercased form, a `color` from
+  the four-value palette the spec enumerates), `PUT /labels/{id}` (rename
+  and/or recolor; renaming onto another of the user's labels answers 409), and
+  `DELETE /labels/{id}` (deletes the label and its assignment rows only —
+  agents are never altered). `PUT /agents/{id}/labels` replaces one agent's
+  whole label set (full-replacement form: the editor's checkbox list is the
+  unit of intent, and a replacement survives retries idempotently — the
+  per-label add/remove pair from the issue was deliberately not built, because
+  a route with no caller is surface area, not API). Every agent read returns
+  `labels[]` so cards and filters need no second round trip. Labels are
+  display/categorization only: no delegation, budget, or enforcement path
+  reads them. The `/agents` filter facet itself lands with #3165; the decided
+  behaviour it wires to: multi-select is **OR** by default — an agent matches
+  when it carries ANY selected label — because the list's job at a glance is
+  "show me the prod and finance agents", not intersection; an AND toggle is
+  #3165's to add if a user ever needs narrowing.
 - health and OpenAPI discovery
 
 The SDK's quote and resume helpers are partly client-side by design. For
@@ -171,11 +188,13 @@ unchanged), but the SDK no longer exposes a client method that consumes it —
 
 For catalog discovery specifically, the published `GET /catalog` contract now
 includes three read-only query parameters: `category`, `search`, and `rail`.
-`category` is matched case-insensitively after trim; `search` matches product
-`name`, `description`, or `category`; `rail` keeps its existing filter. This
-surface only returns curated metadata and may yield zero or multiple entries.
-It never quotes, signs, or authorizes a payment, and catalog prices remain
-indicative rather than authoritative.
+`category` is matched case-insensitively after trim. `search` normalizes
+whitespace, accepts at most eight words, and requires every word to match the
+product `name`, `description`, or `category`; merchant name is deliberately
+excluded because it belongs to the separate merchant table. `rail` keeps its
+existing filter. This surface only returns curated metadata and may yield zero
+or multiple entries. It never quotes, signs, or authorizes a payment, and
+catalog prices remain indicative rather than authoritative.
 
 The sibling `POST /catalog/submit` is a public, unauthenticated self-service
 submission endpoint (epic #1717, #1711): it writes a queue row and returns an
@@ -354,7 +373,11 @@ undeclared. `TransactionBase` and `Transaction` are now two flat object schemas
 sharing one TypeScript object (`transactionBaseProperties` /
 `transactionBaseRequired` in `openapi/spec.ts`) instead of composing via `$ref`
 + `allOf` — same DRY source, but each closes truthfully, and both routes now
-assert their full payload. Other `allOf` shapes remain: `CreateAgentResponse`
+assert their full payload. (#3127 re-proved the mechanism end-to-end: the new
+`convertedAmount`/`convertedCurrency`/`convertedFxRate`/`fxRates` fields were
+contract-tested the same way — emitted on the feed and asserted against the
+closed schema, so an undeclared key would fail `expectMatchesSpec`.) Other
+`allOf` shapes remain: `CreateAgentResponse`
 (over an open inline `Agent`, on an asserted route — the hiding case),
 `X402SignablePayment`, `AgentConnectionAllowance` and
 `AgentPaymentStatus.mpp` (over closed `$ref`s, not on asserted routes — the

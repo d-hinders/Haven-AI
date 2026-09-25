@@ -742,7 +742,13 @@ describe('StackedBarChart — what a reader who cannot see the chart is told', (
     const table = screen.getByTestId('chart-data-table')
     expect(table.tagName).toBe('TABLE')
     expect(table.closest('[role="img"]')).toBeNull()
-    expect(table.className).toContain('sr-only')
+    // Visually hidden through a WRAPPER, never the table itself: `sr-only`'s
+    // `height: 1px` is a minimum for a <table>, so the table rendered full
+    // height under the card's `overflow-hidden` and every screenshot capture
+    // reported ~800px of clipped content (#3204). Mutation: put `sr-only`
+    // back on the table → red.
+    expect(table.className).not.toContain('sr-only')
+    expect(table.parentElement?.className).toContain('sr-only')
 
     const headCells = [...table.querySelectorAll('thead th')].map((th) => th.textContent)
     expect(headCells).toEqual(['Day', 'Research agent', 'Ops agent', 'Total', 'Refusals'])
@@ -808,6 +814,11 @@ describe('StackedBarChart — what a reader who cannot see the chart is told', (
         narrow
       />,
     )
+    // The bar chart centres every label on its bar (day 0 included), so
+    // its first pair had 24px of clear gap at 390 and it KEEPS day 7 — the
+    // area chart's left-anchored start-label rule (#3204 round 3) is that
+    // caller's opt-in, not this chart's (round 4). Mutation: pass
+    // `startAnchoredLeft` here → d7 gone.
     expect(screen.getAllByTestId('chart-x-label').map((el) => el.textContent)).toEqual([
       'd0',
       'd7',
@@ -873,5 +884,18 @@ describe('StackedBarChart — the two things that must not happen', () => {
     // for calm still gets.
     const ungated = css.slice(0, gate!.index) + css.slice(close)
     expect(ungated).not.toMatch(/\.v2-chart-draw[^{]*\{[^}]*\banimation:/)
+  })
+})
+
+describe('StackedBarChart — the legend names the refusal cap (#3204)', () => {
+  it('lists "Refused (cap)" when any day in the range refused something, beside the series rows', () => {
+    renderChart()
+    expect(screen.getByTestId('chart-legend-refusal')).toHaveTextContent('Refused (cap)')
+  })
+
+  it('omits the entry when no day refused anything — a legend row for a mark that is not drawn would be a false key', () => {
+    // Mutation: drop the `entries.some(...)` guard → red.
+    renderChart({}, THREE_DAYS.map((d) => ({ ...d, refusals: 0 })))
+    expect(screen.queryByTestId('chart-legend-refusal')).toBeNull()
   })
 })

@@ -1,5 +1,18 @@
 # SDK test fixtures
 
+## `direct-payment-userop.json`
+
+A **real** direct-payment (`POST /payments`) EIP-712 signing payload served by
+the dev backend on 2026-09-24 (Base Sepolia), plus its `payload_hash` — the
+ERC-4337 v0.7 `UserOperation` hash of the same operation — captured together
+so `userop-binding.test.ts` (#3271) can prove `assertUserOpTypedDataBinding`
+accepts a real payload rather than a hand-built one, and that the hash it
+recomputes agrees with viem's own `getUserOperationHash` on the unpacked
+`UserOperation`. Public Base Sepolia testnet data; the delegate key that
+would have signed it is not included and is not needed — the binding check
+never touches a key. Payment id and delegate/account addresses are recorded
+in the fixture's `_note` field for provenance.
+
 ## `settlement-delegation-payload.json`
 
 A **real** EIP-712 signing payload for an erc7710 x402 settlement child,

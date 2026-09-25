@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/middleware/agentAuth.ts
   - packages/connect/src/runtime.ts
   - packages/backend/src/modules/fee/fee-module.ts
-last-verified: "2026-09-08"
+last-verified: "2026-09-21"
 ---
 
 # Haven — Architecture
@@ -79,7 +79,9 @@ done
 - Current registries support **Base (8453)**, **Base Sepolia (84532)**, and
   **Gnosis Chain (100)**. Base is primary production, Base Sepolia is dev/QA,
   and Gnosis remains for existing configured flows. Standard exact-scheme USDC
-  x402 supports Base and Base Sepolia.
+  x402 supports Base and Base Sepolia. Re-verified against
+  `packages/core/src/chains.ts`, `packages/backend/src/domain/chains.ts` and
+  `packages/frontend/src/lib/chains.ts` on 2026-09-21.
 - **API-key agents only.** (An earlier self-sign / EIP-191 agent path was
   removed — it is no longer part of the codebase.)
 - **One live policy rail.** Docs 1–5 primarily describe the
@@ -100,6 +102,12 @@ done
   [`delegation-rail-vendor-ops.md`](../operations/delegation-rail-vendor-ops.md),
   and the [exit guarantee](../exit/README.md). The delegation rail is **Base-only**;
   Gnosis is not in scope for it.
+- Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
+  index above, the scope notes and every linked doc, archive file and research
+  note were checked to still exist and describe what their rows say. The
+  intervening commits touched covered code (`connect/src/runtime.ts`,
+  `agentAuth.ts`, the chains registries) and sibling architecture docs, but no
+  claim in this file changed meaning.
 - These docs and their mapped code are the implementation authority.
   [CLAUDE.md](../../CLAUDE.md) is current repository guidance, but broad claims
   must still be checked against implementation. Safe import does not prove

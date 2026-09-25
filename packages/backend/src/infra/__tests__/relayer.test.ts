@@ -9,7 +9,19 @@ const SEPOLIA_KEY = '0x' + '22'.repeat(32)
 process.env.RELAYER_PRIVATE_KEY = GLOBAL_KEY
 process.env.RELAYER_PRIVATE_KEY_84532 = SEPOLIA_KEY
 
-const { getRelayer } = await import('../relayer.js')
+const { getRelayer, getProvider } = await import('../relayer.js')
+
+describe('getProvider — no JSON-RPC batching (dRPC free plan)', () => {
+  it('sends every call as its own request, never a batch', () => {
+    // dRPC's free plan refuses batches over three with code 31 on every item,
+    // which surfaced as zero balances and failed relays under concurrent reads.
+    expect(getProvider(84532)._getOption('batchMaxCount')).toBe(1)
+  })
+
+  it('detects the chain once rather than sending eth_chainId before every call', () => {
+    expect(getProvider(84532)._getOption('staticNetwork')).toBe(true)
+  })
+})
 
 describe('getRelayer — per-chain key (#640 deploy/exec path)', () => {
   it('uses the per-chain key for Base Sepolia and the global key for Base mainnet', () => {

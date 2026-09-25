@@ -54,6 +54,7 @@ vi.mock('../../db.js', () => ({
 }))
 
 import userAccountsRoutes from '../user-accounts.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import userAccountsRetiredRoutes from '../user-accounts-retired.js'
 import userRoutes from '../user.js'
 
@@ -80,6 +81,10 @@ describe('/user/safes is retired and answers 410 (#2914)', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module(s) enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/user-accounts.ts', 'routes/user-accounts-retired.ts', 'routes/user.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(userAccountsRetiredRoutes, { prefix: '/user/safes' })
     await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
@@ -180,6 +185,10 @@ describe('/user/safes is retired and answers 410 (#2914)', () => {
     // refusal, because that is the one an old client can act on — the rail
     // refusal lives on `/user/account`, which is where it points.
     const userApp = Fastify({ logger: false })
+    // The production wiring (#3030, slice 2 of #3028): root-scope install, the
+    // module(s) enforced — off-spec requests answer the 400 envelope before the
+    // handler, conformant ones reach it unchanged.
+    installRequestValidation(userApp, { mode: 'enforce', enforcedModules: ['routes/user-accounts.ts', 'routes/user-accounts-retired.ts', 'routes/user.ts'] })
     await userApp.register(fastifyJwt, { secret: 'test-secret' })
     await userApp.register(userRoutes, { prefix: '/user' })
     const userToken = userApp.jwt.sign({ sub: USER, email: 'ada@example.com' })

@@ -35,27 +35,39 @@ function agentFixture(overrides: Partial<Agent> = {}): Agent {
     account_type: 'delegator_hybrid',
     created_at: '2026-05-01T00:00:00Z',
     allowances: [],
+    labels: [],
+    organization_id: null,
     ...overrides,
   } as Agent
 }
 
-function renderCard(agent: Agent, { canUseWalletActions = true } = {}) {
+function renderCard(
+  agent: Agent,
+  {
+    busyAction = null,
+    organizations = [],
+  }: {
+    busyAction?: import('@/hooks/useAgentPanelState').AgentBusyAction
+    organizations?: import('@/hooks/useOrganizations').Organization[]
+  } = {},
+) {
   const onRestore = vi.fn()
+  const onViewDetails = vi.fn()
   const { container } = render(
     <AgentCard
       agent={agent}
-      onViewDetails={vi.fn()}
-      onEdit={vi.fn()}
+      onViewDetails={onViewDetails}
       onPause={vi.fn()}
       onResume={vi.fn()}
       onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
       onArchive={vi.fn().mockResolvedValue(undefined)}
       onRestore={onRestore}
-      busyAction={null}
-      canUseWalletActions={canUseWalletActions}
+      onMoveToOrganization={vi.fn()}
+      busyAction={busyAction}
+      organizations={organizations}
     />,
   )
-  return { onRestore, container }
+  return { onRestore, onViewDetails, container }
 }
 
 /**
@@ -234,10 +246,13 @@ describe('AgentCard paused notice copy (#2230)', () => {
 })
 
 describe('AgentCard action-row matrix (#1402)', () => {
-  it('active delegation agent: Remove shown, Safe Revoke hidden', () => {
+  // #3168: the first action is "Details" on every operational card — the
+  // Edit/Details fork is gone, so the old "Edit <name>" button no longer
+  // renders anywhere on the card.
+  it('active delegation agent: Details first, Remove shown, Safe Revoke hidden', () => {
     renderCard(agentFixture())
     const actions = [
-      screen.getByRole('button', { name: 'Edit Research agent' }),
+      screen.getByRole('button', { name: 'Open details for Research agent' }),
       screen.getByRole('button', { name: 'Pause Research agent' }),
       screen.getByRole('button', { name: 'Remove Research agent' }),
     ]
@@ -246,7 +261,29 @@ describe('AgentCard action-row matrix (#1402)', () => {
       expect(action.className).toContain('min-h-11')
       expect(action.className).toContain('min-w-11')
     }
+    expect(screen.queryByRole('button', { name: 'Edit Research agent' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).toBeNull()
+  })
+
+  /**
+   * #3168: "Details" navigates via onViewDetails — the same handler the
+   * `canUseWalletActions === false` branch always used — and navigation is
+   * disabled while a card action is in flight, so the user cannot leave
+   * mid-action. The hook half (router.push) is asserted in
+   * `useAgentPanelState.test.tsx`.
+   */
+  it('Details navigates to the agent detail page (#3168)', () => {
+    const { onViewDetails } = renderCard(agentFixture())
+    const details = screen.getByRole('button', { name: 'Open details for Research agent' })
+    fireEvent.click(details)
+    expect(onViewDetails).toHaveBeenCalledTimes(1)
+    expect(onViewDetails).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent-1' }))
+  })
+
+  it('Details is disabled while an action is in flight (#3168 busy state)', () => {
+    renderCard(agentFixture(), { busyAction: 'pause' })
+    const details = screen.getByRole('button', { name: 'Open details for Research agent' })
+    expect(details).toBeDisabled()
   })
 
   it('keeps the live delegation budget row and does not render the historical meter', () => {
@@ -306,5 +343,77 @@ describe('AgentCard action-row matrix (#1402)', () => {
     expect(screen.queryByTestId('remove-agent-dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Remove Research agent' }))
     expect(screen.getByTestId('remove-agent-dialog')).toBeTruthy()
+  })
+})
+
+/**
+ * #3197: the labels wrapper must not render for an unlabelled agent.
+ *
+ * The #3167 card wrapped `LabelChipRow` in an unconditional `mt-1.5` div.
+ * The row returns null when the list is empty, but the wrapper did not — its
+ * margin stayed in the DOM and every unlabelled card gained a ~6px gap under
+ * the description, which is exactly what the old comment claimed could not
+ * happen. The guard is the one the detail page's label row already uses
+ * (`AgentDetailClient`), asserted here structurally: the wrapper's absence,
+ * not its margin — jsdom resolves no stylesheet, so the pixel claim is
+ * measured where it can be, by the regenerated `agents-list-mobile.png`
+ * baseline (its fixture agent is unlabelled).
+ */
+describe('AgentCard label chips (#3167, #3197)', () => {
+  it('renders no labels wrapper and no mt-1.5 box for an unlabelled agent', () => {
+    const { container } = renderCard(agentFixture())
+    expect(screen.queryByTestId('agent-label-chips')).toBeNull()
+    expect(container.querySelector('div.mt-1\\.5')).toBeNull()
+  })
+
+  it('keeps the spaced wrapper when the agent carries labels', () => {
+    renderCard(
+      agentFixture({
+        labels: [
+          {
+            id: 'label-1',
+            name: 'finance',
+            color: 'debit',
+            created_at: '2026-05-01T00:00:00Z',
+          },
+        ],
+      }),
+    )
+    expect(screen.getByTestId('agent-label-chips')).toBeTruthy()
+    expect(screen.getByText('finance')).toBeTruthy()
+  })
+})
+
+describe('AgentCard organization actions (#3222 re-review)', () => {
+  const ORG = {
+    id: 'org-1',
+    parent_organization_id: null,
+    name: 'Tech Agents',
+    created_at: '2026-05-01T00:00:00Z',
+    updated_at: '2026-05-01T00:00:00Z',
+    agent_count: 1,
+  }
+
+  it('offers Move only when the user has an organization to move to', () => {
+    renderCard(agentFixture())
+    expect(screen.queryByRole('button', { name: 'Move Research agent to an organization' })).toBeNull()
+  })
+
+  it('offers Move once an organization exists', () => {
+    renderCard(agentFixture(), { organizations: [ORG] })
+    expect(screen.getByRole('button', { name: 'Move Research agent to an organization' })).toBeInTheDocument()
+  })
+
+  it('hides the operational separators below lg, where a wrapped row stranded them (S9)', () => {
+    const { container } = renderCard(agentFixture({ status: 'paused' }), { organizations: [ORG] })
+    const row = container.querySelector('[data-testid="agent-card-actions"]') as HTMLElement
+    const pipes = [...row.querySelectorAll('span')].filter((el) => el.textContent === '|')
+    expect(pipes.length).toBe(3)
+    for (const pipe of pipes) {
+      expect(pipe.className).toMatch(/(^|\s)hidden(\s|$)/)
+      expect(pipe.className).toMatch(/(^|\s)lg:inline(\s|$)/)
+    }
+    expect(row.className).toMatch(/gap-x-4/)
+    expect(row.className).toMatch(/lg:gap-2/)
   })
 })

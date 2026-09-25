@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getAddress } from 'ethers'
 import Fastify, { type FastifyInstance } from 'fastify'
 import paymentRoutes from '../payments.js'
 import { allowanceModuleRailRetired } from '../../rails/execution-rail.js'
@@ -671,6 +672,20 @@ describe('payment routes', () => {
     const listIdx = calls.findIndex((c) => /ORDER BY created_at DESC/.test(c.sql))
     expect(sweepIdx).toBeGreaterThanOrEqual(0)
     expect(listIdx).toBeGreaterThan(sweepIdx)
+  })
+
+  it('#3307: GET /:id and GET / return `to` EIP-55 checksummed, whatever casing the row stores', async () => {
+    const stored = RECIPIENT.toLowerCase()
+    expect(getAddress(stored)).not.toBe(stored) // a self-checksumming seed would prove nothing
+    primeDb(
+      AUTH,
+      [/FROM payment_intents WHERE id/, () => ({ rows: [pendingIntent({ status: 'confirmed', to_address: stored })] })],
+      [/ORDER BY created_at DESC/, () => ({ rows: [pendingIntent({ status: 'confirmed', to_address: stored })] })],
+    )
+    const one = await app.inject({ method: 'GET', url: `/payments/${PAYMENT_ID}`, headers: { authorization: 'Bearer sk_agent_test' } })
+    expect(one.json().to).toBe(getAddress(stored))
+    const list = await app.inject({ method: 'GET', url: '/payments', headers: { authorization: 'Bearer sk_agent_test' } })
+    expect(list.json().payments[0].to).toBe(getAddress(stored))
   })
 
   // POST /payments idempotency (#1207) — the same contract the MPP routes

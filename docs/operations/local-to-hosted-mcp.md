@@ -5,7 +5,7 @@ covers:
   - packages/mcp/**
   - packages/mcp-server/**
   - packages/signer/**
-last-verified: "2026-09-07"
+last-verified: "2026-09-19"
 ---
 
 # Migration - Local MCP To Hosted MCP
@@ -206,10 +206,10 @@ The signer exposes local stdio MCP tools:
 
 | Tool | Purpose |
 |---|---|
-| `haven_sign` | Sign a delegation-rail payment from EIP-712 `typed_data`/`typed_data_b64`, or just `payment_id` (#1263 — the signer fetches the exact payload itself). The historical legacy `payload_hash` input is unreachable because that rail is retired. |
+| `haven_sign` | Sign a delegation-rail payment from EIP-712 `typed_data`/`typed_data_b64`, or just `payment_id` (#1263 — the signer fetches the exact payload itself). A `payload_hash` on its own is REFUSED (`BARE_HASH_REFUSED`, #3169); it is still accepted alongside `typed_data` / `typed_data_b64` or `x402_expected`. Typed data without an x402 context is signed only when it is a direct-payment UserOp from the agent's own delegate account whose only call redeems a delegation made to it — anything else answers `TYPED_DATA_NOT_ALLOWED` (#3272). With an x402 context it signs only a funding leg of that same shape paying the agent's own delegate EOA, or a settlement child from the agent's own account (#3281). |
 | `haven_sign_x402` | One-call x402 fast path: funding signature + merchant payment header; signs by `payment_id` ALONE (#1355 — Haven's sign-context re-serves `payment_required`); a caller-supplied `payment_required` is the fallback for pre-#1355 backends |
 | `haven_x402_sign_header` | Build and sign the x402 merchant payment header after the Haven funding leg succeeds (decomposed flow) |
-| `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless Base-USDC recovery sweep (delegate → own Safe only) |
+| `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless Base-USDC recovery sweep (delegate → the agent's account (Haven wallet) only) |
 
 The signer's ONE network use (#1263) is a read-only fetch of a pending
 payment's signing context from Haven by `payment_id`, authenticated with the
@@ -241,8 +241,10 @@ Then test a tiny in-budget payment. The expected direct payment sequence is:
    `signature_scheme`, `typed_data` and `typed_data_b64`: the Hybrid account
    validates the EIP-712 typed data, and a bare-hash signature is rejected
    on-chain (AA24, #1254).
-3. Agent calls local `haven_sign` — pass `typed_data_b64` UNCHANGED (or, for
-   x402 intents, just `payment_id` and let the signer fetch the payload, #1263).
+3. Agent calls local `haven_sign` — pass `payload_hash` and `typed_data_b64`
+   UNCHANGED, or just `payment_id` and let the signer fetch the payload (#1263
+   for x402; for a direct payment since #3271, via
+   `GET /payments/:id/sign-context`, on a current signer).
    The legacy rail's bare-payload-hash variant is unreachable: that rail is
    retired (#1440) and never returns a signable intent.
 4. Agent calls hosted `haven_submit` with `{ payment_id, signature }`.

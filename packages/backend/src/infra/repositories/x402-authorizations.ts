@@ -155,7 +155,8 @@ export const CONFIRM_X402_INTENT_SQL = `UPDATE payment_intents
                submitted_at = NOW(),
                confirmed_at = NOW(),
                usd_value = $3,
-               eur_value = $4
+               eur_value = $4,
+               sek_value = $6
            WHERE id = $2
              AND agent_id = $5
              AND COALESCE(payment_rail, source) = 'x402'
@@ -171,6 +172,7 @@ export async function confirmX402Intent(
     usdValue: number | string | null
     eurValue: number | string | null
     agentId: string
+    sekValue: number | string | null
   },
   db: Executor = pool,
 ): Promise<boolean> {
@@ -180,6 +182,7 @@ export async function confirmX402Intent(
     input.usdValue,
     input.eurValue,
     input.agentId,
+    input.sekValue,
   ])
   return result.rows.length > 0
 }
@@ -261,7 +264,8 @@ export const CONFIRM_SETTLEMENT_OBSERVED_SQL = `UPDATE payment_intents
                tx_hash = $1,
                confirmed_at = NOW(),
                usd_value = $4,
-               eur_value = $5
+               eur_value = $5,
+               sek_value = $8
            WHERE id = $2
              AND agent_id = $3
              AND COALESCE(payment_rail, source) = 'x402'
@@ -369,6 +373,8 @@ export interface ObservedSettlementConfirm {
   agentId: string
   usdValue: number | string | null
   eurValue: number | string | null
+  /** Booked beside usd/eur from the same price read (#3127 round 2). */
+  sekValue: number | string | null
   /**
    * The ambiguity guard's reach, in seconds: how far apart two intents'
    * `created_at` values can be and still have overlapping settlement windows.
@@ -398,6 +404,7 @@ export async function confirmObservedSettlementRow(
     input.eurValue,
     input.windowSeconds,
     input.delegationBound ?? false,
+    input.sekValue,
   ])
   return result.rows.length > 0
 }

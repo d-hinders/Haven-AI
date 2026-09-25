@@ -277,7 +277,7 @@ function MobileMerchantRow({
             {open ? 'Hide' : 'More'}
           </button>
         }
-        className="px-0 py-0"
+        density="flush"
       />
       {open && (
         <dl className="mt-2 space-y-1.5 rounded-md bg-[var(--v2-surface)] p-3 text-xs">

@@ -51,6 +51,12 @@ export interface AgentRow {
    * rather than being guessed at as the bare pair.
    */
   mcp_server_name: string | null
+  /**
+   * #3164: the organization the agent files under (NULL = the top level).
+   * DISPLAY/CATEGORIZATION ONLY — the delegation, budget, and enforcement
+   * path never reads it.
+   */
+  organization_id: string | null
   has_stranded_funds: boolean
 }
 
@@ -257,6 +263,9 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
               a.account_id, us.account_address, us.name as account_name, us.chain_id AS account_chain_id,
               us.account_type,
               a.api_key_prefix, a.status, a.created_at, a.archived_at, a.mcp_server_name,
+              -- #3164: the organization the agent files under (NULL = top
+              -- level). Display/categorization only, like labels below it.
+              a.organization_id,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -274,7 +283,7 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
        -- unlink), which is an owner decision rather than a side effect: since
        -- #2331 such an agent gets 403 from agentAuth on every route, and the
        -- one exemption -- sweep recovery -- refuses them too, because
-       -- has_bound_safe is false. They are already dead records, not usable
+       -- has_bound_account is false. They are already dead records, not usable
        -- ones. An INNER-shaped predicate on the LEFT JOIN is what excludes
        -- them: us.account_type is NULL for an orphan, and NULL = 'x' is not
        -- true.
@@ -288,6 +297,7 @@ export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.desc
               a.account_id, us.account_address, us.name as account_name, us.chain_id AS account_chain_id,
               us.account_type,
               a.api_key_prefix, a.status, a.created_at, a.archived_at, a.mcp_server_name,
+              a.organization_id,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -472,6 +482,9 @@ export async function findAgentIdStatusForUser(
 export const INSERT_AGENT_WITH_KEY_SQL = `INSERT INTO agents (user_id, name, description, delegate_address, api_key_hash, api_key_prefix, account_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id, name, description, delegate_address, account_id, api_key_prefix, status, created_at,
+                   -- #3164: a brand-new agent starts at the top level; the
+                   -- column default is the honest value on the create response.
+                   organization_id,
                    NULL::timestamptz AS mcp_last_seen_at,
                    -- #1878: an agent created straight through the API was never
                    -- wired by the connector, so it has no MCP server name. NULL
@@ -509,6 +522,10 @@ export interface CreatedAgent {
     // only: a Pick that omits it lets a future refactor rebuild this response
     // field-by-field and drop the column with neither tsc nor a test noticing.
     | 'mcp_server_name'
+    // #3164: always NULL here — a brand-new agent starts at the top level.
+    // Declared for the same reason as mcp_server_name above: the query
+    // returns it and the create response's Agent shape now requires it.
+    | 'organization_id'
   >
   accountInfo: AccountInfoRow
 }
@@ -554,15 +571,23 @@ export const UPDATE_AGENT_PROFILE_SQL = `WITH updated AS (
            UPDATE agents
            SET name        = COALESCE($3, name),
                description = COALESCE($4, description),
+               -- #3164: three-state org move on the same partial update —
+               -- key absent keeps the placement, present (null included)
+               -- sets it. NULL is the top level, outside every folder.
+               organization_id = CASE
+                 WHEN $6 = 'set' THEN $5::uuid
+                 ELSE organization_id END,
                updated_at  = NOW()
            WHERE id = $1 AND user_id = $2
            RETURNING id, name, description, delegate_address, account_id, api_key_prefix, status, created_at,
+                     organization_id,
                      mcp_server_name
          )
          SELECT updated.id, updated.name, updated.description, updated.delegate_address,
                 updated.account_id, us.account_address, us.name AS account_name, us.chain_id AS account_chain_id,
                 us.account_type,
                 updated.api_key_prefix, updated.status, updated.created_at,
+                updated.organization_id,
                 -- #1878/#1694: the display name is editable, the wiring name is
                 -- not. This UPDATE never touches mcp_server_name; reading it
                 -- back keeps the renamed agent's card showing the same pair.
@@ -578,12 +603,17 @@ export async function updateAgentProfile(
   name: string | null,
   description: string | null,
   db: Executor = pool,
+  // #3164: three-state org move (undefined = keep, null = top level, id =
+  // file under). Optional and LAST so every existing caller compiles untouched.
+  organizationId?: string | null,
 ): Promise<AgentRow | null> {
   const result = await db.query<AgentRow>(UPDATE_AGENT_PROFILE_SQL, [
     agentId,
     userId,
     name,
     description,
+    organizationId ?? null,
+    organizationId === undefined ? 'keep' : 'set',
   ])
   return result.rows[0] ?? null
 }
@@ -775,7 +805,7 @@ export const AGENT_BY_API_KEY_SQL = `
          COALESCE(us.account_address, u.account_address) as account_address,
          COALESCE(us.chain_id, ${DEFAULT_CHAIN_ID}) as chain_id,
          us.execution_rail, us.account_type,
-         (us.id IS NOT NULL) AS has_bound_safe
+         (us.id IS NOT NULL) AS has_bound_account
   FROM agents a
   JOIN users u ON a.user_id = u.id
   LEFT JOIN smart_accounts us ON a.account_id = us.id
@@ -792,7 +822,7 @@ export interface AgentAuthRow {
   archived_at: string | null
   execution_rail: string | null
   account_type: string | null
-  has_bound_safe: boolean
+  has_bound_account: boolean
 }
 
 /**

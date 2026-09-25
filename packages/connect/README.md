@@ -159,7 +159,9 @@ minutes. Two rules follow:
    This replaces the directory's signer wrapper with a diagnostic that logs the
    retirement (agent id, date, reason, restart guidance) to the host's MCP
    stderr log on every probe, and records it in `TOMBSTONE.json` for
-   `--doctor`. It touches no key material and revokes nothing — revoke the
+   `--doctor` — with a copy in `~/.haven/tombstones/` (or `.tombstones/` inside
+   a custom credentials root), so the retirement stays visible after the
+   directory is deleted. It touches no key material and revokes nothing — revoke the
    agent on the Haven agent page yourself. Delete the tombstone only once every
    long-lived host has been restarted.
 
@@ -173,7 +175,12 @@ minutes. Two rules follow:
    and a refusal is `{"tombstoned": false, "error": {"code", "next_action"}}`
    with exit 1 — so check the result rather than assuming silence means success
    (#2175). The `message` field is present only for connector-authored refusals;
-   an unexpected filesystem error keeps its raw text on stderr alone.
+   an unexpected filesystem error keeps its raw text on stderr alone. If only the
+   surviving copy fails — the directory IS tombstoned — the run still succeeds
+   with `"recordPath": null` and `"mirrorError"` set to the errno code (or
+   `mirror_write_failed` when there is none), and `--unwire --json` carries the
+   same as `mirror_error`; `--replace` still removes the old directory's key
+   files and names the failure in `retirement_mirror_errors` (#3259).
 
 ### Unwiring an agent (`--unwire`, #2169)
 
@@ -350,7 +357,8 @@ read-only verification tools, `hosted_mcp_url`, `superseded_agent_ids`,
 `existing_agents_before_write` (#3122 — the other live-keyed directories named
 before the first write, each with the account it spends from), and — on a run
 that replaced existing wiring — `superseded_agents_retired_locally` with
-`retired_agent_ids`; `server_name_rebound_from` (#3122) appears only when the
+`retired_agent_ids`, plus `retirement_mirror_errors` (#3259) only when a retired
+directory's surviving ledger record could not be written; `server_name_rebound_from` (#3122) appears only when the
 run took a server name over from another directory's local binding record. It
 contains no API key, private key, credential
 contents, full credential paths, or full delegate address. The same redacted
@@ -640,6 +648,7 @@ across the rest is yours.
 ## Diagnosing a stuck setup: `--doctor` / `--repair` (#1589)
 
 ```bash
+npx @haven_ai/connect@<channel> --doctor
 npx @haven_ai/connect@<channel> --doctor --runtime codex-desktop
 npx @haven_ai/connect@<channel> --doctor --repair --runtime codex-desktop
 ```
@@ -648,6 +657,16 @@ npx @haven_ai/connect@<channel> --doctor --repair --runtime codex-desktop
 not indifferent: `signer_runtime` compares the sidecar against the manifest of
 the connector **that runs the check**, so a doctor from another channel reports
 a skew that is not there. Use the channel your dashboard hands out.
+
+`--runtime` is optional for `--doctor` and required for `--repair` (#3210).
+Without the flag the doctor checks the runtime the setup recorded in the
+agent directory's `last-connect-outcome.json` (#3120), and the `runtime_config`
+verdict says which runtime it resolved and from which file; when no
+record names one, the `runtime_config` check FAILS with "Runtime is unknown —
+the runtime config was NOT checked" and the exit code is 1 — never a pass on a
+config it did not open. `--repair` rewrites that config, so the runtime it
+rewrites is named on the command line rather than inherited from a record on
+disk: a flagless `--repair` is refused before anything runs.
 
 `--doctor` is read-only and needs NO setup token: it checks the runtime config,
 the agent credential files, the pinned signer runtime install (and, since

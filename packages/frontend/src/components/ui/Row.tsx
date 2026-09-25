@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 
-type Density = 'comfortable' | 'compact'
+type Density = 'comfortable' | 'compact' | 'flush'
 type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'brand'
 
 interface BaseRowProps {
@@ -15,7 +15,13 @@ interface BaseRowProps {
   subtitle?: ReactNode
   /** Right-hand slot — value, badge, chevron, action button. */
   trailing?: ReactNode
-  /** Visual density. `comfortable` (default) is for top-level lists; `compact` for dense panels. */
+  /**
+   * Visual density. `comfortable` (default) is for top-level lists; `compact`
+   * for dense panels; `flush` for a row that sits inside a caller-padded box
+   * (no padding of its own — a `px-0` in `className` cannot do this, because
+   * the primitive's padding class is emitted later in the stylesheet and
+   * wins, #3204).
+   */
   density?: Density
   /** If true, renders a 2px left accent bar in `--v2-brand` (e.g. active state). */
   accent?: boolean
@@ -74,7 +80,7 @@ export function Row(props: RowProps) {
   const isInteractive = Boolean(href || onClick)
 
   // Comfortable: 56px-ish tall, normal padding. Compact: 44px-ish, tighter.
-  const paddingClass = density === 'compact' ? 'px-3 py-2.5' : 'px-4 py-3'
+  const paddingClass = density === 'compact' ? 'px-3 py-2.5' : density === 'flush' ? 'p-0' : 'px-4 py-3'
   const gapClass = density === 'compact' ? 'gap-2.5' : 'gap-3'
 
   const hoverClass = isInteractive

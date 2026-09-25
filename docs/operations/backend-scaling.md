@@ -5,7 +5,7 @@ covers:
   - packages/backend/src/platform/leader-lock.ts
   - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/infra/relayer.ts
-last-verified: "2026-08-29"
+last-verified: "2026-09-24"
 ---
 
 # Backend Scaling
@@ -16,10 +16,14 @@ may now run more than one, and the relayer is what still caps throughput.**
 ## What multiple replicas already handle
 
 - **Periodic monitors** — every replica starts the same `setInterval` ticks, so
-  each one is wrapped in `runIfLeader` (`platform/leader-lock.ts`). A Postgres
-  advisory lock elects one executor per tick; the losers skip rather than queue.
-  Without it, an N-replica deployment runs every scan N times and sends up to N
-  copies of each alert.
+  every tick but one is wrapped in `runIfLeader` (`platform/leader-lock.ts`). A
+  Postgres advisory lock elects one executor per tick; the losers skip rather
+  than queue. Without it, an N-replica deployment runs every scan N times and
+  sends up to N copies of each alert. The exception is the relayer balance
+  monitor, deliberately NOT leader-locked (`index.ts`): its scan feeds each
+  replica's own `/health/ops` answer. Its low-balance alert is edge-triggered
+  per chain but tracked per replica, so each low edge sends one alert per
+  replica.
 - **First-deploy races on one counterfactual account**
   ([#1673](https://github.com/d-hinders/Haven-AI/issues/1673)). `runIfLeader`'s
   blocking sibling, `withKeyedAdvisoryLock`, serialises the callers that must
@@ -213,8 +217,8 @@ retry after an expiry opens its OWN `outbound_txs` row at its own nonce, so a
 persistently stuck RPC can leave several `broadcast` rows for one account, each
 bumped independently once it ages past 180 s — relayer gas amplification,
 bounded by `MAX_BUMPS_PER_NONCE` per lane and by the relayer budget guard
-(#717), never a fund risk. And only a `TIMEOUT` takes the hand-off branch: any
-other wait error (a transient RPC exception mid-wait) still closes the record
+(#717), never a fund risk. And only a `TIMEOUT`, or a null receipt with no wait
+error at all, takes the hand-off branch: any other wait error (a transient RPC exception mid-wait) still closes the record
 failed, exactly as before #1722 — unchanged behaviour, not a new gap, but the
 same ambiguity in a narrower window.
 
@@ -314,8 +318,10 @@ queries, at the cost of a second pool to configure and monitor.
 
 ## What still serialises: the relayer
 
-One relayer EOA per chain signs every sponsored transaction (Safe deploys,
-owner-signed execs, Hybrid deploys, allowance transfers, sweeps). An EOA has a
+One relayer EOA per chain signs every relayer-submitted transaction (Hybrid
+deploys, passport attestations and revocations, sweeps, and the outbound queue's
+own fee bumps and lane cancels). Agent payments are not among them: they are
+paymaster-sponsored UserOps and never touch the relayer's nonce. An EOA has a
 single sequential nonce, so **replicas do not multiply relayer throughput** —
 they queue behind the same key. Two consequences worth planning around:
 
@@ -325,8 +331,9 @@ they queue behind the same key. Two consequences worth planning around:
 2. **Single point of stall — self-healing on the queue lane, with one named
    exception.** One stuck transaction blocks every later submission on that
    chain. Since #1558 the leader-locked bump worker replaces a stuck
-   queue-lane tx with bumped fees (and alerts after 3 attempts); the
-   Safe-bound legacy sites have no bump path until they retire (#1440).
+   queue-lane tx with bumped fees (and alerts after 3 attempts). Every relayer
+   submitter is on the queue lane since the Safe-bound sites were deleted with
+   the rail (#1440).
 
    The exception, deliberate since [#1735](https://github.com/d-hinders/Haven-AI/issues/1735):
    a stuck **`passport_attest`** is NOT replaced. A same-nonce replacement is
@@ -368,21 +375,43 @@ they queue behind the same key. Two consequences worth planning around:
    operator procedure is
    [`stuck-revoke-alarm.md`](stuck-revoke-alarm.md).
 
-### Multi-replica CORRECTNESS: closed for the queue lane (#1559)
+### Multi-replica CORRECTNESS: closed except on two unstamped paths (#1559)
 
 The correctness half of the old constraint — two replicas reading the same
-pending nonce and colliding — is **closed for queue-lane submitters** (sweeps,
-Hybrid deploys, passport anchors, the bump worker). They submit through
-`infra/outbound-queue.ts`'s `submitRecorded`: sign → **stamp** the durable
+pending nonce and colliding — is **closed for every stamped relayer
+submission**. Every broadcast goes through
+`infra/outbound-queue.ts`'s `submitRecorded`. The inline submitters (sweeps,
+Hybrid deploys, passport attestations and revocations) and lane cancels pass
+their record: sign → **stamp** the durable
 `outbound_txs` row under the partial UNIQUE (chain, nonce) live-broadcast
 index → broadcast. Postgres arbitrates the nonce lane: the losing replica's
 stamp is rejected, it re-reads and re-signs. The guarded stamp doubles as the
-fence — whoever stamps, sends.
+fence — whoever stamps, sends. The bump worker sends through the same
+pipeline without a record id (it stamps its own rows), under its leader lock:
+a same-nonce replacement re-uses the row's explicit nonce, and an orphan
+re-send reads a fresh one. When the provider refuses the `pending` block tag
+(#2769), the fresh nonce is the first one at or above its `latest` count that
+no live-broadcast row in that same table holds, so a losing replica's re-read
+sees the winner's stamp and moves past it.
 
-The Safe-bound legacy sites (`safe-deploy`/`safe-exec`, allowance transfers,
-the deployers) still rely on the in-process `withRelayerSendLock` only, so
-**multi-replica remains gated on them** until #1440 retires the rail. The
-throughput ceiling above is unchanged either way — one key is still one
+The Safe-bound sites that once relied on the in-process `withRelayerSendLock`
+alone were deleted with the rail (#1440). **Two paths remain** that read a
+fresh nonce unstamped, with only the in-process lock between them and another
+replica. The first: opening the record is fail-open by policy
+(`infra/outbound-queue.ts` header), so on a database error an inline submitter
+passes a null `recordId` and `submitRecorded` skips the stamp. The second: the
+bump worker's orphan re-send, whose leader lock serialises bump ticks but not
+another replica's inline sends. Two replicas can collide on either path — the
+loser's broadcast fails; nothing is sent anywhere it should not go. The header
+asked for the fail-open policy to be revisited per site once the queue became
+the only lane. It was, on 2026-09-24: **kept fail-open by owner decision** —
+no funds are at risk, and the decision assumes a single backend replica.
+**Revisit it before running more than one**: those two paths are the
+multi-replica caveat. The same failed open also leaves the send unrecorded, so
+a stuck one is invisible to the bump worker even on a single replica — a
+database failure and a stuck transaction at once, accepted with the rest.
+
+The throughput ceiling above is unchanged either way — one key is still one
 sequential nonce.
 
 ### Evaluation: a relayer key pool
@@ -427,16 +456,8 @@ Whoever picks this up should read the interaction with two existing pieces:
 ## Operating notes
 
 - Replica count is a Railway setting; nothing in the code reads it.
-- **The riskier direction is a row that is too HIGH, not a missing one.** The
-  write is backed by a single confirmation, so a reorg (or an RPC reporting a
-  nonce from a dropped block, or two environments sharing a database) can
-  persist a nonce the chain never reaches — and `GREATEST` means it can never
-  come back down. The read therefore ignores any row older than **5 minutes**:
-  the window this tier closes is seconds-scale RPC lag, so an older watermark
-  carries no information, and bounding it caps the damage of a bad row at
-  minutes rather than permanently. Without that bound, one bad row would make
-  every later authorize for the triple poll to the full timeout, forever,
-  surviving restarts.
-- The watermark only ever rises (`GREATEST` in the upsert). A lower incoming
-  value can only be a late write from a replica that fell behind, and honouring
-  it would re-open the window the table exists to close.
+- The allowance-nonce watermark this section used to carry operating notes for
+  (its 5-minute read bound and its `GREATEST` upsert) went with its table in
+  migration `071_drop_allowance_nonce_watermarks.ts`, and the notes went with
+  it. They are in this file's git history
+  (`git log -S GREATEST -- docs/operations/backend-scaling.md`).

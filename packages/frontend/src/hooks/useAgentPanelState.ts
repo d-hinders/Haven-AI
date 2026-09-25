@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents, type Agent } from '@/hooks/useAgents'
+import { useOrganizations } from '@/hooks/useOrganizations'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 
 export type AgentBusyAction = 'pause' | 'resume' | 'archive' | 'restore' | null
@@ -15,6 +17,7 @@ export type AgentBusyAction = 'pause' | 'resume' | 'archive' | 'restore' | null
  */
 export function useAgentPanelState() {
   const { activeAccount } = useAuth()
+  const router = useRouter()
   const accountAddress = activeAccount?.account_address ?? null
   const chainId = activeAccount?.chain_id ?? DEFAULT_CHAIN_ID
   const {
@@ -28,12 +31,30 @@ export function useAgentPanelState() {
     unarchiveAgent,
     refetch,
   } = useAgents()
+  // #3164: the organization tree. Fetched once for the panel; the tree, the
+  // #3165 facet and every card's Move picker read the same list.
+  const {
+    organizations,
+    loading: organizationsLoading,
+    error: organizationsError,
+    fetchOrganizations,
+  } = useOrganizations()
+
+  useEffect(() => {
+    void fetchOrganizations()
+  }, [fetchOrganizations])
 
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
   const [firstAgentSetup, setFirstAgentSetup] = useState(false)
   const [finalizingAgent, setFinalizingAgent] = useState(false)
   const [finalizeTimedOut, setFinalizeTimedOut] = useState(false)
-  const [editAgent, setEditAgent] = useState<Agent | null>(null)
+  // #3167: the label vocabulary manager (rename, recolour, delete) — opened
+  // from the agents panel header. Edit itself lives on the agent detail page
+  // (#3168), not here.
+  const [labelsManagerOpen, setLabelsManagerOpen] = useState(false)
+  // #3164: the organization tree manager (create, rename, move, delete) —
+  // opened from the panel's organization tree.
+  const [organizationsManagerOpen, setOrganizationsManagerOpen] = useState(false)
   const [busyAgentId, setBusyAgentId] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<AgentBusyAction>(null)
   const [showRemovedAgents, setShowRemovedAgents] = useState(false)
@@ -110,37 +131,21 @@ export function useAgentPanelState() {
     return () => window.clearTimeout(timeout)
   }, [toastMessage])
 
-  const agentUsesActiveAccount = useCallback(
-    (agent: Agent): boolean => {
-      if (agent.account_id) return agent.account_id === activeAccount?.id
-      if (agent.account_address) {
-        const agentChainId = agent.account_chain_id ?? DEFAULT_CHAIN_ID
-        return Boolean(
-          accountAddress &&
-            agent.account_address.toLowerCase() === accountAddress.toLowerCase() &&
-            agentChainId === chainId,
-        )
-      }
-      return true
-    },
-    [activeAccount?.id, chainId, accountAddress],
-  )
-
+  /**
+   * #3168: the card's first action navigates to the agent detail page — the
+   * surface where the agent's budgets and spending controls live, and which
+   * also hosts name/description editing (the detail page's kebab → "Edit
+   * agent" modal). What used to be the Edit/Details fork is now this one
+   * navigation for every operational card: Edit opened a name/description
+   * modal on the list, and nothing about the card needed it once the detail
+   * page is the destination. A client-side router push, not a full-page
+   * assignment, so the authenticated shell does not remount.
+   * `useAgentPanelState` is only mounted inside the app router's tree, so
+   * `useRouter` is always defined here.
+   */
   function handleViewDetails(agent: Agent) {
-    window.location.href = `/agents/${agent.id}`
+    router.push(`/agents/${agent.id}`)
   }
-
-  function handleEdit(agent: Agent) {
-    if (!agentUsesActiveAccount(agent)) {
-      handleViewDetails(agent)
-      return
-    }
-    setEditAgent(agent)
-  }
-
-  useEffect(() => {
-    if (editAgent && !agentUsesActiveAccount(editAgent)) setEditAgent(null)
-  }, [agentUsesActiveAccount, editAgent])
 
   async function handlePause(agent: Agent) {
     setBusyAgentId(agent.id)
@@ -202,9 +207,25 @@ export function useAgentPanelState() {
     void pollForNewAgent(lastPollDelegateRef.current)
   }
 
+  // #3167: anything that changes the label vocabulary (create, rename,
+  // recolour, delete) re-reads the agents list, because every card renders
+  // the labels its agents carry.
   function handleAgentEdited() {
     void refetch()
-    setEditAgent(null)
+  }
+
+  // #3164: the Move modal saved a placement — fold the updated agent into
+  // state without a refetch (the PUT response IS the new row), and refresh
+  // the tree's counts, which read from the API rather than the agent list.
+  const [moveAgent, setMoveAgent] = useState<Agent | null>(null)
+  function handleAgentMoved() {
+    setMoveAgent(null)
+    void refetch({ silent: true })
+    void fetchOrganizations()
+  }
+  function handleOrganizationsChanged() {
+    void refetch({ silent: true })
+    void fetchOrganizations()
   }
 
   return {
@@ -216,7 +237,6 @@ export function useAgentPanelState() {
     error,
     visibleAgents,
     removedAgents,
-    agentUsesActiveAccount,
     connectAgentOpen,
     setConnectAgentOpen,
     firstAgentSetup,
@@ -224,10 +244,21 @@ export function useAgentPanelState() {
     finalizingAgent,
     finalizeTimedOut,
     retryFinalizePoll,
-    editAgent,
-    setEditAgent,
-    handleEdit,
+    // #3167: label vocabulary management on the agents panel.
     handleAgentEdited,
+    labelsManagerOpen,
+    setLabelsManagerOpen,
+    // #3164: organizations — tree, facet, Move modal, manager.
+    organizations,
+    organizationsLoading,
+    organizationsError,
+    fetchOrganizations,
+    moveAgent,
+    setMoveAgent,
+    handleAgentMoved,
+    handleOrganizationsChanged,
+    organizationsManagerOpen,
+    setOrganizationsManagerOpen,
     busyAgentId,
     busyAction,
     handleViewDetails,

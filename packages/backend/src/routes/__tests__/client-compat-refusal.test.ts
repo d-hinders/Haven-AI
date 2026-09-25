@@ -82,7 +82,7 @@ async function seedAgent(executionRail: 'delegation' | 'session_key' = 'delegati
 
 async function seedIntent(
   owner: Seeded,
-  overrides: Partial<{ status: string; send_idempotency_key: string | null; x402_idempotency_key: string | null; payment_rail: string | null; expires_at: string }> = {},
+  overrides: Partial<{ status: string; send_idempotency_key: string | null; x402_idempotency_key: string | null; payment_rail: string | null; expires_at: string; prepared_user_op: unknown }> = {},
 ): Promise<string> {
   const row = {
     status: 'pending_signature',
@@ -90,6 +90,7 @@ async function seedIntent(
     x402_idempotency_key: null,
     payment_rail: null,
     expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+    prepared_user_op: PREPARED_USER_OP as unknown,
     ...overrides,
   }
   const intent = await db.query<{ id: string }>(
@@ -111,7 +112,7 @@ async function seedIntent(
       SIGN_HASH,
       row.status,
       row.expires_at,
-      JSON.stringify(PREPARED_USER_OP),
+      row.prepared_user_op == null ? null : JSON.stringify(row.prepared_user_op),
       CHAIN_ID,
       row.send_idempotency_key,
       row.x402_idempotency_key,
@@ -271,6 +272,21 @@ describeDb('client-version refusal on the real payment routes (#3303)', () => {
     expect(await tableCounts()).toEqual(before)
     // Nothing touched it: the handler, which would have lazily expired it and
     // then prepared a fresh payment, never ran.
+    expect(await intentRow(id)).toEqual(rowBefore)
+  })
+
+  it('an in-window x402 row WITHOUT its prepared UserOp is not a replay — the handler would mint, so it is refused (#3303 review B1c)', async () => {
+    const id = await seedIntent(agent, { x402_idempotency_key: 'no-op-key', payment_rail: 'x402', prepared_user_op: null })
+    const before = await tableCounts()
+    const rowBefore = await intentRow(id)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/x402/authorize',
+      headers: { authorization: `Bearer ${agent.apiKey}`, 'x-haven-client': MCP_OLD },
+      payload: { ...X402_BODY, idempotencyKey: 'no-op-key' },
+    })
+    expect(res.statusCode).toBe(426)
+    expect(await tableCounts()).toEqual(before)
     expect(await intentRow(id)).toEqual(rowBefore)
   })
 

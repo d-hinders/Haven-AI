@@ -11,7 +11,10 @@ import {
   type MonthlySpendRow,
 } from '../infra/repositories/dashboard.js'
 import { getFiatValuesForTokenAmount } from '../infra/fiat-values.js'
-import { fetchPortfolioForAccount } from '../modules/accounts/index.js'
+import {
+  combineBalanceFreshness,
+  fetchPortfolioForAccount,
+} from '../modules/accounts/index.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
 import {
   compareTransactions,
@@ -123,6 +126,16 @@ export default async function dashboardRoutes(
       accounts.map((account) => fetchPortfolioForAccount(account.chain_id, account.account_address)),
     )
 
+    // #3295: a portfolio whose balance read failed serves the last-known
+    // balances, marked stale (or unavailable when nothing was ever read).
+    // The totals already use those substituted values, so a degraded read
+    // shows the last figure we actually saw — never an understated zero.
+    const balancesDegraded = combineBalanceFreshness(
+      currentPortfolio.flatMap((portfolio) =>
+        (portfolio.breakdown ?? []).map((item) => item.balanceFreshness),
+      ),
+    )
+
     const totalUsd = currentPortfolio.reduce((sum, item) => sum + item.totalUsd, 0)
     const totalEur = currentPortfolio.reduce((sum, item) => sum + item.totalEur, 0)
     const totalSek = currentPortfolio.reduce((sum, item) => sum + item.totalSek, 0)
@@ -223,13 +236,21 @@ export default async function dashboardRoutes(
       },
       change: {
         available: changeAvailable,
-        usdAmount: totalUsd - previousUsd,
-        eurAmount: totalEur - previousEur,
+        // #3295: when some token has no known value, the totals are
+        // understated by an unknown amount — the change is reported as
+        // unavailable (null amounts), never as a swing computed from a zero.
+        // Marked-stale tokens still diff normally: the last-known figures are
+        // on both sides of the subtraction.
+        usdAmount: balancesDegraded?.status === 'unavailable' ? null : totalUsd - previousUsd,
+        eurAmount: balancesDegraded?.status === 'unavailable' ? null : totalEur - previousEur,
         // Null, not 0, when yesterday's snapshot predates migration 090: the
         // wire distinguishes "no SEK figure to diff against" from "changed by
         // exactly 0", and the frontend reports the change as unavailable
         // rather than fabricating a -100% swing from a missing baseline.
-        sekAmount: sekChangeAvailable ? totalSek - previousSek : null,
+        sekAmount:
+          sekChangeAvailable && balancesDegraded?.status !== 'unavailable'
+            ? totalSek - previousSek
+            : null,
         usdPercent: changeAvailable ? computePercentChange(totalUsd, previousUsd) : 0,
         eurPercent: changeAvailable ? computePercentChange(totalEur, previousEur) : 0,
         // sekPercent 0 beside sekAmount null is deliberate: the frontend
@@ -237,6 +258,9 @@ export default async function dashboardRoutes(
         // reads the percentage in that state — the schema wants a number, so
         // 0 is the inert filler, not a claim the change was zero.
         sekPercent: sekChangeAvailable ? computePercentChange(totalSek, previousSek) : 0,
+        // Additive (#3295): present only when at least one token's read is
+        // stale or unavailable; absent on a clean read.
+        ...(balancesDegraded ? { balancesFreshness: balancesDegraded } : {}),
       },
       metrics: {
         connectedAgents: activeAgents.length,

@@ -6,6 +6,12 @@ import { getChainClient } from '../infra/chain/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { createCache } from '../platform/cache.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+import {
+  balanceFreshness,
+  knownBalance,
+  recordKnownBalance,
+  type BalanceFreshness,
+} from '../modules/accounts/index.js'
 
 // Balance reads are RPC-standard and rail-agnostic (a `balanceOf`/native-balance
 // read is identical regardless of which execution rail the Safe uses), and this
@@ -17,8 +23,11 @@ const BALANCE_READ_IMPL = 'ethers'
 const balanceCache = createCache<{ balances: BalanceItem[] }>(30_000)
 
 /**
- * Results where a balance read failed. A failed leg still reads as '0', but it
- * is never cached, so one RPC blip does not pin a zero for the whole TTL.
+ * Results where a balance read failed. A failed leg is no longer a silent
+ * zero (#3295): it serves the last-known balance, marked stale with its as-of
+ * time, or stays '0' marked unavailable when nothing was ever read. Either
+ * way it is never cached, so one RPC blip does not pin a degraded figure for
+ * the whole TTL.
  */
 const degradedResults = new WeakSet<{ balances: BalanceItem[] }>()
 
@@ -28,6 +37,14 @@ export interface BalanceItem {
   balance: string
   formatted: string
   decimals: number
+  /**
+   * Present only when this entry's balance read FAILED (#3295): 'stale' with
+   * the last successful read's time, or 'unavailable' when no balance has
+   * ever been read for this token. Absent on a clean read. Additive only —
+   * `balance` stays a decimal string with its address and decimals, which the
+   * published CLI's registry reads rely on.
+   */
+  balanceFreshness?: BalanceFreshness
 }
 
 /**
@@ -85,27 +102,47 @@ export default async function balanceRoutes(
         ])
 
         const nativeResult = results[0]
+        const nativeKnown = knownBalance(chainId, accountAddress, null)
         const nativeBalance =
-          nativeResult.status === 'fulfilled' ? nativeResult.value.toString() : '0'
+          nativeResult.status === 'fulfilled'
+            ? nativeResult.value.toString()
+            : nativeKnown?.balance ?? '0'
+        if (nativeResult.status === 'fulfilled') {
+          recordKnownBalance(chainId, accountAddress, null, nativeBalance)
+        }
+        const nativeFreshness =
+          nativeResult.status === 'rejected'
+            ? balanceFreshness(true, nativeKnown)
+            : null
         balances.push({
           symbol: nativeToken.symbol,
           address: null,
           balance: nativeBalance,
           formatted: formatTokenValue(nativeBalance, nativeToken.decimals),
           decimals: nativeToken.decimals,
+          ...(nativeFreshness ? { balanceFreshness: nativeFreshness } : {}),
         })
 
         for (let i = 0; i < erc20Tokens.length; i++) {
           const token = erc20Tokens[i]
           const result = results[i + 1]
+          const known = knownBalance(chainId, accountAddress, token.address)
           const rawBalance =
-            result.status === 'fulfilled' ? result.value.toString() : '0'
+            result.status === 'fulfilled'
+              ? result.value.toString()
+              : known?.balance ?? '0'
+          if (result.status === 'fulfilled') {
+            recordKnownBalance(chainId, accountAddress, token.address, rawBalance)
+          }
+          const freshness =
+            result.status === 'rejected' ? balanceFreshness(true, known) : null
           balances.push({
             symbol: token.symbol,
             address: token.address,
             balance: rawBalance,
             formatted: formatTokenValue(rawBalance, token.decimals),
             decimals: token.decimals,
+            ...(freshness ? { balanceFreshness: freshness } : {}),
           })
         }
 

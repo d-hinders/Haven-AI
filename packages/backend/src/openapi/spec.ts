@@ -9463,11 +9463,35 @@ export const openapiSpec = {
         properties: {
           symbol: { type: 'string' },
           address: { type: ['string', 'null'], description: 'Token contract address; null for the chain-native token (exactly one entry).' },
-          balance: { type: 'string', description: "Raw base units; '0' when the RPC lookup failed." },
+          balance: { type: 'string', description: "Raw base units. On a failed read, the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token." },
           formatted: { type: 'string' },
           decimals: { type: 'integer' },
+          balanceFreshness: { $ref: '#/components/schemas/BalanceFreshness' },
         },
         additionalProperties: false,
+      },
+      BalanceFreshness: {
+        type: 'object',
+        description: 'Present only when this entry\'s balance read FAILED (#3295). Absent on a clean read. The balance string it marks is still additive: the last-known value when one exists (status stale), else the filler \'0\' (status unavailable).',
+        oneOf: [
+          {
+            type: 'object',
+            required: ['status', 'asOf'],
+            properties: {
+              status: { type: 'string', enum: ['stale'] },
+              asOf: { type: 'string', format: 'date-time', description: 'When the served value was last successfully read from the chain.' },
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['status'],
+            properties: {
+              status: { type: 'string', enum: ['unavailable'] },
+            },
+            additionalProperties: false,
+          },
+        ],
       },
       BalancesResponse: {
         type: 'object',
@@ -9528,11 +9552,12 @@ export const openapiSpec = {
         required: ['symbol', 'balance', 'formatted', 'usdValue', 'eurValue'],
         properties: {
           symbol: { type: 'string' },
-          balance: { type: 'string', description: "Raw base units; '0' on RPC failure." },
+          balance: { type: 'string', description: "Raw base units. On a failed read, the last successfully read balance is served instead, marked by balanceFreshness; '0' only when no balance has ever been read for this token." },
           formatted: { type: 'string' },
           usdValue: { type: 'number', description: '0 when the price feed failed.' },
           eurValue: { type: 'number' },
           sekValue: { type: 'number', description: 'Same one price read as usd/eur (#3127 round 2); 0 when the price feed failed.' },
+          balanceFreshness: { $ref: '#/components/schemas/BalanceFreshness' },
         },
         additionalProperties: false,
       },
@@ -9652,12 +9677,13 @@ export const openapiSpec = {
             required: ['available', 'usdAmount', 'eurAmount', 'usdPercent', 'eurPercent'],
             properties: {
               available: { type: 'boolean', description: 'true iff a yesterday snapshot existed to diff against.' },
-              usdAmount: { type: 'number' },
-              eurAmount: { type: 'number' },
-              sekAmount: { type: ['number', 'null'], description: 'Null when yesterday’s snapshot predates migration 090 (no SEK baseline stored) — the client reports the change as unavailable rather than reading a fabricated swing.' },
+              usdAmount: { type: ['number', 'null'], description: 'Null when balanceFreshness below is unavailable: the totals are understated by an unknown amount, so no swing may be claimed.' },
+              eurAmount: { type: ['number', 'null'], description: 'Null when balanceFreshness below is unavailable, as usdAmount.' },
+              sekAmount: { type: ['number', 'null'], description: 'Null when yesterday’s snapshot predates migration 090 (no SEK baseline stored) or when balanceFreshness below is unavailable — the client reports the change as unavailable rather than reading a fabricated swing.' },
               usdPercent: { type: 'number', description: '0 when unavailable or the previous total was 0.' },
               eurPercent: { type: 'number' },
               sekPercent: { type: 'number', description: '0 when the SEK baseline is missing or the previous total was 0.' },
+              balancesFreshness: { $ref: '#/components/schemas/BalanceFreshness', description: 'Present only when at least one of the totals\' balance reads failed (#3295): stale with the oldest served as-of time, or unavailable when some token has no known value. Absent on a clean read.' },
             },
             additionalProperties: false,
           },

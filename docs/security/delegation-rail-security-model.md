@@ -1501,3 +1501,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > or sweep logic moves, so nothing this document claims about authority,
 > custody or signing changes. Scope of this note: those copy strings. Nothing
 > else in this document was re-verified.
+>
+> **Re-verified unchanged (#3295, 2026-09-25, last-known balances):** this doc
+> is coupled through `routes/user-accounts.ts`, whose change is comment-only:
+> the funding endpoint's parity comment now states that `GET
+> /balances/:accountAddress` serves a last-known balance on a failed read
+> (#3295) while THIS endpoint still answers `'0'` and computes `funded` from
+> it — behaviour byte-identical, the marker gap deferred by name to a
+> follow-up. No handler, query, response field, or signing path moves; the
+> endpoint still reads balances with the same ethers client and spends
+> nothing. Nothing this document claims about authority, custody or signing
+> changes. Scope of this note: that comment. Nothing else in this document
+> was re-verified.

@@ -1,17 +1,26 @@
 /**
- * Real-DB test for #3307 (owner decision: payment status is in scope): the
- * payment-status response checksums its Haven-owned addresses at its own read
- * boundary, the same rule as the receipt (`mapEvidence`) and the transactions
- * feed (#3129), so the three agent-facing surfaces agree byte for byte.
+ * Real-DB tests for #3307 (owner decision: payment status is in scope).
  *
- * LETTER-BEARING, deliberately mis-cased inputs: a digit-only address is
- * unchanged by checksumming and would pass on the old code.
+ * 1. Payment status checksums EVERY Haven-owned address it returns — top
+ *    level, the rail context (`asset`, `x402.*`) and `parties` — the same rule
+ *    as the receipt (`mapEvidence`) and the transactions feed (#3129).
+ * 2. The resume lookup embeds that checksummed status, but REBUILDS its
+ *    merchant-bound payment objects (`accepted`, `paymentRequired`) from the
+ *    row in STORED casing, so those bytes do not change.
+ * 3. Cross-surface: for one payment, the receipt row and the status response
+ *    carry byte-equal AND checksummed addresses.
+ *
+ * Every seed is written lowercase and asserted to differ from its checksum
+ * form: an address that checksums to itself (e.g. `0x…00f1`) would pass on the
+ * old code and prove nothing.
  */
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import { ethers } from 'ethers'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
-import { getAgentPaymentStatus } from '../agent-payment-status.js'
+import { upsertEvidenceBase } from '../../../infra/repositories/machine-payments.js'
+import { listReceipts } from '../../mpp/evidence.js'
+import { getAgentPaymentResumeState, getAgentPaymentStatus } from '../agent-payment-status.js'
 import { type AgentContext } from '../../../middleware/agentAuth.js'
 
 const MIXED = (pair: string) => `0x${pair.repeat(20)}`
@@ -20,6 +29,7 @@ const DELEGATE = MIXED('bC')
 const DELEGATE_ACCOUNT = MIXED('dE')
 const MERCHANT = MIXED('aB')
 const TOKEN = MIXED('Fa')
+const SEEDS = { ACCOUNT, DELEGATE, DELEGATE_ACCOUNT, MERCHANT, TOKEN }
 const checksum = (a: string) => ethers.getAddress(a.toLowerCase())
 let seq = 0
 
@@ -34,7 +44,7 @@ async function seedX402(): Promise<{ agent: AgentContext; paymentId: string }> {
     [userId],
   )
   const agentId = agentRow.rows[0].id
-  // Stored as the writers store them: lowercase.
+  // Every address stored LOWERCASE.
   const intent = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
        (agent_id, user_id, account_address, token_symbol, token_address, to_address,
@@ -70,35 +80,84 @@ async function seedX402(): Promise<{ agent: AgentContext; paymentId: string }> {
 }
 
 describeDb('payment status addresses are checksummed at the read boundary (#3307)', () => {
-  it('resume state keeps the merchant-facing payment requirement exactly as stored', async () => {
-    const { getAgentPaymentResumeState } = await import('../agent-payment-status.js')
-    const { agent, paymentId } = await seedX402()
-    const lookup = await getAgentPaymentResumeState(agent, paymentId)
-    const resume = lookup.resumeState as Record<string, any>
-    expect(resume.accepted.payTo).toBe(MERCHANT.toLowerCase())
-    expect(resume.accepted.asset).toBe(TOKEN.toLowerCase())
-    expect(resume.paymentRequired.accepts[0].payTo).toBe(MERCHANT.toLowerCase())
-  })
-
   beforeAll(initDbHarness)
   beforeEach(resetDb)
 
-  it('top-level and parties addresses are EIP-55 checksummed; the rail context stays as stored', async () => {
+  it('every seed differs from its checksum form — otherwise these tests would pass on the old code', () => {
+    for (const [name, address] of Object.entries(SEEDS)) {
+      expect(checksum(address), name).not.toBe(address.toLowerCase())
+    }
+  })
+
+  it('status checksums EVERY address: top level, rail context (asset, x402.*) and parties', async () => {
     const { agent, paymentId } = await seedX402()
     const status = (await getAgentPaymentStatus(agent, paymentId)) as Record<string, any>
-    expect(status).not.toBeNull()
     expect(status.merchant_address).toBe(checksum(MERCHANT))
     expect(status.payer_address).toBe(checksum(DELEGATE))
-    // The x402 context is the stored protocol record: resume-state rebuilds the
-    // merchant-facing `accepted.payTo` / `asset` from it, so it is NOT re-cased.
-    expect(status.asset).toBe(TOKEN.toLowerCase())
-    expect(status.x402.asset).toBe(TOKEN.toLowerCase())
-    expect(status.x402.merchant_address).toBe(MERCHANT.toLowerCase())
+    expect(status.asset).toBe(checksum(TOKEN))
+    expect(status.x402.asset).toBe(checksum(TOKEN))
+    expect(status.x402.merchant_address).toBe(checksum(MERCHANT))
     expect(status.parties).toEqual({
       treasury_account: checksum(ACCOUNT),
       delegate: checksum(DELEGATE),
       delegate_account: checksum(DELEGATE_ACCOUNT),
       merchant: checksum(MERCHANT),
     })
+  })
+
+  it('resume EMBEDS the checksummed status but rebuilds its merchant-bound payment objects in STORED casing', async () => {
+    const { agent, paymentId } = await seedX402()
+    const lookup = await getAgentPaymentResumeState(agent, paymentId)
+    const embedded = lookup.status as Record<string, any>
+    expect(embedded.merchant_address).toBe(checksum(MERCHANT))
+    expect(embedded.x402.merchant_address).toBe(checksum(MERCHANT))
+
+    const resume = lookup.resumeState as Record<string, any>
+    expect(resume.accepted.payTo).toBe(MERCHANT.toLowerCase())
+    expect(resume.accepted.asset).toBe(TOKEN.toLowerCase())
+    expect(resume.paymentRequired.accepts[0].payTo).toBe(MERCHANT.toLowerCase())
+    expect(resume.merchantAddress).toBe(MERCHANT.toLowerCase())
+  })
+
+  it('CROSS-SURFACE: the receipt row and the status response carry byte-equal, checksummed addresses for one payment', async () => {
+    const { agent, paymentId } = await seedX402()
+    await upsertEvidenceBase({
+      paymentIntentId: paymentId,
+      approvalRequestId: null,
+      agentId: agent.id,
+      userId: agent.user_id,
+      rail: 'x402',
+      txHash: `0x${'ab'.repeat(32)}`,
+      chainId: 84532,
+      resourceUrl: 'https://merchant.example/r',
+      merchantAddress: MERCHANT.toLowerCase(),
+      payerAddress: ACCOUNT.toLowerCase(),
+      settlementAddress: DELEGATE.toLowerCase(),
+      tokenSymbol: 'USDC',
+      tokenAddress: TOKEN.toLowerCase(),
+      amountRaw: '100000',
+      amountHuman: '0.10',
+      challengeId: null,
+      idempotencyKey: null,
+      challengePayload: null,
+      confirmedAt: null,
+      amountSek: null,
+      fxRateSek: null,
+      fxSource: null,
+      fxAt: null,
+      fxRates: null,
+    })
+    const [receipt] = (await listReceipts(agent.id, 10))!.receipts
+    const status = (await getAgentPaymentStatus(agent, paymentId)) as Record<string, any>
+
+    // Byte-equal across the two surfaces…
+    expect(receipt.merchant_address).toBe(status.merchant_address)
+    expect(receipt.token_address).toBe(status.asset)
+    expect(receipt.parties).toEqual(status.parties)
+    // …and checksummed (all-lowercase would also be byte-equal).
+    expect(receipt.merchant_address).toBe(checksum(MERCHANT))
+    expect(receipt.token_address).toBe(checksum(TOKEN))
+    expect(receipt.parties.merchant).toBe(checksum(MERCHANT))
+    // `payer_address` is excluded: the treasury on receipts, the delegate on status.
   })
 })

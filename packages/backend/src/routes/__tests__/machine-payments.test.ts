@@ -1069,7 +1069,7 @@ describe('machine payment routes', () => {
         asset: USDC,
         network: challenge.network.name,
         resource_url: challenge.resource,
-        merchant_address: RECIPIENT.toLowerCase(),
+        merchant_address: RECIPIENT, // #3307: the rail context is checksummed too
         description: challenge.description,
         idempotency_key: 'mpp_demo:test',
         challenge_id: challenge.challengeId,

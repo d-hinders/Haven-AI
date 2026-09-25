@@ -69,6 +69,12 @@ describeDb('receipt addresses are checksummed at the read boundary, stored lower
     await resetDb()
   })
 
+  it('every seed differs from its checksum form — otherwise these tests would pass on the old code', () => {
+    for (const [name, address] of Object.entries({ MERCHANT, PAYER, SETTLEMENT, TOKEN, DELEGATE, DELEGATE_ACCOUNT })) {
+      expect(checksum(address), name).not.toBe(address.toLowerCase())
+    }
+  })
+
   it('listReceipts returns every Haven-owned address checksummed — top level and parties — while storage stays lowercase', async () => {
     const agent = await seedAgent()
     const intentId = await seedIntent(agent.agentId, agent.userId)

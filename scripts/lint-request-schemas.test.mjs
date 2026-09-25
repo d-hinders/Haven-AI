@@ -260,8 +260,16 @@ describe('index.ts readers', () => {
       'routes/user.ts',
       'routes/user-accounts.ts',
       'routes/user-accounts-retired.ts',
-      // Slice 3 (#3031): the FIRST money-path module, and the only one the
-      // 2026-09-22 shadow reading proved conformant on every operation.
+      // Slice 3 (#3031): the money-path modules. #3221 flipped x402.ts — the
+      // only one the 2026-09-22 shadow reading proved on traffic alone; the
+      // remainder (payments, agent-delegations, machine-payments) joins on
+      // the epic's fallback instrument: the route suites assembled
+      // production-style (off-spec → the 400 envelope, every accepted shape
+      // byte-identical) plus that same reading (zero would_refuse,
+      // zero would_coerce across the 24.41 h window).
+      'routes/payments.ts',
+      'routes/agent-delegations.ts',
+      'routes/machine-payments.ts',
       'routes/x402.ts',
     ])
   })

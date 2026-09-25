@@ -1067,3 +1067,109 @@ C4 → #3229, C5 → #3230 (`area:ci`). Notes: not filed. Filed to the backlog
 
 F1 (#3231) stays open until #3234 and #3235 have landed and its promotion
 checklist is ticked.
+
+## 2026-09-25 — whole repo, weighted to the least recently scanned surfaces and the day's landings (owner request 2026-09-25, no scope named)
+
+Full report: [`docs/bug-reports/quality-scan-2026-09-25-whole-repo.md`](../bug-reports/quality-scan-2026-09-25-whole-repo.md)
+— file:line evidence lives there; this entry stays path-free. Measured on
+`origin/dev` @ `2cc23374` by the captain and three read-only workers in
+detached worktrees (the day's landings; the SDK, core, the QA harness and the
+backend modules and workers outside the 09-22 sample; CI, docs and history),
+all removed with a plain `git worktree remove`. On the owner's instruction
+during the scan, every candidate was re-run by the captain in a separate
+pinned worktree before it was written; three worker figures were corrected
+there. Mutations used `cp` backups with byte-identical restores; real-DB
+runs used disposable local databases, dropped afterwards. The only live calls
+were two read-only nonce reads on the public Base Sepolia endpoint. Two
+landings of the day were the captain's own; they were mutated and read by a
+worker, not by the captain.
+
+**Excluded this run:** every prior finding and candidate. The 2026-08-18
+outbound-lifecycle finding's re-surface bar ("the queue lane failing") is met
+on the day, but the incident is tracked on #2769 and is recorded as context
+there, not as a new item.
+
+**Structural finding (pending the owner's word):**
+- S1 — qa-dev goes red on RPC-provider behaviour in waves (public endpoint
+  and rate limits 09-02 → 09-06; Alchemy 429s 09-18 → 09-23; the dRPC plan's
+  batch and `pending`-tag refusals 09-24 → 09-25), each triaged as a flake,
+  absorbed by the in-step retry and fixed one quirk at a time. Over the last
+  100 dev deployments: 592 money-flow check-runs → 472 skipped / 90 success /
+  26 failure, 21 of the 26 with a provider signature; 19 of the 90 passed
+  only on the in-step attempt 2 (a captain sample of the 15 newest harness
+  passes → 2 on attempt 2). Cost: promotion #3325 shipped with `qa-override`
+  and three relayer legs red. Four slices proposed: a conformance probe, the
+  provider-swap runbook step, failure-class and attempt-2 recording in the
+  QA failure issue, and the #2769 triage rule.
+
+**Improvement candidates (one PR each), pending the owner's word:**
+- C1 — the promotion digest upserts the newest open issue carrying the
+  `promotion` label; #3262 (the prod RPC swap procedure) carries it and has
+  been overwritten 33 times since 2026-09-24T09:04Z. Its author was notified
+  on #3262 during the scan.
+- C2 — the passport UID repair landed 2026-09-25 (#3327): the sweep stalls on
+  rows that already match (three ticks, 0 repaired, 20 chain reads each, on a
+  real database); its reader accepts an `Attested` log the mint path's reader
+  refuses; and the mint path's attester guard has a test that cannot fail
+  (mutation survived, 7 / 7).
+- C3 — three owner revoke submit routes record a revocation without checking
+  that the signed calldata disables those delegations; the rule exists at
+  the other two submit sites (#906). A `disableDelegation` → `enableDelegation`
+  mutation survives 120 / 120.
+- C4 — two gating QA scenarios (the within-budget settle and the delegation
+  lifecycle's revoke) read no chain effect from any node; their PASS tests
+  stay green with the observer RPC on a dead port.
+- C5 — both balance monitors commit their "alerted" state before sending and
+  never check the webhook's status: a 404 is posted once, never logged, never
+  retried while the condition persists.
+- Verified and held back by the cap: guard-freshness files a new issue per
+  qa-dev flap (five in 29 hours); the change classifier routes the four
+  served docs to no surface (incident #3288); the copy lint does not scan the
+  app's message catalog; three instruments in this skill's reference misread.
+- Context, not new: the nonce hole a post-stamp broadcast failure leaves
+  (#2769); a class note that C2, C3 and C4 share one shape with #3294 and
+  #2968 (an on-chain effect recorded without chain evidence) — no census
+  was taken, so it is not proposed as a structural finding.
+
+**Probed clean** (block → command → number, all at `2cc23374`):
+- sizing → the 09-22 command (control at `fd7b1289` reproduces 77,152) →
+  backend 80,798 / 101,079; frontend 51,892 / 45,854; sdk 13,481 / 13,991;
+  core 18,316 / 347; qa-agent 7,306 / 5,229.
+- block 1 (guard falsifiability) → 10 mutations over two samples → the day's
+  money-path landings 3 caught / 1 survived (C2), plus the captain's own
+  landing caught; the least-scanned code 3 caught / 2 survived (C3; a
+  QA-harness merchant-leg check, a note).
+- block 2 (`covers:` completeness) → the reference loop under bash with
+  `set -f`, misses confirmed with the strict gate → 18 across 6 of 8 contract
+  docs (09-22: 17 across 5); `npm run docs:covers-gaps` → 138 / 36
+  (unchanged).
+- block 3 (stale numbers) → partial → 25 newest shards: 1 figure line by the
+  block's regex, 0 with a command (the regex misses its own specimens — a
+  held-back candidate); `any` → 24 and db-mock gauge 54 / 273 / 57, both
+  unchanged.
+- block 4 (retired vocabulary) → positive control 36 shards → 192 files, 46
+  historical / 146 live (+1 live, a new test fixture).
+- block 5 (merge-method drift) → since 2026-09-22T00:00:00Z → 0 merge-commit /
+  53 squash (clean); since 2026-08-10T00:00:00Z → 282 / 743 of 1,028
+  (unchanged merge count).
+- block 6 (nets with holes) → examined, all four halves → copy lint 87
+  unscanned / 6 with hits (hole: the message catalog); money perimeter 31
+  verb files / 19 outside; visual 9 of 26 routes (12 resolving concrete ids);
+  docs boundary 39; the freshness gate's completeness warning is dead under
+  the require-all-legs variable.
+- incident clustering → issues created since 2026-09-22T00:00:00Z → 52; the
+  untracked recurring class is S1.
+- workflow archaeology → `ci.yml` last 200 → 5 with attempt > 1 (4 parked
+  bot-push runs), 14 failures, 0 on `dev`; qa-dev read at the `money-flow`
+  job level (see S1).
+- comment archaeology → TODO / FIXME / HACK / XXX → 0 (control `import` →
+  1,499 files).
+- live exercise → not taken beyond two read-only nonce reads.
+
+Instrument lessons: run-level qa-dev conclusions count gate-skipped runs as
+success (the 60 newest "successful" runs held no harness log); BSD `sed`
+accepts a GNU-only address as a silent no-op (print the applied diff before
+trusting a mutation); a fresh worktree needs the core and SDK builds before
+backend suites, and Vitest's `Tests` line hides files that failed to import;
+`ethers`' provider bypasses a stubbed global `fetch`; `fetch` resolves on
+4xx/5xx.

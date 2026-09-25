@@ -34,7 +34,7 @@ import {
   markOutboundTxBroadcast,
   markOutboundTxFailed,
   markOutboundTxMined,
-  maxLiveBroadcastNonce,
+  listLiveBroadcastNoncesFrom,
 } from './repositories/outbound-txs.js'
 import { getRelayer, withRelayerSendLock } from './relayer.js'
 import { describeRevert, isDeterministicRevert } from './deterministic-revert.js'
@@ -67,7 +67,7 @@ export interface OutboundQueueRepo {
   markOutboundTxMined: typeof markOutboundTxMined
   markOutboundTxFailed: typeof markOutboundTxFailed
   /** Optional so existing fakes need not grow it; the default is the real read. */
-  maxLiveBroadcastNonce?: typeof maxLiveBroadcastNonce
+  listLiveBroadcastNoncesFrom?: typeof listLiveBroadcastNoncesFrom
 }
 
 const defaultRepo: OutboundQueueRepo = {
@@ -75,7 +75,7 @@ const defaultRepo: OutboundQueueRepo = {
   markOutboundTxBroadcast,
   markOutboundTxMined,
   markOutboundTxFailed,
-  maxLiveBroadcastNonce,
+  listLiveBroadcastNoncesFrom,
 }
 
 function warn(action: string, err: unknown): void {
@@ -176,7 +176,7 @@ export async function submitRecorded(
         (await readNextRelayerNonce(
           params.chainId,
           relayer,
-          repo.maxLiveBroadcastNonce ?? maxLiveBroadcastNonce,
+          repo.listLiveBroadcastNoncesFrom ?? listLiveBroadcastNoncesFrom,
         ))
       let populated
       try {
@@ -254,51 +254,73 @@ export async function submitRecorded(
  * Some providers refuse the `pending` block tag outright. dRPC's Base plans
  * route it only to flashblocks-capable upstreams and answer "no available
  * upstreams … No label `flashblocks`" when there are none, while serving
- * `latest` normally. Every relayer send (account deploy at first activation,
- * sweeps, passport attestations) died at this read on dev from 2026-09-25.
+ * `latest` normally. Every relayer send died at this read on dev from
+ * 2026-09-25: account deploys at first budget activation and at a fresh
+ * agent's first erc7710 authorize, sweeps, passport attestations and revokes,
+ * lane cancels and the bump worker's orphan re-sends.
  *
  * On THAT refusal only, the nonce is derived without the node's mempool view:
- * the larger of the chain's `latest` count (same provider, so #1533's single
- * nonce view holds) and one past the highest nonce this relayer holds a live
+ * start at the chain's `latest` count (same provider, so #1533's single nonce
+ * view holds) and step over every nonce this relayer holds a CONTIGUOUS live
  * broadcast at in `outbound_txs`. Every send through {@link submitRecorded}
- * with a record id is stamped there BEFORE it is broadcast, so the ledger
- * sees our own in-flight transactions even when the node will not report
- * them. What it cannot see — an unstamped send (a failed-open record, the
- * bump worker's orphan re-send) or another writer on the key — surfaces as a
- * rejected broadcast (nonce too low / replacement underpriced), the same
- * failure class a stale `pending` read already produces: a failed send,
- * never a misdirected one. Any other error from the `pending` read
- * propagates unchanged: a dead endpoint is not papered over here.
+ * with a record id is stamped there BEFORE it is broadcast, so the walk steps
+ * over our own in-flight sends the node will not report. It never jumps a
+ * hole: a stale row far above the count (the table has no from-address, so an
+ * earlier key's dropped send looks like ours) cannot push every later send
+ * into a gap nothing fills.
+ *
+ * The ledger read is deliberately FAIL-CLOSED, unlike {@link openOutboundRecord}:
+ * without it, `latest` alone would re-use the nonce of our own in-flight send.
+ * A database error propagates before anything is signed.
+ *
+ * Residuals. The ledger cannot see a live nonce held by an unstamped send (a
+ * failed-open record; the bump worker's orphan re-send, stamped only after
+ * this returns), nor during two transient handoffs (a lane cancel stamping
+ * after the attest it cancels left `broadcast`; the bump worker between
+ * marking a row replaced and stamping its successor). A fresh send can then
+ * take that nonce and either be rejected, or — with fees at least 10% higher
+ * on both fields — silently REPLACE our own unrecorded transaction. A live
+ * row whose transaction was DROPPED at N = `latest` is stepped over, so later
+ * sends take N+1, N+2 … and stall behind the hole until an operator clears N
+ * (`modules/passport/attestation.ts` describes that stall). None of these can
+ * misdirect funds: a nonce orders the relayer's own transactions, it does not
+ * choose what they do. Any other error from the `pending` read propagates
+ * unchanged: a dead endpoint is not papered over here.
  */
 export async function readNextRelayerNonce(
   chainId: number,
   relayer: { getNonce(blockTag?: string): Promise<number> },
-  readLedger: (chainId: number) => Promise<bigint | null> = maxLiveBroadcastNonce,
+  readLedger: (chainId: number, from: bigint) => Promise<bigint[]> = listLiveBroadcastNoncesFrom,
 ): Promise<number> {
   try {
     return await relayer.getNonce('pending')
   } catch (err) {
     if (!isPendingTagRefusal(err)) throw err
-    const [latest, ledger] = await Promise.all([relayer.getNonce('latest'), readLedger(chainId)])
-    const floor = ledger === null ? 0 : Number(ledger) + 1
-    const nonce = Math.max(latest, floor)
+    const latest = await relayer.getNonce('latest')
+    let next = BigInt(latest)
+    for (const live of await readLedger(chainId, next)) {
+      if (live === next) next += 1n
+      else if (live > next) break
+    }
     console.warn(
       `outbound-queue: the RPC refused the 'pending' block tag on chain ${chainId}; ` +
-        `nonce ${nonce} derived from latest ${latest} and the live-broadcast ledger (#2769)`,
+        `nonce ${next} derived from latest ${latest} and the live-broadcast ledger (#2769)`,
     )
-    return nonce
+    return Number(next)
   }
 }
 
 /**
  * True only for a provider refusing the `pending` block tag itself — never
- * for a timeout, a rate limit or a dead endpoint. Matches the refusal text
+ * for a timeout, a rate limit or a dead endpoint. Matches dRPC's refusal text
  * wherever ethers put it (the top-level message quotes the RPC error body).
+ * A provider that words the refusal differently fails closed: the error
+ * propagates, as it did before this fallback existed.
  */
 export function isPendingTagRefusal(err: unknown): boolean {
   const e = err as { message?: unknown; error?: { message?: unknown } } | null
   const text = [e?.message, e?.error?.message].filter((m) => typeof m === 'string').join(' ')
-  return /No label `flashblocks`/i.test(text) || /pending block (tag )?(is )?not supported/i.test(text)
+  return /No label `flashblocks`/.test(text)
 }
 
 function toBigIntOrUndefined(value: unknown): bigint | undefined {

@@ -19,6 +19,7 @@ import {
   type OutboundQueueRepo,
   type SubmitChainDeps,
 } from '../outbound-queue.js'
+import * as outboundRepo from '../repositories/outbound-txs.js'
 import { markOutboundTxBroadcast, type OutboundTxRow } from '../repositories/outbound-txs.js'
 
 const TO = '0xdb9b1e94b5b69df7e401ddbede43491141047db3'
@@ -340,11 +341,18 @@ describeDb('openOutboundRecord (#1556)', () => {
     expect(isPendingTagRefusal(null)).toBe(false)
   })
 
-  it('#2769: a refused `pending` read takes one past our highest LIVE broadcast when the node lags it', async () => {
-    // Our own send at nonce 7 is stamped and in flight; the chain has mined
-    // only up to 5. `latest` alone would re-use 5 and collide.
-    const inFlight = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
-    await markOutboundTxBroadcast(inFlight.id!, { txHash: TX, nonce: 7n })
+  async function stampLive(nonce: bigint, tag: string) {
+    const row = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    await markOutboundTxBroadcast(row.id!, { txHash: '0x' + tag.repeat(32), nonce })
+    return row
+  }
+
+  it('#2769: a refused `pending` read steps over our own CONTIGUOUS in-flight sends from `latest`', async () => {
+    // Our sends at 5, 6, 7 are stamped and in flight; the chain has mined up
+    // to 5. `latest` alone would re-use 5 and collide.
+    await stampLive(5n, 'a1')
+    await stampLive(6n, 'a2')
+    await stampLive(7n, 'a3')
     const { chain, broadcasts, tags } = refusingChain(5)
 
     const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'hybrid_deploy', to: TO, data: DATA })
@@ -355,6 +363,66 @@ describeDb('openOutboundRecord (#1556)', () => {
     expect(tags).toEqual(['pending', 'latest'])
     const stamped = (await rowsFor(CHAIN)).find((r) => r.id === record.id)
     expect([stamped?.nonce, stamped?.status]).toEqual(['8', 'broadcast'])
+  })
+
+  it('#2769: a stale live row FAR above `latest` never pushes the send into a gap', async () => {
+    // An earlier key's dropped send, left `broadcast` at 900 (the table has no
+    // from-address). MAX(nonce)+1 would send at 901, into a hole of ~897
+    // nonces nothing ever fills; the walk stops at the first free nonce.
+    await stampLive(3n, 'b1')
+    await stampLive(900n, 'b2')
+    const { chain, broadcasts } = refusingChain(3)
+
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    const sent = await submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain)
+
+    expect(sent.nonce).toBe(4)
+    expect(broadcasts).toEqual([4])
+  })
+
+  it('#2769: a losing replica under the fallback re-reads and moves past the winner', async () => {
+    // Between our ledger read and our stamp, another replica stamps nonce 5.
+    // The UNIQUE live-nonce index refuses our stamp; the retry re-reads the
+    // ledger, now sees 5, and takes 6.
+    const { chain, broadcasts } = refusingChain(5)
+    let reads = 0
+    const racingRepo: OutboundQueueRepo = {
+      enqueueOutboundTx: outboundRepo.enqueueOutboundTx,
+      markOutboundTxBroadcast: outboundRepo.markOutboundTxBroadcast,
+      markOutboundTxMined: outboundRepo.markOutboundTxMined,
+      markOutboundTxFailed: outboundRepo.markOutboundTxFailed,
+      listLiveBroadcastNoncesFrom: async (chainId, from) => {
+        const seen = await outboundRepo.listLiveBroadcastNoncesFrom(chainId, from)
+        if (++reads === 1) await stampLive(5n, 'c1') // the winner lands after our read
+        return seen
+      },
+    }
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    const sent = await submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, racingRepo, chain)
+
+    expect(reads).toBe(2)
+    expect(sent.nonce).toBe(6)
+    expect(broadcasts).toEqual([6])
+  })
+
+  it('#2769: the ledger read FAILS CLOSED — a database error signs and broadcasts nothing', async () => {
+    const { chain, broadcasts } = refusingChain(5)
+    const downRepo: OutboundQueueRepo = {
+      enqueueOutboundTx: outboundRepo.enqueueOutboundTx,
+      markOutboundTxBroadcast: outboundRepo.markOutboundTxBroadcast,
+      markOutboundTxMined: outboundRepo.markOutboundTxMined,
+      markOutboundTxFailed: outboundRepo.markOutboundTxFailed,
+      listLiveBroadcastNoncesFrom: async () => {
+        throw new Error('db down')
+      },
+    }
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+
+    await expect(
+      submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, downRepo, chain),
+    ).rejects.toThrow('db down')
+    expect(broadcasts).toEqual([])
+    expect((await rowsFor(CHAIN))[0].status).toBe('queued')
   })
 
   it('#2769: a refused `pending` read takes the chain count when the ledger is behind it or empty', async () => {

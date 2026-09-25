@@ -51,7 +51,7 @@ import {
   MARK_OUTBOUND_TX_FAILED_SQL,
   MARK_OUTBOUND_TX_MINED_SQL,
   MARK_OUTBOUND_TX_REPLACED_SQL,
-  MAX_LIVE_BROADCAST_NONCE_SQL,
+  LIST_LIVE_BROADCAST_NONCES_FROM_SQL,
 } from '../src/infra/repositories/outbound-txs.js'
 import {
   GET_RECORDED_FEE_SQL,
@@ -461,7 +461,7 @@ const QUERIES: SmokeQuery[] = [
   { name: 'outbound: list unmined for the bump worker', sql: LIST_UNMINED_OUTBOUND_TXS_SQL },
   { name: 'outbound: claim an orphaned queued row (#1558)', sql: CLAIM_ORPHANED_OUTBOUND_TX_SQL },
   { name: 'outbound: count lane attempts at a nonce (#1558)', sql: COUNT_LANE_ATTEMPTS_AT_NONCE_SQL },
-  { name: 'outbound: highest live broadcast nonce (#2769)', sql: MAX_LIVE_BROADCAST_NONCE_SQL },
+  { name: 'outbound: live broadcast nonces from a floor (#2769)', sql: LIST_LIVE_BROADCAST_NONCES_FROM_SQL },
   // Owner-alias aggregate (#1167) is GONE: routes/user.ts and the
   // owner-aliases repository were deleted in #2847 (epic #1440), so the
   // smoke list no longer carries those three statements.

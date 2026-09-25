@@ -364,7 +364,13 @@ export async function recoverAnchorFromReceipt(
  *   transaction still holds a `broadcast` row at that nonce, and migration
  *   061's partial UNIQUE `(chain_id, nonce) WHERE status = 'broadcast'`
  *   refuses the stamp — `submitRecorded` re-reads the same nonce and throws
- *   `could not win a nonce lane`.
+ *   `could not win a nonce lane`. On a provider that REFUSES the `pending`
+ *   tag (#2769) the shape differs: the ledger walk steps over the live row at
+ *   N, so later sends stamp and broadcast at N+1, N+2 … and then never
+ *   confirm (a deploy 502s at its confirmation timeout, a sweep reports "not
+ *   confirmed"). After the bump worker's age gate those gap-blocked rows are
+ *   bumped to their cap and raise INCIDENTs at N+1 and above — the nonce to
+ *   clear is still N, the lowest live one, not the ones alarming.
  *
  * And the blast radius is wider than this passport: `getRelayer(chainId)`
  * returns ONE wallet per chain, shared by every submitter, so a stuck

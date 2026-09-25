@@ -390,8 +390,8 @@ fence — whoever stamps, sends. The bump worker sends through the same
 pipeline without a record id (it stamps its own rows), under its leader lock:
 a same-nonce replacement re-uses the row's explicit nonce, and an orphan
 re-send reads a fresh one. When the provider refuses the `pending` block tag
-(#2769), the fresh nonce is derived from its `latest` count and one past the
-highest live-broadcast nonce in that same table, so a losing replica's re-read
+(#2769), the fresh nonce is the first one at or above its `latest` count that
+no live-broadcast row in that same table holds, so a losing replica's re-read
 sees the winner's stamp and moves past it.
 
 The Safe-bound sites that once relied on the in-process `withRelayerSendLock`

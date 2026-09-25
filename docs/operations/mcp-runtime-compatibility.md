@@ -3257,3 +3257,53 @@ to call next in structured fields, and those fields are typed end to end
 > read-only GET — so no tool, schema key, `next_tool` value, expected-context
 > version or signer contract changes. Scope of this note: that endpoint's
 > response shape. Nothing else in this document was re-verified.
+>
+> **Re-verified #3319 (2026-09-25, agent-side allowance/identity addresses
+> checksummed):** the residual after #3307 — the agent-side reads still
+> emitting two addresses lowercase — is closed with the same
+> `toCanonicalAddress` rule, at the response boundary, storage untouched.
+> - **`haven_get_allowances`:** the top-level `delegate_address` and every
+>   `allowances[].token_address` are checksummed (`handleGetAllowances`).
+> - **`haven_get_agent`:** `delegate_address` is checksummed;
+>   `account_address` and `delegate_account_address` are canonicalised through
+>   the same total helper — a no-op on the checksummed forms they already
+>   carry (viem-computed; verified live on dev), healing for any lowercase
+>   row.
+> - **`haven_check_funds`:** the `token_address` echo is canonicalised, so the
+>   response carries ONE casing whether the caller sent a lowercase address, a
+>   checksummed one, or a symbol (resolved from the now-checksummed
+>   allowances read).
+> - **`haven_get_payment_status` and `haven_settle_mcp_tool`:** no diff of
+>   their own — the joined `allowance` block's `token_address` comes from the
+>   allowances read (`account-reads.ts` copies `match.tokenAddress`), so it
+>   is checksummed through the fix above. With that, the #3307 block's
+>   "covers every address" is now true of the status tool result as a whole:
+>   `asset` and `allowance.token_address` are the same checksummed string for
+>   one payment.
+>
+> **What stays as stored:**
+> - **Owner-side reads:** `allowances[].token_address` on `GET /agents`,
+>   `GET /agents/:id`, `PUT /agents/:id` and `/dashboard` (via
+>   `deriveDelegationAllowances`), and the `/agents/:id/delegations*` routes.
+>   The owner and agent views of one delegation therefore differ in casing —
+>   declared, not fixed; every frontend consumer compares case-insensitively.
+> - **The budget-precheck refusal:** `merchant_address` is deliberately
+>   lowercased and `asset` echoes the input.
+> - **`rails/delegation-budget-view.ts`**, storage (`LOWER(...)` writes and
+>   the `agent_delegations` CHECK), and the spec's owner-side `Delegation`
+>   schema, whose "Stored lowercase" note stays true.
+> - **The x402 binding:** the signer lowercases `delegate_address`
+>   independently, so canonicalising the emitted value cannot move a signed
+>   byte.
+> - The x402 quote/prepare responses were not re-surveyed beyond the status
+>   and settle paths above.
+>
+> **Compatibility:** the OpenAPI `address` pattern is case-agnostic, so no
+> wire schema moves; no tool name, schema key, `next_tool` value,
+> expected-context version or failure code changes; the SDK join and every
+> in-repo consumer compares addresses case-insensitively. A real-DB route
+> test seeds lowercase rows (the CHECK-constraint storage form) and pins the
+> checksummed responses with raw storage reads guarding the boundary.
+>
+> Scope of this note: those tool results. Nothing else in this document was
+> re-verified.

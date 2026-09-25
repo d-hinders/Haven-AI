@@ -533,17 +533,18 @@ test('a satisfied-by shard clears the BLOCKING half but still reports the doc (#
  * bump-only diff actually lands on are `packages/mcp/src/**`,
  * `packages/signer/src/**`, `packages/connect/src/**` and
  * `packages/mcp-server/src/**` — and `mcp-server` is a PRIVATE package, never
- * published. `packages/sdk/src/**` is covered but contributes nothing here: the
- * bump rewrites no source constant under it, only `packages/sdk/package.json`.
+ * published. `packages/sdk/src/**` joined them with #3303: the bump now
+ * rewrites `SDK_VERSION` in `packages/sdk/src/client-identity.ts`.
  *
  * #1826 — `packages/cli/src/**` now carries it too. It is a published package
  * the bump DOES write (`CLI_VERSION` in `commands.ts`), and it was the one such
  * entry CASP did not cover; #1826 added it (with
  * `packages/backend/src/routes/agents.ts`) after finding the agent-authority
- * surface gated by no contract doc. So FIVE entries carry this guarantee:
- * `packages/mcp/src/**`, `packages/signer/src/**`, `packages/connect/src/**`,
- * `packages/mcp-server/src/**` and `packages/cli/src/**`. Narrowing any one of
- * them weakens it; narrowing all five removes it.
+ * surface gated by no contract doc. So SIX entries carry this guarantee since
+ * #3303: `packages/mcp/src/**`, `packages/signer/src/**`,
+ * `packages/connect/src/**`, `packages/mcp-server/src/**`, `packages/cli/src/**`
+ * and `packages/sdk/src/**`. Narrowing any one of them weakens it; narrowing
+ * all six removes it.
  */
 test('a bump-only release diff still FAILS the strict gate — no shard, no green (#1790)', async () => {
   const { execFile } = await import('node:child_process')
@@ -565,6 +566,7 @@ test('a bump-only release diff still FAILS the strict gate — no shard, no gree
     'packages/signer/src/server.ts',
     'packages/mcp-server/src/server.ts',
     'packages/cli/src/commands.ts',
+    'packages/sdk/src/client-identity.ts', // #3303: SDK_VERSION
     'docs/operations/mcp-runtime-compatibility.md',
   ].join(',')
 

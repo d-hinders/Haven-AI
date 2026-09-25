@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+- **Client identity and update hint (#3303, epic #3302).** Haven API requests name `@haven_ai/mcp/<version>` in `X-Haven-Client`. When the backend sends a `client_update` hint for this runtime, the tool result carries it as `client_update`, on success and failure alike, with the exact update command. A 426 `client_outdated` refusal also keeps the backend's `next_tool_omitted_reason` at the top level of the failure. No tool, schema or consent input changes, so nobody is re-prompted.
+
 ## 0.5.0-alpha.0 — 2026-09-25
 
 - **Consent label copy fix (#3279).** The first-launch consent screen prints `Haven wallet: <address>` instead of `Haven wallet (Safe): <address>`, and the `accountAddress` field JSDoc loses the retired rail's name. Copy only: **the consent hash is unchanged** — `computeConsentHash` covers identity, the tool set and the allowance summary, never the rendered text, so nobody is re-prompted; the label pin test is retargeted to the new wording, not removed. The spend-gate wording on the same screen ("the real spend gate — enforced by the agent's signed delegation") was already correct and stays.

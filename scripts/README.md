@@ -39,7 +39,8 @@ That table is the **original inventory** (`3f6e9959c`), kept because it is what
 motivated the script — not a description of today's surface, which has grown
 since: `@haven_ai/cli` became a published package, `mcp-server`'s version joined
 the lockstep set, more source constants appeared
-(`SIGNER_VERSION`, `HOSTED_SERVER_VERSION`, `CONNECTOR_VERSION`, `CLI_VERSION`),
+(`SIGNER_VERSION`, `HOSTED_SERVER_VERSION`, `CONNECTOR_VERSION`, `CLI_VERSION`,
+and since #3303 `SDK_VERSION`),
 and the lockfile is rewritten too. *What the script does (in order)* below is the
 current list. The authoritative published set is not written down in prose at
 all: it is **derived from each workspace's `private` flag** — the same test
@@ -201,6 +202,7 @@ git add packages/sdk/package.json packages/signer/package.json \
         packages/cli/package.json packages/cli/src/commands.ts \
         packages/signer/src/server.ts packages/mcp-server/package.json \
         packages/mcp-server/src/server.ts packages/connect/src/runtime.ts \
+        packages/sdk/src/client-identity.ts \
         docs/operations/mcp-runtime-compatibility.md \
         docs/regulatory/casp-changelog/ \
         package-lock.json

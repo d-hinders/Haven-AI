@@ -26,6 +26,12 @@ export {
 } from './types.js'
 export { createNextStepBuilder, type NextStep, type NextStepHandoff, type NextStepTarget } from './next-step.js'
 export { HAVEN_CONNECTOR_CHANNEL, connectorRerunCommand } from './connector-channel.js'
+export {
+  HAVEN_CLIENT_HEADER,
+  havenClientIdentity,
+  readClientUpdate,
+  type HavenClientUpdate,
+} from './client-identity.js'
 export { HAVEN_MINIMUM_NODE_VERSION, isSupportedNodeVersion, unsupportedNodeVersionMessage } from './node-version.js'
 export { decodeBase64Json, encodeBase64Json } from './base64.js'
 export {

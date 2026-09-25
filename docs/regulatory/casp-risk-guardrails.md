@@ -1142,7 +1142,8 @@ named in the list that guarantees it.
 claim rather than only counting better.** A release bump implicates three
 contract docs, forced three different ways. Measured with the gate's own
 reckoning over **every path `release-bump.mjs` writes** — the six
-`package.json`, the five `CHANGELOG.md`, the five source version constants,
+`package.json`, the five `CHANGELOG.md`, the six source version constants (#3303 added
+`SDK_VERSION`; the gate's verdict over the full set is unchanged),
 `connect/src/runtime-manifest.ts`, `sdk/src/connector-channel.ts`,
 `package-lock.json` and the manifest doc — not over a sample:
 

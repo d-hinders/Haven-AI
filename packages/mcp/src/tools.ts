@@ -21,6 +21,7 @@ import {
   sameUrl,
   toolDescriptions as sharedDescriptions,
   verifyPaymentReceipt,
+  type HavenClientUpdate,
   type PaymentReceipt,
   type X402Quote,
   type X402ResumeState,
@@ -192,6 +193,12 @@ export interface ToolSuccess<T> {
    * leave, which is how `idempotencyKey` survived #2312 and #2348.
    */
   warnings?: string[]
+  /**
+   * #3303: the backend's `client_update` hint when this package is behind the
+   * version the deployment recommends (`required: false`) or below its
+   * minimum (`required: true`). Carries the exact command that updates it.
+   */
+  client_update?: HavenClientUpdate
 }
 
 export interface ToolFailure {
@@ -232,6 +239,8 @@ export interface ToolFailure {
    * own wallet needs to recover first.
    */
   retry_with_new_quote?: boolean
+  /** #3303: as on {@link ToolSuccess}; on a 426 `client_outdated` refusal it is always `required: true`. */
+  client_update?: HavenClientUpdate
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
@@ -850,6 +859,11 @@ function normalizeError(err: unknown): ToolFailure {
         stringOrUndefined(body?.nextAction) ??
         stringOrUndefined(body?.next_action) ??
         AgentPaymentNextAction.StopAndTellUser,
+      // #3303: a backend refusal that already names why no tool follows (the
+      // 426 `client_outdated` does) keeps that reason at the top level.
+      ...(typeof body?.next_tool_omitted_reason === 'string'
+        ? { next_tool_omitted_reason: body.next_tool_omitted_reason }
+        : {}),
       body: err.body,
     }
   }

@@ -7,7 +7,7 @@ import {
   registeredSignerToolNames,
   type SignerConsentDecision,
 } from './consent.js'
-import { isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk/edge'
+import { havenClientIdentity, isSupportedNodeVersion, unsupportedNodeVersionMessage } from '@haven_ai/sdk/edge'
 import { createEdgeSigner, type EdgeSigner } from './core.js'
 import { loadSignerCredentials, type SignerCredentials } from './credentials.js'
 import {
@@ -139,6 +139,9 @@ export function buildSignerMcpServer(
     // binding verification + digest re-derivation as tool-argument bytes.
     signContext: {
       loadIdentity: () => loadHavenIdentity(credentialsPath),
+      // #3303: the backend refuses a signer below a minimum it has set, at
+      // sign-context — the one place this signer meets it.
+      clientIdentity: havenClientIdentity(SIGNER_NAME, SIGNER_VERSION),
     },
   })
   const registerTool = (server as unknown as {

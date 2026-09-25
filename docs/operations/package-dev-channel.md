@@ -24,6 +24,7 @@ covers:
   - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
+  - packages/core/src/client-compat.ts
 last-verified: "2026-09-24"
 ---
 
@@ -246,6 +247,11 @@ and the `release` skill.
   sorts below every real version, so no `^0.1.x` range can resolve to a snapshot
   by accident and nobody has to reason about `dev` vs `alpha` prerelease
   ordering.
+  The same property is why the backend's client-version signal (#3303)
+  **exempts** a snapshot: a `0.0.0-dev.*` version in `X-Haven-Client` is never
+  hinted or refused, whatever minimum the deployment sets
+  (`isSnapshotVersion` in `packages/core/src/client-compat.ts`), so a dev-channel
+  install keeps working against dev after a minimum is set.
 - **All five carry the same version.** The job runs the ordinary
   `scripts/release-bump.mjs` with `--snapshot` over the CI checkout, so the
   cross-package pins, connect's `runtime-manifest.ts`, the baked version

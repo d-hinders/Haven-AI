@@ -2878,6 +2878,19 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
+        /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the exact command that updates it, on this deployment's channel. */
+        ClientUpdate: {
+            /** @example @haven_ai/mcp */
+            package: string;
+            /** @example 0.4.0-alpha.0 */
+            current: string;
+            recommended: string | null;
+            min_version: string | null;
+            required: boolean;
+            /** @example npx -y @haven_ai/connect@alpha */
+            upgrade_command: string;
+            notes_url: string | null;
+        };
         /** @description A hybrid account's signer set — the exact configuration the account address was derived from. Public key material plus per-credential enrollment time (#1679); nothing secret. */
         HybridAccountSigners: {
             account_address: string;
@@ -4745,6 +4758,8 @@ export type components = {
     };
     responses: never;
     parameters: {
+        /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+        HavenClient: string;
         AgentId: string;
         LabelId: string;
         OrganizationId: string;
@@ -14055,7 +14070,10 @@ export interface operations {
     createPaymentIntent: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -14157,6 +14175,23 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
                     };
                 };
             };
@@ -14274,7 +14309,10 @@ export interface operations {
     getDirectPaymentSignContext: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
             path: {
                 id: components["parameters"]["PaymentId"];
             };
@@ -14375,6 +14413,23 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
                     };
                 };
             };
@@ -14696,7 +14751,10 @@ export interface operations {
     authorizeX402Payment: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -14799,6 +14857,23 @@ export interface operations {
                     };
                 };
             };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
+                    };
+                };
+            };
             /** @description Error response */
             429: {
                 headers: {
@@ -14834,7 +14909,10 @@ export interface operations {
     getX402SignContext: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
             path: {
                 /** @description Payment intent id from the quote/authorize response. */
                 id: string;
@@ -14924,6 +15002,23 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
                     };
                 };
             };
@@ -15030,7 +15125,10 @@ export interface operations {
     authorizeX402PaymentLegacy: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -15130,6 +15228,23 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
                     };
                 };
             };
@@ -15634,7 +15749,10 @@ export interface operations {
     sendTransfer: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                "X-Haven-Client"?: components["parameters"]["HavenClient"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -15725,6 +15843,23 @@ export interface operations {
                         details?: string;
                     } & {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` updates it; retry the same request afterwards. */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        /** @enum {string} */
+                        error_code: "client_outdated";
+                        client_update: components["schemas"]["ClientUpdate"];
+                        /** @enum {string} */
+                        next_action: "stop_and_tell_user";
+                        next_tool_omitted_reason: string;
                     };
                 };
             };

@@ -221,9 +221,10 @@ const SEMVER = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?
  * packages/signer/src/server.ts and HOSTED_SERVER_VERSION into
  * packages/mcp-server/src/server.ts — the second joined when #2300 put
  * packages/mcp-server/src/** on the perimeter, which is exactly the
- * intersection this comment says to re-derive. The other three (MCP_VERSION in
+ * intersection this comment says to re-derive. The other four (MCP_VERSION in
  * packages/mcp/src/server.ts, CONNECTOR_VERSION in packages/connect/,
- * CLI_VERSION in packages/cli/) land in packages that are on no glob.
+ * CLI_VERSION in packages/cli/, and since #3303 SDK_VERSION in
+ * packages/sdk/src/client-identity.ts) land in files that are on no glob.
  *
  * Named literally rather than matched as `[A-Z0-9_]*_VERSION`, because a
  * generic pattern would be wider than the writer it claims to be derived from —

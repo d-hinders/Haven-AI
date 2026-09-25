@@ -209,7 +209,7 @@ The signer exposes local stdio MCP tools:
 | `haven_sign` | Sign a delegation-rail payment from EIP-712 `typed_data`/`typed_data_b64`, or just `payment_id` (#1263 — the signer fetches the exact payload itself). A `payload_hash` on its own is REFUSED (`BARE_HASH_REFUSED`, #3169); it is still accepted alongside `typed_data` / `typed_data_b64` or `x402_expected`. Typed data without an x402 context is signed only when it is a direct-payment UserOp from the agent's own delegate account whose only call redeems a delegation made to it — anything else answers `TYPED_DATA_NOT_ALLOWED` (#3272). |
 | `haven_sign_x402` | One-call x402 fast path: funding signature + merchant payment header; signs by `payment_id` ALONE (#1355 — Haven's sign-context re-serves `payment_required`); a caller-supplied `payment_required` is the fallback for pre-#1355 backends |
 | `haven_x402_sign_header` | Build and sign the x402 merchant payment header after the Haven funding leg succeeds (decomposed flow) |
-| `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless Base-USDC recovery sweep (delegate → own Safe only) |
+| `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless Base-USDC recovery sweep (delegate → the agent's account (Haven wallet) only) |
 
 The signer's ONE network use (#1263) is a read-only fetch of a pending
 payment's signing context from Haven by `payment_id`, authenticated with the

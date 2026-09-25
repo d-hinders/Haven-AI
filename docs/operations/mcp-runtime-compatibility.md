@@ -56,7 +56,7 @@ covers:
   - scripts/lint-next-steps.mjs
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
-last-verified: "2026-09-24"
+last-verified: "2026-09-25"
 ---
 
 # MCP Runtime Compatibility
@@ -64,6 +64,25 @@ last-verified: "2026-09-24"
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent
 > setup — the advanced/local path. For the default topology (hosted MCP + local
 > signer) and how to deploy it, see [hosted-mcp.md](hosted-mcp.md).
+>
+> **Re-verified unchanged (#3279, 2026-09-25, Safe-vocabulary copy):** copy-only
+> edits on two surfaces this document covers. The local signer's first-launch
+> consent block (`packages/signer/src/consent.ts`) now names the agent's signed
+> budget delegation as the real spend gate, and the local MCP server's consent
+> screen prints `Haven wallet: <address>` (`packages/mcp/src/consent.ts`) — the
+> retired rail's name is gone from both. `haven_sign_sweep_delegate`'s
+> description (`packages/signer/src/tools.ts`) and the sweep `to`-guard refusal
+> message (`packages/signer/src/core.ts`) name the destination as the agent's
+> account (Haven wallet) and state the conditional destination check: it runs
+> only when the local credential carries an account address (#2247), and
+> otherwise rests on Haven's binding signature. No tool added, renamed or
+> re-shaped, no schema or argument change, no version-skew axis moves, and the
+> consent-hash contract holds: neither `computeConsentHash`
+> (`packages/mcp/src/consent.ts`) nor `computeSignerConsentHash`
+> (`packages/signer/src/consent.ts`) hashes rendered text, and
+> `SIGNER_CONSENT_SURFACE_VERSION` stays 2 (newly pinned by a test). Scope of
+> this note: those copy strings and their pins. Nothing else in this document
+> was re-verified in this pass.
 >
 > **Re-verified unchanged (#3241):** the change is test-only in
 > `packages/connect/src/doctor.test.ts` (+47/−1) — a `stampAgentMtimes()`

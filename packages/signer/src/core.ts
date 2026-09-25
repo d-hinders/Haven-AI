@@ -77,9 +77,10 @@ export interface EdgeSigner {
   ): Promise<X402HeaderResult>
   /**
    * Sign a Haven-prepared EIP-3009 sweep authorization (gasless USDC recovery
-   * delegate → Safe). Verifies the authorization came from Haven and pays out to
-   * the delegate's own Safe before signing; the relayer broadcasts it and pays
-   * gas. Never broadcasts — pure signing.
+   * delegate → the agent's account (Haven wallet)). Verifies the authorization
+   * came from Haven and pays out to the agent's account (Haven wallet) — the
+   * account belongs to the agent, not the delegate — before signing; the
+   * relayer broadcasts it and pays gas. Never broadcasts — pure signing.
    */
   signSweepAuthorization(input: SweepSignatureInput): Promise<SweepSignatureResult>
 }
@@ -89,7 +90,7 @@ export interface SweepSignatureInput {
   authorization: SweepAuthorization
   /** Haven's signature over the authorization context (binding). */
   expectedAuth: SweepExpectedAuth
-  /** Optional Safe address from the local credential, cross-checked against `to`. */
+  /** Optional account (Haven wallet) address from the local credential, cross-checked against `to` when present. */
   expectedSafe?: string
 }
 
@@ -447,7 +448,7 @@ export function createEdgeSigner(
       }
       if (expectedSafe && !sameAddress(authorization.to, expectedSafe)) {
         throw new HavenSigningError(
-          'Sweep authorization `to` does not match the Safe in the local credential.',
+          "Sweep authorization `to` does not match the agent's account (Haven wallet) in the local credential.",
         )
       }
 

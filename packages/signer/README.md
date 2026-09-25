@@ -431,7 +431,10 @@ audit write (disk full, read-only, two appends racing at the bound) is
 reported on stderr and never fails the signing call that already produced
 its signature — so the consent block's
 "appended for every signing operation" is a best-effort promise since #3172,
-kept unchanged in text because editing it moves the consent hash. The
+kept unchanged in text (editing consent copy does NOT move the consent hash —
+that covers identity, tool names and the surface version, as the consent
+screen section above already says; #3279 rewords the block without
+re-prompting anyone). The
 credential check itself is unchanged in wording and still judges a symlinked
 credential by its target. The
 `payload_hash` argument itself is bounded on the tool schema to a 32-byte hash

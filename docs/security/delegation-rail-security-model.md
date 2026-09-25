@@ -46,7 +46,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
-last-verified: "2026-09-22"
+last-verified: "2026-09-25"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -1449,3 +1449,18 @@ once, against its fixed threat model, when its last slice lands.
 > claims about authority, custody or signing moves. Scope of this note: those
 > identifier renames in the files named. Nothing else in this document was
 > re-verified.
+>
+> **Re-verified unchanged (#3279, 2026-09-25, Safe-vocabulary copy):** copy-only
+> edits in `packages/signer/src/tools.ts` and `packages/signer/src/core.ts`,
+> both covered here. `haven_sign_sweep_delegate`'s agent-facing description and
+> the sweep `to`-guard refusal message now name the destination as the agent's
+> account (Haven wallet) and state the conditional destination check: the local
+> comparison runs only when the credential carries an account address (#2247),
+> and otherwise the destination rests on Haven's binding signature. The guard
+> itself — the `expectedSafe &&` conditional, the `from` check, the binding
+> verification and the canonical-USDC assertion — is byte-identical; the field
+> comment on `expectedSafe` was reworded and the field keeps its name
+> (`SweepSignatureInput` remains unexported by name). No signing, verification
+> or sweep logic moves, so nothing this document claims about authority,
+> custody or signing changes. Scope of this note: those copy strings. Nothing
+> else in this document was re-verified.

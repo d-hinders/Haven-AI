@@ -6528,9 +6528,9 @@ export const openapiSpec = {
       post: {
         tags: ['Machine payments'],
         operationId: 'prepareDelegateSweep',
-        summary: 'Prepare a gasless USDC sweep from the delegate wallet to the Safe.',
+        summary: "Prepare a gasless USDC sweep from the delegate wallet to the agent's account (Haven wallet).",
         description:
-          'Reads the delegate EOA\'s stranded USDC and returns an EIP-3009 TransferWithAuthorization (delegate → the agent\'s own Safe) plus Haven\'s authorization binding. ' +
+          "Reads the delegate EOA's stranded USDC and returns an EIP-3009 TransferWithAuthorization (delegate → the agent's account (Haven wallet)) plus Haven's authorization binding. " +
           'The edge signer signs the authorization with haven_sign_sweep_delegate; POST /machine-payments/sweep/submit relays it. The delegate never needs ETH and Haven never holds the key. ' +
           'Returns { nothing_stranded: true } when the delegate is empty.',
         security: [{ AgentApiKey: [] }],
@@ -9327,7 +9327,7 @@ export const openapiSpec = {
       },
       SweepAuthorization: {
         type: 'object',
-        description: 'EIP-3009 TransferWithAuthorization fields for a delegate → Safe USDC sweep.',
+        description: "EIP-3009 TransferWithAuthorization fields for a delegate → the agent's account (Haven wallet) USDC sweep.",
         required: ['from', 'to', 'value', 'validAfter', 'validBefore', 'nonce', 'token', 'chainId'],
         properties: {
           from: address,

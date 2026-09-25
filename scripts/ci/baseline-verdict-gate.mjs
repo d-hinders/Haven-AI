@@ -70,7 +70,7 @@
 //     even when it was edited last). A non-passing line vetoes a pass bound
 //     at or before its own sha — a tie vetoes — and a pass clears an earlier
 //     block only when the block's sha is a strict ancestor of the pass's.
-//     Unrelated shas, unknown ancestry and an unbound (`@`-less) block all
+//     Unrelated shas, unknown ancestry and an unbound block (no `@`, or a malformed sha) all
 //     fail closed: the block stands.
 //   - A block bound before the baseline's last touch, or to a commit that is
 //     not on the head, describes a different image and is ignored — the same
@@ -223,16 +223,19 @@ export function parseVerdicts(texts) {
       // before the `--` separator or the `baselines:` marker. Only that head is
       // read, and only as a whole: a substring match over the line let `not
       // approved`, and a baseline named `approved-mock.png`, verify (#3301).
-      // The head ends at the first `@` whether or not a sha parses after it,
-      // so a pass with a malformed sha (`@ <head-sha>` pasted from a template)
-      // stays a pass — unbound, so not evidence — instead of reading as a
-      // block that vetoes.
+      // The head ends at the first `@`, `--` separator or `baselines:` marker,
+      // whichever comes first — whether or not a sha parses — so a pass with a
+      // malformed sha (`@ <head-sha>` pasted from a template) or an `@` later
+      // in the line (an email in the name list) stays a pass: unbound, so not
+      // evidence, but never a block that vetoes.
       const sep = body.match(SEPARATOR_RE)
       const markerIdx = body.toLowerCase().indexOf('baselines:')
       const atIdx = body.indexOf('@')
-      const headEnd = atIdx !== -1
-        ? atIdx
-        : Math.min(sep ? sep.index : body.length, markerIdx === -1 ? body.length : markerIdx)
+      const headEnd = Math.min(
+        atIdx === -1 ? body.length : atIdx,
+        sep ? sep.index : body.length,
+        markerIdx === -1 ? body.length : markerIdx,
+      )
       const word = body.slice(0, headEnd).toLowerCase().replace(/^[^a-z/]+|[^a-z/]+$/g, '')
       const passing = PASSING_VERDICTS.has(word)
       // The names live after the `baselines:` marker when the line follows the
@@ -397,7 +400,7 @@ export function evaluate({ pr, files, declarationTexts, verdictTexts, lastTouch 
     `mass re-bless — a font or Playwright bump that moves every baseline — declare \`*\`.`,
     `A non-passing verdict (\`changes requested\`) at or after a pass vetoes it, and a line`,
     `naming a file outranks a \`*\` line for that file: re-review the fixed PNG and post a`,
-    `new \`passed\` NAMING THE FILE at a later sha (a \`*\` pass does not clear a named block)`,
+    `new \`passed\` NAMING THE FILE at a later sha (a \`*\` pass does not clear a named block).`,
     ``,
     `Per file:`,
     ``,

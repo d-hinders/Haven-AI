@@ -463,6 +463,12 @@ describe('verifiedFor — conflicting verdicts (#3301)', () => {
     assert.equal(verifiedFor('a.png', vs, ctx), true)
   })
 
+  test('an `@` AFTER the separator (an email in the line) does not turn a pass into a block', () => {
+    const mail = v('passed -- baselines: a.png (ping a@b.com)')
+    assert.equal(mail.passing, true)
+    assert.equal(verifiedFor('a.png', [v('passed @ cc00000 -- baselines: a.png'), mail], ctx), true)
+  })
+
   test('a single bound pass with no block still verifies (the pre-#3301 case)', () => {
     assert.equal(verifiedFor('a.png', [v('passed @ cc00000 -- baselines: a.png')], ctx), true)
   })

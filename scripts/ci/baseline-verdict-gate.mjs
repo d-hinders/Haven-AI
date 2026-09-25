@@ -56,7 +56,9 @@
 //             `approved-mock.png` does not make its line one (#3301). A line
 //             that says `skipped` or `n/a` does not verify a MODIFIED
 //             baseline: a skipped design review is the absence of the review.
-//   <sha>     the commit the verdict was given at. Verified, not just present:
+//   <sha>     the commit the verdict was given at, read only right after the
+//             `@` that ends the verdict word — an `@` later in the line (an
+//             email in the name list) binds nothing (#3301). Verified, not just present:
 //             the last commit that touched the PNG must be an ancestor of it
 //             (or equal), and it an ancestor of the PR head — a verdict naming
 //             a commit older than the baseline's re-commit does not count.
@@ -153,6 +155,8 @@ export const DECLARATION_RE = /^\s*(?:[-*]\s*)?baseline-change:\s*(.+)$/gim
 export const VERDICT_RE = /^\s*(?:[-*]\s*)?design-review\s+verdict:\s*(.+)$/gim
 
 const SHA_RE = /@\s*`?([0-9a-fA-F]{7,40})\b/
+/** The sha a verdict is bound to: only right after the `@` that ends its verdict word. */
+const BOUND_SHA_RE = /^@\s*`?([0-9a-fA-F]{7,40})\b/
 const SEPARATOR_RE = /\s+(?:--|—)\s+/
 const LIST_SPLIT_RE = /[\s,]+/
 
@@ -218,16 +222,15 @@ export function parseVerdicts(texts) {
     if (!text) continue
     for (const m of String(text).matchAll(VERDICT_RE)) {
       const body = m[1] ?? ''
-      const shaMatch = body.match(SHA_RE)
-      // The verdict word is the text before `@` — or, on a line with no sha,
-      // before the `--` separator or the `baselines:` marker. Only that head is
-      // read, and only as a whole: a substring match over the line let `not
+      // The verdict word is the head of the line: the text before the first
+      // `@`, `--` separator or `baselines:` marker, whichever comes first. It
+      // is read only as a whole — a substring match over the line let `not
       // approved`, and a baseline named `approved-mock.png`, verify (#3301).
-      // The head ends at the first `@`, `--` separator or `baselines:` marker,
-      // whichever comes first — whether or not a sha parses — so a pass with a
-      // malformed sha (`@ <head-sha>` pasted from a template) or an `@` later
-      // in the line (an email in the name list) stays a pass: unbound, so not
-      // evidence, but never a block that vetoes.
+      // The sha is read only right after the `@` that ends the head. A pass
+      // with a malformed sha (`@ <head-sha>` pasted from a template) stays an
+      // unbound pass, and an `@` later in the line (an email in the name
+      // list, even a hex-looking one) binds nothing — so it can neither turn a
+      // pass into a block nor move a block onto a commit where it is ignored.
       const sep = body.match(SEPARATOR_RE)
       const markerIdx = body.toLowerCase().indexOf('baselines:')
       const atIdx = body.indexOf('@')
@@ -236,6 +239,7 @@ export function parseVerdicts(texts) {
         sep ? sep.index : body.length,
         markerIdx === -1 ? body.length : markerIdx,
       )
+      const shaMatch = atIdx !== -1 && headEnd === atIdx ? body.slice(atIdx).match(BOUND_SHA_RE) : null
       const word = body.slice(0, headEnd).toLowerCase().replace(/^[^a-z/]+|[^a-z/]+$/g, '')
       const passing = PASSING_VERDICTS.has(word)
       // The names live after the `baselines:` marker when the line follows the
@@ -245,7 +249,7 @@ export function parseVerdicts(texts) {
       // what follows the verdict head, so the verdict word is never read as a
       // baseline name.
       const listIdx = body.toLowerCase().lastIndexOf('baselines:')
-      const listPart = listIdx === -1 ? body.slice(headEnd) : body.slice(listIdx + 'baselines:'.length)
+      const listPart = listIdx === -1 ? body.slice(headEnd).replace(BOUND_SHA_RE, ' ') : body.slice(listIdx + 'baselines:'.length)
       const names = parseNameList(listPart.replace(SHA_RE, ' ').replace(SEPARATOR_RE, ' '))
       out.push({ names, sha: shaMatch ? shaMatch[1] : null, passing, raw: m[0].trim() })
     }

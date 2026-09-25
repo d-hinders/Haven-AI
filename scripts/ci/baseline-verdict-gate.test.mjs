@@ -463,6 +463,18 @@ describe('verifiedFor — conflicting verdicts (#3301)', () => {
     assert.equal(verifiedFor('a.png', vs, ctx), true)
   })
 
+  test('a hex-looking email after the separator binds no sha — a block cannot be moved off the head', () => {
+    // `ops@deadbeef1.io` used to bind the block to `deadbeef1`, a commit not
+    // on the head, so the block was ignored and the pass verified (fail-open).
+    const blk = v('changes requested -- baselines: a.png (cc ops@deadbeef1.io)')
+    assert.equal(blk.sha, null)
+    assert.equal(blk.passing, false)
+    const offHead = (a, b) => (a === 'deadbeef1' || b === 'deadbeef1' ? false : chain(a, b))
+    assert.equal(verifiedFor('a.png', [v('passed @ cc00000 -- baselines: a.png'), blk], { ...ctx, isAncestor: offHead }), false)
+    const pass = v('passed -- baselines: a.png (x@cc00000.io)')
+    assert.equal(pass.sha, null) // unbound: not evidence
+  })
+
   test('an `@` AFTER the separator (an email in the line) does not turn a pass into a block', () => {
     const mail = v('passed -- baselines: a.png (ping a@b.com)')
     assert.equal(mail.passing, true)

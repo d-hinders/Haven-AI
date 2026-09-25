@@ -144,7 +144,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "POST /machine-payments/authorize": "routes/machine-payments.ts",
   "POST /machine-payments/budget-precheck": "routes/machine-payments.ts",
   "POST /machine-payments/evidence": "routes/machine-payments.ts",
-  "POST /machine-payments/reconciliation-events": "routes/machine-payments.ts",
+  "POST /machine-payments/reconciliation-events": "routes/machine-payments-reconciliation-events.ts",
   "POST /machine-payments/send": "routes/machine-payments.ts",
   "POST /machine-payments/sweep/prepare": "routes/machine-payments.ts",
   "POST /machine-payments/sweep/submit": "routes/machine-payments.ts",

@@ -117,9 +117,11 @@ describe('machine payment sweep routes', () => {
 
   beforeAll(async () => {
     app = Fastify({ logger: false })
-    // #3031: production wiring — every money-path module is in
+    // #3031: production wiring — `routes/machine-payments.ts` is in
     // `enforcedModules`, so the request schema refuses off-spec shapes
-    // before the handler.
+    // before the handler. (Round 2: `/reconciliation-events` split out of
+    // this module and stays SHADOWED — it is not part of this suite; the
+    // sweep routes are unaffected.)
     installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/machine-payments.ts'] })
     await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
   })

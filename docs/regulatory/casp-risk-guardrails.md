@@ -10,6 +10,7 @@ covers:
   - packages/backend/src/openapi/request-validation.ts
   - packages/backend/src/routes/payments.ts
   - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/routes/machine-payments-reconciliation-events.ts
   - packages/backend/src/modules/mpp/**
   - packages/backend/src/domain/payment-token.ts
   - packages/backend/src/routes/catalog.ts

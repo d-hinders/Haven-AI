@@ -3994,7 +3994,9 @@ export type components = {
             };
         };
         MachinePaymentAuthorizeRequest: {
-            [key: string]: unknown;
+            challenge: components["schemas"]["MachinePaymentChallenge"];
+            idempotencyKey: string;
+            signature?: string;
         };
         MachinePaymentAuthorizeResponse: components["schemas"]["AgentPaymentStatus"] | components["schemas"]["X402SignablePayment"] | components["schemas"]["X402ConfirmedPayment"];
         MppResumeState: {

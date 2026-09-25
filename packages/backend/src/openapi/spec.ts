@@ -9028,21 +9028,25 @@ export const openapiSpec = {
       },
       MachinePaymentAuthorizeRequest: {
         type: 'object',
-        // #3031: PERMISSIVE, and that is precise, not lazy. The route is the
-        // #1328 tombstone — it answers `mppDemoRetired()` unconditionally and
-        // never reads the body (`routes/machine-payments.ts`: "the body is
-        // never inspected"). Its own operation description says the same.
-        // The 2026-09-22 traffic drive proved the operation live with a
-        // well-formed challenge, and the characterization suite drives it
-        // with `{}`, a full challenge, and a signed one-shot — all 410. The
-        // one thing enforcement must NOT do on a money-path tombstone is
-        // refuse a body the tombstone would have refused anyway with a
-        // DIFFERENT answer (a 400 spec refusal instead of the honest 410) —
-        // a retired endpoint's contract is its refusal, and the schema stays
-        // out of its way. `AuthorizeBody` remains the route's request TYPE
-        // for documentation.
-        properties: {},
-        additionalProperties: true,
+        required: ['challenge', 'idempotencyKey'],
+        properties: {
+          challenge: { $ref: '#/components/schemas/MachinePaymentChallenge' },
+          idempotencyKey: { type: 'string' },
+          signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
+        },
+        additionalProperties: false,
+        // #3031 round 2: the pre-#3031 declaration, RESTORED. Round 1 made
+        // this schema permissive so the handler's 410 would win over any
+        // body — but the owner decision (epic #3028, 2026-09-24T21:24:44Z,
+        // closing #3223) ordered the retirement answer moved to `onRequest`
+        // instead (the #3030 retired-tombstone pattern), and the move makes
+        // the strict schema SAFE again: the tombstone hook refuses at
+        // `onRequest`, which fastify runs BEFORE schema validation, so a
+        // body that misses the declared shape gets the honest 410, not a
+        // 400. What the schema then refuses (for a hypothetical future that
+        // lets the hook's answer lapse) is a body the tombstone would have
+        // refused anyway — no accepted shape narrows. `AuthorizeBody`
+        // remains the route's request TYPE for documentation.
       },
       MachinePaymentAuthorizeResponse: {
         oneOf: [

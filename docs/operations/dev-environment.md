@@ -21,7 +21,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/modules/accounting/api-key-flow.ts
   - packages/backend/src/routes/accounting-webhooks.ts
-last-verified: "2026-09-24"
+last-verified: "2026-09-25"
 ---
 
 # Dev environment
@@ -341,10 +341,22 @@ Isolation rules that are non-negotiable for a payments product:
   `routes/payments.ts`, `routes/agent-delegations.ts` and
   `routes/machine-payments.ts` join `routes/x402.ts` (flipped by #3221, the
   only module the 2026-09-22 shadow reading proved conformant on every
-  operation) — so every money-path module is now enforced, on the route
-  suites assembled production-style plus that reading. Five modules are
-  still shadowed (`agents`, `agent-rekey`, `agent-passports`,
-  `agent-connection-setups`, `hybrid-accounts` — slice 4, #3032). The
+  operation) — on the route suites assembled production-style plus that
+  reading. One money-path operation is the rollout's NAMED RESIDUE and stays
+  SHADOWED by owner decision (epic #3028, 2026-09-24T21:24:44Z, closing
+  #3223): `POST /machine-payments/reconciliation-events` — it is only posted
+  on a genuine merchant rejection after a confirmed payment, and driving it
+  synthetically would write a false record into a payment's ledger. It lives
+  in its own file, `routes/machine-payments-reconciliation-events.ts`
+  (registered under the same `/machine-payments` prefix), because
+  enforcement is keyed on the route file and the plugin has no per-operation
+  opt-out — a per-file exemption inside `machine-payments.ts` would have been
+  invisible to the `lint:request-schemas` gauge. Its shadow residue is
+  baselined (`shadow: 1, typeof: 5`), and it is enforced the day a real
+  rejection (or a QA scenario that produces one) gives the shadow reading
+  traffic to prove it. Six money-path modules remain shadowed (`agents`,
+  `agent-rekey`, `agent-passports`, `agent-connection-setups`,
+  `hybrid-accounts` — slice 4, #3032) plus this one named residue. The
   reading printed NOT PROVEN for 33 of slice 4's operations, so on dev an
   off-spec request to any
   other route answers the 400 envelope. Slice 2 flipped on the epic's

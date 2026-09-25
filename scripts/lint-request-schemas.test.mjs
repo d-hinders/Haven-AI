@@ -267,6 +267,14 @@ describe('index.ts readers', () => {
       // production-style (off-spec → the 400 envelope, every accepted shape
       // byte-identical) plus that same reading (zero would_refuse,
       // zero would_coerce across the 24.41 h window).
+      // Round 2 (owner decision, epic #3028 2026-09-24T21:24:44Z, closing
+      // #3223): `POST /machine-payments/reconciliation-events` is the NAMED
+      // RESIDUE and stays SHADOWED — it moved to its own file,
+      // `routes/machine-payments-reconciliation-events.ts` (one file = one
+      // enforcedModules entry, #3135/#3167), which is deliberately NOT in
+      // this list; its shadow residue is baselined instead. It is enforced
+      // the day a real merchant rejection (or a QA scenario that produces
+      // one) gives the shadow reading traffic to prove it.
       'routes/payments.ts',
       'routes/agent-delegations.ts',
       'routes/machine-payments.ts',

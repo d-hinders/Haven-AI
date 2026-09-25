@@ -23,6 +23,10 @@
     "shadow": 1,
     "typeof": 1
   },
+  "routes/machine-payments-reconciliation-events.ts": {
+    "shadow": 1,
+    "typeof": 5
+  },
   "routes/safe-deploy.ts": {
     "shadow": 0,
     "typeof": 0,

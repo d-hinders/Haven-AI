@@ -64,6 +64,11 @@ import userAccountsRetiredRoutes from './routes/user-accounts-retired.js'
 import passkeyRoutes from './routes/passkeys.js'
 import safeDeployRoutes from './routes/safe-deploy.js'
 import machinePaymentRoutes from './routes/machine-payments.js'
+// #3031 round 2: `POST /machine-payments/reconciliation-events` in its own
+// file so it can STAY SHADOWED while the rest of the machine-payments
+// surface is enforced (owner decision, epic #3028 2026-09-24) — see that
+// file's header.
+import machinePaymentsReconciliationEventsRoutes from './routes/machine-payments-reconciliation-events.js'
 import openapiRoutes from './routes/openapi.js'
 import { registerHealthRoutes } from './routes/health.js'
 import catalogRoutes from './routes/catalog.js'
@@ -188,6 +193,17 @@ installRequestValidation(app, {
     // refusals (budget, rail, scheme agreement, expiry, the uint96 cap)
     // stay in the handlers; the schema takes only the SHAPE checks the
     // spec already declares — see the per-route notes in the four files.
+    //
+    // #3031 round 2 (owner decision, epic #3028 2026-09-24T21:24:44Z,
+    // closing #3223): `POST /machine-payments/reconciliation-events` is the
+    // rollout's NAMED RESIDUE and STAYS SHADOWED — driving it synthetically
+    // would write a false record into a payment's ledger. It moved to its
+    // own route file (`routes/machine-payments-reconciliation-events.ts`)
+    // because enforcement is keyed on the file and the plugin has no
+    // per-operation opt-out; that file is deliberately NOT listed here. It
+    // is enforced the day a real rejection (or a QA scenario that produces
+    // one) gives the shadow reading traffic to prove it — the promotion
+    // checklist carries the note.
     'routes/payments.ts',
     'routes/agent-delegations.ts',
     'routes/machine-payments.ts',
@@ -388,6 +404,10 @@ await app.register(userAccountsRoutes, { prefix: '/user/accounts' })
 await app.register(passkeyRoutes, { prefix: '/passkeys' })
 await app.register(safeDeployRoutes, { prefix: '/safe' })
 await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
+// #3031 round 2: the reconciliation-events route, split out of
+// `machine-payments.ts` so it stays SHADOWED while that module is enforced
+// (owner decision, epic #3028 2026-09-24). Same prefix, one route.
+await app.register(machinePaymentsReconciliationEventsRoutes, { prefix: '/machine-payments' })
 await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 // #3078: the merchant layer over the catalog — read-only, same auth door.

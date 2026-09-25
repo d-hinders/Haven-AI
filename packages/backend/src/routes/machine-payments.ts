@@ -10,7 +10,6 @@ import {
   handleBudgetPrecheck,
   budgetPrecheckBodyError,
   parseBalanceCoverageQuery,
-  handleReconciliationEvent,
   handleSend,
   attachEvidenceHandler,
   handleMerchantReceiptCapture,
@@ -22,23 +21,10 @@ import {
   type AuthorizeBody,
   type BudgetPrecheckBody,
   type EvidenceBody,
-  type ReconciliationEventBody,
   type SendAsset,
   type SendBody,
   type SweepSubmitBody,
 } from '../modules/mpp/index.js'
-
-/**
- * The reconciliation-events request body: `paymentId`, `rail` and
- * `eventType` required, the optional halves of `ReconciliationEventBody`
- * unchanged. A NAMED alias rather than an inline `Pick`/`Omit` generic on
- * the route: the route-modules extractor matches `app.post(` up to the
- * first quote (#3135), and the inline form's string literals broke the
- * match — see the note at the registration.
- */
-type ReconciliationEventRequestBody =
-  Required<Pick<ReconciliationEventBody, 'paymentId' | 'rail' | 'eventType'>> &
-    Omit<ReconciliationEventBody, 'paymentId' | 'rail' | 'eventType'>
 
 // Route handlers only: auth middleware wiring, rate-limit config, and
 // response serialization — the request SHAPE has been the plugin's since
@@ -182,14 +168,43 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
   })
 
   // #1328: the legacy internal MPP demo flow is retired outright — fail
-  // closed, nothing read or written beyond the agent-auth lookup the
+  // closed, nothing read or written beyond the agent-auth lookup the module
   // `onRequest` hook already did. `AuthorizeBody` stays as the route's
   // request type for OpenAPI/documentation purposes; the body is never
   // inspected. Agents are directed to the deployed x402 merchant flow.
-  app.post<{ Body: AuthorizeBody }>('/authorize', { config: moneyPathRateLimit }, async (_request, reply) => {
-    const refusal = mppDemoRetired()
-    return reply.code(refusal.statusCode).send(refusal.body)
-  })
+  //
+  // #3031 round 2 — the refusal is a ROUTE-LEVEL `onRequest` hook, not the
+  // handler body, per the owner decision (epic #3028, 2026-09-24T21:24:44Z,
+  // closing #3223): "enforce, with the retirement answer moved to
+  // `onRequest`" — the #3030 retired-tombstone pattern. Fastify runs
+  // `onRequest` hooks BEFORE request validation, so the enforced schema on
+  // `MachinePaymentAuthorizeRequest` (restored strict) can never answer a
+  // 400 where the honest answer is this 410: every body — a full old
+  // challenge, `{}`, a signed one-shot, garbage — reaches the tombstone
+  // first and gets exactly the refusal the handler used to send. The
+  // module-level `agentAuthMiddleware` is itself an `onRequest` hook and is
+  // added BEFORE this one, so it still runs first and an unauthenticated
+  // caller keeps their 401 (measured hook order on fastify 5.8.x; pinned by
+  // the suite's unauthenticated case — the same ordering property
+  // `routes/user-accounts-retired.ts` pins for its tombstones).
+  app.post<{ Body: AuthorizeBody }>(
+    '/authorize',
+    {
+      config: moneyPathRateLimit,
+      onRequest: async (_request, reply) => {
+        const refusal = mppDemoRetired()
+        return reply.code(refusal.statusCode).send(refusal.body)
+      },
+    },
+    async (_request, reply) => {
+      // Unreachable while the `onRequest` tombstone above answers every
+      // request; kept as the same producer so that if the route option is
+      // ever dropped by accident the honest 410 remains the answer rather
+      // than a validation result the retirement never intended.
+      const refusal = mppDemoRetired()
+      return reply.code(refusal.statusCode).send(refusal.body)
+    },
+  )
 
   app.post<{ Body: EvidenceBody }>('/evidence', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
@@ -218,48 +233,6 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       return reply.code(result.statusCode).send(result.body)
     },
   )
-
-  // The Body generic states the post-#3031 reality: the enforced schema
-  // guarantees `paymentId`/`rail`/`eventType` before the handler runs, so
-  // the type says so instead of a rung proving it at runtime. The type is a
-  // NAMED alias, not an inline generic: the route-modules extractor
-  // (`extractRoutes`, #3135) matches `app.post(` up to the first quote, and
-  // the inline `Pick<..., 'paymentId' | ...>`'s string literals swallowed
-  // the match — the route dropped out of `ROUTE_MODULE_BY_OPERATION`, and
-  // with it out of enforcement (caught by the generated-table staleness
-  // test, which is exactly what that gate exists for).
-  app.post<{ Body: ReconciliationEventRequestBody }>('/reconciliation-events', { config: moneyPathRateLimit }, async (request, reply) => {
-    const agent = request.agent as AgentContext
-    const {
-      paymentId,
-      rail,
-      eventType,
-      txHash,
-      reason,
-      details,
-    } = request.body
-
-    // #3031: the shapes are `MachinePaymentReconciliationEventRequest`'s —
-    // required `paymentId` (uuid)/`rail`/`eventType` (the enum that replaces
-    // the RECONCILIATION_EVENT_TYPES rung), the 0x-64 txHash, optional
-    // string `reason` and open object `details` (arrays and null refused by
-    // `type: 'object'`). What stays is the module's SEMANTIC layer —
-    // payment ownership, state agreement, the duplicate-report rule
-    // (`modules/mpp/reconciliation.ts`) — which is also why this route must
-    // never be driven synthetically for a shadow reading (#3223): a forced
-    // event reports a merchant rejection that did not happen.
-
-    const result = await handleReconciliationEvent(
-      agent.id,
-      paymentId,
-      rail,
-      eventType,
-      txHash,
-      reason,
-      details,
-    )
-    return reply.code(result.statusCode).send(result.body)
-  })
 
   // ── POST /budget-precheck — server-side budget gate for the hosted prepare ─
   // #3054: the guided purchase's over-budget refusal is DECIDED here so it

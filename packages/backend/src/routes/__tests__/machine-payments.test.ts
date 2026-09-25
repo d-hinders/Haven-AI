@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import machinePaymentRoutes from '../machine-payments.js'
+// #3031 round 2: the reconciliation-events module — split out of
+// machine-payments.ts and SHADOWED (owner decision, epic #3028 2026-09-24);
+// registered beside it below, the way index.ts registers it.
+import machinePaymentsReconciliationEventsRoutes from '../machine-payments-reconciliation-events.js'
 // #3031: production wiring for the enforced module (see beforeAll).
 import { installRequestValidation } from '../../openapi/request-validation.js'
 // #1444: validate the real payload against the spec's own schema.
@@ -270,9 +274,14 @@ describe('machine payment routes', () => {
     // #3031: production wiring — every money-path module is in
     // `enforcedModules`, so the request schema refuses off-spec shapes
     // before the handler (and the rungs that used to make those refusals
-    // are gone).
+    // are gone). Round 2: `/reconciliation-events` split into its own file
+    // and stays SHADOWED (owner decision, epic #3028 2026-09-24) — it is
+    // registered beside this module exactly as `index.ts` registers it,
+    // WITHOUT an enforcedModules entry, so this suite keeps proving its
+    // handler characterization the way dev actually serves it.
     installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/machine-payments.ts'] })
     await app.register(machinePaymentRoutes, { prefix: '/machine-payments' })
+    await app.register(machinePaymentsReconciliationEventsRoutes, { prefix: '/machine-payments' })
   })
 
   afterAll(async () => {
@@ -989,6 +998,16 @@ describe('machine payment routes', () => {
   // inspected. (The generic MPP orchestrator this route used to delegate to,
   // `modules/mpp/authorize.ts`, was deleted outright in #1987 — see the file
   // header comment.)
+  //
+  // #3031 round 2 (owner decision, epic #3028 2026-09-24T21:24:44Z, closing
+  // #3223): the refusal lives in a ROUTE-LEVEL `onRequest` hook now, not the
+  // handler body — the #3030 retired-tombstone pattern — and the enforced
+  // schema on `MachinePaymentAuthorizeRequest` is the strict pre-#3031
+  // declaration again. The ordering property these cases pin: `onRequest`
+  // runs BEFORE schema validation, so every body below gets the honest 410,
+  // never the plugin's 400 envelope; and the module-level
+  // `agentAuthMiddleware` (also an `onRequest` hook, added first) still runs
+  // before the tombstone, so an unauthenticated caller keeps their 401.
   describe('POST /machine-payments/authorize (#1328: mpp_demo retired)', () => {
     it('refuses a well-formed mpp_demo challenge — 410, zero writes', async () => {
       primeDb(AUTH)
@@ -1009,7 +1028,7 @@ describe('machine payment routes', () => {
       expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
     })
 
-    it('refuses an empty/garbage body the same way — 410 before any body validation', async () => {
+    it('refuses an empty/garbage body the same way — 410 from the onRequest tombstone, never a schema 400', async () => {
       primeDb(AUTH)
 
       const response = await app.inject({
@@ -1019,8 +1038,14 @@ describe('machine payment routes', () => {
         payload: {},
       })
 
+      // The body misses the (restored, strict) MachinePaymentAuthorizeRequest
+      // schema — `challenge` and `idempotencyKey` are required. The answer is
+      // still the tombstone's 410, which proves the onRequest hook ran before
+      // validation: the owner-ordered mechanism, not the round-1 permissive
+      // schema, is what keeps a retired endpoint's contract intact.
       expect(response.statusCode).toBe(410)
       expect(response.json().error).toMatch(/retired/i)
+      expect(response.json().error).not.toBe('Request does not match the API spec')
       expect(sqlCalls().some((c) => /INSERT|UPDATE|DELETE/i.test(c.sql))).toBe(false)
     })
 

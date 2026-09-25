@@ -16,7 +16,7 @@
     "",
     "`disposition` is about the NAMES. Two entries marked `converged` still record a",
     "referent difference in their reason (`payment id` widens to sweep ids;",
-    "`token address` is normalised on one surface only). That second axis is",
+    "`token address` was normalised on one surface only until #3307 checksummed both). That second axis is",
     "deliberately not counted -- the open number tracks the renames and value defects the epic's slices owe, not every",
     "way two fields can disagree -- but a reader must not take `converged` as",
     "'identical'."
@@ -187,7 +187,7 @@
         "field": "tokenAddress",
         "column": "token_address",
         "value": "recorded",
-        "copiedFrom": "payment_intents.token_address, copied onto machine_payment_evidence at settlement (modules/mpp/evidence.ts:321)"
+        "copiedFrom": "payment_intents.token_address, copied onto machine_payment_evidence at settlement (modules/mpp/evidence.ts:323)"
       },
       "transaction": {
         "field": "tokenAddress",
@@ -195,7 +195,7 @@
         "value": "recorded"
       },
       "disposition": "converged",
-      "reason": "Already one name on both surfaces. NOT both normalised, though: #3129 checksummed the TRANSACTION surface at its row boundary and touched no SDK file; the receipt surface passes the stored value through, checksummed by storage convention only -- the receipt reads machine_payment_evidence.token_address, a copy taken at settlement from payment_intents.token_address, which happens to be stored that way, while to_address and x402_merchant_address are stored lowercase."
+      "reason": "Already one name on both surfaces, and one casing rule since #3307: addresses are EIP-55 checksummed at the row boundary on both surfaces -- #3129 on the TRANSACTION surface, #3307 on the receipt (`mapEvidence`), with no SDK change. Storage stays lowercase: the evidence upsert writes LOWER(token_address)."
     },
     {
       "concept": "payment rail / source",

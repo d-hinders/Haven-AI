@@ -52,6 +52,7 @@ import {
 import { getAgentPaymentResumeState } from '../modules/payments/index.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../modules/payments/index.js'
 import { quoteFee } from '../modules/fee/index.js'
+import { toCanonicalAddress } from '../modules/transactions/index.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
 
 /**
@@ -886,7 +887,10 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
       chain_id: intent.chain_id,
       token: intent.token_symbol,
       amount: intent.amount_human,
-      to: intent.to_address,
+      // #3307: Haven-owned addresses are EIP-55 checksummed at the read
+      // boundary, the same rule as the receipt, payment status and the
+      // transactions feed (#3129). Storage stays lowercase.
+      to: toCanonicalAddress(intent.to_address),
       tx_hash: intent.tx_hash,
       explorer_url: intent.tx_hash ? getExplorerUrl(intent.chain_id, 'tx', intent.tx_hash) : null,
       fee: buildResponseFee(intent),
@@ -928,7 +932,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         status: intent.status,
         token: intent.token_symbol,
         amount: intent.amount_human,
-        to: intent.to_address,
+        to: toCanonicalAddress(intent.to_address), // #3307
         tx_hash: intent.tx_hash,
         created_at: intent.created_at,
         confirmed_at: intent.confirmed_at,

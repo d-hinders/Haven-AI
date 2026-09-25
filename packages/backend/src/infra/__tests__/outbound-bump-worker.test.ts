@@ -50,6 +50,12 @@ function deps(overrides: Partial<BumpDeps> = {}): BumpDeps {
     markReplaced: vi.fn(async () => null),
     countLaneAttempts: vi.fn(async () => 0),
     getReceiptStatus: vi.fn(async () => null),
+    // #3293: by default the consumed-nonce check RUNS and answers "not
+    // consumed" — the settled mined nonce equals the default row's nonce (42)
+    // and no node knows the hash — so every existing case still reaches the
+    // path its name claims, instead of skipping the check on a null.
+    isTxKnown: vi.fn(async () => false),
+    settledMinedNonce: vi.fn(async () => 42n),
     currentFees: vi.fn(async () => ({ maxFeePerGas: 900n, maxPriorityFeePerGas: 90n })),
     sendRaw: vi.fn(async () => ({ hash: '0x' + 'dd'.repeat(32), nonce: 42 })),
     ...overrides,
@@ -221,6 +227,102 @@ describe('runOutboundBumpTick — stale broadcast rows', () => {
     const result = await runOutboundBumpTick(84532, d, log)
     expect(result.closedMined).toBe(1)
     expect(log.warn).toHaveBeenCalled()
+  })
+})
+
+describe('runOutboundBumpTick — a stale row whose nonce another transaction consumed (#3293)', () => {
+  const consumed = (overrides: Partial<BumpDeps> = {}) =>
+    deps({ listUnmined: vi.fn(async () => [row({})]), settledMinedNonce: vi.fn(async () => 43n), ...overrides })
+
+  it('a CAPPED row closes failed — no INCIDENT, no gas', async () => {
+    const d = consumed({ countLaneAttempts: vi.fn(async () => MAX_BUMPS_PER_NONCE) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markFailed).toHaveBeenCalledWith('row-1', expect.stringMatching(/nonce 42 consumed on-chain.*settled mined nonce 43/))
+    expect(result.closedFailed).toBe(1)
+    expect(result.alerted).toBe(0)
+    expect(d.sendRaw).not.toHaveBeenCalled()
+    expect(log.error).not.toHaveBeenCalledWith(expect.anything(), expect.stringContaining('INCIDENT'))
+  })
+
+  it('an UNCAPPED row closes before any bump work — no enqueue, no fee read, no send', async () => {
+    const d = consumed({ countLaneAttempts: vi.fn(async () => 0) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(1)
+    expect(d.enqueue).not.toHaveBeenCalled()
+    expect(d.currentFees).not.toHaveBeenCalled()
+    expect(d.sendRaw).not.toHaveBeenCalled()
+  })
+
+  it('a consumed-nonce passport_attest closes too, instead of alarming at the non-idempotent gate', async () => {
+    const d = consumed({ listUnmined: vi.fn(async () => [row({ submitter: 'passport_attest' })]) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(1)
+    expect(result.alerted).toBe(0)
+    expect(d.sendRaw).not.toHaveBeenCalled()
+  })
+
+  it('a genuinely stuck lane still alerts: settled nonce == N keeps the INCIDENT', async () => {
+    const d = consumed({ settledMinedNonce: vi.fn(async () => 42n), countLaneAttempts: vi.fn(async () => MAX_BUMPS_PER_NONCE) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.alerted).toBe(1)
+    expect(d.markFailed).not.toHaveBeenCalled()
+  })
+
+  it('settled nonce < N keeps today\'s bump', async () => {
+    const d = consumed({ settledMinedNonce: vi.fn(async () => 41n) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.bumped).toBe(1)
+    expect(result.closedFailed).toBe(0)
+  })
+
+  it('NO EVIDENCE, NO CLOSE: a transaction a node still knows is never closed', async () => {
+    const d = consumed({ isTxKnown: vi.fn(async () => true) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(0)
+    expect(result.bumped).toBe(1)
+  })
+
+  it('NO EVIDENCE, NO CLOSE: no settled block (null) keeps today\'s path', async () => {
+    const d = consumed({ settledMinedNonce: vi.fn(async () => null) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(0)
+    expect(result.bumped).toBe(1)
+  })
+
+  it('NO EVIDENCE, NO CLOSE: a throwing nonce read keeps today\'s path and is logged', async () => {
+    const d = consumed({ settledMinedNonce: vi.fn(async () => { throw new Error('rpc down') }) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(0)
+    expect(result.bumped).toBe(1)
+    expect(log.warn).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('settled nonce read failed'))
+  })
+
+  it('NO EVIDENCE, NO CLOSE: a throwing known-check keeps today\'s path', async () => {
+    const d = consumed({ isTxKnown: vi.fn(async () => { throw new Error('rpc down') }) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(result.closedFailed).toBe(0)
+    expect(result.bumped).toBe(1)
+  })
+
+  it('the receipt RE-READ wins: our own transaction mined after all → closed mined, never failed', async () => {
+    const statuses: Array<0 | 1 | null> = [null, 1]
+    const d = consumed({ getReceiptStatus: vi.fn(async () => statuses.shift() ?? null) })
+    const result = await runOutboundBumpTick(84532, d, log)
+    expect(d.markMined).toHaveBeenCalledWith('row-1')
+    expect(d.markFailed).not.toHaveBeenCalled()
+    expect(result.closedMined).toBe(1)
+  })
+
+  it('the settled nonce is read ONCE per tick, however many rows need it', async () => {
+    const d = consumed({ listUnmined: vi.fn(async () => [row({ id: 'a' }), row({ id: 'b', nonce: '40' }), row({ id: 'c', nonce: '41' })]) })
+    await runOutboundBumpTick(84532, d, log)
+    expect(d.settledMinedNonce).toHaveBeenCalledTimes(1)
+  })
+
+  it('a row whose receipt is already known never triggers the nonce read', async () => {
+    const d = consumed({ getReceiptStatus: vi.fn(async () => 1 as const) })
+    await runOutboundBumpTick(84532, d, log)
+    expect(d.settledMinedNonce).not.toHaveBeenCalled()
   })
 })
 

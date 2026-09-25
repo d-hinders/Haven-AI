@@ -112,6 +112,11 @@ function realRepoDeps(broadcasts: unknown[]): BumpDeps {
     markReplaced: markOutboundTxReplaced,
     countLaneAttempts: countLaneAttemptsAtNonce,
     getReceiptStatus: async () => null,
+    // #3293: pinned so the consumed-nonce check RUNS and answers "not
+    // consumed" — the settled mined nonce equals the stuck row's own nonce, and
+    // no node knows the hash. These cases still exercise the wedge they name.
+    isTxKnown: async () => false,
+    settledMinedNonce: async () => BigInt(STUCK_NONCE),
     currentFees: async () => ({ maxFeePerGas: 3_000_000_000n, maxPriorityFeePerGas: 2_000_000n }),
     sendRaw: async (chainId, tx) => {
       broadcasts.push({ chainId, ...tx })
@@ -562,5 +567,33 @@ describeDb('operator lane cancel frees the wedge (#1743 Option A)', () => {
     expect(failedAttempt).toBeDefined()
     expect(failedAttempt!.nonce).toBe(String(STUCK_NONCE))
     expect(await countLaneAttemptsAtNonce(CHAIN, BigInt(STUCK_NONCE))).toBeGreaterThanOrEqual(2)
+  })
+
+  it('#3293: RACE — attest lands late, SETTLED: the losing cancel is closed failed on its first stale tick with no bump attempt and no INCIDENT', async () => {
+    const stuck = await insertStuckAttest()
+    const { deps } = cancelHarness()
+    const result = await cancelStuckOutboundLane(stuck.id, deps)
+    if (result.outcome !== 'cancel_broadcast') throw new Error('trigger failed')
+    await db.query(`UPDATE outbound_txs SET updated_at = NOW() - INTERVAL '10 minutes' WHERE id = $1`, [result.cancelRowId])
+
+    // The attest mined at N and that is now SETTLED: the relayer's mined nonce
+    // as of a settled block is N + 1, and no node knows the cancel's hash.
+    const broadcasts: unknown[] = []
+    const workerDeps = realRepoDeps(broadcasts)
+    workerDeps.settledMinedNonce = async () => BigInt(STUCK_NONCE + 1)
+    const tick = await runOutboundBumpTick(CHAIN, workerDeps, log)
+
+    expect(broadcasts).toEqual([])
+    expect(tick.closedFailed).toBe(1)
+    expect(tick.alerted).toBe(0)
+    const rows = await rowsFor(CHAIN)
+    const cancel = rows.find((r) => r.id === result.cancelRowId)!
+    expect(cancel.status).toBe('failed')
+    expect(cancel.error).toMatch(/nonce 7 consumed on-chain/)
+    expect(cancel.nonce).toBe(String(STUCK_NONCE))
+    // The attest is untouched — #1043 recovery still owns it.
+    const attest = rows.find((r) => r.id === stuck.id)!
+    expect(attest.tx_hash).toBe(ATTEST_TX)
+    expect(attest.status).toBe('replaced')
   })
 })

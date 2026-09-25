@@ -243,6 +243,14 @@ the lane has capped out does it become yours:
 ERROR outbound-bump: nonce lane stuck after 3 replacements — INCIDENT, not retrying
 ```
 
+Since [#3293](https://github.com/d-hinders/Haven-AI/issues/3293) the INCIDENT means the lane really is held. A row whose nonce another transaction already consumed doesn't reach it: the relayer's mined nonce as of a settled block is past N, no node knows the row's hash, and its receipt is still null. The worker closes that row `failed` and logs:
+
+```
+WARN  outbound-bump: stale broadcast whose nonce was consumed by another transaction — closed failed, not bumped
+```
+
+That row can never mine, so there is nothing to cancel. The lane was never blocked by it.
+
 ## 3. "Landed and unconverged" — this self-heals, and here is how long
 
 If Step 1 found the revoked bit set while the row still reads `pending`, the

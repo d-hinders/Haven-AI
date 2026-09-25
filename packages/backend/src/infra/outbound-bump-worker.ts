@@ -33,7 +33,13 @@
  *     #1559's claim-time nonce allocation removes that window: the nonce is
  *     stamped before any broadcast can happen.
  *  3. A nonce lane that has burned {@link MAX_BUMPS_PER_NONCE} replacements
- *     is an INCIDENT, not a retry: alert loudly and stop bumping it.
+ *     is an INCIDENT, not a retry: alert loudly and stop bumping it — UNLESS
+ *     the chain shows the slot was consumed by another transaction (#3293):
+ *     the relayer's mined nonce as of a SETTLED block is past the row's
+ *     nonce, no node knows the row's hash, and a last receipt read finds
+ *     nothing. That row can never mine, so it is closed `failed` before any
+ *     bump or alert, whatever its submitter. Short of all three, today's
+ *     path.
  *
  * Every chain interaction and repository call arrives via {@link BumpDeps}
  * so the decision logic is testable without a chain; the production deps are
@@ -75,8 +81,9 @@ export const REBROADCAST_SAFE_SUBMITTERS: ReadonlySet<string> = new Set([
   // canonical rebroadcast-safe payload — a duplicate broadcast moves nothing
   // and its hash keys no recovery — so a fee-stuck cancel is fee-replaced by
   // this worker instead of becoming a second wedge, and a cancel that LOST
-  // its race (the attest mined at the shared nonce) is closed `failed` here
-  // when its bump attempt gets "nonce too low".
+  // its race (the attest mined at the shared nonce) is closed `failed` here:
+  // on its first stale tick once that mining is settled (#3293, consumed
+  // nonce), or before then when a bump attempt gets "nonce too low".
   'lane_cancel',
 ])
 
@@ -123,6 +130,19 @@ export interface BumpDeps {
   countLaneAttempts(chainId: number, nonce: bigint): Promise<number>
   /** null = unknown to the chain (unmined or dropped). */
   getReceiptStatus(chainId: number, txHash: string): Promise<0 | 1 | null>
+  /**
+   * #3293: does any node this provider reaches still know the transaction
+   * (pending in a mempool, or mined)? A known transaction is never closed as
+   * consumed — including one sent by an earlier relayer key.
+   */
+  isTxKnown(chainId: number, txHash: string): Promise<boolean>
+  /**
+   * #3293: the relayer's MINED nonce as of a settled block
+   * (`infra/chain/settled-read-block.ts`) — never the head, which can race the
+   * row's own mining and be un-shown by a reorg. null = no settled vantage
+   * point, which is no evidence.
+   */
+  settledMinedNonce(chainId: number): Promise<bigint | null>
   currentFees(chainId: number): Promise<BumpFees | null>
   /** Broadcast under the relayer send lock. `nonce` set = same-nonce replacement. */
   sendRaw(
@@ -163,6 +183,21 @@ export async function runOutboundBumpTick(
   }
 
   // ── Stale broadcast rows: chain first, bump only what is truly unmined ────
+  // #3293: the settled mined nonce, read at most ONCE per tick and only when a
+  // row needs it (the relayer provider is primary-only, #3255). `undefined` =
+  // not read yet; `null` = no evidence (no settled block, or the read threw).
+  let settledNonce: bigint | null | undefined
+  const readSettledNonce = async (): Promise<bigint | null> => {
+    if (settledNonce === undefined) {
+      try {
+        settledNonce = await deps.settledMinedNonce(chainId)
+      } catch (err) {
+        log.warn({ err, chainId }, 'outbound-bump: settled nonce read failed — no consumed-nonce evidence this tick')
+        settledNonce = null
+      }
+    }
+    return settledNonce
+  }
   let stale: OutboundTxRow[] = []
   try {
     stale = await deps.listUnmined(chainId, STALE_BROADCAST_SECONDS)
@@ -182,6 +217,52 @@ export async function runOutboundBumpTick(
         await deps.markFailed(row.id, `mined and reverted (${row.tx_hash})`)
         result.closedFailed += 1
         continue
+      }
+
+      // #3293: a null receipt is not yet "truly unmined". If the relayer's
+      // nonce as of a SETTLED block is already past this row's nonce, no node
+      // knows the transaction, and a last receipt read still finds nothing,
+      // then another transaction consumed the slot and this one can never
+      // mine — close it instead of bumping it or raising a lane INCIDENT that
+      // no operator can act on (the same evidence chain
+      // `classifyAnchorTxLiveness` uses, steps 1, 3 and 4). Placed BEFORE the
+      // non-idempotent gate: a consumed-nonce attest is just as dead, and
+      // #1043 recovery reads `failed` like `broadcast` (straight to its nonce
+      // evidence). Anything short of all three is no evidence: today's path.
+      const settled = await readSettledNonce()
+      if (settled !== null && settled > BigInt(row.nonce)) {
+        let known = true
+        let recheck: 0 | 1 | null = null
+        try {
+          known = await deps.isTxKnown(chainId, row.tx_hash)
+          if (!known) recheck = await deps.getReceiptStatus(chainId, row.tx_hash)
+        } catch (err) {
+          log.warn({ err, chainId, id: row.id }, 'outbound-bump: consumed-nonce evidence read failed — treating as no evidence')
+          known = true
+        }
+        if (!known && recheck === 1) {
+          await deps.markMined(row.id)
+          result.closedMined += 1
+          continue
+        }
+        if (!known && recheck === 0) {
+          await deps.markFailed(row.id, `mined and reverted (${row.tx_hash})`)
+          result.closedFailed += 1
+          continue
+        }
+        if (!known && recheck === null) {
+          await deps.markFailed(
+            row.id,
+            `dropped: nonce ${row.nonce} consumed on-chain by another transaction ` +
+              `(settled mined nonce ${settled}); ${row.tx_hash} is unknown to the node and can never mine`,
+          )
+          result.closedFailed += 1
+          log.warn(
+            { chainId, id: row.id, submitter: row.submitter, nonce: row.nonce, settledNonce: String(settled), txHash: row.tx_hash },
+            'outbound-bump: stale broadcast whose nonce was consumed by another transaction — closed failed, not bumped',
+          )
+          continue
+        }
       }
 
       // Truly unmined, and we are about to spend gas on it. A REPLACEMENT is
@@ -375,6 +456,23 @@ export async function productionBumpDeps(): Promise<BumpDeps> {
       const receipt = await getRelayer(chainId).provider?.getTransactionReceipt(txHash)
       if (!receipt) return null
       return receipt.status === 1 ? 1 : 0
+    },
+
+    async isTxKnown(chainId, txHash) {
+      const provider = getRelayer(chainId).provider
+      // No provider = no evidence = treat as known (never close on silence).
+      if (!provider) return true
+      return (await provider.getTransaction(txHash)) !== null
+    },
+
+    async settledMinedNonce(chainId) {
+      const relayer = getRelayer(chainId)
+      const provider = relayer.provider
+      if (!provider) return null
+      const { settledReadBlock } = await import('./chain/settled-read-block.js')
+      const block = await settledReadBlock(provider)
+      if (block === null) return null
+      return BigInt(await provider.getTransactionCount(relayer.address, block))
     },
 
     async currentFees(chainId) {

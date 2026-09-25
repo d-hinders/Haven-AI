@@ -329,6 +329,9 @@ describeDb('bump tick end-to-end over the REAL repository (#1559 review)', () =>
         markReplaced: repo.markOutboundTxReplaced,
         countLaneAttempts: repo.countLaneAttemptsAtNonce,
         getReceiptStatus: async () => null, // truly unmined
+        // #3293: the consumed-nonce check runs and answers "not consumed".
+        isTxKnown: async () => false,
+        settledMinedNonce: async () => 33n,
         currentFees: async () => ({ maxFeePerGas: 900n, maxPriorityFeePerGas: 90n }),
         sendRaw: async () => ({ hash: '0x' + 'ee'.repeat(32), nonce: 33 }),
       },

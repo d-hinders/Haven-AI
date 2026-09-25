@@ -50,13 +50,31 @@
 //             reason. The same length the copy lint and the ratchets demand of
 //             an inline marker, for the same reason: an empty or one-word
 //             reason is the declaration checked off, not made.
-//   <verdict> `passed` or `approved` (case-insensitive). A line that says
-//             `skipped` or `n/a` does not verify a MODIFIED baseline: a
-//             skipped design review is the absence of the review.
+//   <verdict> `passed` or `approved` (case-insensitive), as the WHOLE verdict
+//             word before `@` — `not approved`, `unapproved` or
+//             `passed-with-nits` are not passing, and a baseline named
+//             `approved-mock.png` does not make its line one (#3301). A line
+//             that says `skipped` or `n/a` does not verify a MODIFIED
+//             baseline: a skipped design review is the absence of the review.
 //   <sha>     the commit the verdict was given at. Verified, not just present:
 //             the last commit that touched the PNG must be an ancestor of it
 //             (or equal), and it an ancestor of the PR head — a verdict naming
 //             a commit older than the baseline's re-commit does not count.
+//
+// When verdicts conflict (#3301), the newest one decides, per baseline:
+//
+//   - A line that NAMES a baseline outranks a `*` line for that baseline, in
+//     both directions — a named `changes requested` beats a `*` pass, and a
+//     named pass beats a `*` block.
+//   - "Newest" is commit ancestry, never text order (the body is read first
+//     even when it was edited last). A non-passing line vetoes a pass bound
+//     at or before its own sha — a tie vetoes — and a pass clears an earlier
+//     block only when the block's sha is a strict ancestor of the pass's.
+//     Unrelated shas, unknown ancestry and an unbound (`@`-less) block all
+//     fail closed: the block stands.
+//   - A block bound before the baseline's last touch, or to a commit that is
+//     not on the head, describes a different image and is ignored — the same
+//     binding a pass has to meet.
 //
 // `--` and `—` both work as the separator; matching is on the BASE NAME, the
 // same convention `parseExpected` in baseline-audit.mjs uses, for the same
@@ -201,15 +219,26 @@ export function parseVerdicts(texts) {
     for (const m of String(text).matchAll(VERDICT_RE)) {
       const body = m[1] ?? ''
       const shaMatch = body.match(SHA_RE)
+      // The verdict word is the text before `@` — or, on a line with no sha,
+      // before the `--` separator or the `baselines:` marker. Only that head is
+      // read, and only as a whole: a substring match over the line let `not
+      // approved`, and a baseline named `approved-mock.png`, verify (#3301).
+      const sep = body.match(SEPARATOR_RE)
+      const markerIdx = body.toLowerCase().indexOf('baselines:')
+      const headEnd = shaMatch
+        ? shaMatch.index
+        : Math.min(sep ? sep.index : body.length, markerIdx === -1 ? body.length : markerIdx)
+      const word = body.slice(0, headEnd).toLowerCase().replace(/^[^a-z/]+|[^a-z/]+$/g, '')
+      const passing = PASSING_VERDICTS.has(word)
       // The names live after the `baselines:` marker when the line follows the
       // format; a line that only names files also counts — the word
       // "baselines:" is the convention, not the contract, and the failure
-      // report quotes the line either way.
+      // report quotes the line either way. Without the marker the names are
+      // what follows the verdict head, so the verdict word is never read as a
+      // baseline name.
       const listIdx = body.toLowerCase().lastIndexOf('baselines:')
-      const listPart = listIdx === -1 ? body : body.slice(listIdx + 'baselines:'.length)
-      const names = parseNameList(listPart.replace(SHA_RE, ' '))
-      const word = body.toLowerCase()
-      const passing = [...PASSING_VERDICTS].some((v) => word.includes(v))
+      const listPart = listIdx === -1 ? body.slice(headEnd) : body.slice(listIdx + 'baselines:'.length)
+      const names = parseNameList(listPart.replace(SHA_RE, ' ').replace(SEPARATOR_RE, ' '))
       out.push({ names, sha: shaMatch ? shaMatch[1] : null, passing, raw: m[0].trim() })
     }
   }
@@ -223,8 +252,16 @@ export function declaredFor(name, declarations) {
   return declarations.some((d) => d.names.includes('*') || d.names.includes(name))
 }
 
+/** Two shas name the same commit — one may be abbreviated. */
+function sameSha(a, b) {
+  const x = String(a).toLowerCase()
+  const y = String(b).toLowerCase()
+  return x.startsWith(y) || y.startsWith(x)
+}
+
 /**
- * Does any PASSING verdict cover this baseline, bound to a sha that verifies?
+ * Is this baseline verified: a PASSING verdict covers it, bound to a sha that
+ * verifies, and no newer non-passing verdict vetoes that pass?
  *
  * The binding: `lastTouchSha` (the newest commit that touched the PNG, read
  * from the PR head) must be an ancestor of — or equal to — the verdict's sha,
@@ -233,19 +270,37 @@ export function declaredFor(name, declarations) {
  * tree: the #3222 shape, where the review happened and the baselines were
  * re-committed after it.
  *
+ * The veto (#3301): lines that NAME the baseline outrank `*` lines; within
+ * the tier that applies, a pass stands only if every non-passing line is
+ * provably older — its sha a strict ancestor of the pass's. A tie, unrelated
+ * shas, unknown ancestry or an unbound block leave the block standing. A
+ * block provably about a different image (before the last touch, or off the
+ * head) is ignored, like an unbound pass.
+ *
  * `isAncestor(a, b)` answers "is commit a an ancestor of (or equal to) b?" —
  * null when ancestry could not be determined, which fails closed.
  */
 export function verifiedFor(name, verdicts, { lastTouchSha, headSha, isAncestor }) {
-  for (const v of verdicts) {
-    if (!v.passing) continue
-    if (!(v.names.includes('*') || v.names.includes(name))) continue
-    if (!v.sha || !lastTouchSha || !headSha) continue // unbindable: not evidence
+  if (!lastTouchSha || !headSha) return false // unbindable: nothing can verify
+  const bound = (v) => {
+    if (!v.sha) return false
     const touchOk = isAncestor(lastTouchSha, v.sha)
     const headOk = isAncestor(v.sha, headSha)
-    if (touchOk === true && headOk === true) return true
+    return touchOk === true && headOk === true
   }
-  return false
+  // A block is ignored only when its sha provably describes another image; an
+  // unbound or unknown one stands (fail closed).
+  const blockApplies = (v) =>
+    !v.sha || (isAncestor(lastTouchSha, v.sha) !== false && isAncestor(v.sha, headSha) !== false)
+  const relevant = (v) => (v.passing ? bound(v) : blockApplies(v))
+  const named = verdicts.filter((v) => v.names.includes(name) && relevant(v))
+  const tier = named.length > 0
+    ? named
+    : verdicts.filter((v) => v.names.includes('*') && relevant(v))
+  const blocks = tier.filter((v) => !v.passing)
+  const clears = (pass, block) =>
+    Boolean(block.sha) && !sameSha(block.sha, pass.sha) && isAncestor(block.sha, pass.sha) === true
+  return tier.some((v) => v.passing && blocks.every((b) => clears(v, b)))
 }
 
 /**
@@ -335,6 +390,9 @@ export function evaluate({ pr, files, declarationTexts, verdictTexts, lastTouch 
     `The verdict's <sha> must name a commit at or after the last commit that touched each`,
     `PNG (a review given before the baseline was re-committed does not verify it). For a`,
     `mass re-bless — a font or Playwright bump that moves every baseline — declare \`*\`.`,
+    `A non-passing verdict (\`changes requested\`) at or after a pass vetoes it, and a line`,
+    `naming a file outranks a \`*\` line for that file: re-review the fixed PNG and post a`,
+    `new \`passed\` at a later sha rather than deleting the earlier block.`,
     ``,
     `Per file:`,
     ``,
@@ -396,8 +454,10 @@ export async function collect({ gh, repo, prNumber }) {
   }
   // Resolve the commit-graph questions the verdict needs BEFORE the pure
   // `evaluate` runs, so `evaluate` stays synchronous and dependency-free: for
-  // each last-touch sha × verdict sha, and each verdict sha × head sha, is a
-  // an ancestor of (or equal to) b? Unknown pairs read as null — fail closed.
+  // each last-touch sha × verdict sha, each verdict sha × head sha, and each
+  // ordered pair of verdict shas (which of two conflicting verdicts is newer,
+  // #3301), is a an ancestor of (or equal to) b? Unknown pairs read as null —
+  // fail closed.
   // Equal shas are trivially ancestors and are short-circuited in the reader,
   // so a self-compare the API refuses cannot sink a valid verdict.
   const verdictShas = [...new Set(parseVerdicts([prJson.body ?? '', ...comments]).map((v) => v.sha).filter(Boolean))]
@@ -419,6 +479,7 @@ export async function collect({ gh, repo, prNumber }) {
   }
   for (const t of touchShas) for (const s of verdictShas) await probe(t, s)
   for (const s of verdictShas) if (headSha) await probe(s, headSha)
+  for (const a of verdictShas) for (const b of verdictShas) if (a !== b) await probe(a, b)
   const isAncestor = (a, b) => {
     if (a === b) return true
     const v = ancestry.get(`${a}|${b}`)

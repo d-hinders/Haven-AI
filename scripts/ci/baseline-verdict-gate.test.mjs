@@ -28,6 +28,7 @@ import {
   parseNameList,
   baselineName,
   verifiedFor,
+  collect,
   MIN_REASON_CHARS,
   BASELINE_DIR,
 } from './baseline-verdict-gate.mjs'
@@ -121,6 +122,30 @@ describe('parseVerdicts', () => {
     const [v] = parseVerdicts(['', 'rendered pass looks right.\n\ndesign-review verdict: passed @ abc1234 -- baselines: topbar-desktop.png\n'])
     assert.equal(v.passing, true)
     assert.deepEqual(v.names, ['topbar-desktop.png'])
+  })
+
+  test('(C) the verdict word is the WHOLE head before `@`, never a substring (#3301)', () => {
+    for (const line of [
+      'design-review verdict: not approved @ abc1234 -- baselines: topbar-desktop.png',
+      'design-review verdict: unapproved @ abc1234 -- baselines: topbar-desktop.png',
+      'design-review verdict: passed-with-nits @ abc1234 -- baselines: topbar-desktop.png',
+      'design-review verdict: blocked -- was passed before @ abc1234 -- baselines: topbar-desktop.png',
+      'design-review verdict: changes requested @ abc1234 -- baselines: approved-mock.png',
+    ]) {
+      assert.equal(parseVerdicts([line])[0].passing, false, line)
+    }
+    for (const word of ['passed', 'approved', 'Approved', '**passed**']) {
+      assert.equal(parseVerdicts([`design-review verdict: ${word} @ abc1234 -- baselines: a.png`])[0].passing, true, word)
+    }
+  })
+
+  test('a line without the `baselines:` marker never reads the verdict word as a name', () => {
+    const [v] = parseVerdicts(['design-review verdict: not approved @ abc1234 topbar-desktop.png'])
+    assert.deepEqual(v.names, ['topbar-desktop.png'])
+    assert.equal(v.passing, false)
+    const [w] = parseVerdicts(['design-review verdict: passed -- topbar-desktop.png'])
+    assert.deepEqual(w.names, ['topbar-desktop.png'])
+    assert.equal(w.passing, true)
   })
 
   test('no sha → null, and the gate must treat it as unbindable (asserted below)', () => {
@@ -328,16 +353,152 @@ describe('evaluate — the sha binding (#3222 shape)', () => {
   })
 
   test('a verdict naming a commit NEWER than the head does not verify', () => {
-    const at = (a, b) => (a === 't1' && b === 'future' ? true : false) // t1 ≤ future, but future ≰ h1
+    // Hex shas, so the verdict IS bindable and the head check is what refuses
+    // it (#3301: the earlier `@ future` was not hex, parsed as sha null, and
+    // was skipped as unbindable — the test passed with the head check deleted;
+    // M10 below now proves the head check is what fires).
+    const at = (a, b) => (a === 'aa00000' && b === 'ff00000' ? true : false) // touch ≤ verdict, but verdict ≰ head
     const r = evaluate({
-      pr: { number: 1, base: 'dev', defaultBranch: 'dev', headSha: 'h1' },
+      pr: { number: 1, base: 'dev', defaultBranch: 'dev', headSha: 'cc00000' },
       files: [modifiedFile()],
       declarationTexts: [DECL],
-      verdictTexts: ['design-review verdict: passed @ future -- baselines: topbar-desktop.png'],
-      lastTouch: { [PNG]: 't1' },
+      verdictTexts: ['design-review verdict: passed @ ff00000 -- baselines: topbar-desktop.png'],
+      lastTouch: { [PNG]: 'aa00000' },
       isAncestor: at,
     })
+    assert.equal(parseVerdicts(['design-review verdict: passed @ ff00000'])[0].sha, 'ff00000')
     assert.equal(r.verdict, 'fail')
+  })
+})
+
+describe('verifiedFor — conflicting verdicts (#3301)', () => {
+  // A linear history: aa (last touch) < bb < cc < dd (head). `rank` is the
+  // ancestry relation "a is an ancestor of (or equal to) b" on that chain.
+  const rank = { aa00000: 1, bb00000: 2, cc00000: 3, dd00000: 4 }
+  const chain = (a, b) => (a in rank && b in rank ? rank[a] <= rank[b] : null)
+  const ctx = { lastTouchSha: 'aa00000', headSha: 'dd00000', isAncestor: chain }
+  const v = (line) => parseVerdicts([`design-review verdict: ${line}`])[0]
+
+  test('(A) a later block cancels an earlier pass', () => {
+    const vs = [v('passed @ bb00000 -- baselines: a.png'), v('changes requested @ cc00000 -- baselines: a.png')]
+    assert.equal(verifiedFor('a.png', vs, ctx), false)
+  })
+
+  test('(A) text order does not matter — the block still wins when it comes first', () => {
+    const vs = [v('changes requested @ cc00000 -- baselines: a.png'), v('passed @ bb00000 -- baselines: a.png')]
+    assert.equal(verifiedFor('a.png', vs, ctx), false)
+  })
+
+  test('(A) a tie vetoes: pass and block at the same sha', () => {
+    const vs = [v('passed @ cc00000 -- baselines: a.png'), v('changes requested @ cc00000 -- baselines: a.png')]
+    assert.equal(verifiedFor('a.png', vs, ctx), false)
+  })
+
+  test('a re-review clears an earlier block: block @ bb, then pass @ cc', () => {
+    const vs = [v('changes requested @ bb00000 -- baselines: a.png'), v('passed @ cc00000 -- baselines: a.png')]
+    assert.equal(verifiedFor('a.png', vs, ctx), true)
+  })
+
+  test('(B) a named block beats a `*` pass for that name, and only that name', () => {
+    const vs = [v('passed @ cc00000 -- baselines: *'), v('changes requested @ cc00000 -- baselines: a.png')]
+    assert.equal(verifiedFor('a.png', vs, ctx), false)
+    assert.equal(verifiedFor('b.png', vs, ctx), true)
+  })
+
+  test('a named pass beats a `*` block for that name', () => {
+    const vs = [v('changes requested @ cc00000 -- baselines: *'), v('passed @ bb00000 -- baselines: a.png')]
+    assert.equal(verifiedFor('a.png', vs, ctx), true)
+    assert.equal(verifiedFor('b.png', vs, ctx), false)
+  })
+
+  test('an unbound block (no sha) stands — fail closed', () => {
+    const vs = [v('passed @ cc00000 -- baselines: a.png'), v('changes requested -- baselines: a.png')]
+    assert.equal(verifiedFor('a.png', vs, ctx), false)
+  })
+
+  test('unknown ancestry between pass and block leaves the block standing', () => {
+    const noVerdictPairs = (a, b) => (a === 'aa00000' || b === 'dd00000' ? chain(a, b) : null)
+    const vs = [v('changes requested @ bb00000 -- baselines: a.png'), v('passed @ cc00000 -- baselines: a.png')]
+    assert.equal(verifiedFor('a.png', vs, { ...ctx, isAncestor: noVerdictPairs }), false)
+  })
+
+  test('unrelated shas (neither an ancestor of the other) leave the block standing', () => {
+    // bb and ee both descend from aa and reach dd, but not each other (a merge).
+    const rel = (a, b) => {
+      if (a === b) return true
+      if (a === 'aa00000' || b === 'dd00000') return true
+      return false
+    }
+    const vs = [v('changes requested @ ee00000 -- baselines: a.png'), v('passed @ bb00000 -- baselines: a.png')]
+    assert.equal(verifiedFor('a.png', vs, { ...ctx, isAncestor: rel }), false)
+  })
+
+  test('a block bound BEFORE the last touch is about an older image and is ignored', () => {
+    const rank2 = { '0000000': 0, aa00000: 1, cc00000: 3, dd00000: 4 }
+    const at = (a, b) => (a in rank2 && b in rank2 ? rank2[a] <= rank2[b] : null)
+    const vs = [v('changes requested @ 0000000 -- baselines: a.png'), v('passed @ cc00000 -- baselines: a.png')]
+    assert.equal(verifiedFor('a.png', vs, { ...ctx, isAncestor: at }), true)
+  })
+
+  test('a block bound to a commit off the head (rebased away) is ignored', () => {
+    const at = (a, b) => (b === 'dd00000' && a === 'ab99999' ? false : chain(a, b) ?? (a === 'aa00000'))
+    const vs = [v('changes requested @ ab99999 -- baselines: a.png'), v('passed @ cc00000 -- baselines: a.png')]
+    assert.equal(verifiedFor('a.png', vs, { ...ctx, isAncestor: at }), true)
+  })
+
+  test('a single bound pass with no block still verifies (the pre-#3301 case)', () => {
+    assert.equal(verifiedFor('a.png', [v('passed @ cc00000 -- baselines: a.png')], ctx), true)
+  })
+})
+
+describe('collect — the production ancestry map answers verdict-vs-verdict (#3301)', () => {
+  // `collect` is the only producer of `isAncestor` in production. A veto
+  // proven against a stub relation would pass here and fail in the gate if
+  // collect never asked which of two verdicts is newer — so drive the real
+  // collect with a recording `gh` and evaluate what it returns.
+  const HEAD = 'dd00000000000000000000000000000000000000'
+  const TOUCH = 'aa00000000000000000000000000000000000000'
+  const rank = { aa00000: 1, bb00000: 2, cc00000: 3, dd00000: 4 }
+  const r7 = (sha) => rank[sha.slice(0, 7)]
+
+  const ghFor = (body, calls) => async (args) => {
+    const url = args[1]
+    calls.push(url)
+    let out
+    if (url.includes('pulls/7/files?')) out = [{ path: PNG, status: 'modified' }]
+    else if (url.includes('pulls/7/commits?')) out = [{ commit: { message: 'chore: re-review' } }]
+    else if (url.endsWith('pulls/7')) out = { number: 7, draft: false, base: { ref: 'dev', repo: { default_branch: 'dev' } }, head: { sha: HEAD }, body }
+    else if (url.includes('issues/7/comments?')) out = []
+    else if (url.includes('commits?path=')) out = [{ sha: TOUCH }]
+    else if (url.includes('/compare/')) {
+      const [a, b] = url.split('/compare/')[1].split('...')
+      out = { status: r7(a) === r7(b) ? 'identical' : r7(a) < r7(b) ? 'ahead' : 'behind' }
+    } else throw new Error(`unexpected gh call ${url}`)
+    return JSON.stringify(out)
+  }
+
+  const run = async (verdictLines) => {
+    const calls = []
+    const body = `${DECL}\n\n${verdictLines.join('\n')}\n`
+    const collected = await collect({ gh: ghFor(body, calls), repo: 'o/r', prNumber: 7 })
+    return { result: evaluate(collected), calls }
+  }
+
+  test('a later block, as the real gate sees it → fail', async () => {
+    const { result, calls } = await run([
+      'design-review verdict: passed @ bb00000 -- baselines: topbar-desktop.png',
+      'design-review verdict: changes requested @ cc00000 -- baselines: topbar-desktop.png',
+    ])
+    assert.equal(result.verdict, 'fail')
+    assert.ok(calls.some((c) => c.endsWith('compare/cc00000...bb00000')), 'collect asked whether the block is older than the pass')
+  })
+
+  test('a re-review after a block, as the real gate sees it → pass', async () => {
+    const { result } = await run([
+      'design-review verdict: changes requested @ bb00000 -- baselines: topbar-desktop.png',
+      'design-review verdict: passed @ cc00000 -- baselines: topbar-desktop.png',
+    ])
+    assert.equal(result.verdict, 'pass')
   })
 })
 
@@ -445,17 +606,19 @@ describe('mutation proofs (each gating branch can fire)', () => {
   const pr = { number: 1, base: 'dev', defaultBranch: 'dev', headSha: 'h1' }
   const bothFixture = { pr, files: [modifiedFile()], declarationTexts: [DECL], verdictTexts: [VERDICT], lastTouch: { [PNG]: 't1' }, isAncestor: ancestorOk }
 
-  async function mutant(from, to) {
+  async function mutantModule(from, to) {
     assert.ok(SRC.includes(from), `mutation anchor not found: ${JSON.stringify(from.slice(0, 60))}`)
+    assert.equal(SRC.split(from).length, 2, `mutation anchor is not unique: ${JSON.stringify(from.slice(0, 60))}`)
     const dir = mkdtempSync(path.join(tmpdir(), 'baseline-verdict-mutant-'))
     const file = path.join(dir, 'mutant.mjs')
     writeFileSync(file, SRC.replace(from, to))
     try {
-      return (await import(pathToFileURL(file).href)).evaluate
+      return await import(pathToFileURL(file).href)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   }
+  const mutant = async (from, to) => (await mutantModule(from, to)).evaluate
 
   test('M1: MODIFIED must keep the verdict requirement — mutant treats every change as added', async () => {
     const mutated = await mutant(
@@ -490,13 +653,86 @@ describe('mutation proofs (each gating branch can fire)', () => {
   })
 
   test('M4: the sha binding is load-bearing — mutant accepts any verdict sha (#3222 shape)', async () => {
+    // Re-anchored by #3301 (verifiedFor was restructured around `bound`); the
+    // property is unchanged: without the binding, an old-sha verdict verifies.
     const mutated = await mutant(
-      `if (touchOk === true && headOk === true) return true`,
-      `if (true) return true`,
+      `return touchOk === true && headOk === true`,
+      `return true`,
     )
     const oldSha = { ...bothFixture, isAncestor: ancestorNever } // verdict OLDER than the re-commit
     const r = await mutated(oldSha)
     assert.equal(r.verdict, 'pass')
+  })
+
+  // #3301's three rules, each against the fixture the real code fails.
+  const rank = { aa00000: 1, bb00000: 2, cc00000: 3, dd00000: 4 }
+  const chain = (a, b) => (a in rank && b in rank ? rank[a] <= rank[b] : null)
+  const chainPr = { ...pr, headSha: 'dd00000' }
+  const conflict = (lines) => ({ pr: chainPr, files: [modifiedFile()], declarationTexts: [DECL], verdictTexts: [lines.join('\n')], lastTouch: { [PNG]: 'aa00000' }, isAncestor: chain })
+  const laterBlock = conflict([
+    'design-review verdict: passed @ bb00000 -- baselines: topbar-desktop.png',
+    'design-review verdict: changes requested @ cc00000 -- baselines: topbar-desktop.png',
+  ])
+  const starVsNamed = conflict([
+    'design-review verdict: passed @ cc00000 -- baselines: *',
+    'design-review verdict: changes requested @ cc00000 -- baselines: topbar-desktop.png',
+  ])
+  const notApproved = conflict(['design-review verdict: not approved @ cc00000 -- baselines: topbar-desktop.png'])
+
+  test('M6: the later-block veto fires — mutant ignores every block', async () => {
+    assert.equal(evaluate(laterBlock).verdict, 'fail')
+    const mutated = await mutant(`blocks.every((b) => clears(v, b))`, `true`)
+    assert.equal(mutated(laterBlock).verdict, 'pass')
+  })
+
+  test('M7: a named line outranks `*` — mutant reads the `*` tier whenever it exists', async () => {
+    assert.equal(evaluate(starVsNamed).verdict, 'fail')
+    const mutated = await mutant(`const tier = named.length > 0`, `const tier = false`)
+    assert.equal(mutated(starVsNamed).verdict, 'pass')
+  })
+
+  test('M8: the whole-token verdict word — mutant restores the substring match', async () => {
+    assert.equal(evaluate(notApproved).verdict, 'fail')
+    const mutated = await mutant(
+      `const passing = PASSING_VERDICTS.has(word)`,
+      `const passing = [...PASSING_VERDICTS].some((w) => body.toLowerCase().includes(w))`,
+    )
+    assert.equal(mutated(notApproved).verdict, 'pass')
+  })
+
+  test('M9: collect probes verdict × verdict — mutant drops those probes and a re-review can never clear', async () => {
+    const HEAD = 'dd00000000000000000000000000000000000000'
+    const body = `${DECL}\n\ndesign-review verdict: changes requested @ bb00000 -- baselines: topbar-desktop.png\ndesign-review verdict: passed @ cc00000 -- baselines: topbar-desktop.png\n`
+    const gh = async (args) => {
+      const url = args[1]
+      let out
+      if (url.includes('pulls/7/files?')) out = [{ path: PNG, status: 'modified' }]
+      else if (url.includes('pulls/7/commits?')) out = []
+      else if (url.endsWith('pulls/7')) out = { base: { ref: 'dev', repo: { default_branch: 'dev' } }, head: { sha: HEAD }, body }
+      else if (url.includes('issues/7/comments?')) out = []
+      else if (url.includes('commits?path=')) out = [{ sha: 'aa00000' }]
+      else {
+        const [a, b] = url.split('/compare/')[1].split('...')
+        out = { status: chain(a.slice(0, 7), b.slice(0, 7)) ? 'ahead' : 'behind' }
+      }
+      return JSON.stringify(out)
+    }
+    const real = await collect({ gh, repo: 'o/r', prNumber: 7 })
+    assert.equal(evaluate(real).verdict, 'pass')
+    const m = await mutantModule(
+      `for (const a of verdictShas) for (const b of verdictShas) if (a !== b) await probe(a, b)`,
+      ``,
+    )
+    const mutated = await m.collect({ gh, repo: 'o/r', prNumber: 7 })
+    assert.equal(m.evaluate(mutated).verdict, 'fail')
+  })
+
+  test('M10: the head check fires — mutant accepts a verdict newer than the head', async () => {
+    const at = (a, b) => (a === 'aa00000' && b === 'ff00000' ? true : false)
+    const future = { pr: { ...pr, headSha: 'cc00000' }, files: [modifiedFile()], declarationTexts: [DECL], verdictTexts: ['design-review verdict: passed @ ff00000 -- baselines: topbar-desktop.png'], lastTouch: { [PNG]: 'aa00000' }, isAncestor: at }
+    assert.equal(evaluate(future).verdict, 'fail')
+    const mutated = await mutant(`const headOk = isAncestor(v.sha, headSha)`, `const headOk = true`)
+    assert.equal(mutated(future).verdict, 'pass')
   })
 
   test('M5: the short-reason bar is load-bearing — mutant accepts a stub reason', async () => {

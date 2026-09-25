@@ -3059,3 +3059,32 @@ to call next in structured fields, and those fields are typed end to end
 > No tool, schema key, `next_tool` value, expected-context version or signer
 > contract changes. Scope of this note: those renames — nothing else in this
 > document was re-verified.
+
+> **Re-verified #3307 (2026-09-25, receipt and payment-status addresses checksummed):**
+> this diff changes the *values* `haven_list_receipts` and `haven_get_payment_status`
+> return on both MCP runtimes, and no names or schemas.
+> - **Receipt.** `GET /machine-payments/receipts` now returns its Haven-owned
+>   addresses EIP-55 checksummed at the backend read boundary (`mapEvidence`):
+>   `merchantAddress`, `payerAddress`, `settlementAddress`, `tokenAddress`, and
+>   every `parties` entry.
+> - **Payment status.** It checksums its top-level `merchant_address` /
+>   `payer_address` and its `parties`.
+> - **Why.** A receipt, its transaction row (#3129) and its status now agree
+>   byte for byte.
+> - **What stays as stored.**
+>   - Storage (`LOWER(...)`).
+>   - `tx_hash`.
+>   - The relayed merchant objects (`challenge_payload`, `selected_payment`,
+>     `protocol_receipt_payload`, #3125).
+>   - The status rail context (`asset`, the `x402` / `mpp` blocks), from which
+>     `resume_state` rebuilds the merchant-facing `accepted.payTo`, so a resumed
+>     payment requirement is byte-identical.
+>   - The signed receipt bundle (`haven_verify_receipt`).
+> - **Clients.** The OpenAPI `address` pattern is case-agnostic and the SDK
+>   mappers pass values through, so no tool schema, package, version floor or
+>   failure code moves. Every in-repo consumer compares addresses
+>   case-insensitively.
+>
+> Scope of this note: those two tool results. Nothing else in this document was
+> re-verified.
+

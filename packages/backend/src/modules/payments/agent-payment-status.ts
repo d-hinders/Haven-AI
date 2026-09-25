@@ -15,6 +15,7 @@ import {
 } from '../../infra/repositories/payment-intents.js'
 import { type AgentContext } from '../../middleware/agentAuth.js'
 import { quoteFee } from '../fee/index.js'
+import { toCanonicalAddress } from '../transactions/index.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from '../x402/x402-delegation.js'
 
 /**
@@ -830,7 +831,21 @@ export async function getAgentPaymentStatus(
     const state = intentStateFor(payment)
     const rail = railFor(payment)
     const resourceUrl = payment.payment_resource_url ?? payment.x402_resource_url
-    const merchantAddress = payment.merchant_address ?? payment.x402_merchant_address
+    // #3307 (owner decision): the AGENT-FACING addresses — top-level
+    // `merchant_address` / `payer_address` and the `parties` — are EIP-55
+    // checksummed at this read boundary, the same rule as the receipt
+    // (`mapEvidence`) and the transactions feed (#3129). In this caller's
+    // arguments, never inside `withParties`, which also builds the signed
+    // receipt bundle (left as it is).
+    //
+    // The RAIL CONTEXT (`asset`, the `x402` / `mpp` blocks) is the stored
+    // protocol record and is passed through as stored: `buildX402ResumeState`
+    // rebuilds the merchant-facing payment requirement (`accepted.payTo`,
+    // `asset`) from it, and a merchant- or facilitator-bound payload must not
+    // be re-cased (#3307 "Deliberately untouched").
+    const storedMerchantAddress = payment.merchant_address ?? payment.x402_merchant_address
+    const merchantAddress = toCanonicalAddress(storedMerchantAddress)
+    const delegateAddress = toCanonicalAddress(payment.delegate_address)
     return withParties(
       {
         payment_id: payment.id,
@@ -843,7 +858,7 @@ export async function getAgentPaymentStatus(
         token: payment.token_symbol,
         resource_url: resourceUrl,
         merchant_address: merchantAddress,
-        payer_address: payment.delegate_address,
+        payer_address: delegateAddress,
         tx_hash: payment.tx_hash,
         expires_at: payment.expires_at,
         chain_id: payment.chain_id,
@@ -854,19 +869,19 @@ export async function getAgentPaymentStatus(
           amountRaw: payment.amount_raw,
           tokenAddress: payment.token_address,
           resourceUrl,
-          merchantAddress,
+          merchantAddress: storedMerchantAddress,
           idempotencyKey: payment.machine_idempotency_key ?? payment.x402_idempotency_key,
           challengeId: payment.machine_challenge_id,
           machineMetadata: payment.machine_metadata,
         }),
       },
       {
-        account_address: payment.account_address ?? null,
-        delegate_address: payment.delegate_address,
+        account_address: toCanonicalAddress(payment.account_address) ?? null,
+        delegate_address: delegateAddress,
         // #2960: `machine_metadata.delegate_account_address`, written at
         // authorize on both delegation-rail legs — null for rows authorized
         // before #2960 and on the legacy rail, where no such account exists.
-        delegate_account_address: delegateAccountAddressOf(payment.machine_metadata),
+        delegate_account_address: toCanonicalAddress(delegateAccountAddressOf(payment.machine_metadata)),
         merchant_address: merchantAddress,
       },
     )

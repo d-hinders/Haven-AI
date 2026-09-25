@@ -53,6 +53,9 @@ import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
 export const CONNECTOR_VERSION = '0.4.0-alpha.0'
 
+/** #3303: the `X-Haven-Client` value every Haven API request from this connector carries. */
+export const CONNECTOR_CLIENT_IDENTITY = `@haven_ai/connect/${CONNECTOR_VERSION}`
+
 export interface ConnectOptions {
   setupToken: string
   apiBaseUrl: string
@@ -433,7 +436,7 @@ async function executeConnect(
   assertSupportedNodeVersion(deps.nodeVersion, MCP_RUNTIME_MANIFEST.minimumNodeVersion)
 
   const connectorVersion = options.connectorVersion ?? CONNECTOR_VERSION
-  const api = deps.api ?? createConnectApiClient(options.apiBaseUrl)
+  const api = deps.api ?? createConnectApiClient(options.apiBaseUrl, undefined, CONNECTOR_CLIENT_IDENTITY)
   const log = secureLogger(
     deps.log ?? ((message) => process.stdout.write(`${message}\n`)),
     deps.redactPaths === true,

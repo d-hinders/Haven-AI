@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { HavenClient } from '@haven_ai/sdk'
+import { HavenClient, havenClientIdentity } from '@haven_ai/sdk'
 import { hostedConnectorRerunCommand } from './connector-channel.js'
 import {
   assertHostedToolRegistry,
@@ -152,6 +152,10 @@ export function createHostedHavenClient(options: HostedClientOptions): HavenClie
     apiKey: options.apiKey,
     baseUrl: options.baseUrl,
     chainRpcs,
+    // #3303: the hosted server is Haven-deployed and outside the five
+    // published packages, so the backend's compat table never hints or refuses
+    // it; naming it keeps its requests from reading as a bare SDK embedder's.
+    clientIdentity: havenClientIdentity('@haven_ai/mcp-server', HOSTED_SERVER_VERSION),
     // Intentionally NO delegateKey. See custody invariant in
     // docs/architecture/06-hosted-mcp-connect-flow.md.
   })

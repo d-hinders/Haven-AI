@@ -16,8 +16,14 @@
  */
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { AgentPaymentNextAction, DIRECT_SIGN_CONTEXT_VERSION, HavenSigningError } from '@haven_ai/sdk/edge'
-import type { NextStep } from '@haven_ai/sdk/edge'
+import {
+  AgentPaymentNextAction,
+  DIRECT_SIGN_CONTEXT_VERSION,
+  HAVEN_CLIENT_HEADER,
+  HavenSigningError,
+  readClientUpdate,
+} from '@haven_ai/sdk/edge'
+import type { HavenClientUpdate, NextStep } from '@haven_ai/sdk/edge'
 import { nextStepWireFields, signerRefusalStep } from './next-step.js'
 
 export interface HavenIdentity {
@@ -114,11 +120,17 @@ export class HavenSignContextError extends HavenSigningError {
   readonly http_status?: number
   /** Present only for `SIGN_CONTEXT_REFUSED`: the backend's own `error_code`. */
   readonly backend_error_code?: string
+  /**
+   * #3303: on a 426 `client_outdated` refusal, the backend's update hint —
+   * this signer is below the minimum the deployment set, and
+   * `client_update.upgrade_command` is what updates it.
+   */
+  readonly client_update?: HavenClientUpdate
 
   constructor(
     message: string,
     code: SignContextErrorCode,
-    refusal: { httpStatus: number; errorCode?: string } | undefined,
+    refusal: { httpStatus: number; errorCode?: string; clientUpdate?: HavenClientUpdate } | undefined,
     /** #3103: the payment the context was fetched for, so a refusal can name the status read. */
     paymentId: string,
     /**
@@ -134,7 +146,22 @@ export class HavenSignContextError extends HavenSigningError {
     if (code === 'SIGN_CONTEXT_REFUSED') {
       this.http_status = refusal?.httpStatus
       this.backend_error_code = refusal?.errorCode
-      if (flow === 'direct' && refusal?.httpStatus === 404) {
+      if (refusal?.errorCode === 'client_outdated') {
+        // #3303: this signer is below the minimum the deployment set, so it is
+        // refused at sign-context — nothing is signed or submitted, and the
+        // prepared payment is left unsigned (owner decision 2026-09-25, #3303).
+        // No retry and no other bytes can help; only an update can.
+        this.client_update = refusal.clientUpdate
+        this.next_action = AgentPaymentNextAction.StopAndTellUser
+        step = signerRefusalStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: null,
+          nextToolOmittedReason:
+            'this signer is below the minimum version Haven accepts — tell the user to run ' +
+            `${refusal.clientUpdate?.upgrade_command ?? 'the connector again'}, restart the agent runtime, ` +
+            'then re-run the quote with the same idempotency_key and sign the fresh payment_id',
+        })
+      } else if (flow === 'direct' && refusal?.httpStatus === 404) {
         // Either the payment is not this agent's, or the backend predates
         // #3271 and has no direct sign-context route at all (deploy skew). The
         // payment result's relay fields still work whenever the payment is real.
@@ -226,6 +253,8 @@ export interface FetchedSignContext {
    * context either way.
    */
   paymentRequired: Record<string, unknown> | null
+  /** #3303: the backend's update hint when this signer is behind; absent when current. */
+  clientUpdate?: HavenClientUpdate
 }
 
 /**
@@ -247,18 +276,41 @@ export interface FetchedSignContext {
  */
 export const SIGN_CONTEXT_TIMEOUT_MS = 15_000
 
+/**
+ * The sign-context request headers. `clientIdentity` is this signer's
+ * `@haven_ai/signer/<version>` (#3303), passed in by the server that owns
+ * `SIGNER_VERSION` — the backend refuses a signer below a minimum it has set,
+ * here and nowhere else.
+ */
+function signContextHeaders(identity: HavenIdentity, clientIdentity: string | undefined): Record<string, string> {
+  return {
+    Authorization: `Bearer ${identity.apiKey}`,
+    ...(clientIdentity ? { [HAVEN_CLIENT_HEADER]: clientIdentity } : {}),
+  }
+}
+
+/** #3303: the refusal fields a backend answer carries, `client_update` included. */
+function refusalOf(status: number, body: Record<string, unknown>) {
+  return {
+    httpStatus: status,
+    errorCode: typeof body.error_code === 'string' ? body.error_code : undefined,
+    clientUpdate: readClientUpdate(body.client_update),
+  }
+}
+
 export async function fetchX402SignContext(
   identity: HavenIdentity,
   paymentId: string,
   fetchImpl: typeof fetch = fetch,
   timeoutMs: number = SIGN_CONTEXT_TIMEOUT_MS,
+  clientIdentity?: string,
 ): Promise<FetchedSignContext> {
   let response: Response
   try {
     response = await fetchImpl(
       `${identity.apiUrl}/x402/${encodeURIComponent(paymentId)}/sign-context`,
       {
-        headers: { Authorization: `Bearer ${identity.apiKey}` },
+        headers: signContextHeaders(identity, clientIdentity),
         signal: AbortSignal.timeout(timeoutMs),
       },
     )
@@ -305,7 +357,7 @@ export async function fetchX402SignContext(
             ? ' Re-run the quote with the same idempotency key, then sign the fresh payment_id.'
             : ''),
       'SIGN_CONTEXT_REFUSED',
-      { httpStatus: response.status, errorCode: typeof body.error_code === 'string' ? body.error_code : undefined },
+      refusalOf(response.status, body),
       paymentId,
     )
   }
@@ -336,6 +388,7 @@ export async function fetchX402SignContext(
       paymentRequired && typeof paymentRequired === 'object' && !Array.isArray(paymentRequired)
         ? (paymentRequired as Record<string, unknown>)
         : null,
+    clientUpdate: readClientUpdate(body.client_update),
   }
 }
 
@@ -359,6 +412,8 @@ export interface FetchedDirectSignContext {
   typedData: Record<string, unknown>
   status: string
   expiresAt?: string
+  /** #3303: the backend's update hint when this signer is behind; absent when current. */
+  clientUpdate?: HavenClientUpdate
 }
 
 /**
@@ -375,13 +430,14 @@ export async function fetchDirectSignContext(
   paymentId: string,
   fetchImpl: typeof fetch = fetch,
   timeoutMs: number = SIGN_CONTEXT_TIMEOUT_MS,
+  clientIdentity?: string,
 ): Promise<FetchedDirectSignContext> {
   let response: Response
   try {
     response = await fetchImpl(
       `${identity.apiUrl}/payments/${encodeURIComponent(paymentId)}/sign-context`,
       {
-        headers: { Authorization: `Bearer ${identity.apiKey}` },
+        headers: signContextHeaders(identity, clientIdentity),
         signal: AbortSignal.timeout(timeoutMs),
       },
     )
@@ -429,7 +485,7 @@ export async function fetchDirectSignContext(
             ? ' The payment window has expired; call haven_send / haven_pay again with the same idempotency_key.'
             : ''),
       'SIGN_CONTEXT_REFUSED',
-      { httpStatus: response.status, errorCode: typeof body.error_code === 'string' ? body.error_code : undefined },
+      refusalOf(response.status, body),
       paymentId,
       'direct',
     )
@@ -465,5 +521,6 @@ export async function fetchDirectSignContext(
     typedData: signData.typed_data as Record<string, unknown>,
     status: typeof body.status === 'string' ? body.status : 'pending_signature',
     expiresAt: typeof body.expires_at === 'string' ? body.expires_at : undefined,
+    clientUpdate: readClientUpdate(body.client_update),
   }
 }

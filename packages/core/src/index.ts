@@ -64,3 +64,22 @@ export {
   isLabelColor,
   type LabelColor,
 } from './label-colors.js'
+
+// Client compatibility (#3303, epic #3302) — the one table of recommended and
+// minimum published-client versions, plus the pure header parse and verdict.
+// The backend enforces it; the public release document (#3304) reads it.
+export {
+  CLIENT_HEADER_NAME,
+  CLIENT_COMPAT,
+  PUBLISHED_CLIENT_PACKAGES,
+  formatClientHeader,
+  parseClientHeader,
+  isSnapshotVersion,
+  compareVersions,
+  isPublishedClientPackage,
+  evaluateClient,
+  type ClientCompatEntry,
+  type ClientCompatVerdict,
+  type ParsedClientHeader,
+  type PublishedClientPackage,
+} from './client-compat.js'

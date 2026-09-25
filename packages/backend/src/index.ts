@@ -86,6 +86,7 @@ import {
 } from './modules/catalog/index.js'
 import { ingestDiscoveredCatalog } from './modules/catalog/index.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
+import { registerClientCompatHooks } from './middleware/client-compat.js'
 import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
 // dep-lint-exempt: composition root — owns the pool for the /health liveness probe (SELECT 1) and hands it to the leader-gated catalog jobs at boot; it wires infrastructure rather than running tenant SQL
 import pool from './db.js'
@@ -247,6 +248,15 @@ await app.register(discoveryRoutes)
 // be registered before routes that decorate request.agent so the onResponse
 // hook fires after them.
 registerAgentToolAuditHooks(app)
+
+// Client-version signal (#3303, epic #3302): a `client_update` hint on the
+// responses an outdated published client receives, and a 426
+// `client_outdated` refusal — only below a SET minimum, only at the
+// payment-initiating routes and (for the signer) sign-context. Registered
+// before the routes so its root hooks reach them; the request-validation
+// preHandler above has already restored the client's body by the time the
+// refusal hook reads its idempotency key.
+registerClientCompatHooks(app)
 
 // Record agent liveness (last_seen_at) after each authenticated agent request,
 // powering the dashboard "Connected · last seen" indicator. Registered as an

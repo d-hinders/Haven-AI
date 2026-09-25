@@ -909,6 +909,34 @@ const spendTotals = {
   },
 } as const
 
+/**
+ * #3303 (epic #3302): the client-version refusal. Only below a minimum the
+ * deployment has explicitly set, only at the payment-initiating routes and
+ * (for the signer) sign-context, and always before anything is written.
+ */
+const clientOutdatedResponse = {
+  description:
+    'Client outdated (#3303): the `X-Haven-Client` package is below the minimum version this ' +
+    'deployment accepts here. Nothing was written or signed. `client_update.upgrade_command` ' +
+    'updates it; retry the same request afterwards.',
+  content: {
+    'application/json': {
+      schema: {
+        type: 'object',
+        required: ['error', 'error_code', 'client_update', 'next_action', 'next_tool_omitted_reason'],
+        properties: {
+          error: { type: 'string' },
+          error_code: { type: 'string', enum: ['client_outdated'] },
+          client_update: { $ref: '#/components/schemas/ClientUpdate' },
+          next_action: { type: 'string', enum: [AgentPaymentNextAction.StopAndTellUser] },
+          next_tool_omitted_reason: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+} as const
+
 const errorResponse = {
   description: 'Error response',
   content: {
@@ -5618,7 +5646,9 @@ export const openapiSpec = {
         // from `routes/payments.ts` with the approval_requests replay fallback
         // (#2055, the comment at its old site). The 409 below is the reachable
         // replay outcome that was never documented.
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           '201': {
             description: 'Payment intent requires the agent signature.',
             content: {
@@ -5710,8 +5740,9 @@ export const openapiSpec = {
           'x402/MPP intent id is refused here (fetch GET /x402/{id}/sign-context instead), and a ' +
           'direct intent id is refused there — each surface serves only its own rail\'s shape.',
         security: [{ AgentApiKey: [] }],
-        parameters: [{ $ref: '#/components/parameters/PaymentId' }],
+        parameters: [{ $ref: '#/components/parameters/PaymentId' }, { $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           // #1464: a malformed uuid in the path is a 400 (central 22P02
           // mapping in infra/http-error-handler.ts), not a 500.
           '400': errorResponse,
@@ -5884,7 +5915,9 @@ export const openapiSpec = {
             },
           },
         },
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           '200': {
             description: 'Existing or resumed x402 state.',
             content: {
@@ -5928,8 +5961,10 @@ export const openapiSpec = {
             schema: { type: 'string' },
             description: 'Payment intent id from the quote/authorize response.',
           },
+          { $ref: '#/components/parameters/HavenClient' },
         ],
         responses: {
+          '426': clientOutdatedResponse,
           // #1464: a malformed uuid in the path is a 400 (central 22P02
           // mapping in infra/http-error-handler.ts), not a 500.
           '400': errorResponse,
@@ -5996,7 +6031,9 @@ export const openapiSpec = {
             },
           },
         },
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           // #2105: this alias is registered to the SAME `authorizeX402Handler`
           // as POST /x402/authorize, so its status set is identical. The 202 it
           // documented is unreachable for the same reason (see the note there);
@@ -6296,7 +6333,9 @@ export const openapiSpec = {
         // entirely. `handleSend` returns exactly one of the three refusals below
         // and `resolveExecutionRail`'s union has no fourth member, so there is
         // no success response left to describe.
+        parameters: [{ $ref: '#/components/parameters/HavenClient' }],
         responses: {
+          '426': clientOutdatedResponse,
           '400': {
             ...errorResponse,
             description:
@@ -7112,6 +7151,25 @@ export const openapiSpec = {
       },
     },
     parameters: {
+      // #3303 (epic #3302): the client-version signal.
+      HavenClient: {
+        name: 'X-Haven-Client',
+        in: 'header',
+        required: false,
+        // Deliberately unconstrained: a missing, malformed or unknown value is
+        // treated as "no header" and never refused, so the spec must not
+        // refuse one either.
+        schema: { type: 'string' },
+        description:
+          'The calling published client and its version, `<package>/<version>` (for example ' +
+          '`@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it. When the client is ' +
+          'below the version this deployment recommends, any JSON-object response carries a ' +
+          '`client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment ' +
+          'has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at ' +
+          'the payment-initiating routes (the signer: at sign-context). A missing or unparseable ' +
+          'value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never ' +
+          'refused.',
+      },
       AgentId: {
         name: 'id',
         in: 'path',
@@ -7144,6 +7202,25 @@ export const openapiSpec = {
       },
     },
     schemas: {
+      ClientUpdate: {
+        type: 'object',
+        description:
+          '#3303: the backend\'s update hint for an outdated published client. `required: true` ' +
+          'means the client is below a minimum this deployment set and will be refused at its ' +
+          'refusal points; `upgrade_command` is the exact command that updates it, on this ' +
+          'deployment\'s channel.',
+        required: ['package', 'current', 'recommended', 'min_version', 'required', 'upgrade_command', 'notes_url'],
+        properties: {
+          package: { type: 'string', examples: ['@haven_ai/mcp'] },
+          current: { type: 'string', examples: ['0.4.0-alpha.0'] },
+          recommended: { type: ['string', 'null'] },
+          min_version: { type: ['string', 'null'] },
+          required: { type: 'boolean' },
+          upgrade_command: { type: 'string', examples: ['npx -y @haven_ai/connect@alpha'] },
+          notes_url: { type: ['string', 'null'] },
+        },
+        additionalProperties: false,
+      },
       HybridAccountSigners: {
         type: 'object',
         description:

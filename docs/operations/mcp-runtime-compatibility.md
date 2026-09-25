@@ -2308,6 +2308,59 @@ true (unlike the signer's compatibility numbers above, which are point-in-time
 by design). See [`07-edge-signer.md`](../architecture/07-edge-signer.md) for
 what each server's instructions say and why they differ in length.
 
+## Client-version signal (#3303, epic #3302)
+
+Every published client names itself on each Haven API request with
+`X-Haven-Client: <package>/<version>`. That covers the SDK transport (default
+`@haven_ai/sdk/<SDK_VERSION>`, or the embedding package's own name through
+`HavenClientConfig.clientIdentity`), the local `@haven_ai/mcp` runtime, the CLI,
+the connector, and the signer on its two sign-context reads. The hosted
+`mcp-server` names itself too; it is not one of the five published packages, so
+nothing below ever applies to it.
+
+The backend reads the header against one hand-edited table, `CLIENT_COMPAT` in
+`packages/core/src/client-compat.ts`. Two things can happen:
+
+| Client is… | Effect | Where |
+|---|---|---|
+| below `recommended_version` | `client_update` (`required: false`) on any JSON-object response | every route |
+| below a **set** `min_version` | 426 `client_outdated`, before the handler runs; nothing written | `POST /payments`, `POST /machine-payments/send`, `POST /x402`, `POST /x402/authorize` for the API clients; `GET /payments/:id/sign-context` and `GET /x402/:id/sign-context` for the signer |
+| no header, unparseable, not a published package, or a `0.0.0-dev.*` snapshot | nothing, whatever the table says | — |
+
+A below-minimum client on a route that does not refuse it gets
+`client_update.required: true` instead. Sweep, sign, settle, evidence, status
+reads, an idempotent replay of an accepted request, and an agent on a retired
+rail are never refused. The table ships with every threshold `null`, so until an
+owner sets one the only observable change is the header itself.
+
+**How each runtime surfaces it.**
+- `@haven_ai/mcp` attaches the hint its own dispatch received as `client_update`
+  on the tool result, success or failure. A refusal also keeps the backend's
+  `next_tool_omitted_reason` at the top level.
+- The signer turns a refusal into `SIGN_CONTEXT_REFUSED` with
+  `backend_error_code: 'client_outdated'`, the hint as `client_update`,
+  `next_action: stop_and_tell_user`, and a `next_tool_omitted_reason` naming the
+  update command. It carries no `fallback`, because relaying other bytes cannot
+  help.
+- A hint on a successful sign-context read rides on the signing result.
+- The update command is built from the **deployment's** connector channel, not a
+  client's build-time one.
+
+**This does not reopen the 2026-08-07 decision above.** That decision ("a
+mismatch warns, it does not block") is about the x402 expected-context version a
+quote *reports*, and it stands. This signal is a separate mechanism. It refuses
+only when an owner has explicitly set a minimum for a package (owner decision
+2026-09-25, on #3302), and even then never a client that sends no header. The
+signer's refusal comes after prepare, so its contract is "nothing signed or
+submitted" and the prepared payment is left unsigned (owner decision
+2026-09-25, on #3303).
+
+**`SDK_VERSION` is a bump-managed source constant too** (`packages/sdk/src/client-identity.ts`,
+in `release-bump.mjs`'s `SOURCE_VERSION_CONSTANTS` beside `SIGNER_VERSION`,
+`HOSTED_SERVER_VERSION`, `CONNECTOR_VERSION` and `CLI_VERSION`). The "fifth
+bump-managed constant" heading above counts the constants that existed at #2423
+and is left as written. Do not hand-edit `SDK_VERSION` either.
+
 ## Typed next steps — the agent contract and its ratchet (epic #3105)
 
 Every response on a payment flow — success or refusal — tells the agent what

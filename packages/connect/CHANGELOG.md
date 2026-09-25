@@ -8,6 +8,7 @@ alone.
 
 ## Unreleased
 
+- **Client identity (#3303, epic #3302).** Every Haven API request the connector makes (setup resolve/register, status reports, the agent identity read) carries `X-Haven-Client: @haven_ai/connect/<version>` (`CONNECTOR_CLIENT_IDENTITY`), so the backend can tell an outdated connector what to run. `createConnectApiClient` takes it as an optional third argument. No flag, output or exit code changes.
 - `--doctor` no longer needs `--runtime` (#3210): the argument parser used to refuse a flagless `--doctor` before the doctor ran, which left #3120's record resolution reachable only by library callers. A flagless `--doctor` now checks the runtime recorded in `last-connect-outcome.json`, and with no resolvable record reports the existing `failed` "Runtime is unknown — the runtime config was NOT checked" verdict (exit 1). `--repair` still requires `--runtime` — it rewrites that config, so the runtime is named, never inherited — and its refusal message now says so (a whitespace-only value counts as absent). On the newly reachable path, a record-resolved runtime is named with its source on the `runtime_config` verdict, `--repair` hints carry `--runtime <runtime>` plus the allowed values instead of a bare `--doctor --repair` the parser would refuse, and the `restart` check no longer env-detects a runtime nobody named. The report schema (`version: 1`), check ids and exit-code semantics are unchanged; a flagless `--doctor --json` now emits a `DoctorReport` where it emitted the parse-failure record.
 
 ## 0.4.0-alpha.0 — 2026-09-19

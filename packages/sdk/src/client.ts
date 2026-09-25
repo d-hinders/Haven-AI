@@ -84,6 +84,7 @@ import type {
   SweepSubmitResponse,
 } from './sweep.js'
 import { HavenApiTransport } from './haven-api-transport.js'
+import type { HavenClientUpdate } from './client-identity.js'
 import {
   mapPaymentResult,
   mapPaymentStatusResult,
@@ -291,6 +292,16 @@ export class HavenClient {
    */
   withRequestContext<T>(headers: Record<string, string>, fn: () => Promise<T>): Promise<T> {
     return this.havenApi.withRequestContext(headers, fn)
+  }
+
+  /**
+   * The backend's newest `client_update` hint for this client (#3303): inside
+   * a `withRequestContext` dispatch, the one that dispatch's own requests
+   * received; outside one, the latest seen. Undefined when the client is
+   * current or the backend predates #3303.
+   */
+  clientUpdate(): HavenClientUpdate | undefined {
+    return this.havenApi.clientUpdate()
   }
 
   // ── High-Level API ───────────────────────────────────────────────

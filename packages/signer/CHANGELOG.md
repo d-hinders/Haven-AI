@@ -8,6 +8,7 @@ alone.
 
 ## Unreleased
 
+- **Client identity at sign-context; `client_outdated` refusal (#3303, epic #3302).** Both sign-context reads send `X-Haven-Client: @haven_ai/signer/<version>`. If this signer is below a minimum version the deployment has explicitly set, the backend answers 426. `haven_sign` / `haven_sign_x402` then return `SIGN_CONTEXT_REFUSED` with `backend_error_code: 'client_outdated'`, the backend's `client_update` (including `upgrade_command`), `next_action: stop_and_tell_user`, and a `next_tool_omitted_reason`. They return no signature and no `fallback`, and the prepared payment is left unsigned. A `client_update` hint on a successful read is carried onto the signing result. Nothing about what the signer signs changes.
 - **BREAKING (x402 arm): `signX402FundingTypedData` signs only a guarded funding leg or a verified settlement child (#3281, epic #3284).** A valid Haven binding is no longer enough. The x402 arm (`haven_sign` with `x402_expected` or a fetched x402 context, and `haven_sign_x402`) now signs exactly two shapes:
   - a funding-leg `PackedUserOperation` that passes the #3271 binding against the declared `payloadHash` and the #3272 direct-payment allowlist, and whose single execution is a `transfer` of the quoted amount of the quoted token to **this signer's own delegate EOA** (`assertFundingLegPaysDelegate`);
   - an erc7710 settlement child that passes `verifySettlementChild`, now also required to be delegated by this signer's own account (and never ROOT).

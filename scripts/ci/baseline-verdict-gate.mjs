@@ -51,7 +51,7 @@
 //             an inline marker, for the same reason: an empty or one-word
 //             reason is the declaration checked off, not made.
 //   <verdict> `passed` or `approved` (case-insensitive), as the WHOLE verdict
-//             word before `@` — `not approved`, `unapproved` or
+//             word before the first `@`, `--` or `baselines:` — `not approved`, `unapproved` or
 //             `passed-with-nits` are not passing, and a baseline named
 //             `approved-mock.png` does not make its line one (#3301). A line
 //             that says `skipped` or `n/a` does not verify a MODIFIED

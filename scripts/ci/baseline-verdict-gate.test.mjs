@@ -124,7 +124,7 @@ describe('parseVerdicts', () => {
     assert.deepEqual(v.names, ['topbar-desktop.png'])
   })
 
-  test('(C) the verdict word is the WHOLE head before `@`, never a substring (#3301)', () => {
+  test('(C) the verdict word is the WHOLE head before the first `@`, `--` or `baselines:`, never a substring (#3301)', () => {
     for (const line of [
       'design-review verdict: not approved @ abc1234 -- baselines: topbar-desktop.png',
       'design-review verdict: unapproved @ abc1234 -- baselines: topbar-desktop.png',

@@ -399,6 +399,33 @@ export function createStateDirectRecoveryHandlers(
     haven_submit: async (input) =>
       runTool(async () => {
         const args = parseStrict('haven_submit', input)
+        // #3329: exactly one of payment_id / task_budget_id selects what this
+        // relays — a structured parse error, before anything is contacted,
+        // rather than an ambiguous guess at which record the signature is for.
+        const hasPaymentId = typeof args.payment_id === 'string' && args.payment_id.length > 0
+        const hasTaskBudgetId = typeof args.task_budget_id === 'string' && args.task_budget_id.length > 0
+        if (hasPaymentId === hasTaskBudgetId) {
+          throw new HostedToolError({
+            code: 'INVALID_INPUT',
+            message:
+              'haven_submit takes exactly one of payment_id or task_budget_id — never both, never ' +
+              'neither. Nothing was relayed.',
+            statusCode: 400,
+            nextStep: refusalNextStep({
+              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextTool: null,
+              nextToolOmittedReason: 'the caller has to resend with exactly one of the two ids',
+            }),
+          })
+        }
+        if (hasTaskBudgetId) {
+          const result = await haven.submitTaskBudget(args.task_budget_id, args.signature)
+          return {
+            task_budget: result.taskBudget,
+            status: result.status,
+            ...(result.closeTxHash !== undefined ? { close_tx_hash: result.closeTxHash } : {}),
+          }
+        }
         // #2041: the erc7710 branch, for the GENERIC plain-HTTP flow. The MCP
         // flow's equivalent lives in haven_settle_mcp_tool, which also CALLS
         // the merchant; a plain-HTTP merchant is retried by the agent itself,

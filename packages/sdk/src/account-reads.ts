@@ -8,12 +8,15 @@ import type {
   HavenAllowanceSummary,
   HavenBalanceCoverage,
   HavenPaymentReceipt,
+  HavenTaskBudget,
+  HavenTaskBudgetSummary,
   PaymentStatusResult,
   PostPurchaseAllowanceSummary,
   RawHavenAgent,
   RawHavenAllowanceSummary,
   RawHavenBalanceCoverage,
   RawHavenPaymentReceiptsResponse,
+  RawTaskBudget,
   HavenPaymentReceiptsPage,
 } from './types.js'
 import { AgentPaymentWarningCode } from './types.js'
@@ -66,6 +69,45 @@ export function formatRemainingDisplay(tokenAddress: string, tokenSymbol: string
     : `${remainingAtomic} ${tokenSymbol} (atomic; unknown decimals)`
 }
 
+/** #3329: `RawTaskBudget` (snake_case wire) → `HavenTaskBudget` (camelCase). */
+export function mapTaskBudget(raw: RawTaskBudget): HavenTaskBudget {
+  return {
+    id: raw.id,
+    agentId: raw.agent_id,
+    chainId: raw.chain_id,
+    tokenAddress: raw.token_address,
+    recipientAddress: raw.recipient_address,
+    parentDelegationHash: raw.parent_delegation_hash,
+    delegationHash: raw.delegation_hash,
+    label: raw.label,
+    maxAtomic: raw.max_atomic,
+    status: raw.status,
+    expiresAt: raw.expires_at,
+    isExpired: raw.is_expired,
+    createdAt: raw.created_at,
+    openedAt: raw.opened_at,
+    closedAt: raw.closed_at,
+    closeTxHash: raw.close_tx_hash,
+  }
+}
+
+/** #3329: `HavenTaskBudget` → the condensed row `getAgentSummary()` carries. */
+function summarizeTaskBudget(taskBudget: HavenTaskBudget): HavenTaskBudgetSummary {
+  const token = resolveTokenFromAddress(taskBudget.tokenAddress)
+  const maxDisplay = token
+    ? `${formatAtomicAmount(safeBigInt(taskBudget.maxAtomic), token.decimals)} ${token.symbol}`
+    : `${taskBudget.maxAtomic} (atomic; unknown decimals)`
+  return {
+    id: taskBudget.id,
+    label: taskBudget.label,
+    tokenAddress: taskBudget.tokenAddress,
+    maxAtomic: taskBudget.maxAtomic,
+    maxDisplay,
+    recipientAddress: taskBudget.recipientAddress,
+    expiresAt: taskBudget.expiresAt,
+  }
+}
+
 /**
  * Internal read-only account boundary for HavenClient.
  *
@@ -95,7 +137,11 @@ export class AccountReads {
   }
 
   async getAgentSummary(): Promise<HavenAgentSummary> {
-    const [agent, allowanceSummary] = await Promise.all([this.getAgent(), this.getAllowances()])
+    const [agent, allowanceSummary, taskBudgets] = await Promise.all([
+      this.getAgent(),
+      this.getAllowances(),
+      this.listOpenTaskBudgetsSummary(),
+    ])
     // #3128: every field here is the HavenAllowance's own (or, for the display
     // string, derived by the same function `getAllowances` used), so the two
     // reads cannot disagree for the same fixture.
@@ -112,7 +158,33 @@ export class AccountReads {
       }
     })
     const readiness = deriveReadiness(agent.status, allowances)
-    return { ...agent, readiness, spend_authority_readiness: readiness, allowances }
+    return { ...agent, readiness, spend_authority_readiness: readiness, allowances, taskBudgets }
+  }
+
+  /**
+   * #3329: `GET /task-budgets?status=open`, mapped to the condensed summary
+   * row `getAgentSummary()` carries. Fails SOFT per the #3093 rule (default
+   * every array wire key to `[]` so an absent/malformed key degrades instead
+   * of taking the route down): a 404 (a backend that predates #3329's
+   * route), ANY other transport error, an undefined/null body, or a missing
+   * or non-array `task_budgets` key all return `[]` rather than throwing —
+   * `getAgentSummary`'s identity + readiness + allowances fields are what
+   * callers depend on, and this read must never be why the whole summary
+   * fails.
+   */
+  private async listOpenTaskBudgetsSummary(): Promise<HavenTaskBudgetSummary[]> {
+    try {
+      const raw = await this.transport.get<{ task_budgets?: RawTaskBudget[] } | null | undefined>(
+        '/task-budgets?status=open',
+      )
+      const rows = raw?.task_budgets
+      if (!Array.isArray(rows)) return []
+      return rows.map((row) => summarizeTaskBudget(mapTaskBudget(row)))
+    } catch {
+      // #3093: any transport failure (404, network error, malformed body) —
+      // never let it fail the agent summary this feeds.
+      return []
+    }
   }
 
   async getAllowances(): Promise<HavenAllowanceSummary> {

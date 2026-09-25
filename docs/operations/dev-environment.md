@@ -363,7 +363,12 @@ Isolation rules that are non-negotiable for a payments product:
   (`npm run check:route-modules` and the backend suite both fail on a stale
   table). New modules are born ENFORCED with their own `enforcedModules`
   entry — #3164's `routes/agent-organizations.ts` (its own `/organizations`
-  prefix) followed the #3167 precedent exactly. The `lint:request-schemas`
+  prefix) followed the #3167 precedent exactly, and #3329's two new modules
+  did the same — the owner-auth `routes/agent-task-budgets.ts` (one GET under
+  the `/agents` prefix) and the agent-auth, money-path
+  `routes/task-budgets.ts` (its own `/task-budgets` prefix): a module with no
+  installed caller has no old shape to shadow for, so it is enforced from its
+  first commit even though it moves money. The `lint:request-schemas`
   gate keys its baseline entries with the
   same string, so the gate and the runtime agree about which modules are
   still shadowed — with one stated limit, closed in #3030: the gate reads a

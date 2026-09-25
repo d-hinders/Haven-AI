@@ -13,6 +13,8 @@ import {
   TYPED_DATA_NOT_ALLOWED,
   assertBoundDirectPaymentUserOp as assertSdkBoundDirectPaymentUserOp,
   isSettlementChildTypedData,
+  assertOwnTaskChild,
+  assertOwnTaskBudgetCloseUserOp,
   type HavenClientUpdate,
   type X402PaymentRequired,
 } from '@haven_ai/sdk/edge'
@@ -33,11 +35,13 @@ import type {
 } from './core.js'
 import {
   fetchDirectSignContext,
+  fetchTaskBudgetSignContext,
   fetchX402SignContext,
   HavenSignContextError,
   type HavenIdentity,
   type FetchedDirectSignContext,
   type FetchedSignContext,
+  type FetchedTaskBudgetSignContext,
 } from './sign-context.js'
 import { nextStepWireFields, signerRefusalStep } from './next-step.js'
 
@@ -263,6 +267,13 @@ export const toolSchemas = {
     // generous headroom while keeping the offline signer from materializing
     // arbitrarily large caller input.
     typed_data_b64: z.string().min(1).max(262144).optional(),
+    // #3329: sign a task budget's own child delegation (purpose `open`) or
+    // its early-close UserOp (purpose `close`) — the signer fetches the
+    // exact typed data and expectation itself, exactly like payment_id.
+    // Mutually exclusive with payment_id / payload_hash (checked in the
+    // handler, since Zod's object-level refine on a raw shape used by
+    // several call sites is not the shape this schema is composed as).
+    task_budget_id: z.string().min(1).optional(),
   },
   haven_x402_sign_header: {
     // The parsed HTTP 402 PaymentRequired from the merchant. Typed as an object
@@ -317,6 +328,10 @@ const SIGN_DESCRIPTION = [
   'Next: call mcp__haven__haven_submit with signature, then pass x402_binding',
   'to mcp__haven-signer__haven_x402_sign_header. A bare payload_hash with no payment_id, typed_data',
   'or x402_expected is REFUSED (BARE_HASH_REFUSED): a hash carries nothing this signer can verify.',
+  'TASK BUDGETS (#3329): pass task_budget_id ALONE — mutually exclusive with payment_id and',
+  'payload_hash — to sign a task budget’s own child delegation (opening it) or its early-close',
+  'UserOp; this signer fetches the exact typed data itself. Result then carries next_tool_name',
+  '(haven_submit) and next_arguments { task_budget_id, signature } instead of x402_binding.',
 ].join(' ')
 
 const X402_SIGN_HEADER_DESCRIPTION = [
@@ -670,10 +685,97 @@ export function createToolHandlers(
     }
   }
 
+  /**
+   * #3329: resolve + verify + sign a `task_budget_id` call — a DIFFERENT
+   * typed-data class from everything else `haven_sign` signs (a self-
+   * delegated child, or its early-close UserOp), verified by the SDK's
+   * task-budget guards rather than the direct-payment / x402 ones. Mutually
+   * exclusive with payment_id / payload_hash, checked before any fetch.
+   */
+  async function signTaskBudget(
+    taskBudgetId: string,
+  ): Promise<{ signature: string; task_budget_id: string; purpose: 'open' | 'close'; next_tool_name: string; next_tool_server_role: 'hosted'; next_arguments: Record<string, unknown> }> {
+    const identity = (await options.signContext?.loadIdentity()) ?? null
+    if (!identity) {
+      throw new HavenSigningError(
+        'task_budget_id signing needs the agent identity (identity.json next to the signer ' +
+          `credentials), which this signer could not load. Re-run \`${connectorRerunCommand()}\` to restore it.`,
+      )
+    }
+    const ctx: FetchedTaskBudgetSignContext = await fetchTaskBudgetSignContext(
+      identity,
+      taskBudgetId,
+      options.signContext?.fetchImpl,
+      undefined,
+      options.signContext?.clientIdentity,
+    )
+    let signature: string
+    if (ctx.purpose === 'open') {
+      try {
+        assertOwnTaskChild(
+          ctx.typedData,
+          {
+            chainId: ctx.expected.chainId,
+            tokenAddress: ctx.expected.tokenAddress,
+            maxAmountAtomic: ctx.expected.maxAmountAtomic,
+            recipientAddress: ctx.expected.recipientAddress,
+            expiresAt: ctx.expected.expiresAt,
+            parentDelegationHash: ctx.expected.parentDelegationHash,
+          },
+          signer.delegateAddress,
+        )
+      } catch (err) {
+        if (err instanceof HavenTypedDataRefusedError) throw err
+        throw new HavenTypedDataRefusedError(err instanceof Error ? err.message : String(err))
+      }
+      signature = await signer.signDelegationTypedData(ctx.typedData)
+    } else {
+      try {
+        assertUserOpTypedDataBinding(ctx.typedData, ctx.userOpHash)
+      } catch (err) {
+        if (err instanceof HavenUserOpBindingError) throw new HavenUserOpBindingRefusedError(err.message)
+        throw err
+      }
+      try {
+        assertOwnTaskBudgetCloseUserOp(
+          ctx.typedData,
+          { delegationHash: ctx.expected.delegationHash },
+          signer.delegateAddress,
+        )
+      } catch (err) {
+        if (err instanceof HavenTypedDataRefusedError) throw err
+        throw new HavenTypedDataRefusedError(err instanceof Error ? err.message : String(err))
+      }
+      signature = await signer.signDelegationTypedData(ctx.typedData)
+    }
+    await auditSigning('haven_sign', hashTypedData(ctx.typedData as Parameters<typeof hashTypedData>[0]))
+    return {
+      signature,
+      task_budget_id: ctx.taskBudgetId,
+      purpose: ctx.purpose,
+      next_tool_name: 'haven_submit',
+      next_tool_server_role: 'hosted',
+      next_arguments: { task_budget_id: ctx.taskBudgetId, signature },
+    }
+  }
+
   return {
     haven_sign: async (input) =>
       runTool(async () => {
         const args = parse('haven_sign', coerceX402Expected(input))
+        if (args.task_budget_id) {
+          if (args.payment_id || args.payload_hash) {
+            throw new z.ZodError([
+              {
+                code: z.ZodIssueCode.custom,
+                path: ['task_budget_id'],
+                message:
+                  'task_budget_id is mutually exclusive with payment_id / payload_hash — pass exactly one.',
+              },
+            ])
+          }
+          return signTaskBudget(args.task_budget_id)
+        }
         // #3271: only haven_sign falls back to the direct-payment
         // sign-context; haven_sign_x402 never does (below).
         const resolved = await resolveSignContext(args, { allowDirectFallback: true })

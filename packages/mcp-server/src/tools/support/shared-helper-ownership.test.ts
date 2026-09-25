@@ -1091,9 +1091,10 @@ describe('shared fixture (test-support/hosted-mcp.ts)', () => {
     })
     await handlers().haven_get_agent({})
     const calls = recordedCalls()
-    // getAgentSummary reads the agent AND its allowances (two GETs, the shape
-    // the original tools.test.ts fixture modeled).
-    expect(calls).toHaveLength(2)
+    // getAgentSummary reads the agent, its allowances, AND its open task
+    // budgets (#3329: GET /task-budgets?status=open, three GETs total —
+    // the third fails soft to [] when unstubbed, per the #3093 rule).
+    expect(calls).toHaveLength(3)
     const agentCall = calls.find((c) => c.url.endsWith('/machine-payments/agent'))!
     expect(agentCall.method).toBe('GET')
     expect(agentCall.headers).toBeDefined()

@@ -46,7 +46,7 @@ import {
 } from './tools/registry.js'
 
 /**
- * The 24 hosted tool names, pinned HERE independently of `toolSchemas` — so
+ * The 26 hosted tool names, pinned HERE independently of `toolSchemas` — so
  * the completeness assertion cannot heal itself when a contract entry is
  * removed (a mutation proof deletes the entry; a list derived from the
  * mutated map would shrink with it and stay green).
@@ -76,6 +76,9 @@ const PINNED_TOOL_NAMES: readonly HostedToolName[] = [
   'haven_sweep_delegate',
   'haven_discover_tools',
   'haven_submit_catalog_entry',
+  // #3329:
+  'haven_open_task_budget',
+  'haven_close_task_budget',
 ]
 
 /** A complete synthetic registry for the injectable detection-logic tests. */

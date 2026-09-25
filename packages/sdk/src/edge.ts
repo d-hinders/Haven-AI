@@ -84,3 +84,16 @@ export {
   assertFundingLegPaysDelegate,
   assertOwnSettlementChild,
 } from './direct-payment-guard.js'
+export {
+  MAX_TASK_BUDGET_TTL_SECONDS,
+  DELEGATION_TYPEHASH,
+  CAVEAT_TYPEHASH,
+  isTaskChildTypedData,
+  assertOwnTaskChild,
+  assertOwnTaskBudgetCloseUserOp,
+  hashDelegation,
+  type TaskChildTypedData,
+  type TaskChildExpectation,
+  type TaskBudgetCloseExpectation,
+  type DelegationForHashing,
+} from './task-budget-guards.js'

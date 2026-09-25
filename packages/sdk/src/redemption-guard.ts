@@ -28,6 +28,24 @@
  * `@metamask/delegation-abis`' `IDelegationManager` ABI (a devDependency
  * only, in `@haven_ai/signer`'s `package.json`) and pinned against the kit's
  * own encoder by `packages/signer/src/redemption-guard.pins.test.ts`.
+ *
+ * TASK BUDGETS (#3329) widen the accepted chain from exactly one link to ONE
+ * OR TWO: `[budget]` (unchanged) or `[task child, budget]` — leaf first, as
+ * everywhere else in this file. The two-link case is safe by the SAME
+ * reasoning as the one-link case, extended one hop: the task child's own
+ * `delegate` AND `delegator` are this signer's OWN account (a
+ * SELF-delegation — `assertOwnTaskChild` in `task-budget-guards.ts` is what
+ * proves its caveats narrow, never widen, the budget it chains under), and
+ * the budget link underneath it keeps the existing (3)/(4) shape: delegate ==
+ * own account, delegator != own account (a real grant from elsewhere). A
+ * chain redeemed this way can therefore only ever be AS OR MORE restrictive
+ * than redeeming the budget directly — the task child ADDS caveats (amount,
+ * recipient, expiry); it can never remove one, because
+ * `DelegationManager.redeemDelegations` ANDs every caveat of every link in
+ * the chain (the same AND-only property `settlement-child.ts`'s header
+ * documents). Any OTHER two-link chain — a leaf delegated by a third party, a
+ * leaf whose delegate is not this signer's own account, a chain longer than
+ * two — is refused exactly as before.
  */
 import {
   decodeAbiParameters,
@@ -171,12 +189,16 @@ export function assertRedeemsOwnBudgetDelegation(redeemCalldata: Hex, ownAccount
         "and runs the paired execution as the account, with no caveat, budget or recipient pin",
     )
   }
-  // (2b) Exactly one link. Haven's budget delegation is a single grant from the
-  // user's account to this agent's account (`delegations: [[delegation]]` in the
-  // backend's prepareRedemption); a longer chain is never emitted, and each extra
-  // hop is a delegator this signer cannot vouch for.
-  if (delegations.length !== 1) {
-    refuse(`carries a ${delegations.length}-link delegation chain, not the single budget grant Haven emits`)
+  // (2b) One OR TWO links (#3329). Haven's budget delegation is a single
+  // grant from the user's account to this agent's account (`delegations:
+  // [[delegation]]` in the backend's prepareRedemption) — one link. A task
+  // budget payment redeems `[task child, budget]` — two links, leaf first.
+  // Anything else is never emitted.
+  if (delegations.length !== 1 && delegations.length !== 2) {
+    refuse(
+      `carries a ${delegations.length}-link delegation chain, not the single budget grant or the ` +
+        'two-link [task child, budget] chain Haven emits',
+    )
   }
 
   // (6b) Canonical encoding of the permission context itself.
@@ -198,10 +220,37 @@ export function assertRedeemsOwnBudgetDelegation(redeemCalldata: Hex, ownAccount
     )
   }
 
-  // (4) The root delegation's delegator must NOT be this signer's own
-  // account — a self-to-self delegation is exactly the B1 shape restated:
-  // it authorises nothing beyond what the account already is, so it must be
-  // a real grant FROM somewhere else (the treasury/budget owner).
+  if (delegations.length === 2) {
+    // #3329: the two-link task-budget chain. The leaf (the task child) must
+    // be SELF-delegated — `delegator` is this signer's own account too — the
+    // shape `assertOwnTaskChild` (`task-budget-guards.ts`) already proved is
+    // a narrowing re-delegation, never a grant from elsewhere.
+    if (leaf.delegator.toLowerCase() !== ownAccount.toLowerCase()) {
+      refuse(
+        `carries a two-link chain whose leaf is delegated by ${leaf.delegator}, not this signer's ` +
+          `own account (${ownAccount}) — a task-budget child is always self-delegated`,
+      )
+    }
+    const budget = delegations[1]
+    if (budget.delegate.toLowerCase() !== ownAccount.toLowerCase()) {
+      refuse(
+        `carries a two-link chain whose second link delegates to ${budget.delegate}, not this ` +
+          `signer's own account (${ownAccount})`,
+      )
+    }
+    if (budget.delegator.toLowerCase() === ownAccount.toLowerCase()) {
+      refuse(
+        "carries a two-link chain whose budget link is granted by this signer's OWN account — a " +
+          'real budget delegation always comes from elsewhere',
+      )
+    }
+    return
+  }
+
+  // (4) One-link chain: the delegation's own delegator must NOT be this
+  // signer's own account — a self-to-self delegation is exactly the B1 shape
+  // restated: it authorises nothing beyond what the account already is, so
+  // it must be a real grant FROM somewhere else (the treasury/budget owner).
   const root = delegations[delegations.length - 1]
   if (root.delegator.toLowerCase() === ownAccount.toLowerCase()) {
     refuse(

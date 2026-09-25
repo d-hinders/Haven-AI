@@ -264,6 +264,16 @@ export {
   assertBoundDirectPaymentUserOp,
 } from './direct-payment-guard.js'
 export { ROOT_AUTHORITY, verifySettlementChild, type SettlementChildExpectation } from './settlement-child.js'
+export {
+  MAX_TASK_BUDGET_TTL_SECONDS,
+  isTaskChildTypedData,
+  assertOwnTaskChild,
+  assertOwnTaskBudgetCloseUserOp,
+  hashDelegation,
+  type TaskChildTypedData,
+  type TaskChildExpectation,
+  type TaskBudgetCloseExpectation,
+} from './task-budget-guards.js'
 
 // #1328: mpp.ts's demo challenge/proof helpers (parseMachinePaymentChallenge,
 // parseMachinePaymentChallengeResponse, buildMachinePaymentIdempotencyKey,

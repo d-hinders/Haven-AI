@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
+import { useTaskBudgets, type TaskBudget } from '@/hooks/useTaskBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
 import EditBudgetModal from './EditBudgetModal'
 import { Card } from './ui/Card'
@@ -20,8 +21,10 @@ import { Skeleton } from './ui/Skeleton'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
+import { Row } from './ui/Row'
 import { useToast } from './ui/Toast'
 import { truncateAddress } from '@/components/haven'
+import { timeUntil } from '@/lib/format'
 
 interface TokenOption {
   address: string
@@ -57,6 +60,14 @@ const PERIODS: Array<{ label: string; seconds: number }> = [
 export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudgetChange }: Props) {
   const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners } =
     useDelegationBudget(agentId, chainId)
+  // #3329: read separately from the period budgets above — a failed fetch
+  // here must never take the budgets list down with it, so `taskBudgets`
+  // stays `null` (nothing rendered) rather than surfacing its own error UI.
+  const { taskBudgets } = useTaskBudgets(agentId)
+  const openTaskBudgets = useMemo(() => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    return (taskBudgets ?? []).filter((t) => t.status === 'open' && !t.is_expired && t.expires_at > nowSec)
+  }, [taskBudgets])
   const { toast } = useToast()
   // #3166: the ACTIVE budget whose limits are being edited in place, and the
   // modal's open flag — one state so closing the modal and clearing the
@@ -247,6 +258,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
               key={b.delegation_hash}
               budget={b}
               tokens={tokens}
+              openTaskBudgets={openTaskBudgets}
               onRevoke={handleRevoke}
               onEdit={setEditing}
               busy={busy}
@@ -255,6 +267,18 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
           ))
         )}
       </Card.Section>
+
+      {/* #3329: task budgets are a separate, self-closing authority carved
+          from a budget above — listed here only when at least one is open,
+          never as an empty section. */}
+      {openTaskBudgets.length > 0 ? (
+        <Card.Section divided className="mt-4">
+          <p className="py-2 text-sm font-medium text-[var(--v2-ink)]">Task budgets</p>
+          {openTaskBudgets.map((t) => (
+            <TaskBudgetRow key={t.id} taskBudget={t} tokens={tokens} />
+          ))}
+        </Card.Section>
+      ) : null}
 
       {tokens.length > 0 ? (
         <div className="mt-4 space-y-2">
@@ -337,6 +361,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
 function BudgetRow({
   budget,
   tokens,
+  openTaskBudgets,
   onRevoke,
   onEdit,
   busy,
@@ -344,6 +369,8 @@ function BudgetRow({
 }: {
   budget: DelegationBudget
   tokens: TokenOption[]
+  /** Open, unexpired task budgets across the agent (#3329) — filtered to this row's parent below. */
+  openTaskBudgets: TaskBudget[]
   onRevoke: (hash: string) => void
   /** Opens the edit-in-place flow (#3166) for THIS row. */
   onEdit: (budget: DelegationBudget) => void
@@ -354,6 +381,14 @@ function BudgetRow({
   const amount = t ? formatUnits(BigInt(budget.budget_atomic), t.decimals) : budget.budget_atomic
   const periodLabel =
     PERIODS.find((p) => p.seconds === budget.period_seconds)?.label ?? `every ${budget.period_seconds}s`
+
+  // #3329: the sum of open, unexpired task budgets carved from THIS budget —
+  // matched by parent delegation hash, never rendered when the sum is zero.
+  const reservedAtomic = openTaskBudgets
+    .filter((tb) => tb.parent_delegation_hash === budget.delegation_hash)
+    .reduce((sum, tb) => sum + BigInt(tb.max_atomic), 0n)
+  const reservedDisplay = t ? formatUnits(reservedAtomic, t.decimals) : reservedAtomic.toString()
+
   return (
     <div className="flex items-center justify-between gap-3 py-3">
       <div className="min-w-0">
@@ -363,6 +398,11 @@ function BudgetRow({
         <p className="truncate text-xs text-[var(--v2-ink-muted)]">
           {budget.recipient_address ? `to ${truncateAddress(budget.recipient_address)}` : 'to any recipient'}
         </p>
+        {reservedAtomic > 0n ? (
+          <p className="text-xs text-[var(--v2-ink-3)]">
+            Reserved by open task budgets: {reservedDisplay} {t?.symbol ?? ''}
+          </p>
+        ) : null}
       </div>
       {/* #3166: Edit changes this budget's limits in place — same slot, same
           agent key, new owner-signed delegation. It is hidden while a
@@ -384,4 +424,19 @@ function BudgetRow({
       </div>
     </div>
   )
+}
+
+/**
+ * One open, unexpired task budget (#3329) — the self-closing authority
+ * carved from a period budget above. Reuses the `Row` primitive rather than
+ * a bespoke layout, since this is now the second row-of-a-list shape in this
+ * file (the period-budget rows predate `Row` and are left as-is — converting
+ * them is out of scope here).
+ */
+function TaskBudgetRow({ taskBudget, tokens }: { taskBudget: TaskBudget; tokens: TokenOption[] }) {
+  const t = tokens.find((x) => x.address.toLowerCase() === taskBudget.token_address.toLowerCase())
+  const max = t ? formatUnits(BigInt(taskBudget.max_atomic), t.decimals) : taskBudget.max_atomic
+  const parts = [`up to ${max} ${t?.symbol ?? ''}`.trim(), `ends ${timeUntil(taskBudget.expires_at * 1000)}`]
+  if (taskBudget.recipient_address) parts.push(`to ${truncateAddress(taskBudget.recipient_address)}`)
+  return <Row title={taskBudget.label || 'Task budget'} subtitle={parts.join(' · ')} />
 }

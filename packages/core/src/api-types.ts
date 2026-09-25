@@ -521,6 +521,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agents/{id}/task-budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List an agent's task budgets.
+         * @description Every task budget on this agent, newest first — the owner-facing twin of the agent-auth list at GET /task-budgets. Scoped by BOTH agent id and the caller's ownership of it.
+         */
+        get: operations["listAgentTaskBudgets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents/{id}/rekey": {
         parameters: {
             query?: never;
@@ -2132,6 +2152,107 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/task-budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List task budgets for the authenticated agent.
+         * @description Default status=open: OPEN and not expired. status=all: every row regardless of status or expiry.
+         */
+        get: operations["listTaskBudgets"];
+        put?: never;
+        /**
+         * Open a task budget, step 1: build the unsigned child (nothing signed yet).
+         * @description Carves an unsigned, self-delegated child from the agent's active budget delegation for (token, recipient|open) — chain [taskChild, budget], delegate = the agent's own delegate account, never ANY_BENEFICIARY. Stored pending; the agent signs sign_data.typed_data and POSTs it to /task-budgets/{id}/submit to open it. Pre-sign refusal (409 task_budget_exceeds_remaining) when max_amount_atomic plus this agent's other OPEN task budgets under the same parent would exceed the parent's on-chain remaining budget — a convenience, never the real control: the enforcers still rule at redemption.
+         */
+        post: operations["openTaskBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/task-budgets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch one task budget. */
+        get: operations["getTaskBudget"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/task-budgets/{id}/sign-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Re-servable, byte-free signing handoff for a pending or closing task budget.
+         * @description purpose='open' (status pending): typed_data is the EIP-712 Delegation payload for the task child. purpose='close' (status closing): typed_data is the userOp typed data for the disableDelegation call, plus user_operation and user_op_hash. Any other status answers 409 sign_context_unavailable.
+         */
+        get: operations["getTaskBudgetSignContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/task-budgets/{id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit the agent signature — opens a pending child, or submits a closing UserOp.
+         * @description status=pending: verifies signature recovers the agent's delegate key over the stored child typed data, then flips to open. status=closing: submits the stored close UserOp with signature; flips to closed. Any other status is 409.
+         */
+        post: operations["submitTaskBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/task-budgets/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a task budget — trivially if never signed or already expired, otherwise prepares the revocation.
+         * @description status=pending, or status=open past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the agent's own delegate account and returns sign_data for the agent to sign, then submit via POST /task-budgets/{id}/submit. status=closing: re-serves the SAME sign_data (idempotent). status=closed: 409.
+         */
+        post: operations["closeTaskBudget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/payments": {
         parameters: {
             query?: never;
@@ -2930,6 +3051,36 @@ export type components = {
             /** Format: date-time */
             created_at: string;
         };
+        TaskBudget: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            agent_id: string;
+            chain_id: number;
+            /** @description Stored lowercase. */
+            token_address: string;
+            /** @description Lowercase recipient pin, or null when this task budget carries none. */
+            recipient_address: string | null;
+            /** @description The delegation's stable identity (#827) — keccak of the unsigned delegation. */
+            parent_delegation_hash: string;
+            /** @description This task budget's own child delegation hash. */
+            delegation_hash: string;
+            label: string | null;
+            max_atomic: string;
+            /** @enum {string} */
+            status: "pending" | "open" | "closing" | "closed";
+            /** @description Unix seconds. */
+            expires_at: number;
+            /** @description Derived: expires_at <= now. */
+            is_expired: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            opened_at: string | null;
+            /** Format: date-time */
+            closed_at: string | null;
+            close_tx_hash: string | null;
+        };
         Contact: {
             /** Format: uuid */
             id: string;
@@ -3602,6 +3753,8 @@ export type components = {
             to: string;
             /** @description Optional dedupe key (#1207): a retried request with the same key returns the first request's result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer is a 409. Same contract as /machine-payments/send. */
             idempotency_key?: string;
+            /** @description #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. */
+            task_budget_id?: string;
         } & {
             [key: string]: unknown;
         };
@@ -3868,6 +4021,8 @@ export type components = {
             paymentRequired?: {
                 [key: string]: unknown;
             };
+            /** @description #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget's signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent's delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch. */
+            taskBudgetId?: string;
         };
         X402MerchantCallContext: {
             /** Format: uuid */
@@ -6795,6 +6950,60 @@ export interface operations {
             };
             /** @description Error response */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listAgentTaskBudgets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Task budgets ordered by created_at DESC. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        task_budgets: components["schemas"]["TaskBudget"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14026,6 +14235,567 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listTaskBudgets: {
+        parameters: {
+            query?: {
+                status?: "open" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Task budgets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        task_budgets: components["schemas"]["TaskBudget"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    openTaskBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Defaults to the chain's USDC.
+                     * @example 0x1111111111111111111111111111111111111111
+                     */
+                    token_address?: string;
+                    /** @description Positive atomic amount; must fit uint96. */
+                    max_amount_atomic: string;
+                    /** @description This task budget's lifetime, 60 s to 24 h. */
+                    ttl_seconds: number;
+                    /**
+                     * @description Optional recipient pin.
+                     * @example 0x1111111111111111111111111111111111111111
+                     */
+                    recipient_address?: string;
+                    label?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Pending task budget stored; the agent signs sign_data.typed_data next. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        task_budget: components["schemas"]["TaskBudget"];
+                        sign_data: {
+                            /** @enum {string} */
+                            signature_scheme: "eip712_delegation";
+                            /** @description EIP-712 typed data (primaryType 'Delegation') the agent signs verbatim. */
+                            typed_data: {
+                                [key: string]: unknown;
+                            };
+                        };
+                        /** @enum {string} */
+                        next_action: "sign_then_submit";
+                        instructions: string;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description no_delegation_for_target — no active budget delegation authorizes this token/recipient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description not_delegation_rail, or task_budget_exceeds_remaining (carries remaining_atomic, reserved_atomic, requested_atomic). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Money-path rate limit. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getTaskBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The task budget. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        task_budget: components["schemas"]["TaskBudget"];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getTaskBudgetSignContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sign context for whichever signature is currently pending. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        task_budget_id: string;
+                        /** @enum {string} */
+                        purpose: "open" | "close";
+                        /** @enum {integer} */
+                        task_sign_context_version: 1;
+                        typed_data: {
+                            [key: string]: unknown;
+                        };
+                        /** @description purpose=close only. */
+                        user_operation?: {
+                            [key: string]: unknown;
+                        };
+                        /** @description purpose=close only. */
+                        user_op_hash?: string;
+                        expected: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description sign_context_unavailable — the task budget is open, closed, or has no signature currently pending. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    submitTaskBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    signature: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Opened (from pending) or closed (from closing). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        task_budget: components["schemas"]["TaskBudget"];
+                        /** @enum {string} */
+                        status: "open" | "closed";
+                        /** @description Present when status=closed. */
+                        close_tx_hash?: string;
+                    };
+                };
+            };
+            /** @description signature_mismatch, or a malformed signature. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Money-path rate limit. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    closeTaskBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Closed trivially, or a close signature is now pending. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        task_budget: components["schemas"]["TaskBudget"];
+                        /**
+                         * @description Present on a trivial close.
+                         * @enum {string}
+                         */
+                        status?: "closed";
+                        /** @description Present when a live child needs a revocation signature. */
+                        sign_data?: {
+                            /** @enum {string} */
+                            signature_scheme?: "eip712_userop";
+                            typed_data?: {
+                                [key: string]: unknown;
+                            };
+                            user_op_hash?: string;
+                        };
+                        /** @enum {string} */
+                        next_action?: "sign_then_submit";
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Already closed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Money-path rate limit. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -83,15 +83,37 @@ interface Caveat {
   terms: string
 }
 
-/** True when this typed data is a delegation — the shape that must never be signed unbound. */
+/**
+ * True when this typed data is a delegation — the shape that must never be
+ * signed unbound. Excludes a SELF-delegation (`delegate === delegator`,
+ * #3329): that is the shape of a task-budget child
+ * (`task-budget-guards.ts`'s `isTaskChildTypedData`), a DIFFERENT typed-data
+ * class verified by a different function against a different expectation. A
+ * real settlement child's `delegate` is always a facilitator or
+ * `ANY_BENEFICIARY` — never this account's own address — so narrowing here
+ * costs this verifier nothing and keeps the two classes from ever
+ * overlapping.
+ */
 export function isSettlementChildTypedData(value: unknown): value is SettlementChildTypedData {
   const td = value as SettlementChildTypedData | undefined
-  return (
-    !!td &&
-    td.primaryType === 'Delegation' &&
-    typeof td.domain?.verifyingContract === 'string' &&
-    Array.isArray((td.message as { caveats?: unknown })?.caveats)
-  )
+  if (
+    !td ||
+    td.primaryType !== 'Delegation' ||
+    typeof td.domain?.verifyingContract !== 'string' ||
+    !Array.isArray((td.message as { caveats?: unknown })?.caveats)
+  ) {
+    return false
+  }
+  const delegate = td.message?.delegate
+  const delegator = td.message?.delegator
+  if (
+    typeof delegate === 'string' &&
+    typeof delegator === 'string' &&
+    delegate.toLowerCase() === delegator.toLowerCase()
+  ) {
+    return false
+  }
+  return true
 }
 
 function same(a: string | undefined, b: string | undefined): boolean {

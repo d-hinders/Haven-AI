@@ -18,6 +18,7 @@
  *   #2810  catalog / quote / prepare          -> tools/catalog-purchase.ts
  *   #2811  plain-HTTP x402                    -> tools/plain-http-x402.ts
  *   #2812  paid-MCP completion                -> tools/paid-mcp-completion.ts
+ *   #3329  task budgets                       -> tools/task-budgets.ts
  *
  * This module is now a THIN compatibility/composition facade: it keeps the
  * `createToolHandlers` composition root (the one place every entry imports),
@@ -36,6 +37,7 @@ import { createCatalogPurchaseHandlers } from './tools/catalog-purchase.js'
 import { createPaidMcpCompletionHandlers } from './tools/paid-mcp-completion.js'
 import { createPlainHttpX402Handlers } from './tools/plain-http-x402.js'
 import { createStateDirectRecoveryHandlers } from './tools/state-direct-recovery.js'
+import { createTaskBudgetHandlers } from './tools/task-budgets.js'
 import { HostedToolError } from './tools/support/errors.js'
 
 // #2807: the parsing seam throws through the SUPPORT module's HostedToolError
@@ -96,6 +98,11 @@ export {
   type PaidMcpCompletionToolName,
   type ResolvedMerchantCallContext,
 } from './tools/paid-mcp-completion.js'
+export {
+  createTaskBudgetHandlers,
+  TASK_BUDGET_TOOLS,
+  type TaskBudgetToolName,
+} from './tools/task-budgets.js'
 
 export function createToolHandlers(haven: HavenClient): HostedToolHandlers {
   return {
@@ -136,5 +143,10 @@ export function createToolHandlers(haven: HavenClient): HostedToolHandlers {
     // BELOW is a silent shadow, so do not add a handler here for a tool this
     // capability owns.
     ...createPaidMcpCompletionHandlers(haven),
+
+    // #3329: task budgets — haven_open_task_budget, haven_close_task_budget —
+    // are owned by the capability module and composed in here. Same
+    // one-directional guarantee as the spreads above.
+    ...createTaskBudgetHandlers(haven),
   }
 }

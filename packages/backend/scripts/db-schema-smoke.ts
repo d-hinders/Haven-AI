@@ -38,6 +38,15 @@ import {
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
 import {
+  FIND_TASK_BUDGET_FOR_AGENT_SQL,
+  INSERT_PENDING_TASK_BUDGET_SQL,
+  MARK_TASK_BUDGET_CLOSED_SQL,
+  MARK_TASK_BUDGET_CLOSING_SQL,
+  MARK_TASK_BUDGET_OPEN_SQL,
+  SELECT_OPEN_TASK_BUDGET_FOR_PAYMENT_SQL,
+  SUM_OPEN_RESERVED_ATOMIC_SQL,
+} from '../src/infra/repositories/task-budgets.js'
+import {
   HAS_IN_FLIGHT_REKEYS_FOR_ACCOUNT_SQL,
   FIND_OWNED_ACCOUNT_ID_BY_ADDRESS_AND_CHAIN_SQL,
 } from '../src/infra/repositories/smart-accounts.js'
@@ -606,6 +615,35 @@ const QUERIES: SmokeQuery[] = [
   {
     name: 'delegations: retire the slot\'s OTHER active grants, excluding the row being activated (#2411)',
     sql: REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL,
+  },
+  {
+    // IMPORTED since #3329 — the repository owns the query.
+    name: 'task budgets: insert pending child (#3329)',
+    sql: INSERT_PENDING_TASK_BUDGET_SQL,
+  },
+  {
+    name: 'task budgets: find for agent (#3329)',
+    sql: FIND_TASK_BUDGET_FOR_AGENT_SQL,
+  },
+  {
+    name: 'task budgets: sum open-reserved atomic under one parent (#3329)',
+    sql: SUM_OPEN_RESERVED_ATOMIC_SQL,
+  },
+  {
+    name: 'task budgets: mark open (pending only, #3329)',
+    sql: MARK_TASK_BUDGET_OPEN_SQL,
+  },
+  {
+    name: 'task budgets: mark closing (open only, #3329)',
+    sql: MARK_TASK_BUDGET_CLOSING_SQL,
+  },
+  {
+    name: 'task budgets: mark closed (open/closing/pending, #3329)',
+    sql: MARK_TASK_BUDGET_CLOSED_SQL,
+  },
+  {
+    name: 'task budgets: select open for payment (#3329)',
+    sql: SELECT_OPEN_TASK_BUDGET_FOR_PAYMENT_SQL,
   },
   {
     name: 'agents: lock before opening re-key',

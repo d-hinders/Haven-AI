@@ -2024,6 +2024,39 @@ of them on the delegation rail as a version-skew report, not a credential
 problem — and note the last is also what a *legacy-rail* intent looks like if
 a caller passes `typed_data` that the context never committed to.
 
+### Task budgets — a third sign-context, and the tool set moves (#3329)
+
+`haven_sign` accepts `task_budget_id` (mutually exclusive with `payment_id`
+and `payload_hash`). The signer fetches
+`GET /task-budgets/:id/sign-context`, whose `task_sign_context_version` is
+pinned to `SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS` (`packages/signer/src/sign-context.ts`,
+currently `[1]`) and advertised in the handshake as
+`task_sign_context_versions` next to `direct_sign_context_versions`. Two
+shapes are signed and nothing else: a self-delegated task child
+(`assertOwnTaskChild`) and the `disableDelegation` UserOp that closes one
+(`assertOwnTaskBudgetCloseUserOp`), both from `@haven_ai/sdk`'s
+`task-budget-guards.ts` — the security model §10 states the allowlist.
+
+**The tool-name set changes on both runtimes**, so the consent hash moves and
+every installed operator is asked to consent again on the next launch:
+local `@haven_ai/mcp` gains `haven_open_task_budget`, `haven_close_task_budget`
+and `haven_submit` (the local relay step task budgets need; its `payment_id`
+branch refuses, because the local runtime signs and submits a payment inline);
+the hosted MCP gains `haven_open_task_budget` and `haven_close_task_budget`,
+and its existing `haven_submit` takes `task_budget_id` XOR `payment_id`.
+`task_budget_id` is an optional argument on `haven_send`, `haven_pay`,
+`haven_pay_x402_quote` and `haven_pay_x402` where each exists.
+
+Skew, both directions fail closed: an **older signer** refuses
+`task_budget_id` with the `-32602` undeclared-argument envelope below (it
+never fetches, never signs); an **older hosted MCP** has no task-budget tools,
+so the local runtime's hand-off names a tool the server does not list, and a
+**newer signer against an older backend** gets a 404 from the sign-context
+read and refuses with `SIGN_CONTEXT_UNREACHABLE`-class errors, never a
+signature. The SDK's `getAgentSummary()` now performs a third read
+(`GET /task-budgets?status=open`) and degrades to an empty `taskBudgets`
+list on any failure, so an older backend does not break `haven_get_agent`.
+
 ### An undeclared argument is refused, not stripped (#2312)
 
 This produces the same `-32602` vocabulary as the skew rows above, and it is

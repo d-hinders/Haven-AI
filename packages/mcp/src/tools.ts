@@ -18,6 +18,7 @@ import {
   HavenSigningError,
   composeDescription,
   discoverMerchantMcpUrl,
+  resolveTokenFromAddress,
   sameUrl,
   toolDescriptions as sharedDescriptions,
   verifyPaymentReceipt,
@@ -46,6 +47,9 @@ export type HavenMcpToolName =
   | 'haven_sweep_delegate'
   | 'haven_discover_tools'
   | 'haven_submit_catalog_entry'
+  | 'haven_open_task_budget'
+  | 'haven_close_task_budget'
+  | 'haven_submit'
 
 /**
  * #3100 (epic #3105, decision 4): the structured hint on a local discovery
@@ -90,6 +94,8 @@ export const toolSchemas = {
     idempotency_key: z.string().optional(),
     /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
     idempotencyKey: z.string().optional(),
+    /** #3329: spend against an open task budget instead of the agent's period budget. */
+    task_budget_id: z.string().min(1).optional(),
   },
   haven_pay_mcp_tool: {
     merchant_url: z.string().url(),
@@ -113,6 +119,8 @@ export const toolSchemas = {
     idempotency_key: z.string().optional(),
     /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
     idempotencyKey: z.string().optional(),
+    /** #3329: spend against an open task budget instead of the agent's period budget. */
+    task_budget_id: z.string().min(1).optional(),
   },
   haven_pay_x402: {
     url: z.string().url(),
@@ -122,6 +130,8 @@ export const toolSchemas = {
     idempotency_key: z.string().optional(),
     /** Legacy spelling, accepted during the #2366 window. Warns; do not use. */
     idempotencyKey: z.string().optional(),
+    /** #3329: spend against an open task budget instead of the agent's period budget. */
+    task_budget_id: z.string().min(1).optional(),
   },
   haven_resume_x402_payment: {
     payment_id: z.string().optional(),
@@ -154,8 +164,61 @@ export const toolSchemas = {
   haven_verify_receipt: {
     receipt: z.unknown(),
   },
+  // #3329: a budget for one task that ends by itself — a short-lived child of
+  // the agent's own budget, capped and time-boxed independently of the period
+  // reset.
+  haven_open_task_budget: {
+    max_amount_human: z.string().min(1),
+    ttl_minutes: z.number().int().min(1).max(1440),
+    recipient: z.string().optional(),
+    label: z.string().max(120).optional(),
+    token: z.string().optional(),
+  },
+  haven_close_task_budget: {
+    task_budget_id: z.string().min(1),
+  },
+  // #3329: relays a signature from the local signer — either the open/close
+  // signature for a task budget, or (schema parity with the hosted surface)
+  // a direct-payment signature by payment_id. Exactly one of task_budget_id /
+  // payment_id, never both or neither.
+  haven_submit: {
+    task_budget_id: z.string().min(1).optional(),
+    payment_id: z.string().min(1).optional(),
+    signature: z
+      .string()
+      .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
+  },
 // #3101: keys survive on the type (see the hosted server's contracts.ts).
 } as const satisfies Record<HavenMcpToolName, z.ZodRawShape>
+
+// #3329: outcome language only — never "delegation", "caveat" or "UserOp".
+const OPEN_TASK_BUDGET_DESCRIPTION = [
+  'Open a budget for one task that ends by itself: a spending cap, good for at most ttl_minutes,',
+  'reserved out of the agent\'s own budget and separate from its period reset.',
+  'Pass max_amount_human (whole tokens, e.g. "5" for 5 USDC), ttl_minutes (1-1440), and optionally',
+  'recipient (pins every payment against this task budget to one address), label, and token',
+  '(defaults to USDC). Returns { task_budget, next_action: "sign", next_tool, next_arguments } —',
+  'call next_tool with next_arguments EXACTLY as given to get a signature, then relay it with',
+  'haven_submit. Spending anything above the reserved amount, past the deadline, or to a',
+  'different recipient than the one pinned here is declined on the spot — nothing is queued.',
+].join(' ')
+
+const CLOSE_TASK_BUDGET_DESCRIPTION = [
+  'End a task budget early, before its deadline, releasing whatever of its cap was unspent back',
+  'to the agent\'s own budget. Pass task_budget_id. If the budget was never signed (still pending),',
+  'this ends it immediately with { task_budget, status: "closed" } and nothing was ever reserved',
+  'on-chain. Otherwise it returns a signature request: { task_budget, next_action: "sign",',
+  'next_tool, next_arguments } — call next_tool with next_arguments EXACTLY as given, then relay',
+  'the signature with haven_submit. A task budget past its own deadline closes immediately, the',
+  'same as the pending case.',
+].join(' ')
+
+const SUBMIT_DESCRIPTION = [
+  'Relay a signature from the local signer. Pass exactly one of task_budget_id (from',
+  'haven_open_task_budget or haven_close_task_budget) or payment_id — never both, never neither —',
+  'plus signature. For a task budget this opens or closes it on-chain and returns { task_budget,',
+  'status }; a close in progress may return { task_budget, status: "closed", close_tx_hash }.',
+].join(' ')
 
 /**
  * MCP tool descriptions, composed from the shared semantic source in
@@ -179,6 +242,9 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
   haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
+  haven_open_task_budget: OPEN_TASK_BUDGET_DESCRIPTION,
+  haven_close_task_budget: CLOSE_TASK_BUDGET_DESCRIPTION,
+  haven_submit: SUBMIT_DESCRIPTION,
 }
 
 export interface ToolSuccess<T> {
@@ -263,6 +329,9 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
             // #1207: was accepted by the schema but silently dropped — now
             // carried to the backend's replay contract.
             idempotencyKey: args.idempotencyKey,
+            // #3329: spend against an open task budget instead of the
+            // agent's period budget, when the caller names one.
+            ...(typeof args.task_budget_id === 'string' ? { taskBudgetId: args.task_budget_id } : {}),
           })
           return {
             payment_id: result.paymentId,
@@ -405,7 +474,10 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
         )
       }
       return runTool(async () => {
-        const response = await haven.payX402Quote(args.quote as X402Quote, { idempotencyKey: args.idempotencyKey })
+        const response = await haven.payX402Quote(args.quote as X402Quote, {
+          idempotencyKey: args.idempotencyKey,
+          ...(typeof args.task_budget_id === 'string' ? { taskBudgetId: args.task_budget_id } : {}),
+        })
         return responsePayload(response)
       }, warnings)
     },
@@ -415,7 +487,10 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       if ('success' in pf) return pf
       const { args, warnings } = pf
       return runTool(async () => {
-        const response = await haven.fetch(args.url, requestInit(args), { idempotencyKey: args.idempotencyKey })
+        const response = await haven.fetch(args.url, requestInit(args), {
+          idempotencyKey: args.idempotencyKey,
+          ...(typeof args.task_budget_id === 'string' ? { taskBudgetId: args.task_budget_id } : {}),
+        })
         return responsePayload(response)
       }, warnings)
     },
@@ -536,6 +611,86 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
     haven_verify_receipt: async (input) => {
       const args = objectInput('haven_verify_receipt', input)
       return runTool(async () => verifyPaymentReceipt(args.receipt as PaymentReceipt))
+    },
+
+    haven_open_task_budget: async (input) => {
+      const args = objectInput('haven_open_task_budget', input)
+      return runTool(async () => {
+        const token = await resolveTaskBudgetToken(haven, typeof args.token === 'string' ? args.token : undefined)
+        const maxAmountAtomic = humanToAtomicOrNull(args.max_amount_human as string, token.decimals)
+        if (maxAmountAtomic === null) {
+          throw new HavenApiError(
+            `max_amount_human ("${args.max_amount_human}") is not a valid decimal amount for ` +
+              `${token.symbol} (${token.decimals} decimal places). Nothing was reserved.`,
+            400,
+          )
+        }
+        const result = await haven.openTaskBudget({
+          tokenAddress: token.address,
+          maxAmountAtomic,
+          ttlSeconds: Number(args.ttl_minutes) * 60,
+          recipientAddress: typeof args.recipient === 'string' ? args.recipient : undefined,
+          label: typeof args.label === 'string' ? args.label : undefined,
+        })
+        return {
+          task_budget: result.taskBudget,
+          next_action: 'sign',
+          next_tool: 'mcp__haven-signer__haven_sign',
+          next_arguments: { task_budget_id: result.taskBudget.id },
+        }
+      })
+    },
+
+    haven_close_task_budget: async (input) => {
+      const args = objectInput('haven_close_task_budget', input)
+      return runTool(async () => {
+        const result = await haven.closeTaskBudget(args.task_budget_id as string)
+        if (result.status === 'closed') {
+          return { task_budget: result.taskBudget, status: 'closed' as const }
+        }
+        return {
+          task_budget: result.taskBudget,
+          next_action: 'sign',
+          next_tool: 'mcp__haven-signer__haven_sign',
+          next_arguments: { task_budget_id: args.task_budget_id },
+        }
+      })
+    },
+
+    haven_submit: async (input) => {
+      const args = objectInput('haven_submit', input)
+      const hasTaskBudget = typeof args.task_budget_id === 'string' && args.task_budget_id.length > 0
+      const hasPayment = typeof args.payment_id === 'string' && args.payment_id.length > 0
+      if (hasTaskBudget === hasPayment) {
+        return {
+          success: false,
+          code: 'INVALID_INPUT',
+          message:
+            'haven_submit takes exactly one of task_budget_id or payment_id, never both or ' +
+            'neither. Nothing was relayed.',
+        }
+      }
+      return runTool(async () => {
+        if (hasTaskBudget) {
+          const result = await haven.submitTaskBudget(args.task_budget_id as string, args.signature as string)
+          return {
+            task_budget: result.taskBudget,
+            status: result.status,
+            ...(result.closeTxHash !== undefined ? { close_tx_hash: result.closeTxHash } : {}),
+          }
+        }
+        // #3329: payment_id has no caller on the local surface today — the
+        // local runtime signs and submits a direct payment inline through
+        // haven.pay(), so a bare signature relay by payment_id has nothing to
+        // do here. Declared for schema parity with the hosted surface
+        // (captain contract §5); refuses rather than guessing at behavior.
+        throw new HavenApiError(
+          'haven_submit with payment_id is not supported on the local MCP surface: haven_send ' +
+            'signs and submits a direct payment in one call, so there is no separate relay step. ' +
+            'Use haven_submit with task_budget_id to relay a task-budget open/close signature.',
+          400,
+        )
+      })
     },
   }
 
@@ -706,6 +861,46 @@ async function responsePayload(response: Response): Promise<Record<string, unkno
     headers: Object.fromEntries(response.headers.entries()),
     body: parseMaybeJson(text),
   }
+}
+
+/**
+ * #3329: `haven_open_task_budget` takes a symbol-or-address plus a HUMAN
+ * amount, but the SDK's `openTaskBudget` takes atomic units against a
+ * resolved token address — the same split `haven_check_funds` bridges on the
+ * hosted surface. This agent's own allowances are the source of truth for
+ * which tokens it may spend at all, so a symbol resolves against THOSE (never
+ * a guess), and decimals come from the SDK's own chain registry.
+ */
+async function resolveTaskBudgetToken(
+  haven: HavenClient,
+  symbolOrAddress: string | undefined,
+): Promise<{ address: string; symbol: string; decimals: number }> {
+  const wanted = (symbolOrAddress ?? 'USDC').toLowerCase()
+  const { allowances } = await haven.getAllowances()
+  const isAddress = /^0x[0-9a-fA-F]{40}$/.test(wanted)
+  const match = isAddress
+    ? allowances.find((a) => a.tokenAddress.toLowerCase() === wanted)
+    : allowances.find((a) => (a.tokenSymbol ?? '').toLowerCase() === wanted)
+  if (!match) {
+    const known = allowances.map((a) => `${a.tokenSymbol} (${a.tokenAddress})`)
+    throw new HavenApiError(
+      `token "${symbolOrAddress ?? 'USDC'}" is not the symbol or address of any allowance this ` +
+        `agent holds${known.length > 0 ? ` (it holds: ${known.join(', ')})` : ' (it holds none)'}. ` +
+        'Nothing was reserved.',
+      400,
+    )
+  }
+  const resolved = resolveTokenFromAddress(match.tokenAddress)
+  return { address: match.tokenAddress, symbol: match.tokenSymbol, decimals: resolved?.decimals ?? 6 }
+}
+
+/** A plain decimal string ("5", "0.25") to atomic units, or null if it does not fit `decimals`. */
+function humanToAtomicOrNull(human: string, decimals: number): string | null {
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(human)) return null
+  const [whole, frac = ''] = human.split('.')
+  if (frac.length > decimals) return null
+  const atomic = BigInt(whole || '0') * 10n ** BigInt(decimals) + BigInt(frac.padEnd(decimals, '0') || '0')
+  return atomic.toString()
 }
 
 function parseMaybeJson(text: string): unknown {

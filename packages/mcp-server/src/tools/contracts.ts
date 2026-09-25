@@ -71,6 +71,8 @@ export type HostedToolName =
   | 'haven_sweep_delegate'
   | 'haven_discover_tools'
   | 'haven_submit_catalog_entry'
+  | 'haven_open_task_budget'
+  | 'haven_close_task_budget'
 
 /**
  * #2282: the hosted MCP tool boundary spells arguments in **snake_case**
@@ -203,15 +205,25 @@ export const toolSchemas = {
     recipient: z.string().min(1),
     amount: z.string().min(1),
     idempotency_key: z.string().optional(),
+    // #3329: spend against an open task budget instead of the agent's
+    // period budget.
+    task_budget_id: z.string().min(1).optional(),
   },
   haven_pay: {
     token: z.string().min(1),
     amount: z.string().min(1),
     to: z.string().min(1),
     idempotency_key: z.string().min(1).max(128).optional(),
+    // #3329: spend against an open task budget instead of the agent's
+    // period budget.
+    task_budget_id: z.string().min(1).optional(),
   },
   haven_submit: {
-    payment_id: z.string().min(1),
+    // #3329: exactly one of payment_id / task_budget_id — never both, never
+    // neither. Amount, recipient, expiry and (for a task budget) the parent
+    // budget it draws from all come from the stored record either way.
+    payment_id: z.string().min(1).optional(),
+    task_budget_id: z.string().min(1).optional(),
     signature: z
       .string()
       .regex(/^0x[0-9a-fA-F]+$/, 'signature must be a 0x-prefixed hex string'),
@@ -220,8 +232,22 @@ export const toolSchemas = {
     // erc7710 there is no funding leg: the signature IS the settlement child,
     // so it goes to POST /x402/:id/settle and Haven returns the assembled
     // merchant header. Omitted (or 'eip3009') relays the funding signature
-    // exactly as before, so every existing caller is untouched.
+    // exactly as before, so every existing caller is untouched. Not
+    // applicable to a task_budget_id submission.
     settlement_scheme: z.enum(['erc7710', 'eip3009']).optional(),
+  },
+  // #3329: a budget for one task that ends by itself — a short-lived child of
+  // the agent's own budget, capped and time-boxed independently of the
+  // period reset.
+  haven_open_task_budget: {
+    max_amount_human: z.string().min(1),
+    ttl_minutes: z.number().int().min(1).max(1440),
+    recipient: z.string().optional(),
+    label: z.string().max(120).optional(),
+    token: z.string().optional(),
+  },
+  haven_close_task_budget: {
+    task_budget_id: z.string().min(1),
   },
   haven_pay_mcp_tool: {
     // #1271: the exact MCP endpoint OR a base merchant URL — a non-402 probe
@@ -381,6 +407,9 @@ export const toolSchemas = {
     idempotency_key: z.string().optional(),
     // #1272: same contract as haven_pay_mcp_tool — see there.
     include_signing_payload: z.boolean().optional(),
+    // #3329: spend against an open task budget instead of the agent's
+    // period budget.
+    task_budget_id: z.string().min(1).optional(),
   },
   haven_resume_x402_payment: {
     payment_id: z.string().optional(),
@@ -679,8 +708,9 @@ export const STRICT_INPUT_TOOLS = {
   // from the stored intent. A stripped key here means relaying a signature for
   // a different question than the caller asked.
   haven_submit:
-    'Amount, recipient and rail come from the stored payment intent; this tool takes only ' +
-    'which payment, which signature, and (optionally) which settlement scheme that signature is for.',
+    'Amount, recipient and rail come from the stored payment intent (or, for a task budget, ' +
+    'from the stored task budget record); this tool takes only which payment or which task ' +
+    'budget, which signature, and (optionally) which settlement scheme that signature is for.',
   // #1307: merchant_url / tool_name / arguments / mcp_transport are OPTIONAL
   // because Haven rehydrates the stored MCP call context from payment_id, and
   // it relays the funding signature: this one moves money before it delivers.
@@ -804,6 +834,15 @@ export const STRICT_INPUT_TOOLS = {
     'Exactly one of max_amount_human or max_amount selects the amount the coverage question is ' +
     'asked about — both or neither is refused before anything is read. An undeclared key ' +
     'cannot select or filter what the chain is asked, so it is refused rather than dropped.',
+  // #3329: both task-budget tools ship new — no live caller predates
+  // strictness here, the same reasoning as haven_check_funds.
+  haven_open_task_budget:
+    'This tool declares max_amount_human, ttl_minutes, recipient, label and token only — an ' +
+    'undeclared key cannot silently widen or narrow what gets reserved, so it is refused ' +
+    'rather than dropped.',
+  haven_close_task_budget:
+    'This tool declares task_budget_id only; which budget closes is never inferred from ' +
+    'anything else, so an undeclared key is refused rather than dropped.',
 } as const satisfies Partial<Record<HostedToolName, string>>
 
 export type StrictInputToolName = keyof typeof STRICT_INPUT_TOOLS
@@ -927,6 +966,8 @@ const SUBMIT_DESCRIPTION = [
   'When the quote reported settlement_scheme "erc7710", pass settlement_scheme: "erc7710" here:',
   'the signature is the settlement child, not a funding authorization, and the response returns',
   'payment_header for you to retry the merchant with — no funding tx, no header to build locally.',
+  'For a task budget (haven_open_task_budget / haven_close_task_budget), pass task_budget_id',
+  'INSTEAD of payment_id — exactly one, never both. Returns { task_budget, status }.',
 ].join(' ')
 
 const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
@@ -1108,6 +1149,23 @@ const SWEEP_DELEGATE_DESCRIPTION = [
 // treasury total. Kept lean by hand (not the full composed fragment) because
 // the #1591 mean budget is a per-tool property measured at the cap; the
 // shared fragment's summary leads verbatim so the drift test holds.
+// #3329: outcome language only — never "delegation", "caveat" or "UserOp".
+const OPEN_TASK_BUDGET_DESCRIPTION = [
+  'Open a budget for one task that ends by itself: a cap good for at most ttl_minutes, reserved',
+  'out of the agent\'s own budget, separate from its period reset.',
+  'Pass max_amount_human (whole tokens), ttl_minutes (1-1440), and optionally recipient (pins',
+  'every payment to one address), label, token (default USDC). Returns { task_budget, sign_data,',
+  'next_action } — sign, then relay with haven_submit (task_budget_id). Over-cap, past-deadline,',
+  'or wrong-recipient spend is declined on the spot; nothing is queued.',
+].join(' ')
+
+const CLOSE_TASK_BUDGET_DESCRIPTION = [
+  'End a task budget early, releasing its unspent cap back to the agent\'s own budget.',
+  'Pass task_budget_id. A never-signed or already-expired budget ends immediately with',
+  '{ task_budget, status: "closed" }; otherwise returns { task_budget, sign_data, next_action } —',
+  'sign, then relay with haven_submit (task_budget_id).',
+].join(' ')
+
 const CHECK_FUNDS_DESCRIPTION = [
   sharedDescriptions.checkFunds.summary + '.',
   'Pass the token address or allowance symbol and ONE amount spelling: max_amount_human (whole tokens, preferred) or max_amount (atomic).',
@@ -1148,6 +1206,8 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
   haven_verify_receipt: composeDescription(sharedDescriptions.verifyReceipt),
+  haven_open_task_budget: OPEN_TASK_BUDGET_DESCRIPTION,
+  haven_close_task_budget: CLOSE_TASK_BUDGET_DESCRIPTION,
 }
 
 export interface ToolSuccess<T> {

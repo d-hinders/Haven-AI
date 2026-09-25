@@ -23,6 +23,7 @@ const boundary: ClientBoundary = {
   publicMethods: [
     'authorizeX402',
     'clientUpdate', // #3303
+    'closeTaskBudget', // #3329
     'completeX402MerchantCall',
     'createIntent',
     'createX402Intent',
@@ -42,9 +43,13 @@ const boundary: ClientBoundary = {
     'getPostPurchaseAllowanceSummary',
     'getReceipt',
     'getResumeState',
+    'getTaskBudget', // #3329
+    'getTaskBudgetSignContext', // #3329
     'getX402MerchantCallContext',
     'listReceipts',
     'listReceiptsPage', // #3128
+    'listTaskBudgets', // #3329
+    'openTaskBudget', // #3329
     'pay',
     'payX402Quote',
     'prepareSweep',
@@ -61,6 +66,7 @@ const boundary: ClientBoundary = {
     'submitCatalogEntry',
     'submitSignature',
     'submitSweep',
+    'submitTaskBudget', // #3329
     'submitX402Erc7710',
     'sweepDelegate',
     'waitForConfirmation',
@@ -68,6 +74,7 @@ const boundary: ClientBoundary = {
   ],
   publicMembers: [
     "async authorizeX402(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Receipt>",
+    "async closeTaskBudget(id: string): Promise<CloseTaskBudgetResult>",
     "async completeX402MerchantCall(input: { url: string; init?: RequestInit; paymentId: string; paymentHeader: string; mcpTransport?: X402McpTransport; noFundingLeg?: boolean; }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string; evidenceOutcome?: EvidenceReportOutcome; }>",
     "async createIntent(request: PaymentRequest): Promise<PaymentIntent>",
     "async createX402Intent(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Intent>",
@@ -87,9 +94,13 @@ const boundary: ClientBoundary = {
     "async getPostPurchaseAllowanceSummary(paymentId: string): Promise<{ allowance: PostPurchaseAllowanceSummary | null; warnings: AgentPaymentWarning[]; payment: PaymentStatusResult | null; }>",
     "async getReceipt(paymentId: string): Promise<{ receipt: PaymentReceipt; verification: ReceiptVerification; }>",
     "async getResumeState(paymentId: string): Promise<PaymentResumeState>",
+    "async getTaskBudget(id: string): Promise<HavenTaskBudget>",
+    "async getTaskBudgetSignContext(id: string): Promise<TaskBudgetSignContext>",
     "async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext>",
     "async listReceipts(options: { limit?: number; } = {}): Promise<HavenPaymentReceipt[]>",
     "async listReceiptsPage(options: { limit?: number; cursor?: string; } = {}): Promise<HavenPaymentReceiptsPage>",
+    "async listTaskBudgets(options: { status?: 'open' | 'all'; } = {}): Promise<HavenTaskBudget[]>",
+    "async openTaskBudget(request: { tokenAddress?: string; maxAmountAtomic: string; ttlSeconds: number; recipientAddress?: string; label?: string; }): Promise<OpenTaskBudgetResult>",
     "async pay(request: PaymentRequest): Promise<PaymentResult>",
     "async payX402Quote(quote: X402Quote, options: X402AuthorizationOptions = {}): Promise<Response>",
     "async precheckBudget(input: { chainId?: number; token: string; amountAtomic: string; merchantTo?: string; resourceUrl?: string; }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean; }>",
@@ -105,6 +116,7 @@ const boundary: ClientBoundary = {
     "async submitCatalogEntry(resourceUrl: string, options: { website?: string; } = {}): Promise<HavenCatalogSubmission>",
     "async submitSignature(paymentId: string, signature: string): Promise<{ status: string; txHash?: string; }>",
     "async submitSweep(authorization: SweepAuthorization, signature: string): Promise<SweepSubmitResponse>",
+    "async submitTaskBudget(id: string, signature: string): Promise<SubmitTaskBudgetResult>",
     "async submitX402Erc7710(paymentId: string, signature: string): Promise<string>",
     "async sweepDelegate(): Promise<SweepResult>",
     "async waitForConfirmation(paymentId: string): Promise<PaymentResult>",
@@ -456,6 +468,7 @@ describe('HavenClient structural boundary', () => {
       'HavenUserOpBindingError', // #3271
       'HavenZeroSettlementHashError',
       'INSECURE_RETRY_TARGET_CODE', // #3097
+      'MAX_TASK_BUDGET_TTL_SECONDS', // #3329
       'MERCHANT_DISCOVERY_PATHS',
       'MerchantTimeoutError',
       'NEXT_TOOL_SERVER_NAMES', // #3101
@@ -486,6 +499,8 @@ describe('HavenClient structural boundary', () => {
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
       'addressFromKey',
       'assertBoundDirectPaymentUserOp', // #3283
+      'assertOwnTaskBudgetCloseUserOp', // #3329
+      'assertOwnTaskChild', // #3329
       'assertSecureX402RetryTarget', // #3097
       'assertUserOpTypedDataBinding', // #3271
       'buildSweepAuthorizationMessage',
@@ -504,6 +519,7 @@ describe('HavenClient structural boundary', () => {
       'encodeBase64Json',
       'encodeBase64Utf8',
       'encodePaymentProof',
+      'hashDelegation', // #3329
       'havenClientIdentity', // #3303
       'havenTools',
       'isConnectorChannel',
@@ -512,6 +528,7 @@ describe('HavenClient structural boundary', () => {
       'isSecureX402RetryTarget', // #3097
       'isSupportedNodeVersion',
       'isSweepableChain',
+      'isTaskChildTypedData', // #3329
       'isZeroSettlementTxHash', // #2970
       'normalizePaymentRequired',
       'packedUserOperationHash', // #3271
@@ -631,6 +648,9 @@ describe('HavenClient structural boundary', () => {
       'SweepSubmitResponse',
       'SweepSubmitResult',
       'SweepTypedData',
+      'TaskBudgetCloseExpectation', // #3329
+      'TaskChildExpectation', // #3329
+      'TaskChildTypedData', // #3329
       'ToolDescription',
       'UnsupportedNodeVersionMessageOptions',
       'X402AuthorizationOptions',

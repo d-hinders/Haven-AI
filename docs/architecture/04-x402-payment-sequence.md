@@ -7,6 +7,8 @@ covers:
   - packages/backend/src/openapi/party-model.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
+  - packages/backend/src/modules/task-budgets/**
+  - packages/backend/src/routes/task-budgets.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/x402/x402-delegation.ts
   - packages/backend/src/infra/chain/settlement-transfer-verifier.ts
@@ -2011,6 +2013,49 @@ the three inputs that widened); and
 chain being requested. `DELEGATION_RAIL_BUNDLER_URL` is a single value while two
 chains are enabled, so a mismatched env now fails at first use with a config
 error instead of quietly routing a payment at the wrong chain's bundler.
+
+## Task budgets — a time-boxed child budget for one run (#3329)
+
+A **task budget** is an ERC-7710 child delegation the agent opens under its own
+budget delegation for one run: an upper amount, a TTL of 1 minute to 24 hours,
+optionally a recipient pin. The agent's own delegate smart account is both the
+child's delegator and its delegate (owner decision 2026-09-25, recorded on
+#3329) — so the chain a payment redeems is `[task child, budget]`, the
+`ERC20TransferAmountEnforcer` on the child caps the run and the
+`ERC20PeriodTransferEnforcer` on the budget still meters the period. Over the
+child's amount or past its expiry the redemption reverts during gas
+estimation; nothing queues. Key separation for a *different* delegate is
+#3330's job, not this one.
+
+**Lifecycle** (`packages/backend/src/modules/task-budgets/`,
+`routes/task-budgets.ts`, agent-authenticated):
+
+1. `POST /task-budgets` selects the agent's active budget delegation for the
+   token and recipient, refuses before signing when the request exceeds the
+   budget's live on-chain remainder minus what open task budgets already
+   reserve (`task_budget_exceeds_remaining`), builds the child
+   (`erc20TransferAmount` scope, `timestamp` caveat, `allowedCalldata` pin
+   when a recipient is given, salt `haven-task-budget:<id>`, never
+   `ANY_BENEFICIARY`), stores it `pending` and returns the EIP-712 typed data.
+2. The agent signs it — `haven_sign` with `task_budget_id` fetches the exact
+   bytes from `GET /task-budgets/:id/sign-context` and runs the SDK's
+   `assertOwnTaskChild` — and `POST /task-budgets/:id/submit` verifies the
+   signature recovers the agent's delegate key before the row becomes `open`.
+3. A payment names the budget: `task_budget_id` on `POST /payments` and
+   `POST /x402/authorize`. The redemption UserOp redeems the two-link chain;
+   an erc7710 settlement child is built under the task child, so the
+   permission context a merchant redeems is `[settlement, task, budget]`.
+   Token, recipient pin and parent must match the row, else a structured 409.
+4. `POST /task-budgets/:id/close` on a live budget prepares a sponsored
+   `disableDelegation(child)` UserOp **from the agent's own account** — the
+   one new shape the signer learned, authority-reducing only
+   (`assertOwnTaskBudgetCloseUserOp`) — and `submit` relays it. An expired or
+   never-signed budget closes with no transaction.
+
+**What the dashboard shows** on the agent's budget card: the budget's on-chain
+remainder unchanged, plus a separate "reserved by open task budgets" line —
+an open child reserves nothing on-chain, so the two figures are shown apart
+rather than netted into a number the chain would not agree with.
 
 ## Guardrails
 

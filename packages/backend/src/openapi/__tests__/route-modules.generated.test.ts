@@ -36,7 +36,7 @@ describe('route-modules.generated.ts (#3135)', () => {
     expect(committed).toBe(renderRouteModules(await deriveRouteModuleMap()))
   })
 
-  it('attributes the four route files sharing the /agents mount separately', async () => {
+  it('attributes the route files sharing the /agents mount separately', async () => {
     const map = await deriveRouteModuleMap()
     const agentFiles = new Set(
       Object.entries(map)
@@ -51,6 +51,8 @@ describe('route-modules.generated.ts (#3135)', () => {
         'routes/agent-passports.ts',
         // #3167: the label assignment route shares the /agents mount too.
         'routes/agent-labels.ts',
+        // #3329: the owner-facing task-budget read shares the /agents mount too.
+        'routes/agent-task-budgets.ts',
       ]),
     )
   })

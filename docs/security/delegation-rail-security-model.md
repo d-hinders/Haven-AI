@@ -8,6 +8,7 @@ covers:
   - packages/sdk/src/redemption-guard.ts
   - packages/sdk/src/direct-payment-guard.ts
   - packages/sdk/src/settlement-child.ts
+  - packages/sdk/src/task-budget-guards.ts
   - packages/sdk/src/userop-binding.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402-erc7710.ts
@@ -1383,6 +1384,30 @@ signer imports:
   402 (payee, amount, token, chain, advertised facilitators).
 - **The EIP-3009 merchant header**, against the recorded binding, and **the
   sweep home**, against Haven's recovery binding (see residual 2).
+- **A task-budget child `Delegation` (#3329)** — a self-delegation: delegator
+  AND delegate are this key's own delegate account, authority is the agent's
+  budget delegation (never ROOT), an `erc20TransferAmount` cap on the expected
+  token, a `timestamp` caveat of at most 24 hours, and an `allowedCalldata`
+  payee pin exactly when a recipient was requested. Verified by
+  `assertOwnTaskChild` (`task-budget-guards.ts`) against the Haven-served
+  sign-context, which the guard treats as untrusted input the way it treats
+  the settlement child's. It is a different typed-data class from the
+  settlement child, verified by a different function: a task child is refused
+  by `assertOwnSettlementChild` and a settlement child by `assertOwnTaskChild`,
+  both pinned by tests. A self-delegated child can only **narrow** what the
+  account may already redeem under its budget, never widen it.
+- **A `disableDelegation` `PackedUserOperation` for one of those children
+  (#3329)** — the same sender, chain and single-`execute`-to-the-
+  DelegationManager rules as a redemption, but the inner call is
+  `disableDelegation` of a delegation whose delegator and delegate are both
+  this account and whose hash the agent named (`assertOwnTaskBudgetCloseUserOp`).
+  Authority-reducing only: it cannot disable the owner's budget delegation
+  (a different delegator) or anything not self-granted.
+- **The redemption allowlist admits one more chain (#3329):** exactly two
+  links where the leaf is a self-delegation by this account and the parent is
+  a grant to this account from a different account — the task-budget shape —
+  in addition to the single grant. An empty chain, a longer chain, a leaf
+  delegated by anyone else and a leaf delegated *to* anyone else stay refused.
 
 The signer's x402 arm (#3281) signs only the first two shapes, however validly
 Haven's binding key declared anything else. Every refusal on the shape checks,

@@ -120,6 +120,7 @@ export class X402FundingLeg {
     paymentRequired: X402PaymentRequired,
     option: X402PaymentOption,
     idempotencyKey: string,
+    taskBudgetId?: string,
   ): Promise<X402Receipt> {
     // 2. Standard x402 settles from an EOA, so the SDK uses the agent-owned
     // delegate EOA for the merchant-facing EIP-3009 authorization. Haven does
@@ -151,6 +152,8 @@ export class X402FundingLeg {
       // this local-key path derives payTo from the key (never stale), but the
       // declaration keeps both writers of the 3009 shape loud-by-default.
       settlementScheme: 'eip3009',
+      // #3329
+      ...(taskBudgetId ? { task_budget_id: taskBudgetId } : {}),
     })
 
     // The backend can report an ALREADY-EXECUTED payment in two different

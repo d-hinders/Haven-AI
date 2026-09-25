@@ -8,6 +8,7 @@ covers:
   - scripts/ci/guard-freshness.mjs
   - scripts/ci/change-classifier.mjs
   - scripts/ci/qa-freshness.mjs
+  - scripts/ci/review-isolation.mjs
   - scripts/frontend-copy-lint.mjs
   - packages/frontend/scripts/serve-docs.mjs
   - packages/frontend/src/lib/i18n/messages/en.ts
@@ -87,32 +88,41 @@ provider's quirk. Nothing records the failure class, so the next provider
 behaviour starts from zero.
 
 **Evidence (three waves).**
-- Wave 1, 2026-09-02 → 09-06 — public-endpoint and rate-limit signatures in
-  8 of 11 dated `qa-failure` issues: #2443, #2449, #2485, #2496, #2508,
-  #2543, #2564, #2594 (W3). *Re-run by the captain:* `gh issue view <n>
-  --json body` for those 8 with `test("429|rate.?limit|sepolia.base.org|timeout|Too Many|upstream|RPC";"i")`
-  → 8 of 8 true. Fixed by #2511 → #2552/#2553.
+- Wave 1, 2026-09-02 → 09-06 — `gh issue list --label qa-failure --state all
+  --search "created:2026-09-02..2026-09-06"` → 9 issues. Classified from each
+  issue's own human triage comment → 6 of 9 a provider failure (#2449,
+  #2496, #2564 and #2594 rate limits; #2508 a public-endpoint outage; #2543
+  RPC/bundler), 3 not (#2411 a post-activate 403, #2443 timing races, #2485
+  the merchant wallet's gas preflight). Fixed by #2511 → #2552/#2553.
+  *Corrected in review:* the first draft read "8 of 11" (W3) and quoted a
+  captain re-run of `test("429|rate.?limit|…|RPC")` over the issue bodies as
+  "8 of 8 true" — that regex matches the template sentence every
+  `qa-failure` body carries ("A transient testnet/RPC flake …"), 25 of 25
+  issues ever filed, so it could not say no.
 - Wave 2, 2026-09-18 → 09-23 — Alchemy 429s ("FALLBACK, not a live enforcer
-  read"): 3 money-flow failures plus attempt-1 failures absorbed by the
-  retry (W3). Fixed by #3255/#3257 and the dRPC swap (#3262).
-- Wave 3, 2026-09-24 → 09-25 — dRPC free-plan behaviour: batch/timeout
-  (codes 31/30, 408) and the `pending` block tag refused with "No label
-  `flashblocks`" (W3: 18 failures). Fixed by #3292, #3320 and #3323 on
+  read"): 3 of the 4 completed money-flow failures in the window carry a
+  provider signature, plus attempt-1 failures absorbed by the retry. Fixed by #3255/#3257 and the dRPC swap (#3262).
+- Wave 3, 2026-09-24 → 09-25 (through 19:06Z) — dRPC free-plan behaviour:
+  batch/timeout (codes 31/30, 408) and the `pending` block tag refused with
+  "No label `flashblocks`": 18 of the 22 completed money-flow failures carry
+  a provider signature. Fixed by #3292, #3320 and #3323 on
   2026-09-25. Five read-as-zero issues in the same window (#3295, #3296,
   #3297, #3317, #3318); #3317's body calls itself "the same failure class the
   owner saw in the dRPC batch-limit incident, #2769".
 - Instrument (W3): `money-flow` check-runs over the last 100 Railway dev
   deployments (2026-09-18T19:27Z → 09-25T19:25Z) → 592 runs: 472 skipped,
-  90 success, 26 failure; of the 26, 21 carry a provider signature. Of the 90
-  successes, 19 passed only on the in-step attempt 2 (log marker
-  `passed on attempt 2/2`).
-  *Partial re-run by the captain* (the 15 newest runs whose `money-flow` job
-  concluded success, via the jobs API and each job's log) → 2 of 15 passed on
-  attempt 2. A newer, narrower window than W3's; consistent in direction, not
-  a re-derivation of 19 / 90.
-- State at the pin (W3): money-flow red from 12:54Z, 12 consecutive failures
-  through 19:06Z on `2cc23374`; after #3320/#3323 merged, all 7 completed
-  runs failed.
+  90 success, 26 failure, 3 cancelled (2026-09-20) and 1 still in flight when
+  read (19:25Z on `a1e126d1`, since failed); of the 26, 21 carry a provider
+  signature (W3; a coarse token grep in review gives 22 — not adjudicated
+  per run). Of the 90 successes, 19 passed only on the in-step attempt 2
+  (log marker `passed on attempt 2/2`) — re-derived in review over all 90
+  job logs (71 on attempt 1, 19 on attempt 2). *Corrected in review:* the
+  first draft omitted the cancelled and in-flight runs, so its parts summed
+  to 588.
+- State at the pin: money-flow red from 12:54Z, 12 consecutive failures
+  through 19:06Z on `2cc23374` (re-derived in review); every completed run
+  after #3320 merged (14:57Z) failed — 7 of 7, or 4 of 4 counting from
+  #3323's merge.
 
 **Demonstrated cost.**
 - Promotion #3325 (0.5.0-alpha.1) merged 2026-09-25T17:04Z with
@@ -122,25 +132,35 @@ behaviour starts from zero.
 - Three fix PRs in about eight hours on 2026-09-25; five `ci-health` issues in
   29 hours duplicating #2769's signal (C-extra-1 below).
 
-**How contributors would work differently (bar 4 — the owner's call).** A
-provider or plan change runs a conformance probe before the swap; an
-RPC-signature failure is classified and counted, not closed as a flake; an
-attempt-2 pass is recorded rather than hidden inside a green run. *Untested
-hypothesis:* that such a probe would have caught the dRPC `pending` and batch
-refusals before #3262's swap on dev.
+**How contributors work differently (bar 4).** The scan claims it: a
+provider or plan change is not done until a conformance probe has run
+against the new endpoint; a qa-dev failure is filed with its failure class
+(provider / harness / preflight / Haven) instead of the template's "transient
+flake", so a wave is visible as a count; and an attempt-2 pass is recorded
+rather than hidden inside a green run. *Untested hypothesis:* that such a
+probe would have caught the dRPC `pending` and batch refusals before #3262's
+swap on dev.
 
-**Slices (disjoint).**
-(a) an RPC conformance probe under `scripts/ci/` — batch size, `pending`,
-`eth_sendRawTransaction`, rate behaviour; (b) the provider-swap runbook step
-that runs it; (c) `scripts/ci/qa-failure-issue.mjs` records the failure class
-and counts attempt-2 passes; (d) the #2769 triage rule.
+**Slices (disjoint, each pickable cold).**
+(a) an RPC conformance probe under `scripts/ci/` (batch size, the `pending`
+tag, `eth_sendRawTransaction`, rate behaviour) together with its runbook step
+in the provider-swap procedure — one slice, so nothing waits on another;
+(b) `scripts/ci/qa-failure-issue.mjs` records the failing legs' error
+signatures and a failure-class field; (c) the qa-dev job summary and the
+`money-flow` log report an attempt-2 pass explicitly, and a count of them is
+kept; (d) the template sentence in the QA failure issue ("A transient
+testnet/RPC flake can be cleared by re-dispatching") is replaced by the
+classification step in `docs/operations/agent-qa.md` § Troubleshooting.
 
 **Tracking.** Class-level searches (`rpc provider conformance`, `provider
 capability rpc`, `transient rpc flake`) find no open issue for the class;
 the related work is #2769 (open), #3262 (open), #3255, #3292, #3320, #3323.
-Not a re-surface: the 2026-08-18 entry refused a merchant/QA-flakiness wave
-and the 09-17 entry recorded a qa-dev cluster as closed — both a different
-class.
+Relation to the ledger: the 09-17 entry recorded "the `qa-dev` money-flow
+cluster (20 `qa-failure` issues 2026-08-12 → 09-08) is **closed**", and that
+range contains all of wave 1. S1 is therefore partly a re-surface: waves 2
+and 3 are the recurrence after that cluster was declared closed, which is the
+material worsening the exclusion rule asks for. The 2026-08-18 entry refused
+a merchant/QA-flakiness wave, a different class.
 
 ---
 
@@ -161,7 +181,8 @@ class.
 - **Mechanism:** the newest open `promotion` issue captures the upsert; any
   human who labels an issue `promotion` loses its body.
 - **Cost:** the procedure is needed now — #3325 promoted #3257, which #3262
-  waits on. The author was notified on #3262 during this scan.
+  waits on. The real digest issue, #666, has stopped being updated too. The
+  author was notified on #3262 during this scan.
 - **Scope / benefit:** select the digest by title or a dedicated label, never
   by `promotion` alone; one PR.
 - **Verification still needed:** a workflow test that a second
@@ -174,7 +195,12 @@ Three defects in one surface (`modules/passport/attestation.ts`,
 `modules/passport/issuance.ts`, `infra/repositories/agent-passports.ts`),
 landed today in PR #3327. All three are the captain's re-runs.
 
-- **(a) The sweep never reaches the rows it exists to repair.**
+- **(a) The sweep re-reads the same correct rows every tick, and can stall on them.**
+  The certain part, for any population of ten or more correct anchored rows:
+  every 5-minute tick re-reads the ten oldest (20 chain reads) and logs them
+  as `unrepairable`. The stall needs a precondition — ten or more correct
+  rows older than a phantom one; after #3327 the mint path makes no new
+  phantoms, and a small population may drain (not proven either way).
   `LIST_ANCHOR_REPAIRS_DUE_SQL` (`agent-passports.ts:291-297`) orders
   oldest-first with `LIMIT 10`; a row whose UID already matches returns
   without a write (`attestation.ts:384-385`), so its `updated_at` never moves
@@ -313,7 +339,8 @@ landed today in PR #3327. All three are the captain's re-runs.
 - **Scope:** one shared sender checking `res.ok`, committing the alerted
   state only after delivery (or re-arming on failure); tests for 404,
   network error and re-arm on both monitors. One PR.
-- **Tracking:** #777 (closed) only.
+- **Tracking:** #777 (closed) only — the delegate monitor's issue; the 404
+  probe above ran on the relayer monitor, whose source shows the same shape.
 
 ### Verified, held back by the five-candidate cap (the owner may swap any in)
 
@@ -321,7 +348,7 @@ landed today in PR #3327. All three are the captain's re-runs.
   cannot see its own 4-day budget** (`scripts/ci/guard-freshness.mjs`:
   `--limit 50` at `:528`, `JOB_LOOKUP_BUDGET = 12` at `:495`, upsert reuses
   only `--state open` at `:607`). Re-run by the captain:
-  `gh issue list --label ci-health --state all` → five issues in 29 hours
+  `gh issue list --label ci-health --state all` → five issues in 28 h 13 min
   (#3270, #3291, #3299, #3315, #3321); `gh run list --workflow qa-dev.yml
   --event deployment_status --limit 50` → a window of 15:45Z → 19:47Z on
   2026-09-25. W3 ran the module's own `selectQualifyingRuns`/`evaluate`
@@ -330,12 +357,12 @@ landed today in PR #3327. All three are the captain's re-runs.
   reopens by title.
 - **C-extra-2 — the change classifier routes the served docs nowhere.**
   Re-run: `classifyChangedFiles([f])` for the 4 sources in
-  `serve-docs.mjs`'s `ALLOWLIST` → `{}` each; control `…/app/page.tsx` →
-  `code,frontend`. Incident: #3287 edited
+  `serve-docs.mjs`'s `ALLOWLIST` → all 13 surface flags `false` each; control
+  `…/app/page.tsx` → `code` and `frontend` true. Incident: #3287 edited
   `docs/security/delegation-rail-security-model.md`, merged with Frontend
   checks skipped, and broke `served-docs.test.ts` on dev (#3288, closed by
-  a reword, #3290). The 09-22 C4 counted only non-Markdown files, so this is
-  new, not a re-surface.
+  a reword, #3290). The 09-22 C4 (#3229) scoped itself to the "remaining
+  non-doc, non-image files", so this is new, not a re-surface.
 - **C-extra-3 — the copy lint does not scan the app's message catalog**
   (`packages/frontend/src/lib/i18n/messages/en.ts`, "the source of truth for
   the app's copy"). Re-run: clean tree `npm run lint:copy` → exit 0; with
@@ -359,7 +386,9 @@ landed today in PR #3327. All three are the captain's re-runs.
   `broadcast` before `broadcastSigned` (`outbound-queue.ts`, the stamp, then
   the broadcast), and none of its four inline callers (`attestation.ts:254`,
   `sweep.ts:161`, `hybrid-provisioning.ts:286`, `attestation.ts:718`) wraps
-  the call in a `catch` that closes the record. Captain's probe with the real
+  the call in a `catch` that closes the record (the other two call sites,
+  `outbound-bump-worker.ts:495` and `outbound-lane-cancel.ts:259`, are the
+  worker's own re-sends and cancels and were not read for this). Captain's probe with the real
   `submitRecorded` and injected deps (pending refused, primary broadcast
   refused, fallback 503): send 1 → `fallback 503`, record A stays
   `broadcast@5`; with the fallback up, send 2 walks to nonce 6 while the chain

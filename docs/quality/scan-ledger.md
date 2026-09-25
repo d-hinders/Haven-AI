@@ -1090,26 +1090,34 @@ on the day, but the incident is tracked on #2769 and is recorded as context
 there, not as a new item.
 
 **Structural finding (pending the owner's word):**
-- S1 — qa-dev goes red on RPC-provider behaviour in waves (public endpoint
-  and rate limits 09-02 → 09-06; Alchemy 429s 09-18 → 09-23; the dRPC plan's
-  batch and `pending`-tag refusals 09-24 → 09-25), each triaged as a flake,
-  absorbed by the in-step retry and fixed one quirk at a time. Over the last
-  100 dev deployments: 592 money-flow check-runs → 472 skipped / 90 success /
-  26 failure, 21 of the 26 with a provider signature; 19 of the 90 passed
-  only on the in-step attempt 2 (a captain sample of the 15 newest harness
-  passes → 2 on attempt 2). Cost: promotion #3325 shipped with `qa-override`
-  and three relayer legs red. Four slices proposed: a conformance probe, the
-  provider-swap runbook step, failure-class and attempt-2 recording in the
-  QA failure issue, and the #2769 triage rule.
+- S1 — qa-dev goes red on RPC-provider behaviour in waves, each triaged as a
+  flake, absorbed by the in-step retry and fixed one quirk at a time: 6 of
+  the 9 `qa-failure` issues of 09-02 → 09-06 (classified from each issue's
+  triage comment); 3 of 4 money-flow failures 09-18 → 09-23 (Alchemy 429s);
+  18 of 22 on 09-24 → 09-25 (the dRPC plan's batch and `pending`-tag
+  refusals). Over the last 100 dev deployments: 592 money-flow check-runs →
+  472 skipped / 90 success / 26 failure / 3 cancelled / 1 in flight, 21 of
+  the 26 with a provider signature; 19 of the 90 passed only on the in-step
+  attempt 2. Partly a re-surface: the 09-17 entry recorded the qa-dev cluster
+  (2026-08-12 → 09-08, containing the first wave) as closed; the later two
+  waves are its recurrence. Cost: promotion #3325 shipped with `qa-override`
+  and three relayer legs red. Four slices proposed: a conformance probe with
+  its swap-runbook step, failure signatures and a class in the QA failure
+  issue, an explicit attempt-2 count, and a classification step replacing the
+  failure template's "transient flake" sentence.
+  *Corrected in review:* the first wave was first recorded from a regex that
+  matched the template sentence every such issue carries (so it could not say
+  no), and the check-run breakdown omitted 3 cancelled runs and 1 in flight.
 
 **Improvement candidates (one PR each), pending the owner's word:**
 - C1 — the promotion digest upserts the newest open issue carrying the
   `promotion` label; #3262 (the prod RPC swap procedure) carries it and has
   been overwritten 33 times since 2026-09-24T09:04Z. Its author was notified
   on #3262 during the scan.
-- C2 — the passport UID repair landed 2026-09-25 (#3327): the sweep stalls on
-  rows that already match (three ticks, 0 repaired, 20 chain reads each, on a
-  real database); its reader accepts an `Attested` log the mint path's reader
+- C2 — the passport UID repair landed 2026-09-25 (#3327): every tick re-reads
+  the ten oldest rows that already match (20 chain reads, logged as
+  unrepairable), and with ten such rows older than a phantom one it stalls
+  (three ticks, 0 repaired, on a real database); its reader accepts an `Attested` log the mint path's reader
   refuses; and the mint path's attester guard has a test that cannot fail
   (mutation survived, 7 / 7).
 - C3 — three owner revoke submit routes record a revocation without checking
@@ -1123,7 +1131,7 @@ there, not as a new item.
   never check the webhook's status: a 404 is posted once, never logged, never
   retried while the condition persists.
 - Verified and held back by the cap: guard-freshness files a new issue per
-  qa-dev flap (five in 29 hours); the change classifier routes the four
+  qa-dev flap (five in 28 hours); the change classifier routes the four
   served docs to no surface (incident #3288); the copy lint does not scan the
   app's message catalog; three instruments in this skill's reference misread.
 - Context, not new: the nonce hole a post-stamp broadcast failure leaves
@@ -1148,7 +1156,7 @@ there, not as a new item.
   held-back candidate); `any` → 24 and db-mock gauge 54 / 273 / 57, both
   unchanged.
 - block 4 (retired vocabulary) → positive control 36 shards → 192 files, 46
-  historical / 146 live (+1 live, a new test fixture).
+  historical / 146 live (+1 live, a new test file).
 - block 5 (merge-method drift) → since 2026-09-22T00:00:00Z → 0 merge-commit /
   53 squash (clean); since 2026-08-10T00:00:00Z → 282 / 743 of 1,028
   (unchanged merge count).

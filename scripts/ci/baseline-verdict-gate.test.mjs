@@ -704,6 +704,7 @@ describe('block shapes and globs (#3309)', () => {
       'design-review verdict:\nchanges requested @ cc00000 -- baselines: a.png',
       '- design-review verdict:\n  changes requested @ cc00000 -- baselines: a.png',
       'design-review verdict:\r\nchanges requested @ cc00000 -- baselines: a.png',
+      'design-review verdict:\n\nchanges requested @ cc00000 -- baselines: a.png',
     ]) {
       const blocks = parseVerdicts([text])
       assert.equal(blocks.length, 1, JSON.stringify(text))

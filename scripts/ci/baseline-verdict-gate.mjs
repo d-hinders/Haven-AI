@@ -166,14 +166,15 @@ export const PASSING_VERDICTS = new Set(['passed', 'approved'])
  * One line of the declaration format. Exported for the playbook's testability
  * and so the self-test and the report cannot restate the spelling.
  */
-export const DECLARATION_RE = /^[ \t]*(?:[-*][ \t]*)?baseline-change:[ \t]*(?:\r?\n[ \t]*)?(.+)$/gim
+export const DECLARATION_RE = /^[ \t]*(?:[-*][ \t]*)?baseline-change:[ \t]*(?:\r?\n[ \t]*)*(.+)$/gim
 // A verdict line may sit in a quote, a bullet or a numbered list, and the
 // label may be bold: a block written in any of those shapes must still be
 // read, or the gate cannot see it (#3301). Whitespace around the label is `[ \t]`,
 // not `\s`: `^\s*` spans line breaks, and a comment of blank lines took seconds
-// (#3309). One line break after the colon is still allowed — the base read a
-// verdict whose status sat on the next line, and so must this.
-export const VERDICT_RE = /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]*)?(?:\*\*|__)?design-review\s+verdict:(?:\*\*|__)?[ \t]*(?:\r?\n[ \t]*)?(.+)$/gim
+// (#3309). Line breaks after the colon are still allowed — the base read a
+// verdict whose status sat on a later line, blank lines between, and so must
+// this.
+export const VERDICT_RE = /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]*)?(?:\*\*|__)?design-review\s+verdict:(?:\*\*|__)?[ \t]*(?:\r?\n[ \t]*)*(.+)$/gim
 // A BLOCK is read in more shapes than a pass (#3309): a table row (the label
 // in its own cell, with or without the colon), a heading, a task-list item,
 // an italic or backticked label, an HTML-wrapped line, an emoji shortcode

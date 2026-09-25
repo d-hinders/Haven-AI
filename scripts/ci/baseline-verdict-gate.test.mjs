@@ -699,6 +699,35 @@ describe('block shapes and globs (#3309)', () => {
     }
   })
 
+  test('a verdict whose status sits on the line after the label is read, as at base', () => {
+    for (const text of [
+      'design-review verdict:\nchanges requested @ cc00000 -- baselines: a.png',
+      '- design-review verdict:\n  changes requested @ cc00000 -- baselines: a.png',
+      'design-review verdict:\r\nchanges requested @ cc00000 -- baselines: a.png',
+    ]) {
+      const blocks = parseVerdicts([text])
+      assert.equal(blocks.length, 1, JSON.stringify(text))
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, JSON.stringify(text))
+    }
+    const [pass] = parseVerdicts(['design-review verdict:\npassed @ cc00000 -- baselines: a.png'])
+    assert.equal(verifiedFor('a.png', [pass], ctx), true)
+    assert.equal(parseDeclarations(['baseline-change:\na.png -- a reason that is long enough to count']).length, 1)
+  })
+
+  test('underscore emphasis around a name in a BLOCK names the file', () => {
+    for (const line of [
+      '__design-review verdict: changes requested @ cc00000 -- baselines: a.png__',
+      '*_design-review verdict: changes requested @ cc00000 -- baselines: a.png_*',
+      '**_design-review verdict: changes requested @ cc00000 -- baselines: a.png_**',
+      'design-review verdict: changes requested @ cc00000 -- baselines: _a.png_',
+      'design-review verdict: changes requested @ cc00000 -- baselines: a.png_',
+    ]) {
+      const blocks = parseVerdicts([line])
+      assert.ok(blocks[0].names.includes('a.png'), `${line}: ${JSON.stringify(blocks[0].names)}`)
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, line)
+    }
+  })
+
   test('the pass side reads exactly as at base — no emphasis stripping there', () => {
     // `__…a.png__` named `a.png__.png` at base, which covers nothing.
     const [pass] = parseVerdicts(['__design-review verdict: approved @ cc00000 -- a.png__'])

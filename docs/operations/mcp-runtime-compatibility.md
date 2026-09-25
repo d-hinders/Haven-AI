@@ -3290,3 +3290,17 @@ to call next in structured fields, and those fields are typed end to end
 > read-only GET — so no tool, schema key, `next_tool` value, expected-context
 > version or signer contract changes. Scope of this note: that endpoint's
 > response shape. Nothing else in this document was re-verified.
+>
+> **Re-verified unchanged (#3318, 2026-09-25, CLI balance-freshness render):**
+> this doc is coupled through `packages/cli/src/commands.ts` and
+> `packages/cli/src/commands.test.ts`, and #3318 changes what the CLI's human
+> output SHOWS, not what any party sends or accepts: `wallets balances` reads
+> the additive optional `balanceFreshness` marker that #3295/#3317 already put
+> on the wire and renders `≈ … (as of …)` for a stale entry and
+> `unavailable` for a never-read one instead of presenting those figures as
+> current. The CLI sends nothing new, accepts nothing new (the marker is
+> optional and absent on clean reads), calls no new route, and the registry
+> consumers — budget grant and connect, which read address/decimals/symbol —
+> neither read nor render the marker. No tool, schema key, `next_tool` value,
+> expected-context version or signer contract changes. Scope of this note:
+> that rendering. Nothing else in this document was re-verified.

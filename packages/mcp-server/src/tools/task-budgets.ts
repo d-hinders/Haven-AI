@@ -26,8 +26,30 @@ import { AgentPaymentNextAction, resolveTokenFromAddress, type HavenClient } fro
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { runTool, HostedToolError } from './support/errors.js'
-import { refusalNextStep } from './support/guidance.js'
+import { refusalNextStep, taskBudgetNextStep } from './support/guidance.js'
 import { humanToAtomic } from './support/cap-price.js'
+
+/**
+ * #3329 (review fix): the hand-off both tools return once a signature is
+ * needed. `next_tool_name: 'haven_sign'` / `next_tool_server_role: 'signer'` /
+ * `next_arguments: { task_budget_id }` come from the typed builder — the
+ * plain-prose "Sign the returned sign_data with the local signer" this used
+ * to say instead named no tool a client could dispatch on, so the only
+ * observable behavior was a model reading prose and guessing which signer
+ * tool to call with which argument (and, on the wrong guess, a signer refusal
+ * over typed_data it does not recognise for this shape).
+ */
+function taskBudgetSignHandoff(taskBudgetId: string) {
+  return taskBudgetNextStep({
+    nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+    nextTool: 'haven_sign',
+    nextArguments: { task_budget_id: taskBudgetId },
+    reason:
+      'Sign with the local signer tool named above, passing task_budget_id EXACTLY as given — it ' +
+      'fetches the signing context itself. Then relay the signature with haven_submit, passing ' +
+      'task_budget_id (not payment_id).',
+  })
+}
 
 /** See `state-direct-recovery.ts` for why this is a tuple, not a `Record`. */
 export const TASK_BUDGET_TOOLS = [
@@ -110,13 +132,7 @@ export function createTaskBudgetHandlers(haven: HavenClient): HostedToolHandlers
         return {
           task_budget: result.taskBudget,
           ...(result.signData
-            ? {
-                sign_data: result.signData,
-                next_action: 'sign_then_submit',
-                instructions:
-                  'Sign the returned sign_data with the local signer, then relay the signature ' +
-                  'with haven_submit, passing task_budget_id (not payment_id).',
-              }
+            ? { sign_data: result.signData, ...taskBudgetSignHandoff(result.taskBudget.id) }
             : {}),
         }
       }),
@@ -131,10 +147,7 @@ export function createTaskBudgetHandlers(haven: HavenClient): HostedToolHandlers
         return {
           task_budget: result.taskBudget,
           sign_data: result.signData,
-          next_action: 'sign_then_submit',
-          instructions:
-            'Sign the returned sign_data with the local signer, then relay the signature with ' +
-            'haven_submit, passing task_budget_id (not payment_id).',
+          ...taskBudgetSignHandoff(args.task_budget_id as string),
         }
       }),
   }

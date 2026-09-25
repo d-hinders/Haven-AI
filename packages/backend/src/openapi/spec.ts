@@ -5632,7 +5632,7 @@ export const openapiSpec = {
       post: {
         tags: ['TaskBudgets'],
         operationId: 'openTaskBudget',
-        summary: 'Open a task budget, step 1: build the unsigned child (nothing signed yet).',
+        summary: 'Open a task budget, step 1: build the budget to sign (nothing signed yet).',
         description:
           "Carves an unsigned, self-delegated child from the agent's active budget delegation for (token, recipient|open) — chain [taskChild, budget], delegate = the agent's own delegate account, never ANY_BENEFICIARY. Stored pending; the agent signs sign_data.typed_data and POSTs it to /task-budgets/{id}/submit to open it. Pre-sign refusal (409 task_budget_exceeds_remaining) when max_amount_atomic plus this agent's other OPEN task budgets under the same parent would exceed the parent's on-chain remaining budget — a convenience, never the real control: the enforcers still rule at redemption.",
         security: [{ AgentApiKey: [] }],
@@ -5788,7 +5788,7 @@ export const openapiSpec = {
       post: {
         tags: ['TaskBudgets'],
         operationId: 'submitTaskBudget',
-        summary: 'Submit the agent signature — opens a pending child, or submits a closing UserOp.',
+        summary: 'Submit the agent signature — opens a pending child, or relays the signed close operation.',
         description:
           "status=pending: verifies signature recovers the agent's delegate key over the stored child typed data, then flips to open. status=closing: submits the stored close UserOp with signature; flips to closed. Any other status is 409.",
         security: [{ AgentApiKey: [] }],

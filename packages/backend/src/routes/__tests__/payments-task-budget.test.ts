@@ -65,22 +65,42 @@ function primeDb(...routes: DbRoute[]) {
 const AUTH: DbRoute = [/api_key_hash = \$1/, () => ({ rows: [AGENT] })]
 const RAIL_STATE: DbRoute = [/SELECT us.execution_rail/, () => ({ rows: [{ execution_rail: 'delegation' }] })]
 const NO_IDEMPOTENCY_REPLAY: DbRoute = [/send_idempotency_key = \$2/, () => ({ rows: [] })]
+function budgetRow(overrides: Record<string, unknown> = {}) {
+  return {
+    delegation_hash: BUDGET_HASH,
+    delegation_json: JSON.stringify({
+      delegate: DELEGATE_ACCOUNT,
+      delegator: AGENT.account_address,
+      authority: `0x${'ff'.repeat(32)}`,
+      caveats: [],
+      salt: '1',
+      signature: `0x${'ab'.repeat(65)}`,
+    }),
+    recipient_address: null,
+    budget_atomic: '5000000',
+    ...overrides,
+  }
+}
+
+// #3329 review finding E: the task-budget payment path selects the parent
+// by HASH (never by token/to) — this mock ignores the queried hash and
+// always answers with `budgetRow()` unless a test overrides it, matching
+// this file's existing style of "the SQL text is matched, not the params".
 const BUDGET_DELEGATION: DbRoute = [
-  /SELECT delegation_hash, delegation_json, recipient_address\s+FROM agent_delegations/,
+  /SELECT delegation_hash, delegation_json, recipient_address, budget_atomic\s+FROM agent_delegations\s+WHERE agent_id = \$1 AND delegation_hash = \$2/,
+  () => ({ rows: [budgetRow()] }),
+]
+// The ORDINARY (token, to) selection `prepareDelegationPayment` falls back
+// to when no task_budget_id resolves — a DIFFERENT (pinned) grant, so a
+// test can prove the by-hash selection is what actually wins.
+const PINNED_BUDGET_DELEGATION: DbRoute = [
+  /SELECT delegation_hash, delegation_json, recipient_address, budget_atomic\s+FROM agent_delegations\s+WHERE agent_id = \$1\s+AND token_address/,
   () => ({
     rows: [
-      {
-        delegation_hash: BUDGET_HASH,
-        delegation_json: JSON.stringify({
-          delegate: DELEGATE_ACCOUNT,
-          delegator: AGENT.account_address,
-          authority: `0x${'ff'.repeat(32)}`,
-          caveats: [],
-          salt: '1',
-          signature: `0x${'ab'.repeat(65)}`,
-        }),
-        recipient_address: null,
-      },
+      budgetRow({
+        delegation_hash: `0x${'99'.repeat(32)}`,
+        recipient_address: RECIPIENT.toLowerCase(),
+      }),
     ],
   }),
 ]
@@ -254,5 +274,27 @@ describe('POST /payments with task_budget_id (#3329)', () => {
     expect(insertCall).toBeDefined()
     const params = insertCall![1] as unknown[]
     expect(params).toContain('tb-1')
+  })
+
+  it('#3329 review finding E: with BOTH an open and a pinned grant present, the task budget resolves through its OWN parent by hash, not the (token, to) pin', async () => {
+    // The pinned grant's recipient equals `to` — under the OLD (token, to)
+    // selection this would win and mismatch the task budget's real (open)
+    // parent. `PINNED_BUDGET_DELEGATION` answers the ordinary selection
+    // `prepareDelegationPayment` would otherwise fall back to; `BUDGET_DELEGATION`
+    // (by hash) is the task budget's REAL parent and must be what is used.
+    primeDb(
+      AUTH, RAIL_STATE, NO_IDEMPOTENCY_REPLAY, BUDGET_DELEGATION, PINNED_BUDGET_DELEGATION,
+      taskBudgetLookup(taskBudgetRow()), INSERT_INTENT,
+    )
+    const res = await app.inject({
+      method: 'POST', url: '/payments', headers: { authorization: 'Bearer sk_agent_test' }, payload: body(),
+    })
+    expect(res.statusCode).toBe(201)
+    const rail = await mockCreateRail.mock.results[0]!.value
+    const chainArg = rail.prepareRedemption.mock.calls[0][0]
+    // chainArg[1] is the parent budget delegation redeemed — must be the
+    // task budget's OWN parent (delegator = AGENT.account_address, the open
+    // grant), never the pinned grant's shape (delegator would differ).
+    expect(chainArg[1].delegator.toLowerCase()).toBe(AGENT.account_address.toLowerCase())
   })
 })

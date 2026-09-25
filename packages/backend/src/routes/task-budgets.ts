@@ -150,12 +150,16 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
     const requested = BigInt(max_amount_atomic)
     // Owner decision #3329-3: pre-sign refusal when open children + request
     // exceed the on-chain remainder — a convenience, never the real control.
+    // #3329 review finding D: the fallback on a failed on-chain read is the
+    // parent's GRANTED budget (`budget_atomic`), never the REQUESTED amount
+    // — the latter would report a fabricated "remaining" in the 409 body
+    // that happens to equal whatever the caller just asked for.
     const remainder = await checkRemainderForNewTaskBudget(
       agent.id,
       agent.chain_id,
       parentDelegation,
       requested,
-      max_amount_atomic,
+      parentDelegation.budget_atomic,
       nowSec,
     )
     if (!remainder.ok) {
@@ -169,13 +173,18 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
       })
     }
 
+    // #3329 review finding B: mint the row's REAL id first — the row does
+    // not exist yet, but `taskBudgetSalt(id)` must be derived from the id
+    // this row is actually inserted with, or `haven-task-budget:<id>` names
+    // a row that never exists. `insertPendingTaskBudget` below is given this
+    // SAME id explicitly rather than letting the table default supply one.
+    const taskBudgetId = crypto.randomUUID()
+
     let built
     try {
       built = await buildTaskBudgetChild({
         chainId: agent.chain_id,
-        // The row does not exist yet — mint the id first so the salt (keyed
-        // on the task budget's OWN id) is available before the insert.
-        taskBudgetId: crypto.randomUUID(),
+        taskBudgetId,
         delegateOwnerAddress: agent.delegate_address as `0x${string}`,
         budgetDelegation: JSON.parse(parentDelegation.delegation_json),
         token: token_address as `0x${string}`,
@@ -188,6 +197,7 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
     }
 
     const row = await insertPendingTaskBudget({
+      id: taskBudgetId,
       agentId: agent.id,
       chainId: agent.chain_id,
       tokenAddress: token_address,
@@ -280,7 +290,17 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
         try {
           result = await submitTaskBudgetClose(agent, row, signature as Hex)
         } catch (err) {
-          return reply.code(502).send({ error: 'Could not submit the task budget close', details: safeDetails(err) })
+          // #3329 review finding A: the bundler rejecting a submit here
+          // almost always means the STORED op went stale (the delegate
+          // account's nonce moved, or the sponsorship window lapsed) — a
+          // 502 invites a retry of the exact bytes that will fail again.
+          // Name it: the agent's fix is to call /close again for a fresh
+          // prepare, not to resubmit.
+          return reply.code(409).send({
+            error: 'The stored close UserOp is stale — call /task-budgets/:id/close again for a fresh one, then submit that.',
+            error_code: 'close_needs_reprepare',
+            details: safeDetails(err),
+          })
         }
         const closed = await markClosed(row.id, agent.id, result.txHash)
         if (!closed) return reply.code(409).send({ error: 'Task budget is no longer closing' })
@@ -304,19 +324,14 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
 
     const nowSec = Math.floor(Date.now() / 1000)
 
-    if (row.status === 'closing') {
-      // Idempotent re-serve of the same sign_data.
-      const context = await buildTaskBudgetSignContext(agent, row)
-      if (!context || context.purpose !== 'close') {
-        return reply.code(409).send({ error: 'Task budget close context is unavailable', error_code: 'sign_context_unavailable' })
-      }
-      return reply.send({
-        task_budget: toWire(row, nowSec),
-        sign_data: { signature_scheme: 'eip712_userop', typed_data: context.typed_data, user_op_hash: context.user_op_hash },
-        next_action: 'sign_then_submit',
-      })
-    }
-
+    // #3329 review finding A: a 'closing' row does NOT idempotently re-serve
+    // the stored UserOp — that goes stale the moment the delegate account's
+    // nonce moves or the sponsorship window lapses, at which point every
+    // future /submit 502s forever while the child stays live until expiry.
+    // Instead `/close` always re-prepares a FRESH disableDelegation UserOp
+    // (below), overwriting `prepared_user_op` — idempotent in EFFECT (the
+    // row ends 'closing' with a prepare of the same call, every time), never
+    // in bytes.
     let outcome
     try {
       outcome = await prepareTaskBudgetClose(agent, row, nowSec)
@@ -332,7 +347,7 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
 
     const prepared = outcome.prepared!
     const closing = await markClosing(row.id, agent.id, serializeClosePreparedUserOp(prepared))
-    if (!closing) return reply.code(409).send({ error: 'Task budget is no longer open' })
+    if (!closing) return reply.code(409).send({ error: 'Task budget is no longer open or closing' })
     return reply.send({
       task_budget: toWire(closing, nowSec),
       sign_data: {

@@ -37,6 +37,10 @@ vi.mock('../../middleware/agentAuth.js', () => ({
 }))
 vi.mock('../../rails/delegation-authorization.js', () => ({
   selectDelegation: mockSelect,
+  // #3329 review finding E: the task-budget paths resolve their parent by
+  // hash now, not by (token, to) — same mock serves both in this file since
+  // it does not distinguish by argument.
+  selectDelegationByHash: mockSelect,
   prepareDelegationPayment: mockPrepareFunding,
 }))
 vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
@@ -151,6 +155,7 @@ describe('x402 authorize with taskBudgetId (#3329)', () => {
       delegation_hash: BUDGET_HASH,
       delegation_json: JSON.stringify(signedBudget),
       recipient_address: null,
+      budget_atomic: '5000000',
     })
   })
 
@@ -234,5 +239,20 @@ describe('x402 authorize with taskBudgetId (#3329)', () => {
       expect.objectContaining({ taskBudget: expect.objectContaining({ childDelegation: expect.anything() }) }),
     )
     expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({ taskBudgetId: 'tb-1' }))
+  })
+
+  // #3329: `/x402` is camelCase (`X402AuthorizeRequest`, `additionalProperties:
+  // false`) — unlike `POST /payments`, which is snake_case. A caller that
+  // sends the `POST /payments` key here is refused by request validation
+  // rather than silently ignored (the SDK sent this key by mistake before
+  // this issue; this test documents the convention so it does not regress).
+  it('refuses a snake_case task_budget_id on /x402 — the convention is camelCase here', async () => {
+    primeTaskBudgetLookup(taskBudgetRow())
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize', headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ taskBudgetId: undefined, task_budget_id: 'tb-1' }),
+    })
+    expect(res.statusCode).toBe(400)
+    expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 })

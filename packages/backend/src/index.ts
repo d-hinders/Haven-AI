@@ -144,7 +144,7 @@ installRequestValidation(app, {
     // caller yet (unlike `routes/payments.ts` / `routes/agent-delegations.ts`
     // / `routes/machine-payments.ts`, which predate the request-validation
     // rollout and carry real traffic the #3028 fallback could not prove) —
-    // `docs/contributing/dev-environment.md`'s rule is that a genuinely new
+    // `docs/operations/dev-environment.md`'s rule is that a genuinely new
     // module is born ENFORCED, never shadow, because there is no existing
     // caller a stricter schema could break. It is money-path, but that rule
     // is about proving EXISTING traffic safe, not about gating new surfaces.

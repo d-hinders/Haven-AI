@@ -21,6 +21,7 @@
 
 import {
   selectDelegationForPayment,
+  selectActiveDelegationByHash,
   type DelegationForPaymentRow,
 } from '../infra/repositories/delegation-budgets.js'
 import type { Address, Hex } from 'viem'
@@ -50,6 +51,13 @@ export interface DelegationAuthorization {
  */
 export interface TaskBudgetForPayment {
   childDelegation: Delegation
+  /**
+   * #3329 review finding E: the EXACT parent delegation the task budget was
+   * carved from (selected by hash by the caller) — used verbatim instead of
+   * re-selecting by (token, to), which can pick a DIFFERENT active grant
+   * than the one the task child's `authority` names.
+   */
+  parentDelegation: DelegationForPaymentRow
 }
 
 /**
@@ -67,6 +75,18 @@ export async function selectDelegation(
 }
 
 /**
+ * #3329 review finding E: the delegation a task budget names as its parent,
+ * by hash — never re-derived by (token, to). See the repository function's
+ * own comment for why (token, to) can pick the WRONG active grant.
+ */
+export async function selectDelegationByHash(
+  agentId: string,
+  delegationHash: string,
+): Promise<DelegationForPaymentRow | null> {
+  return selectActiveDelegationByHash(agentId, delegationHash)
+}
+
+/**
  * Prepare the sponsored redemption for the selected delegation. Throws when
  * the caveats reject the payment (budget exceeded, wrong recipient, expired)
  * — the caller maps that to a clean 402/502 without writing state.
@@ -78,7 +98,11 @@ export async function prepareDelegationPayment(
   amountRaw: bigint,
   options?: { taskBudget?: TaskBudgetForPayment },
 ): Promise<DelegationAuthorization | null> {
-  const delegation = await selectDelegation(agent.id, tokenAddress, toAddress)
+  // #3329 review finding E: a task budget's parent is used VERBATIM — never
+  // re-selected by (token, to), which can name a different active grant.
+  const delegation = options?.taskBudget
+    ? options.taskBudget.parentDelegation
+    : await selectDelegation(agent.id, tokenAddress, toAddress)
   if (!delegation) return null
 
   const delegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {

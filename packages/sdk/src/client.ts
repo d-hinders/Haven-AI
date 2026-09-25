@@ -444,8 +444,10 @@ export class HavenClient {
       ...(new TextEncoder().encode(JSON.stringify(paymentRequired)).length <= 65536
         ? { paymentRequired }
         : {}),
-      // #3329
-      ...(options.taskBudgetId ? { task_budget_id: options.taskBudgetId } : {}),
+      // #3329: `/x402` bodies are camelCase (`X402AuthorizeRequest`), unlike
+      // `POST /payments`'s snake_case `task_budget_id` above — the two
+      // surfaces use different conventions, so this key is NOT `task_budget_id`.
+      ...(options.taskBudgetId ? { taskBudgetId: options.taskBudgetId } : {}),
     })
 
     // Anything other than a signable funding intent (pending_approval,
@@ -568,9 +570,10 @@ export class HavenClient {
       // used to produce a valid-looking signature over the wrong digest.
       assertUserOpTypedDataBinding(signData.typed_data, signData.hash)
       // #3283 (epic #3284): the binding proves the typed data and hash agree,
-      // but the Haven API response supplies both. Sign only the ONE shape a
-      // direct payment or funding leg is — this key's own account redeeming a
-      // single budget delegation through the DelegationManager — so a
+      // but the Haven API response supplies both. Sign only the shapes a
+      // direct payment or funding leg is — this key's own account redeeming
+      // its budget delegation directly, or a self-delegated task-budget
+      // child redeemed under it — through the DelegationManager, so a
       // compromised API cannot get a self-call or an empty-context
       // redemption (account capture) signed. Same check as `haven_sign`.
       assertBoundDirectPaymentUserOp(
@@ -1324,6 +1327,12 @@ export class HavenClient {
        * of replaying the first.
        */
       idempotencyKey?: string
+      /**
+       * #3329: build the settlement child under this open task budget's own
+       * child delegation instead of the agent's budget delegation directly —
+       * `[settlement, task, budget]`.
+       */
+      taskBudgetId?: string
     } = {},
   ): Promise<{
     paymentId: string

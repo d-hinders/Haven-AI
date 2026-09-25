@@ -86,11 +86,13 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * **and haven_close_task_budget.** Trimmed to the leanest description each still
  * carries its full behavior contract in (505 and 316 bytes — both well below the
  * mean), and `haven_submit`'s description gained one sentence naming the
- * task_budget_id branch (+63 bytes). Nothing pre-existing grew. Measured total:
- * 21,994 UTF-8 bytes / 26 tools = 845.9 mean — the mean actually DROPS (875.0 →
- * 845.9) because the two new descriptions are leaner than the surface average, so
- * only the absolute pin needs to move; it moves to the exact measured value,
- * shrink-only from here, same discipline as every prior re-derivation.
+ * task_budget_id branch (measured 606 → 780 bytes, +174). Nothing else
+ * pre-existing grew: base total across the prior 24 tools was 20,999; +505 +316
+ * +174 = 21,994 across 26 tools. Measured total: 21,994 UTF-8 bytes / 26 tools =
+ * 845.9 mean — the mean actually DROPS (875.0 → 845.9) because the two new
+ * descriptions are leaner than the surface average, so only the absolute pin
+ * needs to move; it moves to the exact measured value, shrink-only from here,
+ * same discipline as every prior re-derivation.
  */
 const MAX_TOTAL_BYTES = 21_994
 // #3329: the mean pin stays the prior shrink-only value (21,000 / 24 = 875.0)

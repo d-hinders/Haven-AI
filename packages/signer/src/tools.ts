@@ -857,9 +857,11 @@ export function createToolHandlers(
               }
               throw err
             }
-            // #3272: content + provenance — the ONE operation this branch may
-            // ever sign: redeeming a single delegation granted to the agent's
-            // own account, from that account, on a chain the delegation rail runs on.
+            // #3272: content + provenance — the operations this branch may
+            // ever sign: redeeming a delegation granted to the agent's own
+            // account directly, or a self-delegated task-budget child
+            // redeemed under it, from that account, on a chain the
+            // delegation rail runs on.
             assertBoundDirectPaymentUserOp(typedData, signer.delegateAddress)
             const signature = await signer.signDelegationTypedData(typedData)
             // #3272 (criterion 4): audit the digest actually signed — the

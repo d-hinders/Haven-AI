@@ -9,6 +9,7 @@ covers:
   - packages/backend/src/modules/x402/**
   - packages/backend/src/modules/task-budgets/**
   - packages/backend/src/routes/task-budgets.ts
+  - packages/sdk/src/task-budget-guards.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/x402/x402-delegation.ts
   - packages/backend/src/infra/chain/settlement-transfer-verifier.ts
@@ -2041,8 +2042,10 @@ estimation; nothing queues. Key separation for a *different* delegate is
    bytes from `GET /task-budgets/:id/sign-context` and runs the SDK's
    `assertOwnTaskChild` — and `POST /task-budgets/:id/submit` verifies the
    signature recovers the agent's delegate key before the row becomes `open`.
-3. A payment names the budget: `task_budget_id` on `POST /payments` and
-   `POST /x402/authorize`. The redemption UserOp redeems the two-link chain;
+3. A payment names the budget: `task_budget_id` on `POST /payments` (a
+   snake_case body) and `taskBudgetId` on `POST /x402/authorize` (that body
+   is camelCase, and it is validated strictly — the SDK sends each key on the
+   right surface). The redemption UserOp redeems the two-link chain;
    an erc7710 settlement child is built under the task child, so the
    permission context a merchant redeems is `[settlement, task, budget]`.
    Token, recipient pin and parent must match the row, else a structured 409.

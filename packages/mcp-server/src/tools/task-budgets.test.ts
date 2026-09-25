@@ -96,7 +96,10 @@ describe('haven_open_task_budget (#3329)', () => {
     })
     expect(result.data).toMatchObject({
       task_budget: { id: 'tb_1' },
-      next_action: 'sign_then_submit',
+      next_action: 'sign_and_submit_payment',
+      next_tool_name: 'haven_sign',
+      next_tool_server_role: 'signer',
+      next_arguments: { task_budget_id: 'tb_1' },
     })
     expect((result.data as { sign_data: unknown }).sign_data).toBeDefined()
   })
@@ -153,7 +156,12 @@ describe('haven_close_task_budget (#3329)', () => {
     const result = await createToolHandlers(haven).haven_close_task_budget({ task_budget_id: 'tb_1' })
     expect(result.success).toBe(true)
     if (!result.success) throw new Error('expected success')
-    expect(result.data).toMatchObject({ next_action: 'sign_then_submit' })
+    expect(result.data).toMatchObject({
+      next_action: 'sign_and_submit_payment',
+      next_tool_name: 'haven_sign',
+      next_tool_server_role: 'signer',
+      next_arguments: { task_budget_id: 'tb_1' },
+    })
     expect((result.data as { sign_data: unknown }).sign_data).toBeDefined()
   })
 })

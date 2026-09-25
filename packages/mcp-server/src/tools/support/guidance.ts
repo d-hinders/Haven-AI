@@ -38,7 +38,11 @@ import { toolSchemas } from '../contracts.js'
  * (test-time import, which the workspace has).
  */
 const SIGNER_HANDOFF_SHAPES = {
-  haven_sign: { payment_id: z.string().min(1) },
+  // #3329: haven_sign also takes task_budget_id (mutually exclusive with
+  // payment_id on the signer's own side) — a task-budget open/close hand-off
+  // names task_budget_id, never payment_id, so both are optional here rather
+  // than requiring a field this handoff does not carry.
+  haven_sign: { payment_id: z.string().min(1).optional(), task_budget_id: z.string().min(1).optional() },
   haven_sign_x402: { payment_id: z.string().min(1) },
 } as const satisfies Record<string, z.ZodRawShape>
 
@@ -94,6 +98,21 @@ export type HostedHandoff = NextStepHandoff<HostedNextStepTargets>
  */
 export function refusalNextStep(input: { nextAction: AgentNextStep['next_action'] } & HostedHandoff): NextStep {
   return nextStep({ ...input, safeToContinue: false, reason: '' } as NextStepInput<HostedNextStepTargets>)
+}
+
+/**
+ * #3329: the SUCCESS-side counterpart of {@link refusalNextStep} for a next
+ * step that has no payment to summarize — a task budget is not a payment, so
+ * forcing it through {@link buildAgentGuidance}'s `AgentPaymentSummary` (which
+ * requires `payment_id`) would mislabel a `task_budget_id` under that key.
+ * Same builder, same target map, same compile-time twins as every other
+ * next-step site; `safeToContinue` defaults true since this is the success
+ * path, overridable for a not-yet-safe hand-off.
+ */
+export function taskBudgetNextStep(
+  input: { nextAction: AgentNextStep['next_action']; reason: string; safeToContinue?: boolean } & HostedHandoff,
+): NextStep {
+  return nextStep({ ...input, safeToContinue: input.safeToContinue ?? true } as NextStepInput<HostedNextStepTargets>)
 }
 
 const nextStep = createNextStepBuilder(HOSTED_NEXT_STEP_TARGETS)

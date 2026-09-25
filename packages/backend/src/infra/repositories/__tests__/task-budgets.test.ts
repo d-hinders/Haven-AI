@@ -3,6 +3,7 @@
  * scoping and the open-reserved sum are all Postgres behaviour, so they
  * belong on the real harness (epic #1219).
  */
+import { randomUUID } from 'node:crypto'
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
@@ -52,6 +53,7 @@ async function seedAgent(): Promise<Seeded> {
 function pendingInput(agentId: string, over: Partial<InsertPendingTaskBudgetInput> = {}): InsertPendingTaskBudgetInput {
   const n = ++seq
   return {
+    id: randomUUID(),
     agentId,
     chainId: 84532,
     tokenAddress: USDC,
@@ -85,6 +87,15 @@ describeDb('agent_task_budgets repository (#3329)', () => {
     expect(await findForAgent(row.id, other.agentId)).toBeNull()
   })
 
+  it('#3329 review finding B: the inserted row id is EXACTLY the caller-minted id — the salt input is real', async () => {
+    const seeded = await seedAgent()
+    const mintedId = randomUUID()
+    const row = await insertPendingTaskBudget(pendingInput(seeded.agentId, { id: mintedId }))
+
+    expect(row.id).toBe(mintedId)
+    expect((await findForAgent(mintedId, seeded.agentId))?.id).toBe(mintedId)
+  })
+
   it('markOpen only succeeds from pending, and stores the signed json', async () => {
     const seeded = await seedAgent()
     const row = await insertPendingTaskBudget(pendingInput(seeded.agentId))
@@ -99,7 +110,7 @@ describeDb('agent_task_budgets repository (#3329)', () => {
     expect(await markOpen(row.id, seeded.agentId, signed)).toBeNull()
   })
 
-  it('markClosing only succeeds from open, markClosed accepts open/closing/pending', async () => {
+  it('markClosing succeeds from open or closing (never pending), markClosed accepts open/closing/pending', async () => {
     const seeded = await seedAgent()
     const pending = await insertPendingTaskBudget(pendingInput(seeded.agentId))
 
@@ -123,6 +134,28 @@ describeDb('agent_task_budgets repository (#3329)', () => {
 
     // Already closed — markClosed again is a no-op.
     expect(await markClosed(closing!.id, seeded.agentId, '0xtxhash2')).toBeNull()
+  })
+
+  it('#3329 review finding A: markClosing from an already-closing row OVERWRITES the stored prepared_user_op', async () => {
+    const seeded = await seedAgent()
+    const opened = await insertPendingTaskBudget(pendingInput(seeded.agentId))
+    await markOpen(opened.id, seeded.agentId, JSON.stringify({ signed: true }))
+
+    const first = await markClosing(opened.id, seeded.agentId, JSON.stringify({ userOp: 'stale' }))
+    expect(first?.status).toBe('closing')
+    expect(first?.prepared_user_op).toBe(JSON.stringify({ userOp: 'stale' }))
+
+    // A re-prepare (fresh bytes) lands on the SAME closing row, overwriting
+    // the stale op rather than being refused by the status guard.
+    const second = await markClosing(opened.id, seeded.agentId, JSON.stringify({ userOp: 'fresh' }))
+    expect(second?.status).toBe('closing')
+    expect(second?.prepared_user_op).toBe(JSON.stringify({ userOp: 'fresh' }))
+    expect(second?.id).toBe(first?.id)
+
+    // markClosed from 'closing' still works after the overwrite.
+    const closed = await markClosed(second!.id, seeded.agentId, '0xfreshtx')
+    expect(closed?.status).toBe('closed')
+    expect(closed?.close_tx_hash).toBe('0xfreshtx')
   })
 
   it('listForAgent status=open excludes pending, closing, closed and expired rows', async () => {

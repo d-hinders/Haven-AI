@@ -215,7 +215,7 @@ export async function withDelegationBuildSlotLock<T>(
  * same reason: two app instances disagreeing about "now" must not disagree
  * about which grant authorizes a payment.
  */
-export const SELECT_DELEGATION_FOR_PAYMENT_SQL = `SELECT delegation_hash, delegation_json, recipient_address
+export const SELECT_DELEGATION_FOR_PAYMENT_SQL = `SELECT delegation_hash, delegation_json, recipient_address, budget_atomic
      FROM agent_delegations
      WHERE agent_id = $1
        AND token_address = LOWER($2)
@@ -229,6 +229,12 @@ export interface DelegationForPaymentRow {
   delegation_hash: string
   delegation_json: string
   recipient_address: string | null
+  /**
+   * #3329 review finding D: the period budget as GRANTED — the fallback a
+   * caller reads `readRemainingBudget` against on a failed on-chain read.
+   * Distinct from any REQUESTED amount a caller is checking against it.
+   */
+  budget_atomic: string
 }
 
 /** `agentId` is the scope: delegations belong to exactly one agent. */
@@ -241,6 +247,32 @@ export async function selectDelegationForPayment(
     agentId,
     tokenAddress,
     toAddress,
+  ])
+  return result.rows[0] ?? null
+}
+
+/**
+ * #3329 review finding E: the delegation a TASK BUDGET names as its parent
+ * (`agent_task_budgets.parent_delegation_hash`), by its OWN identity — never
+ * re-derived by (token, to). An agent holding both an open and a pinned
+ * grant for the same token can have a task budget carved from the open one
+ * while the payment's `to` also matches the pinned grant's recipient;
+ * `selectDelegationForPayment`'s (token, to) selection would then pick the
+ * PINNED grant — a different row than the task child's `authority` names —
+ * and the redemption reverts. Selecting by hash cannot make that mistake:
+ * it names the exact row, or none.
+ */
+export const SELECT_ACTIVE_DELEGATION_BY_HASH_SQL = `SELECT delegation_hash, delegation_json, recipient_address, budget_atomic
+     FROM agent_delegations
+     WHERE agent_id = $1 AND delegation_hash = $2 AND status = 'active'`
+
+export async function selectActiveDelegationByHash(
+  agentId: string,
+  delegationHash: string,
+): Promise<DelegationForPaymentRow | null> {
+  const result = await pool.query<DelegationForPaymentRow>(SELECT_ACTIVE_DELEGATION_BY_HASH_SQL, [
+    agentId,
+    delegationHash,
   ])
   return result.rows[0] ?? null
 }

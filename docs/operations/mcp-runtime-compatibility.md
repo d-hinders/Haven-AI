@@ -11,6 +11,7 @@ covers:
   - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/backend/src/modules/x402/sign-context.ts
   - packages/sdk/src/userop-binding.ts
+  - packages/sdk/src/task-budget-guards.ts
   - .github/workflows/publish.yml
   - packages/cli/src/connect-runner.ts
   - packages/backend/src/routes/machine-payments.ts
@@ -2060,8 +2061,11 @@ shapes are signed and nothing else: a self-delegated task child
 (`assertOwnTaskBudgetCloseUserOp`), both from `@haven_ai/sdk`'s
 `task-budget-guards.ts` — the security model §10 states the allowlist.
 
-**The tool-name set changes on both runtimes**, so the consent hash moves and
-every installed operator is asked to consent again on the next launch:
+**The tool-name set changes on both runtimes.** Only the local `@haven_ai/mcp`
+has a consent gate, so its hash moves and every installed operator of the
+local runtime is asked to consent again on the next launch; the signer's own
+hash covers tool names and does not move, so its reworded `haven_sign`
+consent summary is not re-prompted:
 local `@haven_ai/mcp` gains `haven_open_task_budget`, `haven_close_task_budget`
 and `haven_submit` (the local relay step task budgets need; its `payment_id`
 branch refuses, because the local runtime signs and submits a payment inline);
@@ -2070,13 +2074,15 @@ and its existing `haven_submit` takes `task_budget_id` XOR `payment_id`.
 `task_budget_id` is an optional argument on `haven_send`, `haven_pay`,
 `haven_pay_x402_quote` and `haven_pay_x402` where each exists.
 
-Skew, both directions fail closed: an **older signer** refuses
-`task_budget_id` with the `-32602` undeclared-argument envelope below (it
-never fetches, never signs); an **older hosted MCP** has no task-budget tools,
-so the local runtime's hand-off names a tool the server does not list, and a
-**newer signer against an older backend** gets a 404 from the sign-context
-read and refuses with `SIGN_CONTEXT_UNREACHABLE`-class errors, never a
-signature. The SDK's `getAgentSummary()` now performs a third read
+Skew, both directions fail closed, each by a different mechanism: an
+**older signer** strips the unknown `task_budget_id` key (its `haven_sign`
+schema predates it) and then refuses with "Pass payment_id … or
+payload_hash" — it never fetches and never signs; an **older hosted MCP**
+lists no task-budget tools, and its `haven_submit`, which the signer's
+hand-off names, is strict, so a `task_budget_id` there is refused with the
+`-32602 unrecognized_keys` envelope below; a **newer signer against an older
+backend** gets a 404 from the sign-context read and refuses with
+`SIGN_CONTEXT_REFUSED`, never a signature. The SDK's `getAgentSummary()` now performs a third read
 (`GET /task-budgets?status=open`) and degrades to an empty `taskBudgets`
 list on any failure, so an older backend does not break `haven_get_agent`.
 

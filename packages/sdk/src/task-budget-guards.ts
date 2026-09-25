@@ -52,6 +52,33 @@ interface Caveat {
   terms: string
 }
 
+/**
+ * The pinned `types` shape for a task-budget child's `Delegation` EIP-712
+ * payload — identical to `@metamask/smart-accounts-kit/utils`'s
+ * `SIGNABLE_DELEGATION_TYPED_DATA` (cross-checked by the `hashDelegation`
+ * pin test). Checked verbatim (order and all) in `assertOwnTaskChild` so a
+ * caveat cannot be reinterpreted through a renamed/reordered field, and so a
+ * domain carrying an unrelated `primaryType: 'Delegation'` struct (same
+ * name, different shape) is refused rather than partially trusted.
+ */
+const EXPECTED_DELEGATION_TYPES = {
+  Caveat: [
+    { name: 'enforcer', type: 'address' },
+    { name: 'terms', type: 'bytes' },
+  ],
+  Delegation: [
+    { name: 'delegate', type: 'address' },
+    { name: 'delegator', type: 'address' },
+    { name: 'authority', type: 'bytes32' },
+    { name: 'caveats', type: 'Caveat[]' },
+    { name: 'salt', type: 'uint256' },
+  ],
+} as const
+
+/** `DelegationManager`'s EIP-712 domain `name`/`version` — pinned alongside `verifyingContract`. */
+const DELEGATION_DOMAIN_NAME = 'DelegationManager'
+const DELEGATION_DOMAIN_VERSION = '1'
+
 function same(a: string | undefined, b: string | undefined): boolean {
   return !!a && !!b && a.toLowerCase() === b.toLowerCase()
 }
@@ -132,8 +159,31 @@ export function assertOwnTaskChild(
       `Expected ${DELEGATION_MANAGER}, got ${td.domain?.verifyingContract}.`,
     )
   }
+  if (td.domain?.name !== DELEGATION_DOMAIN_NAME || td.domain?.version !== DELEGATION_DOMAIN_VERSION) {
+    refuseTaskChild(
+      'the EIP-712 domain name/version does not match the pinned DelegationManager domain',
+      `Expected name '${DELEGATION_DOMAIN_NAME}' version '${DELEGATION_DOMAIN_VERSION}'; got name ` +
+        `'${String(td.domain?.name)}' version '${String(td.domain?.version)}'.`,
+    )
+  }
+  if (
+    JSON.stringify(td.types?.Caveat) !== JSON.stringify(EXPECTED_DELEGATION_TYPES.Caveat) ||
+    JSON.stringify(td.types?.Delegation) !== JSON.stringify(EXPECTED_DELEGATION_TYPES.Delegation)
+  ) {
+    refuseTaskChild(
+      'its EIP-712 type definitions do not match the pinned Delegation/Caveat shape',
+      'A renamed, reordered, or additional field on Delegation or Caveat could change what the ' +
+        'caveats below mean without changing this check\'s field-by-field comparisons.',
+    )
+  }
   const domainChain = Number(td.domain?.chainId)
-  if (!Number.isFinite(domainChain) || domainChain !== expected.chainId) {
+  if (!Number.isFinite(domainChain) || !DIRECT_PAYMENT_CHAIN_IDS.has(domainChain)) {
+    refuseTaskChild(
+      'it is scoped to a chain the delegation rail has no pinned contracts for',
+      `Chains with pinned contracts: ${[...DIRECT_PAYMENT_CHAIN_IDS].join(', ')}; the child says ${String(td.domain?.chainId)}.`,
+    )
+  }
+  if (domainChain !== expected.chainId) {
     refuseTaskChild(
       'it is scoped to the wrong chain',
       `Expected chain ${expected.chainId}; the child says ${td.domain?.chainId}.`,

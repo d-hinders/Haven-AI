@@ -264,8 +264,9 @@ export class X402Erc7710 {
       // #1307/#1547: persisted so the settle leg can rehydrate the merchant
       // call by payment_id on this scheme too, not only on the 3009 bridge.
       ...(options.mcpCallContext ? { mcpCallContext: options.mcpCallContext } : {}),
-      // #3329
-      ...(options.taskBudgetId ? { task_budget_id: options.taskBudgetId } : {}),
+      // #3329: `/x402` bodies are camelCase (`X402AuthorizeRequest`) — do not
+      // switch this to `task_budget_id`, which is only the `POST /payments` key.
+      ...(options.taskBudgetId ? { taskBudgetId: options.taskBudgetId } : {}),
     })
 
     if (!raw.payment_id) {

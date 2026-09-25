@@ -106,7 +106,8 @@ export const SINGLE_DEFAULT_MODE: Hex = `0x${'00'.repeat(32)}`
 function refuse(detail: string): never {
   throw new HavenSigningError(
     `Refusing to sign: this UserOperation's redeemDelegations call ${detail}. This signer only ` +
-      "signs a redemption of a single delegation granted to the agent's own account.",
+      "signs one of two shapes: a single grant to the agent's own account, or a self-delegated " +
+      'task-budget child redeemed under it (the two-link [task child, budget] chain).',
   )
 }
 

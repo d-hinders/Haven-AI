@@ -41,6 +41,14 @@ const SELECT_COLUMNS = `id, agent_id, chain_id, token_address, recipient_address
        created_at, updated_at, opened_at, closed_at`
 
 export interface InsertPendingTaskBudgetInput {
+  /**
+   * #3329 review finding B: the caller MINTS this id before building the
+   * child, because `taskBudgetSalt(id)` has to be derived from the row's
+   * real identity — a throwaway id would make `haven-task-budget:<id>` a
+   * salt for a row that does not exist. Explicit `id` column, not the
+   * table's `gen_random_uuid()` default, so the two are always the same value.
+   */
+  id: string
   agentId: string
   chainId: number
   tokenAddress: string
@@ -54,9 +62,9 @@ export interface InsertPendingTaskBudgetInput {
 }
 
 export const INSERT_PENDING_TASK_BUDGET_SQL = `INSERT INTO agent_task_budgets
-       (agent_id, chain_id, token_address, recipient_address, parent_delegation_hash,
+       (id, agent_id, chain_id, token_address, recipient_address, parent_delegation_hash,
         delegation_hash, delegation_json, label, max_atomic, status, expires_at)
-     VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, $8, $9, 'pending', $10)
+     VALUES ($1, $2, $3, LOWER($4), $5, $6, $7, $8, $9, $10, 'pending', $11)
      RETURNING ${SELECT_COLUMNS}`
 
 export async function insertPendingTaskBudget(
@@ -66,6 +74,7 @@ export async function insertPendingTaskBudget(
   const result = await executor.query<TaskBudgetRow>(
     INSERT_PENDING_TASK_BUDGET_SQL,
     [
+      input.id,
       input.agentId,
       input.chainId,
       input.tokenAddress,
@@ -188,10 +197,16 @@ export async function markOpen(
 
 export const MARK_TASK_BUDGET_CLOSING_SQL = `UPDATE agent_task_budgets
      SET status = 'closing', prepared_user_op = $1, updated_at = NOW()
-     WHERE id = $2 AND agent_id = $3 AND status = 'open'
+     WHERE id = $2 AND agent_id = $3 AND status IN ('open', 'closing')
      RETURNING ${SELECT_COLUMNS}`
 
-/** Only from 'open' — the close UserOp is prepared and awaiting a signature. */
+/**
+ * From 'open' (the first prepare) OR 'closing' (#3329 review finding A: a
+ * re-prepare that OVERWRITES the stale stored UserOp with a fresh one —
+ * the row's own nonce/sponsorship window moved on, so replaying the old
+ * bytes is a dead end that `/submit` can only 502 on forever). Either way
+ * the row lands 'closing' with the JUST-prepared op as the only stored one.
+ */
 export async function markClosing(
   id: string,
   agentId: string,

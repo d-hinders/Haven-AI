@@ -248,6 +248,25 @@ export function verifySettlementChild(
         `Expected delegator ${expected.delegatorAccount}; the child names ${String(delegator)}.`,
       )
     }
+    // #3329: a settlement child's `delegate` is a facilitator or
+    // `ANY_BENEFICIARY` — never this same account. `delegate === delegator`
+    // is a SELF-delegation, the task-budget child shape
+    // (`task-budget-guards.ts`'s `isTaskChildTypedData`), a DIFFERENT
+    // typed-data class verified by a different function against a different
+    // expectation. Refused here whatever its amount/payee/expiry say: those
+    // caveats can coincidentally match a settlement expectation (a task
+    // child's caveats are real EIP-712 bytes, not inert placeholders), and
+    // this is the one check in this function that reads WHO may redeem
+    // rather than what the redemption is bounded to.
+    const delegate = typedData.message?.delegate
+    if (typeof delegate === 'string' && same(delegate, delegator)) {
+      refuse(
+        'its delegate is the same account as its delegator (a self-delegation)',
+        'A settlement child is always redeemed by a facilitator or left open to any redeemer — ' +
+          'never redeemable only by the account that granted it. This is the shape of a ' +
+          'task-budget child, a different typed-data class Haven never signs through this path.',
+      )
+    }
   }
 
   const caveats = (typedData.message?.caveats as Caveat[] | undefined) ?? []

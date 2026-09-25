@@ -117,6 +117,9 @@ Environment variable form:
 - `haven_discover_tools`
 - `haven_submit_catalog_entry`
 - `haven_list_receipts`
+- `haven_open_task_budget` (#3329)
+- `haven_close_task_budget` (#3329)
+- `haven_submit` (#3329 — relays a local signer signature, by `payment_id` or `task_budget_id`)
 
 ### `idempotencyKey` is deprecated — send `idempotency_key`
 

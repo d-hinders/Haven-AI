@@ -10,10 +10,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { privateKeyToAccount } from 'viem/accounts'
 
-const { mockQuery, mockCompute, mockReadRemaining } = vi.hoisted(() => ({
+const { mockQuery, mockCompute, mockReadRemaining, mockCreateRail } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockCompute: vi.fn(),
   mockReadRemaining: vi.fn(),
+  mockCreateRail: vi.fn(),
 }))
 vi.mock('../../db.js', () => ({
   default: { query: (...a: unknown[]) => mockQuery(...a) },
@@ -34,6 +35,14 @@ vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
 vi.mock('../../infra/chain/delegation-budget-reader.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../infra/chain/delegation-budget-reader.js')>()
   return { ...actual, readRemainingBudget: (...a: unknown[]) => mockReadRemaining(...a) }
+})
+vi.mock('../../rails/delegation-rail.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../rails/delegation-rail.js')>()
+  return {
+    ...actual,
+    delegationRailBundlerUrl: () => 'https://bundler.example/x?apikey=SECRET',
+    createDelegationRail: (...a: unknown[]) => mockCreateRail(...a),
+  }
 })
 
 const taskBudgetRoutes = (await import('../task-budgets.js')).default
@@ -72,16 +81,18 @@ function mockDb(opts: {
   insertReturn?: Record<string, unknown>
   markOpenReturn?: Record<string, unknown> | null
   markClosedReturn?: Record<string, unknown> | null
+  markClosingReturn?: Record<string, unknown> | null
 }) {
   mockQuery.mockImplementation((sql: string) => {
     const s = String(sql)
-    if (/SELECT delegation_hash, delegation_json, recipient_address\s+FROM agent_delegations/.test(s)) {
+    if (/SELECT delegation_hash, delegation_json, recipient_address, budget_atomic\s+FROM agent_delegations/.test(s)) {
       return Promise.resolve({
         rows: [
           {
             delegation_hash: BUDGET_HASH,
             delegation_json: JSON.stringify(BUDGET_DELEGATION),
             recipient_address: null,
+            budget_atomic: '5000000',
           },
         ],
       })
@@ -94,6 +105,9 @@ function mockDb(opts: {
     }
     if (/UPDATE agent_task_budgets/.test(s) && /status = 'closed'/.test(s)) {
       return Promise.resolve({ rows: opts.markClosedReturn === null ? [] : [opts.markClosedReturn ?? {}] })
+    }
+    if (/UPDATE agent_task_budgets/.test(s) && /status = 'closing'/.test(s)) {
+      return Promise.resolve({ rows: opts.markClosingReturn === null ? [] : [opts.markClosingReturn ?? {}] })
     }
     if (/FROM agent_task_budgets\s+WHERE id = \$1 AND agent_id = \$2/.test(s)) {
       return Promise.resolve({ rows: opts.taskBudget === null || opts.taskBudget === undefined ? [] : [opts.taskBudget] })
@@ -120,6 +134,7 @@ function taskBudgetRow(overrides: Record<string, unknown> = {}) {
       authority: BUDGET_HASH,
       caveats: [],
       salt: '2',
+      signature: `0x${'ef'.repeat(65)}`,
     }),
     label: 'Test task',
     max_atomic: '1000000',
@@ -152,6 +167,7 @@ describe('task budgets API (#3329)', () => {
     mockCompute.mockResolvedValue(DELEGATE_ACCOUNT)
     mockReadRemaining.mockReset()
     mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
+    mockCreateRail.mockReset()
     app = Fastify({ logger: false })
     await app.register(taskBudgetRoutes, { prefix: '/task-budgets' })
   })
@@ -269,5 +285,57 @@ describe('task budgets API (#3329)', () => {
     mockDb({ taskBudget: taskBudgetRow({ status: 'closed' }) })
     const res = await app.inject({ method: 'POST', url: '/task-budgets/tb-1/close' })
     expect(res.statusCode).toBe(409)
+  })
+
+  it('#3329 review finding A: POST /:id/close on a CLOSING row re-prepares a fresh UserOp and overwrites the stale one', async () => {
+    const prepareAccountCall = vi.fn().mockResolvedValue({
+      userOperation: { sender: DELEGATE_ACCOUNT },
+      userOpHash: `0x${'22'.repeat(32)}`,
+      signingTypedData: { primaryType: 'PackedUserOperation' },
+      delegateAccountAddress: DELEGATE_ACCOUNT,
+    })
+    mockCreateRail.mockResolvedValue({
+      delegateAccountAddress: DELEGATE_ACCOUNT,
+      prepareAccountCall,
+      submitRedemption: vi.fn(),
+    })
+    mockDb({
+      taskBudget: taskBudgetRow({ status: 'closing', prepared_user_op: JSON.stringify({ stale: true }) }),
+      markClosingReturn: taskBudgetRow({ status: 'closing', prepared_user_op: JSON.stringify({ fresh: true }) }),
+    })
+
+    const res = await app.inject({ method: 'POST', url: '/task-budgets/tb-1/close' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().sign_data).toBeDefined()
+    expect(res.json().next_action).toBe('sign_then_submit')
+    // A fresh prepare ran (not a re-serve of the stale stored op).
+    expect(prepareAccountCall).toHaveBeenCalledTimes(1)
+    // The overwrite went through the SAME repository call that transitions
+    // open -> closing, now also accepting closing -> closing.
+    const updateCall = mockQuery.mock.calls.find(
+      (c) => /UPDATE agent_task_budgets/.test(String(c[0])) && /status = 'closing'/.test(String(c[0])),
+    )
+    expect(updateCall).toBeDefined()
+  })
+
+  it("#3329 review finding A: POST /:id/submit on a CLOSING row with a stale op 409s close_needs_reprepare, not 502", async () => {
+    mockCreateRail.mockResolvedValue({
+      delegateAccountAddress: DELEGATE_ACCOUNT,
+      prepareAccountCall: vi.fn(),
+      submitRedemption: vi.fn().mockRejectedValue(new Error('AA25 invalid account nonce')),
+    })
+    mockDb({
+      taskBudget: taskBudgetRow({ status: 'closing', prepared_user_op: JSON.stringify({ userOp: true }) }),
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/task-budgets/tb-1/submit',
+      payload: { signature: `0x${'ab'.repeat(65)}` },
+    })
+
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error_code).toBe('close_needs_reprepare')
   })
 })

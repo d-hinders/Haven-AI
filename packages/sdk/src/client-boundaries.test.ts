@@ -105,7 +105,11 @@ const boundary: ClientBoundary = {
     "async payX402Quote(quote: X402Quote, options: X402AuthorizationOptions = {}): Promise<Response>",
     "async precheckBudget(input: { chainId?: number; token: string; amountAtomic: string; merchantTo?: string; resourceUrl?: string; }): Promise<{ sufficient: boolean; remaining_atomic: string; remaining_is_from_chain?: boolean; }>",
     "async prepareSweep(): Promise<SweepPrepareResponse>",
-    "async prepareX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; delegationRail?: boolean; mcpCallContext?: X402McpCallContext; idempotencyKey?: string; } = {}): Promise<{ paymentId: string; signData: SignData; settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>; }>",
+    // #3329: taskBudgetId added — build the settlement child under an open task budget's own
+    // child delegation ([settlement, task, budget]) instead of the agent's budget delegation
+    // directly. Forwarded to X402Erc7710.prepare unchanged; the erc7710 authorize body carries it
+    // as the same camelCase `taskBudgetId` wire key `/x402` uses everywhere else.
+    "async prepareX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; delegationRail?: boolean; mcpCallContext?: X402McpCallContext; idempotencyKey?: string; taskBudgetId?: string; } = {}): Promise<{ paymentId: string; signData: SignData; settlement: Omit<X402Erc7710Settlement, 'paymentHeader'>; }>",
     "async quoteMcpX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
     "async quoteX402(url: string, init?: RequestInit, options: X402AuthorizationOptions = {}): Promise<X402Quote>",
     "async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt>",

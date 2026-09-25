@@ -110,12 +110,9 @@ describe('funding leg ↔ edge-signer guard contract (#3281)', () => {
   /**
    * #3329 §4: a task-budget-authorized redemption's chain is `[taskChild,
    * budget]` — TWO delegations, leaf first. `assertRedeemsOwnBudgetDelegation`
-   * currently accepts a chain of length 1 only; the contract (worker B) is
-   * to extend it to accept length 2 where the leaf is self-delegated (own
-   * account both `delegate` and `delegator`) and the root is granted BY
-   * someone else. This test is written against that extended contract —
-   * it is expected to be RED until that SDK change lands, and this backend
-   * slice reports that explicitly rather than weakening the assertion.
+   * accepts a chain of length 1 (unchanged) or length 2 where the leaf is
+   * self-delegated (own account both `delegate` and `delegator`) and the
+   * root is granted BY someone else.
    */
   it('[task, budget] chain: the SDK guard accepts a self-delegated leaf over a granted root (#3329)', async () => {
     const { callData } = await fundingLeg(DELEGATE_EOA, [TASK_CHILD, BUDGET])

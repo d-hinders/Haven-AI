@@ -54,7 +54,7 @@ import { getPaymentReceipt, verifyPaymentReceipt } from '../modules/payments/ind
 import { quoteFee } from '../modules/fee/index.js'
 import { toCanonicalAddress } from '../modules/transactions/index.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
-import { selectDelegationForPayment } from '../infra/repositories/delegation-budgets.js'
+import { selectActiveDelegationByHash } from '../infra/repositories/delegation-budgets.js'
 import { findForAgent as findTaskBudgetForAgent } from '../infra/repositories/task-budgets.js'
 import {
   resolveTaskBudgetChildForPayment,
@@ -450,36 +450,45 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
     // ── Task budget (#3329, optional) ─────────────────────────────────────
     // A task budget authorizes the payment INSTEAD OF the budget delegation
-    // directly: the redemption chain becomes [taskChild, budget]. Resolved
-    // against the SAME budget delegation `prepareDelegationPayment` is about
-    // to select (`selectDelegationForPayment`, identical args) — when none
-    // is active the ordinary "no active budget delegation" 403 below still
-    // fires, unaffected by whether a task_budget_id was supplied.
+    // directly: the redemption chain becomes [taskChild, budget]. #3329
+    // review finding E: the parent is selected by the task budget's OWN
+    // `parent_delegation_hash` — NEVER re-derived by (token, to), which can
+    // name a DIFFERENT active grant (an agent holding both an open and a
+    // pinned grant for this token, whose pinned recipient happens to equal
+    // `to`, would otherwise get a spurious task_budget_parent_mismatch).
     let taskBudgetChild: Awaited<ReturnType<typeof resolveTaskBudgetChildForPayment>>['childDelegation']
+    let taskBudgetParentDelegation: Awaited<ReturnType<typeof selectActiveDelegationByHash>> = null
     if (task_budget_id) {
-      const [taskBudgetRow, parentDelegation] = await Promise.all([
-        findTaskBudgetForAgent(task_budget_id, agent.id),
-        selectDelegationForPayment(agent.id, tokenAddress, to.toLowerCase()),
-      ])
-      if (parentDelegation) {
-        const resolved = resolveTaskBudgetChildForPayment(
-          taskBudgetRow,
-          tokenAddress,
-          to.toLowerCase(),
-          parentDelegation,
-          Math.floor(Date.now() / 1000),
-        )
-        if (!resolved.ok) {
-          const code = resolved.refusal as TaskBudgetPaymentRefusal
-          return reply.code(TASK_BUDGET_REFUSAL_STATUS[code]).send({
-            error: TASK_BUDGET_REFUSAL_MESSAGE[code],
-            error_code: code,
-          })
-        }
-        taskBudgetChild = resolved.childDelegation
+      const taskBudgetRow = await findTaskBudgetForAgent(task_budget_id, agent.id)
+      if (!taskBudgetRow) {
+        return reply.code(404).send({ error: 'Task budget not found', error_code: 'task_budget_not_found' })
       }
-      // else: no active budget delegation at all — fall through, the
-      // existing `!authorization` 403 below answers it.
+      const parentDelegation = await selectActiveDelegationByHash(agent.id, taskBudgetRow.parent_delegation_hash)
+      if (!parentDelegation) {
+        // The task budget's own parent is no longer an active grant (revoked
+        // or replaced) — it can never again be redeemed through, whatever
+        // token/recipient this payment names.
+        return reply.code(409).send({
+          error: 'The task budget was not carved from the budget delegation selected for this payment',
+          error_code: 'task_budget_parent_mismatch',
+        })
+      }
+      const resolved = resolveTaskBudgetChildForPayment(
+        taskBudgetRow,
+        tokenAddress,
+        to.toLowerCase(),
+        parentDelegation,
+        Math.floor(Date.now() / 1000),
+      )
+      if (!resolved.ok) {
+        const code = resolved.refusal as TaskBudgetPaymentRefusal
+        return reply.code(TASK_BUDGET_REFUSAL_STATUS[code]).send({
+          error: TASK_BUDGET_REFUSAL_MESSAGE[code],
+          error_code: code,
+        })
+      }
+      taskBudgetChild = resolved.childDelegation
+      taskBudgetParentDelegation = parentDelegation
     }
 
     let authorization
@@ -489,7 +498,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         tokenAddress,
         to.toLowerCase(),
         amountRaw,
-        taskBudgetChild ? { taskBudget: { childDelegation: taskBudgetChild } } : undefined,
+        taskBudgetChild && taskBudgetParentDelegation
+          ? { taskBudget: { childDelegation: taskBudgetChild, parentDelegation: taskBudgetParentDelegation } }
+          : undefined,
       )
     } catch (err) {
       // Caveat rejection (budget/recipient/expiry) or bundler failure —

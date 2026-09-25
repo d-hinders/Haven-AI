@@ -1368,9 +1368,11 @@ signer imports:
     HybridDeleGator for the delegate key, derived offline by CREATE2 and
     pinned to the MetaMask kit;
   - its `callData` is a single `execute` to the DelegationManager calling
-    `redeemDelegations` with exactly one delegation: a single grant made to
-    this account by a different account, in `SingleDefault` mode, canonically
-    encoded at every level;
+    `redeemDelegations` with exactly one permission context holding either a
+    single grant made to this account by a different account, or — since
+    #3329 — a two-link chain whose leaf is a task-budget child this account
+    delegated to itself under that grant; in `SingleDefault` mode,
+    canonically encoded at every level;
   - **on the signer's x402 funding leg (#3281)**, its single execution is a
     `transfer` of the quoted amount of the quoted token to this key's own
     delegate EOA. That address is local, not from Haven. The SDK's own
@@ -1393,14 +1395,21 @@ signer imports:
   sign-context, which the guard treats as untrusted input the way it treats
   the settlement child's. It is a different typed-data class from the
   settlement child, verified by a different function: a task child is refused
-  by `assertOwnSettlementChild` and a settlement child by `assertOwnTaskChild`,
-  both pinned by tests. A self-delegated child can only **narrow** what the
+  by `assertOwnSettlementChild` outright, because that verifier now refuses
+  any child whose delegate is its own delegator (a self-delegation is never a
+  settlement child, whatever its amount, payee or window), and a settlement
+  child is refused by `assertOwnTaskChild`; both directions are pinned by
+  tests, including a short-lived self-delegated child that matches a
+  settlement expectation in every other field. A self-delegated child can only **narrow** what the
   account may already redeem under its budget, never widen it.
 - **A `disableDelegation` `PackedUserOperation` for one of those children
   (#3329)** — the same sender, chain and single-`execute`-to-the-
   DelegationManager rules as a redemption, but the inner call is
   `disableDelegation` of a delegation whose delegator and delegate are both
-  this account and whose hash the agent named (`assertOwnTaskBudgetCloseUserOp`).
+  this account and whose hash Haven's sign-context for that task budget names
+  (`assertOwnTaskBudgetCloseUserOp`) — the guard re-derives the hash from the
+  bytes in the UserOp and refuses a mismatch, so the context cannot point it
+  at a different delegation.
   Authority-reducing only: it cannot disable the owner's budget delegation
   (a different delegator) or anything not self-granted.
 - **The redemption allowlist admits one more chain (#3329):** exactly two
@@ -1463,11 +1472,14 @@ exported signing primitives stay verbatim, for embedders; the checks are in
     function selector.
 
   The allowlist therefore decodes the redemption. It must carry exactly one
-  permission context holding exactly one delegation: a grant to this signer's
-  own account from a different account, in `SingleDefault` mode, with every
-  level canonically encoded. An empty chain, a multi-link chain, a
-  self-granted delegation and a delegation to another account are each
-  refused, and each case is pinned by a test. The
+  permission context holding either exactly one delegation — a grant to this
+  signer's own account from a different account — or, since #3329, that
+  grant with a single self-delegated task-budget child in front of it, in
+  `SingleDefault` mode, with every level canonically encoded. An empty chain,
+  a chain of three or more links, a two-link chain whose leaf is not
+  delegated by this account to itself, a self-granted delegation standing
+  alone and a delegation to another account are each refused, and each case
+  is pinned by a test. The
   treasury was never exposed beyond the caveats either way: budget, recipient
   pin and expiry are enforced by the DelegationManager on redemption. A
   captured delegate account would still have been able to redeem the budget

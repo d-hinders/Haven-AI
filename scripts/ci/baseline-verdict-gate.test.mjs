@@ -543,6 +543,7 @@ describe('block shapes and globs (#3309)', () => {
     ['a table row', (x) => `| design-review verdict: ${x} |`],
     ['a table row with more cells', (x) => `| a.png | design-review verdict: ${x} | note |`],
     ['a table row with the label in its own cell', (x) => `| design-review verdict | ${x} |`],
+    ['an emoji shortcode before the label', (x) => `:x: design-review verdict: ${x}`],
     ['a heading', (x) => `### design-review verdict: ${x}`],
     ['an open task-list item', (x) => `- [ ] design-review verdict: ${x}`],
     ['a ticked `*` task-list item', (x) => `* [x] design-review verdict: ${x}`],
@@ -597,7 +598,8 @@ describe('block shapes and globs (#3309)', () => {
       '- [ ] [ ] '.repeat(2000),
       '| [ ] [ ] '.repeat(2000) + '| x |',
       '|'.repeat(10000),
-      '<'.repeat(10000),
+      '<'.repeat(50000),
+      ':'.repeat(20000) + ' design-review verdict: x',
       '<p>'.repeat(3000) + 'design-review verdict',
     ]
     const t0 = performance.now()
@@ -625,8 +627,25 @@ describe('block shapes and globs (#3309)', () => {
     assert.equal(parseVerdicts([`> - **design-review verdict:** ${BLOCK}`]).length, 1)
   })
 
-  test('a sentence that mentions the label is not a verdict line', () => {
+  test('a sentence that mentions the label is not a verdict line — nor is one before a `|`', () => {
     assert.deepEqual(parseVerdicts([`The design-review verdict: ${BLOCK}`]), [])
+    assert.deepEqual(parseVerdicts([`text | design-review verdict: ${BLOCK}`]), [])
+  })
+
+  test('a bold-wrapped line blocks only the file it names; a bare `**` list stays the wildcard', () => {
+    const passC = parseVerdicts(['design-review verdict: passed @ cc00000 -- baselines: c.png'])
+    for (const line of [
+      '**design-review verdict: changes requested @ cc00000 -- baselines: b.png**',
+      '- [ ] **design-review verdict: changes requested @ cc00000 -- baselines: b.png**',
+      '### **design-review verdict: changes requested @ cc00000 -- baselines: b.png**',
+      '_design-review verdict: changes requested @ cc00000 -- baselines: b.png_',
+    ]) {
+      const blocks = parseVerdicts([line])
+      assert.deepEqual(blocks[0].names, ['b.png'], line)
+      assert.equal(verifiedFor('c.png', [...passC, ...blocks], ctx), true, line)
+    }
+    const star = parseVerdicts(['**design-review verdict:** changes requested @ cc00000 -- baselines: **'])
+    assert.ok(star[0].names.includes('*'))
   })
 
   test('in a PASS and in a declaration the same globs cover nothing, exactly as before', () => {

@@ -172,8 +172,9 @@ export const DECLARATION_RE = /^\s*(?:[-*]\s*)?baseline-change:\s*(.+)$/gim
 export const VERDICT_RE = /^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s*)?(?:\*\*|__)?design-review\s+verdict:(?:\*\*|__)?\s*(.+)$/gim
 // A BLOCK is read in more shapes than a pass (#3309): a table row (the label
 // in its own cell, with or without the colon), a heading, a task-list item,
-// an italic or backticked label, an HTML-wrapped line, `design review
-// verdict:` without the hyphen, a space before the colon. An unread block
+// an italic or backticked label, an HTML-wrapped line, an emoji shortcode
+// (`:x:`) before the label, `design review verdict:` without the hyphen, a
+// space before the colon. An unread block
 // lets an older pass verify, so the wider reading fails closed; a pass in
 // one of these shapes is dropped, never read — the line a pass needs stays
 // VERDICT_RE. Tags and `[ ]`/`[x]` boxes are removed from the line first, and
@@ -190,8 +191,24 @@ const NO_LETTERS_RE = /^[^A-Za-z]*$/
  * letters — so a sentence that merely mentions the label is not a line.
  */
 function blockPrefixOk(prefix) {
-  if (NO_LETTERS_RE.test(prefix)) return true
-  return prefix.trimStart().startsWith('|') && NO_LETTERS_RE.test(prefix.slice(prefix.lastIndexOf('|') + 1))
+  // An emoji shortcode (`:x:`, `:no_entry:`) is stored as literal text.
+  const p = prefix.replace(/:[a-z0-9_+-]+:/gi, ' ')
+  if (NO_LETTERS_RE.test(p)) return true
+  return p.trimStart().startsWith('|') && NO_LETTERS_RE.test(p.slice(p.lastIndexOf('|') + 1))
+}
+
+/**
+ * Strip the closing half of emphasis that opened before the label and wraps
+ * the whole line (`**design-review verdict: … b.png**`): left on the last
+ * name it reads as a glob (#3309). Only when a name character precedes it,
+ * so a list that IS `**` or `*` keeps its wildcard.
+ */
+function closeLineEmphasis(line, body) {
+  const open = line.match(/([*_]+)design[-\s]*review/i)?.[1] ?? ''
+  const trimmed = body.replace(/\s+$/, '')
+  if (!open || !trimmed.endsWith(open)) return body
+  const rest = trimmed.slice(0, -open.length)
+  return /[A-Za-z0-9.]$/.test(rest) ? rest : body
 }
 
 const SHA_RE = /@\s*`?([0-9a-fA-F]{7,40})\b/
@@ -294,7 +311,7 @@ export function parseVerdicts(texts) {
   for (const text of texts ?? []) {
     if (!text) continue
     for (const m of String(text).matchAll(VERDICT_RE)) {
-      out.push(parseVerdictBody(m[1] ?? '', m[0].trim()))
+      out.push(parseVerdictBody(closeLineEmphasis(m[0], m[1] ?? ''), m[0].trim()))
     }
     // The block-only shapes (#3309): a line VERDICT_RE already read is not
     // read twice, and a pass found here is dropped. CRLF text (the web
@@ -302,10 +319,10 @@ export function parseVerdicts(texts) {
     // `baselines: *` must stay the wildcard.
     for (const rawLine of String(text).split(/\r?\n/)) {
       if (strictLine.test(rawLine)) continue
-      const line = rawLine.replace(/<[^>]*>/g, ' ').replace(/\[[ xX]\]/g, ' ')
+      const line = rawLine.replace(/<[^<>]*>/g, ' ').replace(/\[[ xX]\]/g, ' ')
       const label = line.match(BLOCK_LABEL_RE)
       if (!label || !blockPrefixOk(line.slice(0, label.index))) continue
-      const body = line.slice(label.index + label[0].length).replace(/\|/g, ' ').replace(/[\s`_]+$/, '')
+      const body = closeLineEmphasis(line, line.slice(label.index + label[0].length).replace(/\|/g, ' ').replace(/[\s`_]+$/, ''))
       if (!body) continue
       const v = parseVerdictBody(body, rawLine.trim())
       if (!v.passing) out.push(v)

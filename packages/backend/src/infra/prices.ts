@@ -89,7 +89,9 @@ export async function fetchTokenPrices(): Promise<PriceMap> {
     // A 200 response that carries no usable price (empty/degraded upstream, e.g.
     // a soft rate-limit) must not be cached — that would pin every token to 0 for
     // the full TTL. Throw so getOrFetch skips the cache and callers fall back
-    // safely (book-time SEK → null/backfillable, fiat display → caught → null).
+    // safely: book-time SEK → null/backfillable; the display portfolio
+    // (`modules/accounts/portfolio.ts`) → its own last-good price, or an
+    // uncached zero when it has none (#3297).
     if (usable === 0) {
       throw new Error('CoinGecko returned no usable prices')
     }

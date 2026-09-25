@@ -4512,10 +4512,10 @@ export type components = {
             /** @description Raw base units; '0' on RPC failure. */
             balance: string;
             formatted: string;
-            /** @description 0 when the price feed failed. */
+            /** @description When the price feed fails, valued at the last good price this server instance has seen for the token; 0 only if it has none (#3297). */
             usdValue: number;
             eurValue: number;
-            /** @description Same one price read as usd/eur (#3127 round 2); 0 when the price feed failed. */
+            /** @description Same one price read as usd/eur (#3127 round 2). When the price feed fails, the last good price this server instance has seen; 0 only if it has none (#3297). */
             sekValue?: number;
         };
         PortfolioResponse: {

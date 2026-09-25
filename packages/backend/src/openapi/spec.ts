@@ -9530,9 +9530,17 @@ export const openapiSpec = {
           symbol: { type: 'string' },
           balance: { type: 'string', description: "Raw base units; '0' on RPC failure." },
           formatted: { type: 'string' },
-          usdValue: { type: 'number', description: '0 when the price feed failed.' },
+          usdValue: {
+            type: 'number',
+            description:
+              'When the price feed fails, valued at the last good price this server instance has seen for the token; 0 only if it has none (#3297).',
+          },
           eurValue: { type: 'number' },
-          sekValue: { type: 'number', description: 'Same one price read as usd/eur (#3127 round 2); 0 when the price feed failed.' },
+          sekValue: {
+            type: 'number',
+            description:
+              'Same one price read as usd/eur (#3127 round 2). When the price feed fails, the last good price this server instance has seen; 0 only if it has none (#3297).',
+          },
         },
         additionalProperties: false,
       },

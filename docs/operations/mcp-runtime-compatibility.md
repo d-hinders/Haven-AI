@@ -1063,7 +1063,7 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `:146`), and otherwise sets `typed_data` to an object on both branches
 > (`delegationSigningPayload`, `userOpTypedData`). `typedDataDigest` throws on
 > unhashable input rather than returning `undefined`. So v1 cannot be produced
-> at any of the three sites. So the
+> at any of the three sites, and the
 > note's earlier claim holds: **a new signer meeting an old backend's v1 is not
 > a live case.** The other direction is unaffected: an old signer against the
 > new backend receives only v2/v3, which it has always supported.

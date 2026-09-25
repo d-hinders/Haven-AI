@@ -21,6 +21,11 @@ covers:
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/edge.ts
+  - packages/sdk/src/client-identity.ts
+  - packages/core/src/client-compat.ts
+  - packages/backend/src/middleware/client-compat.ts
+  - packages/sdk/src/haven-api-transport.ts
+  - packages/cli/src/api.ts
   - packages/sdk/package.json
   - packages/sdk/tsup.config.ts
   - scripts/release-bump.mjs
@@ -1031,6 +1036,46 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `merchant_not_ready` mapping: neither is a skew problem between signer and
 > backend, both are behaviour changes visible to a caller at any pairing.
 
+> **Re-verification (0.5.0-alpha.0 release, 2026-09-25):** the manifest table
+> above is re-pinned by the bump to `0.5.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`; the four numbers were not copied by hand. **Re-read, not
+> rubber-stamped**: the Node floor (`>= 22.0.0`, CI on LTS 24 via `.nvmrc`) and
+> the Codex and Claude Code rows are unchanged.
+>
+> **MINOR, because the signer now refuses things it used to sign.** Every break
+> in this release narrows what a delegate key will sign (epic #3284), and every
+> one moves **fail-closed** — a refusal, never a different signature. The two
+> the signer's CHANGELOG marks BREAKING: `haven_sign`'s unbound branch signs
+> only a bound direct-payment UserOp and **x402 expected-context v1 is retired**
+> (#3272), and the x402 arm signs only a guarded funding leg or a verified
+> settlement child (#3281). Alongside them, `haven_sign` refuses a bare
+> `payload_hash` (#3169) and the signer CLI refuses unknown options (#3173). The
+> SDK's `signForData` refuses the same shapes (#3283), so `mcp`'s payment tools
+> inherit the narrowing through it. None of this is visible to a declaration
+> diff — the lesson the 0.4.0 note above records applies again, one layer in:
+> these are runtime refusals, and the CHANGELOGs are what name them.
+>
+> **The v1 retirement's skew, verified rather than assumed.** The signer's
+> `SUPPORTED_X402_EXPECTED_VERSIONS` goes `[1, 2, 3]` → `[2, 3]`. The risky
+> direction is a new signer against the backend still on `main` at cut time
+> (`fe717b58`), which selects `payerDelegate ? 3 : typedDataHash ? 2 : 1` — so
+> v1 is emittable there, where `dev` selects `payerDelegate ? 3 : 2`. Re-read at
+> the cut: `main` has exactly three `signX402ExpectedContext` call sites
+> (`delegation-authorize.ts` twice, `replay.ts` once). The first two pass
+> `typedDataDigest(...)` of a value they always build. The replay site passes
+> `typedDataDigest(sign_data.typed_data)`, and it too always builds that value:
+> it returns `null` early when `prepared_user_op` is null (`replay.ts:94`,
+> `:146`), and otherwise sets `typed_data` to an object on both branches
+> (`delegationSigningPayload`, `userOpTypedData`). `typedDataDigest` throws on
+> unhashable input rather than returning `undefined`. So v1 cannot be produced
+> at any of the three sites, and the
+> note's earlier claim holds: **a new signer meeting an old backend's v1 is not
+> a live case.** The other direction is unaffected: an old signer against the
+> new backend receives only v2/v3, which it has always supported.
+>
+> `last-verified` is **not** bumped: this note re-reads the manifest rows and the
+> v1 skew claim, and nothing else in the document.
+
 > **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** the manifest table
 > above is re-pinned by the bump to `0.4.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`; the four numbers were not copied by hand. **Re-read, not
@@ -1165,10 +1210,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.4.0-alpha.0` |
-| `@haven_ai/mcp` | `0.4.0-alpha.0` |
-| `@haven_ai/sdk` | `0.4.0-alpha.0` |
-| `@haven_ai/signer` | `0.4.0-alpha.0` |
+| `@haven_ai/connect` | `0.5.0-alpha.0` |
+| `@haven_ai/mcp` | `0.5.0-alpha.0` |
+| `@haven_ai/sdk` | `0.5.0-alpha.0` |
+| `@haven_ai/signer` | `0.5.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -2307,6 +2352,73 @@ of any version literal, since nothing there should ever need a release to stay
 true (unlike the signer's compatibility numbers above, which are point-in-time
 by design). See [`07-edge-signer.md`](../architecture/07-edge-signer.md) for
 what each server's instructions say and why they differ in length.
+
+## Client-version signal (#3303, epic #3302)
+
+Every published client names itself on each Haven API request with
+`X-Haven-Client: <package>/<version>`. That covers the SDK transport (default
+`@haven_ai/sdk/<SDK_VERSION>`, or the embedding package's own name through
+`HavenClientConfig.clientIdentity`), the local `@haven_ai/mcp` runtime, the CLI,
+the connector's API client, and the signer on its two sign-context reads.
+One Haven call deliberately sends no header: the connector's read-only
+hosted-identity probe behind `--doctor` / `--unwire` (`probeHostedAgentIdentity`).
+It can never be refused and reads no hint. The hosted
+`mcp-server` names itself too; it is not one of the five published packages, so
+nothing below ever applies to it.
+
+The backend reads the header against one hand-edited table, `CLIENT_COMPAT` in
+`packages/core/src/client-compat.ts`. Two things can happen:
+
+| Client is… | Effect | Where |
+|---|---|---|
+| below `recommended_version` | `client_update` (`required: false`) on any JSON-object response | every route |
+| below a **set** `min_version` | 426 `client_outdated`, before the handler runs; nothing written | `POST /payments`, `POST /machine-payments/send`, `POST /x402`, `POST /x402/authorize` for the API clients; `GET /payments/:id/sign-context` and `GET /x402/:id/sign-context` for the signer |
+| no header, unparseable, not a published package, or a `0.0.0-dev.*` snapshot | nothing, whatever the table says | — |
+
+A below-minimum client on a route that does not refuse it gets
+`client_update.required: true` instead. Sweep, sign, settle, evidence and
+status reads are never refused, and neither is an agent on a retired rail. An
+idempotent replay is exempt only when the handler would answer it from the
+existing row. A `pending_signature` row past its `expires_at` does not qualify:
+the handler would replace it with a new payment, so that request is refused
+like any new one.
+
+**What a signer minimum does and does not cover.** The signer meets the
+backend only when it signs by `payment_id`: that path runs the sign-context
+read, which is where the refusal lives. A signer handed `typed_data_b64` or
+`x402_expected` directly never contacts the backend before signing, and the
+sign and settle legs are never refused. A signer minimum therefore stops the
+default path and tells the agent what to run, but it does not guarantee that no
+older signer ever signs. The table ships with every threshold `null`, so until an
+owner sets one the only observable change is the header itself.
+
+**How each runtime surfaces it.**
+- `@haven_ai/mcp` attaches the hint its own dispatch received as `client_update`
+  on the tool result, success or failure. A refusal also keeps the backend's
+  `next_tool_omitted_reason` at the top level.
+- The signer turns a refusal into `SIGN_CONTEXT_REFUSED` with
+  `backend_error_code: 'client_outdated'`, the hint as `client_update`,
+  `next_action: stop_and_tell_user`, and a `next_tool_omitted_reason` naming the
+  update command. It carries no `fallback`, because relaying other bytes cannot
+  help.
+- A hint on a successful sign-context read rides on the signing result.
+- The update command is built from the **deployment's** connector channel, not a
+  client's build-time one.
+
+**This does not reopen the 2026-08-07 decision above.** That decision ("a
+mismatch warns, it does not block") is about the x402 expected-context version a
+quote *reports*, and it stands. This signal is a separate mechanism. It refuses
+only when an owner has explicitly set a minimum for a package (owner decision
+2026-09-25, on #3302), and even then never a client that sends no header. The
+signer's refusal comes after prepare, so its contract is "nothing signed or
+submitted" and the prepared payment is left unsigned (owner decision
+2026-09-25, on #3303).
+
+**`SDK_VERSION` is a bump-managed source constant too** (`packages/sdk/src/client-identity.ts`,
+in `release-bump.mjs`'s `SOURCE_VERSION_CONSTANTS` beside `SIGNER_VERSION`,
+`HOSTED_SERVER_VERSION`, `CONNECTOR_VERSION` and `CLI_VERSION`). The "fifth
+bump-managed constant" heading above counts the constants that existed at #2423
+and is left as written. Do not hand-edit `SDK_VERSION` either.
 
 ## Typed next steps — the agent contract and its ratchet (epic #3105)
 

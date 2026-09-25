@@ -24,6 +24,7 @@ covers:
   - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
+  - packages/core/src/client-compat.ts
 last-verified: "2026-09-24"
 ---
 
@@ -193,6 +194,23 @@ and the `release` skill.
 > today**, and a scoped check of one constant is not a re-verification of this
 > document; #1366 rates a rubber stamp worse than a stale date. Scope: `CONNECTOR_VERSION` and the channel constant's value.
 
+> **Re-verification (0.5.0-alpha.0 release, 2026-09-25):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
+> is in this doc's `covers:`. Verified rather than asserted: the constant moved
+> `0.4.0-alpha.0` → `0.5.0-alpha.0`, and the bump's own checks report channel
+> `alpha` agreeing across the source, the built connect bundle and the SDK that
+> bundle resolves. **No channel behaviour changed** — re-measured, not carried
+> over from the 0.4.0 note: `git log origin/main..origin/dev` over
+> `publish.yml`, `release-channel.mjs`, `release-snapshot-version.mjs` and
+> `release-version-order.mjs` returns **0** commits, and this bump's own diff
+> touches **0** of them, so the `0.0.0-dev.*` snapshot path and the rule that the
+> two channels cannot cross are untouched. The `dev` tag observed during this
+> release, `0.0.0-dev.202609250737.3bd5a51`, sits below `alpha`/`latest` at
+> `0.4.0-alpha.0` exactly as the ordering rule requires; a MINOR step changes
+> nothing about that. `last-verified` deliberately NOT bumped — it already
+> reads 2026-09-24 from an earlier change, and this note re-reads only
+> `CONNECTOR_VERSION` and the channel constant's value.
+
 > **Re-verification (0.4.0-alpha.0 release, 2026-09-19):** coupled because the
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), which
 > is in this doc's `covers:`. Verified rather than asserted: the constant moved
@@ -229,6 +247,11 @@ and the `release` skill.
   sorts below every real version, so no `^0.1.x` range can resolve to a snapshot
   by accident and nobody has to reason about `dev` vs `alpha` prerelease
   ordering.
+  The same property is why the backend's client-version signal (#3303)
+  **exempts** a snapshot: a `0.0.0-dev.*` version in `X-Haven-Client` is never
+  hinted or refused, whatever minimum the deployment sets
+  (`isSnapshotVersion` in `packages/core/src/client-compat.ts`), so a dev-channel
+  install keeps working against dev after a minimum is set.
 - **All five carry the same version.** The job runs the ordinary
   `scripts/release-bump.mjs` with `--snapshot` over the CI checkout, so the
   cross-package pins, connect's `runtime-manifest.ts`, the baked version

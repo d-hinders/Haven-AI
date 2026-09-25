@@ -40,6 +40,15 @@ export interface HavenClientConfig {
   defaultHeaders?: Record<string, string>
 
   /**
+   * `<package>/<version>` naming the published package that embeds this
+   * client, sent on every Haven API request as `X-Haven-Client` (#3303) so the
+   * backend can tell an outdated client what to run. Defaults to
+   * `@haven_ai/sdk/<this SDK's version>`. It cannot be set through
+   * `defaultHeaders` — the transport writes it last.
+   */
+  clientIdentity?: string
+
+  /**
    * JSON-RPC RPC URLs keyed by EIP-155 chain ID.
    *
    * When provided for a chain, the SDK waits for ≥1 on-chain confirmation of

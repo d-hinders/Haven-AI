@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import {
   evaluate,
   parseDeclarations,
@@ -28,6 +28,8 @@ import {
   parseNameList,
   baselineName,
   verifiedFor,
+  declaredFor,
+  listHasGlob,
   collect,
   MIN_REASON_CHARS,
   BASELINE_DIR,
@@ -525,6 +527,237 @@ describe('verifiedFor — conflicting verdicts (#3301)', () => {
   })
 })
 
+describe('block shapes and globs (#3309)', () => {
+  // The same linear history as the #3301 suite: aa (last touch) < bb < cc < dd (head).
+  const rank = { aa00000: 1, bb00000: 2, cc00000: 3, dd00000: 4 }
+  const chain = (a, b) => (a in rank && b in rank ? rank[a] <= rank[b] : null)
+  const ctx = { lastTouchSha: 'aa00000', headSha: 'dd00000', isAncestor: chain }
+  const olderPass = parseVerdicts(['design-review verdict: passed @ bb00000 -- baselines: a.png'])
+  const BLOCK = 'changes requested @ cc00000 -- baselines: a.png'
+  const PASS = 'passed @ cc00000 -- baselines: a.png'
+
+  // The class: any shape a human might write a block in, against an older
+  // bound pass for the same file. One row per shape — the next shape found
+  // is a row here, not a review round. Every row is red at cbc937e9.
+  const SHAPES = [
+    ['a table row', (x) => `| design-review verdict: ${x} |`],
+    ['a table row with more cells', (x) => `| a.png | design-review verdict: ${x} | note |`],
+    ['a table row with the label in its own cell', (x) => `| design-review verdict | ${x} |`],
+    ['an emoji shortcode before the label', (x) => `:x: design-review verdict: ${x}`],
+    ['a heading', (x) => `### design-review verdict: ${x}`],
+    ['an open task-list item', (x) => `- [ ] design-review verdict: ${x}`],
+    ['a ticked `*` task-list item', (x) => `* [x] design-review verdict: ${x}`],
+    ['an underscore-italic label', (x) => `_design-review verdict:_ ${x}`],
+    ['no hyphen', (x) => `design review verdict: ${x}`],
+    ['a space before the colon', (x) => `design-review verdict : ${x}`],
+    ['a line wrapped in backticks', (x) => `\`design-review verdict: ${x}\``],
+    ['an HTML <p> line', (x) => `<p>design-review verdict: ${x}</p>`],
+  ]
+  const GLOBS = ['*.png', '`*.png`', '**', '*-mobile.png', 'dir/*.png', './*.png']
+  // In a block, `*` itself too: it is the documented wildcard.
+  const BLOCK_GLOBS = ['*', ...GLOBS]
+
+  for (const [label, shape] of SHAPES) {
+    test(`a block in ${label} vetoes an older bound pass`, () => {
+      const blocks = parseVerdicts([shape(BLOCK)])
+      assert.equal(blocks.length, 1, 'the block line is read')
+      assert.equal(blocks[0].passing, false)
+      assert.equal(blocks[0].sha, 'cc00000')
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false)
+    })
+  }
+
+  for (const glob of GLOBS) {
+    test(`a block naming ${glob} covers every baseline and vetoes an older bound pass`, () => {
+      const blocks = parseVerdicts([`design-review verdict: changes requested @ cc00000 -- baselines: ${glob}`])
+      assert.ok(blocks[0].names.includes('*'), JSON.stringify(blocks[0].names))
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false)
+    })
+  }
+
+  for (const [label, shape] of SHAPES) {
+    test(`a glob block in ${label} covers every baseline, \`*\` included`, () => {
+      for (const glob of BLOCK_GLOBS) {
+        const blocks = parseVerdicts([shape(`changes requested @ cc00000 -- baselines: ${glob}`)])
+        assert.ok(blocks[0]?.names.includes('*'), `${glob}: ${JSON.stringify(blocks[0]?.names)}`)
+        assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, glob)
+      }
+    })
+  }
+
+  test('CRLF text (the web editor) is read like LF, and a strict line is still read once', () => {
+    const blocks = parseVerdicts([`intro\r\n| design-review verdict: ${BLOCK} |\r\nmore\r\n`])
+    assert.equal(blocks.length, 1)
+    assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false)
+    assert.equal(parseVerdicts([`intro\r\ndesign-review verdict: ${BLOCK}\r\n`]).length, 1)
+  })
+
+  test('adversarial runs parse in linear time — raw, in a strict line, in a loose line, before the label', () => {
+    // Every run a regex here could go super-linear on, 60k long (a comment
+    // holds 65,536): blank lines once took 28 s through `^\s*` (#3309).
+    const runs = [' ', '*', '.', '](', '\n', '<', '[ ] ', '|', ':', '_', '-', '@', ',', '> ', '#', '\u00a0', '\u2028', '\u2029']
+    const t0 = performance.now()
+    for (const c of runs) {
+      const r = c.repeat(Math.ceil(60000 / c.length)).slice(0, 60000)
+      parseVerdicts([
+        r,
+        `design-review verdict: changes requested @ cc00000 -- baselines: ${r}x`,
+        `design-review verdict: ${r}x`,
+        `### design-review verdict: changes requested @ cc00000 -- baselines: ${r}x`,
+        `${r} design-review verdict: changes requested`,
+      ])
+      parseDeclarations([r, `baseline-change: ${r} -- ${r}`])
+    }
+    const ms = performance.now() - t0
+    assert.ok(ms < 2000, `took ${ms.toFixed(0)} ms`)
+  })
+
+  test('a glob block in a table row is read as both at once', () => {
+    const blocks = parseVerdicts(['| design-review verdict: changes requested @ cc00000 -- baselines: `*.png` |'])
+    assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false)
+  })
+
+  test('a PASS in any block-only shape is dropped — never read, never verifies', () => {
+    for (const [label, shape] of SHAPES) {
+      assert.deepEqual(parseVerdicts([shape(PASS)]), [], label)
+      assert.equal(verifiedFor('a.png', parseVerdicts([shape(PASS)]), ctx), false, label)
+    }
+    // Control: the same pass in the line VERDICT_RE reads verifies.
+    assert.equal(verifiedFor('a.png', parseVerdicts([`design-review verdict: ${PASS}`]), ctx), true)
+  })
+
+  test('a line VERDICT_RE already reads is not read twice', () => {
+    assert.equal(parseVerdicts([`design-review verdict: ${BLOCK}`]).length, 1)
+    assert.equal(parseVerdicts([`> - **design-review verdict:** ${BLOCK}`]).length, 1)
+  })
+
+  test('a sentence that mentions the label is not a verdict line — nor is one before a `|`', () => {
+    assert.deepEqual(parseVerdicts([`The design-review verdict: ${BLOCK}`]), [])
+    assert.deepEqual(parseVerdicts([`text | design-review verdict: ${BLOCK}`]), [])
+  })
+
+  test('a bold-wrapped line blocks only the file it names; a bare `**` list stays the wildcard', () => {
+    const passC = parseVerdicts(['design-review verdict: passed @ cc00000 -- baselines: c.png'])
+    for (const line of [
+      '**design-review verdict: changes requested @ cc00000 -- baselines: b.png**',
+      '- [ ] **design-review verdict: changes requested @ cc00000 -- baselines: b.png**',
+      '### **design-review verdict: changes requested @ cc00000 -- baselines: b.png**',
+      '_design-review verdict: changes requested @ cc00000 -- baselines: b.png_',
+    ]) {
+      const blocks = parseVerdicts([line])
+      assert.deepEqual(blocks[0].names, ['b.png'], line)
+      assert.equal(verifiedFor('c.png', [...passC, ...blocks], ctx), true, line)
+    }
+    const star = parseVerdicts(['**design-review verdict:** changes requested @ cc00000 -- baselines: **'])
+    assert.ok(star[0].names.includes('*'))
+    // A trailing `*` after a name that is not a whole `.png` may be the glob: kept.
+    for (const line of ['*design-review verdict: changes requested @ cc00000 -- baselines: topbar*', '**design-review verdict: changes requested @ cc00000 -- baselines: topbar**']) {
+      const blocks = parseVerdicts([line])
+      assert.ok(blocks[0].names.includes('*'), line)
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, line)
+    }
+  })
+
+  test('in a PASS and in a declaration the same globs cover nothing, exactly as before', () => {
+    for (const glob of GLOBS) {
+      const [pass] = parseVerdicts([`design-review verdict: passed @ cc00000 -- baselines: ${glob}`])
+      assert.equal(pass.passing, true, glob)
+      assert.ok(!pass.names.includes('*'), glob)
+      assert.equal(verifiedFor('a.png', [pass], ctx), false, glob)
+      const decl = parseDeclarations([`baseline-change: ${glob} -- a reason that is long enough to count`])
+      assert.ok(!decl[0].names.includes('*'), glob)
+      assert.equal(declaredFor('a.png', decl), false, glob)
+    }
+    assert.deepEqual(parseNameList('*.png'), ['png.png'])
+    assert.deepEqual(parseNameList('**'), [])
+  })
+
+  test('emphasis around a whole name or the whole list is not a glob', () => {
+    for (const list of ['**a.png**', '*a.png*', '**a.png, c.png**', '**a.png**, *c.png*', '*a.png*, *c.png*', '**a.png**, **c.png**', '`a.png`.']) {
+      assert.equal(listHasGlob(list), false, list)
+      const block = parseVerdicts([`design-review verdict: changes requested @ cc00000 -- baselines: ${list}`])
+      const passB = parseVerdicts(['design-review verdict: passed @ bb00000 -- baselines: b.png'])
+      assert.equal(verifiedFor('b.png', [...passB, ...block], ctx), true, list)
+    }
+    for (const glob of GLOBS) assert.equal(listHasGlob(glob), true, glob)
+  })
+
+  test('a `*` around anything but a whole .png name is a glob — per name, and in mixed line emphasis', () => {
+    for (const list of ['*.png*', '**.png**', '*-desktop.png*', '*top*', 'a.png, *.png*', '*desktop.png', '** **']) {
+      const blocks = parseVerdicts([`design-review verdict: changes requested @ cc00000 -- baselines: ${list}`])
+      assert.ok(blocks[0].names.includes('*'), `${list}: ${JSON.stringify(blocks[0].names)}`)
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, list)
+    }
+    for (const line of [
+      '*_design-review verdict: changes requested @ cc00000 -- baselines: *.png_*',
+      '_*design-review verdict: changes requested @ cc00000 -- baselines: *.png*_',
+      '*design-review verdict:* changes requested @ cc00000 -- baselines: b.png*',
+    ]) {
+      const blocks = parseVerdicts([line])
+      assert.ok(blocks[0].names.includes('*'), `${line}: ${JSON.stringify(blocks[0].names)}`)
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, line)
+    }
+  })
+
+  test('a verdict whose status sits on the line after the label is read, as at base', () => {
+    for (const text of [
+      'design-review verdict:\nchanges requested @ cc00000 -- baselines: a.png',
+      '- design-review verdict:\n  changes requested @ cc00000 -- baselines: a.png',
+      'design-review verdict:\r\nchanges requested @ cc00000 -- baselines: a.png',
+      'design-review verdict:\n\nchanges requested @ cc00000 -- baselines: a.png',
+      'design-review verdict:\n  \nchanges requested @ cc00000 -- baselines: a.png',
+      'design-review verdict:\u00a0\nchanges requested @ cc00000 -- baselines: a.png',
+      '**design-review verdict:**\u00a0\nchanges requested @ cc00000 -- baselines: a.png',
+    ]) {
+      const blocks = parseVerdicts([text])
+      assert.equal(blocks.length, 1, JSON.stringify(text))
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, JSON.stringify(text))
+    }
+    const [pass] = parseVerdicts(['design-review verdict:\npassed @ cc00000 -- baselines: a.png'])
+    assert.equal(verifiedFor('a.png', [pass], ctx), true)
+    assert.equal(parseDeclarations(['baseline-change:\na.png -- a reason that is long enough to count']).length, 1)
+    // NBSP before the label is whitespace, as at base — for a pass and a declaration too.
+    assert.equal(verifiedFor('a.png', parseVerdicts(['\u00a0design-review verdict: passed @ cc00000 -- baselines: a.png']), ctx), true)
+    assert.equal(parseDeclarations(['\u00a0baseline-change: a.png -- a reason that is long enough to count']).length, 1)
+  })
+
+  test('the separator needs whitespace on both sides, as SEPARATOR_RE did', () => {
+    assert.equal(parseDeclarations(['baseline-change: a.png --a reason that is long enough to count']).length, 0)
+    assert.equal(parseDeclarations(['baseline-change: a.png\u00a0—\u00a0a reason that is long enough to count']).length, 1)
+  })
+
+  test('underscore emphasis around a name in a BLOCK names the file', () => {
+    for (const line of [
+      '__design-review verdict: changes requested @ cc00000 -- baselines: a.png__',
+      '*_design-review verdict: changes requested @ cc00000 -- baselines: a.png_*',
+      '**_design-review verdict: changes requested @ cc00000 -- baselines: a.png_**',
+      'design-review verdict: changes requested @ cc00000 -- baselines: _a.png_',
+      'design-review verdict: changes requested @ cc00000 -- baselines: a.png_',
+    ]) {
+      const blocks = parseVerdicts([line])
+      assert.ok(blocks[0].names.includes('a.png'), `${line}: ${JSON.stringify(blocks[0].names)}`)
+      assert.equal(verifiedFor('a.png', [...olderPass, ...blocks], ctx), false, line)
+    }
+  })
+
+  test('the pass side reads exactly as at base — no emphasis stripping there', () => {
+    // `__…a.png__` named `a.png__.png` at base, which covers nothing.
+    const [pass] = parseVerdicts(['__design-review verdict: approved @ cc00000 -- a.png__'])
+    assert.equal(pass.passing, true)
+    assert.equal(verifiedFor('a.png', [pass], ctx), false)
+  })
+
+  test('regression guard: every committed baseline name round-trips and is no glob', () => {
+    const root = fileURLToPath(new URL(`../../${BASELINE_DIR}/`, import.meta.url))
+    const names = readdirSync(root, { recursive: true }).map(String).filter((f) => f.endsWith('.png')).map(baselineName)
+    assert.ok(names.length >= 80, `read ${names.length} baselines`)
+    for (const n of names) {
+      assert.deepEqual(parseNameList(n), [n.toLowerCase()], n)
+      assert.equal(listHasGlob(n), false, n)
+    }
+  })
+})
+
 describe('collect — the production ancestry map answers verdict-vs-verdict (#3301)', () => {
   // `collect` is the only producer of `isAncestor` in production. A veto
   // proven against a stub relation would pass here and fail in the gate if
@@ -771,7 +1004,7 @@ describe('mutation proofs (each gating branch can fire)', () => {
       'design-review verdict: changes requested @ cc00000 -- baselines: `topbar-desktop.png`',
     ])
     assert.equal(evaluate(ticked).verdict, 'fail')
-    const mutated = await mutant(`const kept = rawPart.replace(/[^A-Za-z0-9._\\-/*]/g, '').replace(/^\\.+|\\.+$/g, '').toLowerCase()`, `const kept = rawPart`)
+    const mutated = await mutant(`const kept = trimChars(rawPart.replace(/[^A-Za-z0-9._\\-/*]/g, ''), '.').toLowerCase()`, `const kept = rawPart`)
     assert.equal(mutated(ticked).verdict, 'pass')
   })
 
@@ -827,6 +1060,50 @@ describe('mutation proofs (each gating branch can fire)', () => {
     const stubReason = { ...bothFixture, declarationTexts: ['baseline-change: topbar-desktop.png -- moved'] }
     const r = await mutated(stubReason)
     assert.equal(r.verdict, 'pass')
+  })
+
+  test('M12: a block glob covers every baseline — mutant never reads a glob', async () => {
+    const globBlock = conflict([
+      'design-review verdict: passed @ bb00000 -- baselines: topbar-desktop.png',
+      'design-review verdict: changes requested @ cc00000 -- baselines: *.png',
+    ])
+    assert.equal(evaluate(globBlock).verdict, 'fail')
+    const mutated = await mutant(`if (!passing && !names.includes('*') && listHasGlob(listText, lineOpen))`, `if (false)`)
+    assert.equal(mutated(globBlock).verdict, 'pass')
+  })
+
+  test('M13: the glob reading is blocks-only — mutant widens a pass too', async () => {
+    const globPass = conflict(['design-review verdict: passed @ bb00000 -- baselines: *.png'])
+    assert.equal(evaluate(globPass).verdict, 'fail')
+    const mutated = await mutant(`if (!passing && !names.includes('*') && listHasGlob(listText, lineOpen))`, `if (!names.includes('*') && listHasGlob(listText, lineOpen))`)
+    assert.equal(mutated(globPass).verdict, 'pass')
+  })
+
+  test('M14: the block-only line shapes are read — mutant reads none of them', async () => {
+    const tableBlock = conflict([
+      'design-review verdict: passed @ bb00000 -- baselines: topbar-desktop.png',
+      '| design-review verdict: changes requested @ cc00000 -- baselines: topbar-desktop.png |',
+    ])
+    assert.equal(evaluate(tableBlock).verdict, 'fail')
+    const mutated = await mutant(`const label = line.match(BLOCK_LABEL_RE)`, `const label = null`)
+    assert.equal(mutated(tableBlock).verdict, 'pass')
+  })
+
+  test('M17: the trailing strip keeps a bare `*` — mutant strips it', async () => {
+    const starHeading = conflict([
+      'design-review verdict: passed @ bb00000 -- baselines: topbar-desktop.png',
+      '### design-review verdict: changes requested @ cc00000 -- baselines: *',
+    ])
+    assert.equal(evaluate(starHeading).verdict, 'fail')
+    const mutated = await mutant("' \\t\\r\\n\\f\\v`_').trimStart()", "' \\t\\r\\n\\f\\v`_*').trimStart()")
+    assert.equal(mutated(starHeading).verdict, 'pass')
+  })
+
+  test('M15: a pass in a block-only shape is dropped — mutant keeps it', async () => {
+    const tablePass = conflict(['| design-review verdict: passed @ bb00000 -- baselines: topbar-desktop.png |'])
+    assert.equal(evaluate(tablePass).verdict, 'fail')
+    const mutated = await mutant(`if (!v.passing) out.push(v)`, `out.push(v)`)
+    assert.equal(mutated(tablePass).verdict, 'pass')
   })
 })
 

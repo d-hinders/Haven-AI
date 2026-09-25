@@ -1502,6 +1502,22 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > custody or signing changes. Scope of this note: those copy strings. Nothing
 > else in this document was re-verified.
 >
+> **Re-verified unchanged (#3303, 2026-09-25, client-version signal):**
+> `packages/signer/src/tools.ts` and `packages/sdk/src/client.ts`, both covered
+> here, change only around the sign-context read and the transport. The signer
+> sends `X-Haven-Client` on its sign-context reads and maps a 426
+> `client_outdated` refusal to a structured `SIGN_CONTEXT_REFUSED` with no
+> signature. That is one more way for the signer to decline before signing,
+> never a way to sign more. It carries a successful read's `client_update` hint
+> onto the result. `HavenClient` gains a read-only `clientUpdate()` accessor,
+> and its transport sends the header. §10's allowlist, the binding checks,
+> `signForData` and every guard it runs are byte-identical. The backend refusal
+> is **not a security layer**: the header is self-reported and unauthenticated,
+> so a client that misstates its version simply gets today's behaviour. It can
+> only withhold service, never widen it, and spend authority remains the
+> on-chain delegation alone. Scope of this note: those files. Nothing else in
+> this document was re-verified.
+>
 > **Re-verified unchanged (#3295, 2026-09-25, last-known balances):** this doc
 > is coupled through `routes/user-accounts.ts`, whose change is comment-only:
 > the funding endpoint's parity comment now states that `GET

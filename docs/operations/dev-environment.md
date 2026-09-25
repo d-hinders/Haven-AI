@@ -677,3 +677,14 @@ project owner — collaborators have Viewer access, not env-var write access.
 > shadow residue only shrinks — `lint:request-schemas` stays green with no
 > baseline bump). Nothing else in this file's coverage was touched; the note
 > and the `last-verified` date are the only edits.
+
+> **Re-verified #3303 (2026-09-25):** `index.ts` registers one more pair of
+> root hooks, `registerClientCompatHooks` (`middleware/client-compat.ts`), after
+> the request-validation plugin. Its `preHandler` therefore runs after the
+> plugin's `preHandler` has restored the client's body; it only reads the body
+> (an idempotency key) and never mutates it, so the shadow-snapshot rule above
+> holds. The `X-Haven-Client` header it reads is declared in the spec as an
+> unconstrained optional string, so neither shadow nor enforce mode can refuse
+> a malformed value. The shadow/enforce semantics, `enforcedModules` and the
+> generated route-module table are unchanged (no route file added or moved).
+> Nothing else in this file's coverage was touched; this note is the only edit.

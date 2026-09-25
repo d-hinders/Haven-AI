@@ -13,6 +13,7 @@ import {
   TYPED_DATA_NOT_ALLOWED,
   assertBoundDirectPaymentUserOp as assertSdkBoundDirectPaymentUserOp,
   isSettlementChildTypedData,
+  type HavenClientUpdate,
   type X402PaymentRequired,
 } from '@haven_ai/sdk/edge'
 import { hashTypedData } from 'viem'
@@ -502,11 +503,24 @@ export interface ToolFailure {
    * the direct `/payments/:id/sign-context` fetch since #3271.
    */
   http_status?: number
-  /** #3001: the backend's own `error_code` on `SIGN_CONTEXT_REFUSED` (`expired`, `already_executed`, `not_signable`, `sign_context_unavailable`). */
+  /** #3001: the backend's own `error_code` on `SIGN_CONTEXT_REFUSED` (`expired`, `already_executed`, `not_signable`, `sign_context_unavailable`, and since #3303 `client_outdated`). */
   backend_error_code?: string
+  /** #3303: on `client_outdated`, the backend's update hint — `upgrade_command` is what updates this signer. */
+  client_update?: HavenClientUpdate
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
+
+/**
+ * #3303: the backend's update hint from a successful sign-context read, carried
+ * onto the signing result so an agent on an outdated signer reads the update
+ * command on the call it made. Empty when the signer is current.
+ */
+function clientUpdateField(
+  resolved: { ctx: { clientUpdate?: HavenClientUpdate } } | null,
+): { client_update?: HavenClientUpdate } {
+  return resolved?.ctx.clientUpdate ? { client_update: resolved.ctx.clientUpdate } : {}
+}
 
 export interface ToolHandlerOptions {
   audit?: SigningAuditContext & { auditPath: string }
@@ -518,6 +532,8 @@ export interface ToolHandlerOptions {
   signContext?: {
     loadIdentity: () => Promise<HavenIdentity | null>
     fetchImpl?: typeof fetch
+    /** #3303: `@haven_ai/signer/<version>`, sent as `X-Haven-Client` on every sign-context read. */
+    clientIdentity?: string
   }
 }
 
@@ -608,7 +624,13 @@ export function createToolHandlers(
       )
     }
     try {
-      const ctx = await fetchX402SignContext(identity, args.payment_id, options.signContext?.fetchImpl)
+      const ctx = await fetchX402SignContext(
+        identity,
+        args.payment_id,
+        options.signContext?.fetchImpl,
+        undefined,
+        options.signContext?.clientIdentity,
+      )
       checkPayloadHashMatch(args.payload_hash, ctx.payloadHash, args.payment_id)
       return { kind: 'x402', ctx }
     } catch (err) {
@@ -620,7 +642,13 @@ export function createToolHandlers(
       ) {
         let ctx: FetchedDirectSignContext
         try {
-          ctx = await fetchDirectSignContext(identity, args.payment_id, options.signContext?.fetchImpl)
+          ctx = await fetchDirectSignContext(
+            identity,
+            args.payment_id,
+            options.signContext?.fetchImpl,
+            undefined,
+            options.signContext?.clientIdentity,
+          )
         } catch (directErr) {
           // The x402 route also answers 409 `sign_context_unavailable` for an
           // x402 row it cannot serve (legacy rail). The direct route then
@@ -737,7 +765,7 @@ export function createToolHandlers(
             // payload_hash (the ERC-4337 UserOp hash, a DIFFERENT value the
             // #3271 check above merely cross-checked this typed data against).
             await auditSigning('haven_sign', hashTypedData(typedData as Parameters<typeof hashTypedData>[0]))
-            return { signature }
+            return { signature, ...clientUpdateField(resolved) }
           }
           // #3169: bare hash, nothing to verify against — refused, never signed.
           // Not audited as a signing operation: nothing was signed.
@@ -749,7 +777,7 @@ export function createToolHandlers(
         // payload_hash, a different value the expected-context binding
         // merely cross-checks this typed data against.
         await auditSigning('haven_sign', hashTypedData(typedData as Parameters<typeof hashTypedData>[0]))
-        return { signature: result.signature, x402_binding: result.x402Binding }
+        return { signature: result.signature, x402_binding: result.x402Binding, ...clientUpdateField(resolved) }
       }),
 
     haven_x402_sign_header: async (input) =>
@@ -834,6 +862,7 @@ export function createToolHandlers(
           x402_binding: funding.x402Binding,
           payment_header: header.paymentHeader,
           accepted: header.accepted,
+          ...clientUpdateField(resolved),
         }
       }),
 
@@ -1020,6 +1049,7 @@ function normalizeError(err: unknown): ToolFailure {
       ...(err.retry_with_new_quote ? { retry_with_new_quote: true } : {}),
       ...(err.http_status !== undefined ? { http_status: err.http_status } : {}),
       ...(err.backend_error_code !== undefined ? { backend_error_code: err.backend_error_code } : {}),
+      ...(err.client_update ? { client_update: err.client_update } : {}),
       // #3103: the typed step the error decided beside its action.
       ...(err.next_tool ? { next_tool: err.next_tool } : {}),
       ...(err.next_tool_server ? { next_tool_server: err.next_tool_server } : {}),

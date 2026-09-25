@@ -405,10 +405,29 @@ describe('verifiedFor — conflicting verdicts (#3301)', () => {
     assert.equal(verifiedFor('b.png', vs, ctx), true)
   })
 
-  test('a named pass beats a `*` block for that name', () => {
+  test('(B) a `*` pass never clears a block that names the file, even when newer', () => {
+    const vs = [v('changes requested @ bb00000 -- baselines: a.png'), v('passed @ cc00000 -- baselines: *')]
+    assert.equal(verifiedFor('a.png', vs, ctx), false)
+    assert.equal(verifiedFor('b.png', vs, ctx), true)
+  })
+
+  test('a NEWER `*` block vetoes an older named pass (fail closed)', () => {
     const vs = [v('changes requested @ cc00000 -- baselines: *'), v('passed @ bb00000 -- baselines: a.png')]
-    assert.equal(verifiedFor('a.png', vs, ctx), true)
-    assert.equal(verifiedFor('b.png', vs, ctx), false)
+    assert.equal(verifiedFor('a.png', vs, ctx), false)
+  })
+
+  test('a newer named pass clears an older `*` block; a newer `*` pass clears an older `*` block', () => {
+    assert.equal(verifiedFor('a.png', [v('changes requested @ bb00000 -- baselines: *'), v('passed @ cc00000 -- baselines: a.png')], ctx), true)
+    assert.equal(verifiedFor('a.png', [v('changes requested @ bb00000 -- baselines: *'), v('passed @ cc00000 -- baselines: *')], ctx), true)
+  })
+
+  test('a block naming the file in markdown (`a.png`, (a.png), a.png., **a.png**) names the same file', () => {
+    for (const nm of ['`a.png`', '(a.png)', 'a.png.', '**a.png**', '`a`']) {
+      const vs = [v('passed @ bb00000 -- baselines: a.png'), v(`changes requested @ cc00000 -- baselines: ${nm}`)]
+      assert.equal(verifiedFor('a.png', vs, ctx), false, nm)
+    }
+    assert.deepEqual(parseNameList('`*`'), ['*'])
+    assert.deepEqual(parseNameList('`a.png`, (b.png).'), ['a.png', 'b.png'])
   })
 
   test('an unbound block (no sha) stands — fail closed', () => {
@@ -708,10 +727,6 @@ describe('mutation proofs (each gating branch can fire)', () => {
     'design-review verdict: passed @ bb00000 -- baselines: topbar-desktop.png',
     'design-review verdict: changes requested @ cc00000 -- baselines: topbar-desktop.png',
   ])
-  const starVsNamed = conflict([
-    'design-review verdict: passed @ cc00000 -- baselines: *',
-    'design-review verdict: changes requested @ cc00000 -- baselines: topbar-desktop.png',
-  ])
   const notApproved = conflict(['design-review verdict: not approved @ cc00000 -- baselines: topbar-desktop.png'])
 
   test('M6: the later-block veto fires — mutant ignores every block', async () => {
@@ -720,10 +735,24 @@ describe('mutation proofs (each gating branch can fire)', () => {
     assert.equal(mutated(laterBlock).verdict, 'pass')
   })
 
-  test('M7: a named line outranks `*` — mutant reads the `*` tier whenever it exists', async () => {
-    assert.equal(evaluate(starVsNamed).verdict, 'fail')
-    const mutated = await mutant(`const tier = named.length > 0`, `const tier = false`)
-    assert.equal(mutated(starVsNamed).verdict, 'pass')
+  test('M7: a `*` pass never clears a named block — mutant lets any newer pass clear', async () => {
+    const newerStar = conflict([
+      'design-review verdict: changes requested @ bb00000 -- baselines: topbar-desktop.png',
+      'design-review verdict: passed @ cc00000 -- baselines: *',
+    ])
+    assert.equal(evaluate(newerStar).verdict, 'fail')
+    const mutated = await mutant(`(names(pass) || !names(block))`, `true`)
+    assert.equal(mutated(newerStar).verdict, 'pass')
+  })
+
+  test('M11: markdown around a name is stripped — mutant keeps the raw part', async () => {
+    const ticked = conflict([
+      'design-review verdict: passed @ bb00000 -- baselines: topbar-desktop.png',
+      'design-review verdict: changes requested @ cc00000 -- baselines: `topbar-desktop.png`',
+    ])
+    assert.equal(evaluate(ticked).verdict, 'fail')
+    const mutated = await mutant(`const kept = rawPart.replace(/[^A-Za-z0-9._\\-/*]/g, '')`, `const kept = rawPart`)
+    assert.equal(mutated(ticked).verdict, 'pass')
   })
 
   test('M8: the whole-token verdict word — mutant restores the substring match', async () => {

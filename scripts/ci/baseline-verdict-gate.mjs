@@ -65,13 +65,13 @@
 //
 // When verdicts conflict (#3301), the newest one decides, per baseline:
 //
-//   - A line that NAMES a baseline outranks a `*` line for that baseline, in
-//     both directions — a named `changes requested` beats a `*` pass, and a
-//     named pass beats a `*` block.
+//   - Every non-passing line that covers the baseline — naming it or `*` —
+//     vetoes a pass bound at or before its own sha; a tie vetoes. A pass
+//     clears an earlier block only when the block's sha is a strict ancestor
+//     of the pass's, and a `*` pass never clears a block that NAMES the file:
+//     a mass re-bless does not overrule a reviewer's specific objection.
 //   - "Newest" is commit ancestry, never text order (the body is read first
-//     even when it was edited last). A non-passing line vetoes a pass bound
-//     at or before its own sha — a tie vetoes — and a pass clears an earlier
-//     block only when the block's sha is a strict ancestor of the pass's.
+//     even when it was edited last).
 //     Unrelated shas, unknown ancestry and an unbound block (no `@`, or a malformed sha) all
 //     fail closed: the block stands.
 //   - A block bound before the baseline's last touch, or to a commit that is
@@ -177,12 +177,18 @@ export function baselineName(path) {
 export function parseNameList(raw) {
   const parts = String(raw ?? '').split(LIST_SPLIT_RE).map((s) => s.trim()).filter(Boolean)
   const out = []
-  for (const part of parts) {
-    if (part === '*') {
+  for (const rawPart of parts) {
+    // Markdown around a name (`a.png`, (a.png), a.png., **a.png**) is not
+    // part of it: a block written that way must name the same file (#3301).
+    const kept = rawPart.replace(/[^A-Za-z0-9._\-/*]/g, '')
+    if (kept === '*') {
       out.push('*')
       continue
     }
+    const part = kept.replace(/\*/g, '').replace(/^\.+|\.+$/g, '')
+    if (!part) continue
     const base = part.split('/').pop()
+    if (!base) continue
     out.push(base.toLowerCase().endsWith('.png') ? base : `${base}.png`)
   }
   return [...new Set(out)]
@@ -282,9 +288,9 @@ function sameSha(a, b) {
  * tree: the #3222 shape, where the review happened and the baselines were
  * re-committed after it.
  *
- * The veto (#3301): lines that NAME the baseline outrank `*` lines; within
- * the tier that applies, a pass stands only if every non-passing line is
- * provably older — its sha a strict ancestor of the pass's. A tie, unrelated
+ * The veto (#3301): a pass stands only if every non-passing line covering
+ * the baseline (named or `*`) is provably older — its sha a strict ancestor
+ * of the pass's — and, for a `*` pass, no such block names the file. A tie, unrelated
  * shas, unknown ancestry or an unbound block leave the block standing. A
  * block provably about a different image (before the last touch, or off the
  * head) is ignored, like an unbound pass.
@@ -305,14 +311,13 @@ export function verifiedFor(name, verdicts, { lastTouchSha, headSha, isAncestor 
   const blockApplies = (v) =>
     !v.sha || (isAncestor(lastTouchSha, v.sha) !== false && isAncestor(v.sha, headSha) !== false)
   const relevant = (v) => (v.passing ? bound(v) : blockApplies(v))
-  const named = verdicts.filter((v) => v.names.includes(name) && relevant(v))
-  const tier = named.length > 0
-    ? named
-    : verdicts.filter((v) => v.names.includes('*') && relevant(v))
-  const blocks = tier.filter((v) => !v.passing)
+  const names = (v) => v.names.includes(name)
+  const lines = verdicts.filter((v) => (names(v) || v.names.includes('*')) && relevant(v))
+  const blocks = lines.filter((v) => !v.passing)
   const clears = (pass, block) =>
-    Boolean(block.sha) && !sameSha(block.sha, pass.sha) && isAncestor(block.sha, pass.sha) === true
-  return tier.some((v) => v.passing && blocks.every((b) => clears(v, b)))
+    Boolean(block.sha) && !sameSha(block.sha, pass.sha) && isAncestor(block.sha, pass.sha) === true &&
+    (names(pass) || !names(block))
+  return lines.some((v) => v.passing && blocks.every((b) => clears(v, b)))
 }
 
 /**
@@ -402,9 +407,9 @@ export function evaluate({ pr, files, declarationTexts, verdictTexts, lastTouch 
     `The verdict's <sha> must name a commit at or after the last commit that touched each`,
     `PNG (a review given before the baseline was re-committed does not verify it). For a`,
     `mass re-bless — a font or Playwright bump that moves every baseline — declare \`*\`.`,
-    `A non-passing verdict (\`changes requested\`) at or after a pass vetoes it, and a line`,
-    `naming a file outranks a \`*\` line for that file: re-review the fixed PNG and post a`,
-    `new \`passed\` NAMING THE FILE at a later sha (a \`*\` pass does not clear a named block).`,
+    `A non-passing verdict (\`changes requested\`), named or \`*\`, at or after a pass vetoes`,
+    `it: re-review the fixed PNG and post a new \`passed\` NAMING THE FILE at a later sha (a`,
+    `\`*\` pass never clears a block that names the file).`,
     ``,
     `Per file:`,
     ``,

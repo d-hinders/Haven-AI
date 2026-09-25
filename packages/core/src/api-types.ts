@@ -4758,7 +4758,7 @@ export type components = {
     };
     responses: never;
     parameters: {
-        /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it. When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+        /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
         HavenClient: string;
         AgentId: string;
         LabelId: string;
@@ -14071,7 +14071,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it. When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
                 "X-Haven-Client"?: components["parameters"]["HavenClient"];
             };
             path?: never;
@@ -14310,7 +14310,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it. When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
                 "X-Haven-Client"?: components["parameters"]["HavenClient"];
             };
             path: {
@@ -14752,7 +14752,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it. When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
                 "X-Haven-Client"?: components["parameters"]["HavenClient"];
             };
             path?: never;
@@ -14910,7 +14910,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it. When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
                 "X-Haven-Client"?: components["parameters"]["HavenClient"];
             };
             path: {
@@ -15126,7 +15126,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it. When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
                 "X-Haven-Client"?: components["parameters"]["HavenClient"];
             };
             path?: never;
@@ -15750,7 +15750,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it. When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
+                /** @description The calling published client and its version, `<package>/<version>` (for example `@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector's read-only identity probe excepted). When the client is below the version this deployment recommends, any JSON-object response carries a `client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at the payment-initiating routes (the signer: at sign-context). A missing or unparseable value, a package outside the five published ones, or a `0.0.0-dev.*` snapshot is never refused. */
                 "X-Haven-Client"?: components["parameters"]["HavenClient"];
             };
             path?: never;

@@ -159,7 +159,7 @@ export class HavenSignContextError extends HavenSigningError {
           nextToolOmittedReason:
             'this signer is below the minimum version Haven accepts — tell the user to run ' +
             `${refusal.clientUpdate?.upgrade_command ?? 'the connector again'}, restart the agent runtime, ` +
-            'then re-run the quote with the same idempotency_key and sign the fresh payment_id',
+            'then retry the same haven_sign / haven_sign_x402 call',
         })
       } else if (flow === 'direct' && refusal?.httpStatus === 404) {
         // Either the payment is not this agent's, or the backend predates

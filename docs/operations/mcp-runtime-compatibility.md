@@ -23,6 +23,9 @@ covers:
   - packages/sdk/src/edge.ts
   - packages/sdk/src/client-identity.ts
   - packages/core/src/client-compat.ts
+  - packages/backend/src/middleware/client-compat.ts
+  - packages/sdk/src/haven-api-transport.ts
+  - packages/cli/src/api.ts
   - packages/sdk/package.json
   - packages/sdk/tsup.config.ts
   - scripts/release-bump.mjs
@@ -2356,7 +2359,10 @@ Every published client names itself on each Haven API request with
 `X-Haven-Client: <package>/<version>`. That covers the SDK transport (default
 `@haven_ai/sdk/<SDK_VERSION>`, or the embedding package's own name through
 `HavenClientConfig.clientIdentity`), the local `@haven_ai/mcp` runtime, the CLI,
-the connector, and the signer on its two sign-context reads. The hosted
+the connector's API client, and the signer on its two sign-context reads.
+One Haven call deliberately sends no header: the connector's read-only
+hosted-identity probe behind `--doctor` / `--unwire` (`probeHostedAgentIdentity`).
+It can never be refused and reads no hint. The hosted
 `mcp-server` names itself too; it is not one of the five published packages, so
 nothing below ever applies to it.
 

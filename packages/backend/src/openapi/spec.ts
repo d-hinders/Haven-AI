@@ -7162,7 +7162,8 @@ export const openapiSpec = {
         schema: { type: 'string' },
         description:
           'The calling published client and its version, `<package>/<version>` (for example ' +
-          '`@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it. When the client is ' +
+          '`@haven_ai/mcp/0.4.0-alpha.0`). Every published Haven client sends it (the connector\'s read-only identity ' +
+          'probe excepted). When the client is ' +
           'below the version this deployment recommends, any JSON-object response carries a ' +
           '`client_update` (`ClientUpdate`, `required: false`). Only below a minimum the deployment ' +
           'has explicitly set is it refused — 426 `client_outdated`, nothing written — and only at ' +

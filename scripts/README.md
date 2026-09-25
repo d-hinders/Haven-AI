@@ -202,6 +202,7 @@ git add packages/sdk/package.json packages/signer/package.json \
         packages/cli/package.json packages/cli/src/commands.ts \
         packages/signer/src/server.ts packages/mcp-server/package.json \
         packages/mcp-server/src/server.ts packages/connect/src/runtime.ts \
+        packages/sdk/src/client-identity.ts \
         docs/operations/mcp-runtime-compatibility.md \
         docs/regulatory/casp-changelog/ \
         package-lock.json

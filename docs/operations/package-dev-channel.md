@@ -249,7 +249,7 @@ and the `release` skill.
   ordering.
   The same property is why the backend's client-version signal (#3303)
   **exempts** a snapshot: a `0.0.0-dev.*` version in `X-Haven-Client` is never
-  hinted as required or refused, whatever minimum the deployment sets
+  hinted or refused, whatever minimum the deployment sets
   (`isSnapshotVersion` in `packages/core/src/client-compat.ts`), so a dev-channel
   install keeps working against dev after a minimum is set.
 - **All five carry the same version.** The job runs the ordinary

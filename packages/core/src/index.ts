@@ -67,7 +67,7 @@ export {
 
 // Client compatibility (#3303, epic #3302) — the one table of recommended and
 // minimum published-client versions, plus the pure header parse and verdict.
-// The backend enforces it; the public release document (#3304) reads it.
+// The backend enforces it; the public release document (#3304) will read it.
 export {
   CLIENT_HEADER_NAME,
   CLIENT_COMPAT,

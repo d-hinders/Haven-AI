@@ -1529,3 +1529,17 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > nothing. Nothing this document claims about authority, custody or signing
 > changes. Scope of this note: that comment. Nothing else in this document
 > was re-verified.
+>
+> **Re-verified unchanged (#3317, 2026-09-25, funding-endpoint degraded read):**
+> this doc is coupled through `routes/user-accounts.ts`, whose funding endpoint
+> now JOINS the #3295 degraded read instead of deferring it: a failed balance
+> leg serves the last-known balance marked stale (or `'0'` marked
+> `unavailable` when never read), the response carries the additive optional
+> `balanceFreshness` marker, and `funded` is computed only from known values —
+> an RPC blip can no longer report a funded account as unfunded. No handler,
+> query, signing path or refusal moves; the endpoint still reads balances with
+> the same ethers client, constructs no transfer and grants no authority, and
+> budget/recipient/expiry remain enforced on-chain by the caveat enforcers.
+> Nothing this document claims about authority, custody or signing changes.
+> Scope of this note: that endpoint's response shape. Nothing else in this
+> document was re-verified.

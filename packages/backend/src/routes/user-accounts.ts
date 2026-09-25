@@ -11,6 +11,13 @@ import {
   setDefaultAccountForUser,
 } from '../infra/repositories/smart-accounts.js'
 import { getChainClient } from '../infra/chain/index.js'
+import {
+  balanceFreshness,
+  combineBalanceFreshness,
+  knownBalance,
+  recordKnownBalance,
+  type BalanceFreshness,
+} from '../modules/accounts/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { getChain } from '../domain/chains.js'
 import {
@@ -155,15 +162,33 @@ interface FundingToken {
   decimals: number
   balance_human: string
   minimum_useful_human: string | null
+  /**
+   * #3317: present only when this token's balance read FAILED. Absent on a
+   * clean read — additive, like the `BalanceItem` marker on /balances.
+   */
+  balanceFreshness?: BalanceFreshness
 }
 
 interface FundingResponse {
   account_address: string
   chain: { id: number; name: string; explorer_url: string }
   tokens: FundingToken[]
-  native: { symbol: string; balance_human: string; needed: boolean }
+  native: {
+    symbol: string
+    balance_human: string
+    needed: boolean
+    /** #3317: present only when the native balance read failed. */
+    balanceFreshness?: BalanceFreshness
+  }
   faucet_url?: string
   funded: boolean
+  /**
+   * #3317: the worst marker across the token legs, when any read failed —
+   * the aggregate that lets a consumer distrust the whole payload at a
+   * glance (an `unavailable` leg means `funded` may be UNKNOWN-low, never
+   * claimed true off the degraded data).
+   */
+  balanceFreshness?: BalanceFreshness
 }
 
 app.get<{ Params: { accountId: string } }>(
@@ -187,13 +212,20 @@ app.get<{ Params: { accountId: string } }>(
     const chain = getChain(chainId)
 
     // The same ethers-backed balance read `GET /balances/:accountAddress` runs —
-    // no new chain machinery, and a failed read answers '0' rather than 500ing
-    // a hand-off whose whole job is to be pasteable. Since #3295 that route no
-    // longer reads a failure as zero — it serves the last-known balance,
-    // marked stale — while THIS endpoint still does: `funded` computed from a
-    // substituted value would claim an account is funded off a figure that may
-    // be hours old, which is a different decision than a display value. The
-    // gap is deferred by name in #3295 to a follow-up.
+    // no new chain machinery — and the two routes now share #3295's degraded
+    // read: a failed leg serves the LAST-KNOWN balance for that (chain,
+    // account, token), marked stale, or '0' marked `unavailable` when no
+    // balance has ever been read (first read after a deploy). The endpoint
+    // never 500s a hand-off whose whole job is to be pasteable, and it never
+    // claims `funded` off a fabricated zero: `funded` counts only a KNOWN
+    // value — a fresh read or a stale last-known one — so an RPC blip
+    // (#2769's failure class) degrades the balance figures without
+    // unfunding the account. The `balanceFreshness` markers are additive;
+    // a clean read is byte-identical to the pre-#3317 response.
+    // #3295: a fulfilled leg records the value as this token's last-known
+    // balance (the store keeps even a zero — a successful read of zero is the
+    // truth); a rejected leg substitutes the last-known balance, or the '0'
+    // filler when none exists, and marks which happened.
     const client = getChainClient('ethers')
     const tokens = Object.values(chain.tokens)
     const nativeToken = tokens.find((t) => t.address === null)!
@@ -206,21 +238,51 @@ app.get<{ Params: { accountId: string } }>(
       ),
     ])
 
+    const nativeResult = results[0]
+    const nativeKnown = knownBalance(chainId, owned.account_address, null)
+    if (nativeResult.status === 'fulfilled') {
+      recordKnownBalance(chainId, owned.account_address, null, nativeResult.value.toString())
+    }
+    const nativeFreshness =
+      nativeResult.status === 'rejected' ? balanceFreshness(true, nativeKnown) : null
     const nativeRaw =
-      results[0].status === 'fulfilled' ? results[0].value.toString() : '0'
+      nativeResult.status === 'fulfilled'
+        ? nativeResult.value.toString()
+        : nativeKnown?.balance ?? '0'
 
     // One pass over the ERC-20s: project each balance to its human shape and
     // keep the raw atomic value alongside, because `funded` compares at the
     // atomic level (the same bigint the balance RPC returned) rather than
-    // re-parsing a rounded human string.
+    // re-parsing a rounded human string. #3317: `funded` counts ONLY a known
+    // value — a fresh read, or the stale last-known one a rejected read
+    // serves. The '0' filler for a never-read token is not a balance, and a
+    // fabricated zero must never unfund the account, so that token simply
+    // cannot make the answer true (it can never make it false either: before
+    // #3317 the filler zero fed the comparison and did exactly that).
     let funded = false
     const fundingTokens: FundingToken[] = erc20Tokens.map((token, i) => {
       const result = results[i + 1]
-      const raw = result.status === 'fulfilled' ? result.value.toString() : '0'
+      const known = knownBalance(chainId, owned.account_address, token.address)
+      if (result.status === 'fulfilled') {
+        recordKnownBalance(chainId, owned.account_address, token.address, result.value.toString())
+      }
+      const raw =
+        result.status === 'fulfilled'
+          ? result.value.toString()
+          : known?.balance ?? '0'
+      const freshness =
+        result.status === 'rejected' ? balanceFreshness(true, known) : null
       const minimum = minimumUsefulTokens(token.symbol)
-      const rawBigint = BigInt(raw)
-      if (minimum !== undefined && rawBigint >= parseTokenAmount(minimum, token.decimals)) {
-        funded = true
+      // #3317: `funded` counts only KNOWN values — a fresh read, or the stale
+      // last-known one a rejected read serves (a figure we actually saw from
+      // the chain). The '0' filler for a never-read token is not a balance
+      // and cannot answer the comparison: unknown is not unfunded, and a
+      // fabricated zero must never unfund the account.
+      if (freshness?.status !== 'unavailable') {
+        const rawBigint = BigInt(raw)
+        if (minimum !== undefined && rawBigint >= parseTokenAmount(minimum, token.decimals)) {
+          funded = true
+        }
       }
       return {
         symbol: token.symbol,
@@ -228,8 +290,12 @@ app.get<{ Params: { accountId: string } }>(
         decimals: token.decimals,
         balance_human: formatTokenValue(raw, token.decimals),
         minimum_useful_human: minimum ?? null,
+        ...(freshness ? { balanceFreshness: freshness } : {}),
       }
     })
+    const tokensFreshness = combineBalanceFreshness(
+      fundingTokens.map((t) => t.balanceFreshness),
+    )
 
     const response: FundingResponse = {
       account_address: owned.account_address,
@@ -240,8 +306,10 @@ app.get<{ Params: { accountId: string } }>(
         balance_human: formatTokenAmount(BigInt(nativeRaw), nativeToken.decimals),
         // Sponsored UserOps: the human never needs ETH/xDAI to fund.
         needed: false,
+        ...(nativeFreshness ? { balanceFreshness: nativeFreshness } : {}),
       },
       funded,
+      ...(tokensFreshness ? { balanceFreshness: tokensFreshness } : {}),
     }
     const faucet = getFaucetUrl(chainId)
     if (faucet !== undefined) {

@@ -41,6 +41,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
  *    mainnets, per-token `minimum_useful_human` constants, native marked
  *    not-needed (gas is relay-sponsored), and `funded` = any token balance
  *    ≥ its minimum.
+ * 4. The degraded read (#3317): a failed balance leg serves the last-known
+ *    balance marked stale instead of fabricating a zero, a never-read token
+ *    is marked unavailable, `funded` counts only known values, and a clean
+ *    read stays byte-identical to the pre-#3317 response.
  *
  * Balances are mocked at the chain-client seam (`getChainClient`) — the same
  * boundary `balances.test.ts` mocks one layer lower — so these tests carry no
@@ -64,6 +68,7 @@ vi.mock('../../infra/chain/index.js', async (importOriginal) => {
 
 import userAccountsRoutes from '../user-accounts.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
+import { resetLastKnownBalancesForTests } from '../../modules/accounts/index.js'
 
 const ACCOUNT_ID = 'd2c47f10-9a83-4e61-8b25-7c3f0e91a4d6'
 const ACCOUNT_ID_OTHER = 'e3d58f21-ab94-4f72-8c36-8d4f1f02b5e7'
@@ -120,6 +125,7 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
   beforeEach(() => {
     mockPoolQuery.mockReset()
     mockGetChainClient.mockReset()
+    resetLastKnownBalancesForTests()
   })
 
   function auth(t: string = ownerToken) {
@@ -277,4 +283,146 @@ describe('GET /user/accounts/:accountId/funding — characterization (#2534)', (
   // one registration of this module now, so there is nothing left to compare
   // it against. Coverage that an `owner_cli` token is accepted on the one
   // surviving mount stays above ("accepts an owner_cli device-code session").
+
+  // ── Degraded read: the three balance states (#3317) ──────────────
+  //
+  // The endpoint shares `GET /balances/:accountAddress`'s #3295 degraded
+  // read: the module-level last-known store (written ONLY by fulfilled
+  // reads) substitutes on a rejected leg, and the additive
+  // `balanceFreshness` marker says which happened. `funded` counts only a
+  // KNOWN value — a fresh read or the stale last-known one — so the three
+  // states are: failed-after-good (stale), never-read (unavailable), and
+  // clean (no marker at all).
+
+  /** A client whose USDC read rejects; the native read always succeeds. */
+  function chainClientWithFailingUsdc() {
+    return {
+      getNativeBalance: async () => 0n,
+      getTokenBalance: async () => {
+        throw new Error('Batch of more than 3 requests are not allowed on free plan')
+      },
+    }
+  }
+
+  it('a rejected read after a good read serves the last-known balance marked stale, and stays funded', async () => {
+    mockPoolQuery.mockResolvedValue({ rows: [ownershipRow()] })
+
+    // Good read first: 25 USDC — above the 5 USDC minimum, so funded=true,
+    // and the store records the value the chain actually returned.
+    mockGetChainClient.mockReturnValue(chainClientWithUsdc(25_000_000n))
+    const good = await app.inject({
+      method: 'GET',
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
+      headers: auth(),
+    })
+    expect(good.statusCode).toBe(200)
+    expect(good.json().funded).toBe(true)
+    expect(good.json().tokens[0].balanceFreshness).toBeUndefined()
+    expect(good.json().native.balanceFreshness).toBeUndefined()
+    expect(good.json().balanceFreshness).toBeUndefined()
+
+    // The RPC blip (#2769's failure class): the USDC leg rejects. The
+    // response carries the LAST-KNOWN balance marked stale — not a
+    // fabricated zero — and `funded` stays true off that known figure.
+    mockGetChainClient.mockReturnValue(chainClientWithFailingUsdc())
+    const degraded = await app.inject({
+      method: 'GET',
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
+      headers: auth(),
+    })
+    expect(degraded.statusCode).toBe(200)
+    const body = degraded.json()
+    expect(body.tokens[0].balance_human).toBe('25.00')
+    expect(body.tokens[0].balanceFreshness).toEqual({ status: 'stale', asOf: expect.any(String) })
+    expect(body.native.balanceFreshness).toBeUndefined()
+    expect(body.balanceFreshness).toEqual({ status: 'stale', asOf: expect.any(String) })
+    expect(body.funded).toBe(true)
+  })
+
+  it('a failed read with no prior good read reports the token unavailable, and funded stays false', async () => {
+    mockPoolQuery.mockResolvedValue({ rows: [ownershipRow()] })
+    mockGetChainClient.mockReturnValue(chainClientWithFailingUsdc())
+
+    // First read after a deploy: the store has never seen this token, so
+    // the balance is the '0' FILLER marked unavailable — and unknown is
+    // not unfunded, so the token cannot answer the `funded` comparison.
+    const res = await app.inject({
+      method: 'GET',
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
+      headers: auth(),
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.tokens[0].balance_human).toBe('0')
+    expect(body.tokens[0].balanceFreshness).toEqual({ status: 'unavailable' })
+    expect(body.native.balanceFreshness).toBeUndefined()
+    expect(body.balanceFreshness).toEqual({ status: 'unavailable' })
+    expect(body.funded).toBe(false)
+  })
+
+  it('a stale last-known balance still counts toward funded; only the unavailable filler cannot', async () => {
+    mockPoolQuery.mockResolvedValue({ rows: [ownershipRow()] })
+
+    // Known-stale counts (the issue's option (a) wording: funded from
+    // known-fresh OR known-stale values): a good 10 USDC read, then a
+    // failing one — funded remains true off the stale figure.
+    mockGetChainClient.mockReturnValue(chainClientWithUsdc(10_000_000n))
+    await app.inject({ method: 'GET', url: `/user/accounts/${ACCOUNT_ID}/funding`, headers: auth() })
+    mockGetChainClient.mockReturnValue(chainClientWithFailingUsdc())
+    const staleFunded = await app.inject({
+      method: 'GET',
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
+      headers: auth(),
+    })
+    expect(staleFunded.json().tokens[0].balanceFreshness).toEqual({ status: 'stale', asOf: expect.any(String) })
+    expect(staleFunded.json().funded).toBe(true)
+
+    // The unavailable filler is the ONLY state that cannot answer: reset
+    // the store (as a deploy would), fail the read — the fabricated-zero
+    // path #3317 removes would have compared 0 < minimum and unfunded the
+    // account; now the token simply cannot make the answer false.
+    resetLastKnownBalancesForTests()
+    const unknown = await app.inject({
+      method: 'GET',
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
+      headers: auth(),
+    })
+    expect(unknown.json().tokens[0].balanceFreshness).toEqual({ status: 'unavailable' })
+    expect(unknown.json().funded).toBe(false)
+  })
+
+  it('a clean read is byte-identical to the pre-#3317 response — no freshness key anywhere', async () => {
+    mockPoolQuery.mockResolvedValueOnce({ rows: [ownershipRow()] })
+    mockGetChainClient.mockReturnValue(chainClientWithUsdc(USDC_MINIMUM_ATOMIC))
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/user/accounts/${ACCOUNT_ID}/funding`,
+      headers: auth(),
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body).toEqual({
+      account_address: ACCOUNT_ADDRESS,
+      chain: { id: 8453, name: 'Base', explorer_url: 'https://basescan.org' },
+      tokens: [
+        {
+          symbol: 'USDC',
+          address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          decimals: 6,
+          balance_human: '5.00',
+          minimum_useful_human: '5',
+        },
+      ],
+      native: { symbol: 'ETH', balance_human: '0.0', needed: false },
+      funded: true,
+    })
+    // The byte-identical guarantee stated as a key census too: a clean
+    // response carries NO balanceFreshness at any level, so a consumer
+    // cannot distinguish this payload from the pre-#3317 one.
+    expect(Object.keys(body)).not.toContain('balanceFreshness')
+    expect(Object.keys(body.tokens[0])).not.toContain('balanceFreshness')
+    expect(Object.keys(body.native)).not.toContain('balanceFreshness')
+    expect(JSON.parse(res.body).tokens[0]).not.toHaveProperty('balanceFreshness')
+  })
 })

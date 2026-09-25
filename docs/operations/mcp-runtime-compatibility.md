@@ -3223,3 +3223,15 @@ to call next in structured fields, and those fields are typed end to end
 > tool, schema key, `next_tool` value, expected-context version or signer
 > contract changes. Scope of this note: that comment. Nothing else in this
 > document was re-verified.
+>
+> **Re-verified unchanged (#3317, 2026-09-25, funding-endpoint degraded read):**
+> this doc is coupled through `routes/user-accounts.ts`, whose funding endpoint
+> now JOINS the #3295 degraded read instead of deferring it: a failed balance
+> leg serves the last-known balance marked stale (or `'0'` marked
+> `unavailable` when never read) and the response carries the additive optional
+> `balanceFreshness` marker; `funded` is computed only from known values. The
+> `/user/accounts*` reads the CLI calls keep their shapes — every previously
+> required field stays required, the markers are optional additions on one
+> read-only GET — so no tool, schema key, `next_tool` value, expected-context
+> version or signer contract changes. Scope of this note: that endpoint's
+> response shape. Nothing else in this document was re-verified.

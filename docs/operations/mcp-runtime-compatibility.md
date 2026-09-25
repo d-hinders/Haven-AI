@@ -1057,11 +1057,13 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > v1 is emittable there, where `dev` selects `payerDelegate ? 3 : 2`. Re-read at
 > the cut: `main` has exactly three `signX402ExpectedContext` call sites
 > (`delegation-authorize.ts` twice, `replay.ts` once). The first two pass
-> `typedDataDigest(...)` of a value they always build; the replay site passes
-> `typedDataDigest(sign_data.typed_data)`, which returns `undefined` only when
-> `typed_data` is absent — and the #1138 comment above that call records that a
-> delegation-rail intent always carries it. A row without it would be a
-> retired-rail row, and retired rails answer 410 before any replay. So the
+> `typedDataDigest(...)` of a value they always build. The replay site passes
+> `typedDataDigest(sign_data.typed_data)`, and it too always builds that value:
+> it returns `null` early when `prepared_user_op` is null (`replay.ts:94`,
+> `:146`), and otherwise sets `typed_data` to an object on both branches
+> (`delegationSigningPayload`, `userOpTypedData`). `typedDataDigest` throws on
+> unhashable input rather than returning `undefined`. So v1 cannot be produced
+> at any of the three sites. So the
 > note's earlier claim holds: **a new signer meeting an old backend's v1 is not
 > a live case.** The other direction is unaffected: an old signer against the
 > new backend receives only v2/v3, which it has always supported.

@@ -128,8 +128,8 @@ payment rail — and the receipt side now carries the transaction feed's names
 decided at `mapPaymentReceipt` only (owner decision 1: the transactions wire
 is frozen, the receipts wire stays snake_case, nothing moves in the backend).
 The old receipt names (`rail`, `proofStatus`, `resourceUrl`,
-`merchantAddress`) were dual-emitted as deprecated twins for one full release
-(`0.5.0-alpha.0`) and removed by #3306 once all three release clocks —
+`merchantAddress`) were dual-emitted as deprecated twins from `0.5.0-alpha.0`
+through `0.5.0-alpha.1` and removed by #3306 once all three release clocks —
 `@haven_ai/sdk` `latest`, `@haven_ai/mcp` `latest`, the hosted mcp-server
 deploy's `serverInfo.version` on `initialize` — read `0.5.0-alpha.1`; a receipt
 row now carries only the transaction feed's names. The pairs are declared in

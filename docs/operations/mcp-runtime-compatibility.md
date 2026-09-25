@@ -235,9 +235,10 @@ last-verified: "2026-09-25"
 > through), so the hosted runtime drops the keys with its deploy (the SDK is a
 > workspace link there) and the local runtime with its SDK dependency. No tool
 > added or renamed, no argument, schema or description change, and the
-> version-skew and consent-hash contracts do not move. Per the 0.x rule below,
-> the release carrying this is a MINOR step, and a `.d.ts` diff does not show
-> a tool-output break. Nothing else in this document was re-verified in this
+> version-skew and consent-hash contracts do not move. Under the 0.x
+> convention this document records below (the 0.4.0-alpha.0 note: a break
+> takes the minor step), the release carrying this is a MINOR step, and a
+> `.d.ts` diff does not show a tool-output break. Nothing else in this document was re-verified in this
 > pass.
 >
 > **Recent re-verification (#3213):** `haven_check_funds` now accepts its

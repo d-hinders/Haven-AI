@@ -105,7 +105,8 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
  * transactions wire is frozen, so the survivor is the transaction-side name
  * in every pair; the argument per pair is in `scripts/ci/vocabulary-map.json`.
  *
- * Removed (#3306): the twins `rail`/`proofStatus`/`resourceUrl`/`merchantAddress`, dual-emitted from 0.5.0-alpha.0, at `latest` 0.5.0-alpha.1 on all three clocks.
+ * Removed (#3306): the twins `rail`/`proofStatus`/`resourceUrl`/`merchantAddress`,
+ * dual-emitted from 0.5.0-alpha.0, once sdk/mcp `latest` and hosted `serverInfo.version` read 0.5.0-alpha.1.
  */
 export function mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentReceipt {
   const receipt: HavenPaymentReceipt = {

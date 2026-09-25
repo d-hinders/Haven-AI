@@ -1061,8 +1061,6 @@ export interface HavenPaymentReceipt {
    * receipt analogue, because no protocol means no evidence row.
    */
   source: string
-  /** @deprecated (#3134) twin of {@link source}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
-  rail: string
   /**
    * #3134: the evidence row's recorded proof status, under the transactions
    * feed's name. Same name, different nullability: `string` here because a
@@ -1070,8 +1068,6 @@ export interface HavenPaymentReceipt {
    * LEFT JOIN to none (#3132) — do not share a non-null-asserting helper.
    */
   paymentProofStatus: string
-  /** @deprecated (#3134) twin of {@link paymentProofStatus}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
-  proofStatus: string
   /**
    * @deprecated (#2998) meaning depends on the settlement scheme — the
    * account → delegate funding transaction on eip3009, the (only) settlement
@@ -1091,12 +1087,8 @@ export interface HavenPaymentReceipt {
   chainId: number
   /** #3134: the paid resource, under the transactions feed's protocol-prefixed name (`string | null` there; a receipt always has one). */
   x402ResourceUrl: string
-  /** @deprecated (#3134) twin of {@link x402ResourceUrl}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
-  resourceUrl: string
   /** #3134: the merchant paid, under the transactions feed's protocol-prefixed name. */
   x402MerchantAddress: string | null
-  /** @deprecated (#3134) twin of {@link x402MerchantAddress}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
-  merchantAddress: string | null
   payerAddress: string
   /** #2960: additive alongside `payerAddress` above (`parties.treasury_account` only). */
   parties?: PaymentParties

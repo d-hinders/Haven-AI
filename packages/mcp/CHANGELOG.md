@@ -8,6 +8,10 @@ alone.
 
 ## Unreleased
 
+### Removed
+
+- **BREAKING (#3306, via `@haven_ai/sdk`) — `haven_list_receipts` rows lose four keys.** `rail`, `proofStatus`, `resourceUrl` and `merchantAddress`, the deprecated twins kept for one full release since `0.5.0-alpha.0` (#3134), are no longer emitted; read `source`, `paymentProofStatus`, `x402ResourceUrl` and `x402MerchantAddress`. This is a tool-output re-shape, breaking for any agent or script still reading an old key, so the release carrying it takes a **MINOR** bump under the 0.x convention (`docs/operations/mcp-runtime-compatibility.md`). A `.d.ts` diff of this package shows nothing — the break is in tool output, which no declaration file carries. No tool, argument, schema or description changed on this package; the hosted runtime drops the keys with its deploy.
+
 ## 0.5.0-alpha.1 — 2026-09-25
 
 - **Client identity and update hint (#3303, epic #3302).** Haven API requests name `@haven_ai/mcp/<version>` in `X-Haven-Client`. When the backend sends a `client_update` hint for this runtime, the tool result carries it as `client_update`, on success and failure alike, with the exact update command. A 426 `client_outdated` refusal also keeps the backend's `next_tool_omitted_reason` at the top level of the failure. No tool, schema or consent input changes, so nobody is re-prompted.

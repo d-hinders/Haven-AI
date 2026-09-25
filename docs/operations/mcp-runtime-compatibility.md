@@ -218,6 +218,29 @@ last-verified: "2026-09-25"
 > authenticated, unlike the two `npm view` reads. Nothing else in this document
 > was re-verified in this pass.
 >
+> **Recent re-verification (#3306):** each `haven_list_receipts` row on BOTH
+> runtimes LOSES four keys — `rail`, `proofStatus`, `resourceUrl`,
+> `merchantAddress`, the deprecated twins #3134 dual-emitted from
+> `0.5.0-alpha.0` — so a row carries only `source`, `paymentProofStatus`,
+> `x402ResourceUrl` and `x402MerchantAddress` for those values. This is a
+> tool-output RE-SHAPE, and breaking for any agent or script still reading an
+> old key. The removal condition held at merge: `@haven_ai/sdk` `latest`,
+> `@haven_ai/mcp` `latest` and the hosted prod `serverInfo.version` on
+> `initialize` all read `0.5.0-alpha.1` (≥ `0.5.0-alpha.0`; evidence on #3130).
+> Those clocks prove clients *received* the survivors, not that they stopped
+> reading the twins — accepted by design (#3134 decision 1). The change is made
+> at `mapPaymentReceipt` only: the receipts WIRE (`RawHavenPaymentReceipt`) is
+> unchanged, neither runtime reshapes receipt rows itself (hosted
+> `state-direct-recovery.ts` and local `tools.ts` pass `listReceiptsPage`
+> through), so the hosted runtime drops the keys with its deploy (the SDK is a
+> workspace link there) and the local runtime with its SDK dependency. No tool
+> added or renamed, no argument, schema or description change, and the
+> version-skew and consent-hash contracts do not move. Under the 0.x
+> convention this document records below (the 0.4.0-alpha.0 note: a break
+> takes the minor step), the release carrying this is a MINOR step, and a
+> `.d.ts` diff does not show a tool-output break. Nothing else in this document was re-verified in this
+> pass.
+>
 > **Recent re-verification (#3213):** `haven_check_funds` now accepts its
 > `token` argument as the contract address OR the SYMBOL the identity and
 > allowance reads report (`packages/mcp-server/src/tools/state-direct-recovery.ts`,

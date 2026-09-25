@@ -22,7 +22,7 @@ import {
 export const DEFAULT_API = 'https://havenbackend-production-8a00.up.railway.app'
 // Self-reported CLI version. Owned by scripts/release-bump.mjs, which rewrites
 // the string literal below on every release — keep it a bare quoted literal.
-export const CLI_VERSION = '0.4.0-alpha.0'
+export const CLI_VERSION = '0.5.0-alpha.0'
 
 /** #3303: the `X-Haven-Client` value every Haven API request from this CLI carries. */
 export const CLI_CLIENT_IDENTITY = `@haven_ai/cli/${CLI_VERSION}`

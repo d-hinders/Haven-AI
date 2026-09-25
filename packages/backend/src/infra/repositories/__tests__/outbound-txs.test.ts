@@ -21,6 +21,7 @@ import {
   markOutboundTxFailed,
   markOutboundTxMined,
   markOutboundTxReplaced,
+  listLiveBroadcastNoncesFrom,
 } from '../outbound-txs.js'
 
 // A UNIQUE chain id per test: claim-next is chain-scoped, so this makes each
@@ -515,5 +516,31 @@ describeDb('findOutboundTxByHash (#1745)', () => {
   it('returns null when the payload was queued but never stamped', async () => {
     await enqueue('passport_revoke') // queued, no hash
     expect(await findOutboundEvidenceTxHash(CHAIN, 'passport_revoke', DATA)).toBeNull()
+  })
+
+  it('#2769: live-broadcast nonces from a floor — broadcast rows only, ascending, per chain', async () => {
+    expect(await listLiveBroadcastNoncesFrom(CHAIN, 0n)).toEqual([])
+
+    await enqueue('sweep') // queued, never stamped: carries no nonce
+    const mined = await enqueue('sweep')
+    await markOutboundTxBroadcast(mined.id, { txHash: '0x' + '01'.repeat(32), nonce: 50n })
+    await markOutboundTxMined(mined.id)
+    const failed = await enqueue('sweep')
+    await markOutboundTxBroadcast(failed.id, { txHash: '0x' + '02'.repeat(32), nonce: 60n })
+    await markOutboundTxFailed(failed.id, 'reverted')
+    expect(await listLiveBroadcastNoncesFrom(CHAIN, 0n)).toEqual([])
+
+    for (const [n, tag] of [[9n, '04'], [7n, '03'], [900n, '06'], [2n, '07']] as const) {
+      const row = await enqueue('sweep')
+      await markOutboundTxBroadcast(row.id, { txHash: '0x' + tag.repeat(32), nonce: n })
+    }
+    expect(await listLiveBroadcastNoncesFrom(CHAIN, 0n)).toEqual([2n, 7n, 9n, 900n])
+    expect(await listLiveBroadcastNoncesFrom(CHAIN, 7n)).toEqual([7n, 9n, 900n])
+
+    // Chain-scoped: another chain's live row is not ours.
+    const otherChain = ++chainCounter
+    const other = await enqueueOutboundTx({ chainId: otherChain, submitter: 'sweep', toAddress: TO, data: DATA, valueAtomic: 0n })
+    await markOutboundTxBroadcast(other.id, { txHash: '0x' + '05'.repeat(32), nonce: 8n })
+    expect(await listLiveBroadcastNoncesFrom(CHAIN, 7n)).toEqual([7n, 9n, 900n])
   })
 })

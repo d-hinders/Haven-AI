@@ -88,7 +88,10 @@ export async function getRelayerFeeOverrides(
  * broadcast to one node is invisible to a second, and the log scanners and
  * receipt verifier behind `relayer-reads.ts` would read "no log" from a
  * lagging fallback rather than fail. A quota-dead `RPC_URL_BASE*` still fails
- * the ethers side; configuring a healthy endpoint is the remedy there.
+ * the ethers side; configuring a healthy endpoint is the remedy there. The one
+ * provider refusal handled in code is the `pending` block tag on the nonce
+ * read (#2769): `readNextRelayerNonce` in `outbound-queue.ts` then walks up
+ * from this same provider's `latest` count over the live-broadcast ledger.
  *
  * JSON-RPC batching is OFF (`batchMaxCount: 1`). By default ethers bundles
  * every call made within about 10 ms into ONE request of up to 100 calls.

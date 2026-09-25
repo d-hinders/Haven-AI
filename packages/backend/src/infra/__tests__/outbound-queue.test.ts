@@ -14,10 +14,12 @@ import { describeDb, initDbHarness, resetDb } from './helpers/db-harness.js'
 import {
   OutboundFencedError,
   openOutboundRecord,
+  isPendingTagRefusal,
   submitRecorded,
   type OutboundQueueRepo,
   type SubmitChainDeps,
 } from '../outbound-queue.js'
+import * as outboundRepo from '../repositories/outbound-txs.js'
 import { markOutboundTxBroadcast, type OutboundTxRow } from '../repositories/outbound-txs.js'
 
 const TO = '0xdb9b1e94b5b69df7e401ddbede43491141047db3'
@@ -286,6 +288,168 @@ describeDb('openOutboundRecord (#1556)', () => {
     await expect(
       submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain),
     ).rejects.toMatchObject({ code: 'CALL_EXCEPTION' })
+    expect((await rowsFor(CHAIN))[0].status).toBe('queued')
+  })
+
+  // ── #2769: a provider that refuses the `pending` block tag ────────────────
+  // dRPC's Base plans answer `eth_getTransactionCount(addr, "pending")` with
+  // this body when no flashblocks-capable upstream is available, while
+  // serving `latest` normally. The shape below is the one ethers raised on
+  // dev (qa-dev runs 36137615672 / 36142150551 / 36146010581).
+  function pendingRefusal() {
+    return makeError('could not coalesce error', 'UNKNOWN_ERROR', {
+      error: {
+        code: 1,
+        message:
+          'no available upstreams to process a request. Cause - upstream-80 - No label `flashblocks` with values [true]',
+      },
+      payload: { method: 'eth_getTransactionCount', params: ['0x0', 'pending'] },
+    })
+  }
+
+  function refusingChain(latest: number, onPending: () => never = () => { throw pendingRefusal() }) {
+    const broadcasts: number[] = []
+    const tags: string[] = []
+    const provider = {
+      getNetwork: async () => ({ chainId: BigInt(CHAIN), name: 'test' }),
+      getFeeData: async () => ({ maxFeePerGas: 200n, maxPriorityFeePerGas: 10n, gasPrice: 200n }),
+      estimateGas: async () => 60_000n,
+      getTransactionCount: async (_address: string, tag: string) => {
+        tags.push(tag)
+        if (tag === 'pending') onPending()
+        return latest
+      },
+      broadcastTransaction: async (raw: string) => {
+        const { Transaction } = await import('ethers')
+        const parsed = Transaction.from(raw)
+        broadcasts.push(parsed.nonce)
+        return { hash: parsed.hash, nonce: parsed.nonce } as never
+      },
+    }
+    const wallet = new Wallet('0x' + '55'.repeat(32), provider as never)
+    const chain: SubmitChainDeps = {
+      getRelayer: (() => wallet) as never,
+      withRelayerSendLock: async (_chainId, fn) => fn(),
+    }
+    return { chain, broadcasts, tags }
+  }
+
+  it('#2769: the dRPC refusal body is recognised; a timeout or rate limit is not', () => {
+    expect(isPendingTagRefusal(pendingRefusal())).toBe(true)
+    expect(isPendingTagRefusal(makeError('request timeout', 'TIMEOUT', { operation: 'getTransactionCount', reason: 'timeout' }))).toBe(false)
+    expect(isPendingTagRefusal(new Error('429 Too Many Requests'))).toBe(false)
+    expect(isPendingTagRefusal(null)).toBe(false)
+  })
+
+  async function stampLive(nonce: bigint, tag: string) {
+    const row = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    await markOutboundTxBroadcast(row.id!, { txHash: '0x' + tag.repeat(32), nonce })
+    return row
+  }
+
+  it('#2769: a refused `pending` read steps over our own CONTIGUOUS in-flight sends from `latest`', async () => {
+    // Our sends at 5, 6, 7 are stamped and in flight; the chain has mined up
+    // to 5. `latest` alone would re-use 5 and collide.
+    await stampLive(5n, 'a1')
+    await stampLive(6n, 'a2')
+    await stampLive(7n, 'a3')
+    const { chain, broadcasts, tags } = refusingChain(5)
+
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'hybrid_deploy', to: TO, data: DATA })
+    const sent = await submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain)
+
+    expect(sent.nonce).toBe(8)
+    expect(broadcasts).toEqual([8])
+    expect(tags).toEqual(['pending', 'latest'])
+    const stamped = (await rowsFor(CHAIN)).find((r) => r.id === record.id)
+    expect([stamped?.nonce, stamped?.status]).toEqual(['8', 'broadcast'])
+  })
+
+  it('#2769: a stale live row FAR above `latest` never pushes the send into a gap', async () => {
+    // An earlier key's dropped send, left `broadcast` at 900 (the table has no
+    // from-address). MAX(nonce)+1 would send at 901, into a hole of ~897
+    // nonces nothing ever fills; the walk stops at the first free nonce.
+    await stampLive(3n, 'b1')
+    await stampLive(900n, 'b2')
+    const { chain, broadcasts } = refusingChain(3)
+
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    const sent = await submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain)
+
+    expect(sent.nonce).toBe(4)
+    expect(broadcasts).toEqual([4])
+  })
+
+  it('#2769: a losing replica under the fallback re-reads and moves past the winner', async () => {
+    // Between our ledger read and our stamp, another replica stamps nonce 5.
+    // The UNIQUE live-nonce index refuses our stamp; the retry re-reads the
+    // ledger, now sees 5, and takes 6.
+    const { chain, broadcasts } = refusingChain(5)
+    let reads = 0
+    const racingRepo: OutboundQueueRepo = {
+      enqueueOutboundTx: outboundRepo.enqueueOutboundTx,
+      markOutboundTxBroadcast: outboundRepo.markOutboundTxBroadcast,
+      markOutboundTxMined: outboundRepo.markOutboundTxMined,
+      markOutboundTxFailed: outboundRepo.markOutboundTxFailed,
+      listLiveBroadcastNoncesFrom: async (chainId, from) => {
+        const seen = await outboundRepo.listLiveBroadcastNoncesFrom(chainId, from)
+        if (++reads === 1) await stampLive(5n, 'c1') // the winner lands after our read
+        return seen
+      },
+    }
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    const sent = await submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, racingRepo, chain)
+
+    expect(reads).toBe(2)
+    expect(sent.nonce).toBe(6)
+    expect(broadcasts).toEqual([6])
+  })
+
+  it('#2769: the ledger read FAILS CLOSED — a database error signs and broadcasts nothing', async () => {
+    const { chain, broadcasts } = refusingChain(5)
+    const downRepo: OutboundQueueRepo = {
+      enqueueOutboundTx: outboundRepo.enqueueOutboundTx,
+      markOutboundTxBroadcast: outboundRepo.markOutboundTxBroadcast,
+      markOutboundTxMined: outboundRepo.markOutboundTxMined,
+      markOutboundTxFailed: outboundRepo.markOutboundTxFailed,
+      listLiveBroadcastNoncesFrom: async () => {
+        throw new Error('db down')
+      },
+    }
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+
+    await expect(
+      submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, downRepo, chain),
+    ).rejects.toThrow('db down')
+    expect(broadcasts).toEqual([])
+    expect((await rowsFor(CHAIN))[0].status).toBe('queued')
+  })
+
+  it('#2769: a refused `pending` read takes the chain count when the ledger is behind it or empty', async () => {
+    // A MINED row is not live: it must not hold the nonce back or forward.
+    const old = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    await markOutboundTxBroadcast(old.id!, { txHash: TX, nonce: 30n })
+    await db.query(`UPDATE outbound_txs SET status = 'mined' WHERE id = $1`, [old.id])
+    const { chain, broadcasts } = refusingChain(12)
+
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+    const sent = await submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain)
+
+    expect(sent.nonce).toBe(12)
+    expect(broadcasts).toEqual([12])
+  })
+
+  it('#2769: any OTHER error on the `pending` read propagates, and nothing is broadcast', async () => {
+    const { chain, broadcasts, tags } = refusingChain(12, () => {
+      throw makeError('request timeout', 'TIMEOUT', { operation: 'getTransactionCount', reason: 'timeout' })
+    })
+    const record = await openOutboundRecord({ chainId: CHAIN, submitter: 'sweep', to: TO, data: DATA })
+
+    await expect(
+      submitRecorded({ chainId: CHAIN, recordId: record.id, to: TO, data: DATA }, undefined, chain),
+    ).rejects.toMatchObject({ code: 'TIMEOUT' })
+    expect(tags).toEqual(['pending'])
+    expect(broadcasts).toEqual([])
     expect((await rowsFor(CHAIN))[0].status).toBe('queued')
   })
 })

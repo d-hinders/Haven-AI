@@ -34,6 +34,7 @@ import {
   markOutboundTxBroadcast,
   markOutboundTxFailed,
   markOutboundTxMined,
+  listLiveBroadcastNoncesFrom,
 } from './repositories/outbound-txs.js'
 import { getRelayer, withRelayerSendLock } from './relayer.js'
 import { describeRevert, isDeterministicRevert } from './deterministic-revert.js'
@@ -65,6 +66,8 @@ export interface OutboundQueueRepo {
   markOutboundTxBroadcast: typeof markOutboundTxBroadcast
   markOutboundTxMined: typeof markOutboundTxMined
   markOutboundTxFailed: typeof markOutboundTxFailed
+  /** Optional so existing fakes need not grow it; the default is the real read. */
+  listLiveBroadcastNoncesFrom?: typeof listLiveBroadcastNoncesFrom
 }
 
 const defaultRepo: OutboundQueueRepo = {
@@ -72,6 +75,7 @@ const defaultRepo: OutboundQueueRepo = {
   markOutboundTxBroadcast,
   markOutboundTxMined,
   markOutboundTxFailed,
+  listLiveBroadcastNoncesFrom,
 }
 
 function warn(action: string, err: unknown): void {
@@ -167,7 +171,13 @@ export async function submitRecorded(
   return chain.withRelayerSendLock(params.chainId, async () => {
     const MAX_LANE_ATTEMPTS = 3
     for (let attempt = 0; attempt < MAX_LANE_ATTEMPTS; attempt++) {
-      const nonce = params.nonce ?? (await relayer.getNonce('pending'))
+      const nonce =
+        params.nonce ??
+        (await readNextRelayerNonce(
+          params.chainId,
+          relayer,
+          repo.listLiveBroadcastNoncesFrom ?? listLiveBroadcastNoncesFrom,
+        ))
       let populated
       try {
         populated = await relayer.populateTransaction({
@@ -233,6 +243,88 @@ export async function submitRecorded(
       `outbound-queue: could not win a nonce lane on chain ${params.chainId} after ${MAX_LANE_ATTEMPTS} attempts`,
     )
   })
+}
+
+/**
+ * The next nonce for a fresh relayer send (#2769).
+ *
+ * Normally the node's `pending` count: it includes this relayer's
+ * transactions still in the mempool, so back-to-back sends take N, N+1, …
+ *
+ * Some providers refuse the `pending` block tag outright. dRPC's Base plans
+ * route it only to flashblocks-capable upstreams and answer "no available
+ * upstreams … No label `flashblocks`" when there are none, while serving
+ * `latest` normally. Every relayer send without an explicit nonce died at
+ * this read on dev from 2026-09-25: account deploys at first budget activation
+ * and at a fresh agent's first erc7710 authorize, sweeps, passport
+ * attestations and revokes, and the bump worker's orphan re-sends. Lane
+ * cancels and same-nonce replacements pass an explicit nonce and never get
+ * here.
+ *
+ * On THAT refusal only, the nonce is derived without the node's mempool view:
+ * start at the chain's `latest` count (same provider, so #1533's single nonce
+ * view holds) and step over every nonce this relayer holds a CONTIGUOUS live
+ * broadcast at in `outbound_txs`. Every send through {@link submitRecorded}
+ * with a record id is stamped there BEFORE it is broadcast, so the walk steps
+ * over our own in-flight sends the node will not report. It never jumps a
+ * hole: a stale row far above the count (the table has no from-address, so an
+ * earlier key's dropped send looks like ours) cannot push every later send
+ * into a gap nothing fills.
+ *
+ * The ledger read is deliberately FAIL-CLOSED, unlike {@link openOutboundRecord}:
+ * without it, `latest` alone would re-use the nonce of our own in-flight send.
+ * A database error propagates before anything is signed.
+ *
+ * Residuals. The ledger cannot see a live nonce held by an unstamped send (a
+ * failed-open record; the bump worker's orphan re-send, stamped only after
+ * this returns), nor during two transient handoffs (a lane cancel stamping
+ * after the attest it cancels left `broadcast`; the bump worker between
+ * marking a row replaced and stamping its successor). A fresh send can then
+ * take that nonce and either be rejected, or — with fees at least 10% higher
+ * on both fields — silently REPLACE our own unrecorded transaction. A live
+ * row whose transaction was DROPPED at N = `latest` is stepped over, so later
+ * sends take N+1, N+2 … and stall behind the hole until the bump worker
+ * re-sends N (rebroadcast-safe submitters) or an operator clears it (a
+ * `passport_attest`, or a lane past its bump cap;
+ * `modules/passport/attestation.ts` describes that stall). None of these can
+ * misdirect funds: a nonce orders the relayer's own transactions, it does not
+ * choose what they do. Any other error from the `pending` read propagates
+ * unchanged: a dead endpoint is not papered over here.
+ */
+export async function readNextRelayerNonce(
+  chainId: number,
+  relayer: { getNonce(blockTag?: string): Promise<number> },
+  readLedger: (chainId: number, from: bigint) => Promise<bigint[]> = listLiveBroadcastNoncesFrom,
+): Promise<number> {
+  try {
+    return await relayer.getNonce('pending')
+  } catch (err) {
+    if (!isPendingTagRefusal(err)) throw err
+    const latest = await relayer.getNonce('latest')
+    let next = BigInt(latest)
+    for (const live of await readLedger(chainId, next)) {
+      if (live === next) next += 1n
+      else if (live > next) break
+    }
+    console.warn(
+      `outbound-queue: the RPC refused the 'pending' block tag on chain ${chainId}; ` +
+        `nonce ${next} derived from latest ${latest} and the live-broadcast ledger (#2769)`,
+    )
+    return Number(next)
+  }
+}
+
+/**
+ * True only for a provider refusing the `pending` block tag itself — never
+ * for a timeout, a rate limit or a dead endpoint. Matches dRPC's refusal text
+ * wherever ethers put it (the top-level message quotes the RPC error body).
+ * A provider that words the refusal differently fails closed: the error
+ * propagates, as it did before this fallback existed.
+ */
+export function isPendingTagRefusal(err: unknown): boolean {
+  const e = err as { message?: unknown; error?: { message?: unknown } } | null
+  const text = [e?.message, e?.error?.message].filter((m) => typeof m === 'string').join(' ')
+  return /No label `flashblocks`/.test(text)
 }
 
 function toBigIntOrUndefined(value: unknown): bigint | undefined {

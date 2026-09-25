@@ -71,8 +71,12 @@ import {
 } from '../../config.js'
 import { getChain } from '../../domain/chains.js'
 
-/** The optional second provider per chain. Empty string = not configured. */
-function secondaryRpcUrl(chainId: number): string {
+/**
+ * The optional second provider per chain (`RPC_URL_BASE_FALLBACK` /
+ * `RPC_URL_BASE_SEPOLIA_FALLBACK`). Empty string = not configured. Also the
+ * relayer's broadcast fallback when the primary refuses a raw send (#2769).
+ */
+export function secondaryRpcUrl(chainId: number): string {
   if (chainId === 8453) return config.rpcUrlBaseFallback
   if (chainId === 84532) return config.rpcUrlBaseSepoliaFallback
   return ''

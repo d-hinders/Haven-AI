@@ -28,7 +28,12 @@
  * § Multi-replica CORRECTNESS).
  */
 
-import { Transaction, type TransactionResponse } from 'ethers'
+import {
+  Transaction,
+  TransactionResponse,
+  type Provider,
+  type TransactionResponseParams,
+} from 'ethers'
 import {
   enqueueOutboundTx,
   markOutboundTxBroadcast,
@@ -36,7 +41,7 @@ import {
   markOutboundTxMined,
   listLiveBroadcastNoncesFrom,
 } from './repositories/outbound-txs.js'
-import { getRelayer, withRelayerSendLock } from './relayer.js'
+import { getFallbackBroadcastProvider, getRelayer, withRelayerSendLock } from './relayer.js'
 import { describeRevert, isDeterministicRevert } from './deterministic-revert.js'
 
 export interface OutboundBroadcastStamp {
@@ -104,6 +109,8 @@ export class OutboundFencedError extends Error {
 export interface SubmitChainDeps {
   getRelayer: typeof getRelayer
   withRelayerSendLock: typeof withRelayerSendLock
+  /** Optional so existing fakes need not grow it; the default is the real send. */
+  sendRawViaFallback?: typeof sendRawViaFallback
 }
 
 const defaultChainDeps: SubmitChainDeps = { getRelayer, withRelayerSendLock }
@@ -237,7 +244,7 @@ export async function submitRecorded(
         }
         if (!stamped) throw new OutboundFencedError(params.recordId)
       }
-      return provider.broadcastTransaction(raw)
+      return broadcastSigned(params.chainId, provider, raw, chain.sendRawViaFallback ?? sendRawViaFallback)
     }
     throw new Error(
       `outbound-queue: could not win a nonce lane on chain ${params.chainId} after ${MAX_LANE_ATTEMPTS} attempts`,
@@ -312,6 +319,66 @@ export async function readNextRelayerNonce(
     )
     return Number(next)
   }
+}
+
+/**
+ * Broadcast the signed bytes (#2769). Normally through the relayer's own
+ * provider. dRPC's Base plans also refuse `eth_sendRawTransaction` with the
+ * same "No label `flashblocks`" body they give the `pending` read. On THAT
+ * refusal only, the identical raw transaction is sent through the chain's
+ * configured second provider (`RPC_URL_BASE_FALLBACK` /
+ * `RPC_URL_BASE_SEPOLIA_FALLBACK`, the same one the viem transport fails over
+ * to) — never the public node. The bytes are already signed and stamped: the
+ * hash is fixed, both providers forward to the same sequencer, and a second
+ * copy of the same transaction is a no-op, so this changes WHICH gateway
+ * carries the broadcast, never WHAT it is. The returned response is built on
+ * the PRIMARY provider, so `wait()` and every later read stay on the single
+ * nonce view (#1533). Any other broadcast error propagates unchanged, and so
+ * does the refusal when no second provider is configured.
+ */
+export async function broadcastSigned(
+  chainId: number,
+  provider: Provider,
+  raw: string,
+  sendFallback: (chainId: number, raw: string) => Promise<string> = sendRawViaFallback,
+): Promise<TransactionResponse> {
+  try {
+    return await provider.broadcastTransaction(raw)
+  } catch (err) {
+    if (!isPendingTagRefusal(err)) throw err
+    const tx = Transaction.from(raw)
+    const hash = await sendFallback(chainId, raw)
+    if (hash.toLowerCase() !== tx.hash?.toLowerCase()) {
+      throw new Error(
+        `outbound-queue: the fallback provider returned hash ${hash}; the signed transaction is ${tx.hash}`,
+      )
+    }
+    console.warn(
+      `outbound-queue: the RPC refused eth_sendRawTransaction on chain ${chainId}; ` +
+        `broadcast ${hash} through the fallback provider (#2769)`,
+    )
+    // Mirrors ethers' own broadcastTransaction: wrap the signed transaction on
+    // the primary provider, replaceable from the current block.
+    const blockNumber = await provider.getBlockNumber()
+    return new TransactionResponse(tx as unknown as TransactionResponseParams, provider).replaceableTransaction(
+      blockNumber,
+    )
+  }
+}
+
+/**
+ * `eth_sendRawTransaction` through the chain's configured second provider
+ * (`getFallbackBroadcastProvider` in `relayer.ts`). Its URL carries a provider
+ * API key, so it is never logged or put into an error message.
+ */
+export async function sendRawViaFallback(chainId: number, raw: string): Promise<string> {
+  const fallback = getFallbackBroadcastProvider(chainId)
+  if (!fallback) {
+    throw new Error(
+      `outbound-queue: the RPC refused the broadcast on chain ${chainId} and no fallback provider is configured`,
+    )
+  }
+  return String(await fallback.send('eth_sendRawTransaction', [raw]))
 }
 
 /**

@@ -16,6 +16,12 @@ const BALANCE_READ_IMPL = 'ethers'
 
 const balanceCache = createCache<{ balances: BalanceItem[] }>(30_000)
 
+/**
+ * Results where a balance read failed. A failed leg still reads as '0', but it
+ * is never cached, so one RPC blip does not pin a zero for the whole TTL.
+ */
+const degradedResults = new WeakSet<{ balances: BalanceItem[] }>()
+
 export interface BalanceItem {
   symbol: string
   address: string | null
@@ -103,8 +109,11 @@ export default async function balanceRoutes(
           })
         }
 
-        return { balances }
+        const fetched = { balances }
+        if (results.some((r) => r.status === 'rejected')) degradedResults.add(fetched)
+        return fetched
       })
+      if (degradedResults.has(result)) balanceCache.delete(cacheKey)
 
       // Emit safe_funded once when the account first receives any tokens.
       // The EVENT NAME is a stored enum value (migration 021) and is out of

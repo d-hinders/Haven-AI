@@ -26,6 +26,13 @@ export interface Portfolio {
 
 const portfolioCache = createCache<Portfolio>(60_000)
 
+/**
+ * Results where a balance read failed. A failed leg still reads as zero in the
+ * response, but it is never cached: one RPC blip must not pin a zero balance
+ * on the dashboard for the whole TTL.
+ */
+const degradedResults = new WeakSet<Portfolio>()
+
 export async function fetchPortfolioForAccount(
   chainId: number,
   accountAddress: string,
@@ -33,7 +40,7 @@ export async function fetchPortfolioForAccount(
   const chain = getChain(chainId)
   const cacheKey = `portfolio:${chainId}:${accountAddress.toLowerCase()}`
 
-  return portfolioCache.getOrFetch(cacheKey, async () => {
+  const portfolio = await portfolioCache.getOrFetch(cacheKey, async () => {
     const provider = getProvider(chainId)
     const tokens = Object.values(chain.tokens)
     const nativeToken = tokens.find((token) => token.address === null)!
@@ -86,6 +93,12 @@ export async function fetchPortfolioForAccount(
     const totalEur = breakdown.reduce((sum, item) => sum + item.eurValue, 0)
     const totalSek = breakdown.reduce((sum, item) => sum + item.sekValue, 0)
 
-    return { totalUsd, totalEur, totalSek, breakdown }
+    const result = { totalUsd, totalEur, totalSek, breakdown }
+    if ([nativeResult, ...erc20Results].some((r) => r.status === 'rejected')) {
+      degradedResults.add(result)
+    }
+    return result
   })
+  if (degradedResults.has(portfolio)) portfolioCache.delete(cacheKey)
+  return portfolio
 }

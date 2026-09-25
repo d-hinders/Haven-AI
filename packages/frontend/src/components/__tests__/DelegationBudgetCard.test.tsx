@@ -288,7 +288,7 @@ describe('DelegationBudgetCard task budgets (#3329)', () => {
     mockTaskBudgets.mockReturnValue([])
     render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
-    expect(screen.queryByText(/Reserved by open task budgets/)).toBeNull()
+    expect(screen.queryByText(/reserved for task budgets/)).toBeNull()
     expect(screen.queryByText('Task budgets')).toBeNull()
   })
 
@@ -296,7 +296,7 @@ describe('DelegationBudgetCard task budgets (#3329)', () => {
     mockGet.mockReturnValue([budget({ recipient_address: null })])
     mockTaskBudgets.mockReturnValue([taskBudget({ parent_delegation_hash: '0x' + 'ab'.repeat(32), max_atomic: '2000000' })])
     render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText(/Reserved by open task budgets: 2 USDC/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/2 USDC reserved for task budgets/)).toBeTruthy())
     expect(screen.getByText('Task budgets')).toBeTruthy()
     expect(screen.getByText(/up to 2 USDC · ends/)).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/delegation|caveat|redemption|userop|permission/i)
@@ -324,7 +324,7 @@ describe('DelegationBudgetCard task budgets (#3329)', () => {
     ])
     render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
-    expect(screen.queryByText(/Reserved by open task budgets/)).toBeNull()
+    expect(screen.queryByText(/reserved for task budgets/)).toBeNull()
     expect(screen.queryByText('Task budgets')).toBeNull()
   })
 
@@ -333,6 +333,6 @@ describe('DelegationBudgetCard task budgets (#3329)', () => {
     mockTaskBudgets.mockReturnValue([]) // the hook degrades to null/[] on error — see useTaskBudgets tests
     render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
-    expect(screen.queryByText(/Reserved by open task budgets/)).toBeNull()
+    expect(screen.queryByText(/reserved for task budgets/)).toBeNull()
   })
 })

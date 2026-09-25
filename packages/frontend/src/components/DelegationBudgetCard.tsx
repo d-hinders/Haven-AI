@@ -268,18 +268,6 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
         )}
       </Card.Section>
 
-      {/* #3329: task budgets are a separate, self-closing authority carved
-          from a budget above — listed here only when at least one is open,
-          never as an empty section. */}
-      {openTaskBudgets.length > 0 ? (
-        <Card.Section divided className="mt-4">
-          <p className="py-2 text-sm font-medium text-[var(--v2-ink)]">Task budgets</p>
-          {openTaskBudgets.map((t) => (
-            <TaskBudgetRow key={t.id} taskBudget={t} tokens={tokens} />
-          ))}
-        </Card.Section>
-      ) : null}
-
       {tokens.length > 0 ? (
         <div className="mt-4 space-y-2">
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -339,6 +327,25 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, onBudge
           Budgets aren&rsquo;t available for this network yet.
         </p>
       )}
+
+      {/* #3329: task budgets are a separate, self-closing authority carved
+          from a budget above — listed here only when at least one is open,
+          never as an empty section, and AFTER the grant form so "Set budget"
+          never reads as part of this section (design review). */}
+      {openTaskBudgets.length > 0 ? (
+        <Card.Section divided className="mt-4">
+          <div className="py-2">
+            <p className="text-sm font-medium text-[var(--v2-ink)]">Task budgets</p>
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+              Short spending limits your agent opened for a single task, taken from the budget above. Each ends by
+              itself; stopping the budget above stops them too.
+            </p>
+          </div>
+          {openTaskBudgets.map((t) => (
+            <TaskBudgetRow key={t.id} taskBudget={t} tokens={tokens} />
+          ))}
+        </Card.Section>
+      ) : null}
 
       {/* #3166: edit-in-place for one active budget. Kept mounted here — the
           modal owns its own `enabled: open` hook instance, so idle cost is one
@@ -400,7 +407,7 @@ function BudgetRow({
         </p>
         {reservedAtomic > 0n ? (
           <p className="text-xs text-[var(--v2-ink-3)]">
-            Reserved by open task budgets: {reservedDisplay} {t?.symbol ?? ''}
+            {reservedDisplay} {t?.symbol ?? ''} reserved for task budgets
           </p>
         ) : null}
       </div>
@@ -438,5 +445,13 @@ function TaskBudgetRow({ taskBudget, tokens }: { taskBudget: TaskBudget; tokens:
   const max = t ? formatUnits(BigInt(taskBudget.max_atomic), t.decimals) : taskBudget.max_atomic
   const parts = [`up to ${max} ${t?.symbol ?? ''}`.trim(), `ends ${timeUntil(taskBudget.expires_at * 1000)}`]
   if (taskBudget.recipient_address) parts.push(`to ${truncateAddress(taskBudget.recipient_address)}`)
-  return <Row title={taskBudget.label || 'Task budget'} subtitle={parts.join(' · ')} />
+  // `density="flush"` (Row.tsx's own #3204 note: an appended padding class
+  // cannot beat the primitive's, so vertical rhythm is restored on this
+  // wrapper instead) — aligns the row flush against the card edge, matching
+  // the period-budget rows above it.
+  return (
+    <div className="py-3">
+      <Row density="flush" title={taskBudget.label || 'Task budget'} subtitle={parts.join(' · ')} />
+    </div>
+  )
 }

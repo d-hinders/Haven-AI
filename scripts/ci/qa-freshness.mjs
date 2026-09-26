@@ -404,8 +404,9 @@ export function partitionVersionOnly(files, diffFor) {
  * @param {number} input.nowMs
  * @param {number} input.freshnessHours
  * @param {string} [input.freshnessHoursInput] the raw variable, echoed when it is refused
- * @param {boolean} [input.searchCutShort] the job-lookup budget ran out before a
- *        run was found (#3361), so "no run" means "not found in time", not "none"
+ * @param {boolean} [input.searchCutShort] the job-lookup budget ran out before
+ *        selection finished (#3361) — possibly after a run was admitted, while its
+ *        same-commit tie-break was still unread — so no run is anchored"
  * @returns {{ok: boolean, code: string, message: string}}
  */
 export function evaluate({
@@ -501,8 +502,8 @@ export function evaluate({
       code: 'search_cut_short',
       message:
         `The search for a green 'QA — money-flow (dev)' run stopped at its job-lookup budget ` +
-        `(#3361) before selection finished, so no run is anchored. The runs it read did not ` +
-        `pass, or could not be read. ${RERUN}`,
+        `(#3361) before selection finished, so no run is anchored; the log above names what ` +
+        `was read and what was left unread. ${RERUN}`,
     }
   }
   if (!latestGreenRun) {
@@ -900,7 +901,10 @@ export function findGreenRun({ repo, freshnessHours, nowMs, gh: runGh, isAncesto
   // A row the budget skipped was never read: say so, rather than the
   // selector's "could not read the job", which reads as an API failure (#3368).
   const refused = result.refused.map((r) => (unread.has(r.databaseId) ? { ...r, reason: 'not read: job-lookup budget exhausted' } : r))
-  return { run: budgetExhausted ? null : result.run, refused, dropped, fetched: rows.length, truncated: rows.length >= GREEN_RUN_LIMIT, lookups, budgetExhausted }
+  // A run admitted before the budget ran out (its same-commit tie-break left
+  // unread) is not anchored, but it is reported, so the log never hides it.
+  const unanchored = budgetExhausted ? result.run : null
+  return { run: budgetExhausted ? null : result.run, unanchored, refused, dropped, fetched: rows.length, truncated: rows.length >= GREEN_RUN_LIMIT, lookups, budgetExhausted }
 }
 
 /**
@@ -1038,7 +1042,7 @@ function main() {
   let latestGreenRun = null
   let searchCutShort = false
   try {
-    const { run, refused, dropped, fetched, truncated, lookups, budgetExhausted } = findGreenRun({
+    const { run, unanchored, refused, dropped, fetched, truncated, lookups, budgetExhausted } = findGreenRun({
       repo,
       freshnessHours,
       nowMs: Date.now(),
@@ -1055,6 +1059,9 @@ function main() {
     if (truncated) console.log(`::warning::qa-freshness: the run query hit its ${GREEN_RUN_LIMIT}-row limit; older runs may be missing.`)
     if (budgetExhausted) console.log(`::warning::qa-freshness: the ${JOB_LOOKUP_BUDGET}-lookup budget ran out before selection finished; no run is anchored, so the gate refuses. Re-running this check rarely helps (only if a lookup failed transiently): dispatch qa-dev.`)
     searchCutShort = budgetExhausted
+    if (unanchored) {
+      console.log(`qa-freshness: run ${unanchored.databaseId} (${unanchored.event} at ${unanchored.headSha}) passed, but its same-commit tie-break was left unread by the budget; it is not anchored.`)
+    }
     for (const r of refused) {
       console.log(`qa-freshness: passed over run ${r.databaseId ?? '?'} (${r.event ?? '?'} at ${r.headSha ?? '?'}): ${r.reason}`)
     }

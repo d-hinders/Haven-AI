@@ -314,7 +314,8 @@ fire — it looked for a failed `Coverage completeness` step inside a run whose
 `money-flow` job had succeeded, a pair GitHub cannot produce while the step
 blocks — and #3368 removed it. What keeps that safe is pinned instead:
 `packages/qa-agent/src/skip-marker.test.ts` fails if the `money-flow` job ever
-gains `continue-on-error` or the step stops exiting 1.
+gains `continue-on-error`, or the step stops running on `if: success()` or stops
+exiting 1 on the marker.
 
 ```bash
 # Copy lint: files that can carry product copy but are outside SCAN_DIRS and

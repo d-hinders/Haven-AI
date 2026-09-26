@@ -1200,6 +1200,12 @@ describe('green-run window (#3361)', () => {
     const starved = pick(1)
     assert.equal(starved.budgetExhausted, true)
     assert.equal(starved.run, null)
+    // …but the passing run it did admit is reported, not hidden (#3368 review).
+    assert.equal(starved.unanchored?.databaseId, 100)
+    assert.equal(pick(40).unanchored, null)
+    const verdict = evaluate({ sourceBranch: 'dev', latestGreenRun: null, changedMoneyPathFiles: [], nowMs: NOW, freshnessHours: 30, searchCutShort: true })
+    assert.match(verdict.message, /before selection finished, so no run is anchored/)
+    assert.doesNotMatch(verdict.message, /did not pass/)
   })
 
   test('a freshness window too large for a date is a clear error', () => {

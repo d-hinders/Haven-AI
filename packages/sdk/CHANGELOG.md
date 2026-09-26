@@ -6,6 +6,13 @@ time while being false. The bump rewrites the `## Unreleased` heading below into
 `## <version> — <date>`; add entries under `## Unreleased` and leave the heading
 alone.
 
+Mark a bullet `**Update required**` when a client must update to keep paying.
+The bump then flags that release `action_required` in the public release data
+(`/releases`, `GET /discovery`, `/.well-known/haven.json`; #3305). It is not
+`**BREAKING**`, which means updating may break you, not that you must update.
+Write it exactly: "update required" in any other form (including "no update
+required") is refused — reword to "no update needed", or quote it in a code span.
+
 ## Unreleased
 
 ### Added

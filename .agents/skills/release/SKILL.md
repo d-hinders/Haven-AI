@@ -277,9 +277,12 @@ Read it there; nothing about the choice lives here.
 npm run release:bump -- <version> --yes
 ```
 
-Never hand-edit a version field, a cross-package pin, or a source version
-constant — the script owns all of them atomically, and a missed one ships a
-package that lies about itself. Never run `npm publish`.
+Never hand-edit a version field, a cross-package pin, a source version
+constant, or the client release data (`packages/core/src/client-releases.data.ts`,
+#3305) — the script owns all of them atomically, and a missed one ships a
+package that lies about itself. The release data comes from the CHANGELOGs: fix
+a note there, and the bump refuses to run over a hand-edited file. Never run
+`npm publish`.
 
 The lockfile needs no attention from you: since #1663 the bump rewrites it
 structurally and fails loudly if the diff holds anything but version lines

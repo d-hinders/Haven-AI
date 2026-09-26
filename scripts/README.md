@@ -118,7 +118,7 @@ npm run release:bump -- prerelease --yes
 node scripts/release-bump.mjs "$(node scripts/release-snapshot-version.mjs "$(git rev-parse --short=7 HEAD)")" --yes --snapshot
 ```
 
-Everything that makes the bump atomic runs identically in both modes — the versions, the cross-package pins, the source constants, the runtime manifest, the ordered rebuild and the bundle verification. That is the whole reason the snapshot job reuses this script instead of setting versions by hand: the version lattice is not a list of numbers, and hand-setting it breaks the pins that make an installed snapshot internally consistent. What `--snapshot` changes is only the sign-off, which otherwise tells the operator to write a CASP shard and open a release PR — instructions with no tree to apply them to.
+Everything that makes the bump atomic runs identically in both modes — the versions, the cross-package pins, the source constants, the runtime manifest, the ordered rebuild and the bundle verification. That is the whole reason the snapshot job reuses this script instead of setting versions by hand: the version lattice is not a list of numbers, and hand-setting it breaks the pins that make an installed snapshot internally consistent. What `--snapshot` changes is the sign-off, which otherwise tells the operator to write a CASP shard and open a release PR — instructions with no tree to apply them to — and it skips the two documentary writes: the CHANGELOG heading and the client release data, with its hand-edit refusal (7a, 7b).
 
 The **version-shape check is bidirectional**, and the second half is the one that protects production:
 
@@ -161,6 +161,28 @@ The developer loop that *consumes* a snapshot — merge, wait for the run, poll 
    `README.md`), so this was a repository-record defect, not a published one.
 7. **Update** `packages/connect/src/runtime-manifest.ts` — `sdkVersion` and `signerVersion` string literals, then re-pin the *Supported Runtime Manifest* table in `docs/operations/mcp-runtime-compatibility.md` to match ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)). The table is verified in step 11 against the constants themselves, never against the value this run wrote — see *The manifest table writes itself*.
 7a. **Update** `packages/sdk/src/connector-channel.ts` — the `HAVEN_CONNECTOR_CHANNEL` constant ([#2423](https://github.com/d-hinders/Haven-AI/issues/2423)). Unlike every other constant here it does **not** carry the version: it carries the npm dist-tag *derived* from it, by the same rule `.github/workflows/publish.yml` uses to choose `npm publish --tag` (prerelease → its own label, so `0.1.34-alpha.0` → `alpha` and `0.0.0-dev.<ts>.<sha>` → `dev`; stable → `latest`). It is what every published package's "re-run `npx @haven_ai/connect@<tag>`" hint renders from, so a build published under one channel cannot tell its user to reinstall from another. The rule lives once, in `scripts/release-channel.mjs`; `npm run release:bump:test` **executes** publish.yml's own `case` block in `bash` and fails if the two ever disagree, and separately compares the constant on disk against `packages/sdk/package.json`'s version on every pull request — which is what catches a bump that stopped writing it.
+7b. **Regenerate** the client release data, `packages/core/src/client-releases.data.ts`
+   ([#3305](https://github.com/d-hinders/Haven-AI/issues/3305),
+   `scripts/release-client-data.mjs`), from the CHANGELOGs the heading step (the first 7a above) just wrote. It runs
+   after that step, so it is listed after it.
+   Per package: the version released in source and a short note for each of the
+   newest releases, which `/releases`, `GET /discovery` and
+   `/.well-known/haven.json` serve (#3304).
+   - **Generated, never appended.** The file is a pure function of the CHANGELOGs.
+     So **before anything is written** the bump regenerates it from the CHANGELOGs
+     as they stand, and **refuses** when the disk differs. A hand edit is refused
+     here, and goes red earlier in CI: `release-bump.test.mjs` runs the same
+     comparison on every pull request. `node scripts/release-client-data.mjs --check`
+     gives the same answer without a release, and `--write` regenerates.
+   - **The `**Update required**` marker.** Anywhere in a release's CHANGELOG section
+     (outside a code span) it flags that release `action_required`. Written any
+     other way — including "no update required" — it is refused, in CI for
+     `## Unreleased` and at bump time for a release; reword to "no update needed"
+     or quote it in a code span. `**BREAKING**` does not, because it means
+     "updating may break you", not "you must update".
+   - **Never `client-compat.ts`.** The enforced minimums are hand-edited by owner
+     decision, and a release must not raise one as a side effect.
+   - **Skipped with the heading on `--snapshot`.** A snapshot is not a release.
 8. **Wipe** all `packages/*/dist` directories — required to prevent tsup from bundling a stale constant from the previous build's output.
 9. **`npm install` + deterministic lockfile rewrite** ([#1663](https://github.com/d-hinders/Haven-AI/issues/1663)) — the install keeps `node_modules` consistent for the builds below, but its lockfile output is **not taken**: on three consecutive cuts (0.1.26 → 0.1.28) the local npm also inserted `"dev"`/`"peer"` metadata on unrelated entries, and each release hand-repaired the diff back to its 11 version lines. Instead the version substitution is replayed **structurally** onto the pre-install lockfile (`scripts/release-lockfile.mjs` — structural rather than textual so a third-party dep coincidentally at the old version is never touched), and the bump then **fails loudly** if the final `package-lock.json` diff contains any line that is not a workspace `version` field or an `@haven_ai/*` pin. The guard reads the file on disk, so removing the rewrite makes the guard see npm's polluted output and fail. Self-tested: `npm run release:bump:test`.
 10. **Build** in dependency order: `sdk → signer → mcp → connect`.

@@ -34,13 +34,16 @@
  *                is the entire reason the snapshot job reuses this script
  *                rather than setting five versions by hand.
  *
- *                ONE write is mode-dependent, and it is deliberately the only
- *                one: the CHANGELOG release heading is skipped for a snapshot.
- *                A `0.0.0-dev.*` snapshot is explicitly not a release, so
- *                stamping a release heading for one would be false even though
- *                the tree is discarded. It is the single write here whose
- *                meaning is documentary rather than mechanical, which is why
- *                it is the single one a snapshot must not make.
+ *                TWO writes are mode-dependent, and they are deliberately the
+ *                only ones: the CHANGELOG release heading, and the client
+ *                release data generated from it (#3305,
+ *                `packages/core/src/client-releases.data.ts`), are skipped for
+ *                a snapshot. A `0.0.0-dev.*` snapshot is explicitly not a
+ *                release, so stamping a release heading — or announcing a
+ *                release in the public release documents — would be false
+ *                even though the tree is discarded. They are the writes here
+ *                whose meaning is documentary rather than mechanical, which
+ *                is why they are the ones a snapshot must not make.
  *
  * See scripts/README.md for full documentation.
  */
@@ -68,6 +71,12 @@ import {
   changelogHeadingViolations,
   releaseChangelog,
 } from './release-changelog.mjs'
+import {
+  CLIENT_RELEASE_DATA_FILE,
+  clientReleaseDataViolations,
+  clientReleasesFrom,
+  renderClientReleaseDataFile,
+} from './release-client-data.mjs'
 import { snapshotModeViolation } from './release-snapshot-version.mjs'
 import { backwardsVersionViolation, resolveSemver } from './release-version-order.mjs'
 
@@ -442,6 +451,51 @@ async function verifyChangelogHeadings(newVersion) {
   log(`  ✓ every published CHANGELOG carries a "## ${newVersion}" heading`)
 }
 
+/** The five CHANGELOG texts as they stand on disk, keyed by package dir name. */
+async function readChangelogs() {
+  const files = {}
+  for (const name of CHANGELOG_PACKAGES) {
+    files[name] = await readFile(join(ROOT, 'packages', name, 'CHANGELOG.md'), 'utf8')
+  }
+  return files
+}
+
+/**
+ * #3305: refuse a hand-edited client release data file BEFORE anything is
+ * written. The file is a pure function of the CHANGELOGs, so the check is to
+ * regenerate it from the CHANGELOGs as they stand and compare with the disk.
+ * Run before the headings move — after, the CHANGELOGs describe a release the
+ * file cannot know about yet.
+ */
+async function refuseHandEditedClientReleaseData() {
+  let onDisk = ''
+  try { onDisk = await readFile(join(ROOT, CLIENT_RELEASE_DATA_FILE), 'utf8') } catch { /* reported as a difference */ }
+  const violations = clientReleaseDataViolations(onDisk, await readChangelogs())
+  if (violations.length > 0) die(violations.join('\n'))
+}
+
+/**
+ * #3305: regenerate the client release data from the CHANGELOGs the heading
+ * step just wrote. Writes exactly ONE file — never `client-compat.ts`: a
+ * release must not raise a minimum as a side effect.
+ */
+async function updateClientReleaseData() {
+  const text = renderClientReleaseDataFile(clientReleasesFrom(await readChangelogs()))
+  await writeFile(join(ROOT, CLIENT_RELEASE_DATA_FILE), text, 'utf8')
+  log(`  ${CLIENT_RELEASE_DATA_FILE}: regenerated from the CHANGELOGs`)
+}
+
+/** Verify by RE-READING the file and the CHANGELOGs from disk, never this run's own text. */
+async function verifyClientReleaseData(newVersion) {
+  const onDisk = await readFile(join(ROOT, CLIENT_RELEASE_DATA_FILE), 'utf8')
+  const violations = clientReleaseDataViolations(onDisk, await readChangelogs())
+  if (violations.length > 0) die(violations.join('\n'))
+  if (!onDisk.includes(`"released_version": "${newVersion}"`)) {
+    die(`${CLIENT_RELEASE_DATA_FILE} does not name ${newVersion} — did a CHANGELOG miss its release heading?`)
+  }
+  log(`  ✓ ${CLIENT_RELEASE_DATA_FILE} matches the CHANGELOGs and names ${newVersion}`)
+}
+
 // ── Build helpers ─────────────────────────────────────────────────────────────
 
 async function run(command, args, cwd = ROOT) {
@@ -647,6 +701,11 @@ async function main() {
   if (backwards) die(backwards)
   if (snapshot) {
     log('  Mode:                dev-channel SNAPSHOT (throwaway tree, nothing to commit)')
+  } else {
+    // #3305: still before anything is written. Not in snapshot mode: a
+    // snapshot never writes the file, and an old CHANGELOG entry corrected
+    // after its release must not stop every dev-channel publish.
+    await refuseHandEditedClientReleaseData()
   }
 
   // ── 2. Preview + confirm ──────────────────────────────────────────────────
@@ -659,6 +718,7 @@ async function main() {
   log(`  Supported Runtime Manifest table = '${newVersion}'  (docs/operations/mcp-runtime-compatibility.md)`)
   log(`  ${CONNECTOR_CHANNEL_CONSTANT} = '${channelForVersion(newVersion)}'  (${CONNECTOR_CHANNEL_FILE})`)
   log(`  CHANGELOG heading = '## ${newVersion}' in ${CHANGELOG_PACKAGES.length} packages${snapshot ? ' — SKIPPED, a snapshot is not a release' : ', with ## Unreleased re-seeded'}`)
+  log(`  ${CLIENT_RELEASE_DATA_FILE} regenerated from the CHANGELOGs${snapshot ? ' — SKIPPED, a snapshot is not a release' : ''}`)
   // These two are CHECKS THIS RUN WILL PERFORM, not results — the guards run
   // after the pins are rewritten, further down. Saying "(verified)" here
   // printed a reassuring line immediately before the run died on that very
@@ -760,8 +820,14 @@ async function main() {
     const isoDate = new Date().toISOString().slice(0, 10)
     await updateChangelogs(newVersion, isoDate)
     await verifyChangelogHeadings(newVersion)
+    // #3305: the fifth thing the bump owns. After the headings, because the
+    // data is generated FROM them; skipped with them for a snapshot.
+    header('Regenerating the client release data')
+    await updateClientReleaseData()
+    await verifyClientReleaseData(newVersion)
   } else {
     log('  CHANGELOG headings: skipped — a dev snapshot is not a release')
+    log(`  ${CLIENT_RELEASE_DATA_FILE}: skipped — a dev snapshot is not a release`)
   }
 
   // ── 6. Wipe all dists ────────────────────────────────────────────────────

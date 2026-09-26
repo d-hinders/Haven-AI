@@ -25,6 +25,17 @@ import {
   releaseChangelog,
 } from './release-changelog.mjs'
 import {
+  ACTION_REQUIRED_MARKER,
+  CLIENT_RELEASE_DATA_FILE,
+  MAX_NOTES_PER_PACKAGE,
+  bulletLead,
+  clientReleaseDataViolations,
+  clientReleasesFrom,
+  noteFromSection,
+  releasedSections,
+  renderClientReleaseDataFile,
+} from './release-client-data.mjs'
+import {
   formatSnapshotVersion,
   isSnapshotVersion,
   snapshotModeViolation,
@@ -2184,4 +2195,162 @@ test('changelog headings — no CHANGELOG reaches a tarball, so this is a repo-r
       `packages/${name} would publish its CHANGELOG — this premise no longer holds`,
     )
   }
+})
+
+// ---------------------------------------------------------------------------
+// Client release data (#3305, epic #3302 slice 3)
+//
+// `packages/core/src/client-releases.data.ts` is a pure function of the five
+// CHANGELOGs, written by the bump after the release headings. These call the
+// bump's pure functions directly — the script has no dry-run mode.
+// ---------------------------------------------------------------------------
+
+/** A minimal CHANGELOG with an Unreleased section and one prior release. */
+function fixtureChangelog(pkgName, unreleasedBullets) {
+  return [
+    `# @haven_ai/${pkgName}`,
+    '',
+    'Release headers are written by the release bump.',
+    '',
+    '## Unreleased',
+    '',
+    ...unreleasedBullets,
+    '',
+    '## 0.5.0-alpha.1 — 2026-09-25',
+    '',
+    '- **Client identity (#3303).** Requests name the client.',
+    '',
+  ].join('\n')
+}
+
+/** What the bump does to the CHANGELOGs, then to the data: heading first, data from it. */
+function bumpedData(changelogs, version, date) {
+  const released = {}
+  for (const [name, source] of Object.entries(changelogs)) {
+    released[name] = releaseChangelog(source, version, date) ?? source
+  }
+  return clientReleasesFrom(released)
+}
+
+test('client release data — the bump produces the new version for all five packages, notes from each Unreleased section (#3305)', () => {
+  const changelogs = Object.fromEntries(
+    CHANGELOG_PACKAGES.map((name) => [name, fixtureChangelog(name, [`- **${name} change (#9${name.length}).** Detail that is not the headline.`])]),
+  )
+  const data = bumpedData(changelogs, '0.6.0-alpha.0', '2026-10-01')
+  assert.deepEqual(Object.keys(data).sort(), CHANGELOG_PACKAGES.map((n) => `@haven_ai/${n}`).sort())
+  for (const name of CHANGELOG_PACKAGES) {
+    const entry = data[`@haven_ai/${name}`]
+    assert.equal(entry.released_version, '0.6.0-alpha.0', name)
+    assert.deepEqual(entry.notes[0], {
+      version: '0.6.0-alpha.0',
+      date: '2026-10-01',
+      summary: `${name} change (#9${name.length})`,
+      action_required: false,
+    })
+    // The previous release is kept, newest first.
+    assert.equal(entry.notes[1].version, '0.5.0-alpha.1', name)
+  }
+})
+
+test('client release data — the Update required marker sets action_required; BREAKING alone does not (#3305)', () => {
+  const marked = noteFromSection(releasedSections(
+    `## 0.6.0 — 2026-10-01\n\n- ${ACTION_REQUIRED_MARKER} **Signer refuses v2 contexts (#1).** Update the connector to keep paying.\n`,
+  )[0])
+  assert.equal(marked.action_required, true)
+  assert.equal(marked.summary.includes('Update required'), false, 'the marker is a flag, not part of the summary')
+
+  const breaking = noteFromSection(releasedSections(
+    '## 0.6.0 — 2026-10-01\n\n- **BREAKING (#2).** A field was removed; updating may break a reader.\n',
+  )[0])
+  assert.equal(breaking.action_required, false, 'BREAKING means "updating may break you", not "you must update"')
+})
+
+test('client release data — a package with nothing released this time says so rather than inventing a note (#3305)', () => {
+  const note = noteFromSection(releasedSections('## 0.6.0 — 2026-10-01\n\n')[0])
+  assert.equal(note.summary, 'No changes in this package.')
+  assert.equal(note.action_required, false)
+})
+
+test('client release data — a lead is the bold span, else the first sentence, never cut at a colon in code (#3305)', () => {
+  assert.equal(bulletLead('**Client identity (#3303).** More.'), 'Client identity (#3303)')
+  assert.equal(
+    bulletLead("`activity list` rows carry `scope` (`{ source: 'wallet' }`). Second sentence."),
+    "activity list rows carry scope ({ source: 'wallet' })",
+  )
+})
+
+test(`client release data — at most ${MAX_NOTES_PER_PACKAGE} notes per package, newest first (#3305)`, () => {
+  const sections = Array.from({ length: MAX_NOTES_PER_PACKAGE + 2 }, (_, i) =>
+    `## 0.${9 - i}.0 — 2026-09-${String(20 - i).padStart(2, '0')}\n\n- **Change ${i}.** x\n`,
+  ).join('\n')
+  const data = clientReleasesFrom(Object.fromEntries(CHANGELOG_PACKAGES.map((n) => [n, `# x\n\n## Unreleased\n\n${sections}`])))
+  for (const entry of Object.values(data)) {
+    assert.equal(entry.notes.length, MAX_NOTES_PER_PACKAGE)
+    assert.equal(entry.notes[0].version, '0.9.0')
+    assert.equal(entry.released_version, '0.9.0')
+  }
+})
+
+test('client release data — a HAND EDIT is refused, a regenerated file is not (#3305)', () => {
+  const changelogs = Object.fromEntries(CHANGELOG_PACKAGES.map((n) => [n, fixtureChangelog(n, [])]))
+  const pristine = renderClientReleaseDataFile(clientReleasesFrom(changelogs))
+  assert.deepEqual(clientReleaseDataViolations(pristine, changelogs), [])
+  const edited = pristine.replace('"action_required": false', '"action_required": true')
+  assert.notEqual(edited, pristine, 'fixture must actually change')
+  const violations = clientReleaseDataViolations(edited, changelogs)
+  assert.equal(violations.length, 1)
+  assert.match(violations[0], /hand-edited/)
+  assert.match(violations[0], /first difference at line \d+/)
+})
+
+test('client release data — the REAL data file is what the REAL CHANGELOGs produce at this commit (#3305)', async () => {
+  // Not a CI drift gate for later edits (the rule is enforced at bump time,
+  // by refuseHandEditedClientReleaseData); this pins that the committed file
+  // was generated, not typed, when this test last changed.
+  const changelogs = {}
+  for (const name of CHANGELOG_PACKAGES) {
+    changelogs[name] = await readFile(join(ROOT, 'packages', name, 'CHANGELOG.md'), 'utf8')
+  }
+  const onDisk = await readFile(join(ROOT, CLIENT_RELEASE_DATA_FILE), 'utf8')
+  assert.deepEqual(clientReleaseDataViolations(onDisk, changelogs), [])
+})
+
+test('client release data — the bump refuses a hand edit BEFORE writing, regenerates AFTER the headings, and skips both for a snapshot (#3305)', async () => {
+  const source = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const refuse = source.indexOf('await refuseHandEditedClientReleaseData()')
+  const firstWrite = source.indexOf('await updatePackageVersion(name, newVersion)')
+  const headings = source.indexOf('await updateChangelogs(newVersion, isoDate)')
+  const write = source.indexOf('await updateClientReleaseData()')
+  const verify = source.indexOf('await verifyClientReleaseData(newVersion)')
+  for (const [label, at] of [['refuse', refuse], ['write', write], ['verify', verify]]) {
+    assert.notEqual(at, -1, `release-bump.mjs no longer calls the ${label} step`)
+  }
+  assert.ok(refuse < firstWrite, 'the hand-edit check must run before anything is written')
+  assert.ok(headings < write && write < verify, 'the data is generated FROM the headings, then re-read to verify')
+  // The write sits in the same `if (!snapshot)` block as the headings; the
+  // refusal sits in the `else` of `if (snapshot)`.
+  const block = source.slice(source.indexOf('if (!snapshot) {\n    const isoDate'), source.indexOf('// ── 6. Wipe all dists'))
+  const ifBranch = block.slice(0, block.indexOf('} else {'))
+  assert.ok(ifBranch.includes('await updateClientReleaseData()'), 'a snapshot must not write the release data')
+  assert.equal(source.split('await updateClientReleaseData()').length, 2, 'exactly one call site — inside the non-snapshot branch')
+  assert.match(block, /\} else \{[\s\S]*skipped — a dev snapshot is not a release[\s\S]*skipped — a dev snapshot is not a release/)
+  assert.match(source, /if \(snapshot\) \{\n[^\n]*SNAPSHOT[^\n]*\n\s*\} else \{[\s\S]{0,400}await refuseHandEditedClientReleaseData\(\)/)
+})
+
+test('client release data — the bump never writes client-compat.ts: a release must not raise a minimum (#3305)', async () => {
+  const bump = await readFile(join(ROOT, 'scripts', 'release-bump.mjs'), 'utf8')
+  const data = await readFile(join(ROOT, 'scripts', 'release-client-data.mjs'), 'utf8')
+  // Code lines only: the comment beside the writer says it never touches the
+  // file, which is the point, not a violation.
+  const code = bump.split('\n').filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join('\n')
+  assert.ok(/client-releases\.data|CLIENT_RELEASE_DATA_FILE/.test(code), 'positive control: the scan sees the file the bump DOES write')
+  assert.equal(/client-compat/.test(code), false, 'release-bump.mjs code must not name client-compat')
+  // The data module mentions it only in prose; it writes ONE path.
+  assert.equal(CLIENT_RELEASE_DATA_FILE, 'packages/core/src/client-releases.data.ts')
+  assert.equal((data.match(/writeFile\(/g) ?? []).length, 1, 'release-client-data.mjs writes exactly one file (its --write CLI)')
+  // And the generated file carries no threshold at all.
+  const rendered = renderClientReleaseDataFile(clientReleasesFrom(
+    Object.fromEntries(CHANGELOG_PACKAGES.map((n) => [n, fixtureChangelog(n, [])])),
+  ))
+  assert.equal(/min_version|recommended_version/.test(rendered.split('*/')[1]), false)
 })

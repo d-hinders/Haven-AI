@@ -1019,6 +1019,19 @@ The source of truth is `packages/connect/src/runtime-manifest.ts` (the SDK and
 signer versions are pinned there; `@haven_ai/mcp` tracks its own `MCP_VERSION`,
 and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 
+> **Re-verification (#3305):** this doc's covered trees changed in four ways,
+> none of which is a runtime or compatibility change:
+> - each published CHANGELOG gains a header paragraph defining the
+>   `**Update required**` marker;
+> - `release-bump.mjs` gains a step that regenerates
+>   `packages/core/src/client-releases.data.ts`, the release notes #3304 serves;
+> - `client-releases.ts` now re-exports that generated data;
+> - `scripts/README.md` documents the new step.
+>
+> No version constant, tool, schema, capability, consent input or version-skew
+> surface moved, and `client-compat.ts` is not written by the bump. The
+> Supported Runtime Manifest table and every claim below stand unchanged.
+
 > **Re-verification (changelog-heading gap, 2026-09-14):** this doc's covered
 > trees changed only by a CHANGELOG heading — `release-bump.mjs` now rewrites
 > `## Unreleased` to `## <version> — <date>` in the five published packages.

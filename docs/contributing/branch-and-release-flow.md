@@ -182,6 +182,16 @@ the epic when its last sub-issue lands on `dev`.
 > (the dev → main promotion) won't re-close anything; the issues are already
 > closed from the dev-merge.
 
+> **Re-verification (#3305):** coupled because `scripts/release-bump.mjs` is in
+> its `covers:`. The bump gains one owned file, the client release data
+> (`packages/core/src/client-releases.data.ts`), which it regenerates from the
+> CHANGELOGs after stamping their headings. It refuses up front when that file
+> was hand-edited, and skips both steps for a snapshot. The release still happens
+> on a release branch into `dev` and publishes on the `dev → main` promotion, and
+> no version, pin, channel, dist-tag, build order or credential path moves.
+> Nothing in this document was made false by that change; it describes the flow
+> the bump sits in, not the bump's list of files.
+
 > **Re-verification (contract-doc count correction, 2026-09-17):** this doc is
 > coupled because `scripts/release-bump.mjs` is in its `covers:` and that script
 > was edited — its *printed* next-steps block said "the two contract docs" and

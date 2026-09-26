@@ -24,7 +24,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-09-19"
+last-verified: "2026-09-26"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -918,22 +918,33 @@ them is a string a caller supplies:
   post-deploy trigger fired" only when the Deployments API holds a deployment
   of that run's exact `headSha` to `Haven AI / dev` created by
   `railway-app[bot]` — which only Railway's GitHub App installation token can
-  write — **and** the run's `money-flow` **job** concluded `success` according
-  to the jobs API (`gh run view <id> --json jobs`, the same
-  `moneyFlowJobConclusion` the promotion gate uses since #2404). The job check
+  write — **and** the run's `money-flow` **job** concluded `success`, read
+  through the same `moneyFlowJobConclusion` the promotion gate uses since
+  #2404. Since #3340 the conclusion comes from one `money-flow` check-runs call
+  per SHA (each check run's `details_url` names its run), so the lookup budget
+  counts deploys, not runs. The job check
   is not decoration: a run whose `gate` job refused the harness is reported by
   GitHub with run-level conclusion **`success`** and the job `skipped`
   (measured on qa-dev run `34340710137`, 2026-09-09: event `deployment_status`,
   head branch `dev`, jobs `gate: success` + `money-flow: skipped`, run-level
   conclusion `success` — the run the job-vs-run block above cites, so both
-  citations measure the same shape), and every deploy leaves two or three
-  such runs at a SHA that *is* in the Railway index. Judged at run level they
+  citations measure the same shape), and every deploy leaves several such
+  runs at a SHA that *is* in the Railway index (3–11 `deployment_status` rows
+  per dev SHA measured on 2026-09-25/26, plus Vercel `Preview` rows). Judged at run level they
   are fresh post-deploy greens in which nothing ran, and the newest of them
   could mask a real harness failure at the same SHA. A `workflow_dispatch` at
   the same SHA fails the event check; a Deployment created by hand fails the
   creator check; an unreadable Deployments API or job list fails closed; a
   gate-refused decoy fails the job check. All of it is mutation-proven in
   `guard-freshness.test.mjs`, including the decoy-masks-a-failure case.
+  **How far back it looks (#3340).** Runs are paged newest first until a
+  success, the 4-day budget or a page cap. Rows whose run name says another
+  environment or a non-`success` status are dropped before any lookup (the
+  gate skips them unconditionally), and a run-level `failure` needs none. If
+  the page cap or the lookup budget stops the search first, the finding is
+  `unconfirmed`, not `never-succeeded` — it did not look far enough to say
+  "never". An alarm with no open issue reopens the newest closed `ci-health`
+  issue with the same title instead of filing another.
 
 **So the operator's confirmation command changes.** `gh workflow run
 qa-dev.yml` still proves the *harness* works and still feeds `qa-freshness`

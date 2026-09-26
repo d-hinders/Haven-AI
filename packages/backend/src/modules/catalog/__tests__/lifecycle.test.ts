@@ -7,12 +7,13 @@
  * DB claims (guarded transitions, streaks, retention) real while the hostile
  * half of the world (the merchant endpoint) stays fake.
  */
-import { beforeEach, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { insertCatalogSubmission, listSubmittedCatalogSubmissions } from '../../../infra/repositories/catalog-submissions.js'
 import { findOrCreateMerchantByHost } from '../../../infra/repositories/merchants.js'
 import type { SafeFetchResult } from '../../../infra/http/ssrf-guard.js'
+import type { EnvAlertDelivery } from '../../../infra/delegate-alert-webhook.js'
 import {
   FAIL_AFTER_CONSECUTIVE_FAILURES,
   REVERIFY_CADENCE_MS,
@@ -22,6 +23,7 @@ import {
 } from '../index.js'
 import {
   catalogAlerts,
+  deliverCatalogAlerts,
   resetCatalogAlertStateForTests,
   runCatalogIngestTick,
   type CatalogIngestDeps,
@@ -378,5 +380,74 @@ describeDb('catalog ingestion lifecycle (#1714)', () => {
     const report = await runCatalogIngestTick(tickDeps({ post: vi.fn() }))
     expect(report.acted).toBe(false)
     expect(report.alerts).toHaveLength(0)
+  })
+})
+
+describe('deliverCatalogAlerts — a failed webhook re-arms the alarm (#3345)', () => {
+  const stuckTick = { stuckSubmitted: 2, failuresThisTick: 0, massFailureThreshold: 5, now: new Date() }
+
+  beforeEach(() => {
+    resetCatalogAlertStateForTests()
+  })
+
+  it('a failed send rolls the edge back: the same condition re-fires on the next tick', async () => {
+    const send = vi.fn<(text: string) => Promise<EnvAlertDelivery>>().mockResolvedValue('failed')
+
+    const first = catalogAlerts(stuckTick)
+    expect(first).toHaveLength(1)
+    await deliverCatalogAlerts(first, send)
+
+    // The bug (#3345) committed the edge before sending → this would be 0
+    // while submissions stay stuck past 48h with a dead webhook.
+    const second = catalogAlerts(stuckTick)
+    expect(second).toHaveLength(1)
+    // The re-fired alarm is delivered too (and re-arms again if that fails).
+    await deliverCatalogAlerts(second, send)
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('a delivered send commits the edge: no repeat while the condition persists', async () => {
+    const send = vi.fn<(text: string) => Promise<EnvAlertDelivery>>().mockResolvedValue('delivered')
+
+    const first = catalogAlerts(stuckTick)
+    expect(first).toHaveLength(1)
+    await deliverCatalogAlerts(first, send)
+
+    expect(catalogAlerts(stuckTick)).toHaveLength(0)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it("'no-webhook' (log-only mode) counts as handled — no repeat, matching the pre-#3345 behaviour", async () => {
+    const send = vi.fn<(text: string) => Promise<EnvAlertDelivery>>().mockResolvedValue('no-webhook')
+
+    const first = catalogAlerts(stuckTick)
+    expect(first).toHaveLength(1)
+    await deliverCatalogAlerts(first, send)
+
+    expect(catalogAlerts(stuckTick)).toHaveLength(0)
+  })
+
+  it('a failed send in a batch re-arms the batch: the next tick re-fires the failed alarm', async () => {
+    // Both alarms fire in one batch: stuck (delivered) + mass failure (failed).
+    // Queued verdicts, no positional chain (the db-mock ratchet counts
+    // mockResolvedValueOnce).
+    const verdicts: EnvAlertDelivery[] = ['delivered', 'failed']
+    const send = vi
+      .fn<(text: string) => Promise<EnvAlertDelivery>>()
+      .mockImplementation(async () => verdicts.shift() ?? 'delivered')
+
+    const batch = catalogAlerts({ stuckSubmitted: 1, failuresThisTick: 5, massFailureThreshold: 5, now: new Date() })
+    expect(batch).toHaveLength(2)
+    await deliverCatalogAlerts(batch, send)
+
+    // The catalog state is one shared flag pair, so the reset on a failed
+    // send is batch-level: the next tick re-fires every alarm whose condition
+    // still holds — here both (stuck AND mass failure), since neither edge
+    // survived a batch containing a failed send. The delegate monitor carries
+    // the per-message partial-batch semantics; the catalog seam
+    // (resetCatalogAlertStateForTests) has no per-alarm granularity.
+    const again = catalogAlerts({ stuckSubmitted: 1, failuresThisTick: 5, massFailureThreshold: 5, now: new Date() })
+    expect(again).toHaveLength(2)
+    expect(again.some((a) => a.includes('failed this tick'))).toBe(true)
   })
 })

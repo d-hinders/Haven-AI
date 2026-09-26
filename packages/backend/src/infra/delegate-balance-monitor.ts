@@ -30,6 +30,7 @@ import {
 import { config } from '../config.js'
 import { getChain } from '../domain/chains.js'
 import { getTokenBalance } from '../infra/chain/relayer-reads.js'
+import { sendDelegateAlertWebhook } from './delegate-alert-webhook.js'
 
 const USDC_DECIMALS = 6
 
@@ -198,21 +199,27 @@ export async function runDelegateBalanceMonitor(log: MonitorLogger): Promise<Del
     'delegate balance scan complete',
   )
 
-  // Real alerting (#777) — best-effort, edge-triggered so an hourly re-scan of
-  // the same condition does not spam. Failure here never affects the scan.
+  // Real alerting (#777) — edge-triggered so an hourly re-scan of the same
+  // condition does not spam; each edge commits only after its webhook was
+  // accepted (#3345), so a failed delivery retries on the next scan. A failed
+  // alert never affects the scan or funds.
   await dispatchAlerts(report, log)
 
   return report
 }
 
-// ── Webhook alerting (#777) ─────────────────────────────────────────────────
+// ── Webhook alerting (#777, delivery-gated per #3345) ───────────────────────
 //
 // A lingering balance or an aggregate-dust breach is worth a real ping, not
 // just a log line. Alerts are edge-triggered against in-memory state: a
 // lingering finding pings once when it appears and again only after it clears
-// and returns; the dust breach pings on the below→above crossing. State is
-// per-process (resets on redeploy — an acceptable at-most-once re-ping); a
-// durable store is a later step if the channel needs guaranteed dedup.
+// and returns; the dust breach pings on the below→above crossing. An edge is
+// committed only after its webhook was ACCEPTED — a failed delivery (4xx/5xx,
+// network error, or no URL configured) stays un-committed and retries on the
+// next scan while the condition persists, so a rejected webhook is neither
+// silent nor lost. State is per-process (resets on redeploy — an acceptable
+// at-most-once re-ping); a durable store is a later step if the channel needs
+// guaranteed dedup.
 
 export interface AlertState {
   /** Agent+chain keys currently in a lingering episode we have already pinged. */
@@ -231,63 +238,100 @@ function lingeringKey(f: DelegateBalanceFinding): string {
   return `${f.agentId}:${f.chainId}`
 }
 
+/** A message plus the alert state it must mutate once DELIVERED (#3345). */
+export interface AlertMessage {
+  text: string
+  /** When delivered, forget this lingering key so it stops re-pinging. */
+  clearLingeringKey?: string
+  /** When delivered, commit the dust-breach edge. */
+  commitDust?: boolean
+}
+
 /**
- * Pure alert decision: which messages to send this scan, and the next state.
- * Edge-triggered — no message for a condition already alerted and still true.
+ * Pure alert decision: which messages to send this scan. Edge-triggered —
+ * no message for a condition already alerted and still true.
+ *
+ * The caller commits each message's state ONLY after that message was
+ * delivered (#3345): a failed webhook (4xx/5xx or network error) leaves the
+ * edge un-committed so the next scan retries while the condition persists.
+ * With the URL unset nothing is sent — log-only mode commits the edge, as
+ * before #3345. One message per condition (lingering key `agentId:chainId`,
+ * plus the aggregate dust breach) so a partial batch commits only what was
+ * actually delivered.
  */
-export function computeAlerts(
-  report: DelegateBalanceReport,
-  state: AlertState,
-): { messages: string[]; nextState: AlertState } {
-  const messages: string[] = []
-  const currentKeys = new Set(report.lingering.map(lingeringKey))
+export function computeAlerts(report: DelegateBalanceReport, state: AlertState): AlertMessage[] {
+  const messages: AlertMessage[] = []
 
   for (const f of report.lingering) {
-    if (!state.lingeringKeys.has(lingeringKey(f))) {
-      messages.push(
-        `🚨 Lingering delegate balance: ${usdc(f.balanceAtomic)} USDC on ${f.delegateAddress} ` +
+    const key = lingeringKey(f)
+    if (!state.lingeringKeys.has(key)) {
+      messages.push({
+        text:
+          `🚨 Lingering delegate balance: ${usdc(f.balanceAtomic)} USDC on ${f.delegateAddress} ` +
           `(agent "${f.agentName}", chain ${f.chainId}) — sweepable funds on a hot EOA. Run the sweep / check settlement.`,
-      )
+        clearLingeringKey: key,
+      })
     }
   }
 
   if (report.dustAlert && !state.dustActive) {
-    messages.push(
-      `🟡 Delegate dust crossed the alert threshold: ${usdc(report.dustTotalAtomic)} USDC total ` +
+    messages.push({
+      text:
+        `🟡 Delegate dust crossed the alert threshold: ${usdc(report.dustTotalAtomic)} USDC total ` +
         `(threshold ${usdc(dustAlertThresholdAtomic())}). Consider a below-floor sweep pass.`,
-    )
+      commitDust: true,
+    })
   }
 
-  return { messages, nextState: { lingeringKeys: currentKeys, dustActive: report.dustAlert } }
+  return messages
 }
 
-/** POST a plain `{ text }` payload (Slack-compatible). Best-effort. */
-async function sendWebhookAlert(url: string, text: string): Promise<void> {
-  await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text }),
-    signal: AbortSignal.timeout(10_000),
-  })
+/** Reset the module-private edge state (test seam — mirrors the catalog monitor). */
+export function resetDelegateAlertStateForTests(): void {
+  moduleAlertState.lingeringKeys.clear()
+  moduleAlertState.dustActive = false
 }
 
 async function dispatchAlerts(report: DelegateBalanceReport, log: MonitorLogger): Promise<void> {
-  const { messages, nextState } = computeAlerts(report, moduleAlertState)
-  moduleAlertState.lingeringKeys = nextState.lingeringKeys
-  moduleAlertState.dustActive = nextState.dustActive
+  // Decide FIRST (against the pre-clear state): which messages to send.
+  const messages = computeAlerts(report, moduleAlertState)
+
+  // Sync the edge state to the report unconditionally — a condition that
+  // cleared re-arms (its next appearance pings again) whether or not anything
+  // was delivered, exactly like the pre-#3345 state machine.
+  const currentKeys = new Set(report.lingering.map(lingeringKey))
+  moduleAlertState.lingeringKeys = new Set(
+    [...moduleAlertState.lingeringKeys].filter((k) => currentKeys.has(k)),
+  )
+  if (!report.dustAlert) moduleAlertState.dustActive = false
+
+  if (messages.length === 0) return
 
   const url = process.env.DELEGATE_ALERT_WEBHOOK_URL
-  if (!url || messages.length === 0) return
 
-  for (const text of messages) {
-    try {
-      await sendWebhookAlert(url, text)
-    } catch (err) {
-      // Best-effort: a failed alert must never affect the scan or funds.
-      log.warn(
-        { scope: 'delegate-balance-monitor', err: err instanceof Error ? err.message : String(err) },
-        'delegate alert webhook failed (scan unaffected)',
-      )
+  // Commit an alert's edge: this condition's message stops until the
+  // condition clears and returns.
+  const commit = (message: AlertMessage): void => {
+    if (message.clearLingeringKey !== undefined) {
+      moduleAlertState.lingeringKeys.add(message.clearLingeringKey)
     }
+    if (message.commitDust) moduleAlertState.dustActive = true
+  }
+
+  for (const message of messages) {
+    if (!url) {
+      // Log-only mode (no webhook configured): the WARN/INFO lines above are
+      // the whole alert — treat the episode as handled, as before #3345.
+      commit(message)
+      continue
+    }
+    // The shared sender logs a 4xx/5xx or network error with the status
+    // (never the URL) and resolves false — it never throws, so a failed
+    // alert can never surface as a failed scan (#3345).
+    const delivered = await sendDelegateAlertWebhook(url, message.text, log, 'delegate-balance-monitor')
+    // Commit this message's edge only after its webhook was accepted, so a
+    // failed delivery is retried on the next scan (#3345). Per-message: a
+    // batch with one failure re-arms only the failed condition.
+    if (delivered) commit(message)
   }
 }

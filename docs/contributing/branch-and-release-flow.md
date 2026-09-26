@@ -7,10 +7,11 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - scripts/ci/promotion-digest-metrics.mjs
+  - scripts/ci/standing-issue-upsert.mjs
   - scripts/release-bump.mjs
   - scripts/ci/qa-freshness.mjs
   - .github/workflows/publish.yml
-last-verified: "2026-09-14"
+last-verified: "2026-09-26"
 ---
 
 # Branch & release flow
@@ -350,10 +351,17 @@ would flatten away exactly the commit being synced. First done as #1231.
   go quiet while the backlog grows. `guard-freshness.yml` documents the same
   principle: a cron watching a cron dies with it.
 
-  It is **one long-lived issue, deliberately**: the workflow upserts by the
-  `promotion` label, so closing it just makes the next run open a duplicate under
-  a new number. It's **pinned** rather than recreated — a bot-maintained tracker
-  wants a stable identity, and pinning is what keeps it visible. Leave it open.
+  It is **one long-lived issue, deliberately**: the workflow upserts the issue it
+  selects by **author** (`app/github-actions` — the one attribute a human cannot
+  set) plus an **exact title** (`📦 Pending promotion: dev → main`, compared
+  exactly in `scripts/ci/standing-issue-upsert.mjs`, never by a tokenised
+  `in:title` search), so an issue a human labelled `promotion` is never adopted
+  or overwritten — a human label finds no bot-owned digest and the workflow
+  creates its own beside it (#3341; #3262 lost its body to this upsert 33+
+  times under the old label-first selection). Closing the digest just makes the
+  next run open a duplicate under a new number. It's **pinned** rather than
+  recreated — a bot-maintained tracker wants a stable identity, and pinning is
+  what keeps it visible. Leave it open.
 
 ## Workflows in this flow
 

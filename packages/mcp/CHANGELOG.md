@@ -8,9 +8,13 @@ alone.
 
 ## Unreleased
 
+### Added
+
+- **Task budgets: three new tools (#3329).** `haven_open_task_budget` and `haven_close_task_budget` reserve and end a short-lived, self-delegated child of the agent's own budget delegation, scoped to one task; `haven_submit` is new on this runtime and relays the local signer's signature for a task budget by `task_budget_id` only — a `payment_id` is refused here, because this runtime signs and submits a payment inline and has no relay step for it. `task_budget_id` is an optional argument on `haven_send`, `haven_pay_x402_quote` and `haven_pay_x402`. The tool set grew by three, so the consent hash changes and every operator is asked to consent once more on the next launch.
+
 ### Removed
 
-- **BREAKING (#3306, via `@haven_ai/sdk`) — `haven_list_receipts` rows lose four keys.** `rail`, `proofStatus`, `resourceUrl` and `merchantAddress`, the deprecated twins kept for one full release since `0.5.0-alpha.0` (#3134), are no longer emitted; read `source`, `paymentProofStatus`, `x402ResourceUrl` and `x402MerchantAddress`. This is a tool-output re-shape, breaking for any agent or script still reading an old key, so the release carrying it takes a **MINOR** bump under the 0.x convention (`docs/operations/mcp-runtime-compatibility.md`). A `.d.ts` diff of this package shows nothing — the break is in tool output, which no declaration file carries. No tool, argument, schema or description changed on this package; the hosted runtime drops the keys with its deploy.
+- **BREAKING (#3306, via `@haven_ai/sdk`) — `haven_list_receipts` rows lose four keys.** `rail`, `proofStatus`, `resourceUrl` and `merchantAddress`, the deprecated twins kept for one full release since `0.5.0-alpha.0` (#3134), are no longer emitted; read `source`, `paymentProofStatus`, `x402ResourceUrl` and `x402MerchantAddress`. This is a tool-output re-shape, breaking for any agent or script still reading an old key, so the release carrying it takes a **MINOR** bump under the 0.x convention (`docs/operations/mcp-runtime-compatibility.md`). A `.d.ts` diff of this package shows nothing — the break is in tool output, which no declaration file carries. No tool, argument, schema or description changed **by this bullet's change alone** — see the task-budget tool additions above for what else this Unreleased section carries; the hosted runtime drops the keys with its deploy.
 
 ## 0.5.0-alpha.1 — 2026-09-25
 

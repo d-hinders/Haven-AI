@@ -63,6 +63,8 @@ import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
 import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
+import taskBudgetRoutes from './routes/task-budgets.js'
+import agentTaskBudgetsOwnerRoutes from './routes/agent-task-budgets.js'
 import userAccountsRoutes from './routes/user-accounts.js'
 import userAccountsRetiredRoutes from './routes/user-accounts-retired.js'
 import passkeyRoutes from './routes/passkeys.js'
@@ -137,6 +139,18 @@ installRequestValidation(app, {
     // #3164: the organization routes are born ENFORCED — new modules never
     // enter shadow.
     'routes/agent-organizations.ts',
+    // #3329: the owner-facing task-budget READ is non-money-path (GET only)
+    // and born ENFORCED, same precedent as agent-organizations.ts above.
+    'routes/agent-task-budgets.ts',
+    // #3329: `routes/task-budgets.ts` is a BRAND NEW module with no live
+    // caller yet (unlike `routes/payments.ts` / `routes/agent-delegations.ts`
+    // / `routes/machine-payments.ts`, which predate the request-validation
+    // rollout and carry real traffic the #3028 fallback could not prove) —
+    // `docs/operations/dev-environment.md`'s rule is that a genuinely new
+    // module is born ENFORCED, never shadow, because there is no existing
+    // caller a stricter schema could break. It is money-path, but that rule
+    // is about proving EXISTING traffic safe, not about gating new surfaces.
+    'routes/task-budgets.ts',
     // Slice 2 (#3030): every non-money route module, plus the two inline
     // routes below (`GET /`, `GET /chains` — keyed `'index.ts'`). Flipped on
     // the epic's fallback (owner decision 2026-09-21 on #3028): the dev
@@ -385,6 +399,10 @@ await app.register(paymentRoutes, { prefix: '/payments' })
 // AllowanceModule rail and its table is dropped; the routes went with it.
 await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
 await app.register(x402Routes, { prefix: '/x402' })
+// #3329: task budgets — agent-auth lifecycle at /task-budgets, owner-auth
+// read at /agents/:id/task-budgets (same prefix as agent-delegations.ts).
+await app.register(taskBudgetRoutes, { prefix: '/task-budgets' })
+await app.register(agentTaskBudgetsOwnerRoutes, { prefix: '/agents' })
 // #2914 (naming P5, the contraction): the `/user/safes*` prefix stops
 // serving and answers 410 with the replacement path. It is registered as a
 // TOMBSTONE module rather than dropped, because an absent registration is a

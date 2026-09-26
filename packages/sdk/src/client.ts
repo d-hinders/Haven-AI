@@ -56,6 +56,20 @@ import type {
   HavenCatalogSubmission,
   RawCatalogEntry,
   AgentPaymentWarning,
+  HavenTaskBudget,
+  RawTaskBudget,
+  OpenTaskBudgetResult,
+  CloseTaskBudgetResult,
+  SubmitTaskBudgetResult,
+  TaskBudgetSignContext,
+  TaskBudgetOpenSignContext,
+  TaskBudgetCloseSignContext,
+  HavenTaskBudgetSignData,
+  HavenTaskBudgetStatus,
+  RawOpenTaskBudgetResponse,
+  RawSubmitTaskBudgetResponse,
+  RawCloseTaskBudgetResponse,
+  RawTaskBudgetSignContext,
 } from './types.js'
 import {
   AgentPaymentNextAction,
@@ -102,7 +116,7 @@ import {
   mcpSettlementFromToolResult,
   mcpToolResultOf,
 } from './mcp-merchant-transport.js'
-import { AccountReads } from './account-reads.js'
+import { AccountReads, mapTaskBudget } from './account-reads.js'
 import { DelegateSweepApi } from './delegate-sweep.js'
 import {
   assertCanResumeX402,
@@ -350,6 +364,7 @@ export class HavenClient {
       amount: request.amount,
       to: request.to,
       ...(request.idempotencyKey ? { idempotency_key: request.idempotencyKey } : {}),
+      ...(request.taskBudgetId ? { task_budget_id: request.taskBudgetId } : {}),
     })
 
     // Haven returns HTTP 202 with this status when the requested amount
@@ -429,6 +444,10 @@ export class HavenClient {
       ...(new TextEncoder().encode(JSON.stringify(paymentRequired)).length <= 65536
         ? { paymentRequired }
         : {}),
+      // #3329: `/x402` bodies are camelCase (`X402AuthorizeRequest`), unlike
+      // `POST /payments`'s snake_case `task_budget_id` above — the two
+      // surfaces use different conventions, so this key is NOT `task_budget_id`.
+      ...(options.taskBudgetId ? { taskBudgetId: options.taskBudgetId } : {}),
     })
 
     // Anything other than a signable funding intent (pending_approval,
@@ -551,9 +570,10 @@ export class HavenClient {
       // used to produce a valid-looking signature over the wrong digest.
       assertUserOpTypedDataBinding(signData.typed_data, signData.hash)
       // #3283 (epic #3284): the binding proves the typed data and hash agree,
-      // but the Haven API response supplies both. Sign only the ONE shape a
-      // direct payment or funding leg is — this key's own account redeeming a
-      // single budget delegation through the DelegationManager — so a
+      // but the Haven API response supplies both. Sign only the shapes a
+      // direct payment or funding leg is — this key's own account redeeming
+      // its budget delegation directly, or a self-delegated task-budget
+      // child redeemed under it — through the DelegationManager, so a
       // compromised API cannot get a self-call or an empty-context
       // redemption (account capture) signed. Same check as `haven_sign`.
       assertBoundDirectPaymentUserOp(
@@ -950,6 +970,109 @@ export class HavenClient {
     return this.accountReads.getReceipt(paymentId)
   }
 
+  // ── Task Budgets (#3329) ────────────────────────────────────────────
+
+  /**
+   * Open a task budget: a self-delegated, time-boxed slice of the agent's own
+   * budget delegation. Returns the pending row plus the child delegation's
+   * `sign_data` — sign it (via `signForData` / `haven_sign` with
+   * `task_budget_id`) and pass the signature to `submitTaskBudget` to make it
+   * OPEN. Nothing is on-chain until then.
+   */
+  async openTaskBudget(request: {
+    tokenAddress?: string
+    maxAmountAtomic: string
+    ttlSeconds: number
+    recipientAddress?: string
+    label?: string
+  }): Promise<OpenTaskBudgetResult> {
+    const raw = await this.post<RawOpenTaskBudgetResponse>('/task-budgets', {
+      ...(request.tokenAddress ? { token_address: request.tokenAddress } : {}),
+      max_amount_atomic: request.maxAmountAtomic,
+      ttl_seconds: request.ttlSeconds,
+      ...(request.recipientAddress ? { recipient_address: request.recipientAddress } : {}),
+      ...(request.label ? { label: request.label } : {}),
+    })
+    return {
+      taskBudget: mapTaskBudget(raw.task_budget),
+      signData: raw.sign_data,
+      nextAction: raw.next_action,
+      instructions: raw.instructions,
+    }
+  }
+
+  /** Read one task budget by id. */
+  async getTaskBudget(id: string): Promise<HavenTaskBudget> {
+    const raw = await this.get<{ task_budget: RawTaskBudget }>(`/task-budgets/${encodeURIComponent(id)}`)
+    return mapTaskBudget(raw.task_budget)
+  }
+
+  /** List this agent's task budgets — `status: 'open'` (default; unexpired only) or `'all'`. */
+  async listTaskBudgets(options: { status?: 'open' | 'all' } = {}): Promise<HavenTaskBudget[]> {
+    const query = options.status ? `?status=${encodeURIComponent(options.status)}` : ''
+    const raw = await this.get<{ task_budgets: RawTaskBudget[] }>(`/task-budgets${query}`)
+    return raw.task_budgets.map(mapTaskBudget)
+  }
+
+  /**
+   * The exact signing payload for a pending (purpose `open`) or closing
+   * (purpose `close`) task budget — the `task_budget_id` counterpart of
+   * `getResumeState` / the payment sign-context reads. `haven_sign` with
+   * `task_budget_id` fetches this itself; call it directly only for manual
+   * signing.
+   */
+  async getTaskBudgetSignContext(id: string): Promise<TaskBudgetSignContext> {
+    const raw = await this.get<RawTaskBudgetSignContext>(`/task-budgets/${encodeURIComponent(id)}/sign-context`)
+    if (raw.purpose === 'close') {
+      return {
+        taskBudgetId: raw.task_budget_id,
+        purpose: 'close',
+        taskSignContextVersion: raw.task_sign_context_version,
+        typedData: raw.typed_data,
+        userOperation: raw.user_operation as Record<string, unknown>,
+        userOpHash: raw.user_op_hash as string,
+        expected: raw.expected as TaskBudgetCloseSignContext['expected'],
+      }
+    }
+    return {
+      taskBudgetId: raw.task_budget_id,
+      purpose: 'open',
+      taskSignContextVersion: raw.task_sign_context_version,
+      typedData: raw.typed_data,
+      expected: raw.expected as TaskBudgetOpenSignContext['expected'],
+    }
+  }
+
+  /** Submit a signature for a pending (open) or closing task budget. */
+  async submitTaskBudget(id: string, signature: string): Promise<SubmitTaskBudgetResult> {
+    const raw = await this.post<RawSubmitTaskBudgetResponse>(
+      `/task-budgets/${encodeURIComponent(id)}/submit`,
+      { signature },
+    )
+    return {
+      taskBudget: mapTaskBudget(raw.task_budget),
+      status: raw.status,
+      ...(raw.close_tx_hash ? { closeTxHash: raw.close_tx_hash } : {}),
+    }
+  }
+
+  /**
+   * Close a task budget early. A `pending` or already-expired `open` budget
+   * closes immediately (nothing was ever signed or is on-chain). A live
+   * `open` budget returns `sign_data` for an on-chain `disableDelegation`
+   * UserOp — sign it (`haven_sign` with `task_budget_id`) and call
+   * `submitTaskBudget`.
+   */
+  async closeTaskBudget(id: string): Promise<CloseTaskBudgetResult> {
+    const raw = await this.post<RawCloseTaskBudgetResponse>(`/task-budgets/${encodeURIComponent(id)}/close`, {})
+    return {
+      taskBudget: mapTaskBudget(raw.task_budget),
+      status: raw.status,
+      ...(raw.sign_data ? { signData: raw.sign_data } : {}),
+      ...(raw.next_action ? { nextAction: raw.next_action } : {}),
+    }
+  }
+
   /**
    * Rehydrate the x402 resume-state bundle for a payment id (#1328: the MPP
    * resume-state variant retired along with the rest of the mpp_demo surface).
@@ -1017,7 +1140,7 @@ export class HavenClient {
     const inFlight = this.inFlightX402.get(idempotencyKey)
     if (inFlight) return inFlight
 
-    const promise = this.fundingLeg.authorize(paymentRequired, option, idempotencyKey)
+    const promise = this.fundingLeg.authorize(paymentRequired, option, idempotencyKey, options.taskBudgetId)
     this.inFlightX402.set(idempotencyKey, promise)
 
     try {
@@ -1204,6 +1327,12 @@ export class HavenClient {
        * of replaying the first.
        */
       idempotencyKey?: string
+      /**
+       * #3329: build the settlement child under this open task budget's own
+       * child delegation instead of the agent's budget delegation directly —
+       * `[settlement, task, budget]`.
+       */
+      taskBudgetId?: string
     } = {},
   ): Promise<{
     paymentId: string

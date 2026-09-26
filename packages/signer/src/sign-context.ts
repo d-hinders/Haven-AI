@@ -136,8 +136,12 @@ export class HavenSignContextError extends HavenSigningError {
     /**
      * #3271: which fetch failed. A DIRECT payment has no quote tool to re-run
      * and its result always carries `typed_data_b64`, so its remedies differ.
+     * #3329: `'task'` is the task-budget sign-context fetch — it has no
+     * `typed_data_b64` relay at all (there is no quote tool to re-run and no
+     * caller-supplied fallback payload), so every refusal on this flow is
+     * stop-and-tell with no fallback field.
      */
-    flow: 'x402' | 'direct' = 'x402',
+    flow: 'x402' | 'direct' | 'task' = 'x402',
   ) {
     super(message)
     ;(this as { code: string }).code = code
@@ -192,6 +196,18 @@ export class HavenSignContextError extends HavenSigningError {
           nextToolOmittedReason:
             're-run the hosted quote tool you called with the same idempotency_key; which one depends on the flow',
         })
+      } else if (flow === 'task') {
+        // #3329: no quote tool to re-run and no typed_data_b64 relay — the
+        // task budget's own status (pending/open/closing/closed/expired) is
+        // the only useful next read, and this signer does not assume a
+        // hosted tool name for it.
+        this.next_action = AgentPaymentNextAction.StopAndTellUser
+        step = signerRefusalStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: null,
+          nextToolOmittedReason:
+            `re-check this task budget's status (id ${paymentId}) with the hosted Haven server before retrying`,
+        })
       } else {
         this.next_action = AgentPaymentNextAction.StopAndTellUser
         step = signerRefusalStep({
@@ -200,6 +216,15 @@ export class HavenSignContextError extends HavenSigningError {
           nextArguments: { payment_id: paymentId },
         })
       }
+    } else if (flow === 'task') {
+      // #3329: transport failure or a malformed body — no fallback field:
+      // there is nothing this signer can sign instead.
+      this.next_action = AgentPaymentNextAction.StopAndTellUser
+      step = signerRefusalStep({
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: 'retry the same haven_sign call with the same task_budget_id',
+      })
     } else {
       this.fallback = 'typed_data_b64'
       this.next_action = AgentPaymentNextAction.StopAndTellUser
@@ -523,4 +548,189 @@ export async function fetchDirectSignContext(
     expiresAt: typeof body.expires_at === 'string' ? body.expires_at : undefined,
     clientUpdate: readClientUpdate(body.client_update),
   }
+}
+
+/**
+ * #3329: `task_sign_context_version`s this signer install understands.
+ * Pinned locally — task budgets have no SDK-side version constant, the way
+ * `DIRECT_SIGN_CONTEXT_VERSION` pins the direct-payment fetch — because the
+ * signer, not the SDK, is what enforces this version at the fetch boundary.
+ */
+export const SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS: readonly number[] = [1]
+
+/** `GET /task-budgets/:id/sign-context`, `purpose: 'open'` shape. */
+export interface FetchedTaskBudgetOpenSignContext {
+  purpose: 'open'
+  taskBudgetId: string
+  typedData: Record<string, unknown>
+  expected: {
+    delegateAccount: string
+    chainId: number
+    tokenAddress: string
+    maxAmountAtomic: string
+    recipientAddress: string | null
+    expiresAt: number
+    parentDelegationHash: string
+  }
+}
+
+/** `GET /task-budgets/:id/sign-context`, `purpose: 'close'` shape. */
+export interface FetchedTaskBudgetCloseSignContext {
+  purpose: 'close'
+  taskBudgetId: string
+  typedData: Record<string, unknown>
+  userOpHash: string
+  expected: {
+    delegateAccount: string
+    chainId: number
+    delegationHash: string
+  }
+}
+
+export type FetchedTaskBudgetSignContext =
+  | FetchedTaskBudgetOpenSignContext
+  | FetchedTaskBudgetCloseSignContext
+
+/**
+ * GET /task-budgets/:id/sign-context (#3329). Same auth header, timeout and
+ * refusal-structuring as `fetchDirectSignContext`, for a task budget's own
+ * `Delegation` (purpose `open`) or `disableDelegation` UserOp (purpose
+ * `close`) typed data. No `typed_data_b64` fallback exists for this flow —
+ * a task budget's typed data is never caller-supplied.
+ */
+export async function fetchTaskBudgetSignContext(
+  identity: HavenIdentity,
+  taskBudgetId: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs: number = SIGN_CONTEXT_TIMEOUT_MS,
+  clientIdentity?: string,
+): Promise<FetchedTaskBudgetSignContext> {
+  let response: Response
+  try {
+    response = await fetchImpl(
+      `${identity.apiUrl}/task-budgets/${encodeURIComponent(taskBudgetId)}/sign-context`,
+      {
+        headers: signContextHeaders(identity, clientIdentity),
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+    )
+  } catch (err) {
+    const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+    throw new HavenSignContextError(
+      timedOut
+        ? `Haven did not answer the task-budget signing-context fetch for ${taskBudgetId} within ${timeoutMs} ms. Retry.`
+        : `Could not reach Haven to fetch the task-budget signing context for ${taskBudgetId}: ` +
+          `${err instanceof Error ? err.message : String(err)}.`,
+      timedOut ? 'SIGN_CONTEXT_TIMEOUT' : 'SIGN_CONTEXT_UNREACHABLE',
+      undefined,
+      taskBudgetId,
+      'task',
+    )
+  }
+  let body: Record<string, unknown>
+  try {
+    body = (await response.json()) as Record<string, unknown>
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new HavenSignContextError(
+        `Haven did not finish sending the task-budget signing context for ${taskBudgetId} within ${timeoutMs} ms. Retry.`,
+        'SIGN_CONTEXT_TIMEOUT',
+        undefined,
+        taskBudgetId,
+        'task',
+      )
+    }
+    body = {}
+  }
+  if (!response.ok) {
+    const detail = typeof body.error === 'string' ? body.error : `HTTP ${response.status}`
+    throw new HavenSignContextError(
+      `Haven refused the task-budget signing-context fetch for ${taskBudgetId}: ${detail}`,
+      'SIGN_CONTEXT_REFUSED',
+      refusalOf(response.status, body),
+      taskBudgetId,
+      'task',
+    )
+  }
+  const purpose = body.purpose
+  const typedData = body.typed_data
+  const version = body.task_sign_context_version
+  const expected = body.expected
+  const malformed = (detail: string): never => {
+    throw new HavenSignContextError(
+      `The Haven task-budget sign-context response for ${taskBudgetId} is malformed: ${detail}.`,
+      'SIGN_CONTEXT_MALFORMED',
+      undefined,
+      taskBudgetId,
+      'task',
+    )
+  }
+  if (typeof version !== 'number' || !SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS.includes(version)) {
+    throw new HavenSignContextError(
+      `The Haven task-budget sign-context response is version ${String(version)}, which this signer ` +
+        `does not support (supported: ${SUPPORTED_TASK_SIGN_CONTEXT_VERSIONS.join(', ')}). Update @haven_ai/signer.`,
+      'SIGN_CONTEXT_MALFORMED',
+      undefined,
+      taskBudgetId,
+      'task',
+    )
+  }
+  if (!typedData || typeof typedData !== 'object') return malformed('missing typed_data')
+  if (!expected || typeof expected !== 'object') return malformed('missing expected')
+  // The wire `expected` object is snake_case, like every other Haven response;
+  // the SDK guards it feeds (`assertOwnTaskChild` / `assertOwnTaskBudgetCloseUserOp`)
+  // take camelCase — mapped explicitly here rather than cast, so a field this
+  // signer relies on being absent is a thrown error, not `undefined` silently
+  // reaching a guard that then fails a DIFFERENT, more confusing check.
+  const e = expected as Record<string, unknown>
+  if (purpose === 'open') {
+    if (
+      typeof e.delegate_account !== 'string' ||
+      typeof e.chain_id !== 'number' ||
+      typeof e.token_address !== 'string' ||
+      typeof e.max_amount_atomic !== 'string' ||
+      (e.recipient_address !== null && typeof e.recipient_address !== 'string') ||
+      typeof e.expires_at !== 'number' ||
+      typeof e.parent_delegation_hash !== 'string'
+    ) {
+      return malformed('expected is missing a required field for purpose open')
+    }
+    return {
+      purpose: 'open',
+      taskBudgetId: String(body.task_budget_id ?? taskBudgetId),
+      typedData: typedData as Record<string, unknown>,
+      expected: {
+        delegateAccount: e.delegate_account,
+        chainId: e.chain_id,
+        tokenAddress: e.token_address,
+        maxAmountAtomic: e.max_amount_atomic,
+        recipientAddress: (e.recipient_address as string | null) ?? null,
+        expiresAt: e.expires_at,
+        parentDelegationHash: e.parent_delegation_hash,
+      },
+    }
+  }
+  if (purpose === 'close') {
+    const userOpHash = body.user_op_hash
+    if (typeof userOpHash !== 'string') return malformed('missing user_op_hash for purpose close')
+    if (
+      typeof e.delegate_account !== 'string' ||
+      typeof e.chain_id !== 'number' ||
+      typeof e.delegation_hash !== 'string'
+    ) {
+      return malformed('expected is missing a required field for purpose close')
+    }
+    return {
+      purpose: 'close',
+      taskBudgetId: String(body.task_budget_id ?? taskBudgetId),
+      typedData: typedData as Record<string, unknown>,
+      userOpHash,
+      expected: {
+        delegateAccount: e.delegate_account,
+        chainId: e.chain_id,
+        delegationHash: e.delegation_hash,
+      },
+    }
+  }
+  return malformed(`unknown purpose '${String(purpose)}'`)
 }

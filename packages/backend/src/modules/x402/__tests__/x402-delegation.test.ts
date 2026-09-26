@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { pad } from 'viem'
+import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
+import type { Delegation } from '@metamask/smart-accounts-kit'
 import {
   buildSettlementDelegation,
   assembleSettlementPayload,
@@ -47,6 +49,26 @@ describe('buildSettlementDelegation (#830)', () => {
     const built = buildSettlementDelegation(req())
     // Not a root delegation — its authority points at the parent, not ROOT.
     expect(built.child.authority).not.toBe(`0x${'f'.repeat(64)}`)
+    expect(built.child.authority).toBe(hashDelegation(signedBudget))
+  })
+
+  it('#3329 review finding B5: when a task budget child is supplied, it — not the budget — is the settlement child\'s immediate parent', () => {
+    const taskBudgetChild = {
+      delegate: DELEGATE_ACCT,
+      delegator: DELEGATE_ACCT, // self-delegated (#3329 owner decision 1)
+      authority: hashDelegation(signedBudget),
+      caveats: [],
+      salt: 99n,
+      signature: ('0x' + '12'.repeat(65)) as `0x${string}`,
+    } as unknown as Delegation
+
+    const withTaskBudget = buildSettlementDelegation(req({ taskBudgetChild }))
+    const withoutTaskBudget = buildSettlementDelegation(req())
+
+    // The parent hash changes: it now names the task child, not the budget.
+    expect(withTaskBudget.child.authority).toBe(hashDelegation(taskBudgetChild))
+    expect(withTaskBudget.child.authority).not.toBe(withoutTaskBudget.child.authority)
+    expect(withoutTaskBudget.child.authority).toBe(hashDelegation(signedBudget))
   })
 
   it('pins the exact amount, the payee, and a short expiry', () => {

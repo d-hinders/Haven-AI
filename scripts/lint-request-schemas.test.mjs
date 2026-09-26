@@ -235,6 +235,11 @@ describe('index.ts readers', () => {
       'routes/labels.ts',
       'routes/agent-labels.ts',
       'routes/agent-organizations.ts',
+      // #3329: two born-enforced task-budget modules — the owner read and the
+      // agent-auth lifecycle, the first money-path module born enforced
+      // (a brand-new module has no installed caller to shadow for).
+      'routes/agent-task-budgets.ts',
+      'routes/task-budgets.ts',
       // Slice 2 (#3030): the 22 non-money modules and the inline index.ts pair.
       'index.ts',
       'routes/accounting.ts',

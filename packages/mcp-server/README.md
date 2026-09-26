@@ -50,7 +50,9 @@ methods (`pay()`, `sign()`, `authorizeX402()`) are unavailable by construction.
 | `haven_get_agent` | `GET /machine-payments/agent` | no |
 | `haven_get_allowances` | `GET /machine-payments/allowances` | no |
 | `haven_pay` | `POST /payments` (returns `payload_hash`) | no — edge signs |
-| `haven_submit` | `POST /payments/:id/sign` (relays signature) | no |
+| `haven_submit` | `POST /payments/:id/sign` (relays signature), or (#3329) `POST /task-budgets/:id/submit` when called with `task_budget_id` instead of `payment_id` | no |
+| `haven_open_task_budget` | `POST /task-budgets` (#3329: reserves a budget for one task; returns the budget to sign) | no — edge signs |
+| `haven_close_task_budget` | `POST /task-budgets/:id/close` (#3329: ends one early, releasing whatever of its cap went unspent; returns the close operation to sign) | no — edge signs |
 | `haven_quote_x402` | merchant x402 quote probe | no |
 | `haven_pay_x402_quote` | `POST /x402` (returns funding `payload_hash` + x402 context) | no — edge signs |
 | `haven_pay_mcp_tool` | merchant MCP quote probe + `POST /x402` | no — edge signs |

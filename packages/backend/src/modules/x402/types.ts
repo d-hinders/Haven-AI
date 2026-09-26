@@ -54,6 +54,8 @@ export interface X402AuthorizeBody {
   paymentRequired?: Record<string, unknown>
   /** #1307: optional MCP merchant-call context, stored for settle-leg rehydration. */
   mcpCallContext?: X402McpCallContextInput
+  /** #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. */
+  taskBudgetId?: string
 }
 /** A route-serializable {statusCode, body} pair — orchestration returns this instead of touching `reply` directly. */
 export interface X402HandlerResult {

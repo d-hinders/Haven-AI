@@ -54,6 +54,29 @@ import { getPaymentReceipt, verifyPaymentReceipt } from '../modules/payments/ind
 import { quoteFee } from '../modules/fee/index.js'
 import { toCanonicalAddress } from '../modules/transactions/index.js'
 import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+import { selectActiveDelegationByHash } from '../infra/repositories/delegation-budgets.js'
+import { findForAgent as findTaskBudgetForAgent } from '../infra/repositories/task-budgets.js'
+import {
+  resolveTaskBudgetChildForPayment,
+  type TaskBudgetPaymentRefusal,
+} from '../modules/task-budgets/index.js'
+
+/** #3329 §3: the refusal table's HTTP status per code. */
+const TASK_BUDGET_REFUSAL_STATUS: Record<TaskBudgetPaymentRefusal, number> = {
+  task_budget_not_found: 404,
+  task_budget_not_open: 409,
+  task_budget_token_mismatch: 409,
+  task_budget_recipient_mismatch: 409,
+  task_budget_parent_mismatch: 409,
+}
+
+const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, string> = {
+  task_budget_not_found: 'Task budget not found',
+  task_budget_not_open: 'Task budget is not open (closed, closing, pending, or expired)',
+  task_budget_token_mismatch: "This payment's token does not match the task budget's token",
+  task_budget_recipient_mismatch: "This payment's recipient does not match the task budget's pinned recipient",
+  task_budget_parent_mismatch: 'The task budget was not carved from the budget delegation selected for this payment',
+}
 
 /**
  * Surface the platform fee on a payment result so it's never silently collected
@@ -91,6 +114,8 @@ interface CreatePaymentBody {
   amount: string   // human-readable, e.g. "25.50"
   to: string       // recipient address
   idempotency_key?: string
+  /** #3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly. */
+  task_budget_id?: string
 }
 
 interface SignPaymentBody {
@@ -295,7 +320,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
 
   app.post<{ Body: CreatePaymentBody }>('/', { config: moneyPathRateLimit }, async (request, reply) => {
     const agent = request.agent as AgentContext
-    const { token, amount, to, idempotency_key } = request.body
+    const { token, amount, to, idempotency_key, task_budget_id } = request.body
 
     // 1. Validate inputs
     if (!token || typeof token !== 'string') {
@@ -313,6 +338,8 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
     ) {
       return reply.code(400).send({ error: 'idempotency_key must be a non-empty string of at most 128 characters' })
     }
+    // #3329: task_budget_id's shape (a non-empty string) is the spec's job
+    // (`CreatePaymentRequest`) — this handler only reads the value.
 
     // 2. Resolve the execution rail — ABOVE token resolution (#2274).
     //
@@ -420,6 +447,50 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         error: 'Native-token transfers are not supported on the delegation rail',
       })
     }
+
+    // ── Task budget (#3329, optional) ─────────────────────────────────────
+    // A task budget authorizes the payment INSTEAD OF the budget delegation
+    // directly: the redemption chain becomes [taskChild, budget]. #3329
+    // review finding E: the parent is selected by the task budget's OWN
+    // `parent_delegation_hash` — NEVER re-derived by (token, to), which can
+    // name a DIFFERENT active grant (an agent holding both an open and a
+    // pinned grant for this token, whose pinned recipient happens to equal
+    // `to`, would otherwise get a spurious task_budget_parent_mismatch).
+    let taskBudgetChild: Awaited<ReturnType<typeof resolveTaskBudgetChildForPayment>>['childDelegation']
+    let taskBudgetParentDelegation: Awaited<ReturnType<typeof selectActiveDelegationByHash>> = null
+    if (task_budget_id) {
+      const taskBudgetRow = await findTaskBudgetForAgent(task_budget_id, agent.id)
+      if (!taskBudgetRow) {
+        return reply.code(404).send({ error: 'Task budget not found', error_code: 'task_budget_not_found' })
+      }
+      const parentDelegation = await selectActiveDelegationByHash(agent.id, taskBudgetRow.parent_delegation_hash)
+      if (!parentDelegation) {
+        // The task budget's own parent is no longer an active grant (revoked
+        // or replaced) — it can never again be redeemed through, whatever
+        // token/recipient this payment names.
+        return reply.code(409).send({
+          error: 'The task budget was not carved from the budget delegation selected for this payment',
+          error_code: 'task_budget_parent_mismatch',
+        })
+      }
+      const resolved = resolveTaskBudgetChildForPayment(
+        taskBudgetRow,
+        tokenAddress,
+        to.toLowerCase(),
+        parentDelegation,
+        Math.floor(Date.now() / 1000),
+      )
+      if (!resolved.ok) {
+        const code = resolved.refusal as TaskBudgetPaymentRefusal
+        return reply.code(TASK_BUDGET_REFUSAL_STATUS[code]).send({
+          error: TASK_BUDGET_REFUSAL_MESSAGE[code],
+          error_code: code,
+        })
+      }
+      taskBudgetChild = resolved.childDelegation
+      taskBudgetParentDelegation = parentDelegation
+    }
+
     let authorization
     try {
       authorization = await prepareDelegationPayment(
@@ -427,6 +498,9 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         tokenAddress,
         to.toLowerCase(),
         amountRaw,
+        taskBudgetChild && taskBudgetParentDelegation
+          ? { taskBudget: { childDelegation: taskBudgetChild, parentDelegation: taskBudgetParentDelegation } }
+          : undefined,
       )
     } catch (err) {
       // Caveat rejection (budget/recipient/expiry) or bundler failure —
@@ -509,6 +583,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         budgetDelegationHash: authorization.delegationHash,
         preparedUserOp: serializeUserOp(authorization.prepared.userOperation),
         sendIdempotencyKey: idempotency_key ?? null,
+        taskBudgetId: taskBudgetChild ? (task_budget_id as string) : null,
       })
     } catch (err) {
       // Lost the idempotency-key race with a concurrent request (migration

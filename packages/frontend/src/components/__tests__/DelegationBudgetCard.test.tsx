@@ -1,12 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError } = vi.hoisted(() => ({
+const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets } = vi.hoisted(() => ({
   mockGet: vi.fn(),
   mockGrant: vi.fn(),
   mockRevoke: vi.fn(),
   mockReload: vi.fn(),
   mockBudgetsError: vi.fn(() => false),
+  mockTaskBudgets: vi.fn(() => [] as unknown[]),
 }))
 
 vi.mock('@/hooks/useDelegationBudget', () => ({
@@ -19,6 +20,11 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     budgetsError: mockBudgetsError(),
     reload: mockReload,
   }),
+}))
+// #3329: read separately — DelegationBudgetCard's own tests must not need to
+// know this hook's wire shape, only what it returns.
+vi.mock('@/hooks/useTaskBudgets', () => ({
+  useTaskBudgets: () => ({ taskBudgets: mockTaskBudgets(), error: false, reload: vi.fn() }),
 }))
 vi.mock('@/components/ui/Toast', () => ({
   useToast: () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }) }),
@@ -42,12 +48,26 @@ function budget(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function taskBudget(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 't1', agent_id: 'agent-1', chain_id: 84532, token_address: USDC,
+    recipient_address: null, parent_delegation_hash: '0x' + 'ab'.repeat(32),
+    delegation_hash: '0x' + 'dd'.repeat(32), label: null, max_atomic: '1000000',
+    status: 'open', expires_at: Math.floor(Date.now() / 1000) + 3600, is_expired: false,
+    created_at: '2026-01-01T00:00:00Z', opened_at: '2026-01-01T00:00:00Z',
+    closed_at: null, close_tx_hash: null,
+    ...overrides,
+  }
+}
+
 beforeEach(() => {
   mockGet.mockReset()
   mockGrant.mockReset()
   mockRevoke.mockReset()
   mockReload.mockReset()
   mockBudgetsError.mockReturnValue(false)
+  mockTaskBudgets.mockReset()
+  mockTaskBudgets.mockReturnValue([])
 })
 
 describe('DelegationBudgetCard (#833)', () => {
@@ -258,5 +278,61 @@ describe('DelegationBudgetCard load failure (#2473)', () => {
     render(<DelegationBudgetCard {...PROPS} tokens={[]} />)
     await waitFor(() => expect(screen.getByText(/aren.t available for this network/i)).toBeTruthy())
     expect(screen.queryByText('Set budget')).toBeNull()
+  })
+})
+
+// #3329: task budgets — a self-closing authority carved from a budget above.
+describe('DelegationBudgetCard task budgets (#3329)', () => {
+  it('no open task budgets: no reserved line, no section', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: null })])
+    mockTaskBudgets.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
+    expect(screen.queryByText(/reserved for task budgets/)).toBeNull()
+    expect(screen.queryByText('Task budgets')).toBeNull()
+  })
+
+  it('one open task budget under a budget: shows the reserved line and the section', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: null })])
+    mockTaskBudgets.mockReturnValue([taskBudget({ parent_delegation_hash: '0x' + 'ab'.repeat(32), max_atomic: '2000000' })])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/2 USDC reserved for task budgets/)).toBeTruthy())
+    expect(screen.getByText('Task budgets')).toBeTruthy()
+    expect(screen.getByText(/up to 2 USDC · ends/)).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/delegation|caveat|redemption|userop|permission/i)
+  })
+
+  it('shows the task budget label and recipient when set', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: null })])
+    const R = '0x' + 'ee'.repeat(20)
+    mockTaskBudgets.mockReturnValue([
+      taskBudget({ label: 'Scrape run', recipient_address: R, parent_delegation_hash: '0x' + 'ab'.repeat(32) }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText('Scrape run')).toBeTruthy())
+    expect(screen.getByText(new RegExp(`to ${R.slice(0, 6)}`))).toBeTruthy()
+  })
+
+  it('an expired task budget is ignored — no line, no section', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: null })])
+    mockTaskBudgets.mockReturnValue([
+      taskBudget({
+        parent_delegation_hash: '0x' + 'ab'.repeat(32),
+        is_expired: true,
+        expires_at: Math.floor(Date.now() / 1000) - 3600,
+      }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
+    expect(screen.queryByText(/reserved for task budgets/)).toBeNull()
+    expect(screen.queryByText('Task budgets')).toBeNull()
+  })
+
+  it('a task-budget fetch error does not break the budgets list', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: null })])
+    mockTaskBudgets.mockReturnValue([]) // the hook degrades to null/[] on error — see useTaskBudgets tests
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
+    expect(screen.queryByText(/reserved for task budgets/)).toBeNull()
   })
 })

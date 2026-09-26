@@ -63,6 +63,7 @@ describe('AccountReads', () => {
       const path = new URL(String(input)).pathname
       if (path === '/machine-payments/agent') return json(agent())
       if (path === '/machine-payments/allowances') return json(allowance())
+      if (path === '/task-budgets') return json({ task_budgets: [] })
       throw new Error(`Unexpected ${path}`)
     }))
     const service = reads(async () => ({}) as PaymentStatusResult)
@@ -71,6 +72,58 @@ describe('AccountReads', () => {
       executionRail: 'legacy', readiness: 'ready', spend_authority_readiness: 'ready',
       allowances: [{ remainingAtomic: '4960000', remainingDisplay: '4.96 USDC' }],
     })
+  })
+
+  // #3329 / #3093: the task-budget read must fail SOFT — a 404, a
+  // transport error, an undefined/null body, or a missing/non-array
+  // `task_budgets` key all degrade to `taskBudgets: []`, never a thrown
+  // getAgentSummary().
+  it('degrades task budgets to [] on a 404 (a backend that predates #3329)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/machine-payments/agent') return json(agent())
+      if (path === '/machine-payments/allowances') return json(allowance())
+      if (path === '/task-budgets') return new Response(JSON.stringify({ error: 'not found' }), { status: 404 })
+      throw new Error(`Unexpected ${path}`)
+    }))
+    const service = reads(async () => ({}) as PaymentStatusResult)
+    await expect(service.getAgentSummary()).resolves.toMatchObject({ taskBudgets: [] })
+  })
+
+  it('degrades task budgets to [] on an undefined/null response body', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/machine-payments/agent') return json(agent())
+      if (path === '/machine-payments/allowances') return json(allowance())
+      if (path === '/task-budgets') return json(null)
+      throw new Error(`Unexpected ${path}`)
+    }))
+    const service = reads(async () => ({}) as PaymentStatusResult)
+    await expect(service.getAgentSummary()).resolves.toMatchObject({ taskBudgets: [] })
+  })
+
+  it('degrades task budgets to [] when task_budgets is missing or not an array', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/machine-payments/agent') return json(agent())
+      if (path === '/machine-payments/allowances') return json(allowance())
+      if (path === '/task-budgets') return json({ task_budgets: 'not-an-array' })
+      throw new Error(`Unexpected ${path}`)
+    }))
+    const service = reads(async () => ({}) as PaymentStatusResult)
+    await expect(service.getAgentSummary()).resolves.toMatchObject({ taskBudgets: [] })
+  })
+
+  it('degrades task budgets to [] on ANY transport error (network failure, not just 404)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/machine-payments/agent') return json(agent())
+      if (path === '/machine-payments/allowances') return json(allowance())
+      if (path === '/task-budgets') throw new Error('network down')
+      throw new Error(`Unexpected ${path}`)
+    }))
+    const service = reads(async () => ({}) as PaymentStatusResult)
+    await expect(service.getAgentSummary()).resolves.toMatchObject({ taskBudgets: [] })
   })
 
   it('keeps a settled status when the best-effort allowance read fails', async () => {

@@ -2283,6 +2283,36 @@ export const openapiSpec = {
         },
       },
     },
+    // ── Task budgets (#3329), owner-facing read ────────────────────────────
+    '/agents/{id}/task-budgets': {
+      get: {
+        tags: ['Delegations'],
+        operationId: 'listAgentTaskBudgets',
+        summary: "List an agent's task budgets.",
+        description:
+          "Every task budget on this agent, newest first — the owner-facing twin of the agent-auth list at GET /task-budgets. Scoped by BOTH agent id and the caller's ownership of it.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'Task budgets ordered by created_at DESC.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budgets'],
+                  properties: {
+                    task_budgets: { type: 'array', items: { $ref: '#/components/schemas/TaskBudget' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
     // ── Re-key (#1698, epic #1694) ────────────────────────────────────────
     // Owner-authorised credential rotation. Ordering is a hard invariant:
     // revoke precedes issue, and the meter is read AFTER the revoke.
@@ -5593,6 +5623,257 @@ export const openapiSpec = {
         },
       },
     },
+    // ── Task budgets (#3329), agent-facing lifecycle ────────────────────────
+    // A short-lived, self-delegated CHILD of the agent's own budget
+    // delegation, scoped to one task. Haven never signs: build/open return
+    // typed data for the agent to sign, close returns a userOp typed data
+    // for a live child's revocation.
+    '/task-budgets': {
+      post: {
+        tags: ['TaskBudgets'],
+        operationId: 'openTaskBudget',
+        summary: 'Open a task budget, step 1: build the budget to sign (nothing signed yet).',
+        description:
+          "Carves an unsigned, self-delegated child from the agent's active budget delegation for (token, recipient|open) — chain [taskChild, budget], delegate = the agent's own delegate account, never ANY_BENEFICIARY. Stored pending; the agent signs sign_data.typed_data and POSTs it to /task-budgets/{id}/submit to open it. Pre-sign refusal (409 task_budget_exceeds_remaining) when max_amount_atomic plus this agent's other OPEN task budgets under the same parent would exceed the parent's on-chain remaining budget — a convenience, never the real control: the enforcers still rule at redemption.",
+        security: [{ AgentApiKey: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['max_amount_atomic', 'ttl_seconds'],
+                properties: {
+                  token_address: { ...address, description: 'Defaults to the chain\'s USDC.' },
+                  max_amount_atomic: { type: 'string', pattern: '^[0-9]+$', description: 'Positive atomic amount; must fit uint96.' },
+                  ttl_seconds: { type: 'integer', minimum: 60, maximum: 86400, description: 'This task budget\'s lifetime, 60 s to 24 h.' },
+                  recipient_address: { ...address, description: 'Optional recipient pin.' },
+                  label: { type: 'string', maxLength: 120 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Pending task budget stored; the agent signs sign_data.typed_data next.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budget', 'sign_data', 'next_action', 'instructions'],
+                  properties: {
+                    task_budget: { $ref: '#/components/schemas/TaskBudget' },
+                    sign_data: {
+                      type: 'object',
+                      required: ['signature_scheme', 'typed_data'],
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_delegation'] },
+                        typed_data: { type: 'object', additionalProperties: true, description: "EIP-712 typed data (primaryType 'Delegation') the agent signs verbatim." },
+                      },
+                    },
+                    next_action: { type: 'string', enum: ['sign_then_submit'] },
+                    instructions: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': { ...errorResponse, description: 'no_delegation_for_target — no active budget delegation authorizes this token/recipient.' },
+          '409': {
+            ...errorResponse,
+            description: 'not_delegation_rail, or task_budget_exceeds_remaining (carries remaining_atomic, reserved_atomic, requested_atomic).',
+          },
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+      get: {
+        tags: ['TaskBudgets'],
+        operationId: 'listTaskBudgets',
+        summary: 'List task budgets for the authenticated agent.',
+        description: "Default status=open: OPEN and not expired. status=all: every row regardless of status or expiry.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['open', 'all'] },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Task budgets.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budgets'],
+                  properties: {
+                    task_budgets: { type: 'array', items: { $ref: '#/components/schemas/TaskBudget' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/task-budgets/{id}': {
+      get: {
+        tags: ['TaskBudgets'],
+        operationId: 'getTaskBudget',
+        summary: 'Fetch one task budget.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The task budget.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budget'],
+                  properties: { task_budget: { $ref: '#/components/schemas/TaskBudget' } },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/task-budgets/{id}/sign-context': {
+      get: {
+        tags: ['TaskBudgets'],
+        operationId: 'getTaskBudgetSignContext',
+        summary: 'Re-servable, byte-free signing handoff for a pending or closing task budget.',
+        description:
+          "purpose='open' (status pending): typed_data is the EIP-712 Delegation payload for the task child. purpose='close' (status closing): typed_data is the userOp typed data for the disableDelegation call, plus user_operation and user_op_hash. Any other status answers 409 sign_context_unavailable.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'The sign context for whichever signature is currently pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budget_id', 'purpose', 'task_sign_context_version', 'typed_data', 'expected'],
+                  properties: {
+                    task_budget_id: uuid,
+                    purpose: { type: 'string', enum: ['open', 'close'] },
+                    task_sign_context_version: { type: 'integer', enum: [1] },
+                    typed_data: { type: 'object', additionalProperties: true },
+                    user_operation: { type: 'object', additionalProperties: true, description: 'purpose=close only.' },
+                    user_op_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]+$', description: 'purpose=close only.' },
+                    expected: { type: 'object', additionalProperties: true },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'sign_context_unavailable — the task budget is open, closed, or has no signature currently pending.' },
+        },
+      },
+    },
+    '/task-budgets/{id}/submit': {
+      post: {
+        tags: ['TaskBudgets'],
+        operationId: 'submitTaskBudget',
+        summary: 'Submit the agent signature — opens a pending child, or relays the signed close operation.',
+        description:
+          "status=pending: verifies signature recovers the agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed; if the operation could not be sent (the account moved on since it was prepared) the answer is 409 close_needs_reprepare — call close again and re-sign; if it was sent but its outcome is unconfirmed, the answer is 200 status='closed' when the chain shows the child disabled, else 502 close_outcome_unconfirmed — call close again later: it reports closed once the disable has finalised, or returns new sign_data if the earlier operation did not land (sign and submit that one). Any other status is 409.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['signature'],
+                properties: { signature: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Opened (from pending) or closed (from closing).',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budget', 'status'],
+                  properties: {
+                    task_budget: { $ref: '#/components/schemas/TaskBudget' },
+                    status: { type: 'string', enum: ['open', 'closed'] },
+                    close_tx_hash: { type: 'string', description: 'Present when status=closed.' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { ...errorResponse, description: 'signature_mismatch, or a malformed signature.' },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': { ...errorResponse, description: "The close was sent but its outcome is unconfirmed and the chain does not yet show the child disabled (error_code close_outcome_unconfirmed): call close again later — it reports closed once the disable has finalised, or returns new sign_data if the earlier operation did not land." },
+        },
+      },
+    },
+    '/task-budgets/{id}/close': {
+      post: {
+        tags: ['TaskBudgets'],
+        operationId: 'closeTaskBudget',
+        summary: 'Close a task budget — trivially if never signed or already expired, otherwise prepares the revocation.',
+        description:
+          "status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the agent's own delegate account and returns sign_data for the agent to sign, then submit via POST /task-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed' with nothing to sign; otherwise re-prepares a fresh close operation and replaces the stored one, so calling close again is always safe. status=closed: 409.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
+        responses: {
+          '200': {
+            description: 'Closed trivially, or a close signature is now pending.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['task_budget'],
+                  properties: {
+                    task_budget: { $ref: '#/components/schemas/TaskBudget' },
+                    status: { type: 'string', enum: ['closed'], description: 'Present on a trivial close.' },
+                    sign_data: {
+                      type: 'object',
+                      properties: {
+                        signature_scheme: { type: 'string', enum: ['eip712_userop'] },
+                        typed_data: { type: 'object', additionalProperties: true },
+                        user_op_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' },
+                      },
+                      description: 'Present when a live child needs a revocation signature.',
+                    },
+                    next_action: { type: 'string', enum: ['sign_then_submit'] },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': { ...errorResponse, description: 'Already closed.' },
+          '429': { ...errorResponse, description: 'Money-path rate limit.' },
+          '502': errorResponse,
+        },
+      },
+    },
     '/payments': {
       get: {
         tags: ['Payments'],
@@ -7280,6 +7561,42 @@ export const openapiSpec = {
         },
       },
       /**
+       * #3329: one task budget — a short-lived, self-delegated CHILD of an
+       * agent's budget delegation, scoped to one task. `is_expired` is
+       * DERIVED (`expires_at <= now`), never a stored status.
+       */
+      TaskBudget: {
+        type: 'object',
+        required: [
+          'id', 'agent_id', 'chain_id', 'token_address', 'recipient_address',
+          'parent_delegation_hash', 'delegation_hash', 'label', 'max_atomic',
+          'status', 'expires_at', 'is_expired', 'created_at', 'opened_at',
+          'closed_at', 'close_tx_hash',
+        ],
+        properties: {
+          id: uuid,
+          agent_id: uuid,
+          chain_id: { type: 'integer' },
+          token_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$', description: 'Stored lowercase.' },
+          recipient_address: {
+            type: ['string', 'null'],
+            pattern: '^0x[0-9a-f]{40}$',
+            description: 'Lowercase recipient pin, or null when this task budget carries none.',
+          },
+          parent_delegation_hash: delegationHash,
+          delegation_hash: { ...delegationHash, description: "This task budget's own child delegation hash." },
+          label: { type: ['string', 'null'], maxLength: 120 },
+          max_atomic: { type: 'string', pattern: '^[0-9]+$' },
+          status: { type: 'string', enum: ['pending', 'open', 'closing', 'closed'] },
+          expires_at: { type: 'integer', description: 'Unix seconds.' },
+          is_expired: { type: 'boolean', description: 'Derived: expires_at <= now.' },
+          created_at: { type: 'string', format: 'date-time' },
+          opened_at: { type: ['string', 'null'], format: 'date-time' },
+          closed_at: { type: ['string', 'null'], format: 'date-time' },
+          close_tx_hash: { type: ['string', 'null'] },
+        },
+      },
+      /**
        * #1446: an address-book label. `LIST_CONTACTS_FOR_USER_SQL` and both
        * RETURNING clauses in `infra/repositories/contacts.ts` select exactly
        * these five columns, so every one is required.
@@ -8574,6 +8891,12 @@ export const openapiSpec = {
             description:
               'Optional dedupe key (#1207): a retried request with the same key returns the first request\'s result (idempotent_replay: true) instead of minting a second transfer or approval. A key reused for a different transfer is a 409. Same contract as /machine-payments/send.',
           },
+          task_budget_id: {
+            type: 'string',
+            minLength: 1,
+            description:
+              '#3329: an OPEN task budget to authorize this payment through, instead of the budget delegation directly — the redemption chain becomes [taskChild, budget]. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch.',
+          },
         },
         additionalProperties: true,
       },
@@ -8858,6 +9181,12 @@ export const openapiSpec = {
             description:
               '#1355: the merchant\'s full parsed 402 PaymentRequired (max 64KB serialized). Persisted so GET /x402/{id}/sign-context can re-serve it and a local signer needs only payment_id. Reporting material, not payment authority — the signer verifies whichever copy it uses against the Haven-signed expected context.',
             additionalProperties: true,
+          },
+          taskBudgetId: {
+            type: 'string',
+            minLength: 1,
+            description:
+              '#3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. erc7710: the settlement child is carved from the task budget\'s signed child ([settlement, taskChild, budget]). EIP-3009: the funding leg redeems the same chain to fund the agent\'s delegate EOA. Refused with 404 task_budget_not_found or 409 task_budget_not_open/token_mismatch/recipient_mismatch/parent_mismatch.',
           },
         },
         additionalProperties: false,

@@ -114,6 +114,11 @@ const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   },
   haven_discover_tools: {},
   haven_submit_catalog_entry: { resource_url: 'https://merchant.example/mcp' },
+  // #3329: the handler resolves the token via haven.getAllowances() first
+  // (the GET the "still accepts its own arguments" loop observes), then
+  // calls the SDK's openTaskBudget.
+  haven_open_task_budget: { max_amount_human: '5', ttl_minutes: 60 },
+  haven_close_task_budget: { task_budget_id: 'tb_1' },
 }
 
 /**
@@ -182,6 +187,10 @@ const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   haven_verify_receipt: 'expected_signer',
   haven_discover_tools: 'query',
   haven_submit_catalog_entry: 'name',
+  // #3329: plausible mis-keys — the atomic-unit spelling and a settlement
+  // field neither tool declares.
+  haven_open_task_budget: 'max_amount',
+  haven_close_task_budget: 'settlement_scheme',
 }
 
 let fetches: string[]
@@ -582,10 +591,12 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
       'haven_verify_receipt',
       'haven_discover_tools',
       'haven_submit_catalog_entry',
+      'haven_open_task_budget',
+      'haven_close_task_budget',
     ]) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).toContain(tool)
     }
-    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(22)
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(24)
     // And the two deliberate exclusions, as a literal list for the same reason.
     expect(Object.keys(PERMISSIVE_INPUT_TOOLS).sort()).toEqual(
       ['haven_get_agent', 'haven_get_allowances'],

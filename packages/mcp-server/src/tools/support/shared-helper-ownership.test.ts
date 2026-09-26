@@ -108,6 +108,7 @@ const CAPABILITY_SLICES = {
   s2810: 'catalog/quote/prepare handlers (#2810)',
   s2811: 'plain-HTTP x402 handlers (#2811)',
   s2812: 'paid-MCP completion handlers (#2812)',
+  s3329: 'task budget handlers (#3329)',
 } as const
 
 type Slice = keyof typeof CAPABILITY_SLICES
@@ -138,6 +139,10 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   paymentStatusHandoff: { module: 'guidance', slices: ['s2810', 's2811'] },
   // #3102: the refusal-side builder — every HostedToolError that names an action.
   refusalNextStep: { module: 'guidance', slices: ['s2810', 's2811', 's2812'] },
+  // #3329: the success-side counterpart — a task budget's signer hand-off,
+  // which is not a payment and so cannot go through buildAgentGuidance's
+  // AgentPaymentSummary (see SINGLE_SLICE_RETAINED for why it stays shared).
+  taskBudgetNextStep: { module: 'guidance', slices: ['s3329'] },
   // tools/support/cap-price.ts — cap/price selection.
   readMaxAmountCap: { module: 'cap-price', slices: ['s2810', 's2811'] },
   priceSelectedOption: { module: 'cap-price', slices: ['s2810', 's2811'] },
@@ -272,6 +277,13 @@ const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
   resolveResumeState:
     'Only the #2811 handlers call it; retained in support until #2811 moves it into its capability module.',
+  // s3329 (#3329 task budgets):
+  taskBudgetNextStep:
+    'Only tools/task-budgets.ts calls it today, but it is DELIBERATE, not "until the capability moves ' +
+    'it": it is the general success-side counterpart of refusalNextStep (same builder, same target ' +
+    'map, same compile-time twins) for any future non-payment next step, and forking it into one ' +
+    "capability would mean a second slice needing it copies refusalNextStep's own pattern rather than " +
+    'importing the general one — the exact drift #2808 exists to prevent.',
 }
 
 /**
@@ -352,7 +364,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'paymentWindowExpiredErrorFor',
     'normalizeError',
   ],
-  guidance: ['buildAgentGuidance', 'buildPurchaseSummary', 'paymentStatusHandoff', 'refusalNextStep'],
+  guidance: ['buildAgentGuidance', 'buildPurchaseSummary', 'paymentStatusHandoff', 'refusalNextStep', 'taskBudgetNextStep'],
   'mcp-context': [
     'delegationSignFields',
     'isMerchantEndpointMiss',
@@ -1091,9 +1103,10 @@ describe('shared fixture (test-support/hosted-mcp.ts)', () => {
     })
     await handlers().haven_get_agent({})
     const calls = recordedCalls()
-    // getAgentSummary reads the agent AND its allowances (two GETs, the shape
-    // the original tools.test.ts fixture modeled).
-    expect(calls).toHaveLength(2)
+    // getAgentSummary reads the agent, its allowances, AND its open task
+    // budgets (#3329: GET /task-budgets?status=open, three GETs total —
+    // the third fails soft to [] when unstubbed, per the #3093 rule).
+    expect(calls).toHaveLength(3)
     const agentCall = calls.find((c) => c.url.endsWith('/machine-payments/agent'))!
     expect(agentCall.method).toBe('GET')
     expect(agentCall.headers).toBeDefined()

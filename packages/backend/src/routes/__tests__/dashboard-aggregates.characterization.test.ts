@@ -30,7 +30,12 @@ import { combineBalanceFreshness } from '../../modules/accounts/balance-freshnes
 
 const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
-  portfolioMocks: { fetchPortfolioForAccount: vi.fn() },
+  portfolioMocks: {
+    fetchPortfolioForAccount: vi.fn(),
+    // #3296: the route consults the module's unpriceable predicate before
+    // writing the daily snapshot; clean by default, the snapshot tests pin.
+    isPortfolioUnpriceable: vi.fn(),
+  },
   transactionMocks: {
     compareTransactions: vi.fn(() => 0),
     enrichedTransactionIdentityKey: vi.fn((tx: { hash: string }) => tx.hash),
@@ -142,6 +147,8 @@ describe('dashboard aggregates (characterization, #1167)', () => {
   beforeEach(() => {
     mockQuery.mockReset()
     portfolioMocks.fetchPortfolioForAccount.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(false)
     transactionMocks.fetchAccountTransactions.mockReset()
     transactionMocks.mergeX402Transactions.mockReset()
     transactionMocks.resolveTransactionCurrency.mockClear()

@@ -1256,7 +1256,7 @@ describe('#3272 (B1): the redeemDelegations ARGUMENTS are verified, not just the
     expect(result.message).toMatch(/not this signer's own account/)
   })
 
-  it('refuses a two-link delegation chain whose leaf is this signer\'s account (Haven emits a single grant)', async () => {
+  it('refuses a two-link delegation chain whose leaf is this signer\'s account but NOT self-delegated (Haven emits either a single grant or a self-delegated task-budget chain, #3329)', async () => {
     const leaf = buildDelegation({ delegate: SENDER, delegator: '0x5555555555555555555555555555555555555555' })
     const root = buildDelegation({ delegate: '0x5555555555555555555555555555555555555555', delegator: DEFAULT_DELEGATOR })
     const redeemCallData = encodeFunctionData({
@@ -1266,7 +1266,11 @@ describe('#3272 (B1): the redeemDelegations ARGUMENTS are verified, not just the
     })
     const result = await expectNoSignatureNoAudit(redeemCallData)
     expect(result.code).toBe('TYPED_DATA_NOT_ALLOWED')
-    expect(result.message).toMatch(/2-link delegation chain/)
+    // #3329 widened the accepted chain to include a self-delegated two-link
+    // task-budget chain — this leaf is NOT self-delegated (its delegator is a
+    // third party, not SENDER), so it is refused for that specific reason
+    // rather than the old blanket "no two-link chains" message.
+    expect(result.message).toMatch(/task-budget child is always self-delegated/)
   })
 
   it('refuses when the root delegation\'s delegator IS this signer\'s own account (self-to-self delegation)', async () => {

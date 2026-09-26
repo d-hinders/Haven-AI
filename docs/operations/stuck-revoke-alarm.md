@@ -179,6 +179,37 @@ Now branch:
   block before doing anything else.
 - **`revocationTime == 0` (live)** → the divergence is real. Go to Step 2.
 
+### Step 1b — is the row's UID even the real one? (#3294)
+
+Before treating "no answer" as "young attestation" or "live", compare the
+row's stored `attestation_uid` with what its own mint produced. Rows anchored
+before [#3294](https://github.com/d-hinders/Haven-AI/issues/3294) recorded the
+pre-send `staticCall` **prediction**, which never existed on-chain: every
+`getAttestation` on it returns the zeroed struct forever, every revoke reverts
+`NotFound()`, and the agent's REAL attestation — the one the mint transaction
+actually emitted — stays live under a UID Haven never stored. A row in this
+state retries revocation forever (dev ran one to 590 attempts).
+
+Compare in one read: replay the row's anchor `tx_hash` and read the `Attested`
+log's uid from the receipt (`cast receipt <tx_hash> --rpc-url <RPC_URL>`, then
+decode the EAS `Attested` event; the row's `tx_hash` is in
+`agent_passports.tx_hash`).
+
+- **The log's uid differs from the stored one** → phantom-UID row. Post-fix
+  deploys self-heal: the repair re-derives the UID from this same receipt,
+  swaps the row to it (a paced sweep step), and the next reconcile revokes the
+  REAL uid — no operator action, and the alarm keeps firing until that revoke
+  actually lands, which is correct. If the row has NOT converged after a
+  deploy that includes the fix, check `revocation_last_error` for the repair's
+  deferral reasons (no tx hash, unreadable receipt) and raise it as a bug —
+  do not hand-edit `attestation_uid`.
+- **The log's uid matches the stored one** → the stored UID is genuine. A
+  "no answer" read at Step 1 is then genuinely a young attestation or an RPC
+  gap; continue to Step 2.
+- **No `tx_hash` on the row** → the anchor never completed; this is an
+  issuance-side condition, not a revoke one. Check `last_error` and the
+  issuance retry queue.
+
 ### Step 2 — is a revoke transaction actually in flight?
 
 ```sql
@@ -344,7 +375,26 @@ being cancelled.
 
 With every precondition met, the action is a **same-nonce cancel**: a 0-value
 self-transfer from the relayer at that exact nonce, with bumped fees, so that
-the stuck revoke can never mine.
+the stuck revoke can never mine. It is encoded; run it with the stuck row's id:
+
+```bash
+npm run ops:cancel-stuck-lane -w packages/backend -- <outbound-row-id>
+```
+
+On Railway, where the deployed image has no `scripts/` or `tsx` (only
+`dist/`, `--omit=dev`), run the compiled command from a shell on the service
+instead:
+
+```bash
+railway ssh --environment <env> --service @haven/backend
+node packages/backend/dist/ops/cancel-stuck-lane.js <outbound-row-id>
+```
+
+It re-checks precondition 4 itself: below the bump cap it refuses with
+`automated_recovery_owns_it` and sends nothing (#2769). It does not check
+preconditions 1, 2, 3 or 5 — those stay yours. On a capped lane nothing
+re-sends the cancel if it sticks; the output says so and prints the cancel
+row's id to re-run the command with.
 
 - **Do this even if the transaction has vanished from the mempool.** A dropped
   transaction does not free its own nonce here: its row is still `broadcast`,

@@ -18,7 +18,7 @@ import {
   X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
 } from './x402.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
-import { buildValidUserOpSignData } from './__fixtures__/valid-userop.js'
+import { buildFundingLegSignData } from './__fixtures__/valid-userop.js'
 
 // The live funding-leg wire shape (#946): every sign_data the backend emits
 // carries 'eip712_userop' plus the account's typed data. Fixtures updated by
@@ -28,7 +28,8 @@ import { buildValidUserOpSignData } from './__fixtures__/valid-userop.js'
 // binding check recomputes its hash and refuses anything else — so this
 // uses the shared synthetic-but-valid builder rather than a hand-rolled,
 // 3-field toy.
-const userOpSignData = buildValidUserOpSignData()
+// #3375: the funding leg is pinned to the 402 option's token and amount, paid to the delegate.
+const userOpSignData = buildFundingLegSignData({ asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', amount: '20000' })
 const userOpTypedData = userOpSignData.typed_data
 
 const accepted: X402PaymentOption = {
@@ -1032,7 +1033,7 @@ describe('x402 helpers', () => {
     }
 
     const txHash = `0x${'ab'.repeat(32)}`
-    const signData3116 = buildValidUserOpSignData()
+    const signData3116 = buildFundingLegSignData({ asset: accepted.asset, amount: accepted.amount })
     const typedData = signData3116.typed_data
 
     const fetchMock = vi.spyOn(globalThis, 'fetch')
@@ -1858,7 +1859,7 @@ describe('delegation-rail 3009-mode (#946)', () => {
   it('signs eip712_userop typed data for the funding leg and completes the flow', async () => {
     const delegateKey = `0x${'01'.repeat(32)}`
     const txHash = `0x${'ab'.repeat(32)}`
-    const signData946 = buildValidUserOpSignData()
+    const signData946 = buildFundingLegSignData({ asset: accepted.asset, amount: accepted.amount })
     const typedData = signData946.typed_data
 
     const fetchMock = vi.spyOn(globalThis, 'fetch')

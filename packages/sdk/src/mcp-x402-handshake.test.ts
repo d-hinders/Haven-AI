@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient } from './client.js'
 import type { X402PaymentOption, X402PaymentRequired } from './types.js'
-import { buildValidUserOpSignData } from './__fixtures__/valid-userop.js'
+import { buildFundingLegSignData } from './__fixtures__/valid-userop.js'
 
 // The live funding-leg wire shape (#946): every sign_data the backend emits
 // carries 'eip712_userop' plus the account's typed data. Fixtures updated by
@@ -9,7 +9,8 @@ import { buildValidUserOpSignData } from './__fixtures__/valid-userop.js'
 // without signature_scheme is now rejected by the client. #3271: the typed
 // data must also be a real, self-consistent PackedUserOperation, so this uses
 // the shared synthetic-but-valid builder rather than a hand-rolled toy.
-const userOpSignData = buildValidUserOpSignData()
+// #3375: the funding leg is pinned to the 402 option's token and amount, paid to the delegate.
+const userOpSignData = buildFundingLegSignData({ asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', amount: '20000' })
 const userOpTypedData = userOpSignData.typed_data
 
 // ── Shared fixtures ───────────────────────────────────────────────

@@ -49,9 +49,14 @@ jobs:
         run: |
           TITLE='Docs staleness audit (weekly)'
           BODY="$(printf 'Automated weekly audit (#646). For each doc: re-verify it against the code and bump \`last-verified\`, or update it.\n\n```\n%s\n```\n\n_Regenerated every Monday by docs-audit.yml — do not edit by hand._' "$REPORT")"
-          NUMBER=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$TITLE\"" --json number --jq '.[0].number // empty')
-          if [ -n "$NUMBER" ]; then
-            gh issue edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --label documentation --body "$BODY"
-          fi
+          # Bot-ownership upsert (#3341): select by AUTHOR — the one attribute a
+          # human cannot set — plus an exact title, never `in:title`, which is a
+          # tokenised search that adopted any human issue whose title merely
+          # contained these words and overwrote its body. A failed lookup fails
+          # the step instead of falling through to a duplicate create.
+          printf '%s' "$BODY" | node scripts/ci/standing-issue-upsert.mjs \
+            --title "$TITLE" \
+            --author 'app/github-actions' \
+            --list-args '--label documentation --state open --json' \
+            --label documentation \
+            --repo "$GITHUB_REPOSITORY"

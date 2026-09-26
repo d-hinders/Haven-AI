@@ -155,17 +155,45 @@ export interface RedemptionSubmitResult {
 }
 
 /**
+ * #3329 review finding N2: `submitRedemption` can fail in two phases, and a
+ * caller must never treat them alike. A failure BEFORE `sendUserOperation`
+ * resolves (bundler rejected it — bad nonce, stale signature) means the op
+ * never entered the mempool: nothing changed on-chain, safe to say "stale,
+ * re-prepare". A failure AFTER it resolves (the receipt wait errored or
+ * timed out, or the op landed but reverted) means the op MAY have been
+ * included — for a `disableDelegation` call that is NOT reversible by
+ * re-preparing: the child may already be disabled on-chain, and a caller
+ * that assumes otherwise will loop 502 forever (a fresh prepare reverts
+ * `AlreadyDisabled`). Thrown only for the post-send phase; `userOpHash` is
+ * always known at that point, so callers can check `disabledDelegations`
+ * (or transaction status) before deciding what to tell the agent.
+ */
+export class SubmittedUserOpFailedError extends Error {
+  readonly userOpHash: Hex
+  constructor(message: string, userOpHash: Hex) {
+    super(message)
+    this.name = 'SubmittedUserOpFailedError'
+    this.userOpHash = userOpHash
+  }
+}
+
+/**
  * The ONE call a redemption UserOp makes: `redeemDelegations` on the chain's
- * DelegationManager, redeeming exactly `[[delegation]]` in `SingleDefault`
- * mode against a single ERC-20 `transfer(to, amount)` on `token`. Pure —
- * extracted from `prepareRedemption` (#3281) so a contract test can prove the
- * bytes the backend emits are the shape the edge signer's guard accepts
- * (`assertBoundDirectPaymentUserOp` / `assertFundingLegPaysDelegate` in
- * `@haven_ai/sdk`) without a bundler.
+ * DelegationManager, redeeming exactly `[delegations]` (leaf first) in
+ * `SingleDefault` mode against a single ERC-20 `transfer(to, amount)` on
+ * `token`. Pure — extracted from `prepareRedemption` (#3281) so a contract
+ * test can prove the bytes the backend emits are the shape the edge signer's
+ * guard accepts (`assertBoundDirectPaymentUserOp` / `assertFundingLegPaysDelegate`
+ * in `@haven_ai/sdk`) without a bundler.
+ *
+ * `delegations` is a CHAIN, leaf first: `[budget]` for an ordinary payment
+ * (unchanged since #826), `[taskChild, budget]` when a task budget (#3329)
+ * authorizes the payment — the same two-hop shape x402 erc7710 settlement
+ * already redeems (`modules/x402/x402-delegation.ts`).
  */
 export function buildRedemptionCall(
   chainId: number,
-  delegation: Delegation,
+  delegations: Delegation[],
   token: Address,
   to: Address,
   amount: bigint,
@@ -176,7 +204,7 @@ export function buildRedemptionCall(
     callData: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [to, amount] }),
   })
   const data = contracts.DelegationManager.encode.redeemDelegations({
-    delegations: [[delegation]],
+    delegations: [delegations],
     modes: [ExecutionMode.SingleDefault],
     executions: [[execution]],
   })
@@ -192,11 +220,19 @@ export interface DelegationRail {
    * redemption fails HERE — before any state is written (the #769 seam).
    */
   prepareRedemption(
-    delegation: Delegation,
+    delegations: Delegation[],
     token: Address,
     to: Address,
     amount: bigint,
   ): Promise<PreparedRedemption>
+  /**
+   * Prepare an arbitrary sponsored call FROM the delegate account itself
+   * (#3329) — the delegate-account twin of `TreasuryOps.prepareCall`, used
+   * for `disableDelegation(taskChild)` when a task budget closes early. Does
+   * NOT sign; the agent signs the returned typed data client-side, same as
+   * `prepareRedemption`.
+   */
+  prepareAccountCall(to: Address, data: Hex): Promise<PreparedRedemption>
   /** Stamp the agent's signature and submit. */
   submitRedemption(prepared: PreparedRedemption, signature: Hex): Promise<RedemptionSubmitResult>
 }
@@ -292,7 +328,7 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
   })
 
   async function prepareRedemption(
-    delegation: Delegation,
+    delegations: Delegation[],
     token: Address,
     to: Address,
     amount: bigint,
@@ -300,7 +336,25 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
     // The stub signature comes from the account implementation, so gas
     // estimation validates without the backend holding a key.
     const userOperation = await client.prepareUserOperation({
-      calls: [buildRedemptionCall(cfg.chainId, delegation, token, to, amount)],
+      calls: [buildRedemptionCall(cfg.chainId, delegations, token, to, amount)],
+    })
+    const userOpHash = getUserOperationHash({
+      chainId: cfg.chainId,
+      entryPointAddress: entryPoint07Address,
+      entryPointVersion: '0.7',
+      userOperation: { ...userOperation, sender: account.address },
+    })
+    return {
+      userOperation,
+      userOpHash,
+      signingTypedData: userOpTypedData(userOperation, account.address, cfg.chainId),
+      delegateAccountAddress: account.address,
+    }
+  }
+
+  async function prepareAccountCall(to: Address, data: Hex): Promise<PreparedRedemption> {
+    const userOperation = await client.prepareUserOperation({
+      calls: [{ to, value: 0n, data }],
     })
     const userOpHash = getUserOperationHash({
       chainId: cfg.chainId,
@@ -320,12 +374,26 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
     prepared: PreparedRedemption,
     signature: Hex,
   ): Promise<RedemptionSubmitResult> {
+    // #3329 review finding N2: a throw HERE (bundler rejected the op) means
+    // it never entered the mempool — nothing on-chain changed.
     const userOpHash = await client.sendUserOperation({
       ...prepared.userOperation,
       signature,
     })
-    const receipt = await pimlico.waitForUserOperationReceipt({ hash: userOpHash })
-    if (!receipt.success) throw new Error('redemption UserOp included but reverted')
+    // Everything past this point is POST-SEND: a throw here means the op MAY
+    // have landed, and `SubmittedUserOpFailedError` says so explicitly.
+    let receipt: Awaited<ReturnType<typeof pimlico.waitForUserOperationReceipt>>
+    try {
+      receipt = await pimlico.waitForUserOperationReceipt({ hash: userOpHash })
+    } catch (err) {
+      throw new SubmittedUserOpFailedError(
+        `redemption UserOp ${userOpHash} was sent but its receipt could not be confirmed: ${err instanceof Error ? err.message : String(err)}`,
+        userOpHash,
+      )
+    }
+    if (!receipt.success) {
+      throw new SubmittedUserOpFailedError(`redemption UserOp ${userOpHash} included but reverted`, userOpHash)
+    }
     return {
       txHash: receipt.receipt.transactionHash,
       userOpHash,
@@ -334,7 +402,7 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
     }
   }
 
-  return { delegateAccountAddress: account.address, prepareRedemption, submitRedemption }
+  return { delegateAccountAddress: account.address, prepareRedemption, prepareAccountCall, submitRedemption }
 }
 
 /**

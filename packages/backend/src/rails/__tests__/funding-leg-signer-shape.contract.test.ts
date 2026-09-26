@@ -24,11 +24,15 @@ import { encodeCallsForCaller } from '@metamask/smart-accounts-kit/utils'
 import {
   assertBoundDirectPaymentUserOp,
   assertFundingLegPaysDelegate,
+  assertRedeemsOwnBudgetDelegation,
   assertUserOpTypedDataBinding,
   deriveDelegateAccountAddress,
   HavenTypedDataRefusedError,
 } from '@haven_ai/sdk/edge'
+import { decodeFunctionData, parseAbi } from 'viem'
 import { buildRedemptionCall, userOpTypedData, type Delegation } from '../delegation-rail.js'
+
+const EXECUTE_ABI = parseAbi(['function execute((address,uint256,bytes))'])
 
 const CHAIN_ID = 84532
 const USDC: Address = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
@@ -49,8 +53,20 @@ const BUDGET: Delegation = {
   signature: `0x${'ab'.repeat(65)}` as Hex,
 } as unknown as Delegation
 
-async function fundingLeg(to: Address = DELEGATE_EOA) {
-  const call = buildRedemptionCall(CHAIN_ID, BUDGET, USDC, to, AMOUNT)
+/** A task-budget child (#3329): self-delegated by the agent's own account. */
+const TASK_CHILD: Delegation = {
+  delegate: ACCOUNT,
+  delegator: ACCOUNT,
+  authority: `0x${'ee'.repeat(32)}` as Hex,
+  caveats: [
+    { enforcer: '0x1046bb45C8d673d4ea75321280DB34899413c069', terms: `0x${'00'.repeat(32)}` as Hex, args: '0x' as Hex },
+  ],
+  salt: 2n,
+  signature: `0x${'cd'.repeat(65)}` as Hex,
+} as unknown as Delegation
+
+async function fundingLeg(to: Address = DELEGATE_EOA, delegations: Delegation[] = [BUDGET]) {
+  const call = buildRedemptionCall(CHAIN_ID, delegations, USDC, to, AMOUNT)
   const callData = await encodeCallsForCaller(ACCOUNT, [call])
   const userOperation = {
     sender: ACCOUNT,
@@ -70,7 +86,7 @@ async function fundingLeg(to: Address = DELEGATE_EOA) {
     entryPointVersion: '0.7',
     userOperation,
   })
-  return { typedData, userOpHash }
+  return { typedData, userOpHash, callData }
 }
 
 describe('funding leg ↔ edge-signer guard contract (#3281)', () => {
@@ -89,5 +105,19 @@ describe('funding leg ↔ edge-signer guard contract (#3281)', () => {
     expect(() =>
       assertFundingLegPaysDelegate(typedData, { delegateAddress: DELEGATE_EOA, asset: USDC, amount: AMOUNT.toString() }),
     ).toThrow(HavenTypedDataRefusedError)
+  })
+
+  /**
+   * #3329 §4: a task-budget-authorized redemption's chain is `[taskChild,
+   * budget]` — TWO delegations, leaf first. `assertRedeemsOwnBudgetDelegation`
+   * accepts a chain of length 1 (unchanged) or length 2 where the leaf is
+   * self-delegated (own account both `delegate` and `delegator`) and the
+   * root is granted BY someone else.
+   */
+  it('[task, budget] chain: the SDK guard accepts a self-delegated leaf over a granted root (#3329)', async () => {
+    const { callData } = await fundingLeg(DELEGATE_EOA, [TASK_CHILD, BUDGET])
+    const { args } = decodeFunctionData({ abi: EXECUTE_ABI, data: callData })
+    const [, , redeemCalldata] = args[0] as [Address, bigint, Hex]
+    expect(() => assertRedeemsOwnBudgetDelegation(redeemCalldata, ACCOUNT)).not.toThrow()
   })
 })

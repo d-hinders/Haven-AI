@@ -471,7 +471,9 @@ describe('machine payment routes', () => {
         chain_id: 84532,
         allowances: [{
           id: 'd-1',
-          token_address: SEPOLIA_USDC,
+          // #3319: the read boundary checksums `token_address` (the seed stays
+          // lowercase; the constant is letter-bearing so the two differ).
+          token_address: getAddress(SEPOLIA_USDC),
           token_symbol: 'USDC',
           configured_amount: '10.00',
           reset_period_min: 1440,

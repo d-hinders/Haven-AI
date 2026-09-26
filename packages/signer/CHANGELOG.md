@@ -6,7 +6,18 @@ time while being false. The bump rewrites the `## Unreleased` heading below into
 `## <version> — <date>`; add entries under `## Unreleased` and leave the heading
 alone.
 
+Mark a bullet `**Update required**` when a client must update to keep paying.
+The bump then flags that release `action_required` in the public release data
+(`/releases`, `GET /discovery`, `/.well-known/haven.json`; #3305). It is not
+`**BREAKING**`, which means updating may break you, not that you must update.
+Write it exactly: "update required" in any other form (including "no update
+required") is refused — reword to "no update needed", or quote it in a code span.
+
 ## Unreleased
+
+## 0.6.0-alpha.0 — 2026-09-26
+
+- **`haven_sign` gains a `task_budget_id` form and two new signed shapes (#3329).** `{ task_budget_id }` alone (mutually exclusive with `payment_id` / `payload_hash`) fetches the pending task-budget open or close context and signs it, returning `{ signature, task_budget_id, purpose }` instead of `{ signature, x402_binding }`. The unbound-branch allowlist (#3272) now accepts the redemption of a delegation made directly to this signer's own account, OR a self-delegated task-budget child redeemed under it — the two-link `[task child, budget]` chain — checked by the new `assertOwnTaskChild` / `assertOwnTaskBudgetCloseUserOp` (`@haven_ai/sdk`'s `task-budget-guards.ts`). New `SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS`-adjacent constant `task_sign_context_versions`, reported in the `initialize` handshake alongside the existing x402/sweep binding-version lists, so a caller can tell a task-budget-capable signer from an older one without a probe signature. The consent summary's `haven_sign` wording was updated to say so; **the consent hash covers tool NAMES only, so an existing operator's acknowledgement is not invalidated and nobody is re-prompted by this change** (`consent.ts`'s own documented contract).
 
 ## 0.5.0-alpha.1 — 2026-09-25
 

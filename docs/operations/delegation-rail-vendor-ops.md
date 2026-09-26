@@ -111,6 +111,10 @@ run no estimation, so recovery retries cost nothing.
   `ops:check-bundler` probe (§3). Read in exactly ONE place
   (`delegationRailBundlerUrl`); every error surface passes
   `redactVendorSecrets` (bundler errors echo the URL — the #764 incident).
+  Since #3371 the same holds for RPC endpoint URLs (`RPC_URL_*`): the failover
+  transport strips the key-like segments of every configured endpoint out of
+  viem's request errors at the source, so a dRPC/Infura/Alchemy/QuickNode key
+  embedded in an RPC URL never reaches an error surface either.
 - `DELEGATION_RAIL_SPONSORSHIP_POLICY_ID` — Pimlico policies bind **per
   request**, not per API key (#738): an unset id means unrestricted
   sponsorship against the key's account. Set it in every deployed env.
@@ -191,15 +195,26 @@ warning. Operator response:
    npm run ops:cancel-stuck-attest -w packages/backend -- <outbound-row-id>
    ```
 
+   On Railway, where the deployed image has no `scripts/` or `tsx` (only
+   `dist/`, `--omit=dev`), open a shell on the running service and run the
+   compiled command instead — same logic, same output:
+
+   ```bash
+   railway ssh --environment <env> --service @haven/backend
+   node packages/backend/dist/ops/cancel-stuck-lane.js <outbound-row-id>
+   ```
+
    The command re-verifies the row is really the wedge before sending anything
    (fail-closed: it refuses a young/slow broadcast, an already-mined one, a
-   row already cancelled, or a bump-worker-owned submitter — and it closes a
-   mined row from the receipt instead of cancelling). The cancel goes through
+   row already cancelled, or a rebroadcast-safe row the bump worker still owns
+   because its lane is below the bump cap — and it closes a mined row from the
+   receipt instead of cancelling). The cancel goes through
    the outbound pipeline (`infra/outbound-lane-cancel.ts`): nonce, chain and
    wallet come from the stuck row itself, and the cancel gets a durable
    `outbound_txs` record the bump worker reconciles like any other broadcast —
-   including fee-replacing the cancel itself if it sticks. Running it twice is
-   safe; the second run is refused.
+   including fee-replacing the cancel itself if it sticks, unless the lane was
+   already at the bump cap (the command's output says which). Running it twice
+   is safe; the second run is refused.
 
    Once the cancel mines, the stuck attest can never mine — its nonce is spent
    — and issuance recovers **on its own**: the next sweep tick sees the burned
@@ -226,6 +241,46 @@ warning. Operator response:
    them — and the hand-run cancel adds its own hazards (typo'd nonce, wrong
    chain, wrong wallet) that the encoded command removes. Use the command,
    never a bare transaction.
+
+**A capped sweep, deploy or revoke lane (#2769).** Those submitters are
+rebroadcast-safe, so the bump worker fee-replaces them itself, and nothing
+above applies while it does. It stops for good at the cap and logs
+`outbound-bump: nonce lane stuck after 3 replacements — INCIDENT, not
+retrying`. The shape that gets there: a row stamped `broadcast` whose send
+never reached a node, with every re-send failing through an RPC outage. Later
+sends then take N+1, N+2 … and all of them wait behind N. The same command
+clears it, and refuses while the lane is still below the cap:
+
+1. Find the lowest live nonce on the chain. It is the hole; the INCIDENTs
+   above it are its symptoms.
+
+   ```sql
+   SELECT id, nonce, submitter, status, updated_at FROM outbound_txs
+    WHERE chain_id = <chain_id> AND status = 'broadcast'
+    ORDER BY nonce LIMIT 5;
+   ```
+
+   Its nonce should equal the relayer's `eth_getTransactionCount(…,
+   "latest")`. If the chain is already past it, the worker closes the row
+   itself once that is settled (#3293) and there is nothing to cancel.
+2. Read what the cancel releases. Every row above N is released to mine at
+   once; the passport revoke runbook's precondition 5
+   ([`stuck-revoke-alarm.md`](stuck-revoke-alarm.md) §4) is the reason to look
+   first, above all for a `passport_attest`.
+3. Run `npm run ops:cancel-stuck-lane -w packages/backend -- <row-id>` for
+   that row — or, on Railway (`railway ssh --environment <env> --service
+   @haven/backend`), `node packages/backend/dist/ops/cancel-stuck-lane.js
+   <row-id>`. The burned payload's owner retries on a fresh record:
+   `reconcileRevocation` submits a fresh revoke, and the deploy is
+   re-attempted at the next activation or erc7710 authorize. A sweep is not
+   retried automatically: its funds stay visible as stranded on the delegate
+   until the agent sweeps again.
+4. **Nothing re-sends this cancel.** The lane was already at the cap, and the
+   command says so in its output. If the cancel has not mined after three
+   minutes, which is what another RPC outage looks like, re-run the command
+   with the cancel row's id, which it prints.
+5. Rows above N whose own lanes also capped during the outage stay stuck after
+   N clears. Repeat from step 1 until the lowest live row mines on its own.
 
 > **Fixed by [#1745](https://github.com/d-hinders/Haven-AI/issues/1745) — this
 > procedure used to be more dangerous, and the history is worth keeping.**

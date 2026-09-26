@@ -2,12 +2,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import {
   CLIENT_COMPAT,
   evaluateClient,
+  upgradeCommandFor as upgradeCommandOnChannel,
   type ClientCompatEntry,
   type ClientCompatVerdict,
   type PublishedClientPackage,
 } from '@haven_ai/core'
 import { config } from '../config.js'
 import { AgentPaymentNextAction } from '../domain/agent-payment-taxonomy.js'
+import { releaseNotesUrl } from '../domain/release-notes.js'
 import { findSendIntentByIdempotencyKey } from '../infra/repositories/payment-intents.js'
 import { findX402IntentByIdempotencyKey } from '../infra/repositories/x402-authorizations.js'
 import { loadExecutionRailState, resolveExecutionRail } from '../rails/execution-rail.js'
@@ -132,22 +134,12 @@ export function findRefusalPoint(method: string, url: string | undefined): Clien
  * The command that updates `pkg`, on THIS deployment's channel. Derived from
  * `config.connectorChannel` — the same value `CONNECTOR_PACKAGE` in the setup
  * handout uses — never from a client's build-time channel, which would tell a
- * dev deployment's clients to install the production package.
+ * dev deployment's clients to install the production package. The command
+ * itself lives in `@haven_ai/core` (#3304) so the public release documents
+ * print the same one.
  */
 export function upgradeCommandFor(pkg: PublishedClientPackage, channel: string = config.connectorChannel): string {
-  switch (pkg) {
-    case '@haven_ai/sdk':
-      return `npm install @haven_ai/sdk@${channel}`
-    case '@haven_ai/cli':
-      return `npx -y @haven_ai/cli@${channel}`
-    // The signer and the local MCP runtime are installed BY the connector; a
-    // connector re-run reinstalls the pinned runtime (the signer's own
-    // version-mismatch guidance says the same).
-    case '@haven_ai/signer':
-    case '@haven_ai/mcp':
-    case '@haven_ai/connect':
-      return `npx -y @haven_ai/connect@${channel}`
-  }
+  return upgradeCommandOnChannel(pkg, channel)
 }
 
 export interface ClientUpdateHint {
@@ -158,7 +150,7 @@ export interface ClientUpdateHint {
   /** True when this client is below a set minimum and will be refused at its refusal points. */
   required: boolean
   upgrade_command: string
-  /** The public release notes page (#3304). Null until that page exists. */
+  /** The public release notes page (#3304). Typed nullable for clients built before it existed. */
   notes_url: string | null
 }
 
@@ -172,7 +164,7 @@ export function clientUpdateHint(verdict: ActionableVerdict): ClientUpdateHint {
     min_version: verdict.min_version,
     required: verdict.kind === 'below_min',
     upgrade_command: upgradeCommandFor(verdict.package),
-    notes_url: null,
+    notes_url: releaseNotesUrl(),
   }
 }
 

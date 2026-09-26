@@ -20,6 +20,7 @@ import {
   findReusablePendingDelegation,
   listActiveDelegations,
   listDelegationJsonByIds,
+  selectActiveDelegationByHash,
   selectDelegationForPayment,
   withDelegationBuildSlotLock,
 } from '../delegation-budgets.js'
@@ -50,6 +51,10 @@ interface DelegationSeed {
   budgetAtomic?: string
   createdAt?: string
   delegationJson?: string
+  /** #3329 review finding N5: override the identity/window for the by-hash lookup tests. */
+  delegationHash?: string
+  startDate?: number
+  expiresAt?: number
 }
 
 async function seedDelegation(seed: DelegationSeed): Promise<string> {
@@ -58,18 +63,20 @@ async function seedDelegation(seed: DelegationSeed): Promise<string> {
        (agent_id, chain_id, token_address, recipient_address, delegation_hash,
         delegation_json, version, status, budget_atomic, period_seconds,
         start_date, expires_at, created_at)
-     VALUES ($1, 84532, $2, $3, $4, $5, 1, $6, $7, 86400, 0, 9999999999,
+     VALUES ($1, 84532, $2, $3, $4, $5, 1, $6, $7, 86400, $9, $10,
              COALESCE($8::timestamptz, NOW()))
      RETURNING id`,
     [
       seed.agentId,
       seed.tokenAddress ?? USDC,
       seed.recipientAddress ?? null,
-      `0x${String(++hashCounter).padStart(64, '0')}`,
+      seed.delegationHash ?? `0x${String(++hashCounter).padStart(64, '0')}`,
       seed.delegationJson ?? '{"signed":"capability"}',
       seed.status ?? 'active',
       seed.budgetAtomic ?? '1000000',
       seed.createdAt ?? null,
+      seed.startDate ?? 0,
+      seed.expiresAt ?? 9999999999,
     ],
   )
   return result.rows[0].id
@@ -240,6 +247,53 @@ describeDb('delegation-budgets repository (#1221)', () => {
       [row!.delegation_hash],
     )
     expect(winner.rows[0].budget_atomic).toBe('222')
+  })
+})
+
+describeDb('selectActiveDelegationByHash (#3329 review finding N5)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  it('scopes strictly by agent — agent B cannot resolve agent A\'s hash', async () => {
+    const agentA = await seedUserAndAgent('A')
+    const agentB = await seedUserAndAgent('B')
+    const hash = `0x${String(++hashCounter).padStart(64, '0')}`
+    await seedDelegation({ agentId: agentA, delegationHash: hash })
+
+    expect(await selectActiveDelegationByHash(agentA, hash)).not.toBeNull()
+    expect(await selectActiveDelegationByHash(agentB, hash)).toBeNull()
+  })
+
+  it('excludes a not-yet-started grant — the on-chain TimestampEnforcer would revert it too', async () => {
+    const agent = await seedUserAndAgent()
+    const hash = `0x${String(++hashCounter).padStart(64, '0')}`
+    const future = Math.floor(Date.now() / 1000) + 3600
+    await seedDelegation({ agentId: agent, delegationHash: hash, startDate: future })
+
+    expect(await selectActiveDelegationByHash(agent, hash)).toBeNull()
+  })
+
+  it('excludes an already-expired grant', async () => {
+    const agent = await seedUserAndAgent()
+    const hash = `0x${String(++hashCounter).padStart(64, '0')}`
+    const past = Math.floor(Date.now() / 1000) - 10
+    await seedDelegation({ agentId: agent, delegationHash: hash, expiresAt: past })
+
+    expect(await selectActiveDelegationByHash(agent, hash)).toBeNull()
+  })
+
+  it('resolves a grant inside its window', async () => {
+    const agent = await seedUserAndAgent()
+    const hash = `0x${String(++hashCounter).padStart(64, '0')}`
+    await seedDelegation({ agentId: agent, delegationHash: hash })
+
+    const row = await selectActiveDelegationByHash(agent, hash)
+    expect(row?.delegation_hash).toBe(hash)
   })
 })
 

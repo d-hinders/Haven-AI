@@ -82,15 +82,19 @@ const TARGET_FILES = ['src/modules/x402/delegation-authorize.ts', 'src/routes/pa
  */
 const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: number; code: number; ledger: 'row' | 'skipped' }[]> = {
   'src/modules/x402/delegation-authorize.ts': [
-    { line: 195, code: 403, ledger: 'row' }, // 3009 funding-leg pre-check: over budget (#2706)
-    { line: 277, code: 502, ledger: 'row' }, // 3009 prepare catch: classified caveat revert (slice 1's writer)
-    { line: 316, code: 403, ledger: 'row' }, // 3009 no open budget delegation (slice 1's writer)
-    { line: 464, code: 403, ledger: 'row' }, // erc7710 no active budget delegation (#2945)
-    { line: 548, code: 403, ledger: 'row' }, // erc7710 pre-check: over budget (#2082)
-    { line: 618, code: 400, ledger: 'skipped' }, // #3117 caller/challenge skew — malformed request, allowlisted
-    { line: 678, code: 502, ledger: 'skipped' }, // settlement-delegation build failure — infrastructure, allowlisted
-    { line: 715, code: 429, ledger: 'skipped' }, // relayer sponsorship budget exhausted — capacity, allowlisted
-    { line: 719, code: 502, ledger: 'skipped' }, // delegate-account deploy failure — infrastructure, allowlisted
+    // #3329 shifted every line below: task-budget refusal-status consts,
+    // the resolveTaskBudgetOrRefusal helper (now resolving the parent by
+    // hash, review finding E), and the funding-leg/erc7710 task-budget
+    // resolution blocks were inserted above/between these sites.
+    { line: 292, code: 403, ledger: 'row' }, // 3009 funding-leg pre-check: over budget (#2706)
+    { line: 377, code: 502, ledger: 'row' }, // 3009 prepare catch: classified caveat revert (slice 1's writer)
+    { line: 416, code: 403, ledger: 'row' }, // 3009 no open budget delegation (slice 1's writer)
+    { line: 565, code: 403, ledger: 'row' }, // erc7710 no active budget delegation (#2945)
+    { line: 666, code: 403, ledger: 'row' }, // erc7710 pre-check: over budget (#2082)
+    { line: 736, code: 400, ledger: 'skipped' }, // #3117 caller/challenge skew — malformed request, allowlisted
+    { line: 799, code: 502, ledger: 'skipped' }, // settlement-delegation build failure — infrastructure, allowlisted
+    { line: 836, code: 429, ledger: 'skipped' }, // relayer sponsorship budget exhausted — capacity, allowlisted
+    { line: 840, code: 502, ledger: 'skipped' }, // delegate-account deploy failure — infrastructure, allowlisted
   ],
   'src/routes/payments.ts': [
     // #3271 shifted every line below by +3: `replayIntentBody`'s delegation
@@ -98,10 +102,14 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // direct-sign-context.ts`) with the new GET /:id/sign-context route,
     // and its doc comment grew by three lines to say so.
     // #3307 shifted every line below by +1: the `toCanonicalAddress` import.
-    { line: 442, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
-    { line: 466, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
-    { line: 758, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 785, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
+    // #3329 shifted every line below: task-budget imports, refusal-status
+    // consts, and the task-budget resolution block ahead of
+    // prepareDelegationPayment (review finding E widened it further —
+    // 404/409 refusals now return directly instead of falling through).
+    { line: 516, code: 502, ledger: 'row' }, // prepare catch: classified caveat revert (#2945)
+    { line: 540, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
+    { line: 833, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 860, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim — allowlisted
   ],
 }
 
@@ -120,7 +128,7 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
 const RAW_ALLOWLIST: Record<(typeof TARGET_FILES)[number], { line: number; code: number; reason: string }[]> = {
   'src/modules/x402/delegation-authorize.ts': [
     {
-      line: 126,
+      line: 206,
       code: 429,
       reason: 'per-agent hourly x402 cap — spend-velocity protection with its own retry_after_seconds contract; owner decision keeps it unrecorded (a rate_limited reason would be a migration-086 CHECK widening on its own)',
     },
@@ -130,14 +138,14 @@ const RAW_ALLOWLIST: Record<(typeof TARGET_FILES)[number], { line: number; code:
 
 const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; reason: string }[]> = {
   'src/modules/x402/delegation-authorize.ts': [
-    { line: 618, reason: '#3117 the caller\'s decomposed fields disagree with the paymentRequired it sent — a malformed request, not a guardrail refusal' },
-    { line: 678, reason: 'buildSettlementDelegation threw — child-construction infrastructure failure, not spend policy' },
-    { line: 715, reason: 'RelayerBudgetExceededError — the sponsorship budget is exhausted (capacity), not a guardrail refusal' },
-    { line: 719, reason: 'ensureHybridDeployed failed — delegate-account deploy infrastructure, not spend policy' },
+    { line: 736, reason: '#3117 the caller\'s decomposed fields disagree with the paymentRequired it sent — a malformed request, not a guardrail refusal' },
+    { line: 799, reason: 'buildSettlementDelegation threw — child-construction infrastructure failure, not spend policy' },
+    { line: 836, reason: 'RelayerBudgetExceededError — the sponsorship budget is exhausted (capacity), not a guardrail refusal' },
+    { line: 840, reason: 'ensureHybridDeployed failed — delegate-account deploy infrastructure, not spend policy' },
   ],
   'src/routes/payments.ts': [
     {
-      line: 785,
+      line: 860,
       reason: 'on-chain execution failed after claim — bundler/chain failure booked on the intent row by failSubmittedIntent, not a policy refusal',
     },
   ],

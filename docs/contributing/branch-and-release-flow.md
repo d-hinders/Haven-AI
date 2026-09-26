@@ -7,10 +7,11 @@ covers:
   - .github/workflows/release.yml
   - .github/workflows/promotion-digest.yml
   - scripts/ci/promotion-digest-metrics.mjs
+  - scripts/ci/standing-issue-upsert.mjs
   - scripts/release-bump.mjs
   - scripts/ci/qa-freshness.mjs
   - .github/workflows/publish.yml
-last-verified: "2026-09-14"
+last-verified: "2026-09-26"
 ---
 
 # Branch & release flow
@@ -181,6 +182,16 @@ the epic when its last sub-issue lands on `dev`.
 > (the dev → main promotion) won't re-close anything; the issues are already
 > closed from the dev-merge.
 
+> **Re-verification (#3305):** coupled because `scripts/release-bump.mjs` is in
+> its `covers:`. The bump gains one owned file, the client release data in
+> `@haven_ai/core`, which it regenerates from the
+> CHANGELOGs after stamping their headings. It refuses up front when that file
+> was hand-edited, and skips both steps for a snapshot. The release still happens
+> on a release branch into `dev` and publishes on the `dev → main` promotion, and
+> no version, pin, channel, dist-tag, build order or credential path moves.
+> Nothing in this document was made false by that change; it describes the flow
+> the bump sits in, not the bump's list of files.
+
 > **Re-verification (contract-doc count correction, 2026-09-17):** this doc is
 > coupled because `scripts/release-bump.mjs` is in its `covers:` and that script
 > was edited — its *printed* next-steps block said "the two contract docs" and
@@ -200,6 +211,42 @@ the epic when its last sub-issue lands on `dev`.
 > channel, build order or credential path moves, and this document names no
 > source constant, so nothing in it was made stale. `last-verified` not bumped,
 > for the reason in the note above.
+
+> **Re-verification (#3361, 2026-09-26):** coupled through
+> `scripts/ci/qa-freshness.mjs`, whose green-run query changes from "the newest
+> 30 run-level successes" to "every run-level success created within twice
+> `QA_FRESHNESS_HOURS`", with rows that cannot have run the harness dropped
+> before the job lookup and the lookups budgeted. This document states only
+> what `qa-freshness` requires — a green money-flow QA run covering the
+> promoted money-path code, bypass `qa-override` — and that requirement is
+> unchanged: the selector's rules, the freshness window and the coverage diff
+> are untouched. The change finds real greens the old window missed, or
+> refuses. In one narrow case it anchors differently at the same commit: when
+> a better-provenance `deployment_status` run lies beyond twice the window, a
+> younger admitted run at that commit (itself a passing money-flow run) is the
+> one whose age is judged. Nothing here was made stale. `last-verified` not bumped,
+> for the reason in the notes above.
+
+> **Re-verification (#3368, 2026-09-26):** coupled through
+> `scripts/ci/qa-freshness.mjs`, which loses a dead branch (the #1044
+> step-level completeness warning, which could never fire while the Coverage
+> completeness step fails its job) and gains precise refusals: a search cut
+> short by the lookup budget is reported as such instead of "no run found",
+> and an unusable `QA_FRESHNESS_HOURS` echoes the raw value. What
+> `qa-freshness` requires — a green money-flow QA run covering the promoted
+> money-path code, bypass `qa-override` — is unchanged, and every changed
+> path still refuses. Nothing here was made stale. `last-verified` not bumped,
+> for the reason in the notes above.
+
+> **Re-verification (#3337, 2026-09-26):** coupled through
+> `.github/workflows/dev-gate.yml`, where only a comment changes: the
+> `qa-override` escape hatch is no longer described as a quarantine for "a
+> wedged testnet flake" but by its documented rule (used only with a comment
+> stating what was verified out-of-band; see agent-qa.md and dev-environment.md
+> for the hotfix, stale-gate and red-run cases). The label,
+> its warning and the gate are unchanged, and this document's "bypass is
+> `qa-override`" still holds. `last-verified` not bumped, for the reason in the
+> notes above.
 
 ## Promotion to production (`dev → main`)
 
@@ -316,20 +363,37 @@ required on `main` only:
 - **Frontend browser smoke** — required on `main` since the same change.
 
 On top of those, `main` is the only branch still requiring the branch to be up
-to date, and the only one restricted to merge commits. The per-branch inventory
+to date (see the merge-behind decision below), and the only one restricted to merge
+commits. The per-branch inventory
 and the `gh api` command that produced it live in
 [`autonomous-pr-loop.md`](autonomous-pr-loop.md#one-time-github-setup-required)
 step 3 — read the numbers there, not here. The operational checklist a human
 runs alongside the gates is
 [`../operations/promoting-dev-to-main.md`](../operations/promoting-dev-to-main.md).
 
-**After every promotion, sync `main`'s merge commit back into `dev`.** The
-`main` ruleset enforces strict up-to-date status checks, so the NEXT promotion
-PR reports BEHIND — `dev` lacks exactly one commit, the previous promotion's
-merge commit — and cannot merge on approval alone. Direct pushes to `dev` are
-ruleset-declined; the sync travels as a PR carrying `git merge origin/main`
-(zero content change, history only) and MUST itself be MERGE-merged — a squash
-would flatten away exactly the commit being synced. First done as #1231.
+**No sync-back; promotions merge behind (owner decision, 2026-09-26).**
+`Dev gate` (ruleset 18134280) sets `strict_required_status_checks_policy: true`,
+so a promotion PR whose `dev` lacks `main`'s earlier promotion merge commits
+reports BEHIND and **cannot merge through the ordinary button**. The old cure,
+a merge-commit sync PR from `main` into `dev` after every promotion (#1231),
+cannot land since `Dev merge` (22449193) made `dev` squash-only on 2026-09-07,
+and direct pushes to `dev` are refused. The owner chose to drop it rather than
+loosen either ruleset: `dev` stays squash-only, `main` stays strict, and every
+promotion is merged **behind, by the owner**, from the web UI or the API. The
+GitHub mobile app offers no such merge. #3162 and #3325 (0.5.0-alpha.1) merged
+this way; `Dev gate` lists no bypass actors to an unauthenticated read (GitHub
+hides them from non-admins), so how GitHub admits it is unconfirmed. A
+migration-carrying promotion still needs its code-owner approval
+first. `dev` falls one more promotion merge behind `main` each time
+(`git rev-list --count origin/dev..origin/main`); that is expected, not drift,
+and never something to "fix" with `gh pr update-branch`.
+
+**A `hotfix/*` reaches `dev` by a back-port PR** (same decision): once the
+hotfix merges to `main`, cherry-pick its commits (`git cherry-pick -m 1 <merge-sha>` for the merge
+commit) onto a branch from `dev` and
+open an ordinary squash PR into `dev`, carrying the hotfix's `Closes #` — that
+merge is where the issue closes. Until it lands, `dev` runs without the fix and
+the next promotion may conflict with it.
 
 ## What's in prod vs. pending
 
@@ -350,10 +414,17 @@ would flatten away exactly the commit being synced. First done as #1231.
   go quiet while the backlog grows. `guard-freshness.yml` documents the same
   principle: a cron watching a cron dies with it.
 
-  It is **one long-lived issue, deliberately**: the workflow upserts by the
-  `promotion` label, so closing it just makes the next run open a duplicate under
-  a new number. It's **pinned** rather than recreated — a bot-maintained tracker
-  wants a stable identity, and pinning is what keeps it visible. Leave it open.
+  It is **one long-lived issue, deliberately**: the workflow upserts the issue it
+  selects by **author** (`app/github-actions` — the one attribute a human cannot
+  set) plus an **exact title** (`📦 Pending promotion: dev → main`, compared
+  exactly in `scripts/ci/standing-issue-upsert.mjs`, never by a tokenised
+  `in:title` search), so an issue a human labelled `promotion` is never adopted
+  or overwritten — a human label finds no bot-owned digest and the workflow
+  creates its own beside it (#3341; #3262 lost its body to this upsert 33+
+  times under the old label-first selection). Closing the digest just makes the
+  next run open a duplicate under a new number. It's **pinned** rather than
+  recreated — a bot-maintained tracker wants a stable identity, and pinning is
+  what keeps it visible. Leave it open.
 
 ## Workflows in this flow
 

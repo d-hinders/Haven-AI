@@ -83,6 +83,14 @@ export interface PaymentRequest {
    * second approval. Same contract as /machine-payments/send. Max 128 chars.
    */
   idempotencyKey?: string
+
+  /**
+   * #3329: redeem against this open task budget's child delegation instead
+   * of the agent's budget delegation directly — `[task child, budget]`. The
+   * backend refuses (404/409) when the id is unknown, not open, or its
+   * token/recipient/parent disagree with this request.
+   */
+  taskBudgetId?: string
 }
 
 export interface SignData {
@@ -319,6 +327,16 @@ export interface X402AuthorizationOptions {
    * fetch.
    */
   delegateAddress?: string
+  /**
+   * #3329: redeem against this open task budget's child delegation for the
+   * funding leg / erc7710 settlement child instead of the agent's budget
+   * delegation directly. Same refusal contract as `PaymentRequest.taskBudgetId`.
+   * On the EIP-3009 funding leg (`authorizeX402`, `fetch()`, `payX402Quote()`)
+   * a task budget's recipient pin is compared with the agent's own delegate
+   * wallet, so a merchant-pinned task budget is refused there
+   * (`task_budget_recipient_mismatch`); it pays through erc7710 only (#3378).
+   */
+  taskBudgetId?: string
 }
 
 /**
@@ -832,6 +850,166 @@ export interface HavenAgentSummary extends HavenAgent {
    */
   spend_authority_readiness: HavenAgentReadiness
   allowances: HavenAgentAllowanceSummary[]
+  /**
+   * #3329: open, unexpired task budgets — a derived VIEW, same discipline as
+   * {@link HavenAgentSummary.allowances}. Populated from
+   * `GET /task-budgets?status=open`; empty (never throws) against a backend
+   * that predates #3329's route (a 404 there is treated as "no task
+   * budgets", not a fetch failure).
+   */
+  taskBudgets: HavenTaskBudgetSummary[]
+}
+
+/** #3329: task-budget lifecycle status, as the wire names it. */
+export type HavenTaskBudgetStatus = 'pending' | 'open' | 'closing' | 'closed'
+
+/** #3329: the wire shape of `components.schemas.TaskBudget` (snake_case). */
+export interface RawTaskBudget {
+  id: string
+  agent_id: string
+  chain_id: number
+  token_address: string
+  recipient_address: string | null
+  parent_delegation_hash: string
+  delegation_hash: string
+  label: string | null
+  max_atomic: string
+  status: HavenTaskBudgetStatus
+  expires_at: number
+  is_expired: boolean
+  created_at: string
+  opened_at: string | null
+  closed_at: string | null
+  close_tx_hash: string | null
+}
+
+/** #3329: `RawTaskBudget`, camelCased — what every SDK task-budget method returns. */
+export interface HavenTaskBudget {
+  id: string
+  agentId: string
+  chainId: number
+  tokenAddress: string
+  recipientAddress: string | null
+  parentDelegationHash: string
+  delegationHash: string
+  label: string | null
+  maxAtomic: string
+  status: HavenTaskBudgetStatus
+  expiresAt: number
+  isExpired: boolean
+  createdAt: string
+  openedAt: string | null
+  closedAt: string | null
+  closeTxHash: string | null
+}
+
+/**
+ * #3329: the condensed row `getAgentSummary()` carries per open, unexpired
+ * task budget — enough to render a "reserved by open task budgets" line and
+ * a task-budget list without a second read.
+ */
+export interface HavenTaskBudgetSummary {
+  id: string
+  label: string | null
+  tokenAddress: string
+  maxAtomic: string
+  maxDisplay: string
+  recipientAddress: string | null
+  expiresAt: number
+}
+
+/** #3329: `POST /task-budgets` and `POST /task-budgets/:id/close` — the sign-then-submit envelope. */
+export interface HavenTaskBudgetSignData {
+  signature_scheme: 'eip712_delegation' | 'eip712_userop'
+  typed_data: Record<string, unknown>
+}
+
+export interface OpenTaskBudgetResult {
+  taskBudget: HavenTaskBudget
+  signData: HavenTaskBudgetSignData
+  nextAction: string
+  instructions: string
+}
+
+export interface CloseTaskBudgetResult {
+  taskBudget: HavenTaskBudget
+  status: HavenTaskBudgetStatus
+  /** Present only when the close needed a signature (an OPEN, unexpired budget). */
+  signData?: HavenTaskBudgetSignData
+  nextAction?: string
+}
+
+export interface SubmitTaskBudgetResult {
+  taskBudget: HavenTaskBudget
+  status: HavenTaskBudgetStatus
+  /** Present only once the close UserOp lands (`status === 'closed'` from `closing`). */
+  closeTxHash?: string
+}
+
+/** #3329: `GET /task-budgets/:id/sign-context` — `purpose: 'open'` shape. */
+export interface TaskBudgetOpenSignContext {
+  taskBudgetId: string
+  purpose: 'open'
+  taskSignContextVersion: number
+  typedData: Record<string, unknown>
+  expected: {
+    delegateAccount: string
+    chainId: number
+    tokenAddress: string
+    maxAmountAtomic: string
+    recipientAddress: string | null
+    expiresAt: number
+    parentDelegationHash: string
+  }
+}
+
+/** #3329: `GET /task-budgets/:id/sign-context` — `purpose: 'close'` shape. */
+export interface TaskBudgetCloseSignContext {
+  taskBudgetId: string
+  purpose: 'close'
+  taskSignContextVersion: number
+  typedData: Record<string, unknown>
+  userOperation: Record<string, unknown>
+  userOpHash: string
+  expected: {
+    delegateAccount: string
+    chainId: number
+    delegationHash: string
+  }
+}
+
+export type TaskBudgetSignContext = TaskBudgetOpenSignContext | TaskBudgetCloseSignContext
+
+// ── Task-budget wire responses ──────────────────────────────────────────
+
+export interface RawOpenTaskBudgetResponse {
+  task_budget: RawTaskBudget
+  sign_data: HavenTaskBudgetSignData
+  next_action: string
+  instructions: string
+}
+
+export interface RawSubmitTaskBudgetResponse {
+  task_budget: RawTaskBudget
+  status: HavenTaskBudgetStatus
+  close_tx_hash?: string
+}
+
+export interface RawCloseTaskBudgetResponse {
+  task_budget: RawTaskBudget
+  status: HavenTaskBudgetStatus
+  sign_data?: HavenTaskBudgetSignData
+  next_action?: string
+}
+
+export interface RawTaskBudgetSignContext {
+  task_budget_id: string
+  purpose: 'open' | 'close'
+  task_sign_context_version: number
+  typed_data: Record<string, unknown>
+  user_operation?: Record<string, unknown>
+  user_op_hash?: string
+  expected: Record<string, unknown>
 }
 
 /**
@@ -887,8 +1065,6 @@ export interface HavenPaymentReceipt {
    * receipt analogue, because no protocol means no evidence row.
    */
   source: string
-  /** @deprecated (#3134) twin of {@link source}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
-  rail: string
   /**
    * #3134: the evidence row's recorded proof status, under the transactions
    * feed's name. Same name, different nullability: `string` here because a
@@ -896,8 +1072,6 @@ export interface HavenPaymentReceipt {
    * LEFT JOIN to none (#3132) — do not share a non-null-asserting helper.
    */
   paymentProofStatus: string
-  /** @deprecated (#3134) twin of {@link paymentProofStatus}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
-  proofStatus: string
   /**
    * @deprecated (#2998) meaning depends on the settlement scheme — the
    * account → delegate funding transaction on eip3009, the (only) settlement
@@ -917,12 +1091,8 @@ export interface HavenPaymentReceipt {
   chainId: number
   /** #3134: the paid resource, under the transactions feed's protocol-prefixed name (`string | null` there; a receipt always has one). */
   x402ResourceUrl: string
-  /** @deprecated (#3134) twin of {@link x402ResourceUrl}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
-  resourceUrl: string
   /** #3134: the merchant paid, under the transactions feed's protocol-prefixed name. */
   x402MerchantAddress: string | null
-  /** @deprecated (#3134) twin of {@link x402MerchantAddress}; removed once all three release clocks have moved — see `mapPaymentReceipt`. */
-  merchantAddress: string | null
   payerAddress: string
   /** #2960: additive alongside `payerAddress` above (`parties.treasury_account` only). */
   parties?: PaymentParties

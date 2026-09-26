@@ -14,7 +14,7 @@ Accept one source:
 - no argument or `label=<name>`: choose the lowest-numbered open issue with the label, defaulting to `code-quality`;
 - `epic=#<n>`: choose the lowest-numbered open sub-issue;
 - a specified ready issue: ship that issue;
-- a quoted freeform task: first use [new-task](../new-task/SKILL.md) (including its mandatory § *Issue review*), add `code-quality`, then ship the created issue.
+- a quoted freeform task: first use [new-task](../new-task/SKILL.md) (including its mandatory § *Issue review*), add `code-quality`, then ship the created issue. The label is not what makes the issue ready. It is there so that a run that stops partway leaves the issue in the loop's queue rather than orphaned.
 
 **Respect dependencies before number order.** An issue is BLOCKED — skip it and take the next candidate — when any of these hold:
 
@@ -1116,11 +1116,11 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   before #2632, when the armed PR sat BEHIND indefinitely until a manual
   `gh pr update-branch <pr>`. On `dev` that no longer matters: with the up-to-date
   rule off, an armed PR in `BEHIND` merges on its own checks and needs nothing from
-  you. The old behaviour still applies to a **promotion PR into `main`**, which is
-  still strict — update that branch yourself and let the re-run checks carry the
-  merge (the post-promotion sync-back in
-  [`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)
-  § *Promotion to production* exists for exactly this reason).
+  you. A **promotion PR into `main`** is still strict, and you cannot update it:
+  its head is `dev`, which refuses direct pushes. By owner decision it merges
+  behind, by the owner, with no sync-back
+  ([`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)
+  § *Promotion to production*) — say so, never run `gh pr update-branch` on it.
 
 ## Closeout
 

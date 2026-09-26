@@ -13,7 +13,7 @@ import { toolSchemas, type SignerToolName } from './tools.js'
  * registered tool has one.
  */
 export const toolSummaries: Record<SignerToolName, string> = {
-  haven_sign: 'signs one Haven-prepared payment (a direct-payment UserOp from your own account whose only call redeems a delegation made to it, or an x402 funding intent against a Haven-signed context)',
+  haven_sign: 'signs a Haven-prepared payment, task-budget open, or task-budget close (a UserOp from your own account whose only call redeems a delegation made to it, directly or through a self-delegated task-budget child, or an x402 funding intent against a Haven-signed context)',
   haven_x402_sign_header: 'builds and signs the EIP-3009 merchant payment header for an x402 payment',
   haven_sign_x402: 'the two above in one call: funding payload + merchant header',
   haven_sign_sweep_delegate: 'signs a Haven-prepared gasless sweep of stranded funds back to your own account',

@@ -3,8 +3,10 @@ owner: "@d-hinders"
 status: current
 contract: true
 covers:
+  - scripts/ci/rpc-conformance.mjs
   - .github/workflows/dev-gate.yml
   - .github/workflows/qa-dev.yml
+  - scripts/ci/qa-freshness.mjs
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
@@ -21,7 +23,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/modules/accounting/api-key-flow.ts
   - packages/backend/src/routes/accounting-webhooks.ts
-last-verified: "2026-09-24"
+last-verified: "2026-09-26"
 ---
 
 # Dev environment
@@ -252,6 +254,15 @@ Isolation rules that are non-negotiable for a payments product:
   wrote through proves only that the backend agrees with itself. The backend
   logs a boot warning when its variable is unset, and the harness prints which
   endpoint CLASS it is observing through (never the URL) in its run preamble.
+  **Before either variable (or a `*_FALLBACK`) points at a new endpoint, run
+  `node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532`
+  (#3336) — a required step.** Every line must be ✓: the chain id, a JSON-RPC batch of 10 (the harness's
+  ethers providers batch up to 100 calls per ~10 ms), the `pending` block tag,
+  `eth_sendRawTransaction` accepted as a method (a zero-balance throwaway key,
+  refused for funds, never mined) and a burst of 20 without a 429. dRPC's free
+  plan, the September 2026 dev primary, fails the batch and the `pending` tag;
+  the shared public node can fail the burst — it is what a dedicated endpoint
+  replaces.
 - **RPC failover (#3255)** — the backend's viem clients (delegation-rail
   prepare, account deploy checks, caveat-enforcer and budget reads) fail over
   in order: `RPC_URL_BASE` / `RPC_URL_BASE_SEPOLIA`, then the optional
@@ -363,7 +374,12 @@ Isolation rules that are non-negotiable for a payments product:
   (`npm run check:route-modules` and the backend suite both fail on a stale
   table). New modules are born ENFORCED with their own `enforcedModules`
   entry — #3164's `routes/agent-organizations.ts` (its own `/organizations`
-  prefix) followed the #3167 precedent exactly. The `lint:request-schemas`
+  prefix) followed the #3167 precedent exactly, and #3329's two new modules
+  did the same — the owner-auth `routes/agent-task-budgets.ts` (one GET under
+  the `/agents` prefix) and the agent-auth, money-path
+  `routes/task-budgets.ts` (its own `/task-budgets` prefix): a module with no
+  installed caller has no old shape to shadow for, so it is enforced from its
+  first commit even though it moves money. The `lint:request-schemas`
   gate keys its baseline entries with the
   same string, so the gate and the runtime agree about which modules are
   still shadowed — with one stated limit, closed in #3030: the gate reads a
@@ -530,6 +546,21 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > does not — the provider refuses to dispatch to private/loopback addresses
   > by policy.
 
+  > **Re-verified #3345 (2026-09-26):** the PR's `index.ts` change replaces
+  > the inline `sendCatalogOpsAlert` body with a call to the shared ops-alert
+  > sender (`infra/delegate-alert-webhook.ts`, also used by the relayer and
+  > delegate balance monitors — see `docs/operations/catalog-ingestion.md`
+  > for the alarm semantics) and hands the ingest loop's alerts to
+  > `deliverCatalogAlerts`, so a failed webhook re-arms the alarm instead of
+  > being dropped. Comment-only inside the covered claims: the function
+  > previously swallowed every failure silently. No new env variable (the
+  > sender reads the existing `DELEGATE_ALERT_WEBHOOK_URL`), no route, plugin
+  > registration, boot-order or request-validation change — the new
+  > `catalog*` alert path registers nothing and the route-module table is
+  > untouched. The doc's other `index.ts` claims (boot flags through
+  > `parseBooleanFlag`, the `installRequestValidation` options, the
+  > non-money-route enumeration) were re-read against this tree and hold.
+
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 
 The dev demo-merchant advertises **EIP-3009 only** by default. The experimental
@@ -688,3 +719,56 @@ project owner — collaborators have Viewer access, not env-var write access.
 > a malformed value. The shadow/enforce semantics, `enforcedModules` and the
 > generated route-module table are unchanged (no route file added or moved).
 > Nothing else in this file's coverage was touched; this note is the only edit.
+
+> **Re-verified #3294 (2026-09-25):** `index.ts` gains two wiring lines and one
+> sweep phase, none of them route work. The wiring: `setAnchorUidRepair` joins
+> the other passport seams beside `setRevocationProbe` (it degrades to the
+> pre-#3294 submit when unwired, so no boot path changes), and
+> `repairAnchoredUids` is imported from the passport barrel. The phase: inside
+> the existing leader-gated passport sweep, a `phase('anchor-repair', …)` runs
+> BETWEEN the issuance retry phase and the revocation phase — a `limit`ed,
+> `updated_at`-paced batch (`repairAnchoredUids()`), so a repair-triggered
+> revoke shares the one relayer lane through the revocation sweep's ordinary
+> backoff rather than stampeding it; phase isolation keeps its failure away
+> from the safety-critical revocation half, as for issuance. No route file is
+> added or moved, `enforcedModules` is untouched, and the shadow/enforce
+> semantics this document describes are unchanged. Nothing else in this file's
+> coverage was touched; this note and the `last-verified` date are the only
+> edits.
+
+> **Re-verified #3338 (2026-09-26):** `qa-dev.yml`'s money-flow step keeps
+> its in-step retry (`QA_MAX_ATTEMPTS`, default 2) unchanged; each attempt now
+> tees its own `qa-run.attempt-<i>.log` and `qa-run.log` is copied from the
+> final attempt, so the blocking Coverage completeness step judges exactly
+> what it judged before. A pass after a failed attempt now adds a job-summary
+> block (URLs and long key-labelled values scrubbed) and a notice (agent-qa.md § Flake budget). The
+> run and its `money-flow` job still conclude `success`, so the promotion
+> freshness gate described above selects the same runs as before. Nothing else
+> in this file's coverage was touched; this note is the only edit.
+
+> **Re-verified #3361 (2026-09-26):** the promotion freshness gate described
+> above now reads every run-level qa-dev success created within twice
+> `QA_FRESHNESS_HOURS`, instead of the newest 30. Rows whose run name names
+> another deployment environment or state, or that finished in under 60 s, are
+> dropped before the job lookup, and the lookups are budgeted. The rules that
+> select the anchoring run — SHA ancestry and the `money-flow` job's
+> conclusion (#2404) — and the recency and coverage checks are unchanged, so
+> every statement above still holds. The `qa-dev.yml` edit is a comment. Nothing
+> else in this file's coverage was touched; this note is the only edit.
+
+> **Re-verified #3368 (2026-09-26):** `qa-freshness.mjs` drops the #1044
+> step-level completeness warning, which could not fire: the Coverage
+> completeness step fails the `money-flow` job, which the gate already
+> refuses. It also reports a search cut short by its lookup budget, and an
+> unusable `QA_FRESHNESS_HOURS`, as their own refusals. The `qa-dev.yml` edits
+> are comments. The statements above — a skipped leg fails the run, the gate
+> selects by SHA ancestry and the `money-flow` job — still hold. Nothing else
+> in this file's coverage was touched; this note is the only edit.
+
+> **Re-verified #3337 (2026-09-26):** `qa-dev.yml`'s failure step now passes
+> the money-flow attempt logs to the standing-issue reporter, which
+> records a failure class and signature in the standing `qa-failure` issue, and
+> the retry-budget comment no longer calls a failed attempt a "transient testnet
+> RPC hiccup". Triggers, gating, the retry count and the freshness gate
+> described above are unchanged. Nothing else in this file's coverage was
+> touched; this note is the only edit.

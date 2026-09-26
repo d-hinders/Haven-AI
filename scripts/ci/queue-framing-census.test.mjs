@@ -117,6 +117,8 @@ const GUARDED_FILES = [
   // the completeness scan deliberately covers non-test source only, exactly
   // as for the #2809–#2811 siblings.
   'packages/mcp-server/src/tools/paid-mcp-completion.ts',
+  // #3329 — the task-budget capability module (open / close, signer hand-off prose)
+  'packages/mcp-server/src/tools/task-budgets.ts',
   'packages/mcp-server/src/tools/support/cap-price.ts',
   'packages/mcp-server/src/tools/support/catalog-entry.ts',
   'packages/mcp-server/src/tools/support/errors.ts',

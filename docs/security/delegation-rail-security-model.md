@@ -8,9 +8,12 @@ covers:
   - packages/sdk/src/redemption-guard.ts
   - packages/sdk/src/direct-payment-guard.ts
   - packages/sdk/src/settlement-child.ts
+  - packages/sdk/src/task-budget-guards.ts
   - packages/sdk/src/userop-binding.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402-erc7710.ts
+  - packages/sdk/src/x402-funding-leg.ts
+  - packages/sdk/src/delegate-sweep.ts
   - packages/signer/src/tools.ts
   - packages/signer/src/core.ts
   - packages/backend/src/middleware/auth.ts
@@ -117,7 +120,7 @@ dropped.
 | 7 | UserOps submitted with caller-provided signature only | Redemptions submitted with **client-signed** UserOp/tx only; the backend constructs and relays, never signs | CI (the #737 pattern, delegation flavor) |
 | 8 | Session-config modules signer-free | Delegation lifecycle modules (grant/replace/revoke construction, #827/#828) are **signer-free and relayer-free**: they build payloads and typed data, never sign | CI (module import/AST scan) |
 | 9 | Bundler credential read in exactly one place | Unchanged (one choke point; `redactVendorSecrets` on every error surface) | CI (existing) |
-| 9a | *(new, #1061)* **Redaction covers the shapes vendors actually use** | `redactVendorSecrets` catches `apikey=`/`api_key=`/`api-key=`/`key=`/`token=`/`secret=` query params, URL basic-auth (`https://user:pass@host`), and key-in-path segments (`/rpc/<token>`, `/v2/<token>`) — not just the one `apikey=` spelling | Unit tests on the redactor |
+| 9a | *(new, #1061)* **Redaction covers the shapes vendors actually use** | `redactVendorSecrets` catches `apikey=`/`api_key=`/`api-key=`/`key=`/`token=`/`secret=` query params, URL basic-auth (`https://user:pass@host`), and key-in-path segments (`/rpc/<token>`, `/v2/<token>`) — not just the one `apikey=` spelling. Since #3371 an RPC URL's key does not reach those patterns at all: the failover transport (`infra/chain/rpc-transport.ts`) scrubs viem's request errors in place, deriving the key-like segments from every configured endpoint URL (dRPC path, `dkey=`, `/v3/`, `/v2/`, QuickNode) | Unit tests on the redactor; transport scrub tests on `rpc-transport` |
 | 10 | Paymaster has no value-transfer surface | Unchanged — sponsorship pays gas only; proven in the spike (agent key held zero ETH and zero USDC) | CI + spike evidence |
 | 11 | *(new)* **No upgrade path from Haven code** | Haven's codebase contains no call site that can reach the account's UUPS upgrade function; upgrade authority = account signers only | CI (ABI/selector scan for `upgradeToAndCall` against DeleGator targets) |
 | 12 | *(new)* **Delegations are client-signed only** | No Haven code path calls `signDelegation`/EIP-712 delegation signing with a server-held key (pilot scripts with throwaway testnet keys excepted, path-scoped) | CI (import + call-site scan) |
@@ -1367,14 +1370,17 @@ signer imports:
     HybridDeleGator for the delegate key, derived offline by CREATE2 and
     pinned to the MetaMask kit;
   - its `callData` is a single `execute` to the DelegationManager calling
-    `redeemDelegations` with exactly one delegation: a single grant made to
-    this account by a different account, in `SingleDefault` mode, canonically
-    encoded at every level;
-  - **on the signer's x402 funding leg (#3281)**, its single execution is a
-    `transfer` of the quoted amount of the quoted token to this key's own
-    delegate EOA. That address is local, not from Haven. The SDK's own
-    funding leg (`signForData`) does not run this recipient pin yet; see the
-    epic's notes.
+    `redeemDelegations` with exactly one permission context holding either a
+    single grant made to this account by a different account, or — since
+    #3329 — a two-link chain whose leaf is a task-budget child this account
+    delegated to itself under that grant; in `SingleDefault` mode,
+    canonically encoded at every level;
+  - **on an x402 funding leg**, its single execution is a `transfer` of the
+    quoted amount of the quoted token to this key's own delegate EOA. That
+    address is local, not from Haven. The signer checks it on its x402 arm
+    (#3281), against the Haven-signed expected context's asset and amount.
+    The SDK's own funding leg (`signForData`, #3375) checks it against the
+    402 option being paid, never against the `/x402` response.
 - **An erc7710 settlement child `Delegation`**, verified against an
   expectation Haven cannot rewrite: payee, amount, token, chain, and an expiry
   of at most 600 seconds. It must not be a ROOT delegation, and it must be
@@ -1383,6 +1389,37 @@ signer imports:
   402 (payee, amount, token, chain, advertised facilitators).
 - **The EIP-3009 merchant header**, against the recorded binding, and **the
   sweep home**, against Haven's recovery binding (see residual 2).
+- **A task-budget child `Delegation` (#3329)** — a self-delegation: delegator
+  AND delegate are this key's own delegate account, authority is the agent's
+  budget delegation (never ROOT), an `erc20TransferAmount` cap on the expected
+  token, a `timestamp` caveat of at most 24 hours, and an `allowedCalldata`
+  payee pin exactly when a recipient was requested. Verified by
+  `assertOwnTaskChild` (`task-budget-guards.ts`) against the Haven-served
+  sign-context, which the guard treats as untrusted input the way it treats
+  the settlement child's. It is a different typed-data class from the
+  settlement child, verified by a different function: a task child is refused
+  by `assertOwnSettlementChild` outright, because that verifier now refuses
+  any child whose delegate is its own delegator (a self-delegation is never a
+  settlement child, whatever its amount, payee or window), and a settlement
+  child is refused by `assertOwnTaskChild`; both directions are pinned by
+  tests, including a short-lived self-delegated child that matches a
+  settlement expectation in every other field. A self-delegated child can only **narrow** what the
+  account may already redeem under its budget, never widen it.
+- **A `disableDelegation` `PackedUserOperation` for one of those children
+  (#3329)** — the same sender, chain and single-`execute`-to-the-
+  DelegationManager rules as a redemption, but the inner call is
+  `disableDelegation` of a delegation whose delegator and delegate are both
+  this account and whose hash Haven's sign-context for that task budget names
+  (`assertOwnTaskBudgetCloseUserOp`) — the guard re-derives the hash from the
+  bytes in the UserOp and refuses a mismatch, so the context cannot point it
+  at a different delegation.
+  Authority-reducing only: it cannot disable the owner's budget delegation
+  (a different delegator) or anything not self-granted.
+- **The redemption allowlist admits one more chain (#3329):** exactly two
+  links where the leaf is a self-delegation by this account and the parent is
+  a grant to this account from a different account — the task-budget shape —
+  in addition to the single grant. An empty chain, a longer chain, a leaf
+  delegated by anyone else and a leaf delegated *to* anyone else stay refused.
 
 The signer's x402 arm (#3281) signs only the first two shapes, however validly
 Haven's binding key declared anything else. Every refusal on the shape checks,
@@ -1391,6 +1428,10 @@ the settlement child's (malformed children included), is
 hash does not match. A settlement network the signer cannot map keeps its own
 `SIGNING_ERROR`, which asks for a signer update. In every
 case nothing is signed, audited or submitted.
+In the SDK, a funding-leg refusal (#3375) throws `HavenTypedDataRefusedError`
+before the funding leg is signed or posted to `/sign`. The EIP-3009 merchant
+header, minted in-process just before (#1521), is discarded and never returned;
+the funding intent stays `pending_signature` until it expires.
 The core's `signDelegationTypedData`, `HavenClient.sign(hash)` and the SDK's
 exported signing primitives stay verbatim, for embedders; the checks are in
 `haven_sign`, `signX402FundingTypedData` and `signForData`.
@@ -1401,17 +1442,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
    prepare payments the caveats allow, because preparing payments is what the
    agent delegated to Haven. For a pinned budget that means only the pinned
    recipient. For an open budget it means any recipient, up to the full period
-   budget, every period, until expiry or revocation. #3281's recipient pin
-   narrows this on the signer's x402 funding leg only: under a compromised
-   binding key, that leg can move budget only into the agent's own EOA. A
-   correctly shaped direct payment (`haven_sign` without an x402 context)
-   still pays whatever recipient the budget allows, by design.
+   budget, every period, until expiry or revocation. The funding-leg recipient
+   pin narrows this for the EIP-3009 bridge, on the signer's x402 arm (#3281)
+   and on the SDK's own funding leg (#3375): under a compromised Haven, a
+   funding leg can move budget only into the agent's own EOA. A correctly
+   shaped direct payment (`haven_sign` without an x402 context, or the SDK's
+   `pay()`) still pays whatever recipient the budget allows, by design.
 2. **Delegate-EOA balances.** The bridge's merchant header and
    `haven_sign_sweep_delegate` sign token authorisations over the delegate
    EOA's own transient balance. With no local account address configured, the
    sweep destination rests on Haven's binding signature alone, so a
-   compromised binding key could redirect such a balance. This is bounded by
-   the hot-delegate discipline (transient balances, sweep).
+   compromised binding key could redirect such a balance. The SDK's
+   `sweepDelegate()` has the same shape: it sends the delegate balance to
+   `getAgent().accountAddress`, which Haven's API serves (#3375 names it; it
+   does not close it). This is bounded by the hot-delegate discipline
+   (transient balances, sweep).
 
 **The blast-radius questions #3272 asked, and where each now stands:**
 
@@ -1438,11 +1483,14 @@ exported signing primitives stay verbatim, for embedders; the checks are in
     function selector.
 
   The allowlist therefore decodes the redemption. It must carry exactly one
-  permission context holding exactly one delegation: a grant to this signer's
-  own account from a different account, in `SingleDefault` mode, with every
-  level canonically encoded. An empty chain, a multi-link chain, a
-  self-granted delegation and a delegation to another account are each
-  refused, and each case is pinned by a test. The
+  permission context holding either exactly one delegation — a grant to this
+  signer's own account from a different account — or, since #3329, that
+  grant with a single self-delegated task-budget child in front of it, in
+  `SingleDefault` mode, with every level canonically encoded. An empty chain,
+  a chain of three or more links, a two-link chain whose leaf is not
+  delegated by this account to itself, a self-granted delegation standing
+  alone and a delegation to another account are each refused, and each case
+  is pinned by a test. The
   treasury was never exposed beyond the caveats either way: budget, recipient
   pin and expiry are enforced by the DelegationManager on redemption. A
   captured delegate account would still have been able to redeem the budget
@@ -1461,7 +1509,16 @@ exported signing primitives stay verbatim, for embedders; the checks are in
   notes (`packages/signer/CHANGELOG.md`).
 
 > **Scope of this section:** written for #3272 and rewritten once for epic
-> #3284 (#3283, #3281) against the signer and SDK at those changes. The rest
+> #3284 (#3283, #3281) against the signer and SDK at those changes; #3375
+> (the epic's third slice) then updated the funding-leg pin and the two
+> residuals above. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3378, 2026-09-26):** `client.ts`'s `payX402Quote`
+> now forwards its options (`taskBudgetId`) to `authorizeX402`, as `fetch()`
+> already did. No signing check moves: the funding leg still runs the #3271
+> binding, the allowlist (which accepts the #3329 two-link task chain) and the
+> #3375 recipient pin, whichever delegation the backend redeems under. The rest
 > of this document was not re-read for it, and `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
@@ -1529,3 +1586,31 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > nothing. Nothing this document claims about authority, custody or signing
 > changes. Scope of this note: that comment. Nothing else in this document
 > was re-verified.
+>
+> **Re-verified unchanged (#3317, 2026-09-25, funding-endpoint degraded read):**
+> this doc is coupled through `routes/user-accounts.ts`, whose funding endpoint
+> now JOINS the #3295 degraded read instead of deferring it: a failed balance
+> leg serves the last-known balance marked stale (or `'0'` marked
+> `unavailable` when never read), the response carries the additive optional
+> `balanceFreshness` marker, and `funded` is computed only from known values —
+> an RPC blip can no longer report a funded account as unfunded. No handler,
+> query, signing path or refusal moves; the endpoint still reads balances with
+> the same ethers client, constructs no transfer and grants no authority, and
+> budget/recipient/expiry remain enforced on-chain by the caveat enforcers.
+> Nothing this document claims about authority, custody or signing changes.
+> Scope of this note: that endpoint's response shape. Nothing else in this
+> document was re-verified.
+>
+> **Re-verified unchanged (#3296, 2026-09-26, snapshot skip on unpriceable reads):**
+> this doc is coupled through `infra/repositories/dashboard.ts`, whose
+> `insertPortfolioSnapshot` the dashboard now calls for the first CLEAN load of
+> the day only: a read the accounts module marks unpriceable (#3296, reusing
+> #3292's degraded-result marker) skips the insert and logs the skip with the
+> user id only, so a degraded figure can no longer stand as a day's baseline.
+> The repository function, its SQL and its DO NOTHING conflict arm are
+> untouched; a skipped day simply has no row. No handler, query, signing path
+> or refusal moves; the snapshot decides no spend — budget, recipient and
+> expiry remain enforced on-chain by the caveat enforcers. Nothing this
+> document claims about authority, custody or signing changes. Scope of this
+> note: which dashboard load writes the daily row. Nothing else in this
+> document was re-verified.

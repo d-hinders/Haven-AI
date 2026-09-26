@@ -1013,6 +1013,119 @@ describe('haven login — device flow', () => {
   })
 })
 
+describe('wallets balances — the balanceFreshness renderings (#3318)', () => {
+  // Fixture responses as the backend serves them since #3295/#3317: the
+  // marker is ABSENT on a clean entry, `{ status: 'stale', asOf }` when the
+  // served figure is the last-known balance, `{ status: 'unavailable' }`
+  // when the '0' is a filler for a token never read.
+  const SAFES = { accounts: [{ id: 's1', account_address: '0xsafe', chain_id: 84532, name: 'Wallet', is_default: true }] }
+  const CLEAN = {
+    balances: [
+      { symbol: 'ETH', formatted: '1.5', balance: '1500000000000000000' },
+      { symbol: 'USDC', formatted: '120.5', balance: '120500000' },
+    ],
+  }
+  const STALE = {
+    balances: [
+      { symbol: 'ETH', formatted: '25', balance: '25000000000000000000', balanceFreshness: { status: 'stale', asOf: '2026-09-25T18:00:00.000Z' } },
+      { symbol: 'USDC', formatted: '120.5', balance: '120500000' },
+    ],
+  }
+  const UNAVAILABLE = {
+    balances: [
+      { symbol: 'ETH', formatted: '0', balance: '0', balanceFreshness: { status: 'unavailable' } },
+      { symbol: 'USDC', formatted: '120.5', balance: '120500000' },
+    ],
+  }
+
+  function balancesApi(balances: unknown) {
+    // Keyed WITH the query string, as the connect tests do: the fake falls
+    // back to the path-only key for GETs, and mocking the real URL keeps
+    // `chain_id` load-bearing in the test as well as in production.
+    return fakeApi({
+      'GET /user/accounts': SAFES,
+      'GET /balances/0xsafe?chain_id=84532': balances,
+    })
+  }
+
+  it('a clean entry prints exactly as before — no marker, no hint', async () => {
+    const { deps, out } = harness({ makeApi: () => balancesApi(CLEAN) })
+    const code = await run(['wallets', 'balances'], deps)
+    expect(code).toBe(0)
+    const rendered = out.join('\n')
+    expect(rendered).toContain('ETH    1.5')
+    expect(rendered).toContain('USDC   120.5')
+    expect(rendered).not.toContain('≈')
+    expect(rendered).not.toContain('unavailable')
+    // --json passes the response through untouched: no synthesized field.
+    const { deps: jdeps, out: jout } = harness({ makeApi: () => balancesApi(CLEAN) })
+    await run(['wallets', 'balances', '--json'], jdeps)
+    const parsed = JSON.parse(jout.join('\n'))
+    expect(parsed.balances.every((b: Record<string, unknown>) => !('balanceFreshness' in b))).toBe(true)
+  })
+
+  it('a stale entry keeps its figure and gains the as-of hint', async () => {
+    try {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-09-25T18:45:00.000Z'))
+      const { deps, out } = harness({ makeApi: () => balancesApi(STALE) })
+      const code = await run(['wallets', 'balances'], deps)
+      expect(code).toBe(0)
+      const rendered = out.join('\n')
+      // The issue's own example: a real but 45-minute-old 25 ETH.
+      expect(rendered).toContain('ETH    ≈ 25 (as of 45m ago)')
+      // The clean sibling on the same screen is not dragged into it.
+      expect(rendered).toContain('USDC   120.5')
+      expect(rendered).not.toContain('unavailable')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a stale marker passes through --json verbatim', async () => {
+    const { deps, out } = harness({ makeApi: () => balancesApi(STALE) })
+    await run(['wallets', 'balances', '--json'], deps)
+    const parsed = JSON.parse(out.join('\n'))
+    expect(parsed.balances[0].balanceFreshness).toEqual({
+      status: 'stale',
+      asOf: '2026-09-25T18:00:00.000Z',
+    })
+  })
+
+  it('an unavailable entry prints `unavailable` instead of the filler zero', async () => {
+    const { deps, out } = harness({ makeApi: () => balancesApi(UNAVAILABLE) })
+    const code = await run(['wallets', 'balances'], deps)
+    expect(code).toBe(0)
+    const rendered = out.join('\n')
+    expect(rendered).toContain('ETH    unavailable')
+    expect(rendered).not.toContain('≈')
+  })
+
+  it('the registry consumers are untouched: budget grant still builds against a stale-marked registry', async () => {
+    // The additive constraint is the point: token address + decimals + symbol
+    // arrive byte-identical whether or not the entry carries a marker, so the
+    // grant path neither reads nor renders it.
+    const GRANT_AGENT = { id: 'a1', name: 'Scout', status: 'active', account_type: 'delegator_hybrid', account_address: '0x' + 'aa'.repeat(20), account_chain_id: 84532 }
+    const BUILT = { delegation_hash: '0x' + 'ab'.repeat(32), version: 1, build_id: '0x' + 'ab'.repeat(32), typed_data_hash: '0x' + 'ab'.repeat(32), signing_url: 'https://app.haven.test/agents/a1?grant=x' }
+    const api = fakeApi({
+      'GET /agents/a1': GRANT_AGENT,
+      'GET /balances/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?chain_id=84532': {
+        balances: [{ symbol: 'USDC', address: '0x' + '03'.repeat(20), decimals: 6, balanceFreshness: { status: 'stale', asOf: '2026-09-25T18:00:00.000Z' } }],
+      },
+      'POST /agents/a1/delegations/build': BUILT,
+      'GET /agents/a1/delegations': { delegations: [{ delegation_hash: BUILT.delegation_hash, version: 1, status: 'pending' }] },
+    })
+    const { deps, out } = harness({ makeApi: () => api })
+    const code = await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440'], deps)
+    expect(code).toBe(0)
+    expect(api.calls).toContain('GET /balances/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?chain_id=84532')
+    expect(api.calls).toContain('POST /agents/a1/delegations/build')
+    // The grant prose renders the budget, not the balance — no hint leaks in.
+    expect(out.join('\n')).toContain('Budget of 25 USDC per 1440 minutes')
+    expect(out.join('\n')).not.toContain('as of')
+  })
+})
+
 describe('agents connect (#2527)', () => {
   const SAFES = { accounts: [{ id: 's1', account_address: '0xsafe', chain_id: 84532, name: 'Wallet', is_default: true }] }
   const BALANCES = {

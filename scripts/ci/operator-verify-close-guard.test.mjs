@@ -556,7 +556,7 @@ test('the report names the concrete replacement and the emitter that carried it'
 // The carve-out is deliberately keyed on head === default branch rather than
 // base !== default branch. Those are different sets, and the difference is
 // `hotfix/* → main`, whose commits have NOT reached `dev` and whose keywords
-// fire for the first time on the sync-back.
+// fire for the first time on the back-port PR.
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('#2346: a promotion (dev → main) is recognised — its commits are already on the default branch', () => {
@@ -566,7 +566,7 @@ test('#2346: a promotion (dev → main) is recognised — its commits are alread
   )
 })
 
-test('#2346: a hotfix into main is NOT a promotion — its commits reach dev later, on the sync-back', () => {
+test('#2346: a hotfix into main is NOT a promotion — its commits reach dev later, on the back-port PR', () => {
   // The case the narrower "base !== default branch" rule would have got wrong.
   // A hotfix branch is based on `main`; its keyword has never reached `dev`,
   // so it must still be scanned.

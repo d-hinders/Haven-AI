@@ -13,7 +13,7 @@ import { signX402ExpectedContext, x402PayerContextFields, x402PayerWireFields } 
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { redactVendorSecrets } from '../../rails/execution-rail.js'
-import { selectDelegation, prepareDelegationPayment } from '../../rails/delegation-authorization.js'
+import { selectDelegation, selectDelegationByHash, prepareDelegationPayment } from '../../rails/delegation-authorization.js'
 import { computeHybridAccountAddress, ensureHybridDeployed } from '../../rails/hybrid-provisioning.js'
 import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
 import {
@@ -38,8 +38,29 @@ import { refuse } from '../payments/refuse.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
+import { findForAgent as findTaskBudgetForAgent } from '../../infra/repositories/task-budgets.js'
+import {
+  resolveTaskBudgetChildForPayment,
+  type TaskBudgetPaymentRefusal,
+} from '../task-budgets/index.js'
 
 type ResolvedToken = Extract<ResolvePaymentTokenResult, { ok: true }>
+
+/** #3329 §3: the refusal table's HTTP status per code, x402's own copy (matches routes/payments.ts). */
+const TASK_BUDGET_REFUSAL_STATUS: Record<TaskBudgetPaymentRefusal, number> = {
+  task_budget_not_found: 404,
+  task_budget_not_open: 409,
+  task_budget_token_mismatch: 409,
+  task_budget_recipient_mismatch: 409,
+  task_budget_parent_mismatch: 409,
+}
+const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, string> = {
+  task_budget_not_found: 'Task budget not found',
+  task_budget_not_open: 'Task budget is not open (closed, closing, pending, or expired)',
+  task_budget_token_mismatch: "This payment's token does not match the task budget's token",
+  task_budget_recipient_mismatch: "This payment's recipient does not match the task budget's pinned recipient",
+  task_budget_parent_mismatch: 'The task budget was not carved from the budget delegation selected for this payment',
+}
 
 export interface DelegationAuthorizeInput {
   agent: AgentContext
@@ -61,13 +82,72 @@ export interface DelegationAuthorizeInput {
   mcpCallContext?: X402McpCallContextInput
   /** #1355: optional full 402 PaymentRequired, persisted for sign-leg rehydration. */
   paymentRequired?: Record<string, unknown>
+  /** #3329: an OPEN task budget to authorize this settlement through, instead of the budget delegation directly. */
+  taskBudgetId?: string
+}
+
+/**
+ * #3329: resolve `taskBudgetId` (when supplied). `toAddress` is whatever the
+ * eventual redemption's `to` will be — the merchant on the erc7710 leg, the
+ * agent's own funding EOA on the 3009 leg (same "recipient-pinned budgets
+ * are erc7710-only" reasoning a task budget's own recipient pin inherits
+ * automatically, since it is checked against this exact address).
+ *
+ * #3329 review finding E: the parent is selected by the task budget's OWN
+ * `parent_delegation_hash` (`selectDelegationByHash`) — NEVER re-derived by
+ * (token, to), which can name a DIFFERENT active grant than the one the
+ * task child's `authority` names (an agent holding both an open and a
+ * pinned grant for this token, whose pinned recipient happens to equal
+ * `toAddress`, would otherwise get a spurious task_budget_parent_mismatch).
+ */
+async function resolveTaskBudgetOrRefusal(
+  agentId: string,
+  taskBudgetId: string,
+  tokenAddress: string,
+  toAddress: string,
+) {
+  const row = await findTaskBudgetForAgent(taskBudgetId, agentId)
+  if (!row) {
+    return {
+      ok: false as const,
+      result: { code: 404, body: { error: TASK_BUDGET_REFUSAL_MESSAGE.task_budget_not_found, error_code: 'task_budget_not_found' } } as X402HandlerResult,
+    }
+  }
+  const parentDelegation = await selectDelegationByHash(agentId, row.parent_delegation_hash)
+  if (!parentDelegation) {
+    return {
+      ok: false as const,
+      result: {
+        code: 409,
+        body: { error: TASK_BUDGET_REFUSAL_MESSAGE.task_budget_parent_mismatch, error_code: 'task_budget_parent_mismatch' },
+      } as X402HandlerResult,
+    }
+  }
+  const resolved = resolveTaskBudgetChildForPayment(
+    row,
+    tokenAddress,
+    toAddress,
+    parentDelegation,
+    Math.floor(Date.now() / 1000),
+  )
+  if (!resolved.ok) {
+    const code = resolved.refusal as TaskBudgetPaymentRefusal
+    return {
+      ok: false as const,
+      result: {
+        code: TASK_BUDGET_REFUSAL_STATUS[code],
+        body: { error: TASK_BUDGET_REFUSAL_MESSAGE[code], error_code: code },
+      } as X402HandlerResult,
+    }
+  }
+  return { ok: true as const, childDelegation: resolved.childDelegation, parentDelegation }
 }
 
 export async function runDelegationAuthorize(input: DelegationAuthorizeInput): Promise<X402HandlerResult> {
   const {
     agent, url, payTo, merchantPayTo, amountRaw, amountHuman, category, idempotencyKey,
     maxTimeoutSeconds, signature, settlementScheme, facilitatorAddresses, network, tokenConfig, tokenAddress,
-    mcpCallContext, paymentRequired,
+    mcpCallContext, paymentRequired, taskBudgetId,
   } = input
 
   if (tokenAddress === ZERO_ADDRESS) {
@@ -172,6 +252,23 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     // pre-check entirely so the existing null-handling below can answer its
     // own more specific 403 — this block must never preempt it.
     const fundingDelegation = await selectDelegation(agent.id, tokenAddress, payTo.toLowerCase())
+
+    // ── Task budget (#3329, optional), funding leg ────────────────────────
+    // #3329 review finding E: resolved by the task budget's OWN parent hash
+    // (`resolveTaskBudgetOrRefusal`), never by `fundingDelegation` above —
+    // that (token, to) selection can name a DIFFERENT active grant. The
+    // remaining-budget PRE-CHECK below still reads `fundingDelegation`
+    // (a convenience only, never the real control); the actual redemption
+    // further down uses the task budget's own resolved parent.
+    let fundingTaskBudgetChild: Awaited<ReturnType<typeof resolveTaskBudgetChildForPayment>>['childDelegation']
+    let fundingTaskBudgetParent: Awaited<ReturnType<typeof selectDelegationByHash>> = null
+    if (taskBudgetId) {
+      const resolved = await resolveTaskBudgetOrRefusal(agent.id, taskBudgetId, tokenAddress, payTo.toLowerCase())
+      if (!resolved.ok) return resolved.result
+      fundingTaskBudgetChild = resolved.childDelegation
+      fundingTaskBudgetParent = resolved.parentDelegation
+    }
+
     if (fundingDelegation) {
       let fundingRemainingAtomic: bigint | null = null
       try {
@@ -248,6 +345,9 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         tokenAddress,
         payTo.toLowerCase(),
         amountRaw,
+        fundingTaskBudgetChild && fundingTaskBudgetParent
+          ? { taskBudget: { childDelegation: fundingTaskBudgetChild, parentDelegation: fundingTaskBudgetParent } }
+          : undefined,
       )
     } catch (err) {
       // Caveat rejection (budget/expiry) or bundler failure — database untouched.
@@ -378,6 +478,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // #1059: on the funding leg the budget IS the signed instrument.
       budgetDelegationHash: fundingAuth.delegationHash,
       preparedUserOp: serializeUserOp(fundingAuth.prepared.userOperation),
+      taskBudgetId: fundingTaskBudgetChild ? taskBudgetId : null,
       conflictTarget: 'x402_idempotency_key',
     })
     if (!intent) {
@@ -456,7 +557,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     }
   }
 
-  const budget = await selectDelegation(agent.id, tokenAddress, payTo.toLowerCase())
+  let budget = await selectDelegation(agent.id, tokenAddress, payTo.toLowerCase())
   if (!budget) {
     // #2945: this 403 is how a recipient pin refuses on this rail — named
     // for what it is, not distinguishable from no-delegation. Fire-and-forget.
@@ -477,6 +578,23 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         detail: { error_code: 'no_delegation_for_target' },
       },
     )
+  }
+
+  // ── Task budget (#3329, optional), erc7710 leg ──────────────────────────
+  // `payTo` IS the merchant on this leg (unlike the funding leg, where it is
+  // the agent's own EOA). #3329 review finding E: resolved by the task
+  // budget's OWN parent hash, never by the (token, payTo) `budget` above —
+  // that selection can name a DIFFERENT active grant. On success, `budget`
+  // is REASSIGNED to the task budget's real parent so every downstream use
+  // (the remaining-budget pre-check, `buildSettlementDelegation`, the
+  // stored settle-time state) redeems the SAME grant the task child's
+  // `authority` names, not whichever one (token, payTo) happened to pick.
+  let erc7710TaskBudgetChild: Awaited<ReturnType<typeof resolveTaskBudgetChildForPayment>>['childDelegation']
+  if (taskBudgetId) {
+    const resolved = await resolveTaskBudgetOrRefusal(agent.id, taskBudgetId, tokenAddress, payTo.toLowerCase())
+    if (!resolved.ok) return resolved.result
+    erc7710TaskBudgetChild = resolved.childDelegation
+    budget = resolved.parentDelegation
   }
 
   // ── #2082: fail-fast remaining-budget pre-check ──────────────────────────
@@ -659,6 +777,9 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       intentId,
       delegateAccountAddress: delegateAccountAddress as `0x${string}`,
       budgetDelegation: JSON.parse(budget.delegation_json),
+      // #3329: when a task budget authorizes this settlement, its signed
+      // child is the settlement child's immediate parent.
+      taskBudgetChild: erc7710TaskBudgetChild,
       asset: tokenAddress as `0x${string}`,
       amountAtomic: amountRaw,
       payTo: payTo.toLowerCase() as `0x${string}`,
@@ -780,7 +901,12 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       // #1058: echoed verbatim; the child's redeemer caveat was built
       // from these (normalized), so state and caveat stay one thing.
       facilitatorAddresses,
+      // #3329: settle.ts needs this to encode [settlement, taskChild, budget]
+      // rather than [settlement, budget] — the settlement child's `authority`
+      // names the task child, so redeeming without it reverts.
+      taskBudgetChild: erc7710TaskBudgetChild,
     }),
+    taskBudgetId: erc7710TaskBudgetChild ? taskBudgetId : null,
     conflictTarget: 'x402_idempotency_key',
   })
   if (!intent) {

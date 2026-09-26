@@ -12,9 +12,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ScenarioContext } from './types.js'
 
-const { mockSign } = vi.hoisted(() => ({ mockSign: vi.fn() }))
+const { mockSign, mockProve, mockWaitDisabled, mockReadDisabled } = vi.hoisted(() => ({
+  mockSign: vi.fn(),
+  mockProve: vi.fn(),
+  mockWaitDisabled: vi.fn(),
+  mockReadDisabled: vi.fn(),
+}))
 vi.mock('@haven_ai/sdk', () => ({
   signUserOpTypedDataForDelegation: mockSign,
+}))
+// #3344: the observer reads are mocked here (their own tests are in lib/chain.test.ts);
+// what is pinned is that the scenario ASKS the chain, with the right hashes.
+vi.mock('../lib/chain.js', async (orig) => ({
+  ...(await orig<typeof import('../lib/chain.js')>()),
+  proveUsdcTransfer: mockProve,
+  waitForDisabled: mockWaitDisabled,
+  readDisabled: mockReadDisabled,
 }))
 
 const { delegationLifecycle } = await import('./delegation-lifecycle.js')
@@ -35,6 +48,8 @@ interface FakeOpts {
   postRevokeAuthorize: { status: number; body: Record<string, unknown> }
   /** Rows returned by the delegations list after replacement. */
   activeAfterReplace?: number
+  /** Omit the tx hash from a confirmed pre-revoke payment. */
+  noTxHash?: boolean
 }
 
 /**
@@ -83,7 +98,7 @@ function installFakeApi(opts: FakeOpts) {
       if (revoked) return json(opts.postRevokeAuthorize.status, opts.postRevokeAuthorize.body)
       return json(201, { payment_id: `p-${payments}`, sign_data: { typed_data: TD } })
     }
-    if (/\/payments\/p-[\w-]+\/sign$/.test(path)) return json(200, { status: 'confirmed', tx_hash: '0xfeed' })
+    if (/\/payments\/p-[\w-]+\/sign$/.test(path)) return json(200, opts.noTxHash ? { status: 'confirmed' } : { status: 'confirmed', tx_hash: '0xfeed' })
     throw new Error(`unexpected fake-api call: ${init?.method ?? 'GET'} ${path}`)
   }))
 }
@@ -91,6 +106,57 @@ function installFakeApi(opts: FakeOpts) {
 beforeEach(() => {
   mockSign.mockReset()
   mockSign.mockResolvedValue('0x' + 'ab'.repeat(65))
+  mockProve.mockReset()
+  mockProve.mockResolvedValue({ ok: true })
+  mockWaitDisabled.mockReset()
+  mockWaitDisabled.mockResolvedValue({ ok: true })
+  mockReadDisabled.mockReset()
+  mockReadDisabled.mockResolvedValue(false)
+})
+
+const THROWAWAY_TREASURY = '0x' + 'ab'.repeat(20)
+const STANDING_TREASURY = '0x' + 'cd'.repeat(20)
+const OK_403 = { status: 403, body: { error: 'Agent has no active budget delegation for USDC to this recipient' } }
+
+describe('the on-chain reads (#3344)', () => {
+  it('passes only after asking the observer: the pay-1 Transfer and grant 2 disabled; grant 1 is reported', async () => {
+    installFakeApi({ postRevokeAuthorize: OK_403 })
+    const result = await delegationLifecycle.run(ctx)
+    expect(result.pass).toBe(true)
+    expect(mockProve).toHaveBeenCalledWith('0xfeed', { from: THROWAWAY_TREASURY, to: STANDING_TREASURY, amount: 2_000n }, expect.anything())
+    expect(mockWaitDisabled).toHaveBeenCalledWith('0xhash2', expect.anything())
+    expect(mockReadDisabled).toHaveBeenCalledWith('0xhash1')
+    expect(result.detail).toMatch(/replaced grant is still enabled on-chain/)
+  })
+
+  it('FAILS when the revoke is reported but disabledDelegations stays false', async () => {
+    installFakeApi({ postRevokeAuthorize: OK_403 })
+    mockWaitDisabled.mockResolvedValue({ ok: false, error: 'delegation 0xhash2 is not disabled on-chain after 60s (observer: PUBLIC …)' })
+    const result = await delegationLifecycle.run(ctx)
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/revoke reported, but the chain does not show it: .*observer/)
+  })
+
+  it('FAILS when the post-activate payment has no Transfer on the observer, or no tx hash at all', async () => {
+    installFakeApi({ postRevokeAuthorize: OK_403 })
+    mockProve.mockResolvedValue({ ok: false, error: 'no receipt for 0xfeed on the observer node within 60s (observer: PUBLIC …)' })
+    const noTransfer = await delegationLifecycle.run(ctx)
+    expect(noTransfer.pass).toBe(false)
+    expect(noTransfer.detail).toMatch(/not on-chain: no receipt/)
+    installFakeApi({ postRevokeAuthorize: OK_403, noTxHash: true })
+    mockProve.mockResolvedValue({ ok: true })
+    const noTx = await delegationLifecycle.run(ctx)
+    expect(noTx.pass).toBe(false)
+    expect(noTx.detail).toMatch(/no tx hash/)
+  })
+
+  it('a failed read of the replaced grant is reported, not fatal', async () => {
+    installFakeApi({ postRevokeAuthorize: OK_403 })
+    mockReadDisabled.mockRejectedValue(new Error('rpc down'))
+    const result = await delegationLifecycle.run(ctx)
+    expect(result.pass).toBe(true)
+    expect(result.detail).toMatch(/replaced grant is unread/)
+  })
 })
 
 describe('the missing-identity gate', () => {

@@ -779,7 +779,7 @@ Server key roles must remain narrow and distinct:
 - The relayer additionally signs **L0 agent passport attestations** as *issuer* (epic #970). That is governance metadata, not spend authority: the transaction targets the pinned EAS contract, carries `value: 0`, encodes no transfer, and involves no user key, delegation, or allowance. It is triggered by the owner opting in — never by a payment — so it sits outside the payment paths entirely. Since #2138 (owner decision 2026-08-27) issuance is also **delegation-rail only**: `modules/passport/issuance.ts` refuses a bound account on a retired rail, on the reasoning that a rail which cannot transact has no spending for an on-chain control to govern. Passports already issued on a legacy account are left alone and report `policyEnforcedOnchain: false` — a narrowing of where governance metadata may be created, with no effect on authority in either direction. The owner opts in from two entry points that run the identical eligibility check and fire-and-forget issuance path: `POST /agents`' `issue_passport` flag, and (#1072) an `issue_passport` flag recorded on the Connect Agent 2 setup at creation and acted on once `POST /agent-connection-setups/register` has created the agent row. Neither path can make issuance block, delay, or roll back agent creation/registration.
 - `PASSPORT_RECEIPT_SIGNING_KEY` signs merchant-facing verification receipts. Its address is published for pinning, it asserts only an agent's governance standing, and it is refused at boot if it matches the relayer key.
 - No key above may be reused as an agent, user, or unrestricted payment signer.
-- Vendor infrastructure credentials (bundler/sponsorship URLs) are read at one choke point and must never reach an error surface, a log line, or an API response. `redactVendorSecrets` covers the shapes vendors actually ship: `apikey=`/`api_key=`/`api-key=`/`key=`/`token=`/`secret=` query params, URL basic-auth, and key-in-path segments (#1061). A chain-scoped bundler URL is also asserted against the chain being served, so a misconfigured deployment fails as a config error rather than relaying at the wrong chain's endpoint.
+- Vendor infrastructure credentials (bundler/sponsorship URLs) are read at one choke point and must never reach an error surface, a log line, or an API response. `redactVendorSecrets` covers the shapes vendors actually ship: `apikey=`/`api_key=`/`api-key=`/`key=`/`token=`/`secret=` query params, URL basic-auth, and key-in-path segments (#1061). A chain-scoped bundler URL is also asserted against the chain being served, so a misconfigured deployment fails as a config error rather than relaying at the wrong chain's endpoint. Since #3371, RPC endpoint URLs are scrubbed one layer earlier too: the failover transport (`infra/chain/rpc-transport.ts`) mutates viem's request errors in place before they leave it, deriving the key-like segments from every configured endpoint URL — `redactVendorSecrets`'s fixed patterns deliberately do not know the dRPC path, `dkey=` or `/v3/` shapes, so a provider key embedded in an RPC URL no longer depends on them.
 
 ### Keep Transaction Construction Deterministic
 
@@ -1145,7 +1145,10 @@ reckoning over **every path `release-bump.mjs` writes** — the six
 `package.json`, the five `CHANGELOG.md`, the six source version constants (#3303 added
 `SDK_VERSION`; the gate's verdict over the full set is unchanged),
 `connect/src/runtime-manifest.ts`, `sdk/src/connector-channel.ts`,
-`package-lock.json` and the manifest doc — not over a sample:
+`package-lock.json`, the manifest doc and `core/src/client-releases.data.ts`
+(#3305 added it; the gate's verdict over the full set is unchanged —
+`coupling-gate.test.mjs` includes it and pins that the CASP doc still blocks) —
+not over a sample:
 
 | doc | how a release satisfies it | what the GATE forces |
 |---|---|---|

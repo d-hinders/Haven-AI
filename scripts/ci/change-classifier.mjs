@@ -17,7 +17,10 @@
 //
 // Deliberately dependency-free (no npm ci, no YAML parser) so the `changes`
 // job stays a bare checkout, and so its self-test can run in the
-// `ci_config_checks` job alongside the other repo-config guards.
+// `ci_config_checks` job alongside the other repo-config guards. Since #3346
+// there is exactly one cross-tree import — the serve-docs ALLOWLIST, which
+// uses node: builtins only and has no import-time side effects, so the bare
+// checkout still works; see DOC_EXCEPTIONS below for why it is worth it.
 //
 //   node scripts/ci/change-classifier.mjs                      # git-derived, from BASE_SHA/HEAD_SHA
 //   node scripts/ci/change-classifier.mjs --files-from list.txt
@@ -27,6 +30,16 @@ import { readFileSync, appendFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+// The served-docs allowlist lives in the frontend because the generator and
+// its pin test live there — but a doc on that list is SERVED CONTENT, not
+// documentation, and routing it is this file's job (#3346). Importing the
+// array itself, rather than restating it, is the acceptance criterion: a
+// fifth allowlisted source then routes the moment it is added, with nothing
+// here to forget. The module is import-safe for the bare-checkout `changes`
+// job: node: builtins only, no side effects at import time (the `generate()`
+// entry point runs only when the script is invoked directly).
+import { ALLOWLIST as SERVED_DOC_SOURCES } from '../../packages/frontend/scripts/serve-docs.mjs'
 
 /**
  * The output contract with ci.yml, in emission order.
@@ -116,7 +129,7 @@ export const DOC_ONLY_PATTERNS = Object.freeze(['*.md', 'docs/*', 'AGENTS.md', '
 /**
  * Markdown that is NOT documentation-only.
  *
- * THREE arms as of #2743, on two distinct rationales, and each arm's reasoning
+ * FOUR arms as of #3346, on two distinct rationales, and each arm's reasoning
  * lives beside it rather than up here — this header used to explain CLAUDE.md
  * alone and then outlived that, which is the enumeration-drift shape #2743's
  * review kept finding in exactly this kind of sentence.
@@ -127,6 +140,10 @@ export const DOC_ONLY_PATTERNS = Object.freeze(['*.md', 'docs/*', 'AGENTS.md', '
  *     the drift test never guards it.
  *   - The two packages/frontend/public/ arms are SERVED CONTENT: Markdown an
  *     agent fetches over HTTP, not documentation. See their inline comment.
+ *   - The docs/ arm (#3346) is the third rationale, SERVED from the frontend:
+ *     Markdown generated into an HTTP response from docs/, read by tests in
+ *     packages/frontend that only frontend_checks runs. Its patterns are
+ *     DERIVED from serve-docs.mjs's ALLOWLIST rather than hand-listed.
  *
  * Every arm wins over `*.md` because this list is consulted first, and within
  * it the FIRST matching arm decides — the shell `case` these came from behaved
@@ -159,6 +176,33 @@ export const DOC_EXCEPTIONS = Object.freeze([
     surfaces: ['code', 'sdk', 'cli', 'frontend'],
   },
   { patterns: ['packages/frontend/public/*.md'], surfaces: ['code', 'frontend'] },
+  // The docs/ sources the frontend SERVES at /docs/*.md (#3346). A doc an
+  // agent fetches over HTTP from this origin is served content, not
+  // documentation — the same category as the public/ arms above, and the same
+  // shape #3287 measured: #3287 edited docs/security/delegation-rail-security-model.md
+  // without touching packages/frontend/, routed NOTHING, and
+  // served-docs.test.ts went red on dev (#3288). The arm is DERIVED from the
+  // generator's ALLOWLIST rather than restated, so a fifth served source
+  // routes the moment it is allowlisted; scripts/ci/routing-matrix.test.mjs
+  // is the divergence guard — its per-pattern coverage test fails until a
+  // source that has never been a fixture gets one, and it runs in the
+  // unconditional ci_config_checks job. `code` is set with `frontend`
+  // deliberately: the ci.yml gate job exits 0 when code != true BEFORE it
+  // reads frontend_checks.result, so an arm naming only `frontend` would
+  // still skip the job the served-docs pin test runs in. Like every
+  // DOC_EXCEPTIONS arm, its surfaces are SET and the file then falls through
+  // to the surface rules, which match nothing under docs/ — so the arm is the
+  // whole answer.
+  {
+    patterns: SERVED_DOC_SOURCES.map((entry) => entry.source),
+    surfaces: ['code', 'frontend'],
+  },
+  // The exit story docs/exit/README.md. Served nowhere, but read by
+  // packages/frontend/src/lib/__tests__/non-custody-no-lockin.test.ts — a
+  // frontend-only test, so the reasoning is the CLAUDE.md arm's: the file
+  // mirrors a contract the frontend suite pins, and an edit that breaks the
+  // wording must run the suite that pins it.
+  { patterns: ['docs/exit/README.md'], surfaces: ['code', 'frontend'] },
 ])
 
 /**
@@ -428,13 +472,25 @@ export function classifyChangedFiles(files, { propagationRules = PROPAGATION_RUL
  * unrelated red on pull requests rather than skipping a job. That is the safe
  * direction to have been wrong in, and the reason it survived: nothing failed
  * that should have passed, so nobody looked.
+ *
+ * ## `--no-renames` is load-bearing in the safe direction (#3346)
+ *
+ * Without it git rename-detects, and a RENAMED file reports only its new path
+ * — the old path disappears from the list. Measured: a tree where
+ * `docs/product/account-recovery.md` moves to `docs/security/moved.md` emits
+ * one line without the flag and two with it. A served source that is renamed
+ * then routes ONLY its new spelling; if the new spelling is not itself
+ * allowlisted, the change routes nowhere and the served copy goes stale green
+ * — the #3288 shape again. `--no-renames` widens the list (old AND new path),
+ * which can only add surfaces, never remove one, so the over-routing cost is
+ * minutes and the alternative cost is a silently skipped guard.
  */
 export function changedFilesCommand({ baseSha, headSha, eventName }) {
   if (!baseSha || baseSha === ZERO_SHA) return ['ls-tree', '-r', '-z', '--name-only', headSha]
   if (PULL_REQUEST_EVENTS.has(eventName)) {
-    return ['diff', '-z', '--name-only', `${baseSha}...${headSha}`]
+    return ['diff', '-z', '--no-renames', '--name-only', `${baseSha}...${headSha}`]
   }
-  return ['diff', '-z', '--name-only', baseSha, headSha]
+  return ['diff', '-z', '--no-renames', '--name-only', baseSha, headSha]
 }
 
 /**

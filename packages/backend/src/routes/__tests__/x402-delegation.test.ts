@@ -1120,9 +1120,11 @@ describe('x402 delegation-rail settlement (#830)', () => {
       // #1059: on the funding leg the budget IS the signed instrument.
       budgetDelegationHash: PREPARED.delegationHash,
     }))
-    // The funding redemption targeted the EOA with the exact amount:
+    // The funding redemption targeted the EOA with the exact amount. #3329:
+    // a 5th (task-budget) argument now always accompanies the call — this
+    // request carried no task_budget_id, so it is undefined.
     expect(mockPrepareFunding).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'agent-1' }), USDC, DELEGATE_EOA.toLowerCase(), 100000n,
+      expect.objectContaining({ id: 'agent-1' }), USDC, DELEGATE_EOA.toLowerCase(), 100000n, undefined,
     )
     // The erc7710 SELECTOR for the merchant was never consulted (#2706 note:
     // the funding leg now calls selectDelegation itself, keyed on the funding

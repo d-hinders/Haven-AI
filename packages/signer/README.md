@@ -61,7 +61,7 @@ It exposes four stdio MCP tools, all sign-only:
 
 | Tool | Does | Emits |
 |---|---|---|
-| `haven_sign` | Sign one payment. Preferred form is `{ payment_id }` alone — the signer fetches the exact payload itself. Signs only Haven-prepared payloads (#3272, #3281): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account, or — against a Haven-signed context, which it records and binds — an EIP-3009 funding leg of that same shape paying this signer's own delegate EOA, or an erc7710 settlement child from this signer's own account; other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }` or `{ signature, x402_binding }` |
+| `haven_sign` | Sign one payment, or (#3329) one task-budget open/close. Preferred form is `{ payment_id }` alone for a payment, or `{ task_budget_id }` alone (mutually exclusive with `payment_id`) for a task-budget open/close — the signer fetches the exact payload itself either way. Signs only Haven-prepared payloads (#3272, #3281, #3329): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account EITHER directly OR through a self-delegated task-budget child under it (the two-link `[task child, budget]` chain), or — against a Haven-signed context, which it records and binds — an EIP-3009 funding leg of that same shape paying this signer's own delegate EOA, or an erc7710 settlement child from this signer's own account; other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }`, `{ signature, x402_binding }`, or `{ signature, task_budget_id, purpose }` |
 | `haven_sign_x402` | One-shot x402: funding signature **and** the merchant header in a single local call (`haven_sign` + `haven_x402_sign_header`). `{ payment_id }` alone is the preferred call | `{ signature, x402_binding, payment_header, accepted }` |
 | `haven_x402_sign_header` | Build + sign the EIP-3009 merchant payment header, only when the fresh merchant `payment_required` matches the recorded `x402_binding` | `{ payment_header, accepted }` |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless EIP-3009 sweep that recovers stranded funds from the delegate wallet back to your own account. Never broadcasts | `{ signature }` |
@@ -121,8 +121,10 @@ sender is THIS signer's own delegate account (the counterfactual
 HybridDeleGator for the delegate key, derived offline — `delegate-account.ts` in `@haven_ai/sdk`);
 and its `callData` is a single `execute` to the DelegationManager calling
 `redeemDelegations`, whose arguments are decoded too (`redemption-guard.ts` in `@haven_ai/sdk`):
-exactly one delegation (a single grant, never an empty or multi-link chain)
-made to this signer's own account by a different account, `SingleDefault` mode, and canonical
+exactly one of two chain shapes (#3329) — a single grant made to this signer's own account by a
+different account, or a two-link `[task child, budget]` chain whose leaf is self-delegated by this
+signer's own account — never an empty chain or any other multi-link shape,
+`SingleDefault` mode, and canonical
 encoding at every level. The argument check matters: an EMPTY permission
 context makes the DelegationManager run the execution as the account itself,
 which would reach `transferOwnership`. A delegate-wallet `TransferWithAuthorization` or `Permit`,

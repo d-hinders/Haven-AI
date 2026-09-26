@@ -2,6 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - scripts/ci/rpc-conformance.mjs
   - .github/workflows/dev-gate.yml
   - .github/workflows/publish.yml
   - .github/workflows/qa-dev.yml
@@ -185,13 +186,18 @@ so this is a rule to point at rather than a question to ask the release runner.
       - **Frontend browser smoke** — required here since the same change.
 
       `main` is also the only branch still requiring the head to be up to date,
-      so a `BEHIND` promotion PR must be brought forward before it can merge.
+      so a `BEHIND` promotion PR cannot merge through the ordinary button. By
+      owner decision there is no sync-back
+      ([`branch-and-release-flow.md`](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main)):
+      the owner merges it behind from the web UI or API — never the mobile
+      app, which offers no such merge.
       The per-branch inventory and the `gh api` command that produced it are in
       [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md#one-time-github-setup-required)
       step 3.
 - [ ] **Sweep the docs staleness audit** ([#2645](https://github.com/d-hinders/Haven-AI/issues/2645), "Docs staleness audit (weekly)" — one standing issue that `docs-audit.yml` rewrites every Monday). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived` and `research` docs are not ranked and need no disposition (#2638). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
-- [ ] A code-owner approval is present if the batch touches an owned path
-      (migrations / release tooling / CODEOWNERS).
+- [ ] A code-owner approval, from an owner other than the PR author, is present
+      if the batch touches an owned path — today only migration files:
+      `git diff --name-only origin/main origin/dev -- ':(glob)packages/backend/src/db/migrations/*.ts'`.
 
 ## Merge, deploy, and verify prod
 
@@ -232,6 +238,29 @@ so this is a rule to point at rather than a question to ask the release runner.
 
       Use a key distinct from the dev/QA ones, so usage is attributable and
       either can be rotated alone.
+
+      **Before any of these variables — or `RPC_URL_BASE_FALLBACK` /
+      `RPC_URL_BASE_SEPOLIA_FALLBACK` (#3255) — points at a new endpoint, run
+      the RPC conformance probe against it (#3336).** It is a required step, run
+      from the repo root after `npm ci`, with the URL in a shell variable so it
+      never lands in history or a log, and `--chain` set to the variable's chain
+      (8453 for `RPC_URL_BASE*`, 84532 for `RPC_URL_BASE_SEPOLIA*`), so a URL
+      pasted into the wrong variable fails:
+
+      ```sh
+      node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 8453
+      ```
+
+      Every line must be ✓: the chain id, a JSON-RPC batch of 10, the `pending`
+      block tag, `eth_sendRawTransaction` accepted as a method, and a burst of 20
+      without a 429. At the defaults it makes 32 read calls (1 + a batch of 10 +
+      1 + a burst of 20) plus one transaction signed by a fresh zero-balance key,
+      which the node refuses for funds and can never mine. The burst deliberately
+      spends up to 20 requests of the key's per-second budget: against a key the
+      live mainnet relayer already uses, run it off-peak or with a smaller
+      `--burst`. A failing line means the endpoint cannot carry Haven's traffic —
+      the September 2026 qa-dev waves were a provider that refused batches over
+      three and the `pending` tag (epic #3335).
 
 - [ ] **Prod smoke:** load the prod app (no `DEV` badge), check login + balances,
       and run one small real payment / x402 happy path as a canary.

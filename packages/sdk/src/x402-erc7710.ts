@@ -175,6 +175,12 @@ export class X402Erc7710 {
        * Omitted, the backend behaves exactly as before (no key, no dedup).
        */
       idempotencyKey?: string
+      /**
+       * #3329: build the settlement child under this open task budget's own
+       * child delegation instead of the agent's budget delegation directly —
+       * `[settlement, task, budget]`.
+       */
+      taskBudgetId?: string
     } = {},
   ): Promise<{
     paymentId: string
@@ -258,6 +264,9 @@ export class X402Erc7710 {
       // #1307/#1547: persisted so the settle leg can rehydrate the merchant
       // call by payment_id on this scheme too, not only on the 3009 bridge.
       ...(options.mcpCallContext ? { mcpCallContext: options.mcpCallContext } : {}),
+      // #3329: `/x402` bodies are camelCase (`X402AuthorizeRequest`) — do not
+      // switch this to `task_budget_id`, which is only the `POST /payments` key.
+      ...(options.taskBudgetId ? { taskBudgetId: options.taskBudgetId } : {}),
     })
 
     if (!raw.payment_id) {

@@ -26,6 +26,7 @@ import {
   signTyped,
   type TypedData,
 } from '../lib/throwaway-identity.js'
+import { proveUsdcTransfer, readDisabled, waitForDisabled } from '../lib/chain.js'
 
 const CHAIN_ID = 84532
 
@@ -33,6 +34,10 @@ const CHAIN_ID = 84532
 const FUND_HUMAN = '0.006'
 const PAY_HUMAN = '0.002'
 const BUDGET_ATOMIC = '10000' // 0.01 USDC/day — the throwaway grant
+const PAY_ATOMIC = 2_000n // PAY_HUMAN in USDC's 6 decimals
+
+/** Mutable purely as a TEST SEAM, like the other legs' `TIMING`. */
+export const TIMING = { receiptWaitMs: 60_000, pollIntervalMs: 3_000 }
 
 export const delegationLifecycle: Scenario = {
   name: 'delegation-lifecycle',
@@ -90,6 +95,15 @@ export const delegationLifecycle: Scenario = {
 
     const pay1 = await payAs(agentKey, delegate.privateKey, standingTreasury, PAY_HUMAN)
     if (!pay1.ok) return fail(`post-activate payment failed: ${pay1.error}`)
+    // #3344: "deploy + pay" is proven on the harness's own node, not taken from
+    // the backend: the throwaway treasury's exact USDC Transfer to the payee.
+    if (!pay1.tx) return fail('post-activate payment returned no tx hash — nothing to prove on-chain')
+    const paid = await proveUsdcTransfer(
+      pay1.tx,
+      { from: safe.account_address, to: standingTreasury, amount: PAY_ATOMIC },
+      { timeoutMs: TIMING.receiptWaitMs, intervalMs: TIMING.pollIntervalMs },
+    )
+    if (!paid.ok) return fail(`post-activate payment is not on-chain: ${paid.error}`)
 
     // ── 2. replace: same slot → EXACTLY ONE active row (#1053 finding 4) ─────
     const grant2 = await grantAndActivate()
@@ -126,6 +140,17 @@ export const delegationLifecycle: Scenario = {
       { signature: revokeSig, user_operation: prep.json.user_operation },
     )
     if (!submit.json.revoked) return fail(`revoke submit failed (${submit.status}): ${submit.json.error ?? ''}`)
+    // #3344: `revoked: true` is the backend's word. The DelegationManager's own
+    // flag, read on the observer (polled: it can lag the node the backend wrote to).
+    const disabled = await waitForDisabled(grant2.hash, { timeoutMs: TIMING.receiptWaitMs, intervalMs: TIMING.pollIntervalMs })
+    if (!disabled.ok) return fail(`revoke reported, but the chain does not show it: ${disabled.error}`)
+    // The REPLACED grant is only marked replaced in the DB: "the on-chain kill of
+    // the old one is the revoke flow" (backend routes/agent-delegations.ts). Read
+    // and REPORT its on-chain state rather than claim it was taken away.
+    const grant1State = await readDisabled(identity.grantHash).then(
+      (d) => (d ? 'disabled' : 'still enabled'),
+      () => 'unread (observer read failed)',
+    )
 
     // ── 4. the SAME payment shape is now REFUSED — 403, never 502 ────────────
     const pay2 = await payAs(agentKey, delegate.privateKey, standingTreasury, PAY_HUMAN)
@@ -143,9 +168,11 @@ export const delegationLifecycle: Scenario = {
     }
 
     return pass(
-      `lifecycle proven on a throwaway identity: grant activated (deploy + pay ${PAY_HUMAN} USDC, ` +
-        `tx ${pay1.tx ?? 'submitted'}), replacement left exactly 1 active row, revoke flipped the ` +
-        `same payment shape to 403 "no active budget delegation" — never a chain-side rejection`,
+      `lifecycle proven on a throwaway identity: grant activated (deploy + pay ${PAY_HUMAN} USDC — the ` +
+        `USDC Transfer is on the observer node, tx ${pay1.tx}), replacement left exactly 1 active row, ` +
+        `revoke disabled the replacement on-chain (DelegationManager.disabledDelegations = true) and flipped ` +
+        `the same payment shape to 403 "no active budget delegation" — never a chain-side rejection. ` +
+        `The replaced grant is ${grant1State} on-chain (replacement is DB-only; its on-chain kill is the revoke flow).`,
     )
   },
 }

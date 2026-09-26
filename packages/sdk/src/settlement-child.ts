@@ -83,15 +83,37 @@ interface Caveat {
   terms: string
 }
 
-/** True when this typed data is a delegation — the shape that must never be signed unbound. */
+/**
+ * True when this typed data is a delegation — the shape that must never be
+ * signed unbound. Excludes a SELF-delegation (`delegate === delegator`,
+ * #3329): that is the shape of a task-budget child
+ * (`task-budget-guards.ts`'s `isTaskChildTypedData`), a DIFFERENT typed-data
+ * class verified by a different function against a different expectation. A
+ * real settlement child's `delegate` is always a facilitator or
+ * `ANY_BENEFICIARY` — never this account's own address — so narrowing here
+ * costs this verifier nothing and keeps the two classes from ever
+ * overlapping.
+ */
 export function isSettlementChildTypedData(value: unknown): value is SettlementChildTypedData {
   const td = value as SettlementChildTypedData | undefined
-  return (
-    !!td &&
-    td.primaryType === 'Delegation' &&
-    typeof td.domain?.verifyingContract === 'string' &&
-    Array.isArray((td.message as { caveats?: unknown })?.caveats)
-  )
+  if (
+    !td ||
+    td.primaryType !== 'Delegation' ||
+    typeof td.domain?.verifyingContract !== 'string' ||
+    !Array.isArray((td.message as { caveats?: unknown })?.caveats)
+  ) {
+    return false
+  }
+  const delegate = td.message?.delegate
+  const delegator = td.message?.delegator
+  if (
+    typeof delegate === 'string' &&
+    typeof delegator === 'string' &&
+    delegate.toLowerCase() === delegator.toLowerCase()
+  ) {
+    return false
+  }
+  return true
 }
 
 function same(a: string | undefined, b: string | undefined): boolean {
@@ -224,6 +246,25 @@ export function verifySettlementChild(
       refuse(
         "it is delegated by an account other than this agent's own",
         `Expected delegator ${expected.delegatorAccount}; the child names ${String(delegator)}.`,
+      )
+    }
+    // #3329: a settlement child's `delegate` is a facilitator or
+    // `ANY_BENEFICIARY` — never this same account. `delegate === delegator`
+    // is a SELF-delegation, the task-budget child shape
+    // (`task-budget-guards.ts`'s `isTaskChildTypedData`), a DIFFERENT
+    // typed-data class verified by a different function against a different
+    // expectation. Refused here whatever its amount/payee/expiry say: those
+    // caveats can coincidentally match a settlement expectation (a task
+    // child's caveats are real EIP-712 bytes, not inert placeholders), and
+    // this is the one check in this function that reads WHO may redeem
+    // rather than what the redemption is bounded to.
+    const delegate = typedData.message?.delegate
+    if (typeof delegate === 'string' && same(delegate, delegator)) {
+      refuse(
+        'its delegate is the same account as its delegator (a self-delegation)',
+        'A settlement child is always redeemed by a facilitator or left open to any redeemer — ' +
+          'never redeemable only by the account that granted it. This is the shape of a ' +
+          'task-budget child, a different typed-data class Haven never signs through this path.',
       )
     }
   }

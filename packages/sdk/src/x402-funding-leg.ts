@@ -54,7 +54,16 @@ import {
  */
 
 export type PaymentPoster = <T>(path: string, body: Record<string, unknown>) => Promise<T>
-export type DataSigner = (signData: SignData) => Promise<string>
+/**
+ * #3375 (epic #3284): what a funding leg must pay, from the 402 option the
+ * caller is paying — never from the `/x402` response. The signer pins the
+ * leg's single execution to `transfer(<own delegate EOA>, amount)` of `asset`.
+ */
+export interface FundingLegExpectation {
+  asset: string
+  amount: string
+}
+export type DataSigner = (signData: SignData, fundingExpectation: FundingLegExpectation) => Promise<string>
 export type AuthorizationStateAssertion = (label: string, raw: RawX402AuthorizeResponse) => void
 
 export interface X402FundingLegOptions {
@@ -120,6 +129,7 @@ export class X402FundingLeg {
     paymentRequired: X402PaymentRequired,
     option: X402PaymentOption,
     idempotencyKey: string,
+    taskBudgetId?: string,
   ): Promise<X402Receipt> {
     // 2. Standard x402 settles from an EOA, so the SDK uses the agent-owned
     // delegate EOA for the merchant-facing EIP-3009 authorization. Haven does
@@ -151,6 +161,9 @@ export class X402FundingLeg {
       // this local-key path derives payTo from the key (never stale), but the
       // declaration keeps both writers of the 3009 shape loud-by-default.
       settlementScheme: 'eip3009',
+      // #3329: `/x402` bodies are camelCase (`X402AuthorizeRequest`) — do not
+      // switch this to `task_budget_id`, which is only the `POST /payments` key.
+      ...(taskBudgetId ? { taskBudgetId } : {}),
     })
 
     // The backend can report an ALREADY-EXECUTED payment in two different
@@ -242,7 +255,13 @@ export class X402FundingLeg {
     if (!raw.sign_data?.hash) {
       throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
     }
-    const sig = await this.signForData(raw.sign_data)
+    // #3375: the recipient pin's asset and amount come from the option this
+    // call is paying, the same values sent in the `/x402` body above — never
+    // from the response, which a compromised Haven writes.
+    const sig = await this.signForData(raw.sign_data, {
+      asset: option.asset,
+      amount: x402AuthorizationAmount(option),
+    })
 
     // 4. Submit signature (reuse existing payments/:id/sign endpoint)
     const execResult = await this.post<RawSignResponse>(

@@ -169,6 +169,22 @@ test('#2246 is a phrase floor, not a claim detector — the reword still evades 
 
 // ── The extracted-copy naming convention (#2333) ─────────────────────────────
 
+test('the i18n message catalog is on the allowlist (#3347)', () => {
+  // The catalog holds the app's copy; the #2859 accounting ban was written for
+  // strings that live here. Dropping this entry re-opens the hole silently.
+  assert.ok(SCAN_FILES.includes('packages/frontend/src/lib/i18n/messages/en.ts'))
+})
+
+test('a locale file in the catalog directory is convention copy, so an unlisted one fails (#3347)', () => {
+  assert.equal(matchesCopyConvention('packages/frontend/src/lib/i18n/messages/sv.ts'), true)
+  assert.deepEqual(
+    conventionGaps(['packages/frontend/src/lib/i18n/messages/sv.ts'], SCAN_FILES, {}),
+    ['packages/frontend/src/lib/i18n/messages/sv.ts'],
+  )
+  // Control: the catalog's loader next door is not copy.
+  assert.equal(matchesCopyConvention('packages/frontend/src/lib/i18n/index.ts'), false)
+})
+
 test('the three rendered-copy modules #2333 found are on the allowlist', () => {
   // passkeyRowLabel renders the credential row (WalletButton, AccountSignersCard);
   // the transaction pair renders every row title, initiator and status.

@@ -1,7 +1,16 @@
-import { JsonRpcProvider, Network, Wallet, formatEther, parseEther, type Provider } from 'ethers'
+import {
+  JsonRpcProvider,
+  Network,
+  Wallet,
+  formatEther,
+  parseEther,
+  type JsonRpcPayload,
+  type JsonRpcResult,
+  type Provider,
+} from 'ethers'
 import { relayerPrivateKeyForChain } from '../config.js'
 import { getChain } from '../domain/chains.js'
-import { secondaryRpcUrl } from './chain/rpc-transport.js'
+import { secondaryRpcUrl, secretSegments } from './chain/rpc-transport.js'
 
 const providers = new Map<number, JsonRpcProvider>()
 const relayers = new Map<number, Wallet>()
@@ -123,6 +132,88 @@ export function getProvider(chainId: number): JsonRpcProvider {
 }
 
 /**
+ * The key-like pieces of an endpoint URL — path segments and query values of
+ * 12+ characters — now the shared `secretSegments` from `chain/rpc-transport.ts`
+ * (#3371 converged the third copy; #2769 wrote the first two). The alias keeps
+ * the call sites below unchanged. It can live in `rpc-transport.ts` because that
+ * file is BELOW this one in the provider graph (this file already imports
+ * `secondaryRpcUrl` from it); `outbound-queue.ts` reaches it through this file,
+ * which must stay its free-standing base.
+ */
+const keySegments = secretSegments
+
+/**
+ * Scrub an RPC URL — and so any embedded provider API key — out of an ethers
+ * error before it leaves this file, for EVERY provider `newEthersProvider`
+ * builds (primary and fallback). The 2026-09-26 incident: a dRPC 408 timeout
+ * on the PRIMARY provider threw with the full URL, key included, inside both
+ * `message` and the enumerable `info.requestUrl` / `request` / `response` —
+ * `FetchResponse.assertOk()` (ethers `utils/fetch.js`) builds that shape, and
+ * `JsonRpcProvider._send` (`providers/provider-jsonrpc.js`) is the one place
+ * it throws from; the message reached logs, the `outbound_txs` error column
+ * and could reach an operator response. `outbound-queue.ts`'s
+ * `fallbackSendError` already rebuilt the FALLBACK send's error from safe
+ * fields (#3323/#2769) at its one call site; this closes the same hole one
+ * layer down, so every caller of either provider is covered, not only that
+ * one.
+ *
+ * Every JSON-RPC-LEVEL error (a wrong nonce, a revert, dRPC's flashblocks
+ * refusal) is built later, by `getRpcError`, from the response BODY alone —
+ * never from `_send`'s throw — so `isPendingTagRefusal`, `isDeterministicRevert`
+ * and ethers' own NONCE_EXPIRED classification are untouched by this: none of
+ * them read a field this rebuilds. `request` and `response` (ethers'
+ * `FetchRequest`/`FetchResponse` instances, which hold the URL in
+ * non-string form too) are dropped outright; every remaining own property —
+ * `code`, `shortMessage`, `info`, a nested JSON-RPC `error` body if present —
+ * is copied through with every string value scrubbed, so classification that
+ * reads them keeps working.
+ */
+function scrubRpcUrlError(err: unknown, url: string): unknown {
+  if (typeof err !== 'object' || err === null) return err
+  const secrets = keySegments(url)
+  const scrub = (text: string): string =>
+    secrets
+      .reduce((acc, secret) => acc.split(secret).join('<redacted>'), text)
+      .replace(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)\]}]+/gi, '<rpc-url>')
+  const deepScrub = (value: unknown): unknown => {
+    if (typeof value === 'string') return scrub(value)
+    if (Array.isArray(value)) return value.map(deepScrub)
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {}
+      for (const [key, val] of Object.entries(value)) out[key] = deepScrub(val)
+      return out
+    }
+    return value
+  }
+  const e = err as Error & Record<string, unknown>
+  const scrubbed = new Error(scrub(String(e.message ?? err))) as Error & Record<string, unknown>
+  for (const key of Object.getOwnPropertyNames(e)) {
+    if (key === 'message' || key === 'stack' || key === 'request' || key === 'response') continue
+    scrubbed[key] = deepScrub(e[key])
+  }
+  return scrubbed
+}
+
+/**
+ * The ONE place ethers' HTTP client throws a transport-level error
+ * (`_send`, via `FetchResponse.assertOk()`): every send this provider makes
+ * — reads, `eth_sendRawTransaction`, everything `getRelayer`'s wallet signs
+ * — routes through it, so scrubbing here covers all of them without a
+ * per-caller wrapper. `send()` (the public entry point) calls `_send`
+ * directly with no intervening catch, so nothing between here and the
+ * caller can re-attach the URL.
+ */
+class ScrubbingJsonRpcProvider extends JsonRpcProvider {
+  async _send(payload: JsonRpcPayload | Array<JsonRpcPayload>): Promise<Array<JsonRpcResult>> {
+    try {
+      return await super._send(payload)
+    } catch (err) {
+      throw scrubRpcUrlError(err, this._getConnection().url)
+    }
+  }
+}
+
+/**
  * The ONE place an ethers provider is constructed (`rpc-transport-guard`).
  * The primary passes no network (detected once, then static). The fallback
  * pins it: an unreachable fallback must not start ethers' 1 s `eth_chainId`
@@ -130,7 +221,7 @@ export function getProvider(chainId: number): JsonRpcProvider {
  * fallback's own `eth_chainId` answer from being trusted.
  */
 function newEthersProvider(url: string, network?: Network): JsonRpcProvider {
-  return new JsonRpcProvider(url, network, { batchMaxCount: 1, staticNetwork: true })
+  return new ScrubbingJsonRpcProvider(url, network, { batchMaxCount: 1, staticNetwork: true })
 }
 
 const fallbackBroadcastProviders = new Map<number, JsonRpcProvider>()

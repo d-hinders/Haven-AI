@@ -6,7 +6,18 @@ time while being false. The bump rewrites the `## Unreleased` heading below into
 `## <version> — <date>`; add entries under `## Unreleased` and leave the heading
 alone.
 
+Mark a bullet `**Update required**` when a client must update to keep paying.
+The bump then flags that release `action_required` in the public release data
+(`/releases`, `GET /discovery`, `/.well-known/haven.json`; #3305). It is not
+`**BREAKING**`, which means updating may break you, not that you must update.
+Write it exactly: "update required" in any other form (including "no update
+required") is refused — reword to "no update needed", or quote it in a code span.
+
 ## Unreleased
+
+## 0.6.0-alpha.0 — 2026-09-26
+
+- **The runtime this connector installs moves to `0.6.0-alpha.0` (no connector source change).** A setup or re-run now wires `@haven_ai/mcp`, `@haven_ai/sdk` and `@haven_ai/signer` `0.6.0-alpha.0`. Two things reach you through them: **BREAKING (#3306)** — `haven_list_receipts` rows no longer carry the deprecated `rail`, `proofStatus`, `resourceUrl` and `merchantAddress` keys (read `source`, `paymentProofStatus`, `x402ResourceUrl`, `x402MerchantAddress`); and three new task-budget tools (#3329), so the consent hash changes and the operator is asked to consent once more on the next launch. The connector's own flags, output and exit codes are unchanged; see the mcp, sdk and signer CHANGELOGs for the full notes.
 
 ## 0.5.0-alpha.1 — 2026-09-25
 

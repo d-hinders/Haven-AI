@@ -685,10 +685,11 @@ describe('custody invariant', () => {
 // (#1263) — and restore them byte-identically on include_signing_payload=true
 // (the recovery path for diagnostics and pre-#1263 signers). Direct payments
 // (haven_pay/haven_send) keep the bulk unconditionally: since #3271 they also
-// have a fetch path (GET /payments/:id/sign-context), but the hosted result
-// does not name it yet (the capability-gated guidance ships after the signer
-// release) and an older signer needs the relay fields, which the
-// haven_pay/haven_send tests above prove are always present.
+// have a fetch path (GET /payments/:id/sign-context), and since #3277 the
+// hosted result NAMES it (next_tool: haven_sign + { payment_id }) with the
+// refusal-recovery route for a pre-#3271 signer — which still needs the relay
+// fields, and the haven_pay/haven_send tests above prove those are always
+// present.
 
 describe('compact x402 signing payload (#1272)', () => {
   const TYPED_DATA = {

@@ -13,7 +13,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { runGuard } from '../test-support/guard-cli.mjs'
-import { evaluate, matchesGlob, moneyPathFiles, loadMoneyPathGlobs, completenessWarningFromJobs, greenRunQueryArgs, jobsQueryArgs, selectDiffBase, isVersionOnlyDiff, partitionVersionOnly, selectGreenRun, moneyFlowJobConclusion, EVIDENCE_EVENTS, MONEY_FLOW_JOB, GREEN_RUN_WINDOW } from './qa-freshness.mjs'
+import { evaluate, matchesGlob, moneyPathFiles, loadMoneyPathGlobs, greenRunQueryArgs, jobsQueryArgs, selectDiffBase, isVersionOnlyDiff, partitionVersionOnly, selectGreenRun, moneyFlowJobConclusion, EVIDENCE_EVENTS, MONEY_FLOW_JOB, GREEN_RUN_WINDOW_FACTOR, GREEN_RUN_LIMIT, JOB_LOOKUP_BUDGET, RAILWAY_DEV_ENVIRONMENT, preFilterHarnessCandidates, findGreenRun } from './qa-freshness.mjs'
 
 const HOUR = 3_600_000
 const NOW = Date.parse('2026-07-27T12:00:00Z')
@@ -159,6 +159,21 @@ describe('the gate refuses to run without a real bound or a known branch', () =>
     assert.equal(evaluate({ ...base, freshnessHours: -5 }).code, 'bad_freshness_hours')
   })
 
+  test('a window too large for a date → fail closed, with the raw variable echoed (#3368)', () => {
+    const r = evaluate({ ...base, latestGreenRun: run(1000), freshnessHours: 1e15, freshnessHoursInput: '1e15' })
+    assert.equal(r.code, 'bad_freshness_hours')
+    assert.match(r.message, /got '1e15'/)
+    assert.match(evaluate({ ...base, freshnessHours: NaN, freshnessHoursInput: 'thirty' }).message, /got 'thirty'/)
+  })
+
+  test('a search cut short by the lookup budget is not reported as "no run" (#3368)', () => {
+    const r = evaluate({ ...base, latestGreenRun: null, searchCutShort: true })
+    assert.equal(r.code, 'search_cut_short')
+    assert.match(r.message, /job-lookup budget/)
+    assert.doesNotMatch(r.message, /No successful/)
+    assert.equal(evaluate({ ...base, latestGreenRun: null }).code, 'no_run')
+  })
+
   test('unknown source branch → fail closed', () => {
     // The docstring promised this; it was not true. `gate` restricts the branch,
     // but this function must not depend on another job for its own correctness.
@@ -241,29 +256,13 @@ describe('glob matching', () => {
   })
 })
 
-describe('completeness warning (#1044)', () => {
-  test('warns when the Coverage completeness step failed', () => {
-    const jobs = [{ steps: [
-      { name: 'Run money-flow QA (bounded flake-retry)', conclusion: 'success' },
-      { name: 'Coverage completeness', conclusion: 'failure' },
-    ] }]
-    assert.match(completenessWarningFromJobs(jobs) ?? '', /GREEN-WITH-SKIPS/)
-  })
-  test('silent on full coverage, missing step, or no jobs', () => {
-    assert.equal(completenessWarningFromJobs([{ steps: [
-      { name: 'Coverage completeness', conclusion: 'success' },
-    ] }]), null)
-    assert.equal(completenessWarningFromJobs([{ steps: [] }]), null)
-    assert.equal(completenessWarningFromJobs(undefined), null)
-  })
-})
-
 // #1047 part 3 — the WIRING decisions main() feeds the pure core with. The
 // core was pinned; these two choices (which runs count as evidence, which SHA
 // the coverage diff anchors to) were not, and both are load-bearing.
 describe('wiring — run-list filters (#1047, re-pinned by #2404)', () => {
-  test('evidence is qa-dev.yml successes, newest first, a bounded window — and NO branch filter', () => {
-    const args = greenRunQueryArgs('d-hinders/Haven-AI')
+  test('evidence is qa-dev.yml successes, newest first, twice the freshness window — and NO branch filter', () => {
+    const nowMs = Date.parse('2026-09-26T12:00:00Z')
+    const args = greenRunQueryArgs('d-hinders/Haven-AI', { freshnessHours: 30, nowMs })
     const arg = (flag) => args[args.indexOf(flag) + 1]
     assert.equal(arg('--workflow'), 'qa-dev.yml')
     // #2404: "on dev" is decided by selectGreenRun on the run's SHA, not by
@@ -275,15 +274,28 @@ describe('wiring — run-list filters (#1047, re-pinned by #2404)', () => {
     // either way, which the selection tests below pin over all three shapes.)
     assert.equal(args.includes('--branch'), false, 'the query must not filter on branch (#2404)')
     assert.equal(arg('--status'), 'success')
-    assert.equal(arg('--limit'), String(GREEN_RUN_WINDOW))
-    assert.ok(GREEN_RUN_WINDOW > 1, 'the selector needs a window, not a single row')
+    // #3361: a time window, not a row count — the newest 30 rows could be all
+    // gate-skipped decoys. Twice the freshness window, so a green just past it
+    // is still found and refused as `stale`, not reported as "no run".
+    assert.equal(GREEN_RUN_WINDOW_FACTOR, 2)
+    assert.equal(arg('--created'), '>=2026-09-24T00:00:00.000Z') // 60 h before now
+    assert.equal(arg('--limit'), String(GREEN_RUN_LIMIT))
+    assert.ok(GREEN_RUN_LIMIT >= 1000, 'the limit must not be the thing that bounds the window')
     assert.equal(arg('--repo'), 'd-hinders/Haven-AI')
     // headSha is what the coverage diff anchors to; dropping it from the JSON
     // fields would silently turn the coverage rule into fail-closed-always.
     // event and headBranch are what the selector decides on; dropping either
     // makes it refuse every row (fail closed), which the selection tests pin.
-    for (const field of ['headSha', 'createdAt', 'databaseId', 'event', 'headBranch']) {
+    // displayTitle/startedAt/updatedAt feed the pre-filter; without them it keeps
+    // every row (fail-open to the selector's own rules, never to admission).
+    for (const field of ['headSha', 'createdAt', 'databaseId', 'event', 'headBranch', 'displayTitle', 'startedAt', 'updatedAt']) {
       assert.match(arg('--json'), new RegExp(`(^|,)${field}(,|$)`), `--json must project ${field}`)
+    }
+  })
+
+  test('an invalid freshness window is an error, not a RangeError or an unbounded query', () => {
+    for (const freshnessHours of [0, -1, NaN, Infinity]) {
+      assert.throws(() => greenRunQueryArgs('o/r', { freshnessHours }), /positive number/)
     }
   })
 })
@@ -323,11 +335,13 @@ function simulateGhRunList(rows, args) {
   const arg = (flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined)
   const branch = arg('--branch')
   const status = arg('--status')
+  const created = arg('--created') // only the `>=ISO` form this gate uses
   const limit = Number(arg('--limit') ?? rows.length)
   const fields = (arg('--json') ?? '').split(',').filter(Boolean)
   return rows
     .filter((r) => branch === undefined || r.headBranch === branch)
     .filter((r) => status === undefined || r.conclusion === status)
+    .filter((r) => created === undefined || Date.parse(r.createdAt) >= Date.parse(created.replace(/^>=/, '')))
     .slice(0, limit)
     .map((r) => Object.fromEntries(fields.map((f) => [f, r[f] ?? null])))
 }
@@ -341,10 +355,10 @@ const PRE_2404_QUERY = [
 
 const T0 = Date.parse('2026-09-02T08:00:00Z')
 const at = (minutesAgo) => new Date(T0 - minutesAgo * 60_000).toISOString()
-const greenJobs = [{ name: MONEY_FLOW_JOB, conclusion: 'success', steps: [{ name: 'Coverage completeness', conclusion: 'success' }] }]
+const greenJobs = [{ name: MONEY_FLOW_JOB, conclusion: 'success' }]
 const skippedJobs = [
-  { name: 'gate', conclusion: 'success', steps: [] },
-  { name: MONEY_FLOW_JOB, conclusion: 'skipped', steps: [] },
+  { name: 'gate', conclusion: 'success' },
+  { name: MONEY_FLOW_JOB, conclusion: 'skipped' },
 ]
 
 // The shape #2404 predicted #2273's trigger would produce: Railway deploys a
@@ -388,7 +402,7 @@ describe('run selection — the "before" leg: what the old filter does to an unl
 
 describe('run selection — the "after" leg (#2404)', () => {
   test('the new query, replayed through the same model, hands the selector the deployment run and it is chosen', () => {
-    const rows = simulateGhRunList([deployRun, manualRun, nightlyRun], greenRunQueryArgs('d-hinders/Haven-AI'))
+    const rows = simulateGhRunList([deployRun, manualRun, nightlyRun], greenRunQueryArgs('d-hinders/Haven-AI', { nowMs: T0 }))
     const { run } = selectGreenRun(rows, io())
     assert.ok(run, 'a run must be selected')
     assert.equal(run.databaseId, deployRun.databaseId, `expected the deployment_status run ${deployRun.databaseId} to be selected, got ${run.databaseId}`)
@@ -458,14 +472,6 @@ describe('run selection — the "after" leg (#2404)', () => {
       jobsFor: (id) => (id === deployRun.databaseId ? skippedJobs : greenJobs),
     }))
     assert.equal(run.databaseId, redispatch.databaseId)
-  })
-
-  test('the selector returns the admitted run\'s jobs so the completeness warning reads the same list', () => {
-    const { jobs } = selectGreenRun([deployRun], io())
-    assert.equal(completenessWarningFromJobs(jobs), null)
-    const partial = [{ name: MONEY_FLOW_JOB, conclusion: 'success', steps: [{ name: 'Coverage completeness', conclusion: 'failure' }] }]
-    const { jobs: partialJobs } = selectGreenRun([deployRun], io({ jobsFor: () => partial }))
-    assert.match(completenessWarningFromJobs(partialJobs) ?? '', /GREEN-WITH-SKIPS/)
   })
 })
 
@@ -548,7 +554,7 @@ describe('run selection — fails closed (#2404)', () => {
   })
 
   test('an empty window yields no run, not a throw', () => {
-    assert.deepEqual(selectGreenRun([], io()), { run: null, jobs: null, refused: [] })
+    assert.deepEqual(selectGreenRun([], io()), { run: null, refused: [] })
     assert.equal(selectGreenRun(undefined, io()).run, null)
   })
 
@@ -925,7 +931,17 @@ if (process.env.GH_SHIM_FAIL === '1') {
   process.exit(1)
 }
 if (args[0] === 'run' && args[1] === 'list') {
-  if (process.env.GH_SHIM_RUNS === 'at-head') {
+  if (process.env.GH_SHIM_RUNS === 'many-at-head') {
+    // 45 harness-shaped dispatch runs at HEAD — more than the 40-lookup budget.
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    process.stdout.write(JSON.stringify(Array.from({ length: 45 }, (_, k) => ({
+      databaseId: 1000 + k,
+      event: 'workflow_dispatch',
+      headBranch: 'dev',
+      headSha: sha,
+      createdAt: new Date(Date.now() - k * 60000).toISOString(),
+    }))))
+  } else if (process.env.GH_SHIM_RUNS === 'at-head') {
     const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
     process.stdout.write(JSON.stringify([{
       databaseId: 1,
@@ -940,7 +956,7 @@ if (args[0] === 'run' && args[1] === 'list') {
   process.exit(0)
 }
 if (args[0] === 'api' && args.some((a) => a.includes('/actions/runs/') && a.endsWith('/jobs'))) {
-  process.stdout.write(JSON.stringify({ jobs: [{ name: 'money-flow', conclusion: 'success', steps: [] }] }))
+  process.stdout.write(JSON.stringify({ jobs: [{ name: 'money-flow', conclusion: process.env.GH_SHIM_JOBS || 'success' }] }))
   process.exit(0)
 }
 process.stderr.write('gh shim: unexpected args ' + JSON.stringify(args) + '\\n')
@@ -998,6 +1014,43 @@ process.exit(64)
     assert.doesNotMatch(out, /No successful 'QA — money-flow \(dev\)' run found/)
   })
 
+  // #3361: the freshness window now also sets the query depth, so an invalid
+  // one must be refused with evaluate's own message BEFORE the query, not
+  // surface as a misleading "could not query workflow runs".
+  test('REFUSES: an invalid QA_FRESHNESS_HOURS, with the fix-the-variable message', () => {
+    for (const hours of ['abc', '0', '-3']) {
+      const { status, out } = run({ GH_SHIM_RUNS: 'at-head', FRESHNESS_HOURS: hours })
+      assert.equal(status, 1, out)
+      assert.match(out, /QA_FRESHNESS_HOURS is not a usable positive number of hours/)
+      assert.match(out, new RegExp(`got '${hours}'`), 'the raw variable is echoed, not NaN')
+      assert.doesNotMatch(out, /could not query workflow runs/)
+    }
+    // A value too large to be a date is the same refusal, not a query failure (#3368).
+    const { status, out } = run({ GH_SHIM_RUNS: 'at-head', FRESHNESS_HOURS: '1e15' })
+    assert.equal(status, 1, out)
+    assert.match(out, /not a usable positive number of hours \(got '1e15'\)/)
+    assert.doesNotMatch(out, /could not query workflow runs/)
+  })
+
+  test('REFUSES: bad hours on an unknown branch names the branch, not a query failure (#3368 review)', () => {
+    for (const hours of ['abc', '1e15']) {
+      const { status, out } = run({ GH_SHIM_RUNS: 'at-head', SOURCE_BRANCH: 'feature/x', FRESHNESS_HOURS: hours })
+      assert.equal(status, 1, out)
+      assert.match(out, /Unrecognised promotion source branch 'feature\/x'/)
+      assert.doesNotMatch(out, /could not query workflow runs/)
+    }
+  })
+
+  test('REFUSES: a search cut short by the lookup budget says so, not "no run found" (#3368)', () => {
+    const { status, out } = run({ GH_SHIM_RUNS: 'many-at-head', GH_SHIM_JOBS: 'failure' })
+    assert.equal(status, 1, out)
+    assert.match(out, /lookup budget ran out/)
+    assert.match(out, /not read: job-lookup budget exhausted/)
+    assert.match(out, /stopped at its job-lookup budget \(#3361\) before selection finished/)
+    assert.doesNotMatch(out, /No successful 'QA — money-flow \(dev\)' run found/)
+    assert.doesNotMatch(out, /Re-run it, or dispatch/) // a re-run hits the same budget
+  })
+
   // --- refusal 3 of 3: evaluate() said no ------------------------------------
   test('REFUSES (3/3): no green run exists, so evaluate refuses', () => {
     const { status, out } = run({ GH_SHIM_RUNS: 'none' })
@@ -1005,5 +1058,181 @@ process.exit(64)
     assert.match(out, /::error::/)
     assert.match(out, /No successful 'QA — money-flow \(dev\)' run found on dev/)
     assert.doesNotMatch(out, /could not query workflow runs/)
+  })
+})
+
+// ── #3361: the window is time, not rows, and decoys are dropped before lookup ──
+//
+// dev-gate run 36161561881 (PR #3325, 2026-09-25) passed over 30 rows and
+// printed "No successful 'QA — money-flow (dev)' run found" while a real green
+// (36129896386, 5 h old) existed: the newest 30 run-level successes were all
+// gate-skipped deployment_status runs. These tests replay that shape through
+// the real query arguments, so they fail if the window reverts to a row count.
+describe('green-run window (#3361)', () => {
+  const NOW = Date.parse('2026-09-26T08:40:00Z')
+  const iso = (minutesAgo) => new Date(NOW - minutesAgo * 60_000).toISOString()
+  const title = (env, state) => `post-deploy ${'a'.repeat(40)} → ${env} (${state})`
+  // 40 decoys newer than the real green, in the three measured shapes.
+  const decoys = Array.from({ length: 40 }, (_, k) => {
+    const created = iso(5 + k * 5)
+    const shape = k % 3
+    return {
+      databaseId: 800000 + k,
+      event: 'deployment_status',
+      headBranch: 'dev',
+      headSha: `decoy-${k}`,
+      conclusion: 'success',
+      createdAt: created,
+      startedAt: created,
+      // Preview and in_progress are dropped by title; a re-stated dev success by its 20 s duration.
+      displayTitle: shape === 0 ? title('Preview', 'success') : shape === 1 ? title(RAILWAY_DEV_ENVIRONMENT, 'in_progress') : title(RAILWAY_DEV_ENVIRONMENT, 'success'),
+      updatedAt: new Date(Date.parse(created) + 20_000).toISOString(),
+    }
+  })
+  const realGreen = {
+    databaseId: 700001,
+    event: 'deployment_status',
+    headBranch: 'dev',
+    headSha: 'real-sha',
+    conclusion: 'success',
+    createdAt: iso(300),
+    startedAt: iso(300),
+    updatedAt: iso(295), // 5 min: a harness run
+    displayTitle: title(RAILWAY_DEV_ENVIRONMENT, 'success'),
+  }
+  const rows = [...decoys, realGreen]
+  const jobsByRun = (id) => (id === realGreen.databaseId ? greenJobs : skippedJobs)
+  const run = (overrides = {}) => {
+    const lookedUp = []
+    const result = findGreenRun({
+      repo: 'o/r',
+      freshnessHours: 30,
+      nowMs: NOW,
+      gh: (args) => JSON.stringify(simulateGhRunList(rows, args)),
+      isAncestorOfHead: (sha) => sha === 'real-sha' || sha.startsWith('decoy-'),
+      jobsFor: (id) => {
+        lookedUp.push(id)
+        return jobsByRun(id)
+      },
+      ...overrides,
+    })
+    return { ...result, lookedUp }
+  }
+
+  test('before: the old 30-row query over this shape finds no run', () => {
+    const old = simulateGhRunList(rows, ['run', 'list', '--workflow', 'qa-dev.yml', '--status', 'success', '--limit', '30', '--json', 'createdAt,headSha,databaseId,event,headBranch'])
+    assert.equal(selectGreenRun(old, io({ jobsFor: jobsByRun, isAncestorOfHead: () => true })).run, null)
+  })
+
+  test('after: 40 gate-skipped greens in front of a real one — it anchors to the real one', () => {
+    const { run: anchored, fetched } = run()
+    assert.equal(fetched, 41)
+    assert.equal(anchored?.databaseId, realGreen.databaseId)
+  })
+
+  test('the pre-filter keeps the lookups bounded: only the real green is looked up', () => {
+    const { lookups, lookedUp, dropped } = run()
+    assert.deepEqual(lookedUp, [realGreen.databaseId])
+    assert.equal(lookups, 1)
+    assert.equal(dropped.filter((d) => d.reason === 'title').length + dropped.filter((d) => d.reason === 'duration').length, 40)
+  })
+
+  test('the pre-filter only removes rows: nothing it drops can be admitted, and unparseable titles are kept', () => {
+    const { kept, dropped } = preFilterHarnessCandidates(rows)
+    assert.equal(kept.length + dropped.length, rows.length)
+    // A decoy that somehow had a money-flow success is still not admitted once dropped.
+    const r = findGreenRun({
+      repo: 'o/r', freshnessHours: 30, nowMs: NOW,
+      gh: () => JSON.stringify([decoys[0]]),
+      isAncestorOfHead: () => true,
+      jobsFor: () => greenJobs,
+    })
+    assert.equal(r.run, null)
+    // Schedule/dispatch titles and rows without timestamps pass through to the selector.
+    const manual = { ...manualRun, displayTitle: 'QA — money-flow (dev)' }
+    assert.deepEqual(preFilterHarnessCandidates([manual, deployRun]).kept, [manual, deployRun])
+  })
+
+  test('the environment is pinned explicitly: a Preview title with a long duration is still dropped', () => {
+    const longPreview = { ...decoys[0], updatedAt: new Date(Date.parse(decoys[0].startedAt) + 600_000).toISOString() }
+    assert.deepEqual(preFilterHarnessCandidates([longPreview]).dropped, [{ databaseId: longPreview.databaseId, reason: 'title' }])
+    assert.equal(RAILWAY_DEV_ENVIRONMENT, 'Haven AI / dev')
+    // …and so is a long dev-titled row in any state but success.
+    const longInProgress = { ...decoys[1], updatedAt: new Date(Date.parse(decoys[1].startedAt) + 600_000).toISOString() }
+    assert.match(longInProgress.displayTitle, /\(in_progress\)$/)
+    assert.deepEqual(preFilterHarnessCandidates([longInProgress]).dropped, [{ databaseId: longInProgress.databaseId, reason: 'title' }])
+  })
+
+  test('an exhausted lookup budget refuses, never admits', () => {
+    // Every decoy made to look harness-shaped, so each costs a lookup.
+    const longDecoys = decoys.map((d) => ({ ...d, displayTitle: title(RAILWAY_DEV_ENVIRONMENT, 'success'), updatedAt: new Date(Date.parse(d.startedAt) + 600_000).toISOString() }))
+    const result = findGreenRun({
+      repo: 'o/r', freshnessHours: 30, nowMs: NOW,
+      gh: (args) => JSON.stringify(simulateGhRunList([...longDecoys, realGreen], args)),
+      isAncestorOfHead: () => true,
+      jobsFor: jobsByRun,
+      lookupBudget: 5,
+    })
+    assert.equal(result.run, null)
+    assert.equal(result.lookups, 5)
+    assert.equal(result.budgetExhausted, true)
+    // Rows the budget skipped are named as unread, not as an API failure (#3368).
+    const unread = result.refused.filter((r) => r.reason === 'not read: job-lookup budget exhausted')
+    assert.ok(unread.length > 0)
+    assert.ok(result.refused.slice(0, 5).every((r) => r.reason !== 'not read: job-lookup budget exhausted'), 'the five read rows keep their real reason')
+    assert.ok(JOB_LOOKUP_BUDGET >= 10, 'the real budget leaves room for a short red streak')
+  })
+
+  test('a budget that runs out inside the tie-break decides nothing (review round 1, S3b)', () => {
+    // A dispatch at X is admitted (lookup 1); an OLDER deployment_status run at
+    // the same commit would win the tie-break but cannot be read. Letting the
+    // dispatch stand would judge the younger run's age; the gate must refuse.
+    const dispatchAtX = { databaseId: 100, event: 'workflow_dispatch', headBranch: 'dev', headSha: 'X', conclusion: 'success', createdAt: iso(9 * 60), startedAt: iso(9 * 60), updatedAt: iso(9 * 60 - 5), displayTitle: 'QA — money-flow (dev)' }
+    const deployAtX = { databaseId: 200, event: 'deployment_status', headBranch: 'dev', headSha: 'X', conclusion: 'success', createdAt: iso(31 * 60), startedAt: iso(31 * 60), updatedAt: iso(31 * 60 - 5), displayTitle: title(RAILWAY_DEV_ENVIRONMENT, 'success') }
+    const pick = (lookupBudget) => findGreenRun({
+      repo: 'o/r', freshnessHours: 30, nowMs: NOW,
+      gh: (args) => JSON.stringify(simulateGhRunList([dispatchAtX, deployAtX], args)),
+      isAncestorOfHead: () => true,
+      jobsFor: () => greenJobs,
+      lookupBudget,
+    })
+    assert.equal(pick(40).run?.databaseId, 200, 'with budget, the tie-break picks the deployment run')
+    const starved = pick(1)
+    assert.equal(starved.budgetExhausted, true)
+    assert.equal(starved.run, null)
+    // …but the passing run it did admit is reported, not hidden (#3368 review).
+    assert.equal(starved.unanchored?.databaseId, 100)
+    assert.equal(pick(40).unanchored, null)
+    const verdict = evaluate({ sourceBranch: 'dev', latestGreenRun: null, changedMoneyPathFiles: [], nowMs: NOW, freshnessHours: 30, searchCutShort: true })
+    assert.match(verdict.message, /before selection finished, so no run is anchored/)
+    assert.doesNotMatch(verdict.message, /did not pass/)
+  })
+
+  test('a freshness window too large for a date is a clear error', () => {
+    assert.throws(() => greenRunQueryArgs('o/r', { freshnessHours: 1e15 }), /representable date/)
+  })
+
+  test('a green older than twice the window is not fetched; one just past the window is, and evaluate calls it stale', () => {
+    const at35h = { ...realGreen, createdAt: iso(35 * 60), startedAt: iso(35 * 60), updatedAt: iso(35 * 60 - 5) }
+    const at61h = { ...realGreen, createdAt: iso(61 * 60), startedAt: iso(61 * 60), updatedAt: iso(61 * 60 - 5) }
+    const fetch = (row) => findGreenRun({
+      repo: 'o/r', freshnessHours: 30, nowMs: NOW,
+      gh: (args) => JSON.stringify(simulateGhRunList([row], args)),
+      isAncestorOfHead: () => true,
+      jobsFor: () => greenJobs,
+    })
+    assert.equal(fetch(at61h).run, null)
+    const found = fetch(at35h).run
+    assert.equal(found?.databaseId, realGreen.databaseId)
+    const verdict = evaluate({ sourceBranch: 'dev', latestGreenRun: found, changedMoneyPathFiles: [], nowMs: NOW, freshnessHours: 30 })
+    assert.equal(verdict.ok, false)
+    assert.match(verdict.message, /stale|old|hours/i)
+  })
+
+  test('the result reports a query that reached its row limit as possibly truncated', () => {
+    const many = Array.from({ length: GREEN_RUN_LIMIT }, (_, k) => ({ ...decoys[0], databaseId: 600000 + k }))
+    const r = findGreenRun({ repo: 'o/r', freshnessHours: 30, nowMs: NOW, gh: () => JSON.stringify(many), isAncestorOfHead: () => true, jobsFor: () => greenJobs })
+    assert.equal(r.truncated, true)
+    assert.equal(run().truncated, false)
   })
 })

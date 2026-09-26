@@ -1,7 +1,7 @@
 import { parseArgs, helpText, type ParsedArgs } from './args.js'
 import { createCliApi, CliApiError, type CliApi } from './api.js'
 import { createSessionStore, type Session, type SessionStore } from './session.js'
-import { chainName, table, truncateAddress } from './format.js'
+import { chainName, table, timeAgo, truncateAddress } from './format.js'
 import { toCsv } from './csv.js'
 import { EXIT, HavenCliError, UsageError, toFailure, type ExitCode } from './errors.js'
 import { createOutput, type Output } from './output.js'
@@ -22,7 +22,7 @@ import {
 export const DEFAULT_API = 'https://havenbackend-production-8a00.up.railway.app'
 // Self-reported CLI version. Owned by scripts/release-bump.mjs, which rewrites
 // the string literal below on every release — keep it a bare quoted literal.
-export const CLI_VERSION = '0.5.0-alpha.1'
+export const CLI_VERSION = '0.6.0-alpha.0'
 
 /** #3303: the `X-Haven-Client` value every Haven API request from this CLI carries. */
 export const CLI_CLIENT_IDENTITY = `@haven_ai/cli/${CLI_VERSION}`
@@ -84,6 +84,26 @@ function accountAddressOf(s: { account_address?: string | null }): string {
 interface Allowance { token_symbol: string; allowance_amount: string; reset_period_min: number }
 interface Agent { id: string; name: string; status: string; allowances?: Allowance[] }
 interface Balance { symbol: string; formatted: string; balance: string }
+/**
+ * The additive balance-freshness marker from the wire (#3295), read by the
+ * CLI since #3318. Present on a `GET /balances/:accountAddress` entry only
+ * when that entry's on-chain read FAILED: `stale` = the served figure is the
+ * last successfully read balance and `asOf` says when it was read;
+ * `unavailable` = no balance has ever been read for this token, so the
+ * accompanying balance string is a filler, not a figure. Absent on a clean
+ * read — which is how the marker stays additive for every existing consumer.
+ */
+interface BalanceFreshness {
+  status: 'stale' | 'unavailable'
+  /** ISO 8601 — present exactly when `status` is `'stale'`. */
+  asOf?: string
+}
+interface BalanceToken {
+  symbol: string
+  address: string | null
+  decimals: number
+  balanceFreshness?: BalanceFreshness
+}
 interface Txn {
   hash: string; direction: 'in' | 'out'; valueFormatted: string; asset: string
   source?: string; timestamp: number; accountName?: string
@@ -93,7 +113,6 @@ interface Txn {
 }
 interface CatalogEntry { name: string; category: string; rail: string; price_display?: string | null; status: string }
 interface Contact { id: string; name: string; address: string }
-interface BalanceToken { symbol: string; address: string | null; decimals: number }
 interface CreateSetupResponse {
   setup_id: string
   status: string
@@ -522,6 +541,27 @@ function accountsEnvelope(body: { accounts?: Safe[] }): Safe[] {
   return body.accounts
 }
 
+/**
+ * One TOKEN/BALANCE table cell (#3318).
+ *
+ * The wire carries an additive `balanceFreshness` marker beside the balance
+ * (since #3295): `stale` means the figure is real but was last read from the
+ * chain at `asOf`, `unavailable` means nothing has ever been read and the
+ * `'0'` beside it is a filler. Printing either as if it were current is how
+ * #2769 read: a failed read renders a number the wallet does not hold. So a
+ * stale entry keeps its figure and gains `≈ … (as of 45m ago)` — the tilde is
+ * the "not exact" signal, the timestamp says how far behind it is; an
+ * unavailable entry prints `unavailable` instead of the filler zero.
+ * A clean entry — marker absent — renders exactly as before, byte for byte,
+ * which is what keeps this additive for every existing consumer of the table.
+ */
+function renderBalanceCell(entry: Balance & { balanceFreshness?: BalanceFreshness }): string {
+  const marker = entry.balanceFreshness
+  if (!marker) return entry.formatted
+  if (marker.status === 'unavailable') return 'unavailable'
+  return `≈ ${entry.formatted} (as of ${timeAgo(marker.asOf ?? '')})`
+}
+
 async function cmdWalletsList(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
   const { api } = await authed(args, d)
   const accounts = accountsEnvelope(await api.get<{ accounts?: Safe[] }>('/user/accounts'))
@@ -552,7 +592,10 @@ async function cmdWalletsBalances(args: ParsedArgs, d: ResolvedDeps): Promise<nu
       `${safe.name} · ${chainName(safe.chain_id)} · ${truncateAddress(accountAddressOf(safe))}`,
       balances.length === 0
         ? '  (no balances)'
-        : table(['TOKEN', 'BALANCE'], balances.map((b) => [b.symbol, b.formatted])),
+        : table(
+            ['TOKEN', 'BALANCE'],
+            balances.map((b) => [b.symbol, renderBalanceCell(b)]),
+          ),
     ].join('\n'),
   )
   return EXIT.ok

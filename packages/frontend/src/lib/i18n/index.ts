@@ -18,7 +18,9 @@ import { en } from './messages/en'
  *
  * Adding one back means: a `messages/<locale>.ts` typed as `Messages` (the type
  * makes an untranslated key a compile error), the code in `LOCALES`, a tag in
- * `INTL_LOCALE`, some way to choose it, and a `lang` value that follows — and
+ * `INTL_LOCALE`, an entry in the copy lint's `SCAN_FILES` (#3347 — an
+ * unlisted catalog file fails the lint), some way to choose it, and a `lang`
+ * value that follows — and
  * then the formatters this module does NOT reach, below.
  *
  * Scope, stated so the list above is not read as complete: this is the

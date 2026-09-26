@@ -14,6 +14,7 @@ import { runMigrations } from './db/migrate.js'
 import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
 import { reencryptPlaintextSecretsAtBoot } from './modules/accounting/index.js'
 import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
+import { sendDelegateAlertFromEnv } from './infra/delegate-alert-webhook.js'
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
 import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
@@ -39,15 +40,18 @@ import {
   setAnchorLiveness,
   anchorOnChain,
   recoverAnchorFromReceipt,
+  repairAnchorUidFromReceipt,
   classifyAnchorTxLiveness,
   setRevoker,
   revokeOnChain,
   setRevocationProbe,
   readRevocationAnchor,
+  setAnchorUidRepair,
   setReceiptSigningKey,
   passportReadiness,
   logPassportReadiness,
   retryPendingPassports,
+  repairAnchoredUids,
   reconcilePendingRevocations,
   reconcilePendingReanchors,
   listStuckReanchors,
@@ -59,6 +63,8 @@ import contactRoutes from './routes/contacts.js'
 import paymentRoutes from './routes/payments.js'
 import agentActivityRoutes from './routes/agent-activity.js'
 import x402Routes from './routes/x402.js'
+import taskBudgetRoutes from './routes/task-budgets.js'
+import agentTaskBudgetsOwnerRoutes from './routes/agent-task-budgets.js'
 import userAccountsRoutes from './routes/user-accounts.js'
 import userAccountsRetiredRoutes from './routes/user-accounts-retired.js'
 import passkeyRoutes from './routes/passkeys.js'
@@ -80,6 +86,7 @@ import { AccountedConnector } from './modules/accounting/index.js'
 import { FortnoxConnector } from './modules/accounting/index.js'
 import { fortnoxConfigured } from './modules/accounting/index.js'
 import {
+  deliverCatalogAlerts,
   refreshCatalog,
   runCatalogIngestTick,
   type QueryableLike,
@@ -132,6 +139,18 @@ installRequestValidation(app, {
     // #3164: the organization routes are born ENFORCED — new modules never
     // enter shadow.
     'routes/agent-organizations.ts',
+    // #3329: the owner-facing task-budget READ is non-money-path (GET only)
+    // and born ENFORCED, same precedent as agent-organizations.ts above.
+    'routes/agent-task-budgets.ts',
+    // #3329: `routes/task-budgets.ts` is a BRAND NEW module with no live
+    // caller yet (unlike `routes/payments.ts` / `routes/agent-delegations.ts`
+    // / `routes/machine-payments.ts`, which predate the request-validation
+    // rollout and carry real traffic the #3028 fallback could not prove) —
+    // `docs/operations/dev-environment.md`'s rule is that a genuinely new
+    // module is born ENFORCED, never shadow, because there is no existing
+    // caller a stricter schema could break. It is money-path, but that rule
+    // is about proving EXISTING traffic safe, not about gating new surfaces.
+    'routes/task-budgets.ts',
     // Slice 2 (#3030): every non-money route module, plus the two inline
     // routes below (`GET /`, `GET /chains` — keyed `'index.ts'`). Flipped on
     // the epic's fallback (owner decision 2026-09-21 on #3028): the dev
@@ -322,6 +341,14 @@ setRevoker(revokeOnChain)
 // row without broadcasting anything. Unwired, it degrades to the pre-#1758
 // behaviour — a stuck `pending` row, never a wrong `confirmed` one.
 setRevocationProbe(readRevocationAnchor)
+// #3294: rows anchored before the fix store the staticCall-predicted UID,
+// which never existed on-chain — revocation of such a row reverts NotFound()
+// forever while the agent's REAL attestation stays live. The retire consults
+// this repair before spending gas on an unseen UID: the row is re-derived
+// from its own anchor receipt and the REAL uid is what gets revoked. Unwired,
+// the retire submits the stored UID exactly as before (#3294's pre-fix
+// behaviour) — never a wrong write.
+setAnchorUidRepair(repairAnchorUidFromReceipt)
 // Receipts the merchant-facing verifier hands out (#974) are signed with a
 // DEDICATED key, never the relayer's: the relayer pays gas for user-authorised
 // transactions, while this one signs public assertions and its address is
@@ -372,6 +399,10 @@ await app.register(paymentRoutes, { prefix: '/payments' })
 // AllowanceModule rail and its table is dropped; the routes went with it.
 await app.register(agentActivityRoutes, { prefix: '/agent-activity' })
 await app.register(x402Routes, { prefix: '/x402' })
+// #3329: task budgets — agent-auth lifecycle at /task-budgets, owner-auth
+// read at /agents/:id/task-budgets (same prefix as agent-delegations.ts).
+await app.register(taskBudgetRoutes, { prefix: '/task-budgets' })
+await app.register(agentTaskBudgetsOwnerRoutes, { prefix: '/agents' })
 // #2914 (naming P5, the contraction): the `/user/safes*` prefix stops
 // serving and answers 410 with the replacement path. It is registered as a
 // TOMBSTONE module rather than dropped, because an absent registration is a
@@ -432,22 +463,16 @@ const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly
  */
 const CATALOG_INGEST_INTERVAL_MS = 5 * 60 * 1000
 
-/** Best-effort ops webhook, same Slack-compatible `{ text }` shape as the
- * delegate/relayer monitors. A failed alert never affects the tick. */
-async function sendCatalogOpsAlert(text: string): Promise<void> {
-  const url = process.env.DELEGATE_ALERT_WEBHOOK_URL
-  if (!url) return
-  try {
-    await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text }),
-      signal: AbortSignal.timeout(10_000),
-    })
-  } catch (err) {
-    // Deliberately silent for the same reason the monitors swallow it:
-    // alerting is best-effort in every monitor in this file.
-  }
+/**
+ * Ops webhook, same Slack-compatible `{ text }` shape as the
+ * delegate/relayer monitors — via the shared sender (#3345), which checks
+ * `res.ok`: a 4xx/5xx or network error logs a warning with the status (never
+ * the URL — it is a credential) and reports `failed`, so the catalog tick
+ * above can re-arm the alarm and retry on the next tick. A failed alert
+ * still never affects the tick itself.
+ */
+async function sendCatalogOpsAlert(text: string): Promise<'delivered' | 'failed' | 'no-webhook'> {
+  return sendDelegateAlertFromEnv(text, app.log, 'catalog-ingestion')
 }
 
 /**
@@ -526,8 +551,17 @@ const start = async () => {
           if (report.acted) app.log.info(report, 'Catalog ingestion tick')
           for (const text of report.alerts) {
             app.log.warn({ text }, 'Catalog ingestion alert')
-            await sendCatalogOpsAlert(text)
           }
+          // Delivery decides the re-arm (#3345): a 'failed' send (4xx/5xx or
+          // network error — logged by the shared sender with the status,
+          // never the URL) rolls the lifecycle edge back so the alarm
+          // re-fires on the next tick while the condition persists.
+          // Delivered alarms stop, edge-triggered as before; 'no-webhook' is
+          // log-only mode — the warn above is the whole alert and the
+          // episode counts as handled.
+          await deliverCatalogAlerts(report.alerts, (text) =>
+            sendCatalogOpsAlert(text),
+          )
         })
       } catch (err) {
         app.log.warn({ err }, 'Catalog ingestion failed')
@@ -681,6 +715,18 @@ const start = async () => {
                 'Passport issuance rows past the attention threshold — investigate, the backoff is capped',
               )
             }
+          })
+          // #3294: rows anchored before the fix store the staticCall-predicted
+          // UID, which never existed on-chain — revocation of such a row loops
+          // on `NotFound()` while the agent's REAL attestation stays live. The
+          // repair re-derives each row's UID from its anchor receipt; the
+          // revocation half below (and the retire's own repair gate) then
+          // converges on the real credential. Batched and paced here; the
+          // phase split keeps a failure here away from the safety-critical
+          // revocation half, exactly as for issuance above.
+          await phase('anchor-repair', async () => {
+            const repairs = await repairAnchoredUids()
+            if (repairs.attempted) app.log.info(repairs, 'Passport anchor UID repairs')
           })
           await phase('revocation', async () => {
             const revocations = await reconcilePendingRevocations()

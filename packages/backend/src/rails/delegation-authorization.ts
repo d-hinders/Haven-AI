@@ -21,9 +21,11 @@
 
 import {
   selectDelegationForPayment,
+  selectActiveDelegationByHash,
   type DelegationForPaymentRow,
 } from '../infra/repositories/delegation-budgets.js'
 import type { Address, Hex } from 'viem'
+import type { Delegation } from '@metamask/smart-accounts-kit'
 import { computeHybridAccountAddress } from './hybrid-provisioning.js'
 import {
   createDelegationRail,
@@ -34,6 +36,28 @@ import {
 export interface DelegationAuthorization {
   delegationHash: string
   prepared: PreparedRedemption
+}
+
+/**
+ * A task budget (#3329) authorizing this payment instead of the budget
+ * delegation directly. `childDelegation` is the task budget's OWN signed
+ * child (`agent_task_budgets.delegation_json` once `status='open'`) — the
+ * redemption chain becomes `[childDelegation, budget]` (leaf first), the
+ * same two-hop shape the x402 erc7710 settlement chain already redeems.
+ * Callers (`routes/payments.ts`, `modules/x402/delegation-authorize.ts`) are
+ * responsible for the pre-sign checks in
+ * `modules/task-budgets/task-budget-service.ts` — this module only builds
+ * the chain and lets the chain rule during gas estimation, same as always.
+ */
+export interface TaskBudgetForPayment {
+  childDelegation: Delegation
+  /**
+   * #3329 review finding E: the EXACT parent delegation the task budget was
+   * carved from (selected by hash by the caller) — used verbatim instead of
+   * re-selecting by (token, to), which can pick a DIFFERENT active grant
+   * than the one the task child's `authority` names.
+   */
+  parentDelegation: DelegationForPaymentRow
 }
 
 /**
@@ -51,6 +75,18 @@ export async function selectDelegation(
 }
 
 /**
+ * #3329 review finding E: the delegation a task budget names as its parent,
+ * by hash — never re-derived by (token, to). See the repository function's
+ * own comment for why (token, to) can pick the WRONG active grant.
+ */
+export async function selectDelegationByHash(
+  agentId: string,
+  delegationHash: string,
+): Promise<DelegationForPaymentRow | null> {
+  return selectActiveDelegationByHash(agentId, delegationHash)
+}
+
+/**
  * Prepare the sponsored redemption for the selected delegation. Throws when
  * the caveats reject the payment (budget exceeded, wrong recipient, expired)
  * — the caller maps that to a clean 402/502 without writing state.
@@ -60,8 +96,13 @@ export async function prepareDelegationPayment(
   tokenAddress: string,
   toAddress: string,
   amountRaw: bigint,
+  options?: { taskBudget?: TaskBudgetForPayment },
 ): Promise<DelegationAuthorization | null> {
-  const delegation = await selectDelegation(agent.id, tokenAddress, toAddress)
+  // #3329 review finding E: a task budget's parent is used VERBATIM — never
+  // re-selected by (token, to), which can name a different active grant.
+  const delegation = options?.taskBudget
+    ? options.taskBudget.parentDelegation
+    : await selectDelegation(agent.id, tokenAddress, toAddress)
   if (!delegation) return null
 
   const delegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
@@ -78,8 +119,15 @@ export async function prepareDelegationPayment(
     throw new Error('delegate account mismatch between grant and rail — refusing to prepare')
   }
 
+  const budgetDelegation = JSON.parse(delegation.delegation_json) as Delegation
+  // #3329: [taskChild, budget] when a task budget authorizes this payment —
+  // leaf first, the same order the x402 erc7710 settlement chain redeems.
+  const chain: Delegation[] = options?.taskBudget
+    ? [options.taskBudget.childDelegation, budgetDelegation]
+    : [budgetDelegation]
+
   const prepared = await rail.prepareRedemption(
-    JSON.parse(delegation.delegation_json),
+    chain,
     tokenAddress as Address,
     toAddress as Address,
     amountRaw,

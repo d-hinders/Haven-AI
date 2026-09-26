@@ -42,6 +42,8 @@ import {
   listLiveBroadcastNoncesFrom,
 } from './repositories/outbound-txs.js'
 import { getFallbackBroadcastProvider, getRelayer, withRelayerSendLock } from './relayer.js'
+// #3371: the shared key-segment helper (was a private copy here; one copy now)
+import { secretSegments } from './chain/rpc-transport.js'
 import { describeRevert, isDeterministicRevert } from './deterministic-revert.js'
 
 export interface OutboundBroadcastStamp {
@@ -399,14 +401,8 @@ export async function sendRawViaFallback(chainId: number, raw: string): Promise<
  * and message (kept so revert and nonce classification still work), with any
  * URL in the text replaced. `info`, `request` and `response` are never copied.
  */
-/**
- * The key-like pieces of an endpoint URL — path segments and query values of
- * 12+ characters — so a provider that echoes its key WITHOUT the URL (say
- * `dkey=<key>` in a JSON-RPC message) is still scrubbed.
- */
-function secretSegments(url: string): string[] {
-  return url.split(/[/?&=#]/).filter((part) => part.length >= 12 && !part.includes(':'))
-}
+// The key-like segments come from the shared `secretSegments`
+// (`chain/rpc-transport.ts`, #3371) — same 12+ heuristic, one copy now.
 
 export function fallbackSendError(err: unknown, secrets: string[] = []): Error {
   const e = err as {

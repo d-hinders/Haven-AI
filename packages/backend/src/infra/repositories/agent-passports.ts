@@ -268,6 +268,87 @@ function normalizeAddress(address: string | null | undefined): string | null {
   return lower === ZERO_ADDRESS ? null : lower
 }
 
+/**
+ * Anchored rows whose stored UID may still be the #3294 staticCall prediction,
+ * oldest anchors first — the repair sweep's batch.
+ *
+ * There is deliberately NO "repaired" flag: the receipt is the durable
+ * evidence, and a row whose stored UID already matches it costs one receipt
+ * read and changes nothing, so a marker column (and the migration + code-owner
+ * review it drags in) would buy nothing. The population self-paces:
+ *
+ * - `tx_hash IS NOT NULL` — without the anchor transaction there is nothing to
+ *   re-derive from, and the row is reported, never guessed at;
+ * - `revocation_status <> 'confirmed'` — a confirmed row's attestation is
+ *   provably dead under the UID the revoke succeeded on; there is nothing
+ *   left to protect;
+ * - `updated_at < NOW() - 1h` — a repaired row bumps `updated_at`
+ *   (`repairAnchoredUid`), so the batch revisits it no more than once an hour;
+ * - `ORDER BY anchored_at ASC` — every pre-fix row predates this fix, so
+ *   oldest-first drains the damaged population first.
+ */
+export const LIST_ANCHOR_REPAIRS_DUE_SQL = `SELECT p.agent_id, p.chain_id, p.attestation_uid, p.tx_hash
+       FROM agent_passports p
+      WHERE p.status = 'anchored'
+        AND p.tx_hash IS NOT NULL
+        AND p.revocation_status <> 'confirmed'
+        AND p.updated_at < NOW() - MAKE_INTERVAL(secs => $2)
+      ORDER BY p.anchored_at ASC
+      LIMIT $1`
+
+export async function listAnchorRepairsDue(
+  limit: number,
+  minAgeSeconds = 3600,
+  db: Executor = pool,
+): Promise<Array<{ agent_id: string; chain_id: number; attestation_uid: string | null; tx_hash: string }>> {
+  const { rows } = await db.query<{
+    agent_id: string
+    chain_id: number
+    attestation_uid: string | null
+    tx_hash: string
+  }>(LIST_ANCHOR_REPAIRS_DUE_SQL, [limit, minAgeSeconds])
+  return rows
+}
+
+/**
+ * Compare-and-set the attestation UID on an ALREADY-anchored row (#3294).
+ *
+ * The repair of rows anchored before #3294 recorded the staticCall prediction:
+ * the row's UID is re-derived from its anchor receipt and swapped in HERE, in
+ * one guarded statement, because a plain read-then-update would let a
+ * concurrent `markRevocationConfirmed` / `resetForReanchor` / `markAnchored`
+ * interleave and the repair would clobber the newer state.
+ *
+ * The CAS is the whole safety argument: the caller passes the `expectedUid` it
+ * read and the statement refuses unless the row still holds exactly that UID
+ * (null expected = refuse an anchored row with NO uid — anchoring may still be
+ * mid-flight; its own mint path will record the mined UID) and the same anchor
+ * `txHash`. A repair that loses the race is simply deferred — the receipt is
+ * durable evidence, so the next pass re-derives it — never a wrong write.
+ *
+ * `status = 'anchored'` is repeated in the statement so a row handed back to
+ * issuance mid-re-anchor cannot be repaired in that window. Idempotent: a
+ * repaired row no longer matches `expectedUid` and costs nothing.
+ */
+export async function repairAnchoredUid(
+  agentId: string,
+  expectedUid: string | null,
+  uid: string,
+  txHash: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE agent_passports
+        SET attestation_uid = $3, updated_at = NOW()
+      WHERE agent_id = $1
+        AND status = 'anchored'
+        AND tx_hash = $4
+        AND attestation_uid IS NOT DISTINCT FROM $2`,
+    [agentId, expectedUid, uid, txHash],
+  )
+  return (rowCount ?? 0) > 0
+}
+
 export async function markFailed(agentId: string, error: string, db: Executor = pool): Promise<void> {
   // Truncated: a provider error can be enormous and this column is for humans.
   // `attempts` is incremented by claimForAnchoring, not here — otherwise a

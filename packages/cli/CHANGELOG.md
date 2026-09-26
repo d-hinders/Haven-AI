@@ -6,7 +6,30 @@ time while being false. The bump rewrites the `## Unreleased` heading below into
 `## <version> — <date>`; add entries under `## Unreleased` and leave the heading
 alone.
 
+Mark a bullet `**Update required**` when a client must update to keep paying.
+The bump then flags that release `action_required` in the public release data
+(`/releases`, `GET /discovery`, `/.well-known/haven.json`; #3305). It is not
+`**BREAKING**`, which means updating may break you, not that you must update.
+Write it exactly: "update required" in any other form (including "no update
+required") is refused — reword to "no update needed", or quote it in a code span.
+
 ## Unreleased
+
+## 0.6.0-alpha.0 — 2026-09-26
+
+- **`haven guide`: "If something breaks" (#3304, epic #3302).** The bundled agent runbook (a copy of `@haven_ai/sdk`'s) gains the section that sends an agent to a result's `client_update.upgrade_command` and to the `/releases` page. Text only; no command changes.
+
+- **`wallets balances` renders the balance-freshness marker (#3318).** Since
+  the backend started serving last-known balances marked `stale` on a failed
+  read (#3295), and `'0'` marked `unavailable` only when nothing was ever
+  read (#3317), the CLI printed those entries as if they were current. A
+  stale entry now prints with a hint — `≈ 25 ETH (as of 45m ago)` — because
+  the figure is real but not fresh; an unavailable entry prints
+  `unavailable` instead of the filler zero. A clean entry prints exactly as
+  before, and `--json` is unchanged: the marker passes through verbatim
+  where the server sent it and stays absent where it did not. The registry
+  reads (budget grants, connect) are untouched — address, decimals and
+  symbol are byte-identical either way.
 
 ## 0.5.0-alpha.1 — 2026-09-25
 

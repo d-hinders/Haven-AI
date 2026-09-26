@@ -419,10 +419,11 @@ restate it; read it.
 - [ ] **BEHIND is a blocker, not noise.** `git rev-list --count origin/dev..origin/main`
       non-zero plus `strict_required_status_checks_policy: true` on `Dev gate`
       (`curl -sS https://api.github.com/repos/d-hinders/Haven-AI/rules/branches/main`)
-      means the ordinary merge button is refused; only an owner/admin bypass
-      merges it. Earlier promotions merging behind proves the bypass, not that
-      nothing blocks. Tell the owner so up front.
-- [ ] **Code-owner review.** `git diff --name-only origin/main origin/dev -- packages/backend/src/db/migrations/ .github/CODEOWNERS`
+      means the ordinary merge button is refused. Past promotions merged behind
+      only by the owner (the ruleset lists no bypass actors, so how is
+      unconfirmed) — that proves an owner path, not that nothing blocks. Tell
+      the owner so up front.
+- [ ] **Code-owner review.** `git diff --name-only origin/main origin/dev -- ':(glob)packages/backend/src/db/migrations/*.ts'`
       non-empty means an approving review from a code owner other than the PR
       author is required — request it when opening, not when it blocks.
 - [ ] **Decide `qa-override` before opening, and apply it at open.**

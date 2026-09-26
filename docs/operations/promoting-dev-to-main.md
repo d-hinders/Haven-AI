@@ -197,7 +197,7 @@ so this is a rule to point at rather than a question to ask the release runner.
 - [ ] **Sweep the docs staleness audit** ([#2645](https://github.com/d-hinders/Haven-AI/issues/2645), "Docs staleness audit (weekly)" — one standing issue that `docs-audit.yml` rewrites every Monday). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived` and `research` docs are not ranked and need no disposition (#2638). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
 - [ ] A code-owner approval, from an owner other than the PR author, is present
       if the batch touches an owned path — today only migration files:
-      `git diff --name-only origin/main origin/dev -- packages/backend/src/db/migrations/`.
+      `git diff --name-only origin/main origin/dev -- ':(glob)packages/backend/src/db/migrations/*.ts'`.
 
 ## Merge, deploy, and verify prod
 

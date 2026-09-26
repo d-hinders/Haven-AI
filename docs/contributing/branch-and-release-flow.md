@@ -337,8 +337,9 @@ since 2026-09-07 `Dev merge` (22449193) allows `dev` only `squash` — so that P
 cannot be merged as prescribed. `dev` is 8 promotion merges behind `main`
 (`git rev-list --count origin/dev..origin/main`, 2026-09-26).
 
-What actually worked: the promotion merges **while behind**, by an owner/admin
-bypass merge — #3162 as admin, #3325 (0.5.0-alpha.1, 2026-09-25) via the API —
+What actually worked: the promotion merges **while behind**, by the owner —
+#3162 in the web UI, #3325 (0.5.0-alpha.1, 2026-09-25) via the API. `Dev gate`
+lists no bypass actors, so the exact mechanism is unconfirmed —
 with the code-owner approval a migration-carrying promotion needs still
 collected first (#3325 carried migrations). The GitHub mobile app offers no bypass merge; use the web UI or
 the API. Until the owner decides, expect every promotion to need that bypass.

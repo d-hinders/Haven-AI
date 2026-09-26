@@ -135,7 +135,7 @@ describe('every ethers provider relayer.ts builds scrubs its own URL out of an e
     expect(err.code).toBe('SERVER_ERROR')
   })
 
-  it('a JSON-RPC error body surviving the rebuild keeps its message for classification (e.g. isPendingTagRefusal)', async () => {
+  it('a JSON-RPC error in a 200 body is untouched by the scrub and still classifies (NONCE_EXPIRED)', async () => {
     // A JSON-RPC-level refusal (HTTP 200, error in the body) never reaches
     // `_send`'s throw path at all — ethers classifies it later, from the
     // body alone — so this is unaffected by the scrub either way. Proven

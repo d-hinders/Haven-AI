@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-09-26 | Promotions merge behind by the owner; the post-promotion sync-back is dropped | PR #3325 |
 | 2026-09-19 | The fix→review loop gets a fourth exit: a prose-only round cannot loop forever | #3158, PR #3156 |
 | 2026-09-11 | Accounting connections: self-serve, provider-generic, dev-only; Fortnox hardened | #2858, #2872 |
 | 2026-09-04 | `latest` dist-tag moves onto every release, prereleases included | #2536, #2647 |
@@ -51,6 +52,20 @@ named where they belong below.
 | — | Historical: POC scope and phased roadmap | — |
 
 ---
+
+## 2026-09-26 — promotions merge behind; no sync-back (#3325)
+
+Owner decision, 2026-09-26, after the 0.5.0-alpha.1 promotion (#3325) could not
+merge through the ordinary button. `main`'s `Dev gate` ruleset requires the head
+to be up to date; the prescribed cure, a merge-commit sync PR from `main` into
+`dev` after each promotion (#1231), became impossible when `dev` went
+squash-only (2026-09-07). Three options were put to the owner: drop the
+sync-back, temporarily allow merge commits on `dev` for it, or relax `main`'s
+up-to-date rule. The owner chose to drop it: both rulesets stay as they are,
+and the owner merges each promotion behind from the web UI or API. A
+`hotfix/*` merged to `main` now reaches `dev` by a back-port squash PR, which
+the sync-back used to carry.
+`branch-and-release-flow.md` § *Promotion to production* holds the rule.
 
 ## 2026-09-19 — a prose-only review round cannot loop forever (#3158)
 

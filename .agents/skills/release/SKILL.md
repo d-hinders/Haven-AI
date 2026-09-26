@@ -412,9 +412,8 @@ tell that PR's author what changed underneath them.
 Publishing happens on the `dev → main` promotion. **Follow
 `branch-and-release-flow.md` § *Promotion to production*** — it owns the
 sequence, why a promotion merges with a merge commit rather than a squash, and
-the BEHIND/sync-back question, which is an **open owner decision**: the
-sync-back PR it prescribed cannot be merge-merged into squash-only `dev`. Do not
-restate it; read it.
+why it merges BEHIND by the owner with no sync-back (owner decision,
+2026-09-26). Do not restate it; read it.
 
 **Promotion preflight** — run before opening the promotion PR; each line cost
 0.5.0-alpha.1 (#3325) a round-trip with the owner.
@@ -422,10 +421,8 @@ restate it; read it.
 - [ ] **BEHIND is a blocker, not noise.** `git rev-list --count origin/dev..origin/main`
       non-zero plus `strict_required_status_checks_policy: true` on `Dev gate`
       (`curl -sS https://api.github.com/repos/d-hinders/Haven-AI/rules/branches/main`)
-      means the ordinary merge button is refused. Past promotions merged behind
-      only by the owner (the ruleset lists no bypass actors, so how is
-      unconfirmed) — that proves an owner path, not that nothing blocks. Tell
-      the owner so up front.
+      means the ordinary merge button is refused, and by design only the owner
+      merges it (no sync-back). Tell the owner so up front.
 - [ ] **Code-owner review.** `git diff --name-only origin/main origin/dev -- ':(glob)packages/backend/src/db/migrations/*.ts'`
       non-empty means an approving review from a code owner other than the PR
       author is required — request it when opening, not when it blocks.
@@ -474,14 +471,6 @@ What it leaves to you:
 - It calls the promotion a human step; it does not say whose. **Confirm the user
   wants it** before opening one — cutting the release and shipping it to
   production are two decisions, and only the first is yours.
-- If the owner decides to keep the sync-back, it claims zero content change, so
-  **prove it**: the merged tree hash
-  must equal `dev`'s, and `git diff origin/dev` must be empty, before you push.
-  Test the merge in a throwaway worktree rather than on a shared branch.
-- **If the promotion merges while a sync PR is still open, that sync is stale.**
-  It carries the superseded `main` and will leave `dev` behind by the newest
-  promotion merge. Re-point it at current `main` before merging it.
-
 ## Closeout
 
 Two halves, **both** owed by every release including a no-bump one:

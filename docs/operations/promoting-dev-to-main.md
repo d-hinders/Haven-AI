@@ -185,12 +185,11 @@ so this is a rule to point at rather than a question to ask the release runner.
       - **Frontend browser smoke** — required here since the same change.
 
       `main` is also the only branch still requiring the head to be up to date,
-      so a `BEHIND` promotion PR cannot merge through the ordinary button. The
-      sync-back that used to bring it forward cannot be merged into squash-only
-      `dev`; until the owner decides
-      ([`branch-and-release-flow.md`](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main)),
-      it merges behind by an owner merge from the web UI or API — never the
-      mobile app, which offers no bypass.
+      so a `BEHIND` promotion PR cannot merge through the ordinary button. By
+      owner decision there is no sync-back
+      ([`branch-and-release-flow.md`](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main)):
+      the owner merges it behind from the web UI or API — never the mobile
+      app, which offers no such merge.
       The per-branch inventory and the `gh api` command that produced it are in
       [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md#one-time-github-setup-required)
       step 3.

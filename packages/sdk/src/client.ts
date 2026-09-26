@@ -9,6 +9,7 @@ import {
 import { assertUserOpTypedDataBinding } from './userop-binding.js'
 import {
   assertBoundDirectPaymentUserOp,
+  assertFundingLegPaysDelegate,
   assertOwnSettlementChild,
   HavenTypedDataRefusedError,
   type SettlementChildExpectation,
@@ -134,7 +135,7 @@ import {
   withX402Wallet,
   x402PayerAddress,
 } from './x402-protocol.js'
-import { X402FundingLeg } from './x402-funding-leg.js'
+import { X402FundingLeg, type FundingLegExpectation } from './x402-funding-leg.js'
 import { X402Erc7710 } from './x402-erc7710.js'
 import { toolError, toolX402PaymentRequired, x402ToolReceipt } from './tool-adapter.js'
 import { MerchantCompletion, isZeroSettlementTxHash, parseMerchantSettlement } from './merchant-completion.js'
@@ -268,7 +269,7 @@ export class HavenClient {
       x402Wallet: this.x402Wallet,
       chainRpcs: this.chainRpcs,
       post: (path, body) => this.post(path, body),
-      signForData: (signData) => this.signForData(signData),
+      signForData: (signData, fundingExpectation) => this.signForData(signData, undefined, fundingExpectation),
       assertSignableAuthorizationState: (label, raw) =>
         this.throwIfNonSignableAuthorizationState(label, raw),
     })
@@ -546,6 +547,7 @@ export class HavenClient {
       typed_data?: unknown
     },
     settlementExpectation?: SettlementChildExpectation,
+    fundingExpectation?: FundingLegExpectation,
   ): Promise<string> {
     if (!this.delegateKey) {
       throw new HavenSigningError(
@@ -580,6 +582,19 @@ export class HavenClient {
         signData.typed_data as Record<string, unknown>,
         this.delegateAddress!,
       )
+      // #3375 (epic #3284): an x402 funding leg is also pinned to WHERE it
+      // pays — the quoted amount of the quoted token into this key's own
+      // delegate EOA, the signer's #3281 check. The address is local and the
+      // asset/amount come from the 402 option, so a compromised Haven cannot
+      // redirect the leg. `pay()` passes no expectation: a direct payment's
+      // recipient is the caller's intent, bounded by the budget's caveats.
+      if (fundingExpectation) {
+        assertFundingLegPaysDelegate(signData.typed_data as Record<string, unknown>, {
+          delegateAddress: this.delegateAddress!,
+          asset: fundingExpectation.asset,
+          amount: fundingExpectation.amount,
+        })
+      }
       return signUserOpTypedDataForDelegation(this.delegateKey, signData.typed_data as never)
     }
     if (scheme === 'eip712_delegation') {

@@ -233,6 +233,20 @@ last-verified: "2026-09-25"
 > a change. The version-skew and consent-hash contracts do not move. Nothing
 > else in this document was re-verified in this pass.
 >
+> **Recent re-verification (#3375):** the local runtime's x402 payment tools
+> (`haven_pay_x402`, `haven_pay_x402_quote`, `haven_pay_mcp_tool`) pay through
+> `@haven_ai/sdk`'s own funding leg, which now also runs the #3281 recipient pin
+> (`assertFundingLegPaysDelegate`) against the 402 option being paid. A funding
+> leg that does not transfer the quoted amount of the quoted token into the
+> key's own delegate EOA is refused as `TYPED_DATA_NOT_ALLOWED`, with nothing
+> signed or posted to `/sign`. No tool, argument, schema, description or
+> consent input changes, so the handshake and consent hash do not move. Skew:
+> the backend already builds exactly this shape, so an updated SDK against the
+> current backend refuses no live leg; installed `@haven_ai/mcp` / SDK copies
+> keep the old funding leg until updated. The hosted runtime signs through the
+> signer, which has pinned this since #3281. Nothing else in this document was
+> re-verified in this pass.
+>
 > **Recent re-verification (#3306):** each `haven_list_receipts` row on BOTH
 > runtimes LOSES four keys — `rail`, `proofStatus`, `resourceUrl`,
 > `merchantAddress`, the deprecated twins #3134 dual-emitted from

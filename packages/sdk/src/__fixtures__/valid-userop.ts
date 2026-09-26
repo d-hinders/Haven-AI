@@ -17,7 +17,7 @@
  * guard itself.
  */
 import { addressFromKey } from '../edge-signing.js'
-import { buildBoundDirectUserOp } from '../test-support/direct-userop.js'
+import { buildBoundDirectUserOp, buildFundingLegUserOp } from '../test-support/direct-userop.js'
 
 /** The delegate key every toy-fixture test file in this package constructs its client with. */
 export const DEFAULT_TEST_DELEGATE_KEY = `0x${'01'.repeat(32)}`
@@ -39,4 +39,36 @@ export function buildValidUserOpSignData(overrides: ValidUserOpOverrides = {}): 
   const delegate = addressFromKey(overrides.delegateKey ?? DEFAULT_TEST_DELEGATE_KEY) as `0x${string}`
   const { typedData, payloadHash } = buildBoundDirectUserOp({ delegate, chainId: overrides.chainId ?? 8453 })
   return { hash: payloadHash, signature_scheme: 'eip712_userop', typed_data: typedData }
+}
+
+export interface FundingLegSignDataOptions {
+  /** The 402 option's token — the funding leg's `transfer` target. */
+  asset: string
+  /** The 402 option's atomic amount — what the leg moves. */
+  amount: string
+  /** The client's delegate key: the account AND the transfer's recipient derive from it. */
+  delegateKey?: string
+  chainId?: number
+  /** Override the recipient (default: the delegate) — for the #3375 recipient-pin negative tests. */
+  recipient?: string
+}
+
+/**
+ * #3375: a guard-valid x402 FUNDING LEG `eip712_userop` sign_data — the
+ * direct-payment shape whose single execution is `transfer(<delegate EOA>,
+ * amount)` of `asset`, exactly as the backend builds it. Since #3375
+ * `HavenClient`'s funding leg also runs the #3281 recipient pin against the
+ * 402 option, so a funding-leg test must pass ITS option's `asset`/`amount`
+ * here; `buildValidUserOpSignData` (a transfer to a third party) is refused.
+ */
+export function buildFundingLegSignData(options: FundingLegSignDataOptions): ValidUserOpSignData {
+  const delegate = addressFromKey(options.delegateKey ?? DEFAULT_TEST_DELEGATE_KEY) as `0x${string}`
+  const { typedData, payloadHash } = buildFundingLegUserOp({
+    delegate,
+    asset: options.asset as `0x${string}`,
+    amount: options.amount,
+    chainId: options.chainId ?? 8453,
+    recipient: options.recipient as `0x${string}` | undefined,
+  })
+  return { hash: payloadHash, signature_scheme: 'eip712_userop', typed_data: typedData as never }
 }

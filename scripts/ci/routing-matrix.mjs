@@ -57,10 +57,67 @@ export const ROUTING_MATRIX = [
     why: 'Prose cannot break a build. Routing it would run the full suite on every doc edit.',
   },
   {
-    files: ['docs/product/agent-passport.md'],
+    files: ['docs/product/copy-guidelines.md'],
     expect: [],
     kind: CONTRACT,
-    why: 'Same, for the docs/ tree. The docs-quality gates cover these on their own workflow.',
+    why:
+      'Same, for the docs/ tree. The docs-quality gates cover these on their own workflow. ' +
+      'Re-pointed here from agent-passport.md by #3346, which made the served docs a real ' +
+      'exception; this row is also the CONTROL the same issue asks for — another docs/**/*.md ' +
+      'must keep returning all thirteen flags false.',
+  },
+  {
+    files: ['docs/product/account-recovery.md'],
+    expect: ['code', 'frontend'],
+    kind: CONTRACT,
+    why:
+      'A SERVED doc (#3346): the frontend serves it at /docs/account-recovery.md from the ' +
+      'ALLOWLIST in packages/frontend/scripts/serve-docs.mjs, and served-docs.test.ts pins it — ' +
+      'a test only frontend_checks runs. #3287 edited a sibling on the same list, routed ' +
+      'NOTHING, and the test went red on dev (#3288). `code` is required alongside `frontend`: ' +
+      'the gate job exits 0 when code != true before it ever reads frontend_checks.result.',
+  },
+  {
+    files: ['docs/product/agent-key-rotation.md'],
+    expect: ['code', 'frontend'],
+    kind: CONTRACT,
+    why:
+      'A SERVED doc (#3346), same arm as account-recovery.md. Each source on the ALLOWLIST ' +
+      'gets its own row rather than one row for a sample: the arm is derived from the ' +
+      'generator, so a row per source is what fails the day a source silently stops routing.',
+  },
+  {
+    files: ['docs/product/agent-passport.md'],
+    expect: ['code', 'frontend'],
+    kind: CONTRACT,
+    why:
+      'A SERVED doc (#3346). This row used to assert this file routes NOWHERE — "the ' +
+      'docs-quality gates cover these on their own workflow" — which stopped being true when ' +
+      'the file went onto the serve-docs ALLOWLIST and only frontend_checks could still run ' +
+      'the pin test on it. The routing change is argued here rather than deleted: the docs-' +
+      'quality gates govern the PROSE, but served-docs.test.ts, discovery-artifacts.test.ts ' +
+      'and the Next build read the file as data, and #3288 is what happens when their job ' +
+      'never runs.',
+  },
+  {
+    files: ['docs/security/delegation-rail-security-model.md'],
+    expect: ['code', 'frontend'],
+    kind: CONTRACT,
+    why:
+      'A SERVED doc (#3346) at /docs/security-model.md, and the file the incident is named ' +
+      'for: #3287 edited it in a backend-only PR, it routed nothing, Frontend checks skipped, ' +
+      'and served-docs.test.ts went red on dev (#3288). If this row ever fails again, the ' +
+      'derived arm in DOC_EXCEPTIONS lost the ALLOWLIST.',
+  },
+  {
+    files: ['docs/exit/README.md'],
+    expect: ['code', 'frontend'],
+    kind: CONTRACT,
+    why:
+      'Not served, but read by packages/frontend/src/lib/__tests__/non-custody-no-lockin.test.ts ' +
+      '(#3346) — the frontend suite pins the exit story\'s wording, so an edit to this file ' +
+      'runs frontend_checks or the pin never guards the edit. Same rationale as the CLAUDE.md ' +
+      'row: the file mirrors a contract a package test asserts, so it routes that package.',
   },
   {
     files: ['docs/contributing/ship-playbooks/frontend.md'],

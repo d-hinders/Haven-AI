@@ -18,9 +18,12 @@ covers:
   - .env.example
   - packages/frontend/scripts/serve-docs.mjs
   - packages/frontend/src/lib/__tests__/served-docs.test.ts
+  - packages/frontend/src/lib/__tests__/non-custody-no-lockin.test.ts
+  - scripts/ci/change-classifier.mjs
+  - scripts/ci/routing-matrix.mjs
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-09-21"
+last-verified: "2026-09-26"
 ---
 
 # Documentation-quality system
@@ -235,6 +238,22 @@ origin it is reading:
   `docs/operations/` are deliberately absent. Adding a doc is a deliberate
   decision, and the build **fails** if an allowlisted doc's `status` is not
   `current`.
+- **Allowlisted sources route `code` + `frontend` in the CI change classifier
+  (#3346).** A served doc is an HTTP artifact of this repo, and
+  `served-docs.test.ts` — a frontend-only test — pins it, so a PR that edits a
+  source without touching `packages/frontend/**` must still run *Frontend
+  checks*; `code` is set because the CI gate exits 0 when no code changed,
+  before it ever reads the frontend flag (#3288 is the incident: #3287 edited
+  the security-model source in a backend-only PR, Frontend checks skipped, and
+  the pin test went red on dev). The classifier imports the `ALLOWLIST`
+  directly rather than restating it, so a fifth served source routes the
+  moment it is allowlisted — and `routing-matrix.test.mjs` fails until the new
+  source gets a routing row, which is the divergence guard. `docs/exit/README.md`
+  routes the same way: nothing serves it, but `non-custody-no-lockin.test.ts`
+  reads it. The classifier also diffs with `--no-renames`, so renaming a
+  served source still lists the old (allowlisted) spelling; a REMOVED source
+  still breaks `generate()` in the Next build by design — that is the control,
+  not a gap.
 - **Relative links are rewritten**, so the served copy is not byte-identical: a
   link to another served doc becomes its served path, everything else becomes a
   repository URL (#2520). Copy-lint deliberately does not scan the served copies

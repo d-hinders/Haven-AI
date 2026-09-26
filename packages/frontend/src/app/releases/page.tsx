@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { buildManifest, type ManifestPackageEntry } from '@/lib/capability-manifest'
 import { UpdateCommand } from './UpdateCommand'
+import { releasesFixtureFrom, withFixtureReleases } from './release-source'
 
 /**
  * `/releases` — "what changed, and do I need to update?" (#3304, epic #3302).
@@ -14,7 +15,9 @@ import { UpdateCommand } from './UpdateCommand'
  * Every value comes from the capability manifest's `packages` entries, which
  * come from `@haven_ai/core`'s `buildReleaseCompat` — the same data
  * `GET /discovery` and `/.well-known/haven.json` serve — so this page cannot
- * say something the machine-readable documents do not. Rendered per request
+ * say something the machine-readable documents do not. (The one exception is
+ * the visual spec's fixture, behind a server-only variable no deployment sets;
+ * see `release-source.ts`, #3393.) Rendered per request
  * because the update commands depend on the deployment's connector channel,
  * which only the backend knows; when it is unreachable the commands are
  * omitted rather than guessed (#2422).
@@ -97,7 +100,11 @@ function PackageCard({ entry }: { entry: ManifestPackageEntry }) {
 
 export default async function ReleasesPage() {
   const manifest = await buildManifest('')
-  const entries = ORDER.map((key) => manifest.packages[key]).filter(
+  // The visual spec's fixture, when its server-only variable is set (#3393);
+  // never set in a deployment, so this is the live data everywhere else.
+  const fixture = releasesFixtureFrom()
+  const packages = fixture ? withFixtureReleases(manifest.packages, fixture) : manifest.packages
+  const entries = ORDER.map((key) => packages[key]).filter(
     (entry): entry is ManifestPackageEntry => entry !== undefined,
   )
 

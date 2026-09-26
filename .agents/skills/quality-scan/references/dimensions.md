@@ -308,11 +308,13 @@ the harness run every leg" half is enforced twice, and both fail the
 The freshness gate reads the `money-flow` **job** conclusion (`selectGreenRun`,
 `moneyFlowJobConclusion`), so a skipping run is never admitted. The
 instrument is therefore job level: `gh run view <id> --json jobs --jq
-'.jobs[]|select(.name=="money-flow")|.conclusion'`. `completenessWarningFromJobs`
-in `qa-freshness.mjs` is not the observable. Its only caller passes the jobs
-of a run whose `money-flow` job already succeeded, and the function looks
-for a failed `Coverage completeness` step in them. GitHub cannot produce
-that pair now that the step blocks, so treat it as a dead branch (#3348).
+'.jobs[]|select(.name=="money-flow")|.conclusion'`. The step-level
+`completenessWarningFromJobs` that `qa-freshness.mjs` once carried could never
+fire — it looked for a failed `Coverage completeness` step inside a run whose
+`money-flow` job had succeeded, a pair GitHub cannot produce while the step
+blocks — and #3368 removed it. What keeps that safe is pinned instead:
+`packages/qa-agent/src/skip-marker.test.ts` fails if the `money-flow` job ever
+gains `continue-on-error` or the step stops exiting 1.
 
 ```bash
 # Copy lint: files that can carry product copy but are outside SCAN_DIRS and
@@ -338,7 +340,6 @@ git ls-files '*.md' | grep -vE '^(docs/|packages/|README|CLAUDE|AGENTS|ABOUT_HAV
 #     150, 283);
 #   - `headSha` is the branch tip at trigger time, not the deployed SHA, on
 #     `schedule` / `workflow_dispatch` runs (KNOWN LIMIT, lines 131–136).
-# (completenessWarningFromJobs is left out on purpose: a dead branch, see above.)
 rg -n "Gap 1|#2164|qa-override|KNOWN LIMIT" scripts/ci/qa-freshness.mjs | cut -c1-120
 ```
 

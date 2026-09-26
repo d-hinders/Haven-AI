@@ -13,7 +13,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { runGuard } from '../test-support/guard-cli.mjs'
-import { evaluate, matchesGlob, moneyPathFiles, loadMoneyPathGlobs, completenessWarningFromJobs, greenRunQueryArgs, jobsQueryArgs, selectDiffBase, isVersionOnlyDiff, partitionVersionOnly, selectGreenRun, moneyFlowJobConclusion, EVIDENCE_EVENTS, MONEY_FLOW_JOB, GREEN_RUN_WINDOW_FACTOR, GREEN_RUN_LIMIT, JOB_LOOKUP_BUDGET, RAILWAY_DEV_ENVIRONMENT, preFilterHarnessCandidates, findGreenRun } from './qa-freshness.mjs'
+import { evaluate, matchesGlob, moneyPathFiles, loadMoneyPathGlobs, greenRunQueryArgs, jobsQueryArgs, selectDiffBase, isVersionOnlyDiff, partitionVersionOnly, selectGreenRun, moneyFlowJobConclusion, EVIDENCE_EVENTS, MONEY_FLOW_JOB, GREEN_RUN_WINDOW_FACTOR, GREEN_RUN_LIMIT, JOB_LOOKUP_BUDGET, RAILWAY_DEV_ENVIRONMENT, preFilterHarnessCandidates, findGreenRun } from './qa-freshness.mjs'
 
 const HOUR = 3_600_000
 const NOW = Date.parse('2026-07-27T12:00:00Z')
@@ -159,6 +159,21 @@ describe('the gate refuses to run without a real bound or a known branch', () =>
     assert.equal(evaluate({ ...base, freshnessHours: -5 }).code, 'bad_freshness_hours')
   })
 
+  test('a window too large for a date → fail closed, with the raw variable echoed (#3368)', () => {
+    const r = evaluate({ ...base, latestGreenRun: run(1000), freshnessHours: 1e15, freshnessHoursInput: '1e15' })
+    assert.equal(r.code, 'bad_freshness_hours')
+    assert.match(r.message, /got '1e15'/)
+    assert.match(evaluate({ ...base, freshnessHours: NaN, freshnessHoursInput: 'thirty' }).message, /got 'thirty'/)
+  })
+
+  test('a search cut short by the lookup budget is not reported as "no run" (#3368)', () => {
+    const r = evaluate({ ...base, latestGreenRun: null, searchCutShort: true })
+    assert.equal(r.code, 'search_cut_short')
+    assert.match(r.message, /job-lookup budget/)
+    assert.doesNotMatch(r.message, /No successful/)
+    assert.equal(evaluate({ ...base, latestGreenRun: null }).code, 'no_run')
+  })
+
   test('unknown source branch → fail closed', () => {
     // The docstring promised this; it was not true. `gate` restricts the branch,
     // but this function must not depend on another job for its own correctness.
@@ -238,23 +253,6 @@ describe('glob matching', () => {
     ]) {
       assert.equal(moneyPathFiles([f], globs).length, 1, `${f} must be money-path`)
     }
-  })
-})
-
-describe('completeness warning (#1044)', () => {
-  test('warns when the Coverage completeness step failed', () => {
-    const jobs = [{ steps: [
-      { name: 'Run money-flow QA (bounded flake-retry)', conclusion: 'success' },
-      { name: 'Coverage completeness', conclusion: 'failure' },
-    ] }]
-    assert.match(completenessWarningFromJobs(jobs) ?? '', /GREEN-WITH-SKIPS/)
-  })
-  test('silent on full coverage, missing step, or no jobs', () => {
-    assert.equal(completenessWarningFromJobs([{ steps: [
-      { name: 'Coverage completeness', conclusion: 'success' },
-    ] }]), null)
-    assert.equal(completenessWarningFromJobs([{ steps: [] }]), null)
-    assert.equal(completenessWarningFromJobs(undefined), null)
   })
 })
 
@@ -357,10 +355,10 @@ const PRE_2404_QUERY = [
 
 const T0 = Date.parse('2026-09-02T08:00:00Z')
 const at = (minutesAgo) => new Date(T0 - minutesAgo * 60_000).toISOString()
-const greenJobs = [{ name: MONEY_FLOW_JOB, conclusion: 'success', steps: [{ name: 'Coverage completeness', conclusion: 'success' }] }]
+const greenJobs = [{ name: MONEY_FLOW_JOB, conclusion: 'success' }]
 const skippedJobs = [
-  { name: 'gate', conclusion: 'success', steps: [] },
-  { name: MONEY_FLOW_JOB, conclusion: 'skipped', steps: [] },
+  { name: 'gate', conclusion: 'success' },
+  { name: MONEY_FLOW_JOB, conclusion: 'skipped' },
 ]
 
 // The shape #2404 predicted #2273's trigger would produce: Railway deploys a
@@ -475,14 +473,6 @@ describe('run selection — the "after" leg (#2404)', () => {
     }))
     assert.equal(run.databaseId, redispatch.databaseId)
   })
-
-  test('the selector returns the admitted run\'s jobs so the completeness warning reads the same list', () => {
-    const { jobs } = selectGreenRun([deployRun], io())
-    assert.equal(completenessWarningFromJobs(jobs), null)
-    const partial = [{ name: MONEY_FLOW_JOB, conclusion: 'success', steps: [{ name: 'Coverage completeness', conclusion: 'failure' }] }]
-    const { jobs: partialJobs } = selectGreenRun([deployRun], io({ jobsFor: () => partial }))
-    assert.match(completenessWarningFromJobs(partialJobs) ?? '', /GREEN-WITH-SKIPS/)
-  })
 })
 
 describe('run selection — fails closed (#2404)', () => {
@@ -564,7 +554,7 @@ describe('run selection — fails closed (#2404)', () => {
   })
 
   test('an empty window yields no run, not a throw', () => {
-    assert.deepEqual(selectGreenRun([], io()), { run: null, jobs: null, refused: [] })
+    assert.deepEqual(selectGreenRun([], io()), { run: null, refused: [] })
     assert.equal(selectGreenRun(undefined, io()).run, null)
   })
 
@@ -941,7 +931,17 @@ if (process.env.GH_SHIM_FAIL === '1') {
   process.exit(1)
 }
 if (args[0] === 'run' && args[1] === 'list') {
-  if (process.env.GH_SHIM_RUNS === 'at-head') {
+  if (process.env.GH_SHIM_RUNS === 'many-at-head') {
+    // 45 harness-shaped dispatch runs at HEAD — more than the 40-lookup budget.
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    process.stdout.write(JSON.stringify(Array.from({ length: 45 }, (_, k) => ({
+      databaseId: 1000 + k,
+      event: 'workflow_dispatch',
+      headBranch: 'dev',
+      headSha: sha,
+      createdAt: new Date(Date.now() - k * 60000).toISOString(),
+    }))))
+  } else if (process.env.GH_SHIM_RUNS === 'at-head') {
     const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
     process.stdout.write(JSON.stringify([{
       databaseId: 1,
@@ -956,7 +956,7 @@ if (args[0] === 'run' && args[1] === 'list') {
   process.exit(0)
 }
 if (args[0] === 'api' && args.some((a) => a.includes('/actions/runs/') && a.endsWith('/jobs'))) {
-  process.stdout.write(JSON.stringify({ jobs: [{ name: 'money-flow', conclusion: 'success', steps: [] }] }))
+  process.stdout.write(JSON.stringify({ jobs: [{ name: 'money-flow', conclusion: process.env.GH_SHIM_JOBS || 'success' }] }))
   process.exit(0)
 }
 process.stderr.write('gh shim: unexpected args ' + JSON.stringify(args) + '\\n')
@@ -1021,9 +1021,25 @@ process.exit(64)
     for (const hours of ['abc', '0', '-3']) {
       const { status, out } = run({ GH_SHIM_RUNS: 'at-head', FRESHNESS_HOURS: hours })
       assert.equal(status, 1, out)
-      assert.match(out, /QA_FRESHNESS_HOURS is not a positive number/)
+      assert.match(out, /QA_FRESHNESS_HOURS is not a usable positive number of hours/)
+      assert.match(out, new RegExp(`got '${hours}'`), 'the raw variable is echoed, not NaN')
       assert.doesNotMatch(out, /could not query workflow runs/)
     }
+    // A value too large to be a date is the same refusal, not a query failure (#3368).
+    const { status, out } = run({ GH_SHIM_RUNS: 'at-head', FRESHNESS_HOURS: '1e15' })
+    assert.equal(status, 1, out)
+    assert.match(out, /not a usable positive number of hours \(got '1e15'\)/)
+    assert.doesNotMatch(out, /could not query workflow runs/)
+  })
+
+  test('REFUSES: a search cut short by the lookup budget says so, not "no run found" (#3368)', () => {
+    const { status, out } = run({ GH_SHIM_RUNS: 'many-at-head', GH_SHIM_JOBS: 'failure' })
+    assert.equal(status, 1, out)
+    assert.match(out, /lookup budget ran out/)
+    assert.match(out, /not read: job-lookup budget exhausted/)
+    assert.match(out, /stopped at its job-lookup budget/)
+    assert.doesNotMatch(out, /No successful 'QA — money-flow \(dev\)' run found/)
+    assert.doesNotMatch(out, /Re-run it, or dispatch/) // a re-run hits the same budget
   })
 
   // --- refusal 3 of 3: evaluate() said no ------------------------------------
@@ -1151,6 +1167,10 @@ describe('green-run window (#3361)', () => {
     assert.equal(result.run, null)
     assert.equal(result.lookups, 5)
     assert.equal(result.budgetExhausted, true)
+    // Rows the budget skipped are named as unread, not as an API failure (#3368).
+    const unread = result.refused.filter((r) => r.reason === 'not read: job-lookup budget exhausted')
+    assert.ok(unread.length > 0)
+    assert.ok(result.refused.slice(0, 5).every((r) => r.reason !== 'not read: job-lookup budget exhausted'), 'the five read rows keep their real reason')
     assert.ok(JOB_LOOKUP_BUDGET >= 10, 'the real budget leaves room for a short red streak')
   })
 

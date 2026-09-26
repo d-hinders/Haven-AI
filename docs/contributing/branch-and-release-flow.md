@@ -220,8 +220,11 @@ the epic when its last sub-issue lands on `dev`.
 > what `qa-freshness` requires — a green money-flow QA run covering the
 > promoted money-path code, bypass `qa-override` — and that requirement is
 > unchanged: the selector's rules, the freshness window and the coverage diff
-> are untouched, and the change can only find a real green the old window
-> missed or refuse. Nothing here was made stale. `last-verified` not bumped,
+> are untouched. The change finds real greens the old window missed, or
+> refuses. In one narrow case it anchors differently at the same commit: when
+> a better-provenance `deployment_status` run lies beyond twice the window, a
+> younger admitted run at that commit (itself a passing money-flow run) is the
+> one whose age is judged. Nothing here was made stale. `last-verified` not bumped,
 > for the reason in the notes above.
 
 ## Promotion to production (`dev → main`)

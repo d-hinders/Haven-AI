@@ -756,9 +756,9 @@ it is not just "a run happened recently":
   are capped (`JOB_LOOKUP_BUDGET`, 40). When they run out, no run is anchored
   and the gate refuses, with a log line saying so; it never decides on a
   partly read window. Because `QA_FRESHNESS_HOURS` now also sets how far back
-  the query reaches, a value above about 50 h (a 100 h query; the densest
-  60 h since 2026-09-13 held about 500 run-level successes) can reach the runs API's
-  1000-row cap. The gate then warns that the result may be truncated, and only
+  the query reaches, a value above about 65 h (a 130 h query; a sliding window
+  since 2026-09-12 put the densest 130 h at about 1000 run-level successes and
+  the densest 60 h at about 520) can reach the runs API's 1000-row cap. The gate then warns that the result may be truncated, and only
   the oldest rows are lost. Measured at 2026-09-26T11:21Z:
   469 run-level successes in 60 h, 446 dropped, one lookup to anchor.
 - a **money-path `hotfix/* → main` blocks**. `qa-dev.yml` is a black-box

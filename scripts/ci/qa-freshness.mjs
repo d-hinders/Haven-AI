@@ -620,10 +620,11 @@ export const GREEN_RUN_WINDOW_FACTOR = 2
  * filtered query at 1000 results. A 60 h query (twice the default window)
  * returned 469 run-level successes at 2026-09-26T11:21Z (findGreenRun's own
  * `fetched`). Per UTC day, 2026-09-13..26 held 40–215 (the runs API's
- * `total_count` for `status=success&created=<day>`), so the densest 60 h
- * held about 500 (2026-09-17/18: 214 + 194 + half of a neighbour).
+ * `total_count` for `status=success&created=<day>`). A sliding window over
+ * every run-level success's `createdAt` since 2026-09-12 put the densest 60 h
+ * at about 520 (ending 2026-09-17T18:49Z) and the densest 130 h at about 1000.
  * So the cap is about 2× away at the default, and a QA_FRESHNESS_HOURS above
- * about 50 h (a 100 h query) can reach it in a busy stretch. `findGreenRun`
+ * about 65 h (a 130 h query) can reach it in a busy stretch. `findGreenRun`
  * reports a result that reaches the cap as possibly truncated, and truncation
  * only drops the OLDEST rows.
  */

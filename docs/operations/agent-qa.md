@@ -943,7 +943,8 @@ them is a string a caller supplies:
   environment or a non-`success` status are dropped before any lookup (the
   gate skips them unconditionally), a green run shorter than 60 s is dropped
   too (gate-only greens measured 5–46 s with one slow gate at 85 s, real
-  harness runs 156–339 s, over ~7 days to 2026-09-26; a gate-only run over the
+  harness runs 153–505 s, over the newest 1000 runs from 2026-09-18T23:37Z to
+  2026-09-26; a gate-only run over the
   floor still goes to the job lookup, which refuses it), and a run-level
   `failure` needs no lookup. If the page cap, the lookup budget, or a
   Deployments index that does not reach back 4 days stops the search first,

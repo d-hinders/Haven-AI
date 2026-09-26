@@ -296,9 +296,9 @@ export function mayHaveRunHarness(run, guard) {
 /**
  * A green run shorter than this cannot have run the money-flow harness (#3340).
  * Measured over qa-dev's run-level `success` dev runs (1000 deployment_status
- * runs, ~7 days to 2026-09-26, `run_started_at → updated_at`; #3340 review):
+ * runs, 2026-09-18T23:37Z → 2026-09-26, `run_started_at → updated_at`; #3340 review):
  * gate-only greens took 5–46 s, with one slow gate at 85 s, and real harness
- * runs 156–339 s. So 60 s drops almost every gate-only green and no harness
+ * runs 153–505 s. So 60 s drops almost every gate-only green and no harness
  * run; a gate-only run over 60 s still goes to the job lookup, which refuses
  * it. Every dev deploy leaves such a gate-only green (Railway's
  * re-stated `success`, superseded), so without this floor each deploy SHA cost

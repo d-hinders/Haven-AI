@@ -148,3 +148,54 @@ describe('HavenClient funding leg — recipient pin (#3375)', () => {
     expect(redirected.signPosts()).toHaveLength(0)
   })
 })
+
+describe('payX402Quote forwards taskBudgetId to /x402 (#3378)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** Quote the merchant, then pay the quote; returns the body of the POST /x402 request. */
+  async function payQuote(options: { taskBudgetId?: string; idempotencyKey?: string }) {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    // 1. The merchant's 402 (quoteX402).
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {
+      status: 402, headers: { 'Content-Type': 'application/json' },
+    }))
+    // 2–3. /x402 funding intent, then /sign (the leg the backend builds).
+    const leg = buildFundingLegUserOp({ delegate: DELEGATE, asset: BASE_USDC, amount: accepted.amount, chainId: 8453 })
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_3378', status: 'pending_signature', expires_at: 'later', chain_id: 8453, to: DELEGATE,
+      merchant_to: accepted.payTo,
+      sign_data: { hash: leg.payloadHash, signature_scheme: 'eip712_userop', typed_data: leg.typedData },
+    }), { status: 201 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_3378', status: 'confirmed', tx_hash: `0x${'ab'.repeat(32)}`, chain_id: 8453,
+    }), { status: 200 }))
+    // 4. The merchant's paid answer.
+    fetchMock.mockResolvedValueOnce(new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    const client = new HavenClient({ apiKey: 'sk_agent_test', delegateKey: DELEGATE_KEY, baseUrl: 'https://haven.example' })
+    const quote = await client.quoteX402(paymentRequired.resource.url)
+    const response = await client.payX402Quote(quote, options)
+    expect(response.status).toBe(200)
+    const x402Call = fetchMock.mock.calls.find(([url]) => String(url) === 'https://haven.example/x402')
+    expect(x402Call).toBeDefined()
+    return { body: JSON.parse((x402Call![1] as RequestInit).body as string) as Record<string, unknown>, quote }
+  }
+
+  it('sends the task budget the caller named', async () => {
+    const { body } = await payQuote({ taskBudgetId: 'tb_3378' })
+    expect(body.taskBudgetId).toBe('tb_3378')
+  })
+
+  it('sends no taskBudgetId key without one, and keeps the quote\'s idempotency key by default', async () => {
+    const { body, quote } = await payQuote({})
+    expect(body).not.toHaveProperty('taskBudgetId')
+    expect(body.idempotencyKey).toBe(quote.idempotencyKey)
+  })
+
+  it('an explicit idempotencyKey still overrides the quote\'s', async () => {
+    const { body } = await payQuote({ idempotencyKey: 'idem_3378' })
+    expect(body.idempotencyKey).toBe('idem_3378')
+  })
+})

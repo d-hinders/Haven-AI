@@ -1151,12 +1151,12 @@ const SWEEP_DELEGATE_DESCRIPTION = [
 // shared fragment's summary leads verbatim so the drift test holds.
 // #3329: outcome language only — never "delegation", "caveat" or "UserOp".
 const OPEN_TASK_BUDGET_DESCRIPTION = [
-  'Open a budget for one task that ends by itself: a cap good for at most ttl_minutes, reserved',
-  'out of the agent\'s own budget, separate from its period reset.',
-  'Pass max_amount_human (whole tokens), ttl_minutes (1-1440), and optionally recipient (pins',
-  'every payment to one address), label, token (default USDC). Returns { task_budget, sign_data,',
-  'next_action } — sign, then relay with haven_submit (task_budget_id). Over-cap, past-deadline,',
-  'or wrong-recipient spend is declined on the spot; nothing is queued.',
+  'Open a one-task budget that ends by itself: a cap good for at most ttl_minutes, reserved',
+  'from the agent\'s own budget, apart from its period reset.',
+  'Pass max_amount_human (whole tokens), ttl_minutes (1-1440), optional recipient (pins',
+  'every payment to one address; x402 then only by direct settlement), label, token (default',
+  'USDC). Returns { task_budget, sign_data, next_action } — sign, then relay with haven_submit',
+  '(task_budget_id). Over-cap, late or wrong-recipient spend is declined; nothing is queued.',
 ].join(' ')
 
 const CLOSE_TASK_BUDGET_DESCRIPTION = [

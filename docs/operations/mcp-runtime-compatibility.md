@@ -2113,7 +2113,14 @@ branch refuses, because the local runtime signs and submits a payment inline);
 the hosted MCP gains `haven_open_task_budget` and `haven_close_task_budget`,
 and its existing `haven_submit` takes `task_budget_id` XOR `payment_id`.
 `task_budget_id` is an optional argument on `haven_send`, `haven_pay`,
-`haven_pay_x402_quote` and `haven_pay_x402` where each exists.
+`haven_pay_x402_quote` and `haven_pay_x402` where each exists. (#3378
+re-verification: until then the local `haven_pay_x402_quote` and the hosted
+`haven_send`, `haven_pay` and `haven_pay_x402_quote` accepted it and dropped
+it, charging the whole budget; all four now carry it to the wire, pinned by
+wire-level tests on both runtimes. A merchant-pinned task budget is declined
+on an EIP-3009 funding leg, which pays the agent's own wallet first; both
+runtimes' `haven_open_task_budget` descriptions say so. Descriptions are not
+consent inputs, so no consent hash moves.)
 
 Skew, both directions fail closed, each by a different mechanism: an
 **older signer** strips the unknown `task_budget_id` key (its `haven_sign`

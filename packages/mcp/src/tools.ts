@@ -201,6 +201,9 @@ const OPEN_TASK_BUDGET_DESCRIPTION = [
   'call next_tool with next_arguments EXACTLY as given to get a signature, then relay it with',
   'haven_submit. Spending anything above the reserved amount, past the deadline, or to a',
   'different recipient than the one pinned here is declined on the spot — nothing is queued.',
+  'A recipient pin is checked against where each payment first goes: haven_pay_x402 and',
+  'haven_pay_x402_quote first move funds into the agent\'s own wallet, so a budget pinned to a',
+  'merchant is declined there — pin only budgets meant for haven_send.',
 ].join(' ')
 
 const CLOSE_TASK_BUDGET_DESCRIPTION = [

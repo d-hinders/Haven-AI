@@ -331,6 +331,10 @@ export interface X402AuthorizationOptions {
    * #3329: redeem against this open task budget's child delegation for the
    * funding leg / erc7710 settlement child instead of the agent's budget
    * delegation directly. Same refusal contract as `PaymentRequest.taskBudgetId`.
+   * On the EIP-3009 funding leg (`authorizeX402`, `fetch()`, `payX402Quote()`)
+   * a task budget's recipient pin is compared with the agent's own delegate
+   * wallet, so a merchant-pinned task budget is refused there
+   * (`task_budget_recipient_mismatch`); it pays through erc7710 only (#3378).
    */
   taskBudgetId?: string
 }

@@ -317,7 +317,7 @@ required on `main` only:
 - **Frontend browser smoke** — required on `main` since the same change.
 
 On top of those, `main` is the only branch still requiring the branch to be up
-to date (see the sync-back decision below), and the only one restricted to merge
+to date (see the merge-behind decision below), and the only one restricted to merge
 commits. The per-branch inventory
 and the `gh api` command that produced it live in
 [`autonomous-pr-loop.md`](autonomous-pr-loop.md#one-time-github-setup-required)
@@ -325,31 +325,21 @@ step 3 — read the numbers there, not here. The operational checklist a human
 runs alongside the gates is
 [`../operations/promoting-dev-to-main.md`](../operations/promoting-dev-to-main.md).
 
-**Sync-back after a promotion: an OPEN OWNER DECISION, because the rule as
-written cannot be followed.** `Dev gate` (ruleset 18134280) sets
-`strict_required_status_checks_policy: true`, so a promotion PR whose `dev`
-lacks `main`'s earlier promotion merge commits reports BEHIND and **cannot merge
-through the ordinary button**. This section used to prescribe the cure: after
-every promotion, a PR carrying `git merge origin/main` (zero content change)
-into `dev`, MERGE-merged because a squash flattens away the very commit being
-synced (first done as #1231). Direct pushes to `dev` are ruleset-declined, and
-since 2026-09-07 `Dev merge` (22449193) allows `dev` only `squash` — so that PR
-cannot be merged as prescribed. `dev` is 8 promotion merges behind `main`
-(`git rev-list --count origin/dev..origin/main`, 2026-09-26).
-
-What actually worked: the promotion merges **while behind**, by the owner —
-#3162 and #3325 (0.5.0-alpha.1, 2026-09-25) via the API. `Dev gate`
-lists no bypass actors, so the exact mechanism is unconfirmed —
-with the code-owner approval a migration-carrying promotion needs still
-collected first (#3325 carried migrations). The GitHub mobile app offers no such merge; use the web UI or
-the API. Until the owner decides, expect every promotion to need that owner merge.
-The two options:
-
-1. **Keep the sync-back:** temporarily allow merge commits on `dev` for the
-   sync PR (or add a bypass actor to `Dev merge` for it), merge-merge it, then
-   restore squash-only.
-2. **Drop the sync-back:** accept that promotions merge behind by that owner merge, and
-   delete this rule.
+**No sync-back; promotions merge behind (owner decision, 2026-09-26).**
+`Dev gate` (ruleset 18134280) sets `strict_required_status_checks_policy: true`,
+so a promotion PR whose `dev` lacks `main`'s earlier promotion merge commits
+reports BEHIND and **cannot merge through the ordinary button**. The old cure,
+a merge-commit sync PR from `main` into `dev` after every promotion (#1231),
+cannot land since `Dev merge` (22449193) made `dev` squash-only on 2026-09-07,
+and direct pushes to `dev` are refused. The owner chose to drop it rather than
+loosen either ruleset: `dev` stays squash-only, `main` stays strict, and every
+promotion is merged **behind, by the owner**, from the web UI or the API. The
+GitHub mobile app offers no such merge. #3162 and #3325 (0.5.0-alpha.1) merged
+this way; `Dev gate` lists no bypass actors, so how GitHub admits it is
+unconfirmed. A migration-carrying promotion still needs its code-owner approval
+first. `dev` falls one more promotion merge behind `main` each time
+(`git rev-list --count origin/dev..origin/main`); that is expected, not drift,
+and never something to "fix" with `gh pr update-branch`.
 
 ## What's in prod vs. pending
 

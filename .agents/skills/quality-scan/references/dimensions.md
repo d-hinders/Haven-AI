@@ -233,10 +233,10 @@ of the three.
 Feature → dev is squash; 44% of the wave's landings arrived as merge commits,
 which is what made the promotion recipes and the head-SHA reads go wrong
 (#1173, #2116). The rule is direction-dependent: the post-promotion sync-back
-(`sync/*`, or `main` itself) is prescribed as MERGE-merged onto `dev`, though
-squash-only `dev` now refuses it (an open owner decision,
-`branch-and-release-flow.md` § *Promotion to production*), so those heads are
-counted separately, never as drift. **Bar interaction, stated so a future run
+(`sync/*`, or `main` itself) was MERGE-merged onto `dev` until the owner
+dropped it (2026-09-26, `branch-and-release-flow.md` § *Promotion to
+production*); historical ones are counted separately, never as drift, and a new
+one is a finding. **Bar interaction, stated so a future run
 does not suppress it:** the remedy is one ruleset edit
 (`allowed_merge_methods: ["squash"]` on `dev`, the mirror of #2165 on
 `main`), so this dimension never yields an epic — it yields a `Probed clean`

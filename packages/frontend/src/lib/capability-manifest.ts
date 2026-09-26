@@ -224,7 +224,8 @@ function withEnforcedThresholds(
   const out = { ...releases }
   for (const pkg of Object.keys(out) as (keyof typeof out)[]) {
     const s = served[pkg]
-    if (s && 'min_version' in s && 'recommended_version' in s) {
+    const versionOrNull = (v: unknown): v is string | null => v === null || typeof v === 'string'
+    if (s && versionOrNull(s.min_version) && versionOrNull(s.recommended_version)) {
       out[pkg] = { ...out[pkg], min_version: s.min_version, recommended_version: s.recommended_version }
     }
   }

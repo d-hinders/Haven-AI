@@ -67,7 +67,7 @@ function PackageCard({ entry }: { entry: ManifestPackageEntry }) {
         {entry.upgrade_command ? (
           <div className="space-y-2">
             {INSTALLED_BY_CONNECTOR.has(entry.name) ? (
-              <p className="text-[13px] text-[var(--v2-ink-2)]">Installed by the connector — this re-runs it.</p>
+              <p className="text-[13px] text-[var(--v2-ink-2)]">Installed by the connector: update the connector to update it.</p>
             ) : null}
             <UpdateCommand command={entry.upgrade_command} />
           </div>
@@ -125,7 +125,7 @@ export default async function ReleasesPage() {
           <>
             If a Haven response carries <code className="font-mono">client_update</code> with{' '}
             <code className="font-mono">required: true</code>, your client is below the minimum and payments are
-            refused until you run its update command. Without <code className="font-mono">required</code>, updating
+            refused until you update it. Without <code className="font-mono">required</code>, updating
             is recommended but nothing stops working.
           </>
         }

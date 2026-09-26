@@ -19,6 +19,9 @@ import {
   mayHaveRunHarness,
   observe,
   JOB_LOOKUP_BUDGET,
+  RUN_PAGE_CAP,
+  MIN_HARNESS_RUN_SECONDS,
+  tooShortForHarness,
 } from './guard-freshness.mjs'
 import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -658,9 +661,12 @@ function fakeGh({ pages, jobs }) {
   return { gh, calls }
 }
 const shaN = (n) => n.toString(16).padStart(40, 'c')
-const rest = (id, title, createdAt, conclusion = 'success', sha = DEPLOYED_SHA) => ({
+// `seconds` is the run's own duration (run_started_at → updated_at); the default
+// is a real harness run's length, so the #3340 duration floor keeps it.
+const rest = (id, title, createdAt, conclusion = 'success', sha = DEPLOYED_SHA, seconds = 200) => ({
   id, conclusion, status: 'completed', event: 'deployment_status', head_branch: 'dev',
   head_sha: sha, created_at: createdAt, updated_at: createdAt, display_title: title,
+  run_started_at: new Date(Date.parse(createdAt) - seconds * 1000).toISOString(),
 })
 const OBS_NOW = Date.parse('2026-09-25T20:45:00Z')
 const at = (hoursAgo) => new Date(OBS_NOW - hoursAgo * 3600e3).toISOString()
@@ -722,7 +728,7 @@ test('observe(): a complete search with no green still reads never-succeeded (th
   assert.equal(evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).findings[0].kind, 'never-succeeded')
 })
 
-test('CLI: an alarm with no open issue REOPENS the newest closed one with the same title instead of filing a new one', () => {
+function runCliWithStub({ reopenFails = false } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'guard-freshness-cli-'))
   const log = path.join(dir, 'calls.log')
   const stub = path.join(dir, 'gh')
@@ -735,6 +741,7 @@ test('CLI: an alarm with no open issue REOPENS the newest closed one with the sa
     "if (s.includes('/runs')) { console.log('[]'); process.exit(0) }",
     "if (a[0] === 'issue' && a[1] === 'list' && s.includes('--state open')) { console.log('[]'); process.exit(0) }",
     `if (a[0] === 'issue' && a[1] === 'list' && s.includes('--state closed')) { console.log(JSON.stringify([{ number: 77, title: ${JSON.stringify(ISSUE_TITLE)} }])); process.exit(0) }`,
+    `if (a[0] === 'issue' && a[1] === 'reopen' && ${reopenFails}) { console.error('HTTP 403'); process.exit(1) }`,
     "process.exit(0)",
   ].join('\n'))
   chmodSync(stub, 0o755)
@@ -742,12 +749,86 @@ test('CLI: an alarm with no open issue REOPENS the newest closed one with the sa
     execFileSync(process.execPath, [path.join(ROOT, 'scripts/ci/guard-freshness.mjs')], {
       env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GITHUB_REPOSITORY: 'o/r', GUARD_FRESHNESS_DRY_RUN: '' },
       encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
-    const calls = readFileSync(log, 'utf8')
-    assert.match(calls, /^issue reopen 77$/m)
-    assert.match(calls, /^issue comment 77 /m)
-    assert.doesNotMatch(calls, /^issue create /m)
+    return readFileSync(log, 'utf8')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+}
+
+test('CLI: an alarm with no open issue REOPENS the newest closed one with the same title instead of filing a new one', () => {
+  const calls = runCliWithStub()
+  assert.match(calls, /^issue reopen 77$/m)
+  assert.match(calls, /^issue edit 77 --body [\s\S]*--add-label ci-health --add-label code-quality$/m)
+  assert.match(calls, /^issue comment 77 /m)
+  assert.doesNotMatch(calls, /^issue create /m)
+})
+
+test('CLI: a failed reopen files a new issue rather than silently editing a closed one', () => {
+  const calls = runCliWithStub({ reopenFails: true })
+  assert.match(calls, /^issue reopen 77$/m)
+  assert.doesNotMatch(calls, /^issue edit 77 /m)
+  assert.match(calls, /^issue create /m)
+})
+
+
+test('a green shorter than the floor cannot have run the harness; unknown timestamps are kept', () => {
+  const t = '2026-09-25T12:00:00Z'
+  const started = (sec) => new Date(Date.parse(t) - sec * 1000).toISOString()
+  assert.equal(tooShortForHarness({ runStartedAt: started(9), updatedAt: t }), true)
+  assert.equal(tooShortForHarness({ runStartedAt: started(MIN_HARNESS_RUN_SECONDS + 1), updatedAt: t }), false)
+  assert.equal(tooShortForHarness({ updatedAt: t }), false)
+})
+
+test('observe(): more gate-only deploy SHAs than the lookup budget, then a green inside the 4-day budget → fresh (#3340 review B1)', () => {
+  const page1 = []
+  // Every deploy leaves a ~9 s gate-only green (Railway's re-stated success).
+  for (let i = 0; i < JOB_LOOKUP_BUDGET * 3; i++) {
+    page1.push(rest(10000 + i, DEV_TITLE(shaN(10000 + i)), at(0.2 + i * 0.3), 'success', shaN(10000 + i), 9))
+  }
+  page1.push(rest(11000, DEV_TITLE(shaN(11000)), at(40), 'success', shaN(11000), 210))
+  const { gh, calls } = fakeGh({ pages: [page1], jobs: (id) => (id === 11000 ? JOBS_HARNESS_RAN[1] : JOBS_GATE_REFUSED[1]) })
+  const seen = observe(QA, { gh, now: OBS_NOW })
+  assert.equal(seen.lastSuccessAt, at(40))
+  assert.equal(checkRunCalls(calls), 1, 'the gate-only greens cost no lookup')
+  assert.equal(evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).healthy, true)
+})
+
+test('observe(): the page cap stops the search and the result reads unconfirmed, not never', () => {
+  // Full pages of never-countable Preview rows, all inside the horizon.
+  const pages = []
+  for (let p = 0; p < RUN_PAGE_CAP + 2; p++) {
+    const pg = []
+    for (let i = 0; i < 100; i++) pg.push(rest(20000 + p * 100 + i, PREVIEW_TITLE(shaN(1)), at(0.01 + (p * 100 + i) * 0.001), 'success', shaN(1)))
+    pages.push(pg)
+  }
+  const { gh, calls } = fakeGh({ pages, jobs: () => JOBS_HARNESS_RAN[1] })
+  const seen = observe(QA, { gh, now: OBS_NOW })
+  assert.equal(calls.filter((c) => c.includes('/runs') && c.includes('page=')).length, RUN_PAGE_CAP)
+  assert.equal(seen.searchComplete, false)
+  const result = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW })
+  assert.equal(result.findings[0].kind, 'unconfirmed')
+  assert.doesNotMatch(result.findings[0].detail, /never completed successfully/)
+})
+
+test('observe(): paging stops at the horizon — one page when it already reaches past the budget — and the never-succeeded text names the window', () => {
+  const page1 = []
+  for (let i = 0; i < 99; i++) page1.push(rest(30000 + i, DEV_TITLE(shaN(30000 + i)), at(1 + i), 'failure', shaN(30000 + i)))
+  page1.push(rest(30099, DEV_TITLE(shaN(30099)), at(24 * 5), 'failure', shaN(30099)))
+  const { gh, calls } = fakeGh({ pages: [page1, [rest(40000, DEV_TITLE(shaN(40000)), at(24 * 6))]], jobs: () => JOBS_HARNESS_RAN[1] })
+  const seen = observe(QA, { gh, now: OBS_NOW })
+  assert.equal(calls.filter((c) => c.includes('/runs') && c.includes('page=')).length, 1)
+  assert.equal(seen.searchComplete, true)
+  const f = evaluate({ guards: [QA], observations: { [QA.workflow]: seen }, now: OBS_NOW }).findings[0]
+  assert.equal(f.kind, 'never-succeeded')
+  assert.match(f.detail, /read back to .* which covers its 4-day budget/)
+})
+
+test('the summary line does not say "never" for an unconfirmed search', () => {
+  const obs = { [QA.workflow]: { fileExists: true, triggerPresent: true, lastSuccessAt: null, lastRunAt: at(1), searchComplete: false, examined: 700 } }
+  const result = evaluate({ guards: [QA], observations: obs, now: OBS_NOW })
+  const summary = renderSummary(result, obs, [QA], OBS_NOW)
+  assert.doesNotMatch(summary, /last success never/)
+  assert.match(summary, /not found in the 700 runs read/)
 })

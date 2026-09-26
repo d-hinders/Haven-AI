@@ -872,7 +872,7 @@ does not control; they live once as constants in
 `scripts/ci/guard-freshness.test.mjs` pins the workflow's literals to them. If
 Railway renames the environment, the gate skips every run and the freshness
 guard goes red within its 4-day budget — the alarm working, not a false
-positive. Expect skipped runs in the history (two or three per deploy); the
+positive. Expect skipped runs in the history (several per deploy — see *The freshness record* below); the
 run title says which status fired it (`post-deploy <sha> → Haven AI / dev
 (in_progress)`), and the gate's log line says why it skipped. The concurrency
 group moved from the workflow to the **money-flow job** so those skipped runs
@@ -930,7 +930,8 @@ them is a string a caller supplies:
   conclusion `success` — the run the job-vs-run block above cites, so both
   citations measure the same shape), and every deploy leaves several such
   runs at a SHA that *is* in the Railway index (3–11 `deployment_status` rows
-  per dev SHA measured on 2026-09-25/26, plus Vercel `Preview` rows). Judged at run level they
+  per dev SHA, measured over the 4 days to 2026-09-25T20:45Z in #3340, plus
+  Vercel `Preview` rows). Judged at run level they
   are fresh post-deploy greens in which nothing ran, and the newest of them
   could mask a real harness failure at the same SHA. A `workflow_dispatch` at
   the same SHA fails the event check; a Deployment created by hand fails the
@@ -940,7 +941,9 @@ them is a string a caller supplies:
   **How far back it looks (#3340).** Runs are paged newest first until a
   success, the 4-day budget or a page cap. Rows whose run name says another
   environment or a non-`success` status are dropped before any lookup (the
-  gate skips them unconditionally), and a run-level `failure` needs none. If
+  gate skips them unconditionally), a green run shorter than 60 s is dropped
+  too (only the gate job ran — measured 5–13 s, against 197–215 s for a real
+  harness run), and a run-level `failure` needs no lookup. If
   the page cap or the lookup budget stops the search first, the finding is
   `unconfirmed`, not `never-succeeded` — it did not look far enough to say
   "never". An alarm with no open issue reopens the newest closed `ci-health`

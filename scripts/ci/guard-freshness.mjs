@@ -232,8 +232,9 @@ export const SCHEDULED_GUARDS = [
     // a Deployment by hand (`gh api -X POST .../deployments`) and mute this
     // guard. That deployment's creator would be the human, not the Railway app.
     provenance: { environment: RAILWAY_DEV_ENVIRONMENT, creator: RAILWAY_DEPLOY_CREATOR },
-    // Judge the run by the money-flow JOB. The gate job skips two or three runs
-    // per deploy (in_progress statuses, the re-stated `success`), and each of
+    // Judge the run by the money-flow JOB. The gate job skips several runs per
+    // deploy (in_progress statuses, the re-stated `success`; 3–11 rows per dev
+    // SHA measured in #3340), and each of
     // those is a run-level `success` at a SHA that IS in the Railway index —
     // a decoy that would read as "fresh post-deploy green" while nothing ran,
     // and could mask a real harness failure at the same SHA behind it
@@ -293,6 +294,27 @@ export function mayHaveRunHarness(run, guard) {
 }
 
 /**
+ * A green run shorter than this cannot have run the money-flow harness (#3340).
+ * Measured over qa-dev's run-level `success` dev runs on 2026-09-26: 38 lasted
+ * 5–13 s (the gate job alone, the harness skipped) and the 2 real harness runs
+ * 197 s and 215 s. Every dev deploy leaves such a gate-only green (Railway's
+ * re-stated `success`, superseded), so without this floor each deploy SHA cost
+ * one lookup and the budget reached ~0.85 day back instead of the 4-day budget.
+ * Only ever drops runs — a harness run cannot finish in a minute — so it can
+ * make the guard stricter, never greener. Measured from `run_started_at` (not
+ * `created_at`, which includes queue time); unknown timestamps are kept.
+ */
+export const MIN_HARNESS_RUN_SECONDS = 60
+
+/** True when a run's own timestamps prove it too short to have run the harness. */
+export function tooShortForHarness(run) {
+  const start = Date.parse(run?.runStartedAt ?? '')
+  const end = Date.parse(run?.updatedAt ?? '')
+  if (Number.isNaN(start) || Number.isNaN(end)) return false
+  return end - start < MIN_HARNESS_RUN_SECONDS * 1000
+}
+
+/**
  * The runs that count as this guard having run, newest timestamp first.
  *
  * Pure and exported so the event/branch scoping is a test rather than a line
@@ -328,6 +350,7 @@ export function selectQualifyingRuns(runs, guard, deploymentCreatorsBySha, jobsF
       out.push({ ...r })
       continue
     }
+    if (requiredJob && tooShortForHarness(r)) continue
     if (requiredJob) {
       // The run's verdict is the job's. Unreadable job list, no thunk, a
       // thrown lookup, or a job list without the job: refused, never assumed.
@@ -428,7 +451,10 @@ export function evaluate({ guards = SCHEDULED_GUARDS, observations = {}, now = D
         guard,
         kind: seen.lastRunAt ? 'never-succeeded' : 'never-run',
         detail: seen.lastRunAt
-          ? `It has run (most recently ${seen.lastRunAt}) but has never completed successfully.`
+          ? (seen.searchedBackTo
+              ? `No successful run among the ${seen.examined ?? 'examined'} runs read back to ${seen.searchedBackTo}, ` +
+                `which covers its ${guard.maxAgeDays}-day budget (most recent run ${seen.lastRunAt}).`
+              : `It has run (most recently ${seen.lastRunAt}) but has never completed successfully.`)
           : 'Actions has no record of it ever running.',
       })
       continue
@@ -496,7 +522,11 @@ export function renderSummary({ healthy, findings }, observations = {}, guards =
     const finding = findings.find((f) => f.guard.workflow === guard.workflow)
     const age = seen?.lastSuccessAt
       ? `${((nowMs - new Date(seen.lastSuccessAt).getTime()) / DAY_MS).toFixed(1)}d ago`
-      : 'never'
+      : finding?.kind === 'unconfirmed'
+        ? `not found in the ${seen?.examined ?? ''} runs read`.replace('  ', ' ')
+        : seen?.searchedBackTo
+          ? `none since ${seen.searchedBackTo}`
+          : 'never'
     lines.push(`  ${finding ? '✗' : '✓'} ${guard.workflow} — last success ${age} (budget ${guard.maxAgeDays}d)`)
     if (finding) lines.push(`      ${finding.kind}: ${finding.detail}`)
   }
@@ -533,6 +563,9 @@ function readDeploymentIndex({ environment, creator }, gh = defaultGh) {
     '-F', 'per_page=100',
   ]))
   const index = {}
+  const created = (Array.isArray(deployments) ? deployments : []).map((d) => d?.created_at).filter(Boolean).sort()
+  // Non-enumerable: the oldest deployment the index reaches (#3340 review N2).
+  Object.defineProperty(index, '__oldest', { value: created[0] ?? null, enumerable: false })
   for (const d of Array.isArray(deployments) ? deployments : []) {
     if (typeof d?.sha !== 'string' || typeof d?.creator?.login !== 'string') continue
     // "A Railway-created deployment of this SHA exists" — so once the expected
@@ -598,7 +631,7 @@ function readRunPage(guard, event, page, gh) {
   const parsed = JSON.parse(gh([
     'api', '-X', 'GET', `repos/${repo}/actions/workflows/${guard.workflow}/runs`,
     '-f', `event=${event}`, '-F', 'per_page=100', '-F', `page=${page}`,
-    '--jq', '[.workflow_runs[] | {id, conclusion, status, event, head_branch, head_sha, created_at, updated_at, display_title}]',
+    '--jq', '[.workflow_runs[] | {id, conclusion, status, event, head_branch, head_sha, created_at, updated_at, run_started_at, display_title}]',
   ]))
   const runs = Array.isArray(parsed) ? parsed : []
   return runs.map((r) => ({
@@ -610,6 +643,7 @@ function readRunPage(guard, event, page, gh) {
     headSha: r.head_sha,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    runStartedAt: r.run_started_at,
     displayTitle: r.display_title,
   }))
 }
@@ -644,6 +678,9 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
     const nowMs = typeof now === 'number' ? now : new Date(now).getTime()
     const horizon = new Date(nowMs - guard.maxAgeDays * DAY_MS).toISOString()
     const index = guard.provenance ? readDeploymentIndex(guard.provenance, gh) : undefined
+    // N2 (#3340 review): a Deployments index that does not reach the horizon
+    // silently drops older runs at the provenance check; say so.
+    const indexShort = Boolean(index?.__oldest && index.__oldest > horizon)
     const shaOfRun = new Map()
     const jobsFor = guard.requiredJob
       ? boundedCheckRunReader(JOB_LOOKUP_BUDGET, guard.requiredJob, shaOfRun, gh)
@@ -671,9 +708,16 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
         )
         if (qualifying.some((r) => r.conclusion === 'success')) break
         if (batch.length < 100 || !oldest || oldest < horizon) break
+        // Past the lookup budget, more pages can only feed `lastRunAt`.
+        if (jobsFor?.exhausted) {
+          searchComplete = false
+          break
+        }
       }
     }
     if (jobsFor?.exhausted && !qualifying.some((r) => r.conclusion === 'success')) searchComplete = false
+    if (indexShort && !qualifying.some((r) => r.conclusion === 'success')) searchComplete = false
+    const readDates = runs.map((r) => r.createdAt).filter(Boolean).sort()
     const success = qualifying.filter((r) => r.conclusion === 'success')
     return {
       fileExists: true,
@@ -682,6 +726,7 @@ export function observe(guard, { gh = defaultGh, now = Date.now(), root = ROOT }
       lastRunAt: newestTimestamp(qualifying),
       searchComplete,
       examined: runs.length,
+      searchedBackTo: readDates[0] ?? null,
     }
   } catch (err) {
     console.error(`run list failed for ${guard.workflow}: ${err.message}`)
@@ -778,7 +823,7 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
     // one guard's history stays in one thread.
     const closedListed = tryGh(
       ['issue', 'list', '--label', 'ci-health', '--state', 'closed', '--limit', '20',
-       '--json', 'number,title'],
+       '--search', `in:title "${ISSUE_TITLE}"`, '--json', 'number,title'],
       'list closed ci-health issues',
     )
     let closed
@@ -787,9 +832,14 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
     } catch (err) {
       console.error(`::warning::guard-freshness could not parse the closed issue list: ${err.message}`)
     }
-    if (closed) {
-      tryGh(['issue', 'reopen', String(closed.number)], `reopen #${closed.number}`)
-      tryGh(['issue', 'edit', String(closed.number), '--body', body], `update #${closed.number}`)
+    // A failed reopen falls back to filing, so the alarm is never a silent
+    // edit to a closed issue (#3340 review S4).
+    const reopened = closed ? tryGh(['issue', 'reopen', String(closed.number)], `reopen #${closed.number}`) : null
+    if (closed && reopened !== null) {
+      // The labels are re-asserted: `code-quality` is what queues the issue for
+      // ship-next, and a human may have stripped it when closing (#3340 S6).
+      tryGh(['issue', 'edit', String(closed.number), '--body', body,
+             '--add-label', 'ci-health', '--add-label', 'code-quality'], `update #${closed.number}`)
       tryGh(['issue', 'comment', String(closed.number), '--body',
              `Reopened: a guard stopped proving its guarantee again.${runUrl ? ` Run: ${runUrl}` : ''}`],
             `comment on #${closed.number}`)

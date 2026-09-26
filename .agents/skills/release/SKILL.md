@@ -189,14 +189,22 @@ matcher rather than approximating it:
 #
 # `--status=success` is the RUN conclusion, and most qa-dev runs are
 # gate-skipped deployment_status runs that still conclude success (#3348;
-# 10 of the newest 10 on 2026-09-26). So check the `money-flow` job of each
-# row and take the first one where it succeeded; its headSha feeds the diff
-# below.
-for id in $(gh run list --workflow=qa-dev.yml --status=success --limit=100 --json databaseId,event \
+# 10 of the newest 10 on 2026-09-26). So walk the same 30 rows the gate reads
+# (GREEN_RUN_WINDOW) and apply its four rules: the event, `headBranch == dev`
+# for schedule/dispatch, the commit on `dev`, and the `money-flow` JOB
+# concluding success. The printed sha is <that-sha> below. An empty result
+# means the gate refuses too (#3361): dispatch qa-dev.
+found=
+for id in $(gh run list --workflow=qa-dev.yml --status=success --limit=30 --json databaseId,event \
     --jq '.[] | select(.event=="deployment_status" or .event=="schedule" or .event=="workflow_dispatch") | .databaseId'); do
-  c=$(gh run view "$id" --json jobs --jq '.jobs[] | select(.name=="money-flow") | .conclusion')
-  if [ "$c" = success ]; then gh run view "$id" --json databaseId,headSha,createdAt,event; break; fi
+  read -r c sha ev br <<<"$(gh run view "$id" --json jobs,headSha,event,headBranch \
+    --jq '[([.jobs[] | select(.name=="money-flow") | .conclusion][0] // "none"), .headSha, .event, .headBranch] | @tsv')"
+  [ "$c" = success ] || continue                                   # the harness ran and passed
+  [ "$ev" = deployment_status ] || [ "$br" = dev ] || continue     # schedule/dispatch must be on dev
+  git merge-base --is-ancestor "$sha" origin/dev || continue       # its commit is on dev
+  found=1; echo "run $id  sha $sha  event $ev  branch $br"; break
 done
+[ -n "$found" ] || echo "no admissible money-flow success in the newest 30 run-level greens: the gate will refuse too (#3361) — dispatch qa-dev"
 
 # Money-path files changed since that commit. Any output means the gate blocks.
 git diff --name-only <that-sha>..origin/dev | node --input-type=module -e '

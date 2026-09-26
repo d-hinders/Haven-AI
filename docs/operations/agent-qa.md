@@ -622,7 +622,7 @@ The repository needs these encrypted Actions secrets:
 
 And, for the three delegation-rail EIP-3009 legs (`x402-delegation-3009`,
 `x402-delegation-3009-grace-resume`, and `x402-delegation-3009-sweep` — the run skips them, and the Coverage
-completeness step warns, when either is absent):
+completeness step turns that red, when either is absent):
 
 - `QA_DELEGATION_AGENT_API_KEY`
 - `QA_DELEGATION_DELEGATE_PRIVATE_KEY`

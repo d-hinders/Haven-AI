@@ -156,7 +156,7 @@ so `rg -U` is not needed. Run the positive control first; a control that
 fails means the regex cannot say yes, and its zero is not a finding.
 
 ```bash
-R='\b[0-9]+ of [0-9]+\b|\b[0-9]+/[0-9]+\b|\b[0-9]+%|\*\*[0-9]+(\*\*|[ ,;:)]|$)|\b[0-9]+ (passed|failed|files|tests|runs|rows|lines|hits|matches)\b'
+R='\b[0-9]+ of [0-9]+\b|\b[0-9]+/[0-9]+\b|\b[0-9]+%|\*\*[0-9]+(\*\*|[ ,;:)]|$)|\b[0-9]+ (passed|failed|skipped|red|files|commits|tests|runs|rows|lines|hits|matches)\b'
 # Positive control: every founding specimen line must match.
 for spec in 2026-09-02-2421.md:110 2026-09-03-2423.md:26 2026-09-03-2423.md:36; do
   sed -n "${spec##*:}p" "docs/regulatory/casp-changelog/${spec%%:*}" | rg -q "$R" || echo "CONTROL FAILED $spec"
@@ -176,11 +176,14 @@ Clean: every re-derived figure matches its recorded one or the drift is
 explained; every figure-bearing shard line carries a command. Report the
 mismatches as `recorded → now` with the command. On `893d74f6` the old
 ratio-only regex reported 18, but that was `rg -o | wc -l`, i.e. 18 matches
-on 14 lines, sampled by mtime, with 1 carrying a command. On `9b06b174`, with the shape and
-sampling above: 10 figure-bearing lines across the 25 newest shards
-(`2026-09-24-3271` … `2026-09-26-rpc-error-key-scrub`), 2 with a command. Two
-of the 10 are not measured figures (a `10%` protocol constant and a `404/500`
-status pair). The old regex found 3 of those lines and missed every specimen;
+on 14 lines, with 1 carrying a command. These figures reproduce at
+`893d74f6` with the dated-name sample; the original mtime order cannot be
+recovered. On `9b06b174`, with the shape and sampling above: 11
+figure-bearing lines across the 25 newest shards (`2026-09-24-3271` …
+`2026-09-26-rpc-error-key-scrub`), 2 with a command. Three of the 11 are not
+measured figures: a `10%` protocol constant, a `404/500` status pair and a
+`4/4` slice number. The old regex found exactly those 3 lines and missed
+every specimen;
 ledger re-derivations against the 2026-08-19 entry: `any` 14 → 18, gate
 scripts 27 → 24, db-mocks 62/465/66 → 58/312/61, zod 0 → 0.
 
@@ -306,9 +309,10 @@ The freshness gate reads the `money-flow` **job** conclusion (`selectGreenRun`,
 `moneyFlowJobConclusion`), so a skipping run is never admitted. The
 instrument is therefore job level: `gh run view <id> --json jobs --jq
 '.jobs[]|select(.name=="money-flow")|.conclusion'`. `completenessWarningFromJobs`
-in `qa-freshness.mjs` is not the observable. It looks for `money-flow: success`
-together with `Coverage completeness: failure`, a pair GitHub cannot produce
-now that the step blocks, so treat it as a dead branch (#3348).
+in `qa-freshness.mjs` is not the observable. Its only caller passes the jobs
+of a run whose `money-flow` job already succeeded, and the function looks
+for a failed `Coverage completeness` step in them. GitHub cannot produce
+that pair now that the step blocks, so treat it as a dead branch (#3348).
 
 ```bash
 # Copy lint: files that can carry product copy but are outside SCAN_DIRS and

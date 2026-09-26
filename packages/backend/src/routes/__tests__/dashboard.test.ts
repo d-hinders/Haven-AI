@@ -13,6 +13,10 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   portfolioMocks: {
     fetchPortfolioForAccount: vi.fn(),
+    // #3296: the route asks the module whether a result is unpriceable before
+    // writing the daily snapshot; the real predicate is proven against the
+    // marker in modules/accounts/__tests__/portfolio-unpriceable.test.ts.
+    isPortfolioUnpriceable: vi.fn(),
   },
   transactionMocks: {
     compareTransactions: vi.fn(() => 0),
@@ -106,6 +110,8 @@ describe('dashboard routes', () => {
   beforeEach(() => {
     mockQuery.mockReset()
     portfolioMocks.fetchPortfolioForAccount.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(false)
     transactionMocks.compareTransactions.mockClear()
     transactionMocks.enrichedTransactionIdentityKey.mockClear()
     transactionMocks.enrichTransactionsWithAgents.mockClear()
@@ -626,4 +632,177 @@ describe('dashboard overview under degraded balance reads (#3295)', () => {
     expect(body.change.eurAmount).toBeCloseTo(17, 10)
     expect(body.change.sekAmount).toBeCloseTo(180, 10)
   })
+})
+
+// #3296 — the daily snapshot is written only from a CLEAN read.
+//
+// `isPortfolioUnpriceable` is mocked per-portfolio above, so what these tests
+// pin is the ROUTE's use of it: any account unpriceable → no INSERT into
+// user_daily_portfolio_snapshots plus an info log naming the user only, a
+// clean read → the insert exactly as before. The predicate's own truth table
+// (marker reuse, cache-hit survival, price-vs-balance failure) is proven
+// against the real marker in modules/accounts/__tests__/
+// portfolio-unpriceable.test.ts. The query stubs keep the
+// characterization suite's keyword-dispatched shape — the ratchet forbids
+// growing positional mocking on db.js (mockResolvedValueOnce).
+describe('dashboard writes the daily snapshot only from a clean read (#3296)', () => {
+  const SKIP_MSG = 'Daily portfolio snapshot skipped: the portfolio read is unpriceable (#3296)'
+  let app: FastifyInstance
+  let token: string
+  const logLines: Array<Record<string, unknown>> = []
+
+  beforeAll(async () => {
+    app = Fastify({
+      // Capture pino's own JSON lines so the skip log can be pinned without
+      // stubbing the logger (a stubbed request.log would no longer prove the
+      // route logs at info through the real pipeline).
+      logger: {
+        level: 'info',
+        stream: {
+          write(chunk: string) {
+            try {
+              logLines.push(JSON.parse(chunk))
+            } catch {
+              // Non-JSON line — not a pino record, not ours to pin.
+            }
+          },
+        },
+      },
+    })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(dashboardRoutes, { prefix: '/dashboard' })
+    token = app.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })
+  })
+  afterAll(async () => app.close())
+
+  /** Same UTC-day arithmetic the route uses for its snapshot keys. */
+  function snapshotDate(offsetDays = 0): string {
+    const date = new Date()
+    date.setUTCDate(date.getUTCDate() + offsetDays)
+    return date.toISOString().slice(0, 10)
+  }
+
+  function installQueryMock(accountRows: unknown[] = [SAFE]) {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('AS has_first_agent_payment')) {
+        return Promise.resolve({ rows: [{ has_first_agent_payment: false }] })
+      }
+      if (sql.includes('FROM smart_accounts') && sql.includes('ORDER BY created_at ASC')) {
+        return Promise.resolve({ rows: accountRows })
+      }
+      if (sql.includes('FROM agents a')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) {
+        return Promise.resolve({ rows: [] })
+      }
+      if (sql.includes('GROUP BY token_symbol')) {
+        return Promise.resolve({ rows: [] })
+      }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+  }
+
+  beforeEach(() => {
+    logLines.length = 0
+    mockQuery.mockReset()
+    portfolioMocks.fetchPortfolioForAccount.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(false)
+    transactionMocks.fetchAccountTransactions.mockReset()
+    transactionMocks.mergeX402Transactions.mockReset()
+    transactionMocks.resolveTransactionCurrency.mockClear()
+    portfolioMocks.fetchPortfolioForAccount.mockResolvedValue({
+      totalUsd: 100,
+      totalEur: 92,
+      totalSek: 920,
+    })
+    transactionMocks.fetchAccountTransactions.mockResolvedValue({ transactions: [] })
+    transactionMocks.mergeX402Transactions.mockResolvedValue([])
+    installQueryMock()
+  })
+
+  async function getOverview() {
+    return app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+  }
+
+  function insertCalls() {
+    return mockQuery.mock.calls.filter(([sql]) =>
+      String(sql).includes('INSERT INTO user_daily_portfolio_snapshots'),
+    )
+  }
+
+  it('a clean read still inserts today\'s snapshot exactly as before', async () => {
+    const response = await getOverview()
+
+    expect(response.statusCode).toBe(200)
+    const inserts = insertCalls()
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0][1]).toEqual(['user-1', snapshotDate(0), 100, 92, 920])
+    expect(logLines.find((line) => line.msg === SKIP_MSG)).toBeUndefined()
+  })
+
+  it('an unpriceable read writes NO snapshot and logs the skip with the user id only', async () => {
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(true)
+
+    const response = await getOverview()
+
+    expect(response.statusCode).toBe(200)
+    expect(insertCalls()).toHaveLength(0)
+    const skip = logLines.find((line) => line.msg === SKIP_MSG)
+    expect(skip, 'expected one skip log line').toBeDefined()
+    expect(skip).toMatchObject({ userId: 'user-1' })
+    // The route controls exactly these fields — no amounts, no portfolio
+    // figures on the skip line (finding aid, not a figures channel). `reqId`
+    // is fastify's automatic per-request binding, present on every line.
+    const routeControlled = Object.keys(skip ?? {}).filter(
+      (key) => !['level', 'time', 'pid', 'hostname', 'msg'].includes(key),
+    )
+    expect(routeControlled).toEqual(['reqId', 'userId'])
+  })
+
+  it('asks every account and skips when ANY of them is unpriceable', async () => {
+    const gnosisSafe = { ...SAFE, id: 'safe-gnosis', chain_id: 100 }
+    installQueryMock([SAFE, gnosisSafe])
+    // Clean on the first account, unpriceable on the second.
+    portfolioMocks.isPortfolioUnpriceable
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true)
+
+    const response = await getOverview()
+
+    expect(response.statusCode).toBe(200)
+    expect(portfolioMocks.isPortfolioUnpriceable).toHaveBeenCalledTimes(2)
+    expect(insertCalls()).toHaveLength(0)
+    expect(logLines.find((line) => line.msg === SKIP_MSG)).toBeDefined()
+  })
+
+  it('all accounts clean after a skipped load writes the snapshot — the day is recoverable', async () => {
+    // First load: degraded (the stale row skips the insert — mocked db has no
+    // snapshot row to begin with, so the skip is what this pins).
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(true)
+    await getOverview()
+    expect(insertCalls()).toHaveLength(0)
+
+    // Later load the same day: clean → the snapshot lands after all.
+    portfolioMocks.isPortfolioUnpriceable.mockReset()
+    portfolioMocks.isPortfolioUnpriceable.mockReturnValue(false)
+    await getOverview()
+
+    expect(insertCalls()).toHaveLength(1)
+    expect(insertsToParams()).toEqual(['user-1', snapshotDate(0), 100, 92, 920])
+  })
+
+  function insertsToParams(): unknown {
+    const inserts = insertCalls()
+    expect(inserts).toHaveLength(1)
+    return inserts[0][1]
+  }
 })

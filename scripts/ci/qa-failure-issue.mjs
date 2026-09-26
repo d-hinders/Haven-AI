@@ -26,10 +26,12 @@
 // default runner is the real `gh`, which the workflow has via GH_TOKEN.
 //
 // Usage (from the workflow's failure step):
-//   TRIGGER='...' RUN_URL='...' node scripts/ci/qa-failure-issue.mjs
+//   TRIGGER='...' RUN_URL='...' node scripts/ci/qa-failure-issue.mjs qa-run.attempt-*.log
 
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { byAttempt, scrubFull } from './qa-retry.mjs'
 
 export const LABEL = 'qa-failure'
 export const LABEL_COLOR = 'b60205'
@@ -39,8 +41,248 @@ export const LABEL_DESCRIPTION =
 /** Fixed title — the upsert finds a closed standing issue by it. No date in it, on purpose. */
 export const ISSUE_TITLE = 'qa-dev money-flow failing'
 
+// ── Failure classification (#3337, absorbs #3339) ─────────────────────────
+//
+// Every issue used to carry the same sentence — "A transient testnet/RPC flake
+// can be cleared by re-dispatching the workflow" — in 25 of 25 qa-failure
+// issues ever filed. It steered triage toward "flake", and it made the bodies
+// useless to search. The issue now records a CLASS and the SIGNATURE that
+// earned it, per run and per failing leg, read from the attempt logs the
+// money-flow step keeps (#3338). A class is only assigned on a signature;
+// everything else is `unclassified` — never a guess.
+//
+//   provider      the RPC/bundler provider refused or failed the request
+//   preflight     the harness stopped before any leg ran (a resource floor)
+//   harness       the harness itself threw (a JS runtime error's message, or
+//                 the run-level `✗ harness crashed:` line)
+//   haven         Haven's API answered a 4xx to a request the leg expected to
+//                 succeed (`<step> failed (4xx)` on the FAIL line itself)
+//   unclassified  no signature — including the backend's masked 502 ("Could
+//                 not deploy the account for this budget") and a timeout on a
+//                 Haven endpoint, which hide whether a provider or Haven
+//                 failed underneath
+//
+// The RUN takes its legs' class when they agree, `mixed` (with a count per
+// class) when they do not, and `preflight` when no leg ran — so one provider
+// leg among masked 502s is still visible at run level.
+//
+// Provider signatures, measured on 2026-09-26 over the money-flow job logs of
+// the newest 40 failed qa-dev runs: `Batch of more than N requests`, `no
+// available upstreams` and `flashblocks` (in 8 logs each), `Status: 429` (in 2:
+// on a continuation line after `HTTP request failed.`, or JSON-escaped as
+// `…failed.\\n\\nStatus: 429` inside a relayed 502 body); `-32016` / `over rate limit` and `RPC Request
+// failed` from #2449's triage. A recurring `provider` class is a finding for
+// the provider, not something a re-dispatch clears.
+export const CLASSES = ['provider', 'preflight', 'harness', 'haven', 'unclassified']
+
+const PROVIDER = [
+  /-32016|over rate limit/i,
+  /RPC Request failed/,
+  // No leading \b: a relayed body carries these JSON-escaped (`…failed.\\n\\nStatus: 429`).
+  /Status: 429\b|Too Many Requests/,
+  /Batch of more than \d+ requests/,
+  /no available upstreams/,
+  /flashblocks/,
+  // #2511: a 502 whose body quotes the public endpoint is an RPC outage. Matched
+  // on the RAW line; the signature is scrubbed afterwards like every other.
+  /URL: https:\/\/sepolia\.base\.org\b/,
+  // dRPC's free-plan limits (code 30 timeouts, code 31 batches): seen in 4 runs
+  // of the 2026-09-26 sample and otherwise left unclassified.
+  /on the free plan|upgrade to paid plan/,
+]
+// The harness prints `err.message`, never the error's name (thrown-error-detail.ts,
+// run.ts), so match the MESSAGE shapes a JS runtime error has — a quoted
+// "TypeError" in a relayed body is someone else's error.
+const HARNESS = [/\bis not a function\b|\bis not defined\b|Cannot (read|set) properties of (undefined|null)/]
+// The harness's own Haven API client reports `<step> failed (<status>)`. A 4xx
+// relayed from a MERCHANT (`(HTTP 402)` inside a hosted-tool refusal) is not Haven's.
+const HAVEN = [/^• \S+ … FAIL — [^(]*\bfailed \(4\d\d\)/]
+
+/** The first line matching one of `patterns`, with the match's index, or null. */
+function firstMatch(lines, patterns) {
+  for (const line of lines) {
+    for (const re of patterns) {
+      const m = re.exec(line)
+      if (m) return { line, index: m.index }
+    }
+  }
+  return null
+}
+
+/**
+ * The evidence, not the first 200 characters: a real provider FAIL line
+ * carries its signature well past character 200 ("…Sweep relay failed: could
+ * not coalesce error (error={ … "no available upstreams" …"), so the excerpt
+ * is taken AROUND the match and prefixed with the leg.
+ *
+ * Scrub BEFORE cutting: a cut can fall between a label and its value
+ * (`Bearer <v>`, `"apiKey": "<v>"`), and a bare value is not recognisable as a
+ * key. So a bounded window (±1000 characters; the scrub regexes backtrack on
+ * pathological input) is scrubbed WHOLE, with a marker at the match, and only
+ * then trimmed and cut. Where the window itself cuts the line, the scrubbed
+ * text's first and last three whitespace tokens are dropped, one at a time,
+ * never past the marker: a label/value pair the window's edge splits lies
+ * within those three tokens (`password = <v>`, `Authorization : Bearer <v>`),
+ * and an intact pair is already `<redacted>`. One theoretical gap remains
+ * (round 4 review): the token holding the match is never dropped, so a label
+ * cut at the window edge whose value shares that whitespace-free token stays
+ * bare — which needs ~900 characters of URLs with no whitespace between the
+ * value and the match. The harness's error details are compact and capped
+ * (thrownErrorDetail: 200 per value, 700 total), so it cannot print that.
+ */
+export function excerpt(line, index, { before = 80, after = 160 } = {}) {
+  const MARK = '\u0001'
+  const a = Math.max(0, index - 1000)
+  const b = Math.min(line.length, index + 1000)
+  let scrubbed = scrubFull(`${line.slice(a, index)}${MARK}${line.slice(index, b)}`)
+  if (a > 0) scrubbed = dropEdgeTokens(scrubbed, 'front', MARK)
+  if (b < line.length) scrubbed = dropEdgeTokens(scrubbed, 'back', MARK)
+  const at = Math.max(0, scrubbed.indexOf(MARK)) // a marker swallowed into a <url> falls back to the start
+  const text = scrubbed.replace(MARK, '')
+  // Already scrubbed, so the cut needs no widening: it can no longer split a secret.
+  const start = Math.max(0, at - before)
+  const end = Math.min(text.length, at + after)
+  const leg = /^• \S+ … FAIL — /.exec(line)?.[0] ?? ''
+  const cutFront = a > 0 || start > leg.length // the leg prefix itself is always kept
+  const out = `${cutFront ? `${leg}… ` : ''}${text.slice(cutFront ? start : 0, end)}${end < text.length || b < line.length ? ' …' : ''}`
+  return out.length > 320 ? `${out.slice(0, 319)}…` : out
+}
+
+/**
+ * Neutralise `#123` so a signature quoting an issue does not create a
+ * cross-reference event from the public qa-failure issue.
+ */
+function noIssueRefs(text) {
+  return text.replace(/#(\d)/g, '#\u2060$1')
+}
+
+/** Drop up to three whitespace tokens from one end of `text`, one at a time, never one holding `stop`. */
+export function dropEdgeTokens(text, end, stop = null) {
+  let t = text
+  for (let n = 0; n < 3; n++) {
+    const m = end === 'front' ? /^\S*\s+/.exec(t) : /\s+\S*$/.exec(t)
+    if (!m || (stop && m[0].includes(stop))) break
+    t = end === 'front' ? t.slice(m[0].length) : t.slice(0, t.length - m[0].length)
+  }
+  return t
+}
+
+/**
+ * `scrub` for a whole line: `qa-retry`'s `scrub` slices to 1024 characters
+ * BEFORE scrubbing, which can cut a labelled value below the 16 characters
+ * that mark it as a key and publish its first part. Here an over-long line is
+ * cut, its last three tokens dropped, then scrubbed whole and capped.
+ */
+export function scrubLine(text, max = 240) {
+  let t = String(text ?? '')
+  if (t.length > 2000) t = dropEdgeTokens(t.slice(0, 2000), 'back')
+  const s = scrubFull(t)
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
+/** Class and signature for one failing leg: its FAIL line plus continuation lines. */
+export function classifyLeg(lines) {
+  for (const [cls, patterns] of [['provider', PROVIDER], ['harness', HARNESS], ['haven', HAVEN]]) {
+    const hit = firstMatch(lines, patterns)
+    if (!hit) continue
+    const found = excerpt(hit.line, hit.index)
+    // A hit on a continuation line (`Status: 429`) keeps the step it belongs to.
+    const signature = hit.line === lines[0] ? found : `${scrubLine(lines[0] ?? '', 120)} → ${found}`
+    return { class: cls, signature: noIssueRefs(signature) }
+  }
+  return { class: 'unclassified', signature: noIssueRefs(scrubLine(lines[0] ?? '', 240)) }
+}
+
+/**
+ * Classify one attempt's harness log. A leg's text is its `• <name> … FAIL — …`
+ * line and every line after it up to the next leg or summary line, because a
+ * provider signature often lands on a later line (`Status: 429`). A preflight
+ * refusal is run-level: no leg ran.
+ *
+ * @returns {{ runClass: string, signature: string|null, legs: Array<{leg: string, class: string, signature: string}> }}
+ */
+export function classifyLog(text) {
+  const lines = String(text ?? '').split('\n').map((l) => l.replace(/\r$/, ''))
+  const preflightAt = lines.findIndex((l) => /^\s*✗ preflight:/.test(l))
+  if (preflightAt !== -1) {
+    // The resource lines that failed their floor say which one.
+    const failing = lines.slice(0, preflightAt).filter((l) => /^\s+✗ /.test(l)).map((l) => l.trim())
+    return { runClass: 'preflight', signature: noIssueRefs(scrubLine(failing[0] ?? lines[preflightAt].trim(), 200)), legs: [] }
+  }
+  // The harness itself crashed: run-level, no legs.
+  const crashed = lines.find((l) => /^\s*✗ harness crashed:/.test(l))
+  if (crashed) {
+    return { runClass: 'harness', signature: noIssueRefs(scrubLine(crashed.trim(), 240)), legs: [] }
+  }
+  const legs = []
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^• (\S+) … FAIL — /.exec(lines[i])
+    if (!m) continue
+    const block = [lines[i]]
+    for (let j = i + 1; j < lines.length && !/^(• |✓ |✗ |\| )/.test(lines[j]); j++) block.push(lines[j])
+    legs.push({ leg: m[1], ...classifyLeg(block) })
+  }
+  const counts = new Map()
+  for (const l of legs) counts.set(l.class, (counts.get(l.class) ?? 0) + 1)
+  if (counts.size === 0) {
+    // No failing leg: strict mode refusing skipped legs, or Coverage completeness
+    // finding the green-with-skips marker. The run-level line says why.
+    const runLine = lines.find((l) => /^\s*✗ /.test(l)) ?? lines.find((l) => /green-with-skips:/.test(l))
+    return { runClass: 'unclassified', signature: runLine ? noIssueRefs(scrubLine(runLine.trim(), 200)) : null, legs }
+  }
+  if (counts.size === 1) return { runClass: legs[0].class, signature: legs[0].signature, legs }
+  const summary = CLASSES.filter((c) => counts.has(c)).map((c) => `${c} ×${counts.get(c)}`).join(', ')
+  return { runClass: 'mixed', signature: summary, legs }
+}
+
+/** Signatures are plain text: escape what GitHub would render as HTML (`<url>` would vanish). */
+export function md(text) {
+  return String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** One earlier attempt, with the legs of any class that is not `unclassified` named. */
+function earlierLine(e) {
+  const named = (e.legs ?? []).filter((l) => l.class !== 'unclassified').map((l) => `\`${l.leg}\` ${l.class}`)
+  return `Earlier attempt ${e.attempt}: \`${e.runClass}\`${e.signature ? ` — ${md(e.signature)}` : ''}${named.length ? ` (${named.join(', ')})` : ''}`
+}
+
+/** The classification section of the body, for the final (failing) attempt. */
+export function classificationSection(result) {
+  if (!result) {
+    return ['## Classification', '', '**Run:** `unclassified` — no harness log (the run failed before the harness ran).']
+  }
+  const out = ['## Classification', '', `**Run:** \`${result.runClass}\`${result.signature ? ` — ${md(result.signature)}` : ''}`]
+  if (result.legs.length > 0) {
+    out.push('', '| Leg | Class | Signature |', '|---|---|---|')
+    for (const l of result.legs) out.push(`| \`${l.leg}\` | \`${l.class}\` | ${md(l.signature).replace(/\|/g, '\\|')} |`)
+  }
+  for (const e of result.earlier ?? []) out.push('', earlierLine(e))
+  return out
+}
+
+/**
+ * Read the attempt logs in attempt order; the last readable one is the failing
+ * attempt. The earlier attempts' run classes ride along as `earlier`, because
+ * on a red run nothing else reports them (#3338's summary only runs on a pass)
+ * and an earlier attempt's provider leg is exactly the evidence this exists for.
+ */
+export function readFinalAttempt(files, read = (f) => readFileSync(f, 'utf8')) {
+  const results = []
+  for (const f of byAttempt(files)) {
+    try {
+      const n = Number(/attempt-(\d+)\.log$/.exec(f)?.[1] ?? results.length + 1)
+      results.push({ attempt: n, ...classifyLog(read(f)) })
+    } catch {
+      // unreadable or missing (an unmatched glob)
+    }
+  }
+  if (results.length === 0) return null
+  const final = results.at(-1)
+  return { ...final, earlier: results.slice(0, -1).map(({ attempt, runClass, signature, legs }) => ({ attempt, runClass, signature, legs })) }
+}
+
 /** The body: latest failure only. History lives in the comments. */
-export function buildBody({ trigger, runUrl, when }) {
+export function buildBody({ trigger, runUrl, when, classification = null }) {
   return [
     'The deterministic money-flow QA run (`qa-dev.yml`) is failing. This is the **one standing**',
     '`qa-failure` issue (#2767): each new failure rewrites this body and adds a comment, and the',
@@ -52,17 +294,23 @@ export function buildBody({ trigger, runUrl, when }) {
     `- **Run:** ${runUrl}`,
     `- **When:** ${when}`,
     '',
+    ...classificationSection(classification),
+    '',
     'This blocks the dev → main freshness gate (#578) until a green run exists.',
-    'Open the run to see which scenario failed, then follow the triage steps in',
-    '`docs/operations/agent-qa.md` → Troubleshooting. A transient testnet/RPC',
-    'flake can be cleared by re-dispatching the workflow; a real regression should',
-    'get its own bug report under `docs/bug-reports/`. Close this issue once a run is green;',
-    'the next failure reopens it.',
+    'Triage it by class: `docs/operations/agent-qa.md` → Troubleshooting → *Classify the',
+    'failure*. A recurring `provider` class is a finding for the provider; an `unclassified`',
+    'one needs reading, and a real regression gets its own bug report under',
+    '`docs/bug-reports/`. Close this issue once a run is green; the next failure reopens it.',
   ].join('\n')
 }
 
-export function buildComment({ trigger, runUrl, when }) {
-  return `\`qa-dev\` failure at ${when} (trigger: \`${trigger}\`) — ${runUrl}`
+export function buildComment({ trigger, runUrl, when, classification = null }) {
+  const cls = classification ? classification.runClass : 'unclassified'
+  const legs = classification?.legs?.length ? ` — legs: ${classification.legs.map((l) => `\`${l.leg}\` ${l.class}`).join(', ')}` : ''
+  // The body is rewritten per failure; the comment is the thread's history, so
+  // earlier attempts' classes are recorded here too.
+  const earlier = (classification?.earlier ?? []).map((e) => `attempt ${e.attempt} \`${e.runClass}\``)
+  return `\`qa-dev\` failure at ${when} (trigger: \`${trigger}\`), class \`${cls}\`${legs}${earlier.length ? `; earlier: ${earlier.join(', ')}` : ''} — ${runUrl}`
 }
 
 const defaultGh = (args) => execFileSync('gh', args, { encoding: 'utf8' })
@@ -81,9 +329,9 @@ function firstNumber(json) {
  * Upsert the standing issue. Returns { action, number } where action is one of
  * 'updated' | 'reopened' | 'created', so the workflow log states what happened.
  */
-export function upsertStandingIssue({ gh = defaultGh, trigger, runUrl, when, log = console.log }) {
-  const body = buildBody({ trigger, runUrl, when })
-  const comment = buildComment({ trigger, runUrl, when })
+export function upsertStandingIssue({ gh = defaultGh, trigger, runUrl, when, classification = null, log = console.log }) {
+  const body = buildBody({ trigger, runUrl, when, classification })
+  const comment = buildComment({ trigger, runUrl, when, classification })
 
   // Ensure the label exists (labels.yml owns only the surface taxonomy). A
   // failure here (already exists, transient API error) must not stop the upsert.
@@ -131,7 +379,9 @@ function main() {
     process.exit(2)
   }
   const when = process.env.WHEN || new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')
-  const result = upsertStandingIssue({ trigger, runUrl, when })
+  // Attempt logs as arguments (the workflow passes qa-run.attempt-*.log).
+  const classification = readFinalAttempt(process.argv.slice(2))
+  const result = upsertStandingIssue({ trigger, runUrl, when, classification })
   console.log(JSON.stringify(result))
 }
 

@@ -46,7 +46,8 @@ jobs:
   # entirely. That file is pure + unit-tested; this job is just its IO.
   #
   # Escape hatch, deliberately kept: a `qa-override` PR label skips the check
-  # (documented quarantine for a wedged testnet flake). It emits a ::warning::,
+  # (a documented quarantine, used only with a comment stating what was verified
+  # out-of-band — docs/operations/agent-qa.md, dev-environment.md). It emits a ::warning::,
   # which is the point — a named, logged bypass is a feature.
   qa-freshness:
     runs-on: ubuntu-latest

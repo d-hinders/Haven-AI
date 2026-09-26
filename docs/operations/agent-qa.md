@@ -1069,10 +1069,11 @@ in the thread's history, and a standing issue that was closed on green is
 migration:** the open lookup is by label, so the first failure after #2767
 lands on whichever dated issue is still open and leaves any others orphaned —
 close every legacy `qa-failure` issue once and let the next failure create the
-standing one (the closed lookup is title-bound and will not reopen a dated one). Triage it via
-[Troubleshooting](#troubleshooting): re-dispatch to clear a transient
-testnet/RPC flake, or open a [`bug-reports/`](../bug-reports/) report for a real
-regression, then close the `qa-failure` issue once green.
+standing one (the closed lookup is title-bound and will not reopen a dated one). Since
+#3337 the issue records a **failure class and its signature**, per run and per failing
+leg, read from the run's attempt logs — triage it by class via
+[Classify the failure](#classify-the-failure), open a [`bug-reports/`](../bug-reports/)
+report for a real regression, and close the `qa-failure` issue once green.
 
 ### The dev → main freshness gate
 
@@ -1092,7 +1093,8 @@ but can never pass blocks every promotion rather than none.
 
 ### Flake budget & quarantine policy
 
-Testnet/RPC hiccups must not permanently wedge promotion. Two levers:
+A failing provider or testnet must not permanently wedge promotion, and it must not
+hide either. Two levers:
 
 - **Retry budget** — each `qa-dev.yml` run retries the whole suite up to
   `QA_MAX_ATTEMPTS` times (default **2**, repo variable) before it's called red.
@@ -1115,10 +1117,11 @@ Testnet/RPC hiccups must not permanently wedge promotion. Two levers:
   gate-skipped run and two per harness run. A rising count is a provider wave in the
   making (epic #3335), not noise.
 - **`qa-override` label** — adding it to a promotion PR **skips** the freshness
-  gate (logged as a warning). Use it only to unblock a known-flaky testnet
-  hiccup when you've confirmed a recent QA run out-of-band; remove it once a fresh
-  green run exists. It is the deliberate quarantine escape hatch, not a routine
-  bypass.
+  gate (logged as a warning). Use it only when you have confirmed the money path
+  out-of-band, and say in a comment what you verified — for a red covering run,
+  name its class ([Classify the failure](#classify-the-failure)); for a money-path
+  `hotfix/*`, see the hotfix rule above. Remove it once a fresh green run exists.
+  It is the deliberate quarantine escape hatch, not a routine bypass.
 
 ## Live deployed-UI smoke
 
@@ -1336,6 +1339,31 @@ touches: names and derived addresses are shareable, values are not (see
 agent must never ask for a key, and an operator must never paste one.
 
 ## Troubleshooting
+
+### Classify the failure
+
+The standing `qa-failure` issue (#2767) records a class for the run and for each failing
+leg, with an excerpt of the line around the matched signature (URLs and key-labelled
+values scrubbed;
+`scripts/ci/qa-failure-issue.mjs`, #3337). A class is only assigned on a signature —
+everything else is `unclassified`, never a guess. Read the class before reading code:
+
+| Class | Signature | What it means, and the example | Next step |
+|---|---|---|---|
+| `provider` | `-32016` / `over rate limit`, `RPC Request failed`, `Status: 429` or `Too Many Requests` (on the line after `HTTP request failed.`, or JSON-escaped inside a relayed 502 body), `Batch of more than N requests`, `no available upstreams`, `flashblocks`, dRPC's `on the free plan` / `upgrade to paid plan` limits, and a body quoting `URL: https://sepolia.base.org` ([#2511](#a-502-whose-body-carries-url-httpssepoliabaseorg-is-an-rpc-outage-not-a-regression-2511)) | The RPC or bundler provider refused the request. #2449: `-32016 over rate limit` inside the delegate-account deploy. | A finding for the provider, not a flake to re-dispatch away. A **recurring** provider class means the endpoint does not fit the harness's load — report it (epic #3335) and check the endpoint before retrying into the same limit. |
+| `preflight` | the run-level `✗ preflight:` line, and the resource line above it that failed its floor | The harness stopped before any leg ran. #2485: the merchant settlement wallet's gas below its floor. | Top up or fix the named resource; no leg result exists to read. |
+| `harness` | the message of a JS runtime error (`… is not a function`, `… is not defined`, `Cannot read properties of undefined`) — the harness prints `err.message`, never the error's name, so a relayed body quoting `TypeError` does not count — or the run-level `✗ harness crashed:` line | The harness itself threw. No failure in the 40-run sample below carries this signature. A harness defect does not always announce itself: #2443's second failure was intra-attempt contamination between scenarios, and this classifier records it as `unclassified`. | Fix the harness; the product may be fine. |
+| `haven` | the leg's own Haven API call answered `… failed (4xx)` | Haven refused a request the leg expected to succeed. | Read the Haven change that landed before the run. |
+| `unclassified` | none of the above — including the backend's masked `activate failed (502): Could not deploy the account for this budget` and timeouts on a Haven endpoint | Could be the provider underneath or Haven; the masked message does not say. | Read the run log and the backend log for that window. Do not re-dispatch it away: if it recurs, it is a finding. |
+
+The run takes its legs' class when they agree and is `mixed` (with a count per class)
+when they do not, so one `provider` leg among masked 502s stays visible. Earlier
+attempts of a red run are listed with their own run class, because nothing else
+reports them. Measured on 2026-09-26 over the final attempt of the newest 40 failed
+qa-dev runs' money-flow logs (`gh run list --workflow qa-dev.yml --status failure --limit 40`):
+1 `provider`, 2 `preflight`, 15 `mixed` (every one with a `provider` leg), 22
+`unclassified` — the masked 502 is most of that — and in 6 runs a `provider` leg
+appeared only in an earlier attempt.
 
 If nothing below matches, the cause may simply be somewhere this session
 cannot look — see [What this session cannot see, and what to ask for](#what-this-session-cannot-see-and-what-to-ask-for) for the artifacts to

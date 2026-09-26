@@ -133,7 +133,7 @@ export function publicText(text) {
     .replace(/,?\s*\bepic #\d+/g, '')
     .replace(/(^|\s)#\d+(?:'s)?(?=[\s.,;:!?)]|$)/g, '$1')
     .replace(/\bBREAKING\b/g, 'Breaking change')
-    .replace(/\s+([.,;:])/g, '$1')
+    .replace(/\s+([.,;:])(?=\s|$)/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -156,7 +156,7 @@ export function bulletSentences(bullet) {
     rest = trimmed.slice(bold[0].length)
   }
   for (const s of splitSentences(publicText(rest))) {
-    const clean = s.replace(/^(?:[\s.,;:]|—\s)+/, '')
+    const clean = s.replace(/^(?:[.,;:](?=\s|$)|\s|—\s)+/, '')
     if (clean.length > 0) sentences.push(clean)
   }
   return sentences
@@ -181,7 +181,7 @@ function splitSentences(text) {
 
 /**
  * A sentence longer than {@link MAX_SUMMARY_CHARS}, shortened at a CLAUSE
- * boundary — a `;` outside parentheses — never mid-clause. One with no such
+ * boundary — a `;` outside brackets — never mid-clause. One with no such
  * boundary is served whole.
  */
 function fitSentence(sentence) {
@@ -190,8 +190,8 @@ function fitSentence(sentence) {
   let lastFit = -1
   for (let i = 0; i < sentence.length && i < MAX_SUMMARY_CHARS; i++) {
     const c = sentence[i]
-    if (c === '(') depth++
-    else if (c === ')') depth = Math.max(0, depth - 1)
+    if ('([{'.includes(c)) depth++
+    else if (')]}'.includes(c)) depth = Math.max(0, depth - 1)
     else if (c === ';' && depth === 0) lastFit = i
   }
   return lastFit > 0 ? `${sentence.slice(0, lastFit)}.` : sentence
@@ -199,11 +199,12 @@ function fitSentence(sentence) {
 
 
 /**
- * The marker as it must appear: a bold span, optionally ending in `.` or `:`.
+ * The marker as it must appear: a bold span, optionally ending in `.` or `:`
+ * (a line wrap between the two words is still the marker).
  * Matched only outside code spans, so prose that QUOTES the marker in
  * backticks (as the CHANGELOG headers do) does not flag a release.
  */
-const ACTION_REQUIRED_SPAN = /\*\*Update required[.:]?\*\*/
+const ACTION_REQUIRED_SPAN = /\*\*Update\s+required[.:]?\*\*/
 
 function withoutCodeSpans(text) {
   return text.replace(/`[^`]*`/g, '')
@@ -219,9 +220,9 @@ export function carriesActionRequired(text) {
  * words inside. The author meant must-update and the flag would silently say
  * the opposite, so the generator REFUSES rather than guess (#3305 review).
  */
-function nearMissMarker(text) {
+export function nearMissMarker(text) {
   const outside = withoutCodeSpans(text)
-  const all = outside.match(/update required/gi) ?? []
+  const all = outside.match(/\bupdate\s+required\b/gi) ?? []
   const exact = outside.match(new RegExp(ACTION_REQUIRED_SPAN.source, 'g')) ?? []
   return all.length > exact.length
 }
@@ -250,8 +251,9 @@ export function noteFromSection({ version, date, body }) {
   if (nearMissMarker(body)) {
     throw new Error(
       `${version}: "update required" appears but not as the marker ${ACTION_REQUIRED_MARKER} ` +
-        '(exactly that bold span, optionally ending in "." or ":"). Write the marker exactly, ' +
-        'or quote it in a code span if the text only mentions it.',
+        '(exactly that bold span, optionally ending in "." or ":"). If clients must update, write ' +
+        'the marker exactly; if the text only mentions it, quote it in a code span; if it means ' +
+        'the opposite ("no update required"), reword it ("no update needed").',
     )
   }
   const actionRequired = carriesActionRequired(body)
@@ -269,7 +271,9 @@ export function noteFromSection({ version, date, body }) {
   const [rawHeadline, next] = bulletSentences(lead)
   const headline = fitSentence(rawHeadline)
   let summary = headline
-  if (next !== undefined && `${headline} ${next}`.length <= MAX_SUMMARY_CHARS) summary = `${headline} ${next}`
+  // A shortened headline is not followed by its next sentence: that would read
+  // as if it followed the clause kept, not the one dropped.
+  if (headline === rawHeadline && next !== undefined && `${headline} ${next}`.length <= MAX_SUMMARY_CHARS) summary = `${headline} ${next}`
   if (bullets.length > 1) summary += ` (+${bullets.length - 1} more in the changelog)`
   return { version, date, summary, action_required: actionRequired }
 }

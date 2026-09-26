@@ -32,6 +32,7 @@ import {
   bulletSentences,
   clientReleaseDataViolations,
   clientReleasesFrom,
+  nearMissMarker,
   noteFromSection,
   publicText,
   releasedSections,
@@ -2277,10 +2278,17 @@ test('client release data — the Update required marker sets action_required an
   const second = note(`- **Docs tidy.** Words.\n- ${ACTION_REQUIRED_MARKER} **Signer refuses v2.** Update it.`)
   assert.equal(second.summary, 'Signer refuses v2. Update it. (+1 more in the changelog)')
 
+  // A marker wrapped across two lines is still the marker.
+  const wrapped = note('- **Update\n  required** Signer v2.')
+  assert.equal(wrapped.action_required, true)
+  assert.equal(wrapped.summary, 'Signer v2.')
+
   // A near-miss is REFUSED, never read as "no update needed".
-  for (const miss of ['- **Update required — new signer.** Old ones stop.', '- **update required** x.', '- Update required for the signer.']) {
+  for (const miss of ['- **Update required — new signer.** Old ones stop.', '- **update required** x.', '- Update required for the signer.', '- **Update\n  required — new.** x.']) {
     assert.throws(() => note(miss), /not as the marker/, miss)
   }
+  assert.throws(() => note('- No update required for existing agents.'), /no update needed/, 'the refusal names the rewording fix')
+  assert.equal(note('- Autoupdate required changes.').action_required, false, 'a word containing "update" is not the phrase')
   assert.throws(
     () => clientReleasesFrom(Object.fromEntries(CHANGELOG_PACKAGES.map((n) => [n, '## 0.6.0 — 2026-10-01\n\n- update required.\n']))),
     /packages\/sdk\/CHANGELOG\.md 0\.6\.0: /,
@@ -2318,6 +2326,9 @@ test('client release data — summaries are whole sentences, public text, never 
   assert.equal(publicText('Fixed the thing in #3303. Fixed #3304, and more. See #3305'), 'Fixed the thing in. Fixed, and more. See')
   // An abbreviation's full stop does not end a sentence.
   assert.deepEqual(bulletSentences('Adds helpers, e.g. foo and bar. Second.'), ['Adds helpers, e.g. foo and bar.', 'Second.'])
+  // A dot that belongs to a word (`.env`) is kept, at the start and mid-text.
+  assert.deepEqual(bulletSentences('`.env` is now read at startup.'), ['.env is now read at startup.'])
+  assert.equal(publicText('Reads `.env` and `.npmrc` now.'), 'Reads .env and .npmrc now.')
   // A lead is served as written: identifiers and flags are not re-cased or stripped.
   assert.equal(noteFromSection(releasedSections('## 0.6.0 — 2026-10-01\n\n- --doctor needs no flag.\n')[0]).summary, '--doctor needs no flag.')
 
@@ -2331,6 +2342,9 @@ test('client release data — summaries are whole sentences, public text, never 
   // …and shortened at the last `;` outside parentheses that fits when it has one.
   const clauses = noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n- First clause (a; b); second clause; ${long}.\n`)[0])
   assert.equal(clauses.summary, 'First clause (a; b); second clause.')
+  // Braces nest like parentheses, and a shortened headline gets no next sentence.
+  const braces = noteFromSection(releasedSections(`## 0.6.0 — 2026-10-01\n\n- Pays now; then { a; ${long} }. Next.\n`)[0])
+  assert.equal(braces.summary, 'Pays now.')
 })
 
 test(`client release data — at most ${MAX_NOTES_PER_PACKAGE} notes per package, newest first (#3305)`, () => {
@@ -2368,6 +2382,16 @@ test('client release data — the REAL data file is what the REAL CHANGELOGs pro
   }
   const onDisk = await readFile(join(ROOT, CLIENT_RELEASE_DATA_FILE), 'utf8')
   assert.deepEqual(clientReleaseDataViolations(onDisk, changelogs), [])
+})
+
+test('client release data — no CHANGELOG\'s Unreleased section carries a near-miss marker, so the PR that adds one goes red, not the bump (#3305)', async () => {
+  for (const name of CHANGELOG_PACKAGES) {
+    const source = await readFile(join(ROOT, 'packages', name, 'CHANGELOG.md'), 'utf8')
+    const unreleased = /^## Unreleased[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(source)
+    if (!unreleased) continue
+    assert.equal(nearMissMarker(unreleased[1]), false, `packages/${name}/CHANGELOG.md ## Unreleased: "update required" not written as ${ACTION_REQUIRED_MARKER}`)
+  }
+  assert.equal(nearMissMarker('- update required for x.'), true, 'positive control')
 })
 
 test('client release data — the bump refuses a hand edit BEFORE writing, regenerates AFTER the headings, and skips both for a snapshot (#3305)', async () => {

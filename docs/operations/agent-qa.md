@@ -742,6 +742,18 @@ it is not just "a run happened recently":
   so `--status success` alone would hand the gate a "green" run at the deployed
   SHA in which nothing ran. Every candidate the gate passes over is printed
   with its reason. A `repository_dispatch` run is refused outright (#2271).
+- **how far back it looks** ([#3361](https://github.com/d-hinders/Haven-AI/issues/3361)):
+  every run-level success created within twice `QA_FRESHNESS_HOURS`, not a
+  fixed number of rows. Most qa-dev runs are gate-skipped decoys, and the
+  newest 30 run-level successes once held no real green while one 5 h old
+  existed (dev-gate run 36161561881). Twice the window, so a green just past
+  it is still found and reported as stale with its age. Before any job
+  lookup, rows that cannot have run the harness are dropped and counted, not
+  printed one by one. These are a run name naming another deployment
+  environment or state, or a run that finished in under 60 s. The lookups
+  are capped (`JOB_LOOKUP_BUDGET`). A row refused for budget is refused, never
+  admitted, and the log says the budget ran out. Measured 2026-09-26: 461
+  run-level successes in 60 h, 438 dropped, one lookup to anchor.
 - a **money-path `hotfix/* → main` blocks**. `qa-dev.yml` is a black-box
   harness against a *deployed* backend, and a hotfix is deployed nowhere until
   it merges — so a green run on any branch exercised different code. Clearing

@@ -202,6 +202,18 @@ the epic when its last sub-issue lands on `dev`.
 > source constant, so nothing in it was made stale. `last-verified` not bumped,
 > for the reason in the note above.
 
+> **Re-verification (#3361, 2026-09-26):** coupled through
+> `scripts/ci/qa-freshness.mjs`, whose green-run query changes from "the newest
+> 30 run-level successes" to "every run-level success created within twice
+> `QA_FRESHNESS_HOURS`", with rows that cannot have run the harness dropped
+> before the job lookup and the lookups budgeted. This document states only
+> what `qa-freshness` requires — a green money-flow QA run covering the
+> promoted money-path code, bypass `qa-override` — and that requirement is
+> unchanged: the selector's rules, the freshness window and the coverage diff
+> are untouched, and the change can only find a real green the old window
+> missed or refuse. Nothing here was made stale. `last-verified` not bumped,
+> for the reason in the notes above.
+
 ## Promotion to production (`dev → main`)
 
 1. Open a **`dev → main` PR** (a human step). Its diff is the promotion manifest

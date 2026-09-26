@@ -81,9 +81,18 @@ import { fileURLToPath } from 'node:url'
 // qa-dev.yml job moves money and how its conclusion is read off a run's job
 // list, so the two gates cannot disagree. qa-freshness.mjs guards its CLI
 // behind an argv check, so importing it runs nothing.
-import { MONEY_FLOW_JOB, moneyFlowJobConclusion } from './qa-freshness.mjs'
+import {
+  MIN_HARNESS_RUN_SECONDS,
+  MONEY_FLOW_JOB,
+  RAILWAY_DEV_ENVIRONMENT,
+  moneyFlowJobConclusion,
+  parseDeployRunName,
+  tooShortForHarness,
+} from './qa-freshness.mjs'
 
-export { MONEY_FLOW_JOB }
+// Moved to qa-freshness.mjs by #3361, which filters its green-run query with
+// them; re-exported so this module's API is unchanged.
+export { MIN_HARNESS_RUN_SECONDS, MONEY_FLOW_JOB, RAILWAY_DEV_ENVIRONMENT, parseDeployRunName, tooShortForHarness }
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -98,9 +107,9 @@ export const DAY_MS = 24 * 60 * 60 * 1000
  * workflow's filter and this guard's provenance check cannot drift apart. If
  * Railway renames the environment, the gate skips every run, no run qualifies
  * here, and the `stale` finding fires within `maxAgeDays` — which is the alarm
- * doing its job, not a false positive to silence.
+ * doing its job, not a false positive to silence. `RAILWAY_DEV_ENVIRONMENT`
+ * lives in qa-freshness.mjs since #3361 (imported above).
  */
-export const RAILWAY_DEV_ENVIRONMENT = 'Haven AI / dev'
 export const RAILWAY_DEPLOY_CREATOR = 'railway-app[bot]'
 
 /**
@@ -265,17 +274,6 @@ export const SCHEDULED_GUARDS = [
 ]
 
 /**
- * qa-dev.yml's run name for a `deployment_status` run (`run-name:`, line 85):
- * `post-deploy <sha> → <environment> (<status state>)`. Parsed, or null when the
- * title is anything else. `guard-freshness.test.mjs` pins the workflow's
- * `run-name` to this shape, so the two cannot drift apart silently.
- */
-export function parseDeployRunName(title) {
-  const m = /^post-deploy ([0-9a-f]{7,40}) → (.+) \(([a-z_]+)\)$/.exec(String(title ?? ''))
-  return m ? { sha: m[1], environment: m[2], state: m[3] } : null
-}
-
-/**
  * Could this run have run the harness at all? (#3340) qa-dev.yml's gate skips
  * the money-flow job unconditionally unless the deployment status is `success`
  * AND the environment is the dev backend, and its run name says both. So a
@@ -291,30 +289,6 @@ export function mayHaveRunHarness(run, guard) {
   const t = parseDeployRunName(run?.displayTitle)
   if (!t) return true
   return t.environment === guard.provenance.environment && t.state === 'success'
-}
-
-/**
- * A green run shorter than this cannot have run the money-flow harness (#3340).
- * Measured over qa-dev's run-level `success` dev runs (1000 deployment_status
- * runs, 2026-09-18T23:37Z → 2026-09-26, `run_started_at → updated_at`; #3340 review):
- * gate-only greens took 5–46 s, with one slow gate at 85 s, and real harness
- * runs 153–505 s. So 60 s drops almost every gate-only green and no harness
- * run; a gate-only run over 60 s still goes to the job lookup, which refuses
- * it. Every dev deploy leaves such a gate-only green (Railway's
- * re-stated `success`, superseded), so without this floor each deploy SHA cost
- * one lookup and the budget reached ~0.85 day back instead of the 4-day budget.
- * Only ever drops runs — a harness run cannot finish in a minute — so it can
- * make the guard stricter, never greener. Measured from `run_started_at` (not
- * `created_at`, which includes queue time); unknown timestamps are kept.
- */
-export const MIN_HARNESS_RUN_SECONDS = 60
-
-/** True when a run's own timestamps prove it too short to have run the harness. */
-export function tooShortForHarness(run) {
-  const start = Date.parse(run?.runStartedAt ?? '')
-  const end = Date.parse(run?.updatedAt ?? '')
-  if (Number.isNaN(start) || Number.isNaN(end)) return false
-  return end - start < MIN_HARNESS_RUN_SECONDS * 1000
 }
 
 /**

@@ -47,7 +47,9 @@ name: QA — money-flow (dev)
 #     fired" only when a Railway-created deployment of that run's exact SHA
 #     exists AND the money-flow JOB concluded success — a run the gate refused
 #     has run-level conclusion `success` with the job skipped, so the run-level
-#     field alone would count the two or three decoys every deploy leaves. So a
+#     field alone would count the decoys every deploy leaves (Vercel `Preview`,
+#     `in_progress` and re-stated `success` runs; scripts/ci/qa-freshness.mjs
+#     drops them by run name and duration before its job lookup, #3361). So a
 #     manual `workflow_dispatch`, a Deployment a human creates by hand through
 #     the API, or a gate-skipped decoy can no longer mute the freshness alarm.
 #

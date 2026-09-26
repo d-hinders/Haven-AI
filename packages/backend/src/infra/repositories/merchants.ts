@@ -351,3 +351,82 @@ export async function findOrCreateMerchantByHost(
   }
   throw new Error(`findOrCreateMerchantByHost: no free slug for ${JSON.stringify(seed.name)} after ${MAX_SLUG_ATTEMPTS} attempts`)
 }
+
+/**
+ * Where a merchant is paid on one chain, for a merchant-locked budget (#3331).
+ *
+ * `pay_to` is non-null only when `pay_to_status` is `verified`: every active,
+ * verified x402 offer of the merchant on that network names the SAME payTo.
+ * `conflicting` (two offers name different addresses) and `unstated` (some
+ * offer names none — not yet probed since migration 096, or its challenge
+ * carries none) both mean "we do not know where this merchant is paid", and
+ * the dashboard does not offer the action. `erc7710` is true when every one
+ * of those offers advertises the ERC-7710 transfer method — the rail a pinned
+ * budget pays through; an EIP-3009-only offer is paid from the open budget.
+ */
+export interface MerchantFundingTarget {
+  network: string
+  chain_id: number
+  pay_to: string | null
+  pay_to_status: 'verified' | 'conflicting' | 'unstated'
+  erc7710: boolean
+}
+
+export interface MerchantFundingAggregateRow {
+  network: string
+  pay_tos: string[] | null
+  any_unstated: boolean
+  all_erc7710: boolean
+}
+
+/**
+ * The per-network aggregate `resolveFundingTarget` decides from. Only
+ * `status = 'active'` rows with a `verified_at` count — a degraded offer's
+ * last-seen payTo is not evidence of where the merchant is paid now — and
+ * only x402 rows, the rail whose challenge names a payTo.
+ */
+const MERCHANT_FUNDING_AGGREGATES_SQL = `
+  SELECT network,
+         array_agg(DISTINCT pay_to) FILTER (WHERE pay_to IS NOT NULL) AS pay_tos,
+         bool_or(pay_to IS NULL) AS any_unstated,
+         bool_and('erc7710' = ANY(string_to_array(COALESCE(asset_transfer_methods, ''), ','))) AS all_erc7710
+  FROM merchant_catalog
+  WHERE merchant_id = $1
+    AND rail = 'x402'
+    AND status = 'active'
+    AND verified_at IS NOT NULL
+    AND network IS NOT NULL
+    AND ($2::text[] IS NULL OR network = ANY($2::text[]))
+  GROUP BY network
+  ORDER BY network`
+
+const EIP155_NETWORK = /^eip155:([0-9]+)$/
+
+/** One network's aggregate → the funding target, or null for a non-EVM network. */
+export function resolveFundingTarget(row: MerchantFundingAggregateRow): MerchantFundingTarget | null {
+  const match = EIP155_NETWORK.exec(row.network)
+  if (!match) return null
+  const payTos = row.pay_tos ?? []
+  const status: MerchantFundingTarget['pay_to_status'] =
+    row.any_unstated || payTos.length === 0 ? 'unstated' : payTos.length > 1 ? 'conflicting' : 'verified'
+  return {
+    network: row.network,
+    chain_id: Number(match[1]),
+    pay_to: status === 'verified' ? payTos[0] : null,
+    pay_to_status: status,
+    erc7710: row.all_erc7710,
+  }
+}
+
+/** The merchant's funding target on each listed chain (`null` = every chain). */
+export async function listMerchantFundingTargets(
+  merchantId: string,
+  chainIds: ChainScope,
+  db: Executor = pool,
+): Promise<MerchantFundingTarget[]> {
+  const result = await db.query<MerchantFundingAggregateRow>(MERCHANT_FUNDING_AGGREGATES_SQL, [
+    merchantId,
+    networksOf(chainIds),
+  ])
+  return result.rows.map(resolveFundingTarget).filter((t): t is MerchantFundingTarget => t !== null)
+}

@@ -86,6 +86,7 @@ export const FIND_REUSABLE_PENDING_DELEGATION_SQL = `SELECT id, delegation_hash,
        AND budget_atomic::numeric = $4::numeric
        AND period_seconds = $5
        AND expires_at >= $6
+       AND merchant_id IS NOT DISTINCT FROM $7
      ORDER BY created_at ASC`
 
 export interface ReusablePendingDelegationRow {
@@ -103,10 +104,17 @@ export async function findReusablePendingDelegation(
   periodSeconds: number,
   expiresAt: number,
   db: Executor = pool,
+  /**
+   * #3331: the merchant a merchant-locked build is FOR (null for every other
+   * build). Part of the match so a merchant build never re-hands a plain
+   * pinned row with the same recipient — that row carries no merchant, and
+   * the merchant page would never find the budget the owner just signed.
+   */
+  merchantId: string | null = null,
 ): Promise<ReusablePendingDelegationRow | null> {
   const result = await db.query<ReusablePendingDelegationRow>(
     FIND_REUSABLE_PENDING_DELEGATION_SQL,
-    [agentId, tokenAddress, recipientAddress, budgetAtomic, periodSeconds, expiresAt],
+    [agentId, tokenAddress, recipientAddress, budgetAtomic, periodSeconds, expiresAt, merchantId],
   )
   return result.rows[0] ?? null
 }
@@ -440,4 +448,44 @@ export async function revokeDelegationsByHashes(
     hashes,
   ])
   return result.rows.map((row) => row.delegation_hash)
+}
+
+/**
+ * The owner's ACTIVE merchant-locked budgets for one merchant (#3331), with
+ * the agent's name — the merchant page's "remaining this period" list. Only
+ * agents that are not revoked; `delegation_json` stays out of the row for
+ * the reason `listDelegationJsonByIds` gives, and the caller asks for it
+ * explicitly when it reads the enforcer.
+ */
+export const LIST_ACTIVE_MERCHANT_BUDGETS_FOR_USER_SQL = `SELECT d.id, d.agent_id, a.name AS agent_name,
+            d.chain_id, d.token_address, d.recipient_address, d.delegation_hash,
+            d.budget_atomic, d.period_seconds, d.expires_at
+     FROM agent_delegations d
+     JOIN agents a ON a.id = d.agent_id
+     WHERE a.user_id = $1
+       AND a.status <> 'revoked'
+       AND d.merchant_id = $2
+       AND d.status = 'active'
+     ORDER BY a.name ASC, d.created_at ASC`
+
+export interface MerchantBudgetRow {
+  id: string
+  agent_id: string
+  agent_name: string
+  chain_id: number
+  token_address: string
+  recipient_address: string
+  delegation_hash: string
+  budget_atomic: string
+  period_seconds: number
+  expires_at: string | number
+}
+
+export async function listActiveMerchantBudgetsForUser(
+  userId: string,
+  merchantId: string,
+  db: Executor = pool,
+): Promise<MerchantBudgetRow[]> {
+  const result = await db.query<MerchantBudgetRow>(LIST_ACTIVE_MERCHANT_BUDGETS_FOR_USER_SQL, [userId, merchantId])
+  return result.rows
 }

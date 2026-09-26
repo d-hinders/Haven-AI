@@ -37,6 +37,13 @@ export interface CatalogRow {
    * probe; MPP entries (not an x402 rail) stay NULL. See migration 037.
    */
   asset_transfer_methods: string | null
+  /**
+   * The lowercased `payTo` the entry's x402 challenge names, when every
+   * `accepts[]` option names the same well-formed one (#3331, migration 096).
+   * NULL for MPP rows, before the first successful probe, and when the
+   * challenge names none or disagrees with itself.
+   */
+  pay_to: string | null
   created_at: string
   updated_at: string
 }
@@ -61,6 +68,11 @@ export interface ProbeResult {
    * non-x402 rails (MPP) and when the challenge carries no `accepts[]`.
    */
   assetTransferMethods?: string[]
+  /**
+   * The lowercased `payTo` every `accepts[]` option agrees on (#3331).
+   * Undefined for MPP and whenever there is no single well-formed one.
+   */
+  payTo?: string
 }
 
 interface X402Accept {
@@ -68,6 +80,7 @@ interface X402Accept {
   maxAmountRequired?: string
   asset?: string
   network?: string
+  payTo?: string
   extra?: { assetTransferMethod?: string }
 }
 
@@ -91,6 +104,30 @@ function collectAssetTransferMethods(payload: unknown): string[] | undefined {
     if (!methods.includes(method)) methods.push(method)
   }
   return methods.length > 0 ? methods : undefined
+}
+
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
+
+/**
+ * The one `payTo` a challenge names, lowercased (#3331). Every `accepts[]`
+ * option must name a well-formed address and they must all be the same one:
+ * a merchant-locked budget pins `transfer(to)` to this address, so a
+ * challenge that names two (or one option that names none) has not told us
+ * where "this merchant" is paid, and the answer is none rather than the
+ * first one seen.
+ */
+function collectPayTo(payload: unknown): string | undefined {
+  const accepts = (payload as { accepts?: unknown[] })?.accepts
+  if (!Array.isArray(accepts) || accepts.length === 0) return undefined
+  let payTo: string | undefined
+  for (const entry of accepts) {
+    const candidate = (entry as X402Accept | null)?.payTo
+    if (typeof candidate !== 'string' || !EVM_ADDRESS.test(candidate)) return undefined
+    const lowered = candidate.toLowerCase()
+    if (payTo !== undefined && payTo !== lowered) return undefined
+    payTo = lowered
+  }
+  return payTo
 }
 
 const TOKEN_DECIMALS: Record<string, number> = { USDC: 6, EURe: 18 }
@@ -200,6 +237,7 @@ export async function probeCatalogEntry(
     asset: symbol,
     network: accept.network,
     assetTransferMethods: collectAssetTransferMethods(payload),
+    payTo: collectPayTo(payload),
   }
 }
 
@@ -232,6 +270,7 @@ export async function refreshCatalog(
          SET price_atomic = $2, price_display = $3, asset = $4,
              network = COALESCE($5, network),
              asset_transfer_methods = COALESCE($6, asset_transfer_methods),
+             pay_to = $7,
              status = 'active', verified_at = now(),
              consecutive_failures = 0, updated_at = now()
          WHERE id = $1`,
@@ -242,6 +281,13 @@ export async function refreshCatalog(
           result.asset,
           result.network ?? null,
           result.assetTransferMethods?.join(',') ?? null,
+          // #3331: written as seen, NOT COALESCEd like the fields above — a
+          // merchant that stops naming one payTo must lose its verified one
+          // (the merchant-locked-budget action then disappears) rather than
+          // keep pinning budgets to an address its own challenge no longer
+          // names. A rotation lands here as a different value, which is what
+          // flags the budgets pinned to the old one as stale.
+          result.payTo ?? null,
         ],
       )
     } else {

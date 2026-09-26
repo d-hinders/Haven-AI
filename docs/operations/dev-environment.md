@@ -291,6 +291,15 @@ Isolation rules that are non-negotiable for a payments product:
   `84532,8453`, the operator step after PR #3202) and never on prod. The route
   lists them only when `HAVEN_MARKETPLACE_CHAIN_IDS` itself names a testnet,
   so a copied flag cannot publish them on prod, whose list is `8453`.
+  The same list scopes a merchant page's `funding` (#3331) — where the
+  merchant is paid on each listed chain, the verified payTo a merchant-locked
+  budget pins to. That needs every active offer on the chain to advertise
+  ERC-7710, so the dev demo-merchant, which advertises EIP-3009 only until its
+  ERC-7710 rail is enabled ([below](#enabling-the-erc-7710-rail-on-the-dev-demo-merchant)),
+  reports `erc7710: false` and the build refuses a merchant-locked budget for
+  it. The payTo itself arrives with the first catalog refresh after migration
+  096 deploys (the backend runs one at boot, then hourly); until then every
+  offer reads `unstated`.
 - **Served-chains gate** — `HAVEN_DEPLOY_CHAIN_IDS=84532` so dev only deploys
   accounts on Base Sepolia (onboarding offers only served chains, #679), and
   `NEXT_PUBLIC_HAVEN_CHAIN_ID=84532` so onboarding defaults there (#615). A

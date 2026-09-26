@@ -252,6 +252,20 @@ The chain round trip that derives the delegate account address is taken
 *before* the lock — a slot held across an RPC turns a slow node into a stalled
 slot, which would trade a duplicate-offer defect for an availability one.
 
+**Merchant-locked budgets (#3331).** A budget built with `merchant_slug` is an
+ordinary recipient-pinned budget whose pin the server fills with the
+merchant's verified payTo on the agent's chain. That is the one address every
+active, verified x402 offer of the merchant there names in its own 402
+challenge (`merchant_catalog.pay_to`, recorded by the read-only catalog
+probe). The client does not choose it: a sent `recipient_address` must equal
+it (409 otherwise), and there is no pin at all when the offers disagree, when
+one names none, or when any of them lacks ERC-7710. A pinned budget cannot pay
+an EIP-3009 merchant, per the rule in §8 below. `agent_delegations.merchant_id`
+only labels the row. Payment selection does not read it, so the authority is
+still the signed caveat stack and nothing else. A later payTo rotation never
+re-points a signed grant: the budget stays pinned to the address the owner
+signed for, and the merchant page reports it `stale`.
+
 **Archiving cannot hide a live delegation agent (#1436).** "Removed" is a
 promise about spending, so the database enforces the delegation path:
 `ARCHIVE_AGENT_SQL` requires `status='revoked'` **and** `NOT EXISTS` any

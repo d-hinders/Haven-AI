@@ -14,6 +14,8 @@ alone.
 
 ### Changed
 
+- **Agent runbook: "If something breaks" (#3304, epic #3302).** `HAVEN_AGENT_RUNBOOK_MD` (served at `/for-agents.md`, mirrored into `@haven_ai/cli`'s `haven guide`) gains a short section: a `client_update` on a Haven result means run its `upgrade_command` and retry, `required: true` means payments are refused until you do, and the release notes live at `/releases`. Text only; no API change.
+
 - **`signForData` / the redemption guard now accept a second chain shape (#3329).** Beyond a single budget-delegation grant made directly to the agent's own account, `assertRedeemsOwnBudgetDelegation` (and `assertBoundDirectPaymentUserOp`, which calls it) now also accepts the two-link `[task child, budget]` chain: a task-budget child self-delegated by the agent's own account, redeemed under its parent budget delegation. Any other multi-link chain, or a leaf delegated by a third party, is still refused. `HavenSigningError`'s refusal wording now names both accepted shapes instead of describing only the single-grant case.
 
 ### Removed

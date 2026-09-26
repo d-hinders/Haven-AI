@@ -41,6 +41,9 @@ export const PUBLIC_SURFACES = [
   '/docs/agent-passport.md',
   '/docs/security-model.md',
   '/exit',
+  // #3304: "what changed / do I need to update" — named by every client_update
+  // hint and by both discovery documents, so it must be public.
+  '/releases',
   '/signup',
   '/login',
 ] as const

@@ -24,6 +24,7 @@ import {
   type ClientCompatDeps,
   type ClientUpdateHint,
 } from '../client-compat.js'
+import { releaseNotesUrl } from '../../domain/release-notes.js'
 
 function table(
   overrides: Partial<Record<PublishedClientPackage, Partial<ClientCompatEntry>>> = {},
@@ -127,7 +128,8 @@ describe('refusal points', () => {
       min_version: '0.5.0',
       required: true,
       upgrade_command: upgradeCommandFor('@haven_ai/mcp'),
-      notes_url: null,
+      // #3304: the public release notes page exists now; the hint names it.
+      notes_url: releaseNotesUrl(),
     })
     expect(handled).toEqual([])
     await app.close()

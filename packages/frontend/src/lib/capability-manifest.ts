@@ -7,7 +7,14 @@
  * answers.
  */
 
-import { CHAIN_REGISTRY, getChainData, resolveToken } from '@haven_ai/core'
+import {
+  CHAIN_REGISTRY,
+  RELEASE_NOTES_PATH,
+  buildReleaseCompat,
+  getChainData,
+  resolveToken,
+  type PackageReleaseCompat,
+} from '@haven_ai/core'
 
 import { havenEnvironment } from './env'
 
@@ -50,7 +57,19 @@ export interface DiscoveryFacts {
   cli_package: string
   openapi_url: string
   chains: { default: number; deployable: number[]; supported: readonly number[] }
+  // The backend's `client_releases` block (#3304) is deliberately NOT read: the
+  // manifest takes the same data from `@haven_ai/core` directly, so it still
+  // answers when the backend is down. Only the channel comes from here.
 }
+
+/**
+ * One published package as the manifest reports it. The descriptor half
+ * (`name`, `channel`, `one_liner`) predates #3304; the release half is
+ * `buildReleaseCompat`'s entry — the same one `GET /discovery` serves — so
+ * the two documents cannot disagree. `upgrade_command` is null when the
+ * backend (the only source of the deployment's channel) was unreachable.
+ */
+export type ManifestPackageEntry = { name: string; channel?: string; one_liner?: string } & PackageReleaseCompat
 
 /**
  * One supported chain as the manifest reports it (#2619).
@@ -93,7 +112,12 @@ export interface CapabilityManifest {
   dashboard: Record<string, string>
   api: { base: string | null; openapi: string | null; openapi_mirror: string | null; root: string | null }
   hosted_mcp: { url: string | null; note?: string; auth: string; signer: string }
-  packages: Record<string, { name: string; channel?: string; one_liner?: string }>
+  packages: Record<string, ManifestPackageEntry>
+  /**
+   * #3304: the human-readable "what changed / do I need to update" page.
+   * Relative, like every own-origin path here.
+   */
+  release_notes_url: string
   chains: {
     default: number
     deployable: number[]
@@ -165,8 +189,20 @@ function manifestChainEntry(chainId: number): ManifestChainEntry | null {
  * The two fields that stay ABSOLUTE name a DIFFERENT origin and come from
  * configuration rather than from a header: the API base and the hosted MCP.
  */
+/**
+ * The deployment's connector channel, read from the backend's own
+ * `connector_package` (`@haven_ai/connect@<channel>`). Null when unknown —
+ * never guessed (#2422: a hard-coded `@alpha` is right on production by
+ * coincidence and wrong on dev).
+ */
+export function channelFrom(facts: DiscoveryFacts | null): string | null {
+  const match = facts?.connector_package.match(/^@haven_ai\/connect@([a-z][a-z0-9-]{0,31})$/)
+  return match ? match[1] : null
+}
+
 export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null): CapabilityManifest {
   const apiBase = facts ? new URL(facts.openapi_url).origin : null
+  const releases = buildReleaseCompat(channelFrom(facts))
   return {
     schema_version: MANIFEST_SCHEMA_VERSION,
     name: 'haven',
@@ -197,21 +233,27 @@ export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null)
       auth: 'bearer agent credential',
       signer: 'local @haven_ai/signer',
     },
+    // #3304 extends each entry with its release record rather than adding a
+    // parallel block, so an agent reading `packages.signer` finds the version,
+    // the thresholds and the update command in one place.
     packages: {
       connect: {
         name: '@haven_ai/connect',
         ...(facts?.connector_package ? { channel: facts.connector_package } : {}),
         ...(facts?.connector_package ? { one_liner: `npx ${facts.connector_package}` } : {}),
+        ...releases['@haven_ai/connect'],
       },
       cli: {
         name: '@haven_ai/cli',
         ...(facts?.cli_package ? { channel: facts.cli_package } : {}),
         ...(facts?.cli_package ? { one_liner: `npx ${facts.cli_package}` } : {}),
+        ...releases['@haven_ai/cli'],
       },
-      sdk: { name: '@haven_ai/sdk' },
-      mcp: { name: '@haven_ai/mcp' },
-      signer: { name: '@haven_ai/signer' },
+      sdk: { name: '@haven_ai/sdk', ...releases['@haven_ai/sdk'] },
+      mcp: { name: '@haven_ai/mcp', ...releases['@haven_ai/mcp'] },
+      signer: { name: '@haven_ai/signer', ...releases['@haven_ai/signer'] },
     },
+    release_notes_url: RELEASE_NOTES_PATH,
     // #2619: the runbook forbids the agent from assuming which chain it is on,
     // so the manifest carries the facts rather than bare ids. `deployable`
     // stays a bare-id array (the static half every served artifact quotes);

@@ -14,8 +14,8 @@
  * **The table is hand-edited, by deliberate owner decision, and nothing else
  * writes it.** In particular the release bump does not: a release must never
  * raise a minimum as a side effect (#3305). A published minimum is a promise the
- * backend enforces, so the public release document (#3304) will read these
- * values from here rather than restating them.
+ * backend enforces, so the public release documents (#3304, `client-releases.ts`)
+ * read these values from here rather than restating them.
  *
  * Owner decision (2026-09-25, on #3302): warn by default, refuse only when
  * flagged. A request with NO header, an unparseable one, a package not in the

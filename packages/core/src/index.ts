@@ -67,7 +67,7 @@ export {
 
 // Client compatibility (#3303, epic #3302) — the one table of recommended and
 // minimum published-client versions, plus the pure header parse and verdict.
-// The backend enforces it; the public release document (#3304) will read it.
+// The backend enforces it; the public release documents (#3304) read it.
 export {
   CLIENT_HEADER_NAME,
   CLIENT_COMPAT,
@@ -83,3 +83,16 @@ export {
   type ParsedClientHeader,
   type PublishedClientPackage,
 } from './client-compat.js'
+// #3304 (epic #3302 slice 2): the release data the public documents serve —
+// `GET /discovery`, `/.well-known/haven.json` and the /releases page — joined
+// with the enforced thresholds above. #3305 generates CLIENT_RELEASES.
+export {
+  CLIENT_RELEASES,
+  RELEASE_NOTES_PATH,
+  upgradeCommandFor,
+  buildReleaseCompat,
+  type ClientRelease,
+  type ClientReleaseNote,
+  type PackageReleaseCompat,
+  type BuildReleaseCompatOptions,
+} from './client-releases.js'

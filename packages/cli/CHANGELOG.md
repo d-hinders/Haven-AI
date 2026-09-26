@@ -8,6 +8,8 @@ alone.
 
 ## Unreleased
 
+- **`haven guide`: "If something breaks" (#3304, epic #3302).** The bundled agent runbook (a copy of `@haven_ai/sdk`'s) gains the section that sends an agent to a result's `client_update.upgrade_command` and to the `/releases` page. Text only; no command changes.
+
 - **`wallets balances` renders the balance-freshness marker (#3318).** Since
   the backend started serving last-known balances marked `stale` on a failed
   read (#3295), and `'0'` marked `unavailable` only when nothing was ever

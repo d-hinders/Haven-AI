@@ -7499,7 +7499,10 @@ export const openapiSpec = {
           min_version: { type: ['string', 'null'] },
           required: { type: 'boolean' },
           upgrade_command: { type: 'string', examples: ['npx -y @haven_ai/connect@alpha'] },
-          notes_url: { type: ['string', 'null'] },
+          notes_url: {
+            type: ['string', 'null'],
+            description: '#3304: the public release notes page. Nullable for clients built before it existed.',
+          },
         },
         additionalProperties: false,
       },
@@ -7907,7 +7910,7 @@ export const openapiSpec = {
       },
       DiscoveryDocument: {
         type: 'object',
-        required: ['hosted_mcp_url', 'connector_package', 'cli_package', 'openapi_url', 'chains'],
+        required: ['hosted_mcp_url', 'connector_package', 'cli_package', 'openapi_url', 'chains', 'client_releases'],
         properties: {
           hosted_mcp_url: {
             anyOf: [{ type: 'string', format: 'uri' }, { type: 'null' }],
@@ -7929,6 +7932,71 @@ export const openapiSpec = {
               supported: { type: 'array', items: { type: 'integer' } },
             },
             additionalProperties: false,
+          },
+          client_releases: {
+            type: 'object',
+            description:
+              '#3304: per published client, the version released in source (not a claim about ' +
+              "npm's `latest` dist-tag — npm publishes later, on promotion), the thresholds this " +
+              'deployment enforces (the same table the `client_outdated` refusal reads), the ' +
+              "update command on this deployment's channel, and short notes. `release_notes_url` " +
+              'is the human-readable page on the dashboard origin.',
+            required: ['release_notes_url', 'packages'],
+            properties: {
+              release_notes_url: { type: 'string', format: 'uri' },
+              packages: {
+                type: 'object',
+                required: ['@haven_ai/sdk', '@haven_ai/signer', '@haven_ai/mcp', '@haven_ai/connect', '@haven_ai/cli'],
+                properties: {
+                  '@haven_ai/sdk': { $ref: '#/components/schemas/PackageReleaseCompat' },
+                  '@haven_ai/signer': { $ref: '#/components/schemas/PackageReleaseCompat' },
+                  '@haven_ai/mcp': { $ref: '#/components/schemas/PackageReleaseCompat' },
+                  '@haven_ai/connect': { $ref: '#/components/schemas/PackageReleaseCompat' },
+                  '@haven_ai/cli': { $ref: '#/components/schemas/PackageReleaseCompat' },
+                },
+                additionalProperties: false,
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      PackageReleaseCompat: {
+        type: 'object',
+        description: '#3304: one published client in `DiscoveryDocument.client_releases`.',
+        required: ['released_version', 'recommended_version', 'min_version', 'upgrade_command', 'notes'],
+        properties: {
+          released_version: {
+            type: 'string',
+            description: "The newest version released in source. Not npm's `latest` dist-tag.",
+          },
+          recommended_version: {
+            type: ['string', 'null'],
+            description: 'Below this, responses carry a non-blocking `client_update` hint. Null = no hint.',
+          },
+          min_version: {
+            type: ['string', 'null'],
+            description: "Below this, the package's refusal points answer `client_outdated`. Null = never refused.",
+          },
+          upgrade_command: { type: ['string', 'null'], examples: ['npx -y @haven_ai/connect@alpha'] },
+          notes: {
+            type: 'array',
+            description: 'Newest first. What changed, for deciding whether to update — not the full CHANGELOG.',
+            items: {
+              type: 'object',
+              required: ['version', 'date', 'summary', 'action_required'],
+              properties: {
+                version: { type: 'string' },
+                date: { type: 'string', format: 'date' },
+                summary: { type: 'string' },
+                action_required: {
+                  type: 'boolean',
+                  description: 'True when a client must update to keep paying. Not the same as a breaking change.',
+                },
+              },
+              additionalProperties: false,
+            },
           },
         },
         additionalProperties: false,

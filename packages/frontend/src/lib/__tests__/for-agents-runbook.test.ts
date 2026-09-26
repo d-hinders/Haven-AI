@@ -157,7 +157,14 @@ describe('/for-agents.md (#2523)', () => {
     // The manifest can name a deployment default, but a funded wallet is the
     // authority for the actual receiving chain; this small clause says both
     // instead of letting an agent turn a default into a transfer instruction.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10700)
+    // 10700 -> 10900 for #3304 (the page is 10819 bytes at this commit). An
+    // agent looks for this page when something has already failed; the 212
+    // bytes are the one thing it needs then: a `client_update` on a result
+    // means run its `upgrade_command` and retry, `required: true` means
+    // payments stop until it does, and where the release notes are. Trimmed
+    // from a first draft about twice as long that also restated the manifest
+    // path — `/releases` itself names it.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10900)
   })
 
   it('treats chains.default as expected only and confirms funding after login', () => {

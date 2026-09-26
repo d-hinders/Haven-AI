@@ -57,16 +57,25 @@ export interface DiscoveryFacts {
   cli_package: string
   openapi_url: string
   chains: { default: number; deployable: number[]; supported: readonly number[] }
-  // The backend's `client_releases` block (#3304) is deliberately NOT read: the
-  // manifest takes the same data from `@haven_ai/core` directly, so it still
-  // answers when the backend is down. Only the channel comes from here.
+  /**
+   * #3304: the backend's own release block. Its THRESHOLDS win when present —
+   * they are what the deployed backend actually enforces, and the frontend and
+   * backend deploy (and roll back) separately, so the frontend's bundled copy
+   * of `CLIENT_COMPAT` can briefly differ. Optional because an older backend
+   * does not send it; then the bundled copy is the best available answer.
+   */
+  client_releases?: {
+    release_notes_url: string
+    packages: Partial<Record<string, Pick<PackageReleaseCompat, 'min_version' | 'recommended_version'>>>
+  }
 }
 
 /**
  * One published package as the manifest reports it. The descriptor half
  * (`name`, `channel`, `one_liner`) predates #3304; the release half is
- * `buildReleaseCompat`'s entry — the same one `GET /discovery` serves — so
- * the two documents cannot disagree. `upgrade_command` is null when the
+ * `buildReleaseCompat`'s entry — the same builder `GET /discovery` uses — with
+ * the thresholds taken from the backend's own answer when it is reachable
+ * (see `DiscoveryFacts.client_releases`). `upgrade_command` is null when the
  * backend (the only source of the deployment's channel) was unreachable.
  */
 export type ManifestPackageEntry = { name: string; channel?: string; one_liner?: string } & PackageReleaseCompat
@@ -200,9 +209,31 @@ export function channelFrom(facts: DiscoveryFacts | null): string | null {
   return match ? match[1] : null
 }
 
+/**
+ * Overlay the thresholds the reachable backend reports onto the bundled
+ * release data. The backend enforces its own copy of `CLIENT_COMPAT`, so when
+ * it answers, its numbers are the true ones; the bundled copy is the fallback
+ * for a backend that is down or predates #3304.
+ */
+function withEnforcedThresholds(
+  releases: ReturnType<typeof buildReleaseCompat>,
+  facts: DiscoveryFacts | null,
+): ReturnType<typeof buildReleaseCompat> {
+  const served = facts?.client_releases?.packages
+  if (!served) return releases
+  const out = { ...releases }
+  for (const pkg of Object.keys(out) as (keyof typeof out)[]) {
+    const s = served[pkg]
+    if (s && 'min_version' in s && 'recommended_version' in s) {
+      out[pkg] = { ...out[pkg], min_version: s.min_version, recommended_version: s.recommended_version }
+    }
+  }
+  return out
+}
+
 export function buildManifestFrom(_origin: string, facts: DiscoveryFacts | null): CapabilityManifest {
   const apiBase = facts ? new URL(facts.openapi_url).origin : null
-  const releases = buildReleaseCompat(channelFrom(facts))
+  const releases = withEnforcedThresholds(buildReleaseCompat(channelFrom(facts)), facts)
   return {
     schema_version: MANIFEST_SCHEMA_VERSION,
     name: 'haven',

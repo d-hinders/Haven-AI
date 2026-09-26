@@ -157,11 +157,13 @@ describe('/for-agents.md (#2523)', () => {
     // The manifest can name a deployment default, but a funded wallet is the
     // authority for the actual receiving chain; this small clause says both
     // instead of letting an agent turn a default into a transfer instruction.
-    // 10700 -> 10900 for #3304 (the page is 10819 bytes at this commit). An
-    // agent looks for this page when something has already failed; the 212
+    // 10700 -> 10900 for #3304 (the page is 10877 bytes at this commit). An
+    // agent looks for this page when something has already failed; the 270
     // bytes are the one thing it needs then: a `client_update` on a result
-    // means run its `upgrade_command` and retry, `required: true` means
-    // payments stop until it does, and where the release notes are. Trimmed
+    // means that client must be updated before retrying, `required: true`
+    // means payments stop until it is, and where the release notes are. It
+    // does not promise `upgrade_command` runs as given: for the connector,
+    // signer and MCP it does not yet (#3304 review; recorded on epic #3302). Trimmed
     // from a first draft about twice as long that also restated the manifest
     // path — `/releases` itself names it.
     expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(10900)

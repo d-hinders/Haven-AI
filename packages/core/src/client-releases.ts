@@ -5,11 +5,13 @@
  * Two public documents serve this: the backend's `GET /discovery`
  * (`client_releases`) and the frontend's `/.well-known/haven.json` (its
  * `packages` entries), plus the human-readable page at
- * {@link RELEASE_NOTES_PATH}. All three read {@link buildReleaseCompat}, so they
- * cannot disagree with each other — and the version thresholds come from
- * `CLIENT_COMPAT` in `client-compat.ts`, the table the backend ENFORCES, so a
- * published minimum and an enforced minimum are one value (the epic's
- * "a published minimum is a promise" note).
+ * {@link RELEASE_NOTES_PATH}. All three are built by {@link buildReleaseCompat},
+ * and the version thresholds come from `CLIENT_COMPAT` in `client-compat.ts`,
+ * the table the backend ENFORCES (the epic's "a published minimum is a
+ * promise" note). One caveat: the frontend and the backend deploy — and roll
+ * back — separately, each with its own bundled copy of this package. So the
+ * frontend prefers the thresholds the reachable backend reports in
+ * `/discovery`, and falls back to its own copy only when the backend is down.
  *
  * ## Who writes {@link CLIENT_RELEASES}
  *

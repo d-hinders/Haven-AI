@@ -90,7 +90,7 @@ Nothing here needs you to. Steps 1-3 are links: hand your user the full `<host>/
 
 ## If something breaks
 
-If a Haven result carries `client_update`, run its `upgrade_command` as given, then retry. `required: true` means payments are refused until you do. What changed: [/releases](/releases).
+If a Haven result carries `client_update`, that client is out of date: update it — `upgrade_command` names the package and channel — then retry. `required: true` means payments are refused until you do. What changed: [/releases](/releases).
 
 ## Vocabulary
 

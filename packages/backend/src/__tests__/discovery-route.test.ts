@@ -42,7 +42,22 @@ describe('GET /discovery', () => {
   it('leaks nothing per-user, per-agent, or operational', () => {
     // Named explicitly rather than left to the allow-list, because these are
     // the categories the issue forbids and a reader should see them refused.
-    const serialized = JSON.stringify(buildDiscoveryDocument(req()))
+    // Release-note prose is excluded (#3304 review): it is the published
+    // CHANGELOG restated, and ordinary changelog words ("balances",
+    // "feedback" ⊃ "db") would trip these substrings without leaking anything.
+    // The rest of `client_releases` — versions, thresholds, commands, URL — is
+    // still scanned.
+    const doc = buildDiscoveryDocument(req())
+    const withoutNotes = {
+      ...doc,
+      client_releases: {
+        ...doc.client_releases,
+        packages: Object.fromEntries(
+          Object.entries(doc.client_releases.packages).map(([pkg, entry]) => [pkg, { ...entry, notes: [] }]),
+        ),
+      },
+    }
+    const serialized = JSON.stringify(withoutNotes)
     for (const forbidden of ['user', 'agent_id', 'relayer', 'database', 'db', 'secret', 'key_hash', 'balance']) {
       expect(serialized.toLowerCase(), forbidden).not.toContain(forbidden)
     }

@@ -360,6 +360,23 @@ describe('capability manifest', () => {
       expect(channelFrom(FACTS)).toBe('dev')
     })
 
+    // The backend enforces its OWN copy of CLIENT_COMPAT and deploys separately,
+    // so when it answers, its thresholds are the true ones (#3304 review).
+    it('prefers the thresholds the reachable backend reports over the bundled copy', () => {
+      const facts: DiscoveryFacts = {
+        ...FACTS,
+        client_releases: {
+          release_notes_url: 'https://app.test/releases',
+          packages: { '@haven_ai/signer': { min_version: '0.5.0-alpha.1', recommended_version: '0.5.0-alpha.1' } },
+        },
+      }
+      const manifest = buildManifestFrom(ORIGIN, facts)
+      expect(manifest.packages.signer.min_version).toBe('0.5.0-alpha.1')
+      expect(manifest.packages.signer.recommended_version).toBe('0.5.0-alpha.1')
+      // A package the backend did not report keeps the bundled values.
+      expect(manifest.packages.sdk.min_version).toBe(CLIENT_COMPAT['@haven_ai/sdk'].min_version)
+    })
+
     // Mutates the SOURCE table the backend enforces (client-compat.ts), not a
     // copy, so this fails if the manifest ever stops reading it.
     it('follows a min_version change in CLIENT_COMPAT', () => {

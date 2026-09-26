@@ -227,6 +227,15 @@ the epic when its last sub-issue lands on `dev`.
 > one whose age is judged. Nothing here was made stale. `last-verified` not bumped,
 > for the reason in the notes above.
 
+> **Re-verification (#3337, 2026-09-26):** coupled through
+> `.github/workflows/dev-gate.yml`, where only a comment changes: the
+> `qa-override` escape hatch is no longer described as a quarantine for "a
+> wedged testnet flake" but for its two documented uses (a money-path hotfix,
+> or a red covering run whose failure class was checked out-of-band). The label,
+> its warning and the gate are unchanged, and this document's "bypass is
+> `qa-override`" still holds. `last-verified` not bumped, for the reason in the
+> notes above.
+
 ## Promotion to production (`dev → main`)
 
 1. Open a **`dev → main` PR** (a human step). Its diff is the promotion manifest

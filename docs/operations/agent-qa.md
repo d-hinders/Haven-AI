@@ -1116,11 +1116,11 @@ hide either. Two levers:
   gate-skipped run and two per harness run. A rising count is a provider wave in the
   making (epic #3335), not noise.
 - **`qa-override` label** — adding it to a promotion PR **skips** the freshness
-  gate (logged as a warning). Use it only when the failure is classified
-  `provider` or `preflight` ([Classify the failure](#classify-the-failure)) and
-  you have confirmed the money path out-of-band, and say so in a comment; remove
-  it once a fresh green run exists. It is the deliberate quarantine escape hatch,
-  not a routine bypass.
+  gate (logged as a warning). Use it only when you have confirmed the money path
+  out-of-band, and say in a comment what you verified — for a red covering run,
+  name its class ([Classify the failure](#classify-the-failure)); for a money-path
+  `hotfix/*`, see the hotfix rule above. Remove it once a fresh green run exists.
+  It is the deliberate quarantine escape hatch, not a routine bypass.
 
 ## Live deployed-UI smoke
 
@@ -1342,15 +1342,16 @@ agent must never ask for a key, and an operator must never paste one.
 ### Classify the failure
 
 The standing `qa-failure` issue (#2767) records a class for the run and for each failing
-leg, with the signature line that earned it (URLs and key-labelled values scrubbed;
+leg, with an excerpt of the line around the matched signature (URLs and key-labelled
+values scrubbed;
 `scripts/ci/qa-failure-issue.mjs`, #3337). A class is only assigned on a signature —
 everything else is `unclassified`, never a guess. Read the class before reading code:
 
 | Class | Signature | What it means, and the example | Next step |
 |---|---|---|---|
-| `provider` | `-32016` / `over rate limit`, `RPC Request failed`, `Status: 429` (often on the line after `HTTP request failed.`), `Batch of more than N requests`, `no available upstreams`, `flashblocks` | The RPC or bundler provider refused the request. #2449: `-32016 over rate limit` inside the delegate-account deploy. | A finding for the provider, not a flake to re-dispatch away. A **recurring** provider class means the endpoint does not fit the harness's load — report it (epic #3335) and check the endpoint before retrying into the same limit. |
+| `provider` | `-32016` / `over rate limit`, `RPC Request failed`, `Status: 429` (often on the line after `HTTP request failed.`), `Batch of more than N requests`, `no available upstreams`, `flashblocks`, and a body quoting `URL: https://sepolia.base.org` ([#2511](#a-502-whose-body-carries-url-httpssepoliabaseorg-is-an-rpc-outage-not-a-regression-2511)) | The RPC or bundler provider refused the request. #2449: `-32016 over rate limit` inside the delegate-account deploy. | A finding for the provider, not a flake to re-dispatch away. A **recurring** provider class means the endpoint does not fit the harness's load — report it (epic #3335) and check the endpoint before retrying into the same limit. |
 | `preflight` | the run-level `✗ preflight:` line, and the resource line above it that failed its floor | The harness stopped before any leg ran. #2485: the merchant settlement wallet's gas below its floor. | Top up or fix the named resource; no leg result exists to read. |
-| `harness` | a JS runtime error (`TypeError`, `ReferenceError`, `Cannot read properties of`) | The harness itself broke. #2443's second failure was intra-attempt contamination between scenarios — a harness defect, though it surfaced without this signature. | Fix the harness; the product may be fine. |
+| `harness` | a JS runtime error (`TypeError`, `ReferenceError`, `SyntaxError`, `RangeError`, `Cannot read properties of`) | The harness itself threw. No failure in the 40-run sample below carries this signature. A harness defect does not always announce itself: #2443's second failure was intra-attempt contamination between scenarios, and this classifier records it as `unclassified`. | Fix the harness; the product may be fine. |
 | `haven` | the leg's own Haven API call answered `… failed (4xx)` | Haven refused a request the leg expected to succeed. | Read the Haven change that landed before the run. |
 | `unclassified` | none of the above — including the backend's masked `activate failed (502): Could not deploy the account for this budget` and timeouts on a Haven endpoint | Could be the provider underneath or Haven; the masked message does not say. | Read the run log and the backend log for that window. Do not re-dispatch it away: if it recurs, it is a finding. |
 

@@ -181,7 +181,10 @@ const PROVIDER_MULTILINE = [
   'Details: Too Many Requests',
   '• x402-delegation-3009-grace-resume … PASS — resumed',
 ].join('\n')
-const PROVIDER_JSON_URL = `• x402-delegation-3009-sweep … FAIL — gasless sweep submit failed: Sweep relay failed: could not coalesce error (error={ "code": 1, "message": "no available upstreams to process a request" }, info={ "requestUrl": "https://lb.example.live/base-sepolia/${KEY}" })`
+// Real shape: every real instance carries the "(delegate held …)" clause.
+const PROVIDER_JSON_URL = `• x402-delegation-3009-sweep … FAIL — gasless sweep submit failed (delegate held 0.0075 USDC before, 0.0075 after): Sweep relay failed: could not coalesce error (error={ "code": 1, "message": "no available upstreams to process a request" }, info={ "requestUrl": "https://lb.example.live/base-sepolia/${KEY}" })`
+// A real dRPC free-plan line (run 36104825999's shape): the evidence starts ~400 characters in.
+const PROVIDER_BATCH_REAL_LENGTH = `• x402-delegation-3009-sweep … FAIL — gasless sweep submit failed (delegate held 0.0005 USDC before, 0.0005 after): Sweep relay failed: server response 500 Internal Server Error (request={  }, response={  }, error=null, info={ "requestUrl": "https://lb.example.live/base-sepolia/${KEY}", "responseBody": "[{\\"id\\":16260,\\"jsonrpc\\":\\"2.0\\",\\"error\\":{\\"message\\":\\"Batch of more than 3 requests are not allowed on free plan, to use this feature register paid account at drpc.org\\",\\"code\\":31}}]" })`
 const MASKED_502 = '• delegation-lifecycle … FAIL — activate failed (502): Could not deploy the account for this budget — try again'
 const PREFLIGHT = [
   'preflight — resources this run consumes:',
@@ -211,6 +214,32 @@ describe('qa-failure-issue: failure classes (#3337)', () => {
     // A merchant's 402 relayed through a hosted-tool refusal is not Haven's 4xx.
     assert.equal(classifyLog(MERCHANT_402).runClass, 'unclassified')
     assert.deepEqual(CLASSES, ['provider', 'preflight', 'harness', 'haven', 'unclassified'])
+  })
+
+  test('the signature shows the evidence even when it sits past character 200 of the line', () => {
+    assert.ok(PROVIDER_BATCH_REAL_LENGTH.indexOf('Batch of more than') > 300, 'fixture must be real-length')
+    const [leg] = classifyLog(PROVIDER_BATCH_REAL_LENGTH).legs
+    assert.equal(leg.class, 'provider')
+    assert.match(leg.signature, /Batch of more than 3 requests/)
+    assert.match(leg.signature, /^• x402-delegation-3009-sweep … FAIL — /)
+    assert.doesNotMatch(leg.signature, new RegExp(KEY))
+  })
+
+  test('an excerpt whose window starts inside a URL widens to the whole URL, so no key fragment survives', () => {
+    // The match sits ~100 characters after the key starts, so a raw 80-character
+    // look-back would start in the middle of the key.
+    const line = `• x402-delegation-3009-sweep … FAIL — relay failed ${'x'.repeat(250)} requestUrl=https://lb.example.live/base-sepolia/${KEY} ${'y'.repeat(60)} "no available upstreams"`
+    assert.ok(line.indexOf('no available') - 80 > line.indexOf(KEY) && line.indexOf('no available') - 80 < line.indexOf(KEY) + KEY.length, 'look-back must land inside the key')
+    const [leg] = classifyLog(line).legs
+    assert.match(leg.signature, /no available upstreams/)
+    for (let i = 0; i + 8 <= KEY.length; i++) assert.ok(!leg.signature.includes(KEY.slice(i, i + 8)), `key fragment ${KEY.slice(i, i + 8)}`)
+  })
+
+  test('#2511: a 502 body quoting the public Base Sepolia endpoint is provider, and the URL is still scrubbed', () => {
+    const log = '• x402-erc7710-fresh-agent … FAIL — fresh-agent authorize failed (502): {"error":"Could not deploy the delegate account","details":"HTTP request failed. URL: https://sepolia.base.org Status: 503"}'
+    const r = classifyLog(log)
+    assert.equal(r.runClass, 'provider')
+    assert.doesNotMatch(r.legs[0].signature, /sepolia\.base\.org/)
   })
 
   test('a preflight refusal is run-level: no legs, and the failing resource is the signature', () => {

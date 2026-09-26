@@ -81,25 +81,52 @@ const PROVIDER = [
   /Batch of more than \d+ requests/,
   /no available upstreams/,
   /flashblocks/,
+  // #2511: a 502 whose body quotes the public endpoint is an RPC outage. Matched
+  // on the RAW line; the signature is scrubbed afterwards like every other.
+  /\bURL: https:\/\/sepolia\.base\.org\b/,
 ]
 const HARNESS = [/\b(TypeError|ReferenceError|SyntaxError|RangeError)\b/, /Cannot read properties of/]
 // The harness's own Haven API client reports `<step> failed (<status>)`. A 4xx
 // relayed from a MERCHANT (`(HTTP 402)` inside a hosted-tool refusal) is not Haven's.
 const HAVEN = [/^• \S+ … FAIL — [^(]*\bfailed \(4\d\d\)/]
 
-/** The first line of `text` matching one of `patterns`, or null. */
+/** The first line matching one of `patterns`, with the match's index, or null. */
 function firstMatch(lines, patterns) {
-  for (const line of lines) if (patterns.some((re) => re.test(line))) return line
+  for (const line of lines) {
+    for (const re of patterns) {
+      const m = re.exec(line)
+      if (m) return { line, index: m.index }
+    }
+  }
   return null
+}
+
+/**
+ * The evidence, not the first 200 characters: a real provider FAIL line
+ * carries its signature well past character 200 ("…Sweep relay failed: could
+ * not coalesce error (error={ … "no available upstreams" …"), so the excerpt
+ * is taken AROUND the match and prefixed with the leg. Its edges are widened
+ * to whitespace, so a URL is never cut in half before scrubbing.
+ */
+export function excerpt(line, index, { before = 80, after = 160 } = {}) {
+  let start = Math.max(0, index - before)
+  let end = Math.min(line.length, index + after)
+  while (start > 0 && !/\s/.test(line[start - 1])) start--
+  while (end < line.length && !/\s/.test(line[end])) end++
+  const leg = /^• \S+ … FAIL — /.exec(line)?.[0] ?? ''
+  const cutFront = start > leg.length // the leg prefix itself is always kept
+  const head = cutFront ? `${leg || ''}… ` : ''
+  const text = cutFront ? line.slice(start, end) : line.slice(0, end)
+  return scrub(`${head}${text}${end < line.length ? ' …' : ''}`, 320)
 }
 
 /** Class and signature for one failing leg: its FAIL line plus continuation lines. */
 export function classifyLeg(lines) {
   for (const [cls, patterns] of [['provider', PROVIDER], ['harness', HARNESS], ['haven', HAVEN]]) {
     const hit = firstMatch(lines, patterns)
-    if (hit) return { class: cls, signature: scrub(hit, 200) }
+    if (hit) return { class: cls, signature: excerpt(hit.line, hit.index) }
   }
-  return { class: 'unclassified', signature: scrub(lines[0] ?? '', 200) }
+  return { class: 'unclassified', signature: scrub(lines[0] ?? '', 240) }
 }
 
 /**

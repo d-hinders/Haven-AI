@@ -601,10 +601,13 @@ least twice.
   times out or the job is canceled. apt hangs on the runner's regional mirror;
   nothing in the PR is implicated. Observed repeatedly, most recently twice on 2026-08-19.
 - **Base Sepolia RPC failures** — `qa-dev` money-flow legs: an RPC provider's
-  refusals or timeouts fail a leg that may pass on rerun. Do not chase the
-  payment code for them, and do not treat a rerun-to-green as the fix either:
-  the standing `qa-failure` issue records the failure class (#3337), and a
-  recurring `provider` class is a finding for the provider (epic #3335). See
+  refusals or timeouts fail a leg that may pass on rerun. The one rerun above
+  still applies to a first occurrence — unless the signature is a rate limit
+  (`-32016`, `Status: 429`), where a rerun into the same limit reproduces it
+  (#2449). Do not chase the payment code for them, and do not treat a
+  rerun-to-green as the fix either: the standing `qa-failure` issue records the
+  failure class (#3337), and a recurring `provider` class is a finding for the
+  provider (epic #3335). See
   [Classify the failure](../operations/agent-qa.md#classify-the-failure).
 
   **#2004 widened where this signature can appear.** The backend test job now

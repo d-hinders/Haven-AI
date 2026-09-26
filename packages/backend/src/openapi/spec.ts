@@ -5790,7 +5790,7 @@ export const openapiSpec = {
         operationId: 'submitTaskBudget',
         summary: 'Submit the agent signature — opens a pending child, or relays the signed close operation.',
         description:
-          "status=pending: verifies signature recovers the agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed; if the operation could not be sent (the account moved on since it was prepared) the answer is 409 close_needs_reprepare — call close again and re-sign; if it was sent but its outcome is unconfirmed, the answer is 200 status='closed' when the chain shows the child disabled, else 502 close_outcome_unconfirmed — check again, do not re-prepare. Any other status is 409.",
+          "status=pending: verifies signature recovers the agent's delegate key over the stored child typed data, then flips to open. status=closing: relays the stored close operation with the signature and flips to closed; if the operation could not be sent (the account moved on since it was prepared) the answer is 409 close_needs_reprepare — call close again and re-sign; if it was sent but its outcome is unconfirmed, the answer is 200 status='closed' when the chain shows the child disabled, else 502 close_outcome_unconfirmed — call close again later: it reports closed once the disable has finalised, or returns new sign_data if the earlier operation did not land (sign and submit that one). Any other status is 409.",
         security: [{ AgentApiKey: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: uuid }],
         requestBody: {
@@ -5827,7 +5827,7 @@ export const openapiSpec = {
           '404': errorResponse,
           '409': errorResponse,
           '429': { ...errorResponse, description: 'Money-path rate limit.' },
-          '502': { ...errorResponse, description: "The close was sent but its outcome is unconfirmed and the chain does not yet show the child disabled (error_code close_outcome_unconfirmed): check again; do not re-prepare." },
+          '502': { ...errorResponse, description: "The close was sent but its outcome is unconfirmed and the chain does not yet show the child disabled (error_code close_outcome_unconfirmed): call close again later — it reports closed once the disable has finalised, or returns new sign_data if the earlier operation did not land." },
         },
       },
     },

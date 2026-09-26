@@ -104,6 +104,95 @@ describe('useDelegationBudget passkey dispatch (#887)', () => {
     expect(activate[1].signature).toBe('0x' + 'ab'.repeat(200))
   })
 
+  it('grant with merchantSlug (#3331): the build body carries merchant_slug and a null recipient, never a sent one', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    const message = { delegate: '0xd', delegator: '0xa', authority: '0x0', caveats: [], salt: '1' }
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({ delegation_hash: '0xhash', version: 1, signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message } })
+      }
+      return Promise.resolve({ activated: true })
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'ab'.repeat(200))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.grant({
+        tokenAddress: ('0x' + 'cc'.repeat(20)) as never,
+        budgetAtomic: '1000',
+        periodSeconds: 86400,
+        merchantSlug: 'ampersend-demo-api',
+      })
+      expect(res.ok).toBe(true)
+    })
+    const build = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/build'))!
+    expect(build[1]).toEqual({
+      token_address: ('0x' + 'cc'.repeat(20)) as never,
+      recipient_address: null,
+      budget_atomic: '1000',
+      period_seconds: 86400,
+      merchant_slug: 'ampersend-demo-api',
+    })
+  })
+
+  it('grant without merchantSlug omits the field entirely, byte-identical to before #3331', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    const message = { delegate: '0xd', delegator: '0xa', authority: '0x0', caveats: [], salt: '1' }
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({ delegation_hash: '0xhash', version: 1, signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message } })
+      }
+      return Promise.resolve({ activated: true })
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'ab'.repeat(200))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      await result.current.grant({
+        tokenAddress: ('0x' + 'cc'.repeat(20)) as never,
+        budgetAtomic: '1000',
+        periodSeconds: 86400,
+      })
+    })
+    const build = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/build'))!
+    expect(Object.keys(build[1])).not.toContain('merchant_slug')
+  })
+
+  it('a merchant-locked build refusal (#3331) reports refused with the backend sentence, not the generic failure', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.reject(
+          new Error(
+            "Merchant's payTo is one of this agent's own addresses; a merchant-locked budget cannot be issued to it",
+          ),
+        )
+      }
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.grant({
+        tokenAddress: ('0x' + 'cc'.repeat(20)) as never,
+        budgetAtomic: '1000',
+        periodSeconds: 86400,
+        merchantSlug: 'ampersend-demo-api',
+      })
+      expect(res).toEqual({
+        ok: false,
+        reason: 'refused',
+        detail: "Merchant's payTo is one of this agent's own addresses; a merchant-locked budget cannot be issued to it",
+      })
+    })
+    // Nothing past the build step ran.
+    expect(mockSignDelegation).not.toHaveBeenCalled()
+    expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/activate'))).toBe(false)
+  })
+
   it('revoke follows the backend scheme: webauthn_userop signs the UserOperation', async () => {
     mockApi(PASSKEY_SIGNERS)
     const userOp = { sender: '0xa', nonce: '5n' }

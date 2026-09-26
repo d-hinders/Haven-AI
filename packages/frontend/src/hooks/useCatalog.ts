@@ -15,6 +15,13 @@ export type CatalogEntry = ApiSchema<'CatalogEntry'>
 /** `GET /merchants` / `GET /merchants/{slug}` wire shape (#3078, epic #3077). */
 export type Merchant = ApiSchema<'Merchant'>
 
+/**
+ * `GET /merchants/{slug}`'s `funding` array (#3331): where the merchant is
+ * paid on each listed chain that has an active, verified x402 offer. A
+ * merchant-locked budget pins its recipient to a `verified` entry's `pay_to`.
+ */
+export type MerchantFundingTarget = ApiSchema<'MerchantFundingTarget'>
+
 /** POST /catalog/submit response (epic #1717, issue #1715). */
 export type CatalogSubmissionAccepted = ApiSchema<'CatalogSubmissionAccepted'>
 
@@ -85,6 +92,7 @@ export function useMerchants() {
 export function useMerchant(slug: string) {
   const [merchant, setMerchant] = useState<Merchant | null>(null)
   const [offers, setOffers] = useState<CatalogEntry[]>([])
+  const [funding, setFunding] = useState<MerchantFundingTarget[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -99,12 +107,16 @@ export function useMerchant(slug: string) {
       setLoading(true)
       setError(null)
       setNotFound(false)
-      const res = await api.get<{ merchant: Merchant; offers: CatalogEntry[] }>(
-        `/merchants/${slug}`,
-      )
+      const res = await api.get<{
+        merchant: Merchant
+        offers: CatalogEntry[]
+        funding?: MerchantFundingTarget[]
+      }>(`/merchants/${slug}`)
       if (mine !== generation.current) return
       setMerchant(res.merchant)
       setOffers(res.offers ?? [])
+      // `?? []` — an absent key must degrade, not crash the route (#3093).
+      setFunding(res.funding ?? [])
     } catch (err) {
       if (mine !== generation.current) return
       if (err instanceof ApiRequestError && err.status === 404) {
@@ -121,5 +133,5 @@ export function useMerchant(slug: string) {
     fetchMerchant()
   }, [fetchMerchant])
 
-  return { merchant, offers, loading, error, notFound, refetch: fetchMerchant }
+  return { merchant, offers, funding, loading, error, notFound, refetch: fetchMerchant }
 }

@@ -79,6 +79,23 @@ describe('DelegationBudgetCard (#833)', () => {
     expect(document.body.textContent).not.toMatch(/delegation|caveat|redemption|userop|permission/i)
   })
 
+  it('names the merchant for a merchant-locked budget instead of its raw address (#3331)', async () => {
+    mockGet.mockReturnValue([
+      budget({ recipient_address: '0x' + 'f0'.repeat(20), merchant_id: 'm-1', merchant_slug: 'ampersend-demo-api', merchant_name: 'Ampersend Demo API' }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
+    expect(screen.getByText('pays Ampersend Demo API only')).toBeTruthy()
+    expect(screen.queryByText(/to 0x/)).toBeNull()
+  })
+
+  it('falls back to the address when a budget carries no merchant (ordinary pinned budget, unaffected by #3331)', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: '0x' + 'f0'.repeat(20), merchant_id: null, merchant_name: null })])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
+    expect(screen.getByText(/to 0xf0f0/)).toBeTruthy()
+  })
+
   it('grant: one Set-budget action calls grant with parsed atomic amount + period', async () => {
     mockGet.mockReturnValue([])
     mockGrant.mockResolvedValue({ ok: true })

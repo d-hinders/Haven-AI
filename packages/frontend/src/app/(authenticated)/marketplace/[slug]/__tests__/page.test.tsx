@@ -1,9 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { mockUseMerchant, mockUseAgents, mockNotFound } = vi.hoisted(() => ({
+const { mockUseMerchant, mockUseAgents, mockUseMerchantBudgets, mockNotFound } = vi.hoisted(() => ({
   mockUseMerchant: vi.fn(),
   mockUseAgents: vi.fn(),
+  mockUseMerchantBudgets: vi.fn(),
   mockNotFound: vi.fn(),
 }))
 
@@ -16,13 +17,17 @@ vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
 }))
 
+vi.mock('@/hooks/useMerchantBudgets', () => ({
+  useMerchantBudgets: () => mockUseMerchantBudgets(),
+}))
+
 vi.mock('next/navigation', () => ({
   useParams: () => ({ slug: 'ampersend-demo-api' }),
   notFound: () => mockNotFound(),
 }))
 
 import MerchantPage from '../page'
-import type { CatalogEntry, Merchant } from '@/hooks/useCatalog'
+import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 
 const merchant: Merchant = {
   id: 'm-1',
@@ -74,9 +79,9 @@ function offer(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
 
 describe('MerchantPage', () => {
   beforeEach(() => {
-    mockUseAgents.mockReturnValue({ agents: [] })
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
+    mockUseMerchantBudgets.mockReturnValue({ budgets: [], loading: false, error: null, forbidden: false, refetch: vi.fn() })
   })
 
   it('renders a loading state', () => {
@@ -210,5 +215,126 @@ describe('MerchantPage', () => {
     })
     render(<MerchantPage />)
     expect(screen.getByText('No offers listed yet')).toBeDefined()
+  })
+
+  // ── "Fund this merchant" (#3331) ──────────────────────────────────────────
+  const verifiedErc7710Funding: MerchantFundingTarget[] = [
+    { network: 'eip155:84532', chain_id: 84532, pay_to: '0x' + 'f0'.repeat(20), pay_to_status: 'verified', erc7710: true },
+  ]
+  const verifiedNotErc7710Funding: MerchantFundingTarget[] = [
+    { network: 'eip155:84532', chain_id: 84532, pay_to: '0x' + 'f0'.repeat(20), pay_to_status: 'verified', erc7710: false },
+  ]
+  const unstatedFunding: MerchantFundingTarget[] = [
+    { network: 'eip155:84532', chain_id: 84532, pay_to: null, pay_to_status: 'unstated', erc7710: false },
+  ]
+
+  it('renders the action when a listed chain has a verified, ERC-7710 payTo', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.getByRole('button', { name: 'Fund this merchant' })).toBeDefined()
+  })
+
+  it('withholds the action, with open-budget copy, when the only verified payTo is not ERC-7710', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedNotErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.getByText(/use an agent's open budget/)).toBeDefined()
+  })
+
+  it('renders neither the action nor the open-budget copy with no verified payTo at all', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: unstatedFunding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByText(/use an agent's open budget/)).toBeNull()
+  })
+
+  it('never renders the action for a coming_soon merchant, even with funding data', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant: { ...merchant, listing_status: 'coming_soon', offer_count: 0 },
+      offers: [],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+  })
+
+  it('renders merchant-locked budgets, with pin_status and #1319 provenance, when GET /merchants/:slug/budgets returns rows', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    mockUseMerchantBudgets.mockReturnValue({
+      budgets: [
+        {
+          agent_id: 'agent-1',
+          agent_name: 'Research Agent',
+          chain_id: 84532,
+          token_address: '0x' + 'aa'.repeat(20),
+          recipient_address: '0x' + 'f0'.repeat(20),
+          delegation_hash: '0x' + 'bb'.repeat(32),
+          budget_atomic: '10000000',
+          period_seconds: 2_592_000,
+          expires_at: '4102444800',
+          remaining_atomic: '10000000',
+          remaining_is_from_chain: false,
+          pin_status: 'stale',
+        },
+      ],
+      loading: false,
+      error: null,
+      forbidden: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.getByText('Research Agent')).toBeDefined()
+    expect(screen.getByText('Stale')).toBeDefined()
+    expect(screen.getByText(/could not confirm the live figure/)).toBeDefined()
+  })
+
+  it('renders no merchant-budgets section when there are none', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer()],
+      funding: verifiedErc7710Funding,
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    render(<MerchantPage />)
+    expect(screen.queryByTestId('merchant-budgets-list')).toBeNull()
   })
 })

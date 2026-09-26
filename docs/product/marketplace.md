@@ -22,10 +22,15 @@ covers:
   - packages/frontend/src/components/marketplace/OffersTable.tsx
   - packages/frontend/src/components/marketplace/OfferRow.tsx
   - packages/frontend/src/components/marketplace/PayWithHavenBlock.tsx
+  - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
+  - packages/frontend/src/components/marketplace/MerchantBudgetsList.tsx
+  - packages/frontend/src/components/DelegationBudgetCard.tsx
+  - packages/frontend/src/hooks/useDelegationBudget.ts
+  - packages/frontend/src/hooks/useMerchantBudgets.ts
   - packages/frontend/src/lib/marketplace.ts
   - packages/frontend/src/hooks/useCatalog.ts
   - packages/frontend/src/components/CatalogSubmitModal.tsx
-last-verified: "2026-09-20"
+last-verified: "2026-09-26"
 ---
 
 # Marketplace
@@ -107,8 +112,9 @@ caller, including `haven_discover_tools`.
 
 An owner can give an agent a budget that pays **one merchant only**. It is an
 ordinary recipient-pinned budget delegation, and its pin is the merchant's
-verified payTo on the agent's chain. This section covers the backend slice;
-the "Fund this merchant" modal on the merchant page is the frontend slice.
+verified payTo on the agent's chain. This section covers the backend slice
+and the "Fund this merchant" modal, the frontend slice — see *Screens* below
+for the modal's own shape.
 
 - **Where a merchant is paid.** The catalog refresh probe (at backend boot,
   then hourly) already reads each offer's 402 challenge for its price. It now
@@ -157,9 +163,10 @@ the "Fund this merchant" modal on the merchant page is the frontend slice.
   Activating either replaces the other: they carry the same on-chain
   authority, and two live grants in one slot would make selection ambiguous.
   Activating a plain pinned budget to a merchant's payTo therefore replaces that
-  merchant's budget, and drops its merchant label. The fund-merchant modal
-  (the frontend slice, not shipped yet) is to warn about this before the
-  owner signs.
+  merchant's budget, and drops its merchant label. The fund-merchant modal's
+  review step warns about this before the owner signs — the same warning
+  fires whether the slot the owner is about to replace holds a plain budget
+  or another active budget already locked to this merchant.
 - **`GET /merchants/{slug}/budgets`** is dashboard-session only (an agent key
   gets 403). It lists the owner's active, unexpired merchant-locked budgets
   for the merchant on agents that are not revoked, each with:
@@ -357,4 +364,43 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   `Date.now()`-relative and the fixtures carry fixed `verified_at` values.
 - `CatalogPanel.tsx` and `app/(authenticated)/catalog/page.tsx` are deleted;
   `CatalogCard` is now `components/marketplace/OfferRow.tsx`;
-  `hooks/useCatalog.ts` gains `useMerchants()` / `useMerchant(slug)`.
+  `hooks/useCatalog.ts` gains `useMerchants()` / `useMerchant(slug)`, and
+  `useMerchant`'s response now also carries `funding` (#3331).
+- **"Fund this merchant"** (`components/marketplace/FundMerchantModal.tsx`,
+  #3331) — rendered on the merchant page only when the merchant is live and
+  at least one listed chain's `funding` entry is `verified` and `erc7710`.
+  When a chain's payTo is verified but not `erc7710`, the action is withheld
+  and the page states instead that payments there use an agent's open budget,
+  which must stay open — no action, no modal. The modal: pick one of the
+  agents whose chain qualifies (`eligibleFundingAgents`), an amount in
+  whichever token the merchant actually sells in on that chain
+  (`merchantTokenOptions`, restricted to its ERC-7710 offers) and a period, a
+  review step naming the agent, the budget, and the merchant's payTo
+  (shortened, never editable — the server derives the recipient from
+  `merchant_slug`), then ONE signature through `useDelegationBudget`'s own
+  `grant()` — the same build → sign → activate composition the agent page's
+  budget form uses, extended with `merchant_slug` rather than forked. The
+  review step also states which budget a payment to the merchant will use
+  (this one, preferred; the open budget still covers everything else) and, if
+  the chosen agent already has an ACTIVE plain budget pinned to the same
+  address and token, or an active budget already locked to this merchant,
+  warns that signing replaces it (same `(agent, token, recipient)` slot).
+  `grant()`'s build-step refusals (#3331's four named 409s) surface with their
+  own copy rather than a generic failure. Copy never says "delegation",
+  "recipient pin" or "ERC-7710" — outcome language only, per
+  `EditBudgetModal.tsx`'s established shape.
+- **Merchant-locked budgets on the merchant page**
+  (`components/marketplace/MerchantBudgetsList.tsx`, reading
+  `useMerchantBudgets` → `GET /merchants/{slug}/budgets`) — one row per agent
+  with an active merchant-locked budget here: remaining vs. total this
+  period, the `pin_status` (`current` unlabelled, `stale` / `unverified` /
+  `not_erc7710` each with their own one-line explanation), and the #1319
+  provenance note when `remaining_is_from_chain` is false. Renders nothing
+  when the merchant has none — the same "nothing yet" absence
+  `DelegationBudgetCard` uses for a fresh agent, not an empty section.
+- **The agent page's budget card** (`components/DelegationBudgetCard.tsx`)
+  names a merchant-locked budget's merchant ("pays `<merchant>` only") instead
+  of its raw recipient address, reading the `merchant_name` `GET
+  /agents/{id}/delegations` now carries (#3331). A budget whose merchant was
+  since deleted, or that lost its label to a re-key (#3386), falls back to the
+  address.

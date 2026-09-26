@@ -26,8 +26,8 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
-import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
-import { ampersendDemoApi, bergetAi, havenDemoStore } from './fixtures/marketplace'
+import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, testAgent } from './fixtures/haven-api'
+import { ampersendDemoApi, bergetAi, havenDemoStore, havenDemoStoreOffers } from './fixtures/marketplace'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
 import { VIEWPORTS as SHARED_VIEWPORTS } from '../scripts/evidence-viewports.mjs'
@@ -249,4 +249,86 @@ test.describe('marketplace visual regression', () => {
       })
     }
   }
+
+  /**
+   * "Fund this merchant" (#3331) — element-scoped, like the Settings →
+   * Accounting backfill dialog (`settings-accounting.visual.spec.ts`), not a
+   * full-page SCENARIOS entry: the dialog is the same size regardless of the
+   * page behind it. `havenDemoStore`'s one offer already advertises ERC-7710
+   * (`fixtures/marketplace.ts`), so only its `funding` and an eligible agent
+   * on its chain (84532) need overriding here — `testAgent` is chain 8453,
+   * i.e. ineligible, which is deliberate: this override adds a SECOND agent
+   * rather than reassigning the shared one every other spec pins its chain
+   * against. `/agents/:id/account-signers` and `/agents/:id/delegations`
+   * already answer any agent id generically (`fixtures/haven-api.ts`), so
+   * nothing else needs overriding for the new agent to be `ready`.
+   */
+  test('merchant-page fund-merchant modal renders pixel-stable (desktop)', async ({ page }) => {
+    const fundEligibleAgent = {
+      ...testAgent,
+      id: 'agent-fund-e2e',
+      name: 'Fund Agent',
+      account_chain_id: 84532,
+    }
+    const fundedHavenDemoStore = {
+      ...havenDemoStore,
+      networks: ['eip155:84532'],
+    }
+    const payTo = '0x' + 'f0'.repeat(20)
+
+    await page.route('**/api/**', async (route) => {
+      const request = route.request()
+      const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+      if (request.method() === 'GET' && path === '/agents') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ agents: [testAgent, fundEligibleAgent] }),
+        })
+        return
+      }
+      if (request.method() === 'GET' && path === `/merchants/${havenDemoStore.slug}`) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            merchant: fundedHavenDemoStore,
+            offers: havenDemoStoreOffers,
+            funding: [
+              { network: 'eip155:84532', chain_id: 84532, pay_to: payTo, pay_to_status: 'verified', erc7710: true },
+            ],
+          }),
+        })
+        return
+      }
+      if (request.method() === 'GET' && path === `/merchants/${havenDemoStore.slug}/budgets`) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ budgets: [] }) })
+        return
+      }
+      await route.fallback()
+    })
+
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.clock.setFixedTime(FROZEN_NOW)
+    await page.goto(`/marketplace/${havenDemoStore.slug}`)
+    await expect(page.getByRole('heading', { name: havenDemoStore.name, exact: true })).toBeVisible({
+      timeout: ANCHOR_TIMEOUT_MS,
+    })
+    await dismissMobileSidebar(page)
+
+    await page.getByRole('button', { name: 'Fund this merchant' }).click()
+    const dialog = page.getByTestId('fund-merchant-modal')
+    await expect(dialog).toHaveCount(1)
+    await expect(dialog.getByRole('heading', { name: `Fund ${havenDemoStore.name}` })).toHaveCount(1)
+    await expect(dialog.getByLabel('Agent')).toHaveCount(1)
+    await expect(dialog.getByText(`Pays only ${havenDemoStore.name}`)).toHaveCount(1)
+
+    await page.evaluate(() => document.fonts.ready)
+    await expect(dialog).toHaveScreenshot('merchant-page-fund-merchant-modal-desktop.png', {
+      animations: 'disabled',
+      caret: 'hide',
+      maxDiffPixels: 50,
+      threshold: PIXEL_THRESHOLD,
+    })
+  })
 })

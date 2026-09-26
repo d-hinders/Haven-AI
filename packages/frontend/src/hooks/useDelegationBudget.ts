@@ -82,6 +82,14 @@ export interface DelegationBudget {
   budget_atomic: string
   period_seconds: number
   expires_at: number
+  /**
+   * The merchant a merchant-locked budget (#3331) was issued for, or null for
+   * every other row (and after that merchant is deleted). All three travel
+   * together — a row either names all three or none.
+   */
+  merchant_id?: string | null
+  merchant_slug?: string | null
+  merchant_name?: string | null
 }
 
 interface BuildResponse {
@@ -113,6 +121,13 @@ export interface GrantInput {
   recipientAddress?: Address | null
   budgetAtomic: string
   periodSeconds: number
+  /**
+   * A merchant-locked budget (#3331): the server pins the recipient to this
+   * live merchant's verified payTo on the agent's chain and records the
+   * merchant on the row. `recipientAddress` must be omitted (or left null) —
+   * the server derives it, and a sent one that disagrees is a 409.
+   */
+  merchantSlug?: string
 }
 
 /**
@@ -120,10 +135,18 @@ export interface GrantInput {
  * an oversized batch by NAMING per-budget revocation as the remedy, and a
  * caller that flattens it into the generic failure strands the user on a
  * screen that repeats a refusal without ever saying what to do instead.
+ *
+ * `refused` (#3331) is the merchant-locked build's own named 409s (no
+ * verified payTo, not every offer ERC-7710, the payTo is one of the agent's
+ * own addresses, a sent recipient disagrees with the payTo) — additive:
+ * every existing caller that does not name it keeps folding it into its
+ * generic failure copy, exactly as it already does for `too_many`. `detail`
+ * is the backend's own sentence, the same shape `editBudget`'s `refused`
+ * already carries.
  */
 export type BudgetResult =
   | { ok: true }
-  | { ok: false; reason: 'cancelled' | 'failed' | 'too_many' }
+  | { ok: false; reason: 'cancelled' | 'failed' | 'too_many' | 'refused'; detail?: string }
 
 /**
  * The edit-in-place result (#3166). Distinct from `BudgetResult` because the
@@ -260,12 +283,25 @@ export function useDelegationBudget(
     async (input: GrantInput): Promise<BudgetResult> => {
       setBusy(true)
       try {
-        const built = await api.post<BuildResponse>(`/agents/${agentId}/delegations/build`, {
-          token_address: input.tokenAddress,
-          recipient_address: input.recipientAddress ?? null,
-          budget_atomic: input.budgetAtomic,
-          period_seconds: input.periodSeconds,
-        })
+        let built: BuildResponse
+        try {
+          built = await api.post<BuildResponse>(`/agents/${agentId}/delegations/build`, {
+            token_address: input.tokenAddress,
+            recipient_address: input.recipientAddress ?? null,
+            budget_atomic: input.budgetAtomic,
+            period_seconds: input.periodSeconds,
+            ...(input.merchantSlug ? { merchant_slug: input.merchantSlug } : {}),
+          })
+        } catch (err) {
+          // Named build refusals (revoked agent, re-key in flight, off-rail
+          // account, and — #3331 — the merchant-locked refusals) carry the
+          // backend's own sentence; pass it through instead of the generic
+          // failure, exactly as `editBudget` already does for its build step.
+          if (err instanceof Error && err.message.trim()) {
+            return { ok: false, reason: 'refused', detail: err.message }
+          }
+          throw err
+        }
         let signature: string
         if (signingPath === 'passkey' && signers) {
           // ONE passkey ceremony — the kit signs the delegation itself; the

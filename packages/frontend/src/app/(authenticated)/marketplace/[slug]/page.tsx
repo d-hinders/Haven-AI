@@ -10,9 +10,12 @@ import { Button } from '@/components/ui/Button'
 import { MerchantHeader } from '@/components/marketplace/MerchantHeader'
 import { OffersTable } from '@/components/marketplace/OffersTable'
 import { PayWithHavenBlock } from '@/components/marketplace/PayWithHavenBlock'
+import FundMerchantModal, { eligibleFundingAgents } from '@/components/marketplace/FundMerchantModal'
+import { MerchantBudgetsList } from '@/components/marketplace/MerchantBudgetsList'
 import CatalogSubmitModal from '@/components/CatalogSubmitModal'
 import { useAgents } from '@/hooks/useAgents'
 import { useMerchant } from '@/hooks/useCatalog'
+import { useMerchantBudgets } from '@/hooks/useMerchantBudgets'
 
 /**
  * The way back on a phone, where Marketplace lives in the More drawer —
@@ -34,9 +37,14 @@ function BackToMarketplace() {
 export default function MerchantPage() {
   const params = useParams<{ slug: string }>()
   const slug = params.slug
-  const { merchant, offers, loading, error, notFound, refetch } = useMerchant(slug)
+  const { merchant, offers, funding = [], loading, error, notFound, refetch } = useMerchant(slug)
   const { agents } = useAgents()
   const [submitOpen, setSubmitOpen] = useState(false)
+  const [fundOpen, setFundOpen] = useState(false)
+  const comingSoonForBudgets = merchant?.listing_status === 'coming_soon'
+  const { budgets: merchantBudgets, refetch: refetchMerchantBudgets } = useMerchantBudgets(slug, {
+    enabled: !comingSoonForBudgets,
+  })
 
   if (loading) {
     return (
@@ -100,6 +108,16 @@ export default function MerchantPage() {
 
   const comingSoon = merchant.listing_status === 'coming_soon'
 
+  // #3331: a merchant-locked budget can only be pinned to a VERIFIED payTo
+  // that every offer there advertises ERC-7710 through. When a chain has a
+  // verified payTo but not every offer is ERC-7710, the action is withheld
+  // and the page says why — payments there use the agent's open budget
+  // instead, and that budget must stay open (`docs/product/marketplace.md`).
+  const verifiedFunding = funding.filter((f) => f.pay_to_status === 'verified')
+  const pinnableFunding = verifiedFunding.filter((f) => f.erc7710)
+  const showFundAction = !comingSoon && pinnableFunding.length > 0
+  const showOpenBudgetNote = !comingSoon && !showFundAction && verifiedFunding.length > 0
+
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
       <BackToMarketplace />
@@ -123,6 +141,27 @@ export default function MerchantPage() {
             <h2 className="mb-2 text-sm font-semibold text-[var(--v2-ink)]">Pay this with Haven</h2>
             <PayWithHavenBlock offers={offers} />
           </section>
+
+          {showFundAction ? (
+            <div>
+              <Button size="sm" onClick={() => setFundOpen(true)}>
+                Fund this merchant
+              </Button>
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                Give one of your agents a budget that pays only {merchant.name}.
+              </p>
+            </div>
+          ) : showOpenBudgetNote ? (
+            <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              Payments to {merchant.name} use an agent's open budget, not a merchant-only one — keep that budget
+              open on the agent's page rather than pinning it to a recipient.
+            </p>
+          ) : null}
+
+          {merchantBudgets && merchantBudgets.length > 0 ? (
+            <MerchantBudgetsList budgets={merchantBudgets} />
+          ) : null}
+
           <section>
             <h2 className="mb-2 text-sm font-semibold text-[var(--v2-ink)]">Offers</h2>
             <OffersTable offers={offers} agents={agents} />
@@ -141,6 +180,20 @@ export default function MerchantPage() {
         onClose={() => setSubmitOpen(false)}
         onVerifiedPayable={() => void refetch()}
       />
+
+      {fundOpen ? (
+        <FundMerchantModal
+          open={fundOpen}
+          onClose={() => setFundOpen(false)}
+          merchant={merchant}
+          funding={funding}
+          offers={offers}
+          agents={agents}
+          onGranted={() => {
+            void refetchMerchantBudgets()
+          }}
+        />
+      ) : null}
     </div>
   )
 }

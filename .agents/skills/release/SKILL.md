@@ -206,8 +206,9 @@ console.log(r.run
   : `no admissible money-flow success in the last ${2 * freshnessHours}h: the gate will refuse too — dispatch qa-dev`)
 '
 
-# If the printed `created` is older than QA_FRESHNESS_HOURS (30 h by default),
-# the gate refuses it as stale whatever the diff below says: dispatch qa-dev.
+# If the printed `created` is QA_FRESHNESS_HOURS + 1 h old or more (the gate
+# counts whole hours; 31 h at the default 30), the gate refuses it as stale
+# whatever the diff below says: dispatch qa-dev.
 # Run both snippets from the repo root (they import ./scripts/ci/qa-freshness.mjs).
 # Money-path files changed since that commit. Any output means the gate blocks.
 git diff --name-only <that-sha>..origin/dev | node --input-type=module -e '

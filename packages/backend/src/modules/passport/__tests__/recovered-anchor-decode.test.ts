@@ -77,7 +77,13 @@ beforeEach(() => {
 describe('#1847 — recovered anchors are attributed from the transaction bytes', () => {
   it('decodes agentEoa and smartAccount out of the mined attest calldata', async () => {
     getTransactionReceipt.mockResolvedValue({ status: 1, logs: [attestedLog(AGENT_EOA)] })
-    getTransaction.mockResolvedValue({ data: attestCalldataFor(AGENT_EOA, SMART_ACCOUNT) })
+    // #3342: the proven-ours reader also verifies the tx targeted EAS and was
+    // sent by the log's attester — the fixture tx must carry both.
+    getTransaction.mockResolvedValue({
+      data: attestCalldataFor(AGENT_EOA, SMART_ACCOUNT),
+      to: getEasDeployment(CHAIN).eas,
+      from: RELAYER,
+    })
 
     const result = await recoverAnchorFromReceipt(CHAIN, TX)
     expect(result).not.toBeNull()

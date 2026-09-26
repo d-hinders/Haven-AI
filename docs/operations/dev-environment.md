@@ -5,6 +5,7 @@ contract: true
 covers:
   - .github/workflows/dev-gate.yml
   - .github/workflows/qa-dev.yml
+  - scripts/ci/qa-freshness.mjs
   - .env.dev.example
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
@@ -734,3 +735,13 @@ project owner — collaborators have Viewer access, not env-var write access.
 > run and its `money-flow` job still conclude `success`, so the promotion
 > freshness gate described above selects the same runs as before. Nothing else
 > in this file's coverage was touched; this note is the only edit.
+
+> **Re-verified #3361 (2026-09-26):** the promotion freshness gate described
+> above now reads every run-level qa-dev success created within twice
+> `QA_FRESHNESS_HOURS`, instead of the newest 30. Rows whose run name names
+> another deployment environment or state, or that finished in under 60 s, are
+> dropped before the job lookup, and the lookups are budgeted. The rules that
+> select the anchoring run — SHA ancestry and the `money-flow` job's
+> conclusion (#2404) — and the recency and coverage checks are unchanged, so
+> every statement above still holds. The `qa-dev.yml` edit is a comment. Nothing
+> else in this file's coverage was touched; this note is the only edit.

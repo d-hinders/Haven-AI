@@ -176,36 +176,40 @@ Check whether a green run has actually **covered** the money-path files now on
 matcher rather than approximating it:
 
 ```sh
-# The newest green qa-dev runs and the commits they ran at. This is a local
-# APPROXIMATION of the gate's selector (#2404): the gate admits a run only if
-# its event is deployment_status/schedule/workflow_dispatch, its commit is an
-# ancestor of `dev`'s tip, and its `money-flow` JOB concluded success — so
-# take the newest row whose event is one of those three and whose SHA is on
-# `dev`. There is deliberately no `--branch` filter: the gate does not use one
-# (a post-deploy run does report `headBranch=dev` — measured, #2427 — but a
-# branch name says nothing about which commit the harness exercised).
+# The green qa-dev run the gate anchors to, and the commit it ran at. This
+# calls the gate's OWN selection (`findGreenRun` in qa-freshness.mjs, #3361):
+# the same query (every run-level success created within 2 × QA_FRESHNESS_HOURS),
+# the same pre-filter, and the same rules (#2404): the event, `headBranch == dev`
+# for schedule/dispatch, the commit on `dev`, and the `money-flow` JOB
+# concluding success. Most qa-dev runs are gate-skipped deployment_status runs
+# that still conclude success at run level (#3348), which is why a hand-rolled
+# `gh run list --status=success` approximation over-reports. Ancestry is taken
+# against origin/dev, the promotion head. The printed sha is <that-sha> below.
+# "No admissible run" means the gate refuses too: dispatch qa-dev.
 # `gh` is unavailable in the remote Claude Code environment — use the Actions UI
 # or the GitHub MCP (list workflow runs for qa-dev.yml) there.
-#
-# `--status=success` is the RUN conclusion, and most qa-dev runs are
-# gate-skipped deployment_status runs that still conclude success (#3348;
-# 10 of the newest 10 on 2026-09-26). So walk the same 30 rows the gate reads
-# (GREEN_RUN_WINDOW) and apply its four rules: the event, `headBranch == dev`
-# for schedule/dispatch, the commit on `dev`, and the `money-flow` JOB
-# concluding success. The printed sha is <that-sha> below. An empty result
-# means the gate refuses too (#3361): dispatch qa-dev.
-found=
-for id in $(gh run list --workflow=qa-dev.yml --status=success --limit=30 --json databaseId,event \
-    --jq '.[] | select(.event=="deployment_status" or .event=="schedule" or .event=="workflow_dispatch") | .databaseId'); do
-  read -r c sha ev br <<<"$(gh run view "$id" --json jobs,headSha,event,headBranch \
-    --jq '[([.jobs[] | select(.name=="money-flow") | .conclusion][0] // "none"), .headSha, .event, .headBranch] | @tsv')"
-  [ "$c" = success ] || continue                                   # the harness ran and passed
-  [ "$ev" = deployment_status ] || [ "$br" = dev ] || continue     # schedule/dispatch must be on dev
-  git merge-base --is-ancestor "$sha" origin/dev || continue       # its commit is on dev
-  found=1; echo "run $id  sha $sha  event $ev  branch $br"; break
-done
-[ -n "$found" ] || echo "no admissible money-flow success in the newest 30 run-level greens: the gate will refuse too (#3361) — dispatch qa-dev"
+git fetch -q origin dev
+node --input-type=module -e '
+import { execFileSync } from "node:child_process"
+import { findGreenRun, jobsQueryArgs } from "./scripts/ci/qa-freshness.mjs"
+const gh = (args) => execFileSync("gh", args, { encoding: "utf8", maxBuffer: 64 << 20 })
+const repo = "d-hinders/Haven-AI"
+const isAncestorOfHead = (sha) => {
+  try { execFileSync("git", ["merge-base", "--is-ancestor", sha, "origin/dev"], { stdio: "ignore" }); return true }
+  catch (e) { return e.status === 1 ? false : null }
+}
+const jobsFor = (id) => { try { return JSON.parse(gh(jobsQueryArgs(repo, id))).jobs } catch { return null } }
+const freshnessHours = Number(process.env.QA_FRESHNESS_HOURS || 30)
+const r = findGreenRun({ repo, freshnessHours, nowMs: Date.now(), gh, isAncestorOfHead, jobsFor })
+console.log(r.run
+  ? `run ${r.run.databaseId}  sha ${r.run.headSha}  event ${r.run.event}  created ${r.run.createdAt}`
+  : `no admissible money-flow success in the last ${2 * freshnessHours}h: the gate will refuse too — dispatch qa-dev`)
+'
 
+# If the printed `created` is QA_FRESHNESS_HOURS + 1 h old or more (the gate
+# counts whole hours; 31 h at the default 30), the gate refuses it as stale
+# whatever the diff below says: dispatch qa-dev.
+# Run both snippets from the repo root (they import ./scripts/ci/qa-freshness.mjs).
 # Money-path files changed since that commit. Any output means the gate blocks.
 git diff --name-only <that-sha>..origin/dev | node --input-type=module -e '
 import { readFileSync } from "node:fs"

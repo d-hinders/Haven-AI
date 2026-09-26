@@ -600,24 +600,137 @@ export const BRANCH_LABELLED_EVENTS = ['schedule', 'workflow_dispatch']
 export const MONEY_FLOW_JOB = 'money-flow'
 
 /**
- * How many green runs the query fetches before the selector gives up. A
- * busy day dispatches qa-dev.yml a dozen times; #2273's gate-skipped
- * deployment_status runs add two or three `success`-conclusion rows per
- * deploy that rule 4 refuses. 30 comfortably spans a day of both.
+ * How far back the green-run query reaches, as a multiple of
+ * QA_FRESHNESS_HOURS (#3361). The query used to take the newest 30 run-level
+ * successes. Most qa-dev runs are #2273's gate-skipped deployment_status runs,
+ * which still conclude `success` at run level: of the 959 run-level successes
+ * among the newest 1000 qa-dev runs at 2026-09-26T11:10Z, 80 had
+ * `money-flow: success` (#3361 doc review, via the jobs API). A real green inside the freshness window could
+ * therefore fall out of the 30, as it did on dev-gate run 36161561881. The
+ * query now takes every run-level success created within TWICE the freshness
+ * window. It reaches twice as far so that a green just past the window is
+ * still found and refused as `stale` with its age, instead of reported as
+ * "no run". `preFilterHarnessCandidates` drops the rows that cannot have run
+ * the harness before any job lookup is spent on them.
  */
-export const GREEN_RUN_WINDOW = 30
+export const GREEN_RUN_WINDOW_FACTOR = 2
+
+/**
+ * `gh run list` paginates up to this many rows, and the runs API caps a
+ * filtered query at 1000 results. A 60 h query (twice the default window)
+ * returned 469 run-level successes at 2026-09-26T11:21Z (findGreenRun's own
+ * `fetched`). Per UTC day, 2026-09-13..26 held 40–215 (the runs API's
+ * `total_count` for `status=success&created=<day>`). A sliding window over
+ * every run-level success's `createdAt` since 2026-09-12 put the densest 60 h
+ * at about 520 (ending 2026-09-17T18:49Z) and the densest 130 h at about 1000.
+ * So the cap is about 2× away at the default, and a QA_FRESHNESS_HOURS above
+ * about 65 h (a 130 h query) can reach it in a busy stretch. `findGreenRun`
+ * reports a result that reaches the cap as possibly truncated, and truncation
+ * only drops the OLDEST rows.
+ */
+export const GREEN_RUN_LIMIT = 1000
+
+/**
+ * Jobs-API lookups one selection may spend (#3361). After the pre-filter,
+ * nearly every remaining row is a real harness run, so the answer comes within
+ * a few lookups. The budget bounds the worst case, a long red streak. Once it
+ * runs out `findGreenRun` returns NO run: an exhausted budget can block a
+ * promotion but never decide one. (Refusing only the unread row is not
+ * enough — inside the tie-break loop that would let an older, better-provenance
+ * row at the same commit go unread and change which run's age is judged.)
+ */
+export const JOB_LOOKUP_BUDGET = 40
+
+/** The Railway environment qa-dev.yml's gate runs the harness for (#2273). */
+export const RAILWAY_DEV_ENVIRONMENT = 'Haven AI / dev'
+
+/**
+ * qa-dev.yml names each deployment_status run
+ * `post-deploy <sha> → <environment> (<state>)` (its `run-name`). Returns the
+ * parts, or null for any other title — a schedule or dispatch run is titled
+ * `QA — money-flow (dev)`. Shared with guard-freshness.mjs (#3340), whose test
+ * pins the workflow's `run-name` to this shape so the two cannot drift apart.
+ */
+export function parseDeployRunName(title) {
+  const m = /^post-deploy ([0-9a-f]{7,40}) → (.+) \(([a-z_]+)\)$/.exec(String(title ?? ''))
+  return m ? { sha: m[1], environment: m[2], state: m[3] } : null
+}
+
+/**
+ * A green run shorter than this cannot have run the money-flow harness (#3340).
+ * Measured over qa-dev's run-level `success` dev runs (1000 deployment_status
+ * runs, 2026-09-18T23:37Z → 2026-09-26, `run_started_at → updated_at`; #3340 review):
+ * gate-only greens took 5–46 s, with one slow gate at 85 s, and real harness
+ * runs 153–505 s. So 60 s drops almost every gate-only green and no harness
+ * run; a gate-only run over 60 s still goes to the job lookup, which refuses
+ * it. In guard-freshness, without this floor every deploy's superseded gate-only
+ * green cost one lookup and the lookup budget reached ~0.85 day back instead of
+ * 4 days. Only ever drops runs — a harness run cannot finish in a minute — so it
+ * can make a gate stricter, never greener. Measured from the run's start (not
+ * `created_at`, which includes queue time); unknown timestamps are kept.
+ */
+export const MIN_HARNESS_RUN_SECONDS = 60
+
+/**
+ * True when a run's own timestamps prove it too short to have run the harness.
+ * Reads `runStartedAt` (the REST field, as guard-freshness maps it) or
+ * `startedAt` (the `gh run list --json` field).
+ */
+export function tooShortForHarness(run) {
+  const start = Date.parse(run?.runStartedAt ?? run?.startedAt ?? '')
+  const end = Date.parse(run?.updatedAt ?? '')
+  if (Number.isNaN(start) || Number.isNaN(end)) return false
+  return end - start < MIN_HARNESS_RUN_SECONDS * 1000
+}
+
+/**
+ * Split the green-run rows into those that could have run the harness and
+ * those that provably could not (#3361), before any job lookup:
+ * - a deployment_status title naming another environment (Vercel's
+ *   `Preview`) or another state (`in_progress`) — the gate skips those
+ *   unconditionally;
+ * - a run too short to have run the harness (`tooShortForHarness`).
+ * An unparseable title (schedule, dispatch) and unknown timestamps are KEPT:
+ * the selector's own rules decide, as before. The filter only removes rows,
+ * so it can make the gate stricter, never greener.
+ */
+export function preFilterHarnessCandidates(rows) {
+  const kept = []
+  const dropped = []
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const t = parseDeployRunName(row?.displayTitle)
+    if (t && (t.environment !== RAILWAY_DEV_ENVIRONMENT || t.state !== 'success')) {
+      dropped.push({ databaseId: row?.databaseId ?? null, reason: 'title' })
+    } else if (tooShortForHarness(row)) {
+      dropped.push({ databaseId: row?.databaseId ?? null, reason: 'duration' })
+    } else {
+      kept.push(row)
+    }
+  }
+  return { kept, dropped }
+}
 
 /**
  * The exact `gh run list` query the gate trusts (#1047 wiring test): always
- * this workflow, only successes, newest first, a bounded window — and NO
- * branch filter (#2404). "On dev" is decided by `selectGreenRun` on the run's
+ * this workflow, only successes, newest first, every run created within
+ * GREEN_RUN_WINDOW_FACTOR × the freshness window (#3361) — and NO branch
+ * filter (#2404). "On dev" is decided by `selectGreenRun` on the run's
  * SHA, because a branch name says nothing about which commit the harness
  * exercised — a `deployment_status` run does report `headBranch: dev`
  * (measured, #2427) and the selector ignores it for that event.
  * `event` and `headBranch` are in the projection because the selector
  * fails closed without them: a row with no `event` is refused, never assumed.
+ * `displayTitle`, `startedAt` and `updatedAt` feed `preFilterHarnessCandidates`.
  */
-export function greenRunQueryArgs(repo) {
+export function greenRunQueryArgs(repo, { freshnessHours = 30, nowMs = Date.now() } = {}) {
+  if (!(Number.isFinite(freshnessHours) && freshnessHours > 0)) {
+    throw new Error(`QA_FRESHNESS_HOURS must be a positive number, got '${freshnessHours}'`)
+  }
+  const sinceMs = nowMs - GREEN_RUN_WINDOW_FACTOR * freshnessHours * 3600 * 1000
+  if (Number.isNaN(new Date(sinceMs).getTime())) {
+    throw new Error(`QA_FRESHNESS_HOURS '${freshnessHours}' reaches past any representable date`)
+  }
+  const since = new Date(sinceMs).toISOString()
   return [
     'run',
     'list',
@@ -627,10 +740,12 @@ export function greenRunQueryArgs(repo) {
     'qa-dev.yml',
     '--status',
     'success',
+    '--created',
+    `>=${since}`,
     '--limit',
-    String(GREEN_RUN_WINDOW),
+    String(GREEN_RUN_LIMIT),
     '--json',
-    'createdAt,headSha,databaseId,event,headBranch',
+    'createdAt,headSha,databaseId,event,headBranch,displayTitle,startedAt,updatedAt',
   ]
 }
 
@@ -769,9 +884,32 @@ function gh(args) {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).trim()
 }
 
-function greenRunWindowFor(repo) {
-  const out = gh(greenRunQueryArgs(repo))
-  return JSON.parse(out || '[]')
+/**
+ * Query → pre-filter → select, with the job lookups budgeted (#3361). Every
+ * side effect comes in as a parameter, so the path from the real query's
+ * arguments to the anchored run is testable end to end.
+ *
+ * Returns selectGreenRun's `{ run, jobs, refused }` plus `dropped` (the
+ * pre-filtered rows), `fetched` (rows the query returned), `truncated`
+ * (the query hit GREEN_RUN_LIMIT, so older rows may be missing), `lookups`
+ * and `budgetExhausted`.
+ */
+export function findGreenRun({ repo, freshnessHours, nowMs, gh: runGh, isAncestorOfHead, jobsFor, lookupBudget = JOB_LOOKUP_BUDGET }) {
+  const rows = JSON.parse(runGh(greenRunQueryArgs(repo, { freshnessHours, nowMs })) || '[]')
+  const { kept, dropped } = preFilterHarnessCandidates(rows)
+  let lookups = 0
+  let budgetExhausted = false
+  const budgeted = (databaseId) => {
+    if (lookups >= lookupBudget) {
+      budgetExhausted = true
+      return null // refused as unreadable: fail closed
+    }
+    lookups += 1
+    return jobsFor(databaseId)
+  }
+  const result = selectGreenRun(kept, { isAncestorOfHead, jobsFor: budgeted })
+  const decided = budgetExhausted ? { run: null, jobs: null, refused: result.refused } : result
+  return { ...decided, dropped, fetched: rows.length, truncated: rows.length >= GREEN_RUN_LIMIT, lookups, budgetExhausted }
 }
 
 /**
@@ -892,14 +1030,34 @@ function main() {
 
   const globs = loadMoneyPathGlobs()
 
+  // An invalid window is refused with evaluate's own message before it can
+  // surface as a query failure (#3361: the window now also sets query depth).
+  if (!(Number.isFinite(freshnessHours) && freshnessHours > 0)) {
+    const refusal = evaluate({ sourceBranch, latestGreenRun: null, changedMoneyPathFiles: [], nowMs: Date.now(), freshnessHours })
+    console.error(`::error::${refusal.message}`)
+    process.exit(1)
+  }
+
   // Which run counts is decided by selectGreenRun on the run's SHA and jobs,
   // pinned by test (#2404); the query itself is pinned by greenRunQueryArgs.
   let latestGreenRun = null
   try {
-    const { run, jobs, refused } = selectGreenRun(greenRunWindowFor(repo), {
+    const { run, jobs, refused, dropped, fetched, truncated, lookups, budgetExhausted } = findGreenRun({
+      repo,
+      freshnessHours,
+      nowMs: Date.now(),
+      gh,
       isAncestorOfHead: (sha) => isAncestorOf(sha, headSha),
       jobsFor: (databaseId) => jobsForRun(repo, databaseId),
     })
+    const byReason = (reason) => dropped.filter((d) => d.reason === reason).length
+    console.log(
+      `qa-freshness: ${fetched} run-level green(s) in the last ${GREEN_RUN_WINDOW_FACTOR * freshnessHours}h; ` +
+        `${byReason('title')} dropped for a non-dev or non-success deployment title and ${byReason('duration')} ` +
+        `for finishing in under ${MIN_HARNESS_RUN_SECONDS}s (neither can have run the harness); ${lookups} job lookup(s).`,
+    )
+    if (truncated) console.log(`::warning::qa-freshness: the run query hit its ${GREEN_RUN_LIMIT}-row limit; older runs may be missing.`)
+    if (budgetExhausted) console.log(`::warning::qa-freshness: the ${JOB_LOOKUP_BUDGET}-lookup budget ran out; no run is anchored, so the gate refuses. Re-run it, or dispatch qa-dev.`)
     for (const r of refused) {
       console.log(`qa-freshness: passed over run ${r.databaseId ?? '?'} (${r.event ?? '?'} at ${r.headSha ?? '?'}): ${r.reason}`)
     }

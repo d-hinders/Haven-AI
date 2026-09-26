@@ -6,6 +6,8 @@ covers:
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-failure-issue.mjs
   - scripts/ci/qa-retry.mjs
+  - scripts/ci/qa-freshness.mjs
+  - scripts/ci/guard-freshness.mjs
   - .github/workflows/docs-audit.yml
   - .github/workflows/qa-live.yml
   - .github/workflows/dev-gate.yml
@@ -742,6 +744,23 @@ it is not just "a run happened recently":
   so `--status success` alone would hand the gate a "green" run at the deployed
   SHA in which nothing ran. Every candidate the gate passes over is printed
   with its reason. A `repository_dispatch` run is refused outright (#2271).
+- **how far back it looks** ([#3361](https://github.com/d-hinders/Haven-AI/issues/3361)):
+  every run-level success created within twice `QA_FRESHNESS_HOURS`, not a
+  fixed number of rows. Most qa-dev runs are gate-skipped decoys, and the
+  newest 30 run-level successes once held no real green while one 5 h old
+  existed (dev-gate run 36161561881). Twice the window, so a green just past
+  it is still found and reported as stale with its age. Before any job
+  lookup, rows that cannot have run the harness are dropped and counted, not
+  printed one by one. These are a run name naming another deployment
+  environment or state, or a run that finished in under 60 s. The lookups
+  are capped (`JOB_LOOKUP_BUDGET`, 40). When they run out, no run is anchored
+  and the gate refuses, with a log line saying so; it never decides on a
+  partly read window. Because `QA_FRESHNESS_HOURS` now also sets how far back
+  the query reaches, a value above about 65 h (a 130 h query; a sliding window
+  since 2026-09-12 put the densest 130 h at about 1000 run-level successes and
+  the densest 60 h at about 520) can reach the runs API's 1000-row cap. The gate then warns that the result may be truncated, and only
+  the oldest rows are lost. Measured at 2026-09-26T11:21Z:
+  469 run-level successes in 60 h, 446 dropped, one lookup to anchor.
 - a **money-path `hotfix/* → main` blocks**. `qa-dev.yml` is a black-box
   harness against a *deployed* backend, and a hotfix is deployed nowhere until
   it merges — so a green run on any branch exercised different code. Clearing
@@ -867,9 +886,11 @@ concurrency group — decides in seconds whether the money-flow job runs at all:
    the gate fails **closed** (the run errors, nothing moves).
 
 The environment string and the creator login are Railway-side facts this repo
-does not control; they live once as constants in
-[`scripts/ci/guard-freshness.mjs`](../../scripts/ci/guard-freshness.mjs)
-(`RAILWAY_DEV_ENVIRONMENT`, `RAILWAY_DEPLOY_CREATOR`) and
+does not control; they live once as constants —
+`RAILWAY_DEV_ENVIRONMENT` in
+[`scripts/ci/qa-freshness.mjs`](../../scripts/ci/qa-freshness.mjs) (re-exported
+by `guard-freshness.mjs` since #3361) and `RAILWAY_DEPLOY_CREATOR` in
+[`scripts/ci/guard-freshness.mjs`](../../scripts/ci/guard-freshness.mjs) — and
 `scripts/ci/guard-freshness.test.mjs` pins the workflow's literals to them. If
 Railway renames the environment, the gate skips every run and the freshness
 guard goes red within its 4-day budget — the alarm working, not a false

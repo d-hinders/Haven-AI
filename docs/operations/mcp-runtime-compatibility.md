@@ -64,7 +64,7 @@ covers:
   - scripts/lint-next-steps-baseline.json
   - .github/workflows/ci.yml
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-25"
+last-verified: "2026-09-26"
 ---
 
 # MCP Runtime Compatibility
@@ -2484,6 +2484,43 @@ of any version literal, since nothing there should ever need a release to stay
 true (unlike the signer's compatibility numbers above, which are point-in-time
 by design). See [`07-edge-signer.md`](../architecture/07-edge-signer.md) for
 what each server's instructions say and why they differ in length.
+
+## Direct-payment signing handoff and old-signer refusal recovery (#3277, 2026-09-26)
+
+The hosted `haven_send` / `haven_pay` results now always name the byte-free
+signing handoff: `next_action: sign_and_submit_payment`,
+`next_tool: haven_sign` (rendered `mcp__haven-signer__haven_sign`),
+`next_arguments: { payment_id }` — the exact shape the hosted handoff map
+declares for the signer's `haven_sign` — plus a `signer_compatibility` notice
+carrying `direct_sign_context_version` (the SDK's
+`DIRECT_SIGN_CONTEXT_VERSION`, the version
+`GET /payments/:id/sign-context` serves) and the recovery instruction.
+
+This replaces #3271's planned "named only when the signer advertises support"
+gating (owner decision on #3277, 2026-09-24): the hosted server never sees the
+signer's `initialize` handshake, and per the #1547 lesson the notice must not
+ask the agent to compare a version against `initialize` instructions either.
+Old signers are handled by refusal recovery instead. Every installed pre-#3271
+signer that follows `haven_sign({ payment_id })` for a direct payment answers
+`SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`
+(its x402-context fetch draws the backend's 409) and has signed NOTHING — so
+the notice says: re-sign with `{ payload_hash, typed_data_b64 }` from the
+payment result, passed through unchanged, then update the connector by
+rerunning the connect command. The relay fields
+(`payload_hash`, `signature_scheme`, `typed_data`, `typed_data_b64`) stay on
+every delegation-rail result unchanged — they are the recovery route, not a
+deprecated path.
+
+Compatibility: additive result fields only; no tool name, schema key, failure
+code, expected-context version or signing wire format changes. The
+`SIGN_CONTEXT_REFUSED` code and the `sign_context_unavailable` backend code
+named in the notice are pinned to what `@haven_ai/signer` emits
+(`sign-context.ts`) by a cross-package test
+(`hosted-signer-integration.test.ts`). No gate upgrades existing installs —
+production runs the signer at `@haven_ai/connect@alpha`'s exact pin
+(`0.4.0-alpha.0`) — which is why the recovery route, not an update prompt, is
+the compatibility story. Merging to `dev` waits for the promotion carrying
+#3271 to publish a connect/signer pair that includes the direct sign-context.
 
 ## Client-version signal (#3303, epic #3302)
 

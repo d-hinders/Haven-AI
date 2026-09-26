@@ -38,7 +38,7 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-24"
+last-verified: "2026-09-26"
 ---
 
 # Haven — Edge Signer
@@ -209,9 +209,11 @@ agent runtime drives the sequence.
 **Regular payment**
 
 ```
-hosted:  haven_pay        -> { payment_id, payload_hash, signature_scheme?, typed_data?, typed_data_b64? }
-local:   haven_sign { payload_hash, typed_data_b64 } -> { signature }   (delegate key never leaves)
-         (or, on a current signer, haven_sign { payment_id }: it fetches the exact bytes itself)
+hosted:  haven_pay        -> { payment_id, payload_hash, next_tool: haven_sign, next_arguments: { payment_id }, signature_scheme?, typed_data?, typed_data_b64?, signer_compatibility }
+local:   haven_sign { payment_id } -> { signature }   (delegate key never leaves)
+         (or, on a pre-#3271 signer after its SIGN_CONTEXT_REFUSED refusal,
+          haven_sign { payload_hash, typed_data_b64 } — the recovery route the
+          result's signer_compatibility notice names)
 hosted:  haven_submit     -> { status, tx_hash }
 ```
 
@@ -224,11 +226,16 @@ itself (`GET /payments/:id/sign-context`), so nothing bulky crosses the agent's
 context. That fetch exists because the relay failed live: on 2026-09-24 a
 hand-relayed `typed_data_b64` arrived altered, the signer signed it without
 complaint, and the bundler rejected the operation (`AA24 signature error`).
-The hosted result does not name it yet: the capability-gated `next_tool`
-guidance ships after the signer release, so older signers are never pointed
-at a call they cannot complete. Until then the result's relay — pass
-`payload_hash` + `typed_data_b64` UNCHANGED — is the path, and every signer
-accepts it. On either path a current signer now runs the UserOp binding check before signing
+**Since #3277 the hosted result names that call** — `next_tool: haven_sign`,
+`next_arguments: { payment_id }` (the exact `SIGNER_HANDOFF_SHAPES` shape),
+with a `signer_compatibility` notice alongside. Per the #1547 pattern the
+notice never asks the agent to compare a version against `initialize`
+instructions: on the one failure a pre-#3271 signer can produce — it answers
+`SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`,
+having signed nothing — the notice says to re-sign with `payload_hash` +
+`typed_data_b64` from the result, passed through unchanged, and update the
+connector. The relay fields stay on every result either way, so the recovery
+route is always available. On either path a current signer now runs the UserOp binding check before signing
 (`assertUserOpTypedDataBinding`, `@haven_ai/sdk`): it recomputes the v0.7
 UserOperation hash from the typed data and refuses (`USEROP_BINDING_MISMATCH`)
 unless it equals `payload_hash`, and pins the domain, field list and

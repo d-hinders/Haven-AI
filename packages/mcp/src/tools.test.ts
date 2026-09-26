@@ -269,7 +269,10 @@ describe('Haven MCP tool handlers', () => {
     vi.restoreAllMocks()
   })
 
-  it('pays x402 quotes without leaking the delegate key over HTTP', async () => {
+  // #3378: also run with a task budget, through the REAL client — the stub
+  // test in task-budgets.test.ts only proves the tool hands the option to the
+  // SDK; this proves it reaches the /x402 wire (payX402Quote dropped it).
+  it.each([[undefined], ['tb_3378']] as const)('pays x402 quotes without leaking the delegate key over HTTP (task_budget_id: %s)', async (taskBudgetId) => {
     const requests: CapturedRequest[] = []
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
       requests.push({ url: String(url), init })
@@ -358,9 +361,16 @@ describe('Haven MCP tool handlers', () => {
     expect(quote.success).toBe(true)
     if (!quote.success) throw new Error('quote failed')
 
-    const paid = await handlers.haven_pay_x402_quote({ quote: quote.data })
+    const paid = await handlers.haven_pay_x402_quote({
+      quote: quote.data,
+      ...(taskBudgetId ? { task_budget_id: taskBudgetId } : {}),
+    })
     expect(paid.success).toBe(true)
     expect(JSON.stringify(paid)).toContain('paid-x402')
+
+    const x402Body = JSON.parse(String(requests.find((r) => r.url.endsWith('/x402'))?.init?.body)) as Record<string, unknown>
+    if (taskBudgetId) expect(x402Body.taskBudgetId).toBe(taskBudgetId)
+    else expect(x402Body).not.toHaveProperty('taskBudgetId')
 
     // Haven traffic must have happened (sign data + sign endpoint) and
     // delegate_key must not appear in any request URL, header, or body.

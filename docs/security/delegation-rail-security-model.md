@@ -1511,7 +1511,13 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > **Scope of this section:** written for #3272 and rewritten once for epic
 > #3284 (#3283, #3281) against the signer and SDK at those changes; #3375
 > (the epic's third slice) then updated the funding-leg pin and the two
-> residuals above. The rest
+> residuals above.
+
+> **Re-verified unchanged (#3378, 2026-09-26):** `client.ts`'s `payX402Quote`
+> now forwards its options (`taskBudgetId`) to `authorizeX402`, as `fetch()`
+> already did. No signing check moves: the funding leg still runs the #3271
+> binding, the allowlist (which accepts the #3329 two-link task chain) and the
+> #3375 recipient pin, whichever delegation the backend redeems under. The rest
 > of this document was not re-read for it, and `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**

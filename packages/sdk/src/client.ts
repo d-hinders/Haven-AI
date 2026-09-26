@@ -1274,7 +1274,10 @@ export class HavenClient {
     const idempotencyKey = options.idempotencyKey ?? quote.idempotencyKey
 
     try {
-      const receipt = await this.authorizeX402(quote.paymentRequired, { idempotencyKey })
+      // #3378: forward every authorization option (taskBudgetId included —
+      // #3329's task budgets were silently dropped here), with the quote's
+      // own idempotency key as the default.
+      const receipt = await this.authorizeX402(quote.paymentRequired, { ...options, idempotencyKey })
       return this.merchantCompletion.retryRequest(
         quote.request.url,
         requestInitFromSnapshot(quote.request),

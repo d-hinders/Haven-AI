@@ -363,6 +363,9 @@ export function createPlainHttpX402Handlers(
               // `conflictTarget: 'x402_idempotency_key'`); it was simply never
               // invoked from here.
               ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
+              // #3378: build the settlement child under the task budget the
+              // caller named (#3329) — this handler used to drop it.
+              ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
             })
             return {
               payment_id: prepared.paymentId,
@@ -420,6 +423,8 @@ export function createPlainHttpX402Handlers(
 
           const intent = await haven.createX402Intent(payReq, {
             idempotencyKey: args.idempotency_key,
+            // #3378: fund the leg under the task budget the caller named (#3329).
+            ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
             ...(prefetchedAgent?.delegateAddress
               ? { delegateAddress: prefetchedAgent.delegateAddress }
               : {}),

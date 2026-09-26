@@ -338,6 +338,9 @@ export function createStateDirectRecoveryHandlers(
             // #1207: was accepted by this tool's schema but silently dropped —
             // now carried to the backend's replay contract.
             idempotencyKey: args.idempotency_key,
+            // #3378: the schema has accepted task_budget_id since #3329; this
+            // handler dropped it, so the payment was charged to the whole budget.
+            ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
           })
           return {
             payment_id: intent.paymentId,
@@ -374,6 +377,9 @@ export function createStateDirectRecoveryHandlers(
             amount: args.amount,
             to: args.to,
             idempotencyKey: args.idempotency_key,
+            // #3378: the schema has accepted task_budget_id since #3329; this
+            // handler dropped it, so the payment was charged to the whole budget.
+            ...(args.task_budget_id ? { taskBudgetId: args.task_budget_id } : {}),
           })
           return {
             payment_id: intent.paymentId,

@@ -20,7 +20,7 @@ covers:
   - packages/sdk/src/payment-state.ts
   - packages/sdk/src/x402.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
-last-verified: "2026-09-19"
+last-verified: "2026-09-26"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -111,10 +111,18 @@ delegation in step 5.
 
 1. `haven_pay` asks the backend to construct a payment intent.
 2. Within the remaining budget, it returns `payment_id`, `payload_hash`, and
-   expiry. Above the remaining budget it is **declined before any money moves**
-   — nothing is queued and no one is asked to review it, because there is no
-   approval queue on the delegation rail (`approval_requests` went with #2055).
-3. `haven_sign` signs the payload locally.
+   expiry — plus, since #3277, the signing handoff itself:
+   `next_tool: haven_sign`, `next_arguments: { payment_id }`, and a
+   `signer_compatibility` notice. Above the remaining budget it is **declined
+   before any money moves** — nothing is queued and no one is asked to review
+   it, because there is no approval queue on the delegation rail
+   (`approval_requests` went with #2055).
+3. `haven_sign` signs the payload locally — by `payment_id` (the signer
+   fetches the exact bytes itself, #3271). On a pre-#3271 signer the call
+   refuses `SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` having signed
+   nothing; the result's notice then says to re-sign with
+   `{ payload_hash, typed_data_b64 }` from the result, unchanged, and update
+   the connector.
 4. `haven_submit` relays the signature; the backend verifies the delegate and
    submits the sponsored UserOp that redeems the budget delegation.
 

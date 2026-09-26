@@ -113,6 +113,68 @@ describe('haven_pay', () => {
     expect(result.data.payload_hash).toBe('0xdeadbeef')
   })
 
+  it('names the byte-free haven_sign handoff and the refusal-recovery route, relay fields intact (#3277)', async () => {
+    // The stub carries a typed-data sign_data so the delegation fields are
+    // actually exercised: #3277 names the handoff ON TOP of them, never
+    // instead of them.
+    const typedData = {
+      domain: { name: 'HybridDeleGator', chainId: 8453 },
+      types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+      primaryType: 'PackedUserOperation',
+      message: { sender: '0xabc' },
+    }
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_handoff',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xdeadbeef', signature_scheme: 'eip712_userop', typed_data: typedData },
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_pay({ token: 'USDC', amount: '0.10', to: '0xabc' }),
+    )
+
+    // The handoff, exactly the SIGNER_HANDOFF_SHAPES shape for haven_sign.
+    expect(result.data.next_action).toBe('sign_and_submit_payment')
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign')
+    expect(result.data.next_tool_server).toBe('haven-signer')
+    expect(result.data.next_tool_name).toBe('haven_sign')
+    expect(result.data.next_tool_server_role).toBe('signer')
+    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_handoff' })
+    expect(result.data.safe_to_continue).toBe(true)
+
+    // The recovery notice: refusal-triggered, relay-routed, NO initialize
+    // version comparison (#1547 pattern).
+    const notice = result.data.signer_compatibility as Record<string, string>
+    expect(notice.direct_sign_context_version).toBe(1)
+    expect(notice.check).toContain('SIGN_CONTEXT_REFUSED')
+    expect(notice.check).toContain('sign_context_unavailable')
+    expect(notice.check).toContain('{ payload_hash, typed_data_b64 }')
+    expect(notice.fallback).toContain('sign_context_unavailable')
+    expect(notice.fallback).toContain('typed_data_b64')
+    expect(notice.check).not.toMatch(/initialize/i)
+    expect(notice.fallback).not.toMatch(/initialize/i)
+
+    // The relay fields stay, unchanged, beside the handoff.
+    expect(result.data.payload_hash).toBe('0xdeadbeef')
+    expect(result.data.signature_scheme).toBe('eip712_userop')
+    expect(result.data.typed_data).toEqual(typedData)
+    expect(
+      JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
+    ).toEqual(typedData)
+
+    // The step's reason carries the same recovery route for an agent that
+    // reads only the guidance.
+    expect(String(result.data.reason)).toContain('SIGN_CONTEXT_REFUSED')
+    expect(String(result.data.reason)).toContain('sign_context_unavailable')
+    expect(String(result.data.reason)).not.toMatch(/initialize/i)
+  })
+
   it('omits the delegation fields entirely on legacy-rail intents (#1254)', async () => {
     stubFetch({
       'POST /payments': {
@@ -469,6 +531,52 @@ describe('haven_send', () => {
       JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
     ).toEqual(typedData)
     expect(result.data.payload_hash).toBe('0xsendhash')
+  })
+
+  it('names the byte-free haven_sign handoff and the refusal-recovery route, relay fields intact (#3277)', async () => {
+    const typedData = {
+      domain: { name: 'HybridDeleGator', chainId: 8453 },
+      types: { PackedUserOperation: [{ name: 'sender', type: 'address' }] },
+      primaryType: 'PackedUserOperation',
+      message: { sender: '0xRecipient' },
+    }
+    stubFetch({
+      'POST /payments': {
+        status: 201,
+        body: {
+          payment_id: 'pay_send_handoff',
+          status: 'pending_signature',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          sign_data: { hash: '0xsendhash', signature_scheme: 'eip712_userop', typed_data: typedData },
+        },
+      },
+    })
+
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_send({ asset: 'USDC', recipient: '0xRecipient', amount: '0.10' }),
+    )
+
+    expect(result.data.next_action).toBe('sign_and_submit_payment')
+    expect(result.data.next_tool).toBe('mcp__haven-signer__haven_sign')
+    expect(result.data.next_tool_name).toBe('haven_sign')
+    expect(result.data.next_tool_server_role).toBe('signer')
+    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_send_handoff' })
+    expect(result.data.safe_to_continue).toBe(true)
+
+    const notice = result.data.signer_compatibility as Record<string, string>
+    expect(notice.direct_sign_context_version).toBe(1)
+    expect(notice.check).toContain('SIGN_CONTEXT_REFUSED')
+    expect(notice.check).toContain('sign_context_unavailable')
+    expect(notice.check).toContain('{ payload_hash, typed_data_b64 }')
+    expect(notice.check).not.toMatch(/initialize/i)
+
+    // The relay fields stay, unchanged, beside the handoff.
+    expect(result.data.payload_hash).toBe('0xsendhash')
+    expect(result.data.signature_scheme).toBe('eip712_userop')
+    expect(result.data.typed_data).toEqual(typedData)
+    expect(
+      JSON.parse(Buffer.from(result.data.typed_data_b64 as string, 'base64').toString('utf8')),
+    ).toEqual(typedData)
   })
 
   it('omits the delegation fields entirely on legacy-rail intents (#1254)', async () => {

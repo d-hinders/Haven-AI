@@ -88,6 +88,7 @@ function rebuildRealFixtureForSender(newSender: `0x${string}`) {
 }
 import { createToolHandlers as createHostedHandlers, type ToolPayload } from './tools.js'
 import { createHostedHavenClient } from './server.js'
+import { directSignerCompatibilityNotice } from './tools/support/signer-compat.js'
 
 // ── Test keys (well-known Hardhat accounts, never used for real funds) ────────
 // Hosted MCP delegate key is intentionally NOT included — simulates keyless server.
@@ -864,6 +865,185 @@ describe('Hosted MCP + Edge Signer integration', () => {
       signature: signed.signature as `0x${string}`,
     })
     expect(recovered.toLowerCase()).toBe(DELEGATE_ADDR.toLowerCase())
+  })
+
+  // #3277 criterion 3 + criterion 6's cross-package pin: the recovery ROUTE
+  // the hosted handoff names, driven end-to-end, and the notice text pinned
+  // to the real old-signer refusal. A pre-#3271 signer following
+  // `next_tool` / `next_arguments: { payment_id }` draws the real refusal —
+  // its x402-context fetch hits the backend's 409 `sign_context_unavailable`
+  // and, having no direct-fallback resolution, it stops there having signed
+  // nothing. (The refusal stub answers both routes; the emitted shape is the
+  // same `SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` either way.)
+  // The codes come from `@haven_ai/signer`'s own sign-context.ts — the test
+  // then asserts the hosted notice names EXACTLY them — and following the
+  // notice (re-sign with { payload_hash, typed_data_b64 } from the hosted
+  // result, unchanged) completes the payment.
+  it('a pre-#3271 signer following the hosted handoff refuses, then recovers through the relay (#3277)', async () => {
+    const realisticHash = packedUserOperationHash(REALISTIC_TYPED_DATA)
+    const directPaymentId = 'pay_direct_3277'
+
+    // ── Step 1: the signer the recovery route targets (current build, both
+    // routes served) — the relay half of the notice re-signs its bytes ──────
+    const directSignContextFetch = (async (url: string) => {
+      if (url.includes('/x402/')) {
+        return new Response(
+          JSON.stringify({
+            error: 'Not an x402 intent.',
+            error_code: 'sign_context_unavailable',
+          }),
+          { status: 409 },
+        )
+      }
+      return new Response(
+        JSON.stringify({
+          payment_id: directPaymentId,
+          status: 'pending_signature',
+          direct_sign_context_version: 1,
+          sign_data: { hash: realisticHash, signature_scheme: 'eip712_userop', typed_data: REALISTIC_TYPED_DATA },
+        }),
+        { status: 200 },
+      )
+    }) as typeof fetch
+    const oldSigner = createSignerHandlers(createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER }), {
+      signContext: {
+        loadIdentity: async () => ({ apiUrl: 'http://haven.test', apiKey: 'sk_agent_test' }),
+        fetchImpl: directSignContextFetch,
+      },
+    })
+
+    // ── Step 2: following next_tool draws the pre-#3271 refusal ──────────────
+    // The x402 fetch refuses with the backend's 409; nothing is signed and
+    // the refusal carries exactly the codes the hosted notice names.
+    const preSignerFetch = (async (url: string) =>
+      new Response(
+        JSON.stringify({ error: 'Not an x402 intent.', error_code: 'sign_context_unavailable' }),
+        { status: 409 },
+      )) as typeof fetch
+    const pre3271Signer = createSignerHandlers(createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER }), {
+      signContext: {
+        loadIdentity: async () => ({ apiUrl: 'http://haven.test', apiKey: 'sk_agent_test' }),
+        fetchImpl: preSignerFetch,
+      },
+    })
+    const refused = await pre3271Signer.haven_sign({ payment_id: directPaymentId })
+    expect(refused.success).toBe(false)
+    if (refused.success) throw new Error('expected the pre-#3271 refusal')
+    expect(refused.code).toBe('SIGN_CONTEXT_REFUSED')
+    expect(refused.backend_error_code).toBe('sign_context_unavailable')
+
+    // Cross-package pin (criterion 6): the hosted notice's recovery trigger
+    // is THIS refusal — the code and backend code it names are the ones the
+    // signer package just emitted, byte-identical.
+    const notice = directSignerCompatibilityNotice()
+    expect(notice.check).toContain(refused.code)
+    expect(notice.check).toContain(refused.backend_error_code as string)
+    expect(notice.fallback).toContain(refused.code)
+    expect(notice.fallback).toContain(refused.backend_error_code as string)
+
+    // ── Step 3: the recovery notice's route re-signs through the relay ───────
+    // { payload_hash, typed_data_b64 } from the hosted result, passed through
+    // unchanged — the same bytes step 1's result carried. Nothing was signed
+    // in step 2, so this retry is safe.
+    const recovered = ok<{ signature: string }>(
+      await oldSigner.haven_sign({
+        payload_hash: realisticHash,
+        typed_data_b64: Buffer.from(JSON.stringify(REALISTIC_TYPED_DATA)).toString('base64'),
+      }),
+    )
+    expect(recovered.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    const recoveredAddress = await recoverTypedDataAddress({
+      ...(REALISTIC_TYPED_DATA as Parameters<typeof hashTypedData>[0]),
+      signature: recovered.signature as `0x${string}`,
+    })
+    expect(recoveredAddress.toLowerCase()).toBe(DELEGATE_ADDR.toLowerCase())
+  })
+
+  // #3277 criterion 3, COMPOSED: the hosted haven_send RESULT (the real
+  // handler, its fetch stubbed here) drives the signer package end to end —
+  // follow next_tool/next_arguments, draw the refusal, then re-sign with the
+  // result's OWN relay fields taken from the result object (never rebuilt by
+  // this test). The refusal is STUBBED as the issue allows: the signer's
+  // context fetches draw the pre-#3271 backend's 409 `sign_context_unavailable`
+  // on EVERY route it can try — the x402 route (the only one a pre-#3271
+  // package fetches, and where its refusal terminates) and the direct route
+  // this package falls back to — so the REAL package reaches the exact
+  // terminal refusal the old install reaches, having signed nothing. The
+  // unit suites pin the hosted fields and the emission separately; this pins
+  // that the two halves line up ON THE WIRE.
+  it('the hosted haven_send result drives an old install: refusal, then recovery through its own relay fields (#3277)', async () => {
+    const directPaymentId = 'pay_send_recovered'
+    const realisticHash = packedUserOperationHash(REALISTIC_TYPED_DATA)
+    // The hosted client's view: POST /payments prepares a delegation-rail
+    // intent carrying typed data.
+    const hostedApi = (async (url: string, init: RequestInit = {}) => {
+      const method = (init.method ?? 'GET').toUpperCase()
+      const path = new URL(url).pathname
+      if (method === 'POST' && path === '/payments') {
+        return new Response(
+          JSON.stringify({
+            payment_id: directPaymentId,
+            status: 'pending_signature',
+            expires_at: '2099-01-01T00:00:00.000Z',
+            sign_data: { hash: realisticHash, signature_scheme: 'eip712_userop', typed_data: REALISTIC_TYPED_DATA },
+          }),
+          { status: 201 },
+        )
+      }
+      return new Response(JSON.stringify({ error: `No stub for ${method} ${path}` }), { status: 404 })
+    }) as typeof fetch
+    vi.stubGlobal('fetch', hostedApi)
+    // The signer's view (stubbed refusal): every sign-context fetch draws the
+    // backend's 409 sign_context_unavailable — the pre-#3271 world.
+    const refusedFetch = (async () =>
+      new Response(
+        JSON.stringify({ error: 'Not an x402 intent.', error_code: 'sign_context_unavailable' }),
+        { status: 409 },
+      )) as typeof fetch
+
+    // ── Step 1: the hosted result, named handoff and relay fields alike ──────
+    const hosted = ok<Record<string, unknown>>(
+      await createHostedHandlers(
+        new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' }),
+      ).haven_send({ asset: 'USDC', recipient: DELEGATE_ADDR, amount: '0.01' }),
+    )
+    expect(hosted.next_tool_name).toBe('haven_sign')
+    expect(hosted.next_arguments).toEqual({ payment_id: directPaymentId })
+
+    // ── Step 2: the old install follows next_tool and is refused ─────────────
+    // The REAL signer package's handler, its context fetches answered with the
+    // stubbed pre-#3271 refusal — nothing signed.
+    const identity = { apiUrl: 'http://haven.test', apiKey: 'sk_agent_test' as const }
+    const oldInstall = createSignerHandlers(createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER }), {
+      signContext: { loadIdentity: async () => identity, fetchImpl: refusedFetch },
+    })
+    const refused = await oldInstall.haven_sign(
+      hosted.next_arguments as { payment_id: string },
+    )
+    expect(refused.success).toBe(false)
+    if (refused.success) throw new Error('expected the old-install refusal')
+    expect(refused.code).toBe('SIGN_CONTEXT_REFUSED')
+    expect(refused.backend_error_code).toBe('sign_context_unavailable')
+    // The refusal is exactly what the result's notice told the agent to expect.
+    const notice = hosted.signer_compatibility as Record<string, string>
+    expect(notice.check).toContain(refused.code)
+    expect(notice.check).toContain(refused.backend_error_code as string)
+
+    // ── Step 3: the notice's route, fed from the RESULT's own fields ─────────
+    // The relay re-sign needs NO context fetch, so the same old install
+    // completes it — the relay fields from the result, unchanged.
+    const recovered = ok<{ signature: string }>(
+      await oldInstall.haven_sign({
+        payload_hash: hosted.payload_hash as string,
+        typed_data_b64: hosted.typed_data_b64 as string,
+      }),
+    )
+    expect(recovered.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+    const recoveredAddress = await recoverTypedDataAddress({
+      ...(REALISTIC_TYPED_DATA as Parameters<typeof hashTypedData>[0]),
+      signature: recovered.signature as `0x${string}`,
+    })
+    expect(recoveredAddress.toLowerCase()).toBe(DELEGATE_ADDR.toLowerCase())
   })
 
   it('payment_id without a local identity refuses with the fallback named (#1263)', async () => {

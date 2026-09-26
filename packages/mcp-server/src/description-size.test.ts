@@ -93,12 +93,43 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * descriptions are leaner than the surface average, so only the absolute pin
  * needs to move; it moves to the exact measured value, shrink-only from here,
  * same discipline as every prior re-derivation.
+ *
+ * **Re-derived at the measured value — round 4, #3277 (2026-09-26).** The
+ * direct-payment results now name the byte-free signing handoff, and the
+ * copy that names it is required, not decorative: `haven_pay` gained the
+ * handoff + refusal-recovery sentence (+80), and the shared `send`
+ * description's signing claim was corrected (#3277 criterion 5 — it claimed
+ * every signer refuses a hash-mismatching payload, true only of a current
+ * signer; the honest wording states the older signer's on-chain rejection
+ * instead, +43). Hand-trimming the recovery instruction to fit would cut
+ * the exact text the issue mandates agents read, and no overclaim remains
+ * to trim. So the pin moves to the exact measured mean of THIS surface,
+ * 21,178 / 24 (≈882.42), and stays shrink-only from here.
+ *
+ * **Re-derived for the composed surface — round 5, #3277 rebased onto
+ * #3354 (2026-09-26).** The rebase composes dev's #3329 surface (26 tools,
+ * 21,994 bytes) with this branch's required #3277 copy, and NEITHER
+ * parent's pin survives: this branch's required #3277 copy costs +179
+ * UTF-8 bytes net on the composed surface (the hosted `haven_send` /
+ * `haven_pay` handoff and refusal-recovery copy, plus the shared `send`
+ * description's corrected signing claim — required copy; hand-trimming
+ * it would cut the exact text the issue mandates agents read), putting
+ * the measured composed total at exactly 22,173
+ * UTF-8 bytes across 26 tools. The mean moves the other way:
+ * 22,173 / 26 = 852.81, BELOW the 875.0 ceiling — the two lean budget
+ * descriptions more than absorb this branch's copy — so the mean pin
+ * stays HELD at 875 with #3329's rationale (the pin is a ceiling, not a
+ * running average of whatever landed most recently; re-deriving it down
+ * to 852.81 would make it one, and would tighten nothing the ceiling
+ * does not already enforce), and only the absolute pin moves, to the
+ * exact measured value of the composed surface, shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 21_994
-// #3329: the mean pin stays the prior shrink-only value (21,000 / 24 = 875.0)
-// rather than re-deriving down to this surface's actual (lower) mean — the
-// two new descriptions happened to be lean, but the pin's job is a ceiling,
-// not a running average of whatever landed most recently.
+const MAX_TOTAL_BYTES = 22_173
+// Mean pin: HELD at the #3329 ceiling (21,000 / 24 = 875.0), not re-derived —
+// the composed surface's actual mean (22,173 / 26 = 852.81) already sits
+// BELOW the ceiling, so the held value is the stricter pin, and re-deriving
+// it to the latest measured mean would turn the ceiling into a running
+// average of whatever landed most recently, which #3329's round rejected.
 const MAX_MEAN_BYTES = 875
 
 describe('tool description payload (#1591)', () => {

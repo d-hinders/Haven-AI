@@ -951,11 +951,11 @@ const _noHostedToolIsDecidedTwice: [DoublyDecidedInputTool] extends [never]
 const PAY_DESCRIPTION = [
   'Construct a direct wallet payment inside the agent budget and return the unsigned payload for the local signer.',
   'For read-only allowance/budget questions use haven_get_allowances instead.',
-  'Returns { payment_id, payload_hash, expires_at }. Sign with haven_sign — delegation-rail responses',
-  'include typed_data_b64: pass it to the signer UNCHANGED as one opaque string, never re-typed —',
-  'then relay with haven_submit. A payment outside the on-chain budget, recipient or expiry is declined',
-  'at prepare — nothing to sign, nothing queued: ask the user to raise the budget in Haven.',
-  'Haven never receives the signing key.',
+  'Returns { payment_id, payload_hash, expires_at, next_tool, next_arguments, signer_compatibility }.',
+  'Sign by payment_id; if the signer refuses with SIGN_CONTEXT_REFUSED / sign_context_unavailable (it signed',
+  'nothing), re-sign with { payload_hash, typed_data_b64 } from the result, UNCHANGED, then haven_submit.',
+  'A payment outside the budget, recipient or expiry is declined at prepare — nothing to sign, nothing queued:',
+  'ask the user to raise the budget in Haven. Haven never receives the signing key.',
 ].join(' ')
 
 const SUBMIT_DESCRIPTION = [

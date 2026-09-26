@@ -24,9 +24,9 @@ const HOSTED = (name: string) => ({
 })
 
 /** `buildAgentGuidance(` call sites in the hosted non-test source — the census `next-step-characterization.test.ts` enforces. */
-export const EMISSION_SITE_COUNT = 17
+export const EMISSION_SITE_COUNT = 19
 /** Fixtures for those sites: the held-hash site has two branches, the three null-id sites share one helper. */
-export const EMISSION_FIXTURE_COUNT = 19
+export const EMISSION_FIXTURE_COUNT = 21
 
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
@@ -49,6 +49,9 @@ export const EMISSION_SITES = [
   { site: 'paid-mcp-completion.ts settle erc7710 settled', action: AgentPaymentNextAction.None, tool: null, reason: 'the purchase is settled; no Haven tool follows', expect: { next_tool_omitted_reason: 'the purchase is settled; no Haven tool follows' } } /* RE-DECIDED: additive reason */,
   { site: 'paid-mcp-completion.ts settle 3009 settled', action: AgentPaymentNextAction.None, tool: null, reason: 'the purchase is settled; no Haven tool follows', expect: { next_tool_omitted_reason: 'the purchase is settled; no Haven tool follows' } } /* RE-DECIDED: additive reason */,
   { site: 'state-direct-recovery.ts own HTTP retry', action: AgentPaymentNextAction.RetryOriginalX402Request, tool: null, reason: 'the next step is your own HTTP retry of the merchant with the payment_header above, not a Haven tool', expect: { next_tool_omitted_reason: 'the next step is your own HTTP retry of the merchant with the payment_header above, not a Haven tool' } } /* RE-DECIDED: additive reason */,
+  // #3277: haven_send / haven_pay success — the direct-payment byte-free handoff, always named (refusal recovery, the #1547 pattern; signer_compatibility rides the result alongside these fields and stays off this next-step census).
+  { site: 'state-direct-recovery.ts haven_send success', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
+  { site: 'state-direct-recovery.ts haven_pay success', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
 ] as const
 
 

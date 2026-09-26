@@ -5,7 +5,7 @@ covers:
   - packages/mcp/**
   - packages/mcp-server/**
   - packages/signer/**
-last-verified: "2026-09-19"
+last-verified: "2026-09-26"
 ---
 
 # Migration - Local MCP To Hosted MCP
@@ -240,11 +240,15 @@ Then test a tiny in-budget payment. The expected direct payment sequence is:
    **delegation-rail** account (the only rail that can pay) also
    `signature_scheme`, `typed_data` and `typed_data_b64`: the Hybrid account
    validates the EIP-712 typed data, and a bare-hash signature is rejected
-   on-chain (AA24, #1254).
-3. Agent calls local `haven_sign` — pass `payload_hash` and `typed_data_b64`
-   UNCHANGED, or just `payment_id` and let the signer fetch the payload (#1263
-   for x402; for a direct payment since #3271, via
-   `GET /payments/:id/sign-context`, on a current signer).
+   on-chain (AA24, #1254). Since #3277 it also names the signing handoff:
+   `next_tool: haven_sign`, `next_arguments: { payment_id }`, plus a
+   `signer_compatibility` notice.
+3. Agent calls local `haven_sign` — pass just `payment_id` and let the signer
+   fetch the payload (#1263 for x402; for a direct payment since #3271, via
+   `GET /payments/:id/sign-context`). On a pre-#3271 signer that call refuses
+   with `SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` and signs nothing:
+   follow the result's notice and re-sign with `{ payload_hash, typed_data_b64 }`
+   from the hosted result, passed through UNCHANGED, then update the connector.
    The legacy rail's bare-payload-hash variant is unreachable: that rail is
    retired (#1440) and never returns a signable intent.
 4. Agent calls hosted `haven_submit` with `{ payment_id, signature }`.

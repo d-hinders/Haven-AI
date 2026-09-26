@@ -57,7 +57,11 @@ export function delegationSignFields(signData: {
         // signed anyway and only failed on-chain (AA24, #3271's own
         // reproduction). The b64 form is copied as a single string; the
         // signer decodes it into the SAME check, so transport gets safer
-        // while the trust model is unchanged.
+        // while the trust model is unchanged. Since #3277 these relay fields
+        // are the RECOVERY route a pre-#3271 signer follows after its
+        // `haven_sign({ payment_id })` refusal (see
+        // `directSignerCompatibilityNotice`) — they stay on every result,
+        // never demoted to a fallback the result omits.
         ...(signData.typed_data
           ? {
               typed_data_b64: Buffer.from(JSON.stringify(signData.typed_data)).toString('base64'),

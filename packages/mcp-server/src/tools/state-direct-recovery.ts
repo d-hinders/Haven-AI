@@ -42,6 +42,7 @@ import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
 import { runTool, HostedToolError } from './support/errors.js'
 import { buildAgentGuidance, refusalNextStep } from './support/guidance.js'
+import { directSignerCompatibilityNotice } from './support/signer-compat.js'
 import { atomicToDisplay, humanToAtomic, readMaxAmountCap } from './support/cap-price.js'
 import {
   delegationSignFields,
@@ -49,6 +50,29 @@ import {
   submitSignatureWithExpiryMapping,
 } from './support/mcp-context.js'
 import { isPendingApproval } from './support/quote-response.js'
+
+/**
+ * #3277: the next-step reason every direct-payment (`haven_send` /
+ * `haven_pay`) SUCCESS result carries, via its own inline `buildAgentGuidance`
+ * call (one per tool, matching the rest of this file's convention — see
+ * `next-step-characterization.test.ts`'s call-site census). The hosted result
+ * ALWAYS names the byte-free `payment_id` handoff (owner decision on #3277,
+ * 2026-09-24: refusal recovery, the #1547 pattern — never an `initialize`
+ * version comparison), and the accompanying `directSignerCompatibilityNotice`
+ * tells the agent how to recover when a pre-#3271 signer refuses that call:
+ * it answers `SIGN_CONTEXT_REFUSED` with
+ * `backend_error_code: 'sign_context_unavailable'`, having signed nothing, so
+ * re-signing with the relay fields (`delegationSignFields`, kept unchanged)
+ * from THIS result is safe. `next_arguments` stays the exact
+ * `{ payment_id }` shape `SIGNER_HANDOFF_SHAPES` declares for `haven_sign` —
+ * never widened.
+ */
+const DIRECT_SIGN_REASON =
+  'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer fetches the ' +
+  'exact bytes by payment_id. If the signer refuses with code SIGN_CONTEXT_REFUSED and ' +
+  "backend_error_code 'sign_context_unavailable' (an older signer: nothing was signed), re-sign " +
+  'with { payload_hash, typed_data_b64 } from this result, passed through unchanged, then update ' +
+  'the connector. Then call haven_submit with the returned signature.'
 
 /**
  * The tools this capability owns, as a tuple so the set is data rather than a
@@ -349,6 +373,23 @@ export function createStateDirectRecoveryHandlers(
             asset: args.asset,
             amount: args.amount,
             recipient: args.recipient,
+            // #3277: the byte-free signing handoff, always named (owner
+            // decision: refusal recovery, the #1547 pattern — see
+            // DIRECT_SIGN_REASON). The relay fields above stay unchanged.
+            ...buildAgentGuidance({
+              nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+              nextTool: 'haven_sign',
+              nextArguments: { payment_id: intent.paymentId },
+              safeToContinue: true,
+              reason: DIRECT_SIGN_REASON,
+              summary: {
+                payment_id: intent.paymentId,
+                status: intent.status,
+                amount: args.amount,
+                token: args.asset,
+              },
+            }),
+            signer_compatibility: directSignerCompatibilityNotice(),
           }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {
@@ -387,6 +428,23 @@ export function createStateDirectRecoveryHandlers(
             // live during the #908 mainnet canary.
             ...delegationSignFields(intent.signData),
             meta: { token: args.token, amount: args.amount, to: args.to },
+            // #3277: the byte-free signing handoff, always named (owner
+            // decision: refusal recovery, the #1547 pattern — see
+            // DIRECT_SIGN_REASON). The relay fields above stay unchanged.
+            ...buildAgentGuidance({
+              nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+              nextTool: 'haven_sign',
+              nextArguments: { payment_id: intent.paymentId },
+              safeToContinue: true,
+              reason: DIRECT_SIGN_REASON,
+              summary: {
+                payment_id: intent.paymentId,
+                status: intent.status,
+                amount: args.amount,
+                token: args.token,
+              },
+            }),
+            signer_compatibility: directSignerCompatibilityNotice(),
           }
         } catch (err) {
           if (err instanceof HavenPaymentStateError && isPendingApproval(err.status)) {

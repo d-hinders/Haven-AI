@@ -724,3 +724,13 @@ project owner — collaborators have Viewer access, not env-var write access.
 > semantics this document describes are unchanged. Nothing else in this file's
 > coverage was touched; this note and the `last-verified` date are the only
 > edits.
+
+> **Re-verified #3338 (2026-09-26):** `qa-dev.yml`'s money-flow step keeps
+> its in-step retry (`QA_MAX_ATTEMPTS`, default 2) unchanged; each attempt now
+> tees its own `qa-run.attempt-<i>.log` and `qa-run.log` is copied from the
+> final attempt, so the blocking Coverage completeness step judges exactly
+> what it judged before. A pass after a failed attempt now adds a job-summary
+> block (`scripts/ci/qa-retry.mjs summary`, URLs scrubbed) and a notice. The
+> run and its `money-flow` job still conclude `success`, so the promotion
+> freshness gate described above selects the same runs as before. Nothing else
+> in this file's coverage was touched; this note is the only edit.

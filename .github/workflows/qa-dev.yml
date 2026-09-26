@@ -250,13 +250,24 @@ jobs:
         run: |
           set -o pipefail
           attempts="${QA_MAX_ATTEMPTS:-2}"
+          # #3338: each attempt keeps its own log, and qa-run.log is always a copy
+          # of the FINAL attempt's — the blocking Coverage completeness step
+          # below reads it, so what it judges must not change. A pass after a
+          # failed attempt reports itself in the job summary (URLs scrubbed) and
+          # as a notice, instead of reading as a plain first-try green.
           for i in $(seq 1 "$attempts"); do
             echo "::group::money-flow attempt $i/$attempts"
-            if npm run qa:dev -w packages/qa-agent 2>&1 | tee qa-run.log; then
+            if npm run qa:dev -w packages/qa-agent 2>&1 | tee "qa-run.attempt-$i.log"; then
+              cp "qa-run.attempt-$i.log" qa-run.log
               echo "::endgroup::"
               echo "money-flow QA passed on attempt $i/$attempts"
+              if [ "$i" -gt 1 ]; then
+                echo "::notice title=money-flow retry::passed on attempt $i/$attempts after a failed attempt (#3338)"
+                node scripts/ci/qa-retry.mjs summary "$i" qa-run.attempt-*.log >> "$GITHUB_STEP_SUMMARY" || true
+              fi
               exit 0
             fi
+            cp "qa-run.attempt-$i.log" qa-run.log
             echo "::endgroup::"
             echo "::warning::money-flow QA attempt $i/$attempts failed"
             if [ "$i" -lt "$attempts" ]; then sleep 30; fi

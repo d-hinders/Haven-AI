@@ -1,0 +1,137 @@
+#!/usr/bin/env node
+// qa-dev's in-step retry, made visible (#3338, epic #3335).
+//
+// `qa-dev.yml` retries the money-flow harness inside one step (QA_MAX_ATTEMPTS,
+// default 2), so a pass on attempt 2 is a plain green run: `run_attempt` never
+// moves, the promotion and freshness gates see `success`, and the only trace
+// was a `::warning::` annotation. Measured before this change: 19 of 90
+// successful harness runs passed only on attempt 2 (quality scan 2026-09-25).
+// A retry that hides a real provider failure is exactly how the RPC waves of
+// epic #3335 went unnoticed, so the retry now reports itself:
+//
+//   summary <final-attempt> <log…>  the job-summary block for a run that passed
+//                                   after failed attempts (empty on attempt 1)
+//   count [--since YYYY-MM-DD]      how many successful money-flow runs needed
+//                                   the retry, read back from the job logs
+//
+// Failure text is printed into a public job summary, so every URL in it is
+// replaced — a provider URL carries its API key in the path.
+
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+
+/** The harness's per-leg failure lines (`• <name> … FAIL — <detail>`, run.ts) and run-level `✗` lines. */
+export function failingLines(log) {
+  const out = []
+  for (const raw of String(log ?? '').split('\n')) {
+    const line = raw.replace(/\r$/, '')
+    const leg = /^• (\S+) … FAIL — (.*)$/.exec(line)
+    if (leg) {
+      out.push({ leg: leg[1], detail: leg[2] })
+      continue
+    }
+    const run = /^✗ (.*)$/.exec(line.trim())
+    if (run) out.push({ leg: null, detail: run[1] })
+  }
+  return out
+}
+
+/** Replace every URL (a provider URL embeds its key) and cap the length. */
+export function scrub(text, max = 240) {
+  const s = String(text ?? '').replace(/\bhttps?:\/\/[^\s"'`)\]}]+/gi, '<url>')
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
+/**
+ * The job-summary markdown for a pass on `finalAttempt` after earlier failed
+ * attempts; '' when the run passed on its first attempt. `logs[i]` is attempt
+ * i+1's log text.
+ */
+export function retrySummary(finalAttempt, logs) {
+  const n = Number(finalAttempt)
+  if (!Number.isInteger(n) || n <= 1) return ''
+  const lines = [
+    `### money-flow passed on attempt ${n} — the in-step retry absorbed a failure (#3338)`,
+    '',
+    'A pass that needed the retry is a signal, not noise: a recurring provider',
+    'failure hides here (epic #3335). Earlier attempts failed on:',
+    '',
+  ]
+  for (let i = 0; i < n - 1; i++) {
+    const found = failingLines(logs[i])
+    lines.push(`- **Attempt ${i + 1}:** ${found.length === 0 ? 'no failure line found in its log' : ''}`)
+    for (const f of found) lines.push(`  - ${f.leg ? `\`${f.leg}\`: ` : ''}${scrub(f.detail)}`)
+  }
+  return lines.join('\n') + '\n'
+}
+
+/** A shell glob sorts `attempt-10` before `attempt-2`: order the log paths by attempt number. */
+export function byAttempt(files) {
+  const n = (f) => Number(/attempt-(\d+)\.log$/.exec(f)?.[1] ?? Infinity)
+  return [...files].sort((a, b) => n(a) - n(b))
+}
+
+/** Which attempt a money-flow job log passed on (`money-flow QA passed on attempt N/M`), or null. */
+export function passedOnAttempt(jobLog) {
+  const m = /money-flow QA passed on attempt (\d+)\/(\d+)/.exec(String(jobLog ?? ''))
+  return m ? Number(m[1]) : null
+}
+
+/** Pure tally over `[{ runId, attempt }]`: how many passed on attempt 1 vs later. */
+export function tally(rows) {
+  const t = { passes: 0, firstAttempt: 0, retried: 0, unknown: 0, retriedRuns: [] }
+  for (const r of rows) {
+    t.passes += 1
+    if (r.attempt === 1) t.firstAttempt += 1
+    else if (Number.isInteger(r.attempt) && r.attempt > 1) {
+      t.retried += 1
+      t.retriedRuns.push(r.runId)
+    } else t.unknown += 1
+  }
+  return t
+}
+
+const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+
+function count(since) {
+  const repo = process.env.GITHUB_REPOSITORY || '{owner}/{repo}'
+  const rows = []
+  for (let page = 1; page <= 20; page++) {
+    const runs = JSON.parse(gh([
+      'api', '-X', 'GET', `repos/${repo}/actions/workflows/qa-dev.yml/runs`,
+      '-f', 'status=success', '-f', `created=>=${since}`, '-F', 'per_page=100', '-F', `page=${page}`,
+      '--jq', '[.workflow_runs[] | {id}]',
+    ]))
+    for (const { id } of runs) {
+      const jobs = JSON.parse(gh(['api', `repos/${repo}/actions/runs/${id}/jobs`, '--jq', '[.jobs[] | {id, name, conclusion}]']))
+      const mf = jobs.find((j) => j.name === 'money-flow' && j.conclusion === 'success')
+      if (!mf) continue // the gate skipped the harness: not a harness pass
+      rows.push({ runId: id, attempt: passedOnAttempt(gh(['api', `repos/${repo}/actions/jobs/${mf.id}/logs`])) })
+    }
+    if (runs.length < 100) break
+  }
+  return tally(rows)
+}
+
+if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+  const [cmd, ...rest] = process.argv.slice(2)
+  if (cmd === 'summary') {
+    const [finalAttempt, ...files] = rest
+    process.stdout.write(retrySummary(finalAttempt, byAttempt(files).map((f) => {
+      try {
+        return readFileSync(f, 'utf8')
+      } catch {
+        return ''
+      }
+    })))
+  } else if (cmd === 'count') {
+    const i = rest.indexOf('--since')
+    const since = i >= 0 ? rest[i + 1] : new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)
+    const t = count(since)
+    console.log(`qa-dev money-flow passes since ${since}: ${t.passes} — first attempt ${t.firstAttempt}, needed the retry ${t.retried}, unknown ${t.unknown}`)
+    if (t.retriedRuns.length) console.log(`retried runs: ${t.retriedRuns.join(' ')}`)
+  } else {
+    console.error('usage: qa-retry.mjs summary <final-attempt> <attempt logs…> | count [--since YYYY-MM-DD]')
+    process.exit(2)
+  }
+}

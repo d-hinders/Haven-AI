@@ -1073,7 +1073,17 @@ Testnet/RPC hiccups must not permanently wedge promotion. Two levers:
 
 - **Retry budget** — each `qa-dev.yml` run retries the whole suite up to
   `QA_MAX_ATTEMPTS` times (default **2**, repo variable) before it's called red.
-  Keep it low; each attempt consumes test funds.
+  Keep it low; each attempt consumes test funds. **A pass that needed the retry
+  reports itself (#3338).** It is not a quiet green: each attempt keeps its own
+  log (`qa-run.attempt-N.log`), and `qa-run.log`, which Coverage completeness
+  reads, is always the final attempt's copy. The run gets a `money-flow retry`
+  notice and a job-summary block listing the earlier attempts' failing legs,
+  with every URL scrubbed, because a provider URL carries its key. Count them
+  over a window with
+  `GITHUB_REPOSITORY=d-hinders/Haven-AI node scripts/ci/qa-retry.mjs count --since <YYYY-MM-DD>`.
+  It reads each successful money-flow job's `passed on attempt N/M` line and
+  prints the passes, how many needed the retry, and their run ids. A rising
+  count is a provider wave in the making (epic #3335), not noise.
 - **`qa-override` label** — adding it to a promotion PR **skips** the freshness
   gate (logged as a warning). Use it only to unblock a known-flaky testnet
   hiccup when you've confirmed a recent QA run out-of-band; remove it once a fresh

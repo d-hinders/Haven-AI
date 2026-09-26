@@ -63,12 +63,21 @@ export function failingLines(log) {
  * bounds the regexes' backtracking on a pathological line.
  */
 export function scrub(text, max = 240) {
-  const s = String(text ?? '')
-    .slice(0, 1024)
+  const s = scrubFull(String(text ?? '').slice(0, 1024))
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
+/**
+ * The same replacements as `scrub`, over the whole text and uncapped. For a
+ * caller that must scrub BEFORE it cuts an excerpt (qa-failure-issue.mjs,
+ * #3337): cutting first can separate a label from its value, and a bare value
+ * is not recognisable as a key. The caller bounds the input's length.
+ */
+export function scrubFull(text) {
+  return String(text ?? '')
     .replace(/\b[a-z][a-z0-9+.-]*(?::\/\/|:\\\/\\\/|%3A%2F%2F)[^\s"'`)\]}]+/gi, '<url>')
     .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?\/[^\s"'`)\]}]*/gi, '<url>')
     .replace(/(?<![a-z0-9])((?:api[_-]?key|private[_-]?key|secret[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|token|secret|password|key)["']?\s*[:=]\s*["']?|bearer\s+)[^\s"',;)\]}]{16,}/gi, '$1<redacted>')
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s
 }
 
 /**

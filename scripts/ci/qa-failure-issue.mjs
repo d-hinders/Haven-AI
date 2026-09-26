@@ -31,7 +31,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { byAttempt, scrub } from './qa-retry.mjs'
+import { byAttempt, scrub, scrubFull } from './qa-retry.mjs'
 
 export const LABEL = 'qa-failure'
 export const LABEL_COLOR = 'b60205'
@@ -68,9 +68,9 @@ export const ISSUE_TITLE = 'qa-dev money-flow failing'
 //
 // Provider signatures, measured on 2026-09-26 over the money-flow job logs of
 // the newest 40 failed qa-dev runs: `Batch of more than N requests`, `no
-// available upstreams` and `flashblocks` (in 8 logs each), `Status: 429` (in 2,
-// on a continuation line after
-// `HTTP request failed.`); `-32016` / `over rate limit` and `RPC Request
+// available upstreams` and `flashblocks` (in 8 logs each), `Status: 429` (in 2:
+// on a continuation line after `HTTP request failed.`, or JSON-escaped as
+// `…failed.\\n\\nStatus: 429` inside a relayed 502 body); `-32016` / `over rate limit` and `RPC Request
 // failed` from #2449's triage. A recurring `provider` class is a finding for
 // the provider, not something a re-dispatch clears.
 export const CLASSES = ['provider', 'preflight', 'harness', 'haven', 'unclassified']
@@ -78,13 +78,14 @@ export const CLASSES = ['provider', 'preflight', 'harness', 'haven', 'unclassifi
 const PROVIDER = [
   /-32016|over rate limit/i,
   /RPC Request failed/,
-  /\bStatus: 429\b|Too Many Requests/,
+  // No leading \b: a relayed body carries these JSON-escaped (`…failed.\\n\\nStatus: 429`).
+  /Status: 429\b|Too Many Requests/,
   /Batch of more than \d+ requests/,
   /no available upstreams/,
   /flashblocks/,
   // #2511: a 502 whose body quotes the public endpoint is an RPC outage. Matched
   // on the RAW line; the signature is scrubbed afterwards like every other.
-  /\bURL: https:\/\/sepolia\.base\.org\b/,
+  /URL: https:\/\/sepolia\.base\.org\b/,
   // dRPC's free-plan limits (code 30 timeouts, code 31 batches): seen in 4 runs
   // of the 2026-09-26 sample and otherwise left unclassified.
   /on the free plan|upgrade to paid plan/,
@@ -112,19 +113,39 @@ function firstMatch(lines, patterns) {
  * The evidence, not the first 200 characters: a real provider FAIL line
  * carries its signature well past character 200 ("…Sweep relay failed: could
  * not coalesce error (error={ … "no available upstreams" …"), so the excerpt
- * is taken AROUND the match and prefixed with the leg. Its edges are widened
- * to whitespace, so a URL is never cut in half before scrubbing.
+ * is taken AROUND the match and prefixed with the leg.
+ *
+ * Scrub BEFORE cutting: a cut can fall between a label and its value
+ * (`Bearer <v>`, `"apiKey": "<v>"`), and a bare value is not recognisable as a
+ * key. So a bounded window (±1000 characters; the scrub regexes backtrack on
+ * pathological input) is scrubbed whole with a marker at the match, and the
+ * excerpt is cut from the scrubbed text. Where the window itself cuts the
+ * line, its first and last three whitespace tokens are dropped first: a label
+ * and its value span at most three (`password = <v>`, `"apiKey": "<v>"`,
+ * `Bearer <v>`), and scrubbing can shrink the text enough (URLs → `<url>`)
+ * for the excerpt to reach the window's edge.
  */
 export function excerpt(line, index, { before = 80, after = 160 } = {}) {
-  let start = Math.max(0, index - before)
-  let end = Math.min(line.length, index + after)
-  while (start > 0 && !/\s/.test(line[start - 1])) start--
-  while (end < line.length && !/\s/.test(line[end])) end++
+  const MARK = '\u0001'
+  const a = Math.max(0, index - 1000)
+  const b = Math.min(line.length, index + 1000)
+  let raw = `${line.slice(a, index)}${MARK}${line.slice(index, b)}`
+  const trim = (re) => {
+    const m = re.exec(raw)
+    if (m && !m[0].includes(MARK)) raw = raw.slice(0, m.index) + raw.slice(m.index + m[0].length)
+  }
+  if (a > 0) trim(/^\S*(\s+\S+){0,2}\s+/)
+  if (b < line.length) trim(/\s+(\S+\s+){0,2}\S*$/)
+  const scrubbed = scrubFull(raw)
+  const at = Math.max(0, scrubbed.indexOf(MARK)) // a marker swallowed into a <url> falls back to the start
+  const text = scrubbed.replace(MARK, '')
+  // Already scrubbed, so the cut needs no widening: it can no longer split a secret.
+  const start = Math.max(0, at - before)
+  const end = Math.min(text.length, at + after)
   const leg = /^• \S+ … FAIL — /.exec(line)?.[0] ?? ''
-  const cutFront = start > leg.length // the leg prefix itself is always kept
-  const head = cutFront ? `${leg || ''}… ` : ''
-  const text = cutFront ? line.slice(start, end) : line.slice(0, end)
-  return scrub(`${head}${text}${end < line.length ? ' …' : ''}`, 320)
+  const cutFront = a > 0 || start > leg.length // the leg prefix itself is always kept
+  const out = `${cutFront ? `${leg}… ` : ''}${text.slice(cutFront ? start : 0, end)}${end < text.length || b < line.length ? ' …' : ''}`
+  return out.length > 320 ? `${out.slice(0, 319)}…` : out
 }
 
 /**
@@ -190,19 +211,28 @@ export function classifyLog(text) {
   return { runClass: 'mixed', signature: summary, legs }
 }
 
+/** Signatures are plain text: escape what GitHub would render as HTML (`<url>` would vanish). */
+export function md(text) {
+  return String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** One earlier attempt, with the legs of any class that is not `unclassified` named. */
+function earlierLine(e) {
+  const named = (e.legs ?? []).filter((l) => l.class !== 'unclassified').map((l) => `\`${l.leg}\` ${l.class}`)
+  return `Earlier attempt ${e.attempt}: \`${e.runClass}\`${e.signature ? ` — ${md(e.signature)}` : ''}${named.length ? ` (${named.join(', ')})` : ''}`
+}
+
 /** The classification section of the body, for the final (failing) attempt. */
 export function classificationSection(result) {
   if (!result) {
     return ['## Classification', '', '**Run:** `unclassified` — no harness log (the run failed before the harness ran).']
   }
-  const out = ['## Classification', '', `**Run:** \`${result.runClass}\`${result.signature ? ` — ${result.signature}` : ''}`]
+  const out = ['## Classification', '', `**Run:** \`${result.runClass}\`${result.signature ? ` — ${md(result.signature)}` : ''}`]
   if (result.legs.length > 0) {
     out.push('', '| Leg | Class | Signature |', '|---|---|---|')
-    for (const l of result.legs) out.push(`| \`${l.leg}\` | \`${l.class}\` | ${l.signature.replace(/\|/g, '\\|')} |`)
+    for (const l of result.legs) out.push(`| \`${l.leg}\` | \`${l.class}\` | ${md(l.signature).replace(/\|/g, '\\|')} |`)
   }
-  for (const e of result.earlier ?? []) {
-    out.push('', `Earlier attempt ${e.attempt}: \`${e.runClass}\`${e.signature ? ` — ${e.signature}` : ''}`)
-  }
+  for (const e of result.earlier ?? []) out.push('', earlierLine(e))
   return out
 }
 
@@ -224,7 +254,7 @@ export function readFinalAttempt(files, read = (f) => readFileSync(f, 'utf8')) {
   }
   if (results.length === 0) return null
   const final = results.at(-1)
-  return { ...final, earlier: results.slice(0, -1).map(({ attempt, runClass, signature }) => ({ attempt, runClass, signature })) }
+  return { ...final, earlier: results.slice(0, -1).map(({ attempt, runClass, signature, legs }) => ({ attempt, runClass, signature, legs })) }
 }
 
 /** The body: latest failure only. History lives in the comments. */
@@ -253,7 +283,10 @@ export function buildBody({ trigger, runUrl, when, classification = null }) {
 export function buildComment({ trigger, runUrl, when, classification = null }) {
   const cls = classification ? classification.runClass : 'unclassified'
   const legs = classification?.legs?.length ? ` — legs: ${classification.legs.map((l) => `\`${l.leg}\` ${l.class}`).join(', ')}` : ''
-  return `\`qa-dev\` failure at ${when} (trigger: \`${trigger}\`), class \`${cls}\`${legs} — ${runUrl}`
+  // The body is rewritten per failure; the comment is the thread's history, so
+  // earlier attempts' classes are recorded here too.
+  const earlier = (classification?.earlier ?? []).map((e) => `attempt ${e.attempt} \`${e.runClass}\``)
+  return `\`qa-dev\` failure at ${when} (trigger: \`${trigger}\`), class \`${cls}\`${legs}${earlier.length ? `; earlier: ${earlier.join(', ')}` : ''} — ${runUrl}`
 }
 
 const defaultGh = (args) => execFileSync('gh', args, { encoding: 'utf8' })

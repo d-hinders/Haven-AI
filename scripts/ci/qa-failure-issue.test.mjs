@@ -202,7 +202,15 @@ const MERCHANT_402 = '• x402-erc7710-hosted … FAIL — hosted haven_settle_m
 describe('qa-failure-issue: failure classes (#3337)', () => {
   test('every provider signature classes a leg on its own', () => {
     for (const detail of [
-      'authorize failed (502): could not coalesce error (error={ "code": -32016, "message": "over rate limit" })',
+      'authorize failed (502): could not coalesce error (error={ "code": -32016 })',
+      'authorize failed (502): the node said: over rate limit',
+      'authorize failed (502): Too Many Requests',
+      'Sweep relay failed: {"message":"Request timeout on the free plan","code":30}',
+      'Sweep relay failed: {"message":"please upgrade to paid plan","code":30}',
+      // The real escaped shape of a relayed viem error (run 35435198631, attempt 1).
+      'fresh-agent authorize failed (502): {"details":"HTTP request failed.\\n\\nStatus: 429\\nURL: https://base-sepolia.example-rpc.io/v2/x"}',
+      // #2511's reference shape (run 33796886018), with RPC Request failed removed.
+      'activate failed (502): {"details":"request failed.\\n\\nURL: https://sepolia.base.org\\nRequest body: {}"}',
       'settleX402Erc7710 failed: Could not deploy the delegate account — retry the authorize: RPC Request failed.',
       'Sweep relay failed: {"message":"Batch of more than 3 requests are not allowed on free plan"}',
       'Sweep relay failed: {"message":"No label `flashblocks`"}',
@@ -216,8 +224,88 @@ describe('qa-failure-issue: failure classes (#3337)', () => {
     assert.deepEqual(r.legs.map((l) => [l.leg, l.class]), [['delegation-lifecycle', 'unclassified'], ['x402-delegation-3009', 'provider']])
   })
 
-  test('precedence: a provider signature wins over a haven 4xx in the same leg', () => {
+  test('precedence: provider wins over haven and over harness in the same leg', () => {
     assert.equal(classifyLog('• a … FAIL — signup failed (400): upstream said Status: 429').legs[0].class, 'provider')
+    assert.equal(classifyLog('• a … FAIL — client.x is not a function after no available upstreams').legs[0].class, 'provider')
+  })
+
+  test('each harness message shape classes a leg on its own', () => {
+    for (const detail of ['api.getAgent is not a function', 'fetchQuote is not defined', 'Cannot read properties of undefined (reading \'id\')', 'Cannot set properties of null (setting \'x\')']) {
+      assert.equal(classifyLog(`• a … FAIL — ${detail}`).runClass, 'harness', detail)
+    }
+  })
+
+  test('a leg block also stops at the run summary and at report-table rows', () => {
+    // Run 35435198631: the report row `| x402-erc7710-fresh-agent | … |` carries Status: 429.
+    const withRow = [MASKED_502, '', '| delegation-lifecycle | activates | **FAIL** | Status: 429 |'].join('\n')
+    assert.equal(classifyLog(withRow).legs[0].class, 'unclassified')
+    const withSummary = [MASKED_502, '✗ 1/14 scenario(s) failed', 'Status: 429'].join('\n')
+    assert.equal(classifyLog(withSummary).legs[0].class, 'unclassified')
+  })
+
+  test('CRLF logs classify the same', () => {
+    assert.deepEqual(classifyLog(PROVIDER_MULTILINE.replace(/\n/g, '\r\n')).legs.map((l) => l.class), ['provider'])
+  })
+
+  test('scrub happens BEFORE the cut: a label and its value are never separated into a bare secret', () => {
+    const SECRET = 'FAKEFAKEFAKEFAKEFAKE0123456789'
+    for (const labelled of [`Authorization: Bearer ${SECRET}`, `password = ${SECRET}`, `"apiKey": "${SECRET}"`]) {
+      // The label sits just outside the 80-character look-back; the value just inside it.
+      const line = `• leg … FAIL — relay failed ${'w'.repeat(200)} ${labelled} ${'x'.repeat(66)} over rate limit`
+      const [leg] = classifyLog(line).legs
+      assert.equal(leg.class, 'provider')
+      for (let i = 0; i + 8 <= SECRET.length; i++) assert.ok(!leg.signature.includes(SECRET.slice(i, i + 8)), `${labelled}: ${SECRET.slice(i, i + 8)}`)
+    }
+  })
+
+  test('a secret split by the scrub window\'s own edge never reaches the excerpt, even after URLs shrink', () => {
+    const SECRET = 'FAKEFAKEFAKEFAKEFAKE0123456789'
+    for (const label of ['Authorization: Bearer', 'password =', '"apiKey":']) {
+      // URLs fill exactly the 1000 characters between the secret and the match, so
+      // the window's front edge (match − 1000) lands on the secret's first character
+      // — and they scrub down to a few `<url>`s, pulling the secret into the excerpt.
+      const head = `• leg … FAIL — relay failed ${'w'.repeat(300)} ${label} `
+      const fill = 1000 - SECRET.length - 2 // the space after the secret, and before the match
+      const urls = []
+      let used = 0
+      while (fill - used > 120) {
+        urls.push(`https://h${urls.length}.example.io/${'p'.repeat(80)}`)
+        used += urls.at(-1).length + 1
+      }
+      urls.push(`https://last.example.io/${'q'.repeat(fill - used - 'https://last.example.io/'.length)}`)
+      const line = `${head}${SECRET} ${urls.join(' ')} over rate limit`
+      assert.equal(line.indexOf('over rate limit') - 1000, line.indexOf(SECRET), 'geometry: the edge must land on the secret')
+      const [leg] = classifyLog(line).legs
+      assert.equal(leg.class, 'provider')
+      for (let i = 0; i + 8 <= SECRET.length; i++) assert.ok(!leg.signature.includes(SECRET.slice(i, i + 8)), `${label}: ${SECRET.slice(i, i + 8)}`)
+    }
+  })
+
+  test('the back edge too: a value the window cuts short (too short to look like a key) never shows', () => {
+    const SECRET = 'FAKEFAKEFAKEFAKEFAKE0123456789'
+    for (const label of ['Authorization: Bearer', 'password =', '"apiKey":']) {
+      const head = `• leg … FAIL — relay failed over rate limit `
+      const at = head.indexOf('over rate limit')
+      // URLs fill the gap so the back edge (match + 1000) lands 10 characters into the secret.
+      const fill = at + 1000 - 10 - head.length - label.length - 2 // total length of the joined URLs
+      const urls = []
+      let used = 0
+      while (fill - used > 120) {
+        urls.push(`https://h${urls.length}.example.io/${'p'.repeat(80)}`)
+        used += urls.at(-1).length + 1
+      }
+      urls.push(`https://last.example.io/${'q'.repeat(fill - used - 'https://last.example.io/'.length)}`)
+      const line = `${head}${urls.join(' ')} ${label} ${SECRET} tail`
+      assert.equal(at + 1000, line.indexOf(SECRET) + 10, 'geometry: the edge must cut the secret')
+      const [leg] = classifyLog(line).legs
+      for (let i = 0; i + 8 <= SECRET.length; i++) assert.ok(!leg.signature.includes(SECRET.slice(i, i + 8)), `${label}: ${SECRET.slice(i, i + 8)}`)
+    }
+  })
+
+  test('the body escapes signature markup so <url> stays visible in the rendered issue', () => {
+    const body = buildBody({ trigger: 'T', runUrl: 'U', when: 'W', classification: classifyLog(PROVIDER_JSON_URL) })
+    assert.match(body, /&lt;url&gt;/)
+    assert.doesNotMatch(body, /[^`]<url>/)
   })
 
   test('haven is the leg\'s own call only: a "failed (4xx)" after a relayed refusal is not Haven\'s', () => {
@@ -258,7 +346,9 @@ describe('qa-failure-issue: failure classes (#3337)', () => {
     const r = readFinalAttempt(Object.keys(logs), (f) => logs[f])
     assert.equal(r.runClass, 'unclassified')
     assert.deepEqual(r.earlier.map((e) => [e.attempt, e.runClass]), [[1, 'provider']])
-    assert.match(buildBody({ trigger: 'T', runUrl: 'U', when: 'W', classification: r }), /Earlier attempt 1: `provider`/)
+    assert.match(buildBody({ trigger: 'T', runUrl: 'U', when: 'W', classification: r }), /Earlier attempt 1: `provider`.*\(`x402-delegation-3009-sweep` provider\)/)
+    // The comment is the thread's history: earlier attempts are recorded there too.
+    assert.match(buildComment({ trigger: 'T', runUrl: 'U', when: 'W', classification: r }), /earlier: attempt 1 `provider`/)
   })
 
   test('a provider signature on a continuation line classes the leg (Status: 429 after "HTTP request failed.")', () => {

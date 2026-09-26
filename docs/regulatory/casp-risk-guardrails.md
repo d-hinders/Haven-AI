@@ -1145,7 +1145,9 @@ reckoning over **every path `release-bump.mjs` writes** — the six
 `package.json`, the five `CHANGELOG.md`, the six source version constants (#3303 added
 `SDK_VERSION`; the gate's verdict over the full set is unchanged),
 `connect/src/runtime-manifest.ts`, `sdk/src/connector-channel.ts`,
-`package-lock.json` and the manifest doc — not over a sample:
+`package-lock.json`, the manifest doc and `core/src/client-releases.data.ts`
+(#3305 added it; the verdict is unchanged, pinned by `coupling-gate.test.mjs`) —
+not over a sample:
 
 | doc | how a release satisfies it | what the GATE forces |
 |---|---|---|

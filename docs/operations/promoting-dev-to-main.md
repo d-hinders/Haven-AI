@@ -238,6 +238,24 @@ so this is a rule to point at rather than a question to ask the release runner.
       Use a key distinct from the dev/QA ones, so usage is attributable and
       either can be rotated alone.
 
+      **Before any of these variables points at a new endpoint, run the RPC
+      conformance probe against it (#3336)** — a required step, from the repo
+      root after `npm ci`, with the URL in a shell variable so it never lands in
+      history or a log:
+
+      ```sh
+      node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL"
+      ```
+
+      Every line must be ✓ (JSON-RPC batch of 10, the `pending` block tag,
+      `eth_sendRawTransaction` accepted as a method, a burst of 20 without a
+      429). It is safe against a **prod** key: 32 read calls at the defaults
+      (1 + a batch of 10 + 1 + a burst of 20; the burst is capped at 50) plus one transaction
+      signed by a fresh zero-balance key, which the node refuses for funds and
+      can never mine. A failing line means the endpoint cannot carry Haven's
+      traffic — the September 2026 qa-dev waves were a provider that refused
+      batches over three and the `pending` tag (epic #3335).
+
 - [ ] **Prod smoke:** load the prod app (no `DEV` badge), check login + balances,
       and run one small real payment / x402 happy path as a canary.
 - [ ] Watch prod error logs for a few minutes. If anything is off, **roll back**

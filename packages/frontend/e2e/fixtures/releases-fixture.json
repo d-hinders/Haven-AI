@@ -1,0 +1,119 @@
+{
+  "$comment": "Fixture release data for e2e/releases.visual.spec.ts (#3393). `releases` is exactly what scripts/release-client-data.mjs clientReleasesFrom(changelogs) returns, pinned by src/app/releases/__tests__/release-source.test.ts; `compat` is a CLIENT_COMPAT-shaped table. Never read by release tooling.",
+  "changelogs": {
+    "sdk": "# @haven_ai/sdk\n\nFixture CHANGELOG for the /releases visual spec (#3393). Not a real release history.\n\n## Unreleased\n\n## 9.4.0-alpha.0 — 2031-03-02\n\n- **Receipts carry the settlement network.** Every receipt row names the chain it settled on, so a caller paying on two networks can tell them apart without a second lookup.\n- **Retries keep their idempotency key across restarts.** A process that restarts mid-payment resumes the same intent instead of opening a second one.\n\n## 9.3.1-alpha.0 — 2031-02-14\n\n- **Balance reads name their freshness.** A balance served from cache says how old it is.\n",
+    "signer": "# @haven_ai/signer\n\nFixture CHANGELOG for the /releases visual spec (#3393). Not a real release history.\n\n## Unreleased\n\n## 9.4.0-alpha.0 — 2031-03-02\n\n- **Update required.** The signer reads the version-2 sign context. Older signers refuse every payment once the backend serves version 2, so update before your next payment.\n\n## 9.3.0-alpha.0 — 2031-02-01\n\n- **Sign-context reads retry once on a dropped connection.** A single network blip no longer surfaces as a refusal.\n",
+    "mcp": "# @haven_ai/mcp\n\nFixture CHANGELOG for the /releases visual spec (#3393). Not a real release history.\n\n## Unreleased\n\n## 9.4.0-alpha.0 — 2031-03-02\n\n- **A new tool lists the agent's open task budgets.** The tool set grew by one, so the operator is asked to consent once more on the next launch.\n\n## 9.3.1-alpha.0 — 2031-02-14\n\n- **Tool errors name the next step.** Every refusal says which tool to call next, or why none follows.\n",
+    "connect": "# @haven_ai/connect\n\nFixture CHANGELOG for the /releases visual spec (#3393). Not a real release history.\n\n## Unreleased\n\n## 9.4.0-alpha.0 — 2031-03-02\n\n- **The runtime this connector installs moves to 9.4.0-alpha.0.** A setup or re-run now wires the matching mcp, sdk and signer versions.\n\n## 9.3.0-alpha.0 — 2031-02-01\n\n- **The doctor names the runtime it checked.** Its report says which recorded runtime it read, and where from.\n",
+    "cli": "# @haven_ai/cli\n\nFixture CHANGELOG for the /releases visual spec (#3393). Not a real release history.\n\n## Unreleased\n\n## 9.4.0-alpha.0 — 2031-03-02\n\n- **Budget listings show the period boundary.** Each budget row prints when its period resets.\n\n## 9.3.0-alpha.0 — 2031-02-01\n\n- **Wallet balances show a freshness hint.** A stale balance prints how long ago it was read.\n"
+  },
+  "releases": {
+    "@haven_ai/sdk": {
+      "released_version": "9.4.0-alpha.0",
+      "notes": [
+        {
+          "version": "9.4.0-alpha.0",
+          "date": "2031-03-02",
+          "summary": "Receipts carry the settlement network. Every receipt row names the chain it settled on, so a caller paying on two networks can tell them apart without a second lookup. (+1 more in the changelog)",
+          "action_required": false
+        },
+        {
+          "version": "9.3.1-alpha.0",
+          "date": "2031-02-14",
+          "summary": "Balance reads name their freshness. A balance served from cache says how old it is.",
+          "action_required": false
+        }
+      ]
+    },
+    "@haven_ai/signer": {
+      "released_version": "9.4.0-alpha.0",
+      "notes": [
+        {
+          "version": "9.4.0-alpha.0",
+          "date": "2031-03-02",
+          "summary": "The signer reads the version-2 sign context. Older signers refuse every payment once the backend serves version 2, so update before your next payment.",
+          "action_required": true
+        },
+        {
+          "version": "9.3.0-alpha.0",
+          "date": "2031-02-01",
+          "summary": "Sign-context reads retry once on a dropped connection. A single network blip no longer surfaces as a refusal.",
+          "action_required": false
+        }
+      ]
+    },
+    "@haven_ai/mcp": {
+      "released_version": "9.4.0-alpha.0",
+      "notes": [
+        {
+          "version": "9.4.0-alpha.0",
+          "date": "2031-03-02",
+          "summary": "A new tool lists the agent's open task budgets. The tool set grew by one, so the operator is asked to consent once more on the next launch.",
+          "action_required": false
+        },
+        {
+          "version": "9.3.1-alpha.0",
+          "date": "2031-02-14",
+          "summary": "Tool errors name the next step. Every refusal says which tool to call next, or why none follows.",
+          "action_required": false
+        }
+      ]
+    },
+    "@haven_ai/connect": {
+      "released_version": "9.4.0-alpha.0",
+      "notes": [
+        {
+          "version": "9.4.0-alpha.0",
+          "date": "2031-03-02",
+          "summary": "The runtime this connector installs moves to 9.4.0-alpha.0. A setup or re-run now wires the matching mcp, sdk and signer versions.",
+          "action_required": false
+        },
+        {
+          "version": "9.3.0-alpha.0",
+          "date": "2031-02-01",
+          "summary": "The doctor names the runtime it checked. Its report says which recorded runtime it read, and where from.",
+          "action_required": false
+        }
+      ]
+    },
+    "@haven_ai/cli": {
+      "released_version": "9.4.0-alpha.0",
+      "notes": [
+        {
+          "version": "9.4.0-alpha.0",
+          "date": "2031-03-02",
+          "summary": "Budget listings show the period boundary. Each budget row prints when its period resets.",
+          "action_required": false
+        },
+        {
+          "version": "9.3.0-alpha.0",
+          "date": "2031-02-01",
+          "summary": "Wallet balances show a freshness hint. A stale balance prints how long ago it was read.",
+          "action_required": false
+        }
+      ]
+    }
+  },
+  "compat": {
+    "@haven_ai/sdk": {
+      "recommended_version": null,
+      "min_version": null
+    },
+    "@haven_ai/signer": {
+      "recommended_version": "9.4.0-alpha.0",
+      "min_version": "9.3.0-alpha.0"
+    },
+    "@haven_ai/mcp": {
+      "recommended_version": "9.4.0-alpha.0",
+      "min_version": null
+    },
+    "@haven_ai/connect": {
+      "recommended_version": null,
+      "min_version": null
+    },
+    "@haven_ai/cli": {
+      "recommended_version": null,
+      "min_version": null
+    }
+  }
+}

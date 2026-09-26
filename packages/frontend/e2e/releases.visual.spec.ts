@@ -11,6 +11,17 @@
  * why. That state is the deterministic one, and it is asserted below so a
  * baseline can never silently capture a different one.
  *
+ * The release data is a FIXTURE, not the live data (#3393): every release
+ * bump rewrote the live data and so moved these baselines (#3382 → #3383).
+ * `playwright.config.ts` names `e2e/fixtures/releases-fixture.json` in the
+ * server-only `HAVEN_RELEASES_FIXTURE`; the page reads it through
+ * `src/app/releases/release-source.ts`. The fixture's release data is exactly
+ * what the release generator produces from its fixture CHANGELOGs (pinned by
+ * `src/app/releases/__tests__/release-source.test.ts`), and it reaches states
+ * the live data never shows: an update-required note and set minimum and
+ * recommended versions. The sentinel assertions below fail if the server was
+ * started without the variable, instead of capturing live data.
+ *
  * Light only, desktop and mobile — a public marketing-shell page with no
  * theme-specific surface of its own. Baselines are Linux-rendered by the
  * *Update visual baselines* dispatch, never locally (frontend playbook §4).
@@ -29,6 +40,10 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{ name: string; width: numbe
 const PIXEL_THRESHOLD = 0.02
 const FULL_PAGE_MAX_DIFF_PIXELS = 150
 const ANCHOR_TIMEOUT_MS = 60_000
+// From e2e/fixtures/releases-fixture.json. No live release carries either, so
+// a server started without HAVEN_RELEASES_FIXTURE fails here, before capture.
+const FIXTURE_VERSION = '9.4.0-alpha.0'
+const FIXTURE_SIGNER_MIN = '9.3.0-alpha.0'
 
 test.describe('releases page visual regression', () => {
   test.skip(!VISUAL_SPECS_ENABLED, VISUAL_SKIP_REASON)
@@ -45,6 +60,11 @@ test.describe('releases page visual regression', () => {
       for (const name of ['@haven_ai/connect', '@haven_ai/signer', '@haven_ai/mcp', '@haven_ai/cli', '@haven_ai/sdk']) {
         await expect(page.getByRole('heading', { name, exact: true })).toHaveCount(1)
       }
+      // The fixture, not the live data (#3393): its version is on screen,
+      // and the branches live data never reaches are on screen.
+      await expect(page.getByText(FIXTURE_VERSION, { exact: true }).first()).toBeVisible()
+      await expect(page.getByText('Update required', { exact: true })).toHaveCount(1)
+      await expect(page.locator('dd', { hasText: FIXTURE_SIGNER_MIN })).toHaveCount(1)
       // The deterministic state: no backend, so no channel, so no command —
       // and never a guessed `@alpha` (#2422).
       // One page-level note, never one per card (#3304 design review).

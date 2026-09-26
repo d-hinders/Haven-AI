@@ -42,8 +42,8 @@
 //
 // A hand-maintained list nobody is prompted to extend is a slower version of
 // the same hole, so since #2333 a NAMING CONVENTION is enforced under it:
-// `*-copy.ts` / `*-labels.ts` / `*Labels.ts` / any `.tsx` under `src/lib` must
-// be in SCAN_FILES or in CONVENTION_EXEMPT with a reason. See the block above
+// `*-copy.ts` / `*-labels.ts` / `*Labels.ts` / any `.tsx` under `src/lib`, and
+// (#3347) any `.ts` in `src/lib/i18n/messages/`, must be in SCAN_FILES or in CONVENTION_EXEMPT with a reason. See the block above
 // CONVENTION_EXEMPT for what that check can and cannot do.
 //
 //   node scripts/frontend-copy-lint.mjs            # check against the baseline
@@ -159,8 +159,9 @@ export const SCAN_FILES = [
 //
 // So the allowlist gets a NORMATIVE naming convention with a check under it:
 // extracted UI copy under `src/lib` is named `*-copy.ts`, `*-labels.ts` or
-// `*Labels.ts`, and any `.tsx` there renders by definition. A file matching
-// those shapes MUST be named in SCAN_FILES (or exempted below with a reason) —
+// `*Labels.ts`, and any `.tsx` there renders by definition; and (#3347) every
+// `.ts` in the message catalog directory `src/lib/i18n/messages/` is copy — a
+// directory rule, not a name rule. A file matching those MUST be named in SCAN_FILES (or exempted below with a reason) —
 // otherwise the run fails, at the moment the file is added, naming it.
 //
 // **Read its ceiling honestly.** It matches NAMES, not content: call the next
@@ -179,7 +180,11 @@ export const SCAN_FILES = [
 // everywhere else in the frontend. Human/design review is the control there.
 const LIB_DIR = join(REPO_ROOT, 'packages', 'frontend', 'src', 'lib')
 
-/** True when `rel`'s basename follows the extracted-copy naming convention. */
+/**
+ * True when `rel` follows the extracted-copy convention: a basename shape
+ * (`*-copy.ts`, `*-labels.ts`, `*Labels.ts`, any `.tsx`), or a `.ts` file in
+ * the i18n message catalog directory (#3347).
+ */
 export function matchesCopyConvention(rel) {
   const base = rel.split('/').pop() ?? ''
   // #3347: every file in the message catalog directory is copy by definition.
@@ -444,8 +449,9 @@ async function scanAll() {
   if (gaps.length > 0) {
     throw new Error(
       `copy-lint: prose-shaped files under src/lib are not scanned:\n${gaps.map((g) => `  ${g}`).join('\n')}\n` +
-        'Their names follow the extracted-UI-copy convention (*-copy.ts, *-labels.ts,\n' +
-        '*Labels.ts, or any .tsx — which renders), so the copy lint must read them.\n' +
+        'They follow the extracted-UI-copy convention (*-copy.ts, *-labels.ts,\n' +
+        '*Labels.ts, any .tsx — which renders — or any .ts in src/lib/i18n/messages/,\n' +
+        'the message catalog, #3347), so the copy lint must read them.\n' +
         'Add each to SCAN_FILES. If a file genuinely is not product copy, add it to\n' +
         'CONVENTION_EXEMPT with a reason (see #2332 for what that looks like).',
     )

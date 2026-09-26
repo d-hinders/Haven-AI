@@ -245,9 +245,8 @@ jobs:
           # testnet RPC hiccup gets one more shot before the run is called red. Bump via a
           # repo variable if a chain is flaky; keep low — each attempt consumes test funds.
           QA_MAX_ATTEMPTS: ${{ vars.QA_MAX_ATTEMPTS || '2' }}
-          # #1044: once every leg's identity is provisioned, set the repo
-          # variable QA_REQUIRE_ALL_LEGS=1 -- from then on a skipped leg fails
-          # the run instead of reading as coverage.
+          # #1044: the repo variable QA_REQUIRE_ALL_LEGS=1 is set (#1066), so a
+          # skipped leg fails the run instead of reading as coverage.
           QA_REQUIRE_ALL_LEGS: ${{ vars.QA_REQUIRE_ALL_LEGS || '' }}
         run: |
           set -o pipefail
@@ -277,8 +276,10 @@ jobs:
           echo "::error::money-flow QA failed after $attempts attempt(s)"
           exit 1
       # #1044: a green run that SKIPPED legs is partial coverage, and the
-      # dev->main promotion gate keys on this run's conclusion. This step turns
-      # the run.ts skip marker into a step-level FAILURE. Blocking since #1066:
+      # dev->main promotion gate keys on this job's (money-flow) conclusion,
+      # not the run's (#2404). This step turns the run.ts skip marker into a
+      # step-level FAILURE, which fails the job: never add continue-on-error
+      # here (skip-marker.test.ts pins that, #3368). Blocking since #1066:
       # every leg is provisioned (#1063 closed the last legitimate skip), so a
       # skip now means a broken credential or a drained identity -- red is the
       # honest color. To retire a leg for real, delete its scenario in the same

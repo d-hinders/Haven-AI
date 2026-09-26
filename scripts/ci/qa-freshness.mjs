@@ -403,6 +403,10 @@ export function partitionVersionOnly(files, diffFor) {
  *        run's SHA and the promotion head; null when it could not be computed
  * @param {number} input.nowMs
  * @param {number} input.freshnessHours
+ * @param {string} [input.freshnessHoursInput] the raw variable, echoed when it is refused
+ * @param {boolean} [input.searchCutShort] the job-lookup budget ran out before
+ *        selection finished (#3361) — possibly after a run was admitted, while its
+ *        same-commit tie-break was still unread — so no run is anchored"
  * @returns {{ok: boolean, code: string, message: string}}
  */
 export function evaluate({
@@ -411,6 +415,8 @@ export function evaluate({
   changedMoneyPathFiles,
   nowMs,
   freshnessHours,
+  freshnessHoursInput,
+  searchCutShort = false,
 }) {
   const RERUN =
     "Trigger it (Actions → 'QA — money-flow (dev)' → Run workflow) and re-run this check, " +
@@ -438,13 +444,16 @@ export function evaluate({
   // non-numeric value makes `ageH > NaN` false, silently disabling the staleness
   // rule while the job prints a green checkmark. The old bash had the same hole
   // but at least logged a shell error; a green "within NaNh" is strictly worse.
-  if (!Number.isFinite(freshnessHours) || freshnessHours <= 0) {
+  // Since #3361 the window also sets how far back the run query reaches, so a
+  // value too large to express as a date is refused here too (#3368).
+  const windowStart = new Date(nowMs - GREEN_RUN_WINDOW_FACTOR * freshnessHours * 3_600_000)
+  if (!Number.isFinite(freshnessHours) || freshnessHours <= 0 || Number.isNaN(windowStart.getTime())) {
     return {
       ok: false,
       code: 'bad_freshness_hours',
       message:
-        `QA_FRESHNESS_HOURS is not a positive number (got '${freshnessHours}'). Refusing to ` +
-        `run with no staleness bound — an unbounded window is not a gate. Fix the repo variable.`,
+        `QA_FRESHNESS_HOURS is not a usable positive number of hours (got '${freshnessHoursInput ?? freshnessHours}'). ` +
+        `Refusing to run with no staleness bound — an unbounded window is not a gate. Fix the repo variable.`,
     }
   }
 
@@ -487,6 +496,16 @@ export function evaluate({
   }
 
   // --- Original behaviour: a green run must exist ----------------------------
+  if (!latestGreenRun && searchCutShort) {
+    return {
+      ok: false,
+      code: 'search_cut_short',
+      message:
+        `The search for a green 'QA — money-flow (dev)' run stopped at its job-lookup budget ` +
+        `(#3361) before selection finished, so no run is anchored; the log above names what ` +
+        `was read and what was left unread. ${RERUN}`,
+    }
+  }
   if (!latestGreenRun) {
     return {
       ok: false,
@@ -550,35 +569,6 @@ export function evaluate({
       `Money-flow QA green ${ageH}h ago (within ${freshnessHours}h) at ${latestGreenRun.headSha}, ` +
       `and no money-path files changed since.`,
   }
-}
-
-/**
- * #1044: was the covering green run green-with-SKIPS? The qa-dev workflow's
- * "Coverage completeness" step fails (under continue-on-error) when any
- * scenario leg was skipped, so a green run's PARTIALITY is visible in its
- * jobs. This inspects those step conclusions and returns a warning string,
- * or null for full coverage.
- *
- * Deliberately a WARNING, not a failure: the skipping leg is optional until
- * its identity is provisioned, and blocking promotion on an unprovisioned
- * optional leg would over-claim in the opposite direction. The strict flip
- * is QA_REQUIRE_ALL_LEGS=1 on the qa-dev side, which makes skips fail the
- * run itself — at which point this code path never sees them.
- */
-export function completenessWarningFromJobs(jobs) {
-  for (const job of jobs ?? []) {
-    for (const step of job.steps ?? []) {
-      if (step.name === 'Coverage completeness' && step.conclusion === 'failure') {
-        return (
-          'the covering QA run is GREEN-WITH-SKIPS: at least one money-flow leg never ran ' +
-          '(#1044). The freshness gate still passes — the skipped leg is optional until its ' +
-          'identity is provisioned — but the coverage this gate certifies is partial. ' +
-          'See the run\u2019s "Coverage completeness" step for which legs.'
-        )
-      }
-    }
-  }
-  return null
 }
 
 /**
@@ -764,9 +754,8 @@ export function moneyFlowJobConclusion(jobs) {
  * rows, newest first (#2404). Pure: ancestry and the jobs API come in as
  * thunks so every refusal is unit-testable.
  *
- * Returns `{ run, jobs, refused }` — `run` is the admitted row or null,
- * `jobs` its job list (so the caller's completeness warning does not fetch
- * it twice), and `refused` names every row that was passed over and why, so
+ * Returns `{ run, refused }` — `run` is the admitted row or null,
+ * and `refused` names every row that was passed over and why, so
  * the job log says which candidates existed rather than only "no run".
  *
  * Every rule fails CLOSED: a missing field, an ancestry check that errored
@@ -828,7 +817,7 @@ export function selectGreenRun(rows, { isAncestorOfHead, jobsFor }) {
       refuse(row, conclusion === null ? `could not read the '${MONEY_FLOW_JOB}' job` : `'${MONEY_FLOW_JOB}' job concluded '${conclusion}', not success`)
       return null
     }
-    return { run: row, jobs }
+    return { run: row }
   }
 
   // Newest first. WHICH COMMIT anchors the diff is decided by the newest
@@ -857,9 +846,9 @@ export function selectGreenRun(rows, { isAncestorOfHead, jobsFor }) {
       const better = admit(row)
       if (better) best = better
     }
-    return { ...best, refused }
+    return { run: best.run, refused }
   }
-  return { run: null, jobs: null, refused }
+  return { run: null, refused }
 }
 
 /**
@@ -889,7 +878,7 @@ function gh(args) {
  * side effect comes in as a parameter, so the path from the real query's
  * arguments to the anchored run is testable end to end.
  *
- * Returns selectGreenRun's `{ run, jobs, refused }` plus `dropped` (the
+ * Returns selectGreenRun's `{ run, refused }` plus `dropped` (the
  * pre-filtered rows), `fetched` (rows the query returned), `truncated`
  * (the query hit GREEN_RUN_LIMIT, so older rows may be missing), `lookups`
  * and `budgetExhausted`.
@@ -898,18 +887,24 @@ export function findGreenRun({ repo, freshnessHours, nowMs, gh: runGh, isAncesto
   const rows = JSON.parse(runGh(greenRunQueryArgs(repo, { freshnessHours, nowMs })) || '[]')
   const { kept, dropped } = preFilterHarnessCandidates(rows)
   let lookups = 0
-  let budgetExhausted = false
+  const unread = new Set()
   const budgeted = (databaseId) => {
     if (lookups >= lookupBudget) {
-      budgetExhausted = true
+      unread.add(databaseId)
       return null // refused as unreadable: fail closed
     }
     lookups += 1
     return jobsFor(databaseId)
   }
   const result = selectGreenRun(kept, { isAncestorOfHead, jobsFor: budgeted })
-  const decided = budgetExhausted ? { run: null, jobs: null, refused: result.refused } : result
-  return { ...decided, dropped, fetched: rows.length, truncated: rows.length >= GREEN_RUN_LIMIT, lookups, budgetExhausted }
+  const budgetExhausted = unread.size > 0
+  // A row the budget skipped was never read: say so, rather than the
+  // selector's "could not read the job", which reads as an API failure (#3368).
+  const refused = result.refused.map((r) => (unread.has(r.databaseId) ? { ...r, reason: 'not read: job-lookup budget exhausted' } : r))
+  // A run admitted before the budget ran out (its same-commit tie-break left
+  // unread) is not anchored, but it is reported, so the log never hides it.
+  const unanchored = budgetExhausted ? result.run : null
+  return { run: budgetExhausted ? null : result.run, unanchored, refused, dropped, fetched: rows.length, truncated: rows.length >= GREEN_RUN_LIMIT, lookups, budgetExhausted }
 }
 
 /**
@@ -927,15 +922,15 @@ export function jobsQueryArgs(repo, databaseId) {
     '-F',
     'per_page=100',
     '--jq',
-    '{jobs: [.jobs[] | {name, conclusion, steps: [.steps[] | {name, conclusion}]}]}',
+    '{jobs: [.jobs[] | {name, conclusion}]}',
   ]
 }
 
 /**
- * The run's jobs with their names, conclusions and step conclusions — one
- * call serves both the money-flow-job rule and the #1044 completeness
- * warning. Returns null when the API cannot answer; the selector refuses on
- * null.
+ * The run's jobs with their names and conclusions, for the money-flow-job
+ * rule. Returns null when the API cannot answer; the selector refuses on null.
+ * (Step conclusions were projected for the #1044 completeness warning until
+ * #3368 removed it: the step blocks, so a skip already fails the job.)
  */
 function jobsForRun(repo, databaseId) {
   try {
@@ -1032,17 +1027,22 @@ function main() {
 
   // An invalid window is refused with evaluate's own message before it can
   // surface as a query failure (#3361: the window now also sets query depth).
-  if (!(Number.isFinite(freshnessHours) && freshnessHours > 0)) {
-    const refusal = evaluate({ sourceBranch, latestGreenRun: null, changedMoneyPathFiles: [], nowMs: Date.now(), freshnessHours })
-    console.error(`::error::${refusal.message}`)
+  // evaluate is the one place that decides what "invalid" means (#3368).
+  const freshnessHoursInput = process.env.FRESHNESS_HOURS
+  const preCheck = evaluate({ sourceBranch, latestGreenRun: null, changedMoneyPathFiles: [], nowMs: Date.now(), freshnessHours, freshnessHoursInput })
+  // An unknown branch is refused here too: evaluate checks it first, and
+  // letting it fall through would surface a bad window as a query failure.
+  if (preCheck.code === 'bad_freshness_hours' || preCheck.code === 'unknown_branch') {
+    console.error(`::error::${preCheck.message}`)
     process.exit(1)
   }
 
   // Which run counts is decided by selectGreenRun on the run's SHA and jobs,
   // pinned by test (#2404); the query itself is pinned by greenRunQueryArgs.
   let latestGreenRun = null
+  let searchCutShort = false
   try {
-    const { run, jobs, refused, dropped, fetched, truncated, lookups, budgetExhausted } = findGreenRun({
+    const { run, unanchored, refused, dropped, fetched, truncated, lookups, budgetExhausted } = findGreenRun({
       repo,
       freshnessHours,
       nowMs: Date.now(),
@@ -1057,15 +1057,17 @@ function main() {
         `for finishing in under ${MIN_HARNESS_RUN_SECONDS}s (neither can have run the harness); ${lookups} job lookup(s).`,
     )
     if (truncated) console.log(`::warning::qa-freshness: the run query hit its ${GREEN_RUN_LIMIT}-row limit; older runs may be missing.`)
-    if (budgetExhausted) console.log(`::warning::qa-freshness: the ${JOB_LOOKUP_BUDGET}-lookup budget ran out; no run is anchored, so the gate refuses. Re-run it, or dispatch qa-dev.`)
+    if (budgetExhausted) console.log(`::warning::qa-freshness: the ${JOB_LOOKUP_BUDGET}-lookup budget ran out before selection finished; no run is anchored, so the gate refuses. Re-running this check rarely helps (only if a lookup failed transiently): dispatch qa-dev.`)
+    searchCutShort = budgetExhausted
+    if (unanchored) {
+      console.log(`qa-freshness: run ${unanchored.databaseId} (${unanchored.event} at ${unanchored.headSha}) passed, but its same-commit tie-break was left unread by the budget; it is not anchored.`)
+    }
     for (const r of refused) {
       console.log(`qa-freshness: passed over run ${r.databaseId ?? '?'} (${r.event ?? '?'} at ${r.headSha ?? '?'}): ${r.reason}`)
     }
     latestGreenRun = run
     if (run) {
       console.log(`qa-freshness: anchoring to run ${run.databaseId} (${run.event} at ${run.headSha}, ${run.createdAt})`)
-      const warning = completenessWarningFromJobs(jobs)
-      if (warning) console.log(`::warning::${warning}`)
     }
   } catch (err) {
     console.error(`::error::qa-freshness: could not query workflow runs: ${err.message}`)
@@ -1110,6 +1112,8 @@ function main() {
     changedMoneyPathFiles,
     nowMs: Date.now(),
     freshnessHours,
+    freshnessHoursInput,
+    searchCutShort,
   })
 
   if (!result.ok) {

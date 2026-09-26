@@ -206,7 +206,7 @@ async function main(): Promise<void> {
   }
 
   // #1044: a skipped leg is UNEXERCISED coverage, and the promotion gate keys
-  // on this run's green. Say it loudly, in a machine-findable shape, instead of
+  // on the money-flow job's conclusion (#2404). Say it loudly, in a machine-findable shape, instead of
   // folding skips into "all passed" — that fold is how a permanently-skipping
   // leg read as coverage for weeks.
   if (skipped.length > 0) {

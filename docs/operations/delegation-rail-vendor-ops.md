@@ -111,6 +111,10 @@ run no estimation, so recovery retries cost nothing.
   `ops:check-bundler` probe (§3). Read in exactly ONE place
   (`delegationRailBundlerUrl`); every error surface passes
   `redactVendorSecrets` (bundler errors echo the URL — the #764 incident).
+  Since #3371 the same holds for RPC endpoint URLs (`RPC_URL_*`): the failover
+  transport strips the key-like segments of every configured endpoint out of
+  viem's request errors at the source, so a dRPC/Infura/Alchemy/QuickNode key
+  embedded in an RPC URL never reaches an error surface either.
 - `DELEGATION_RAIL_SPONSORSHIP_POLICY_ID` — Pimlico policies bind **per
   request**, not per API key (#738): an unset id means unrestricted
   sponsorship against the key's account. Set it in every deployed env.

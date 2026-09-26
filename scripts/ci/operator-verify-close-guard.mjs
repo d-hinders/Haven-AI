@@ -518,7 +518,8 @@ function readCommits(pr, owner, name) {
  * Deliberately narrow in three directions. It keys on head === default branch,
  * NOT on base !== default branch: a `hotfix/* → main` branch is based on
  * `main`, and its commits have NOT reached `dev` yet — they arrive on the
- * sync-back, where the keyword fires for the first time — so those are still
+ * back-port PR into `dev` (owner decision 2026-09-26, no sync-back), where the
+ * keyword fires for the first time — so those are still
  * scanned in full. It ALSO requires base !== default branch, so a pull request
  * whose head and base are both `dev` is not a promotion: that is a merge INTO
  * the default branch, where keywords fire, and dropping its commits would blind

@@ -232,15 +232,15 @@ of the three.
 **5. Merge-method drift on `dev` — first-parent, by subject and by head.**
 Feature → dev is squash; 44% of the wave's landings arrived as merge commits,
 which is what made the promotion recipes and the head-SHA reads go wrong
-(#1173, #2116). The rule is direction-dependent: the post-promotion sync-back
-(`sync/*`, or `main` itself) is prescribed as MERGE-merged onto `dev`, though
-squash-only `dev` now refuses it (an open owner decision,
-`branch-and-release-flow.md` § *Promotion to production*), so those heads are
-counted separately, never as drift. **Bar interaction, stated so a future run
-does not suppress it:** the remedy is one ruleset edit
-(`allowed_merge_methods: ["squash"]` on `dev`, the mirror of #2165 on
-`main`), so this dimension never yields an epic — it yields a `Probed clean`
-baseline and, on evidenced drift, a possible improvement candidate. Filing
+(#1173, #2116). The remedy landed on 2026-09-07: `Dev merge` (ruleset 22449193)
+makes `dev` squash-only, so a window starting after that date probes clean by
+construction — a merge-commit landing then means the ruleset was changed, and
+that is the finding. Before it, the post-promotion sync-back (`sync/*`, or
+`main` itself) was merge-merged on purpose and is counted `LEGIT` below; the
+owner dropped the sync-back on 2026-09-26 (`branch-and-release-flow.md` §
+*Promotion to production*). **Bar interaction:** this dimension never yields
+an epic — a `Probed clean` baseline and, on evidenced drift, a possible
+improvement candidate. Filing
 requires explicit approval and the canonical skill's new-task handoff.
 
 ```bash

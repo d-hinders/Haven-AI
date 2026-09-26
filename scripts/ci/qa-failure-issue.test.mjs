@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ISSUE_TITLE, LABEL, buildBody, upsertStandingIssue } from './qa-failure-issue.mjs'
+import { ISSUE_TITLE, LABEL, CLASSES, buildBody, buildComment, classifyLog, readFinalAttempt, upsertStandingIssue } from './qa-failure-issue.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./qa-failure-issue.mjs', import.meta.url))
 
@@ -51,11 +51,16 @@ process.exit(0)
   return stub
 }
 
-function run(scenario, env = {}) {
+function run(scenario, env = {}, logs = []) {
   const dir = mkdtempSync(join(tmpdir(), 'qa-failure-issue-'))
   makeStub(dir)
   const log = join(dir, 'gh.log')
-  const result = spawnSync(process.execPath, [SCRIPT], {
+  const files = logs.map((text, i) => {
+    const f = join(dir, `qa-run.attempt-${i + 1}.log`)
+    writeFileSync(f, text)
+    return f
+  })
+  const result = spawnSync(process.execPath, [SCRIPT, ...files, join(dir, 'qa-run.attempt-*.log')], {
     encoding: 'utf8',
     env: {
       ...process.env,
@@ -159,5 +164,124 @@ describe('qa-failure-issue: one standing issue', () => {
     assert.match(body, /\*\*Run:\*\* U/)
     assert.match(body, /\*\*When:\*\* W/)
     assert.match(body, /one standing/)
+  })
+})
+
+// ── Classification (#3337) ───────────────────────────────────────────────────
+// Fixture lines are the harness's own shapes, taken from real money-flow job
+// logs (2026-09-26); keys and hosts are fake.
+const KEY = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789'
+const PROVIDER_MULTILINE = [
+  '• x402-delegation-3009 … FAIL — Delegation-rail funding authorization failed (on-chain policy or bundler): HTTP request failed.',
+  '',
+  'Status: 429',
+  `URL: https://base-sepolia.example-rpc.io/v2/${KEY}`,
+  'Request body: {"method":"eth_getCode","params":["0xf431C31511175AE80Cef45A228b7e0C24C2fbE20","latest"]}',
+  '',
+  'Details: Too Many Requests',
+  '• x402-delegation-3009-grace-resume … PASS — resumed',
+].join('\n')
+const PROVIDER_JSON_URL = `• x402-delegation-3009-sweep … FAIL — gasless sweep submit failed: Sweep relay failed: could not coalesce error (error={ "code": 1, "message": "no available upstreams to process a request" }, info={ "requestUrl": "https://lb.example.live/base-sepolia/${KEY}" })`
+const MASKED_502 = '• delegation-lifecycle … FAIL — activate failed (502): Could not deploy the account for this budget — try again'
+const PREFLIGHT = [
+  'preflight — resources this run consumes:',
+  '  ✗ merchant settlement wallet (gas) 0xC03F7c03d20f3DC32d3b8dAD6EeA90a3be4822c1: 0.0000298 ETH (11 settlement(s))',
+  '      below the merchant\'s fail floor (warn 25/fail 12)',
+  '  ✓ delegation treasury (USDC) 0x9281d7c312e67859c65f4A3449F0548ea2f90974: 4.2215 USDC',
+  '',
+  '✗ preflight: a resource this run consumes is below its floor. Fix it before reading anything below — the legs cannot pass without it.',
+].join('\n')
+const HARNESS = "• x402-catalog-guided-purchase … FAIL — TypeError: Cannot read properties of undefined (reading 'amount')"
+const HAVEN_4XX = '• delegation-lifecycle … FAIL — throwaway signup failed (400): email already registered'
+const MERCHANT_402 = '• x402-erc7710-hosted … FAIL — hosted haven_settle_mcp_tool refused: MERCHANT_REJECTED_AFTER_FUNDING — Merchant refused to deliver the tool (HTTP 402).'
+
+describe('qa-failure-issue: failure classes (#3337)', () => {
+  test('a provider signature on a continuation line classes the leg (Status: 429 after "HTTP request failed.")', () => {
+    const r = classifyLog(PROVIDER_MULTILINE)
+    assert.equal(r.runClass, 'provider')
+    assert.deepEqual(r.legs.map((l) => [l.leg, l.class]), [['x402-delegation-3009', 'provider']])
+    assert.match(r.legs[0].signature, /Status: 429/)
+  })
+
+  test('each class has a fixture, and the masked backend 502 is unclassified — never guessed', () => {
+    assert.equal(classifyLog(PROVIDER_JSON_URL).runClass, 'provider')
+    assert.equal(classifyLog(HARNESS).runClass, 'harness')
+    assert.equal(classifyLog(HAVEN_4XX).runClass, 'haven')
+    assert.equal(classifyLog(MASKED_502).runClass, 'unclassified')
+    // A merchant's 402 relayed through a hosted-tool refusal is not Haven's 4xx.
+    assert.equal(classifyLog(MERCHANT_402).runClass, 'unclassified')
+    assert.deepEqual(CLASSES, ['provider', 'preflight', 'harness', 'haven', 'unclassified'])
+  })
+
+  test('a preflight refusal is run-level: no legs, and the failing resource is the signature', () => {
+    const r = classifyLog(PREFLIGHT)
+    assert.equal(r.runClass, 'preflight')
+    assert.deepEqual(r.legs, [])
+    assert.match(r.signature, /merchant settlement wallet \(gas\)/)
+  })
+
+  test('no failing leg: the run-level ✗ line is the signature (strict mode refusing skips)', () => {
+    const r = classifyLog('• a … SKIP — no identity\n\n✗ QA_REQUIRE_ALL_LEGS=1: refusing to report green with unexercised legs')
+    assert.equal(r.runClass, 'unclassified')
+    assert.match(r.signature, /QA_REQUIRE_ALL_LEGS=1: refusing/)
+  })
+
+  test('legs that disagree make a mixed run with a count per class, so a provider leg stays visible', () => {
+    const r = classifyLog([PROVIDER_JSON_URL, MASKED_502, MASKED_502.replace('delegation-lifecycle', 'x402-erc7710-fresh-agent')].join('\n'))
+    assert.equal(r.runClass, 'mixed')
+    assert.equal(r.signature, 'provider ×1, unclassified ×2')
+  })
+
+  test('no URL and no key reaches the body or the comment, including a JSON "requestUrl"', () => {
+    for (const log of [PROVIDER_MULTILINE, PROVIDER_JSON_URL]) {
+      const classification = classifyLog(log)
+      const text = buildBody({ trigger: 'T', runUrl: 'U', when: 'W', classification }) + buildComment({ trigger: 'T', runUrl: 'U', when: 'W', classification })
+      assert.doesNotMatch(text, new RegExp(KEY))
+      assert.doesNotMatch(text, /example-rpc|example\.live/)
+    }
+  })
+
+  test('the template "transient flake, re-dispatch" sentence is gone from the body', () => {
+    const body = buildBody({ trigger: 'T', runUrl: 'U', when: 'W' })
+    assert.doesNotMatch(body, /transient testnet\/RPC/i)
+    assert.doesNotMatch(body, /cleared by re-dispatching/i)
+    assert.match(body, /Classify the\s+failure/)
+  })
+
+  test('the final attempt is the one classified; an unreadable or missing log falls back, then to "no harness log"', () => {
+    const logs = { 'qa-run.attempt-1.log': MASKED_502, 'qa-run.attempt-2.log': PROVIDER_JSON_URL }
+    const read = (f) => {
+      if (!(f in logs)) throw new Error('ENOENT')
+      return logs[f]
+    }
+    assert.equal(readFinalAttempt(['qa-run.attempt-2.log', 'qa-run.attempt-1.log'], read).runClass, 'provider')
+    assert.equal(readFinalAttempt(['qa-run.attempt-1.log', 'qa-run.attempt-*.log'], read).runClass, 'unclassified')
+    assert.equal(readFinalAttempt(['qa-run.attempt-*.log'], read), null)
+    assert.match(buildBody({ trigger: 'T', runUrl: 'U', when: 'W', classification: null }), /no harness log/)
+  })
+
+  test('CLI: the attempt logs passed as arguments reach the issue body and comment', () => {
+    const { result, calls } = run({ open: 12 }, {}, [MASKED_502, PROVIDER_MULTILINE])
+    assert.equal(result.status, 0, result.stderr)
+    const edit = sub(calls, 'issue', 'edit')[0]
+    const body = edit[edit.indexOf('--body') + 1]
+    assert.match(body, /\*\*Run:\*\* `provider`/)
+    assert.match(body, /\| `x402-delegation-3009` \| `provider` \|/)
+    assert.doesNotMatch(body, new RegExp(KEY))
+    const comment = sub(calls, 'issue', 'comment')[0]
+    assert.match(comment[comment.indexOf('--body') + 1], /class `provider`/)
+  })
+
+  test('qa-dev.yml passes the attempt logs to the failure step, in the money-flow job that wrote them', () => {
+    const wf = readFileSync(fileURLToPath(new URL('../../.github/workflows/qa-dev.yml', import.meta.url)), 'utf8')
+    assert.match(wf, /node scripts\/ci\/qa-failure-issue\.mjs qa-run\.attempt-\*\.log/)
+    assert.match(wf, /tee "qa-run\.attempt-\$i\.log"/)
+  })
+
+  test('CLI: with no harness log (the run failed earlier) the issue is still filed, unclassified', () => {
+    const { result, calls } = run({ open: 12 }, {}, [])
+    assert.equal(result.status, 0, result.stderr)
+    const edit = sub(calls, 'issue', 'edit')[0]
+    assert.match(edit[edit.indexOf('--body') + 1], /`unclassified` — no harness log/)
   })
 })

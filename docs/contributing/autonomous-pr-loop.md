@@ -600,10 +600,12 @@ least twice.
   `Ign:N http://azure.archive.ubuntu.com/ubuntu …` repeating until the step
   times out or the job is canceled. apt hangs on the runner's regional mirror;
   nothing in the PR is implicated. Observed repeatedly, most recently twice on 2026-08-19.
-- **Base Sepolia RPC flap** — `qa-dev` money-flow legs: transient RPC timeouts
-  or stale-nonce reads from the public Base Sepolia endpoint fail a leg that
-  passes on rerun. Stability-gate reruns rather than chasing the payment code
-  (the 2026-08-12 promotion lesson).
+- **Base Sepolia RPC failures** — `qa-dev` money-flow legs: an RPC provider's
+  refusals or timeouts fail a leg that may pass on rerun. Do not chase the
+  payment code for them, and do not treat a rerun-to-green as the fix either:
+  the standing `qa-failure` issue records the failure class (#3337), and a
+  recurring `provider` class is a finding for the provider (epic #3335). See
+  [Classify the failure](../operations/agent-qa.md#classify-the-failure).
 
   **#2004 widened where this signature can appear.** The backend test job now
   reaches Base Sepolia too: `non-custody-onchain-enforcer.contract.test.ts` is

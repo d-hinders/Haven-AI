@@ -241,9 +241,11 @@ jobs:
           # purpose, and an on-chain assertion verified on the writer's own
           # node proves only that the backend agrees with itself.
           QA_RPC_URL_BASE_SEPOLIA: ${{ secrets.QA_RPC_URL_BASE_SEPOLIA }}
-          # Flake budget (#578): the harness is idempotent-safe to re-run, so a transient
-          # testnet RPC hiccup gets one more shot before the run is called red. Bump via a
-          # repo variable if a chain is flaky; keep low — each attempt consumes test funds.
+          # Retry budget (#578): the harness is idempotent-safe to re-run, so one failed
+          # attempt gets one more before the run is called red. A pass that needed it
+          # reports itself (#3338), and a red run's issue records its failure class
+          # (#3337): a recurring provider class is a finding for the provider, not a
+          # reason to raise this. Keep low — each attempt consumes test funds.
           QA_MAX_ATTEMPTS: ${{ vars.QA_MAX_ATTEMPTS || '2' }}
           # #1044: once every leg's identity is provisioned, set the repo
           # variable QA_REQUIRE_ALL_LEGS=1 -- from then on a skipped leg fails
@@ -321,4 +323,7 @@ jobs:
             *)
               TRIGGER="${GITHUB_EVENT_NAME}" ;;
           esac
-          TRIGGER="$TRIGGER" RUN_URL="$RUN_URL" node scripts/ci/qa-failure-issue.mjs
+          # The attempt logs the money-flow step kept (#3338) are classified into the
+          # issue (#3337). If the run failed before the harness, the glob stays
+          # unmatched and the issue says "no harness log".
+          TRIGGER="$TRIGGER" RUN_URL="$RUN_URL" node scripts/ci/qa-failure-issue.mjs qa-run.attempt-*.log

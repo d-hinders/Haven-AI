@@ -347,7 +347,12 @@ describe('the key never appears in a surfaced transport error (#3371)', () => {
 
     const client = createPublicClient({
       chain: baseSepolia,
-      transport: rpcTransport(84532),
+      // #3391: viem's default retryCount is 3; across three failing legs that
+      // is 12 attempts inside vitest's 5s default timeout, which timed out 1
+      // in 6 runs under parallel load. Nothing this test pins (the redacted
+      // 502 details shape) depends on the retry count, so pin it to 0 — one
+      // pass over the legs, like the qa harness reads it.
+      transport: rpcTransport(84532, { retryCount: 0 }),
     })
     const err = await client.getCode({ address: ACCOUNT }).then(
       () => null,
@@ -445,6 +450,40 @@ describe('secretSegments — the vendor URL shapes (#3371)', () => {
     // query segments are what real vendors use.
     expect(secretSegments('https://user:pass@host/base')).toEqual([])
   })
+
+  it('never derives a candidate from the HOST (#3391)', () => {
+    // #3387's whole-string split made every host part a candidate: the public
+    // nodes (16+ chars) and provider hostnames were redacted out of the very
+    // errors the qa-dev failure classifier keys on. The host is not a secret.
+    expect(secretSegments('https://sepolia.base.org')).toEqual([])
+    expect(secretSegments('https://mainnet.base.org')).toEqual([])
+    expect(secretSegments('https://base-sepolia.g.alchemy.com')).toEqual([])
+    expect(secretSegments('https://rpc.drpc.example')).toEqual([])
+  })
+
+  it('path and query candidates still come out of keyed URLs (#3391 parity)', () => {
+    // Same vendor shapes as above, now against keyed URLs whose host is the
+    // public one or a provider's: the key-like PATH/QUERY segments survive.
+    expect(secretSegments(`https://sepolia.base.org/v3/${SECRET_PATH}`)).toEqual([SECRET_PATH])
+    expect(secretSegments(`https://rpc.drpc.example/base-sepolia/${SECRET_PATH}`)).toEqual([
+      'base-sepolia',
+      SECRET_PATH,
+    ])
+    expect(secretSegments(`https://rpc.drpc.example/base?dkey=${SECRET_QUERY}`)).toEqual([
+      SECRET_QUERY,
+    ])
+    expect(secretSegments(`https://base-sepolia.g.alchemy.com/v2/${SECRET_PATH}`)).toEqual([
+      SECRET_PATH,
+    ])
+  })
+
+  it('falls back to the whole-string split when the URL does not parse (#3391)', () => {
+    // `new URL` refuses these; the heuristic must not lose a key-shaped part.
+    expect(secretSegments('not-a-url-but-a-secret-token-here')).toEqual([
+      'not-a-url-but-a-secret-token-here',
+    ])
+    expect(secretSegments(`//host/${SECRET_PATH}`)).toContain(SECRET_PATH)
+  })
 })
 
 describe('scrubTransportErrorSecrets — in-place, chain-deep (#3371)', () => {
@@ -494,5 +533,162 @@ describe('scrubTransportErrorSecrets — in-place, chain-deep (#3371)', () => {
     const err = new Error('plain failure')
     scrubTransportErrorSecrets(err, ['https://sepolia.base.org'])
     expect(err.message).toBe('plain failure')
+  })
+
+  it('a public-host-only endpoint list is NOT a scrub, and the message is untouched (#3391)', () => {
+    // The PREMISE, asserted explicitly rather than implied: pre-#3391 the sole
+    // public URL DID yield a secret segment (its 16-character host), so this
+    // call was a scrub — the whole reason a public-only transport reported
+    // `URL: https://<redacted>`. Post-#3391 the candidate list is empty and
+    // nothing changes, which is what lets `URL: https://sepolia.base.org`
+    // surface again (and what makes the classifier's #2511 regex match).
+    expect(secretSegments('https://sepolia.base.org')).toEqual([])
+    const err = new Error(
+      'HTTP request failed.\n\nStatus: 503\nURL: https://sepolia.base.org\nRequest body: {}',
+    )
+    const before = err.message
+    scrubTransportErrorSecrets(err, ['https://sepolia.base.org'])
+    expect(err.message).toBe(before)
+  })
+
+  it('materializes err.stack BEFORE the scrub, so the stack is scrubbed too (#3371 mutation)', () => {
+    // The surviving #3371 mutation: drop 'stack' from the scrubbed property
+    // list. It survived because V8/viem format `stack` LAZILY — the only test
+    // that touched `err.stack` did so AFTER the scrub, by which point
+    // `message` was already rewritten, so a lazily-built stack was clean
+    // without the guard. Reading `stack` FIRST materializes the secret into
+    // it; the scrub must now rewrite the materialized string to stay green.
+    const url = `https://rpc.drpc.example/base-sepolia/${SECRET_PATH}`
+    const err = new HttpRequestError({
+      status: 500,
+      url,
+      body: { method: 'eth_getCode' },
+      details: `upstream exploded for ${SECRET_PATH}`,
+      headers: new Headers(),
+    })
+    const stackBefore = err.stack // materializes: embeds the secret via the message
+    expect(stackBefore).toContain(SECRET_PATH)
+    scrubTransportErrorSecrets(err, [url])
+    expectNoSecretAnywhere(err)
+    expect(err.stack).not.toBe(stackBefore)
+    expect(err.message).toContain('<redacted>')
+    expect(err.stack).toContain('<redacted>')
+  })
+})
+
+// ── #3391: the public host is not a secret — end to end ──────────────────────
+
+describe('the public host survives the scrub and classifies as provider (#3391)', () => {
+  /**
+   * The no-network regression test for `scripts/ci/qa-failure-issue.mjs`'s
+   * #2511 provider signature. Real objects at every step: a real viem
+   * `HttpRequestError` (503, the public Sepolia node) — the error shape the
+   * transport actually throws; the REAL `scrubTransportErrorSecrets` (not a
+   * re-implementation, whose pass would prove nothing about the live wrap);
+   * the real classifier over the resulting message. With #3387's
+   * host-inclusive scrub this test reddens at the classifier step: the
+   * signature regex `URL: https://sepolia\.base\.org\b` no longer matches a
+   * message scrubbed to `URL: https://<redacted>`, and a public-node outage
+   * filed as `unclassified`.
+   */
+  it('a real HttpRequestError from the public node classifies provider after the real scrub', async () => {
+    // @ts-expect-error -- plain .mjs CI helper, no type declarations
+    const { classifyLog } = await import('../../../../../../scripts/ci/qa-failure-issue.mjs')
+    const err = new HttpRequestError({
+      status: 503,
+      url: 'https://sepolia.base.org',
+      body: { method: 'eth_getCode' },
+      details: 'upstream exploded',
+      headers: new Headers(),
+    })
+    expect(err.message).toContain('URL: https://sepolia.base.org')
+
+    // The endpoint list exactly as the public-only transport builds it:
+    // RPC_URL_BASE_SEPOLIA unset, so the legs collapse to the public node.
+    scrubTransportErrorSecrets(err, ['https://sepolia.base.org'])
+    expect(err.message).toContain('URL: https://sepolia.base.org')
+    expect(err.message).not.toContain('<redacted>')
+
+    const line = `• x402-erc7710-fresh-agent … FAIL — fresh-agent authorize failed (502): {"error":"Could not deploy the delegate account","details":${JSON.stringify(err.message)}}`
+    expect(classifyLog(line).runClass).toBe('provider')
+  })
+
+  it('a keyed dedicated leg is still redacted; the public leg still classifies (both legs fail)', async () => {
+    // @ts-expect-error -- plain .mjs CI helper, no type declarations
+    const { classifyLog } = await import('../../../../../../scripts/ci/qa-failure-issue.mjs')
+    // fallback() surfaces the LAST leg's error; with dedicated + public legs
+    // configured and every leg failing, the public leg's error is the one
+    // that surfaces — scrubbed against BOTH endpoints' segments.
+    const dedicated = `https://rpc.drpc.example/base-sepolia/${SECRET_PATH}`
+    const err = new HttpRequestError({
+      status: 503,
+      url: 'https://sepolia.base.org',
+      body: { method: 'eth_getCode' },
+      details: 'upstream exploded',
+      headers: new Headers(),
+    })
+    err.stack = 'HttpRequestError: HTTP request failed.\n\nURL: https://sepolia.base.org\n    at fetch'
+
+    scrubTransportErrorSecrets(err, [dedicated, 'https://sepolia.base.org'])
+    expect(err.message).toContain('URL: https://sepolia.base.org')
+    expectNoSecretAnywhere(err)
+
+    const line = `• x402-delegation-3009-sweep … FAIL — sweep relay failed: ${err.message}`
+    expect(classifyLog(line).runClass).toBe('provider')
+  })
+
+  it('hardening: a frozen own property is left alone and the scrub does not throw', () => {
+    const url = `https://rpc.drpc.example/base-sepolia/${SECRET_PATH}`
+    const err = new Error(`frozen says ${SECRET_PATH}`) as Error & Record<string, unknown>
+    // A frozen enumerable own property: non-writable, non-configurable — the
+    // strict-mode write throws, the guard keeps going. `message` (the
+    // builtin) stays writable, so the scrub still reaches it.
+    Object.defineProperty(err, 'details', {
+      value: `also ${SECRET_PATH}`,
+      writable: false,
+      enumerable: true,
+      configurable: false,
+    })
+    expect(() => scrubTransportErrorSecrets(err, [url])).not.toThrow()
+    expect(err.message).toContain('<redacted>')
+    expect(err.details).toBe(`also ${SECRET_PATH}`)
+  })
+
+  it('hardening: a getter-only own property is skipped without breaking the scrub', () => {
+    const url = `https://rpc.drpc.example/base-sepolia/${SECRET_PATH}`
+    const err = Object.assign(new Error(`outer ${SECRET_PATH}`), {
+      cause: Object.assign(new Error(`inner ${SECRET_PATH}`), {}),
+    }) as Error & { cause: Error & Record<string, unknown> }
+    // A DOMException-shaped own property: enumerable, getter-only. Its value
+    // carries no secret, so the leak scanner below stays honest — what this
+    // pins is that the failed write does not abort the scrub around it.
+    Object.defineProperty(err.cause, 'code', {
+      get: () => 'locked-value',
+      enumerable: true,
+      configurable: true,
+    })
+    scrubTransportErrorSecrets(err, [url])
+    expectNoSecretAnywhere(err)
+    expect(err.message).toContain('<redacted>')
+    expect(err.cause.message).toContain('<redacted>')
+    expect(err.cause.code).toBe('locked-value')
+  })
+
+  it('hardening: a cyclic nested object terminates and is still scrubbed where reachable', () => {
+    const url = `https://rpc.drpc.example/base-sepolia/${SECRET_PATH}`
+    const cyclic: Record<string, unknown> = { note: `cycle carries ${SECRET_PATH}` }
+    cyclic.self = cyclic
+    const err = Object.assign(new Error(`outer ${SECRET_PATH}`), {
+      cause: Object.assign(new Error(`inner ${SECRET_PATH}`), { nested: cyclic }),
+    })
+    // Pre-guard this recursed until the stack blew: scrubValue walked
+    // `nested.self` forever. The visited-guard terminates it, and the object
+    // reached on the way in is scrubbed.
+    expect(() => scrubTransportErrorSecrets(err, [url])).not.toThrow()
+    expect(err.message).toContain('<redacted>')
+    expect((err.cause as Error).message).toContain('<redacted>')
+    expect(cyclic.note).toContain('<redacted>')
+    // The back-edge write is a no-op, not a corruption: `self` still cycles.
+    expect(cyclic.self).toBe(cyclic)
   })
 })

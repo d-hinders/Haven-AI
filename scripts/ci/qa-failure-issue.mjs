@@ -85,6 +85,13 @@ const PROVIDER = [
   /flashblocks/,
   // #2511: a 502 whose body quotes the public endpoint is an RPC outage. Matched
   // on the RAW line; the signature is scrubbed afterwards like every other.
+  // #3391: this signature only survives into real logs because the transport
+  // scrub no longer redacts the HOST (`secretSegments`, rpc-transport.ts) —
+  // the backend suite's no-network test (rpc-transport-key-scrub.test.ts →
+  // `classifies provider after the real scrub`) feeds a REAL scrubbed viem
+  // HttpRequestError through classifyLog, so a scrub that redacts the host
+  // again or a regex narrowed away from the raw `URL:` shape reddens one of
+  // the two suites. Keep the fixture in lockstep with that test.
   /URL: https:\/\/sepolia\.base\.org\b/,
   // dRPC's free-plan limits (code 30 timeouts, code 31 batches): seen in 4 runs
   // of the 2026-09-26 sample and otherwise left unclassified.

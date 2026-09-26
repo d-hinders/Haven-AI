@@ -2081,7 +2081,7 @@ export const openapiSpec = {
         operationId: 'buildAgentDelegation',
         summary: 'Grant step 1: build an unsigned budget delegation for the owner to sign.',
         description:
-          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.',
+          'Builds the EIP-712 typed data for a period-budget delegation (token, atomic budget, refill period, optional recipient pin, expiry — defaulting to 90 days) and stores it as a pending row. Nothing is signed and nothing moves: the OWNER signs signing_payload client-side (one signature, zero transactions) and then calls activate. A rebuilt (token, recipient) slot gets a fresh version so replacements never collide (#827) — EXCEPT an identical (token, recipient, budget, period, merchant) slot whose build is still pending and unexpired: that returns the SAME row (same delegation_hash and version) with nothing inserted, so a retried grant or the #2539 CLI handing off a signing link converges instead of minting a competitor the owner never sees. The response also carries build_id and typed_data_hash (both the delegation_hash, named for API clarity) and signing_url — the dashboard grant form with ?grant= prefill, whose host comes from FRONTEND_URL.',
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         requestBody: {
@@ -2105,7 +2105,7 @@ export const openapiSpec = {
                     // `pattern` constrains strings only, so it still applies
                     // to a real address and ignores null.
                     type: ['string', 'null'],
-                    description: 'Optional recipient pin. Omit (or null) for an open budget.',
+                    description: "Optional recipient pin. Omit (or null) for an open budget — unless merchant_slug is set, in which case the server pins it to the merchant's verified payTo.",
                   },
                   budget_atomic: {
                     type: 'string',
@@ -2114,6 +2114,11 @@ export const openapiSpec = {
                   },
                   period_seconds: { type: 'integer', minimum: 60, description: 'Native refill period; ≥ 60.' },
                   expires_at: { type: 'integer', description: 'Unix seconds, must be in the future. Default: now + 90 days.' },
+                  merchant_slug: {
+                    type: 'string',
+                    pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
+                    description: "A merchant-locked budget (#3331): the server pins the recipient to this live merchant's verified payTo on the agent's chain and records the merchant on the row. recipient_address may be omitted; when sent it must equal that payTo (409 otherwise). 404 for an unknown or non-live merchant; 409 when the merchant has no verified payTo there, not every offer there advertises ERC-7710, or the payTo is one of this agent's own addresses (delegate key, delegate account or treasury).",
+                  },
                 },
               },
             },
@@ -2157,7 +2162,7 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
-          '409': { ...errorResponse, description: 'Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409.' },
+          '409': { ...errorResponse, description: 'Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, the payTo is one of the agent\u2019s own addresses, recipient_address differs from the current payTo).' },
           '502': errorResponse,
         },
       },
@@ -7394,9 +7399,14 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['merchant', 'offers'],
+                  required: ['merchant', 'funding', 'offers'],
                   properties: {
                     merchant: { $ref: '#/components/schemas/Merchant' },
+                    funding: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MerchantFundingTarget' },
+                      description: 'Where the merchant is paid on each listed chain that has an active, verified x402 offer (#3331). Empty when none does.',
+                    },
                     offers: { type: 'array', items: { $ref: '#/components/schemas/CatalogEntry' } },
                   },
                 },
@@ -7405,6 +7415,66 @@ export const openapiSpec = {
           },
           '401': errorResponse,
           '403': agentAuthForbidden,
+          '404': errorResponse,
+        },
+      },
+    },
+    '/merchants/{slug}/budgets': {
+      get: {
+        tags: ['Catalog'],
+        operationId: 'listMerchantBudgets',
+        summary: "The dashboard user's merchant-locked budgets for one merchant.",
+        description:
+          "Every ACTIVE, unexpired budget delegation the user issued for this merchant (#3331) on an agent that is not revoked, with what is left this period — read from the ERC20PeriodTransferEnforcer's storage, the same read GET /allowances makes (remaining_is_from_chain false = that read failed and remaining_atomic is the full budget) — and the pin against the merchant's current verified payTo. Dashboard session only: an agent key gets 403. 404 for an unknown or non-live merchant.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'slug', in: 'path', required: true, schema: { type: 'string', pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Budgets, by agent name.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['budgets'],
+                  properties: {
+                    budgets: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: [
+                          'agent_id', 'agent_name', 'chain_id', 'token_address', 'recipient_address',
+                          'delegation_hash', 'budget_atomic', 'period_seconds', 'expires_at',
+                          'remaining_atomic', 'remaining_is_from_chain', 'pin_status',
+                        ],
+                        properties: {
+                          agent_id: { type: 'string', format: 'uuid' },
+                          agent_name: { type: 'string' },
+                          chain_id: { type: 'integer' },
+                          token_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
+                          recipient_address: { type: 'string', pattern: '^0x[0-9a-f]{40}$' },
+                          delegation_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+                          budget_atomic: { type: 'string', pattern: '^[0-9]+$' },
+                          period_seconds: { type: 'integer' },
+                          expires_at: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
+                          remaining_atomic: { type: 'string', pattern: '^[0-9]+$' },
+                          remaining_is_from_chain: { type: 'boolean' },
+                          pin_status: {
+                            type: 'string',
+                            enum: ['current', 'stale', 'unverified', 'not_erc7710'],
+                            description: '`stale`: the merchant now names a different payTo (a rotation) — this budget pays only the old address, and payments to the new one use the open budget, if the agent has one. `unverified`: the merchant names no single payTo on that chain now (including a `shared` one). `not_erc7710`: the payTo still matches but not every offer there advertises ERC-7710, and a pinned budget pays only through ERC-7710.',
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '403': errorResponse,
           '404': errorResponse,
         },
       },
@@ -7542,7 +7612,7 @@ export const openapiSpec = {
         required: [
           'id', 'chain_id', 'token_address', 'recipient_address', 'delegation_hash',
           'version', 'status', 'budget_atomic', 'period_seconds', 'start_date',
-          'expires_at', 'created_at',
+          'expires_at', 'created_at', 'merchant_id', 'merchant_slug', 'merchant_name',
         ],
         properties: {
           id: { type: 'string', format: 'uuid' },
@@ -7561,6 +7631,36 @@ export const openapiSpec = {
           start_date: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
           expires_at: { type: 'string', pattern: '^[0-9]+$', description: 'Unix seconds as a string (BIGINT).' },
           created_at: { type: 'string', format: 'date-time' },
+          merchant_id: {
+            anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }],
+            description: 'The merchant a merchant-locked budget was issued for (#3331); null for every other row, and after that merchant is deleted.',
+          },
+          merchant_slug: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'That merchant\u2019s slug, or null.' },
+          merchant_name: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'That merchant\u2019s display name, or null.' },
+        },
+      },
+      /**
+       * #3331: where a merchant is paid on one chain.
+       */
+      MerchantFundingTarget: {
+        type: 'object',
+        required: ['network', 'chain_id', 'pay_to', 'pay_to_status', 'erc7710'],
+        properties: {
+          network: { type: 'string', description: 'CAIP-2, e.g. "eip155:84532".' },
+          chain_id: { type: 'integer' },
+          pay_to: {
+            anyOf: [{ type: 'string', pattern: '^0x[0-9a-f]{40}$' }, { type: 'null' }],
+            description: 'The lowercased payTo every active, verified x402 offer of the merchant on this network names — non-null only when pay_to_status is `verified`. A merchant-locked budget pins its recipient here.',
+          },
+          pay_to_status: {
+            type: 'string',
+            enum: ['verified', 'conflicting', 'unstated', 'shared'],
+            description: '`conflicting`: two offers name different addresses. `unstated`: some offer names none (not yet probed, or its challenge carries none). `shared`: another merchant\u2019s non-delisted offer on this network names the same address, so a pin would pay that merchant too. Only `verified` can be pinned to.',
+          },
+          erc7710: {
+            type: 'boolean',
+            description: 'Every one of those offers advertises the ERC-7710 transfer method — the rail a pinned budget pays through. False: payments to this merchant use the open budget, so no merchant-locked budget is offered.',
+          },
         },
       },
       /**

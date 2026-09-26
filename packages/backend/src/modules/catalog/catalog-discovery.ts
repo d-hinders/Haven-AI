@@ -229,8 +229,9 @@ export async function ingestDiscoveredCatalog(
     await db.query(
       `INSERT INTO merchant_catalog
          (name, description, category, resource_url, rail, protocol, tool_name,
-          price_display, price_atomic, asset, network, asset_transfer_methods, status, verified_at, merchant_id)
-       VALUES ($1, $2, $3, $4, 'x402', 'http', NULL, $5, $6, $7, $8, $9, 'active', now(), $10)
+          price_display, price_atomic, asset, network, asset_transfer_methods, status, verified_at, merchant_id,
+          pay_to)
+       VALUES ($1, $2, $3, $4, 'x402', 'http', NULL, $5, $6, $7, $8, $9, 'active', now(), $10, $11)
        ON CONFLICT DO NOTHING`,
       [
         name,
@@ -243,6 +244,8 @@ export async function ingestDiscoveredCatalog(
         probe.network ?? network,
         probe.assetTransferMethods?.join(',') ?? null,
         merchant.id,
+        // #3331: the same probe's payTo the hourly refresh records.
+        probe.payTo ?? null,
       ],
     )
     known.add(resourceUrl)

@@ -55,6 +55,8 @@ interface DelegationSeed {
   delegationHash?: string
   startDate?: number
   expiresAt?: number
+  /** #3331: the merchant a merchant-locked budget was issued for. */
+  merchantId?: string | null
 }
 
 async function seedDelegation(seed: DelegationSeed): Promise<string> {
@@ -62,9 +64,9 @@ async function seedDelegation(seed: DelegationSeed): Promise<string> {
     `INSERT INTO agent_delegations
        (agent_id, chain_id, token_address, recipient_address, delegation_hash,
         delegation_json, version, status, budget_atomic, period_seconds,
-        start_date, expires_at, created_at)
+        start_date, expires_at, created_at, merchant_id)
      VALUES ($1, 84532, $2, $3, $4, $5, 1, $6, $7, 86400, $9, $10,
-             COALESCE($8::timestamptz, NOW()))
+             COALESCE($8::timestamptz, NOW()), $11)
      RETURNING id`,
     [
       seed.agentId,
@@ -77,6 +79,7 @@ async function seedDelegation(seed: DelegationSeed): Promise<string> {
       seed.createdAt ?? null,
       seed.startDate ?? 0,
       seed.expiresAt ?? 9999999999,
+      seed.merchantId ?? null,
     ],
   )
   return result.rows[0].id
@@ -663,5 +666,54 @@ describeDb('delegation build slot lock (#2613)', () => {
       .toBe(delegationBuildSlotKey('a1', USDC, RECIPIENT.toUpperCase()))
     // Two agents never share a slot even on identical parameters.
     expect(open).not.toBe(delegationBuildSlotKey('a2', USDC, null))
+  })
+})
+
+describeDb('merchant-locked budgets (#3331, real DB)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  async function seedMerchant(slug: string): Promise<string> {
+    const { rows } = await db.query<{ id: string }>(
+      `INSERT INTO merchants (slug, name) VALUES ($1, $1) RETURNING id`,
+      [slug],
+    )
+    return rows[0].id
+  }
+
+  // The issue's uniqueness criterion: nothing enforces one active delegation
+  // per agent, so a merchant-locked budget and the open budget coexist — and
+  // the EXISTING selector already sends a payment to the merchant through the
+  // pinned one and everything else through the open one. No selection change
+  // ships with #3331; this pins that it did not need one.
+  it('CHARACTERIZATION: a merchant-locked budget coexists with the open one; the merchant is paid from the pinned one, anyone else from the open one', async () => {
+    const agent = await seedUserAndAgent()
+    const merchantId = await seedMerchant('coexist')
+    await seedDelegation({ agentId: agent, recipientAddress: null, createdAt: '2026-09-02T00:00:00Z' })
+    await seedDelegation({ agentId: agent, recipientAddress: RECIPIENT, merchantId, createdAt: '2026-09-01T00:00:00Z' })
+
+    expect((await listActiveDelegations([agent])).length).toBe(2)
+    expect((await selectDelegationForPayment(agent, USDC, RECIPIENT))!.recipient_address).toBe(RECIPIENT)
+    expect((await selectDelegationForPayment(agent, USDC, '0x' + 'bb'.repeat(20)))!.recipient_address).toBeNull()
+  })
+
+  it('build reuse is merchant-scoped: a plain pinned pending row is never re-handed to a merchant build, nor the reverse', async () => {
+    const agent = await seedUserAndAgent()
+    const merchantId = await seedMerchant('reuse')
+    const plain = await seedDelegation({ agentId: agent, recipientAddress: RECIPIENT, status: 'pending', budgetAtomic: '5000000' })
+
+    expect((await findReusablePendingDelegation(agent, USDC, RECIPIENT, '5000000', 86400, 0))!.id).toBe(plain)
+    expect(await findReusablePendingDelegation(agent, USDC, RECIPIENT, '5000000', 86400, 0, undefined, merchantId)).toBeNull()
+
+    const forMerchant = await seedDelegation({
+      agentId: agent, recipientAddress: RECIPIENT, status: 'pending', budgetAtomic: '5000000', merchantId,
+    })
+    expect((await findReusablePendingDelegation(agent, USDC, RECIPIENT, '5000000', 86400, 0, undefined, merchantId))!.id).toBe(forMerchant)
+    // …and the plain build still gets the plain row, not the merchant's.
+    expect((await findReusablePendingDelegation(agent, USDC, RECIPIENT, '5000000', 86400, 0))!.id).toBe(plain)
   })
 })

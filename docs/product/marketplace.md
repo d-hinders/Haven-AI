@@ -4,6 +4,10 @@ status: current
 covers:
   - packages/backend/src/db/migrations/088_merchants.ts
   - packages/backend/src/db/migrations/089_marketplace_prospects.ts
+  - packages/backend/src/db/migrations/097_merchant_pay_to.ts
+  - packages/backend/src/routes/agent-delegations.ts
+  - packages/backend/src/modules/catalog/merchant-catalog.ts
+  - packages/backend/src/infra/repositories/delegation-budgets.ts
   - packages/backend/src/infra/repositories/merchants.ts
   - packages/backend/src/modules/catalog/marketplace-scope.ts
   - packages/backend/src/modules/catalog/prospect-copy.ts
@@ -98,6 +102,92 @@ callable URL, no prices): the marketplace is a discovery surface and must not
 require the onboarding it leads to (#2530). Every catalog entry now carries
 `merchant { id, slug, name, listing_status, is_test_merchant }` for every
 caller, including `haven_discover_tools`.
+
+## Merchant-locked budgets (#3331)
+
+An owner can give an agent a budget that pays **one merchant only**. It is an
+ordinary recipient-pinned budget delegation, and its pin is the merchant's
+verified payTo on the agent's chain. This section covers the backend slice;
+the "Fund this merchant" modal on the merchant page is the frontend slice.
+
+- **Where a merchant is paid.** The catalog refresh probe (at backend boot,
+  then hourly) already reads each offer's 402 challenge for its price. It now
+  also records the challenge's `payTo` (`merchant_catalog.pay_to`,
+  lowercased). It records one only when every `accepts[]` option on the
+  offer's recorded network names the same well-formed address; options on
+  other networks do not count. A merchant's **verified payTo** on a chain is
+  derived, never stored: it is the one address all its active, verified x402
+  operator offers on that network agree on. Self-submitted offers do not
+  count, because they carry no network.
+- **`GET /merchants/{slug}`** carries `funding`, one entry per listed chain
+  with such an offer:
+  `{ network, chain_id, pay_to, pay_to_status, erc7710 }`. The chain scope is
+  the same one the offers use, and the field is public like the rest of the
+  page, since the merchant's own 402 hands the payTo to every caller.
+  - `pay_to_status` is `verified` (`pay_to` set), `conflicting` (two offers
+    name different addresses), `unstated` (some offer names none, including
+    every offer before its first probe after the migration) or `shared`
+    (another merchant's offer on that network names the same address, so a
+    pin would pay that merchant too; a degraded or not-yet-verified offer
+    counts, since it can recover without anyone re-issuing the budget, and
+    only a delisted one does not).
+  - `erc7710` is true only when **every** such offer advertises the ERC-7710
+    transfer method. A pinned budget cannot fund an EIP-3009 payment, because
+    that leg pays the agent's own wallet first, so an EIP-3009 merchant is paid
+    from the open budget, if the agent has one.
+- **Issuing one.** `POST /agents/{id}/delegations/build` with `merchant_slug`.
+  The server fills the recipient from the merchant's verified payTo on the
+  agent's chain and records the merchant on the row. It returns 404 for an
+  unknown or non-live merchant. It returns 409 when:
+  - there is no verified payTo;
+  - not every offer there is ERC-7710;
+  - the payTo is one of the agent's own addresses (delegate key, delegate
+    account or treasury). A pin to the delegate key would let the EIP-3009
+    funding leg spend it on any merchant;
+  - a sent `recipient_address` differs from the payTo.
+
+  Signing and activation are the ordinary grant flow.
+- **Which budget pays.** Nothing limits an agent to one active delegation.
+  The merchant-locked budget sits beside the open one, and the existing
+  payment selection already prefers a budget pinned to the payee. A payment
+  to the merchant uses the merchant-locked budget, and a payment to anyone
+  else uses the open one, if there is one.
+- **One address, one slot.** A merchant-locked budget and a plain budget
+  pinned to the same address share one `(agent, token, recipient)` slot.
+  Activating either replaces the other: they carry the same on-chain
+  authority, and two live grants in one slot would make selection ambiguous.
+  Activating a plain pinned budget to a merchant's payTo therefore replaces that
+  merchant's budget, and drops its merchant label. The fund-merchant modal
+  (the frontend slice, not shipped yet) is to warn about this before the
+  owner signs.
+- **`GET /merchants/{slug}/budgets`** is dashboard-session only (an agent key
+  gets 403). It lists the owner's active, unexpired merchant-locked budgets
+  for the merchant on agents that are not revoked, each with:
+  - `remaining_atomic`, read from the period enforcer, the same read
+    `GET /allowances` makes; `remaining_is_from_chain: false` means that read
+    failed and the figure is the full budget;
+  - `pin_status`, which is one of:
+    - `current`;
+    - `stale`: the merchant now names a different payTo. The signed budget
+      still pays only the old address, and payments to the new one fall to
+      the open budget, if there is one;
+    - `unverified`: the merchant names no single payTo there now, including
+      a `shared` one;
+    - `not_erc7710`: the payTo still matches, but not every offer there
+      advertises ERC-7710 any more. A pinned budget pays only through
+      ERC-7710, so it cannot pay the offers that dropped it.
+
+  A budget on a chain this deployment no longer lists is still judged against
+  that chain's payTo.
+- **The agent page.** `GET /agents/{id}/delegations` rows carry
+  `merchant_id`, `merchant_slug` and `merchant_name`, so a budget card can
+  name its merchant. A deleted merchant leaves the budget pinned and drops
+  only the label.
+- **Known gap: a re-key drops the label.** The replacement grant a re-key
+  issues keeps the recipient pin but not the merchant. After a re-key, the
+  budget still pays only the merchant, but it no longer appears in
+  `GET /merchants/{slug}/budgets` or carries the merchant's name. Tracked in
+  #3386.
 
 ## Prospects
 

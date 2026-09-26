@@ -14,7 +14,7 @@
 import Fastify, { FastifyError, FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { createHash } from 'crypto'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import db from '../../db.js'
 import { config } from '../../config.js'
 import { assertWorkerSchemaAtHead, describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
@@ -24,6 +24,19 @@ import { PROSPECT_SEEDS } from '../../db/migrations/089_marketplace_prospects.js
 import merchantRoutes from '../merchants.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
 import catalogRoutes from '../catalog.js'
+
+// #3331: the enforcer read is a CHAIN read, not a SQL one — stubbed so the
+// budgets route's remaining/provenance pass-through is deterministic. The
+// stub answers from the stored delegation_json, so each row proves it was
+// read for ITS OWN delegation.
+vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
+  readRemainingBudget: vi.fn(async (_chainId: number, json: string, budgetAtomic: string) => {
+    const parsed = JSON.parse(json) as { remaining?: string }
+    return parsed.remaining === undefined
+      ? { remainingAtomic: budgetAtomic, fromChain: false }
+      : { remainingAtomic: parsed.remaining, fromChain: true }
+  }),
+}))
 
 const AGENT_KEY = 'sk_agent_test_merchants'
 const AGENT_KEY_HASH = createHash('sha256').update(AGENT_KEY).digest('hex')
@@ -371,5 +384,164 @@ describeDb('merchants routes (#3078)', () => {
       expect(slugsOf((await app.inject({ method: 'GET', url: '/merchants', headers: agentHeaders })).json())).not.toContain(slug)
       expect((await app.inject({ method: 'GET', url: `/merchants/${slug}`, headers: agentHeaders })).statusCode).toBe(404)
     }
+  })
+  // ── #3331: merchant-locked budgets ────────────────────────────────────────
+  const PAY_TO = '0x' + 'aa'.repeat(20)
+  const OLD_PAY_TO = '0x' + 'bb'.repeat(20)
+
+  async function setPayTo(host: string, payTo: string | null, methods = 'eip3009,erc7710'): Promise<void> {
+    await db.query(
+      `UPDATE merchant_catalog SET pay_to = $2, asset_transfer_methods = $3
+       WHERE merchant_id = (SELECT merchant_id FROM merchant_catalog WHERE resource_url LIKE $1 LIMIT 1)`,
+      [`https://${host}/%`, payTo, methods],
+    )
+  }
+
+  async function merchantIdOf(slug: string): Promise<string> {
+    const { rows } = await db.query<{ id: string }>(`SELECT id FROM merchants WHERE slug = $1`, [slug])
+    return rows[0].id
+  }
+
+  let hashSeq = 0
+  async function insertMerchantBudget(
+    agentId: string,
+    merchantId: string,
+    opts: { recipient?: string; status?: string; remaining?: string; chainId?: number; expiresAt?: number } = {},
+  ): Promise<void> {
+    hashSeq += 1
+    await db.query(
+      `INSERT INTO agent_delegations
+         (agent_id, chain_id, delegation_hash, delegation_json, version, token_address, recipient_address,
+          status, budget_atomic, period_seconds, start_date, expires_at, merchant_id)
+       VALUES ($1, $2, $3, $4, 1, '0x036cbd53842c5426634e7929541ec2318f3dcf7e', $5,
+               $6, '5000000', 86400, 0, $8, $7)`,
+      [
+        agentId,
+        opts.chainId ?? 84532,
+        `0x${hashSeq.toString(16).padStart(64, '0')}`,
+        JSON.stringify(opts.remaining === undefined ? {} : { remaining: opts.remaining }),
+        opts.recipient ?? PAY_TO,
+        opts.status ?? 'active',
+        merchantId,
+        opts.expiresAt ?? 1900000000,
+      ],
+    )
+  }
+
+  function userHeaders(userId: string): Record<string, string> {
+    return { authorization: `Bearer ${app.jwt.sign({ sub: userId, email: 'u@test.dev' })}` }
+  }
+
+  it('a merchant page carries where the merchant is paid per listed chain, and matches the spec (#3331)', async () => {
+    setConfig({ marketplaceChainIds: [84532, 8453], deployChainIds: [] })
+    await setPayTo('both.example', PAY_TO)
+    const res = await app.inject({ method: 'GET', url: '/merchants/both-chains', headers: dashboardHeaders() })
+    expect(res.statusCode).toBe(200)
+    expectMatchesSpec('GET', '/merchants/{slug}', res.json())
+    expect(res.json().funding).toEqual([
+      { network: 'eip155:84532', chain_id: 84532, pay_to: PAY_TO, pay_to_status: 'verified', erc7710: true },
+      { network: 'eip155:8453', chain_id: 8453, pay_to: PAY_TO, pay_to_status: 'verified', erc7710: true },
+    ].sort((a, b) => a.network.localeCompare(b.network)))
+
+    // Chain-scoped like the offers, and public like them.
+    setConfig({ marketplaceChainIds: [8453], deployChainIds: [] })
+    const pub = await app.inject({ method: 'GET', url: '/merchants/both-chains' })
+    expect(pub.json().funding.map((f: { network: string }) => f.network)).toEqual(['eip155:8453'])
+
+    // No payTo recorded yet → the chain is listed, the address is not.
+    const unprobed = await app.inject({ method: 'GET', url: '/merchants/base-only' })
+    expect(unprobed.json().funding).toEqual([
+      { network: 'eip155:8453', chain_id: 8453, pay_to: null, pay_to_status: 'unstated', erc7710: false },
+    ])
+  })
+
+  it("GET /merchants/:slug/budgets lists only the caller's active budgets for THIS merchant, with remaining and pin status (#3331)", async () => {
+    setConfig({ marketplaceChainIds: [84532], deployChainIds: [] })
+    await setPayTo('sepolia.example', PAY_TO)
+    const { userId, agentId } = await seedAgent(84532)
+    const sepoliaId = await merchantIdOf('sepolia-only')
+    const bothId = await merchantIdOf('both-chains')
+
+    await insertMerchantBudget(agentId, sepoliaId, { remaining: '1250000' })
+    await insertMerchantBudget(agentId, sepoliaId, { recipient: OLD_PAY_TO })
+    // None of these may appear: not active, another merchant, another user.
+    await insertMerchantBudget(agentId, sepoliaId, { status: 'replaced' })
+    await insertMerchantBudget(agentId, sepoliaId, { status: 'pending' })
+    await insertMerchantBudget(agentId, bothId)
+    const other = await seedUser()
+    const otherAccount = await db.query<{ id: string }>(
+      `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type)
+       VALUES ($1, $2, 84532, 'delegation', 'delegator_hybrid') RETURNING id`,
+      [other, '0x' + 'ef'.repeat(20)],
+    )
+    const otherAgent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, name, delegate_address, account_id, status)
+       VALUES ($1, 'b', $2, $3, 'active') RETURNING id`,
+      [other, '0x' + 'ef'.repeat(20), otherAccount.rows[0].id],
+    )
+    await insertMerchantBudget(otherAgent.rows[0].id, sepoliaId)
+
+    const res = await app.inject({ method: 'GET', url: '/merchants/sepolia-only/budgets', headers: userHeaders(userId) })
+    expect(res.statusCode).toBe(200)
+    expectMatchesSpec('GET', '/merchants/{slug}/budgets', res.json())
+    const budgets = res.json().budgets as Array<Record<string, unknown>>
+    expect(budgets).toHaveLength(2)
+    expect(budgets.every((b) => b.agent_id === agentId && b.agent_name === 'a')).toBe(true)
+    expect(budgets.find((b) => b.recipient_address === PAY_TO)).toMatchObject({
+      remaining_atomic: '1250000', remaining_is_from_chain: true, pin_status: 'current', budget_atomic: '5000000',
+    })
+    // A rotated payTo: the budget pinned to the old address is flagged stale,
+    // and a failed enforcer read reports the budget with its provenance.
+    expect(budgets.find((b) => b.recipient_address === OLD_PAY_TO)).toMatchObject({
+      remaining_atomic: '5000000', remaining_is_from_chain: false, pin_status: 'stale',
+    })
+
+    // The merchant stops naming a payTo → every pin is unverified, not stale.
+    await setPayTo('sepolia.example', null)
+    const after = await app.inject({ method: 'GET', url: '/merchants/sepolia-only/budgets', headers: userHeaders(userId) })
+    expect((after.json().budgets as Array<{ pin_status: string }>).map((b) => b.pin_status)).toEqual(['unverified', 'unverified'])
+
+    // Same payTo, but the merchant dropped ERC-7710: the pin is right and
+    // the budget still cannot pay it (pinned budgets are ERC-7710-only).
+    await setPayTo('sepolia.example', PAY_TO, 'eip3009')
+    const noErc7710 = await app.inject({ method: 'GET', url: '/merchants/sepolia-only/budgets', headers: userHeaders(userId) })
+    expect(noErc7710.json().budgets.find((b: { recipient_address: string }) => b.recipient_address === PAY_TO).pin_status)
+      .toBe('not_erc7710')
+
+    // An expired budget is not listed — payment selection will not use it.
+    await insertMerchantBudget(agentId, sepoliaId, { remaining: '1', expiresAt: 1_000_000 })
+    const withExpired = await app.inject({ method: 'GET', url: '/merchants/sepolia-only/budgets', headers: userHeaders(userId) })
+    expect(withExpired.json().budgets).toHaveLength(2)
+
+    // A revoked agent's budgets are not listed.
+    await db.query(`UPDATE agents SET status = 'revoked' WHERE id = $1`, [agentId])
+    const revoked = await app.inject({ method: 'GET', url: '/merchants/sepolia-only/budgets', headers: userHeaders(userId) })
+    expect(revoked.json().budgets).toEqual([])
+  })
+
+  it("GET /merchants/:slug/budgets judges a budget on a chain the marketplace does not list against THAT chain's payTo (#3331 review F6)", async () => {
+    // The page is served (both-chains has an 84532 offer), but the budget
+    // sits on 8453, which this deployment does not list. Its pin must still be
+    // read against the 8453 payTo, not reported unverified for want of one.
+    setConfig({ marketplaceChainIds: [84532], deployChainIds: [] })
+    await setPayTo('both.example', PAY_TO)
+    const { userId, agentId } = await seedAgent(8453)
+    await insertMerchantBudget(agentId, await merchantIdOf('both-chains'), { chainId: 8453 })
+    const res = await app.inject({ method: 'GET', url: '/merchants/both-chains/budgets', headers: userHeaders(userId) })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().budgets).toEqual([expect.objectContaining({ chain_id: 8453, pin_status: 'current' })])
+  })
+
+  it('GET /merchants/:slug/budgets is a dashboard read: 401 without a credential, 403 to an agent, 404 for an unknown merchant or a prospect (#3331)', async () => {
+    setConfig({ marketplaceChainIds: [84532], deployChainIds: [], marketplaceProspectsEnabled: true })
+    await seedAgent(84532)
+    expect((await app.inject({ method: 'GET', url: '/merchants/sepolia-only/budgets' })).statusCode).toBe(401)
+    const agentRes = await app.inject({
+      method: 'GET', url: '/merchants/sepolia-only/budgets', headers: { authorization: `Bearer ${AGENT_KEY}` },
+    })
+    expect(agentRes.statusCode).toBe(403)
+    const userId = await seedUser()
+    expect((await app.inject({ method: 'GET', url: '/merchants/nobody/budgets', headers: userHeaders(userId) })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/merchants/berget-ai/budgets', headers: userHeaders(userId) })).statusCode).toBe(404)
   })
 })

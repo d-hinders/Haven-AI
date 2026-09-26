@@ -226,6 +226,8 @@ export interface PendingDelegationInsert {
   periodSeconds: number
   startDate: number
   expiresAt: number
+  /** #3331: the merchant a merchant-locked budget is issued for; null otherwise. */
+  merchantId?: string | null
 }
 
 /**
@@ -243,13 +245,13 @@ export async function insertPendingDelegationForOwnedNonRevokedAgent(
       `INSERT INTO agent_delegations (
          agent_id, chain_id, token_address, recipient_address, delegation_hash,
          delegation_json, version, status, budget_atomic, period_seconds,
-         start_date, expires_at
-       ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11)
+         start_date, expires_at, merchant_id
+       ) VALUES ($1, $2, LOWER($3), $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12)
        ON CONFLICT (delegation_hash) DO NOTHING`,
       [
         input.agentId, input.chainId, input.tokenAddress, input.recipientAddress,
         input.delegationHash, input.delegationJson, input.version, input.budgetAtomic,
-        input.periodSeconds, input.startDate, input.expiresAt,
+        input.periodSeconds, input.startDate, input.expiresAt, input.merchantId ?? null,
       ],
     )
     return true

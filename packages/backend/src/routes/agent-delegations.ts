@@ -65,6 +65,7 @@ import {
   revokeDelegationsByHashes,
 } from '../infra/repositories/delegation-budgets.js'
 import { redactVendorSecrets } from '../rails/execution-rail.js'
+import { getMerchantBySlug, listMerchantFundingTargets } from '../infra/repositories/merchants.js'
 // Signer management is shared with the account-scoped routes (#1081) — one
 // copy of the authority rules, reached two ways.
 import {
@@ -102,6 +103,15 @@ export const UNAVAILABLE_AGENT_REFUSAL =
   'Agent cannot receive a budget while its account or re-key is unavailable'
 /** #2331's rotated-delegate-key refusal; #2415 kept the wording byte-identical. */
 export const ROTATED_DELEGATE_KEY_REFUSAL = 'Delegation was built for a previous delegate key'
+/** #3331: the merchant-locked build's refusals (see the build route). */
+export const MERCHANT_PAY_TO_UNVERIFIED_REFUSAL =
+  'Merchant has no verified payTo on this chain; a merchant-locked budget cannot be issued yet'
+export const MERCHANT_NOT_ERC7710_REFUSAL =
+  'Merchant does not accept ERC-7710 payments on this chain; its payments use the open budget'
+export const MERCHANT_PAY_TO_IS_AGENT_REFUSAL =
+  "Merchant's payTo is one of this agent's own addresses; a merchant-locked budget cannot be issued to it"
+export const MERCHANT_PAY_TO_CHANGED_REFUSAL =
+  "recipient_address does not match the merchant's current verified payTo; reload the merchant page"
 
 /**
  * Name the reason a pending-grant insert was refused (#2416).
@@ -148,13 +158,18 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
     if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+    // #3331: a merchant-locked budget names its merchant (the agent page's
+    // budget card shows it). LEFT JOIN — most rows carry no merchant, and a
+    // deleted merchant only drops the label (migration 097, ON DELETE SET NULL).
     const result = await pool.query(
-      `SELECT id, chain_id, token_address, recipient_address, delegation_hash,
-              version, status, budget_atomic, period_seconds, start_date,
-              expires_at, created_at
-       FROM agent_delegations
-       WHERE agent_id = $1
-       ORDER BY created_at DESC`,
+      `SELECT d.id, d.chain_id, d.token_address, d.recipient_address, d.delegation_hash,
+              d.version, d.status, d.budget_atomic, d.period_seconds, d.start_date,
+              d.expires_at, d.created_at,
+              d.merchant_id, m.slug AS merchant_slug, m.name AS merchant_name
+       FROM agent_delegations d
+       LEFT JOIN merchants m ON m.id = d.merchant_id
+       WHERE d.agent_id = $1
+       ORDER BY d.created_at DESC`,
       [request.params.id],
     )
     // delegation_json intentionally NOT in the list — fetch is explicit.
@@ -271,6 +286,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       budget_atomic?: string
       period_seconds?: number
       expires_at?: number
+      merchant_slug?: string
     }
   }>('/:id/delegations/build', async (request, reply) => {
     const { sub } = request.user as { sub: string }
@@ -289,13 +305,53 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       return reply.code(409).send({ error: `Delegation rail not enabled on chain ${agent.chain_id}` })
     }
 
-    const { token_address, recipient_address, budget_atomic, period_seconds, expires_at } =
+    const { token_address, budget_atomic, period_seconds, expires_at, merchant_slug } =
       request.body ?? {}
+    let { recipient_address } = request.body ?? {}
     if (!token_address || !isValidAddress(token_address)) {
       return reply.code(400).send({ error: 'Valid token_address is required' })
     }
     if (recipient_address != null && !isValidAddress(recipient_address)) {
       return reply.code(400).send({ error: 'recipient_address must be a valid address when set' })
+    }
+
+    // ── A merchant-locked budget (#3331) ──
+    // The recipient is the merchant's VERIFIED payTo on the agent's chain,
+    // resolved HERE rather than trusted from the client: the dashboard reads
+    // the same value, but the pin is only "this merchant" if the server that
+    // records `merchant_id` also chose the address. A client-supplied
+    // recipient must equal it (a stale page is refused, not silently
+    // re-pointed). No verified payTo, or an offer set that is not all
+    // ERC-7710, is a 409: the page does not render the action then, so a
+    // request that gets here is racing a probe or hand-built.
+    let merchantId: string | null = null
+    if (merchant_slug != null) {
+      const merchant = await getMerchantBySlug(merchant_slug, [agent.chain_id])
+      if (!merchant || merchant.listing_status !== 'live') {
+        return reply.code(404).send({ error: 'Merchant not found' })
+      }
+      const [target] = await listMerchantFundingTargets(merchant.id, [agent.chain_id])
+      if (!target || target.pay_to === null) {
+        return reply.code(409).send({ error: MERCHANT_PAY_TO_UNVERIFIED_REFUSAL })
+      }
+      if (!target.erc7710) {
+        return reply.code(409).send({ error: MERCHANT_NOT_ERC7710_REFUSAL })
+      }
+      if (recipient_address != null && recipient_address.toLowerCase() !== target.pay_to) {
+        return reply.code(409).send({ error: MERCHANT_PAY_TO_CHANGED_REFUSAL })
+      }
+      // A merchant's payTo is the MERCHANT's word, not the owner's. One that
+      // names this agent's own delegate EOA or treasury would pin the grant
+      // to an address the agent itself pays onward from — the EIP-3009
+      // funding leg selects a grant pinned to the delegate EOA, so the
+      // "merchant-locked" budget would fund payments to ANY merchant. The
+      // derived delegate account is checked below, once it is known.
+      const own = [agent.delegate_address, agent.treasury_address].map((a) => a.toLowerCase())
+      if (own.includes(target.pay_to)) {
+        return reply.code(409).send({ error: MERCHANT_PAY_TO_IS_AGENT_REFUSAL })
+      }
+      recipient_address = target.pay_to
+      merchantId = merchant.id
     }
     if (!budget_atomic || !/^\d+$/.test(budget_atomic) || BigInt(budget_atomic) <= 0n || BigInt(budget_atomic) > MAX_UINT96) {
       return reply.code(400).send({ error: 'budget_atomic must be a positive atomic amount' })
@@ -321,13 +377,16 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     } catch (err) {
       return reply.code(502).send({ error: 'Could not build the delegation', details: safeDetails(err) })
     }
+    if (merchantId !== null && recipient_address?.toLowerCase() === delegateAccountAddress.toLowerCase()) {
+      return reply.code(409).send({ error: MERCHANT_PAY_TO_IS_AGENT_REFUSAL })
+    }
 
     // ── Reuse an identical still-pending build (#2539), under the slot lock (#2613) ──
     // The dashboard form calls build again on its own (re-render, retry),
     // and the #2539 CLI points its --wait poller at a SPECIFIC hash: a
     // second build minting a fresh version would strand that hash pending
-    // forever. An identical (agent, token, recipient, budget, period) slot
-    // with a still-pending, unexpired row therefore returns THAT row — same
+    // forever. An identical (agent, token, recipient, budget, period, merchant)
+    // slot with a still-pending, unexpired row therefore returns THAT row — same
     // hash, same version, 201 shape unchanged — and inserts nothing.
     //
     // #2613: the read, the version counter and the insert run inside ONE
@@ -349,6 +408,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           period_seconds,
           expiry,
           tx,
+          merchantId,
         )
         if (reusable) return { kind: 'reused' as const, reusable }
 
@@ -403,6 +463,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
           periodSeconds: period_seconds,
           startDate: nowSec - 60,
           expiresAt: expiry,
+          merchantId,
         }, tx)
         return { kind: 'built' as const, delegation, hash, version, inserted }
       },

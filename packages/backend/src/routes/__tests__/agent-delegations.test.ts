@@ -8,7 +8,9 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
 
-const { mockQuery, mockCompute, mockTreasury, mockEnsureDeployed, mockReadDisabled } = vi.hoisted(() => ({
+const { mockQuery, mockCompute, mockTreasury, mockEnsureDeployed, mockReadDisabled, mockMerchantBySlug, mockFundingTargets } = vi.hoisted(() => ({
+  mockMerchantBySlug: vi.fn(),
+  mockFundingTargets: vi.fn(),
   mockQuery: vi.fn(),
   mockCompute: vi.fn(),
   mockTreasury: vi.fn(),
@@ -47,6 +49,14 @@ vi.mock('../../rails/delegation-rail.js', async (importOriginal) => {
   }
 })
 
+// #3331: the merchant lookups the merchant-locked build makes. Their SQL is
+// proven against real Postgres in infra/repositories/__tests__/merchants.test.ts;
+// here the route's USE of the answer is what is under test.
+vi.mock('../../infra/repositories/merchants.js', () => ({
+  getMerchantBySlug: (...a: unknown[]) => mockMerchantBySlug(...a),
+  listMerchantFundingTargets: (...a: unknown[]) => mockFundingTargets(...a),
+}))
+
 const agentDelegationRoutes = (await import('../agent-delegations.js')).default
 const { getDelegationContracts } = await import('../../rails/delegation-contracts.js')
 
@@ -74,6 +84,9 @@ const DELEGATION_ROW = {
   start_date: '1755600000',
   expires_at: '1763376000',
   created_at: '2026-08-19T10:00:00.000Z',
+  merchant_id: null,
+  merchant_slug: null,
+  merchant_name: null,
 }
 const OWNER = '0x' + 'ee'.repeat(20)
 const HASH = `0x${'ab'.repeat(32)}`
@@ -332,6 +345,116 @@ describe('delegation lifecycle API (#828)', () => {
      * Characterization first (money.md §2): which requests are REFUSED must not
      * move — only which sentence they carry.
      */
+    describe('merchant-locked budgets (#3331)', () => {
+      const PAY_TO = '0x' + '5a'.repeat(20)
+      const MERCHANT_ID = '5d0c7a8e-1f2b-4c3d-9e8f-0a1b2c3d4e5f'
+      const base = { token_address: USDC, budget_atomic: '5000000', period_seconds: 86400 }
+      const liveMerchant = { id: MERCHANT_ID, slug: 'demo-store', listing_status: 'live' }
+      const target = (o: Record<string, unknown> = {}) => ({
+        network: 'eip155:84532', chain_id: 84532, pay_to: PAY_TO, pay_to_status: 'verified', erc7710: true, ...o,
+      })
+      const insertCall = () => mockQuery.mock.calls.find((c) => /INSERT INTO agent_delegations/.test(String(c[0])))
+      const build = (payload: Record<string, unknown>) =>
+        app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`, payload })
+
+      beforeEach(() => {
+        mockMerchantBySlug.mockReset()
+        mockFundingTargets.mockReset()
+        mockMerchantBySlug.mockResolvedValue(liveMerchant)
+        mockFundingTargets.mockResolvedValue([target()])
+      })
+
+      it("pins the recipient to the merchant's verified payTo on the AGENT's chain and records the merchant", async () => {
+        mockDb({})
+        const res = await build({ ...base, merchant_slug: 'demo-store' })
+        expect(res.statusCode, res.body).toBe(201)
+        expectMatchesSpec('POST', '/agents/{id}/delegations/build', res.json(), '201')
+        expect(mockMerchantBySlug).toHaveBeenCalledWith('demo-store', [84532])
+        expect(mockFundingTargets).toHaveBeenCalledWith(MERCHANT_ID, [84532])
+        const insert = insertCall()!
+        expect(insert[1][3]).toBe(PAY_TO) // recipient_address
+        expect(insert[1][11]).toBe(MERCHANT_ID) // merchant_id
+        // The signed grant itself pins transfer(to): the payTo is in the caveat terms.
+        expect(JSON.stringify(res.json().signing_payload).toLowerCase()).toContain(PAY_TO.slice(2))
+        // The reuse lookup is merchant-scoped, so a plain pinned row is never re-handed.
+        const reuse = mockQuery.mock.calls.find((c) => /budget_atomic::numeric/.test(String(c[0])))!
+        expect(reuse[1][6]).toBe(MERCHANT_ID)
+      })
+
+      it('accepts a client recipient equal to the payTo in any casing, refuses a different one', async () => {
+        mockDb({})
+        const same = await build({ ...base, merchant_slug: 'demo-store', recipient_address: '0x' + '5A'.repeat(20) })
+        expect(same.statusCode, same.body).toBe(201)
+        expect(insertCall()![1][3]).toBe(PAY_TO)
+
+        mockQuery.mockClear()
+        const other = await build({ ...base, merchant_slug: 'demo-store', recipient_address: RECIPIENT })
+        expect(other.statusCode).toBe(409)
+        expect(other.json().error).toMatch(/current verified payTo/)
+        expect(insertCall()).toBeUndefined()
+      })
+
+      it.each([
+        ['no funding target on the chain', [] as unknown[], /no verified payTo/],
+        ['offers that disagree', [target({ pay_to: null, pay_to_status: 'conflicting' })], /no verified payTo/],
+        ['an unprobed offer', [target({ pay_to: null, pay_to_status: 'unstated' })], /no verified payTo/],
+        ['an EIP-3009-only merchant', [target({ erc7710: false })], /ERC-7710/],
+      ])('refuses %s with 409 before deriving or storing anything', async (_label, targets, message) => {
+        mockDb({})
+        mockFundingTargets.mockResolvedValue(targets)
+        const res = await build({ ...base, merchant_slug: 'demo-store' })
+        expect(res.statusCode).toBe(409)
+        expect(res.json().error).toMatch(message)
+        expect(mockCompute).not.toHaveBeenCalled()
+        expect(insertCall()).toBeUndefined()
+      })
+
+      it('404s an unknown merchant and a prospect', async () => {
+        mockDb({})
+        mockMerchantBySlug.mockImplementation(async (slug: string) =>
+          slug === 'nobody' ? null : { ...liveMerchant, listing_status: 'coming_soon' },
+        )
+        expect((await build({ ...base, merchant_slug: 'nobody' })).statusCode).toBe(404)
+        expect((await build({ ...base, merchant_slug: 'demo-store' })).statusCode).toBe(404)
+        expect(mockFundingTargets).not.toHaveBeenCalled()
+        expect(insertCall()).toBeUndefined()
+      })
+
+      // Review F1: a payTo is the merchant's word. One naming the agent's own
+      // delegate EOA would pin the grant to the EIP-3009 funding leg's
+      // recipient — the bridge would then fund payments to ANY merchant.
+      it.each([
+        ['delegate key (EOA)', DELEGATE_KEY],
+        ['treasury', TREASURY],
+        ['derived delegate account', DELEGATE_ACCOUNT],
+      ])("refuses a payTo that is the agent's own %s, storing nothing", async (_label, own) => {
+        mockDb({})
+        mockFundingTargets.mockResolvedValue([target({ pay_to: own.toLowerCase() })])
+        const res = await build({ ...base, merchant_slug: 'demo-store' })
+        expect(res.statusCode).toBe(409)
+        expect(res.json().error).toMatch(/own addresses/)
+        expect(insertCall()).toBeUndefined()
+      })
+
+      it('treats merchant_slug: null as absent — a plain build, no lookup', async () => {
+        mockDb({})
+        const res = await build({ ...base, merchant_slug: null })
+        expect(res.statusCode).toBe(201)
+        expect(mockMerchantBySlug).not.toHaveBeenCalled()
+        expect(insertCall()![1][11]).toBeNull()
+      })
+
+      it('CHARACTERIZATION: a build without merchant_slug never looks a merchant up and stores no merchant', async () => {
+        mockDb({})
+        const res = await build({ ...base, recipient_address: RECIPIENT })
+        expect(res.statusCode).toBe(201)
+        expect(mockMerchantBySlug).not.toHaveBeenCalled()
+        expect(insertCall()![1][11]).toBeNull()
+        const reuse = mockQuery.mock.calls.find((c) => /budget_atomic::numeric/.test(String(c[0])))!
+        expect(reuse[1][6]).toBeNull()
+      })
+    })
+
     describe('refusal reasons (#2416)', () => {
       const payload = { token_address: USDC, budget_atomic: '5000000', period_seconds: 86400 }
       const insertRan = () =>
@@ -1300,6 +1423,20 @@ describe('delegation lifecycle API (#828)', () => {
       expectMatchesSpec('GET', '/agents/{id}/delegations', res.json())
     })
 
+    it('a merchant-locked budget names its merchant (#3331)', async () => {
+      mockDb({ list: [{
+        ...DELEGATION_ROW,
+        merchant_id: '5d0c7a8e-1f2b-4c3d-9e8f-0a1b2c3d4e5f',
+        merchant_slug: 'demo-store',
+        merchant_name: 'Demo store',
+      }] })
+      const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
+      expectMatchesSpec('GET', '/agents/{id}/delegations', res.json())
+      expect(res.json().delegations[0]).toMatchObject({ merchant_slug: 'demo-store', merchant_name: 'Demo store' })
+      const listQuery = mockQuery.mock.calls.find((c) => /FROM agent_delegations/.test(String(c[0])))!
+      expect(String(listQuery[0])).toMatch(/LEFT JOIN merchants m ON m\.id = d\.merchant_id/)
+    })
+
     it('an open budget documents its null recipient', async () => {
       mockDb({ list: [{ ...DELEGATION_ROW, recipient_address: null, status: 'pending' }] })
       const res = await app.inject({ method: 'GET', url: `/agents/${AGENT_ID}/delegations` })
@@ -1725,6 +1862,40 @@ describe('POST /:id/delegations/build — OPEN budget through request validation
         )!
         expect(insert).toBeTruthy()
         expect((insert[1] as unknown[]).includes('')).toBe(false)
+      })
+
+      // #3331: merchant_slug is declared in the spec, so the validation layer
+      // passes it through (an undeclared property would be stripped or refused
+      // under enforcement, and the build would silently be an OPEN budget).
+      it('a merchant-locked build reaches the handler with its slug (#3331)', async () => {
+        mockDb({})
+        mockMerchantBySlug.mockReset()
+        mockFundingTargets.mockReset()
+        mockMerchantBySlug.mockResolvedValue({ id: '5d0c7a8e-1f2b-4c3d-9e8f-0a1b2c3d4e5f', listing_status: 'live' })
+        mockFundingTargets.mockResolvedValue([{ network: 'eip155:84532', chain_id: 84532, pay_to: '0x' + '5a'.repeat(20), pay_to_status: 'verified', erc7710: true }])
+        const res = await app.inject({
+          method: 'POST',
+          url: `/agents/${AGENT_ID}/delegations/build`,
+          payload: { token_address: USDC, recipient_address: null, budget_atomic: '1000000', period_seconds: 86400, merchant_slug: 'demo-store' },
+        })
+        expect(res.statusCode, res.body).toBe(201)
+        expect(mockMerchantBySlug).toHaveBeenCalledWith('demo-store', [84532])
+        const insert = mockQuery.mock.calls.find((c) => /INSERT INTO agent_delegations/.test(String(c[0])))!
+        expect(insert[1][3]).toBe('0x' + '5a'.repeat(20))
+      })
+
+      it('refuses a malformed merchant_slug under enforcement only', async () => {
+        mockDb({})
+        mockMerchantBySlug.mockReset()
+        mockMerchantBySlug.mockResolvedValue(null)
+        const res = await app.inject({
+          method: 'POST',
+          url: `/agents/${AGENT_ID}/delegations/build`,
+          payload: { token_address: USDC, budget_atomic: '1000000', period_seconds: 86400, merchant_slug: 'Not A Slug' },
+        })
+        // Enforced: the spec pattern refuses it (400) before the handler.
+        // Otherwise the handler looks it up and finds nothing (404). Never 201.
+        expect(res.statusCode).toBe(options.enforcedModules ? 400 : 404)
       })
 
       it('a PINNED budget is unaffected', async () => {

@@ -95,6 +95,7 @@ import * as agentLabels from './093_agent_labels.js'
 import * as agentOrganizations from './094_agent_organizations.js'
 import * as agentTaskBudgets from './095_agent_task_budgets.js'
 import * as agentPassportsUidRepairConfirmedAt from './096_agent_passports_uid_repair_confirmed_at.js'
+import * as merchantPayTo from './097_merchant_pay_to.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -249,4 +250,5 @@ export const migrations: Migration[] = [
   agentOrganizations,
   agentTaskBudgets,
   agentPassportsUidRepairConfirmedAt,
+  merchantPayTo,
 ]

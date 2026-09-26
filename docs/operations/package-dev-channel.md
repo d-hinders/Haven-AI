@@ -25,7 +25,6 @@ covers:
   - packages/mcp/src/credentials.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/core/src/client-compat.ts
-  - packages/core/src/client-releases.data.ts
 last-verified: "2026-09-24"
 ---
 
@@ -325,13 +324,13 @@ and the `release` skill.
 
 > **Re-verification (#3305):** `release-bump.mjs` gained a second documentary
 > write, and the snapshot path skips it exactly like the CHANGELOG heading. The
-> write regenerates `packages/core/src/client-releases.data.ts` (the public
-> release data behind `/releases`) from the CHANGELOGs, and a real release first
-> refuses a hand-edited copy. In snapshot mode neither the refusal nor the write
-> runs: the bump logs `…client-releases.data.ts: skipped — a dev snapshot is not
-> a release`, and `release-bump.test.mjs` pins the guard with a mutation that
-> goes red. So a correction to an old CHANGELOG entry cannot block dev-channel
-> publishes. Nothing about the snapshot version format, the five guards,
+> write regenerates the client release data file in `@haven_ai/core` (the
+> public release data behind `/releases`) from the CHANGELOGs, and a real
+> release first refuses a hand-edited copy. In snapshot mode neither the refusal
+> nor the write runs: the bump logs that the data was skipped because a dev
+> snapshot is not a release, and `release-bump.test.mjs` pins the guard with a
+> mutation that goes red. A snapshot therefore never depends on that file; CI
+> keeps the committed copy in step with the CHANGELOGs. Nothing about the snapshot version format, the five guards,
 > `HAVEN_CONNECTOR_CHANNEL` or the publish job moved.
 
 > **Re-verification (changelog-heading gap, 2026-09-14):** `release-bump.mjs`

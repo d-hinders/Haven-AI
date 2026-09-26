@@ -16,17 +16,21 @@
  * writing, the bump regenerates the file from the CHANGELOGs AS THEY STAND and
  * compares it with the file on disk. Any difference is a hand edit (or a
  * CHANGELOG edited after its release), and the bump refuses and names it —
- * caught at bump time, which is the only time this file changes. That is the
- * same "never verify your own write" argument `release-changelog.mjs` makes.
+ * refused at bump time. That is the same "never verify your own write"
+ * argument `release-changelog.mjs` makes. Earlier still, CI's
+ * `release-bump.test.mjs` compares the committed file with the committed
+ * CHANGELOGs, so a PR that edits one without regenerating goes red.
  *
  * ## What a note is
  *
  * One note per released version per package: the version, its date, a short
- * summary and `action_required`. The summary is built from each top-level
- * bullet's lead — its opening bold span when it has one (the house style,
- * e.g. `**Client identity (#3303).**`), otherwise its first sentence — joined
- * and capped. It is "what changed, for deciding whether to update", not the
- * CHANGELOG; the CHANGELOG stays the record.
+ * summary and `action_required`. The summary is the lead bullet's headline —
+ * its opening bold span when it has one (the house style, e.g.
+ * `**Client identity (#3303).**`), otherwise its first sentence — plus its next
+ * sentence when both fit, then how many more changes the CHANGELOG lists. Whole
+ * sentences only, never cut mid-clause; issue references stripped, since a
+ * public reader cannot use them. It is "what changed, for deciding whether to
+ * update", not the CHANGELOG; the CHANGELOG stays the record.
  *
  * ## The action-required marker
  *
@@ -53,10 +57,14 @@ export const CLIENT_RELEASE_DATA_FILE = 'packages/core/src/client-releases.data.
 export const ACTION_REQUIRED_MARKER = '**Update required**'
 
 /** Newest releases kept per package. Older ones stay in the CHANGELOG. */
-export const MAX_NOTES_PER_PACKAGE = 3
+export const MAX_NOTES_PER_PACKAGE = 2
 
-/** Longest summary served; a longer one is cut at a word and marked. */
-export const MAX_SUMMARY_CHARS = 320
+/**
+ * A summary grows by its lead bullet's second sentence only while it stays
+ * within this many characters. Sentences are never cut: a single long
+ * headline is served whole rather than broken mid-clause.
+ */
+export const MAX_SUMMARY_CHARS = 300
 
 const RELEASE_HEADING = /^## (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?) — (\d{4}-\d{2}-\d{2})\s*$/
 
@@ -107,43 +115,107 @@ function plain(text) {
   return text.replace(/\*\*/g, '').replace(/`/g, '').replace(/\s+/g, ' ').trim()
 }
 
-/** Longest single lead taken from an un-bolded bullet's first sentence. */
-const MAX_LEAD_CHARS = 160
+/**
+ * Plain text fit for a public page: the issue references a CHANGELOG uses for
+ * traceability (`(#3303, epic #3302)`, a leading `#3128:`) removed, and the
+ * CHANGELOG's `BREAKING` shouting spelled out. Readers of `/releases` decide
+ * whether to update; issue numbers mean nothing to them.
+ */
+export function publicText(text) {
+  let out = plain(text.replace(new RegExp(ACTION_REQUIRED_SPAN.source, 'g'), ''))
+  let prev
+  do {
+    prev = out
+    out = out.replace(/\s*\([^()]*#\d+[^()]*\)/g, '')
+  } while (out !== prev)
+  return out
+    .replace(/^#\d+:\s*/, '')
+    .replace(/,?\s*\bepic #\d+/g, '')
+    .replace(/(^|\s)#\d+(?:'s)?(?=\s)/g, '$1')
+    .replace(/\bBREAKING\b/g, 'Breaking change')
+    .replace(/\s+([.,;:])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 /**
- * A bullet's headline: its opening bold span, else its first sentence. The
- * sentence is found AFTER markup is stripped and only at a sentence end —
- * never at a colon, which in this repo's changelogs is as often inside a code
- * span (`{ source: 'wallet' }`) as it is punctuation.
+ * A bullet as whole sentences, headline first. The opening bold span is the
+ * headline when there is one (the house style, `**Client identity (#3303).**`);
+ * otherwise the first sentence is. A sentence ends at `.`, `!` or `?` followed
+ * by a space — never at a colon, which in these changelogs is as often inside
+ * a code span (`{ source: 'wallet' }`) as it is punctuation.
  */
-export function bulletLead(bullet) {
-  const bold = /^\*\*(.+?)\*\*/.exec(bullet.trim())
-  if (bold) return plain(bold[1]).replace(/[.:]+$/, '')
-  const sentence = plain(bullet).split(/(?<=[.!?])\s/)[0]
-  return capAt(sentence, MAX_LEAD_CHARS).replace(/[.:]+$/, '')
+export function bulletSentences(bullet) {
+  const trimmed = bullet.trim()
+  const bold = /^\*\*(.+?)\*\*/.exec(trimmed)
+  const sentences = []
+  let rest = trimmed
+  if (bold) {
+    const head = publicText(bold[1]).replace(/[:]$/, '')
+    if (head.length > 0) sentences.push(/[.!?]$/.test(head) ? head : `${head}.`)
+    rest = trimmed.slice(bold[0].length)
+  }
+  for (const s of publicText(rest).split(/(?<=[.!?])\s+/)) {
+    if (s.length > 0) sentences.push(s)
+  }
+  return sentences
 }
 
-/** Cut at a word boundary and mark the cut. */
-function capAt(text, max) {
-  if (text.length <= max) return text
-  const cut = text.slice(0, max - 1)
-  return cut.slice(0, cut.lastIndexOf(' ')).replace(/[;,(]$/, '') + '…'
+/**
+ * The marker as it must appear: a bold span, optionally ending in `.` or `:`.
+ * Matched only outside code spans, so prose that QUOTES the marker in
+ * backticks (as the CHANGELOG headers do) does not flag a release.
+ */
+const ACTION_REQUIRED_SPAN = /\*\*Update required[.:]?\*\*/
+
+function withoutCodeSpans(text) {
+  return text.replace(/`[^`]*`/g, '')
 }
 
-function cap(text) {
-  return capAt(text, MAX_SUMMARY_CHARS)
+/** True when `text` carries the marker outside a code span. */
+export function carriesActionRequired(text) {
+  return ACTION_REQUIRED_SPAN.test(withoutCodeSpans(text))
+}
+
+/** A bullet with a leading marker span removed, so its real headline leads. */
+function withoutLeadingMarker(bullet) {
+  return bullet.trim().replace(new RegExp(`^${ACTION_REQUIRED_SPAN.source}\\s*`), '')
+}
+
+/**
+ * The text a section's note is built from when it has no top-level bullet:
+ * its first prose paragraph, else its first `###` heading. A section with
+ * content is never announced as having none.
+ */
+function proseLead(body) {
+  const paragraphs = body.split(/\n\s*\n/).map((p) => p.trim()).filter((p) => p.length > 0)
+  const prose = paragraphs.find((p) => !/^(#|\||```|>)/.test(p))
+  if (prose !== undefined) return prose.split('\n').map((l) => l.trim()).join(' ')
+  const heading = /^#{3,}\s+(.+)$/m.exec(body)
+  return heading ? heading[1] : null
 }
 
 /** One release note from one released section. */
 export function noteFromSection({ version, date, body }) {
-  const bullets = topLevelBullets(body)
-  const leads = bullets.map(bulletLead).filter((l) => l.length > 0 && l !== plain(ACTION_REQUIRED_MARKER))
-  return {
-    version,
-    date,
-    summary: leads.length > 0 ? cap(leads.join('; ')) : 'No changes in this package.',
-    action_required: bullets.some((b) => b.includes(ACTION_REQUIRED_MARKER)),
+  // The marker counts anywhere in the section — a nested bullet or a
+  // continuation paragraph included — so where it sits never hides it.
+  const actionRequired = carriesActionRequired(body)
+  const bullets = topLevelBullets(body).filter((b) => bulletSentences(withoutLeadingMarker(b)).length > 0)
+  let lead
+  if (bullets.length > 0) {
+    // Lead with the marked bullet when there is one: that is what a reader must see.
+    lead = withoutLeadingMarker(bullets.find(carriesActionRequired) ?? bullets[0])
+  } else {
+    lead = proseLead(body)
   }
+  if (lead === null || bulletSentences(lead).length === 0) {
+    return { version, date, summary: 'No changes to this package in this release.', action_required: actionRequired }
+  }
+  const [headline, next] = bulletSentences(lead)
+  let summary = headline
+  if (next !== undefined && `${headline} ${next}`.length <= MAX_SUMMARY_CHARS) summary = `${headline} ${next}`
+  if (bullets.length > 1) summary += ` (+${bullets.length - 1} more in the changelog)`
+  return { version, date, summary, action_required: actionRequired }
 }
 
 /**
@@ -177,12 +249,12 @@ export function renderClientReleaseDataFile(data) {
     ' * release as one clients must update to, put `**Update required**` on its',
     ' * CHANGELOG bullet. The enforced thresholds are NOT here — they live in',
     ' * `client-compat.ts`, which the bump never writes.',
+    ' *',
+    ' * Untyped on purpose: `client-releases.ts` imports this and types it, so',
+    ' * this file imports nothing and no module cycle forms.',
     ' */',
     '',
-    "import type { PublishedClientPackage } from './client-compat.js'",
-    "import type { ClientRelease } from './client-releases.js'",
-    '',
-    `export const CLIENT_RELEASES: Readonly<Record<PublishedClientPackage, ClientRelease>> = ${JSON.stringify(data, null, 2)}`,
+    `export const CLIENT_RELEASE_DATA = ${JSON.stringify(data, null, 2)}`,
     '',
   ].join('\n')
 }
@@ -216,8 +288,8 @@ export function clientReleaseDataViolations(fileText, changelogs) {
 // CLI — `node scripts/release-client-data.mjs --write | --check`
 //   --write  regenerate the data file from the CHANGELOGs (what the bump does)
 //   --check  exit 1 when the file differs from what the CHANGELOGs produce
-// Neither runs in CI (#3305: a hand edit is caught at bump time); both exist so
-// a contributor can see the bump's answer without cutting a release.
+// Both exist so a contributor can see the bump's (and CI's) answer without
+// cutting a release, and fix a red one with a single command.
 // ---------------------------------------------------------------------------
 
 const isMain = (() => {

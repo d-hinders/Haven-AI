@@ -703,8 +703,8 @@ async function main() {
     log('  Mode:                dev-channel SNAPSHOT (throwaway tree, nothing to commit)')
   } else {
     // #3305: still before anything is written. Not in snapshot mode: a
-    // snapshot never writes the file, and an old CHANGELOG entry corrected
-    // after its release must not stop every dev-channel publish.
+    // snapshot never writes the file, so it has nothing to protect (CI's
+    // release-bump.test.mjs already keeps the committed file in step).
     await refuseHandEditedClientReleaseData()
   }
 
@@ -810,9 +810,9 @@ async function main() {
   // NOT in snapshot mode. A `0.0.0-dev.*` snapshot is explicitly "not a
   // release" (`docs/operations/package-dev-channel.md`), so stamping a release
   // heading for one would be false even though the tree is throwaway and no
-  // CHANGELOG reaches a tarball. The heading is the one thing in this script
-  // whose meaning is documentary rather than mechanical, so it is the one thing
-  // a snapshot must not write.
+  // CHANGELOG reaches a tarball. The heading is documentary rather than
+  // mechanical, so a snapshot must not write it — and for the same reason it
+  // skips the client release data regenerated below (#3305).
   // Its own section: a CHANGELOG heading is neither source code nor a version
   // constant, and burying it under that header made the log misdescribe it.
   header('Updating package CHANGELOG headings')

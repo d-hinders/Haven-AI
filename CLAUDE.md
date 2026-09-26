@@ -279,9 +279,9 @@ from branches; `@haven_ai/core` is workspace-private.
   `release-bump.mjs` owns all five atomically. The release data joined on
   2026-09-26 (#3305): it is generated from the CHANGELOGs, so change a note by
   changing its CHANGELOG entry, and mark a must-update release with
-  `**Update required**` (never `**BREAKING**`). A hand edit is caught **at bump
-  time**, not in CI: the bump regenerates the file and refuses to run when the
-  disk differs. It never writes `client-compat.ts` — a release must not raise a
+  `**Update required**` (never `**BREAKING**`). A hand edit goes red in CI
+  (`release-bump.test.mjs` regenerates the file from the committed CHANGELOGs),
+  and the bump refuses to run on one too. It never writes `client-compat.ts` — a release must not raise a
   minimum as a side effect. The heading joined the list on
   2026-09-14: the five changelogs had asserted the bump wrote it since they were
   created while the bump did not touch it — a file instructing the next reader

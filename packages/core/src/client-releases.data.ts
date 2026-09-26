@@ -8,31 +8,25 @@
  * release as one clients must update to, put `**Update required**` on its
  * CHANGELOG bullet. The enforced thresholds are NOT here — they live in
  * `client-compat.ts`, which the bump never writes.
+ *
+ * Untyped on purpose: `client-releases.ts` imports this and types it, so
+ * this file imports nothing and no module cycle forms.
  */
 
-import type { PublishedClientPackage } from './client-compat.js'
-import type { ClientRelease } from './client-releases.js'
-
-export const CLIENT_RELEASES: Readonly<Record<PublishedClientPackage, ClientRelease>> = {
+export const CLIENT_RELEASE_DATA = {
   "@haven_ai/sdk": {
     "released_version": "0.5.0-alpha.1",
     "notes": [
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
-        "summary": "Client identity on Haven API requests (#3303, epic #3302)",
+        "summary": "Client identity on Haven API requests. Every Haven API request now carries X-Haven-Client: <package>/<version>, @haven_ai/sdk/<version> by default.",
         "action_required": false
       },
       {
         "version": "0.5.0-alpha.0",
         "date": "2026-09-25",
-        "summary": "@haven_ai/sdk/edge gains assertFundingLegPaysDelegate and assertOwnSettlementChild (#3281, epic #3284); Behaviour change — signForData refuses what a delegate key must never sign (#3283, epic #3284); Docs only (#3279): JSDoc and README no longer name the retired Safe as a live destination or funding source…",
-        "action_required": false
-      },
-      {
-        "version": "0.4.0-alpha.0",
-        "date": "2026-09-19",
-        "summary": "#3128: listReceiptsPage({ limit, cursor }) returns { receipts, total, hasMore, nextCursor } (the three page fields are null against a backend older than…",
+        "summary": "@haven_ai/sdk/edge gains assertFundingLegPaysDelegate and assertOwnSettlementChild. (+8 more in the changelog)",
         "action_required": false
       }
     ]
@@ -43,19 +37,13 @@ export const CLIENT_RELEASES: Readonly<Record<PublishedClientPackage, ClientRele
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
-        "summary": "Client identity at sign-context; client_outdated refusal (#3303, epic #3302)",
+        "summary": "Client identity at sign-context; client_outdated refusal. Both sign-context reads send X-Haven-Client: @haven_ai/signer/<version>.",
         "action_required": false
       },
       {
         "version": "0.5.0-alpha.0",
         "date": "2026-09-25",
-        "summary": "BREAKING (x402 arm): signX402FundingTypedData signs only a guarded funding leg or a verified settlement child (#3281, epic #3284); Safe-vocabulary copy fix (#3279); Guard modules moved into @haven_ai/sdk (#3283, epic #3284); BREAKING: haven_sign's unbound branch signs only a bound direct-payment UserOp; x402…",
-        "action_required": false
-      },
-      {
-        "version": "0.4.0-alpha.0",
-        "date": "2026-09-19",
-        "summary": "Refusals carry a typed next step (#3103, epic #3105)",
+        "summary": "Breaking change (x402 arm): signX402FundingTypedData signs only a guarded funding leg or a verified settlement child. A valid Haven binding is no longer enough. (+7 more in the changelog)",
         "action_required": false
       }
     ]
@@ -66,19 +54,13 @@ export const CLIENT_RELEASES: Readonly<Record<PublishedClientPackage, ClientRele
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
-        "summary": "Client identity and update hint (#3303, epic #3302)",
+        "summary": "Client identity and update hint. Haven API requests name @haven_ai/mcp/<version> in X-Haven-Client.",
         "action_required": false
       },
       {
         "version": "0.5.0-alpha.0",
         "date": "2026-09-25",
-        "summary": "Consent label copy fix (#3279); Behaviour change, via @haven_ai/sdk (#3283); haven_list_receipts rows gain source, paymentProofStatus, x402ResourceUrl and x402MerchantAddress (#3134, via @haven_ai/sdk's mapPaymentReceipt) beside the…",
-        "action_required": false
-      },
-      {
-        "version": "0.4.0-alpha.0",
-        "date": "2026-09-19",
-        "summary": "#3128: haven_list_receipts accepts cursor and returns { receipts, total, hasMore, nextCursor } instead of a bare array (via the SDK's listReceiptsPage); Failure envelope: next_action added, nextAction deprecated (#3103, epic #3105 decision 10)",
+        "summary": "Consent label copy fix. The first-launch consent screen prints Haven wallet: <address> instead of Haven wallet (Safe): <address>, and the accountAddress field JSDoc loses the retired rail's name. (+2 more in the changelog)",
         "action_required": false
       }
     ]
@@ -89,19 +71,13 @@ export const CLIENT_RELEASES: Readonly<Record<PublishedClientPackage, ClientRele
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
-        "summary": "Client identity (#3303, epic #3302)",
+        "summary": "Client identity. Every request the connector's API client makes (setup resolve/register, status reports, the agent identity read) carries X-Haven-Client: @haven_ai/connect/<version> (CONNECTOR_CLIENT_IDENTITY), so the backend can tell an outdated connector what to run.",
         "action_required": false
       },
       {
         "version": "0.5.0-alpha.0",
         "date": "2026-09-25",
-        "summary": "--doctor no longer needs --runtime (#3210): the argument parser used to refuse a flagless --doctor before the doctor ran, which left #3120's record resolution…; A retired agent directory can no longer keep a spendable key (#3259); The tombstone ledger follows the credential root (#3251)",
-        "action_required": false
-      },
-      {
-        "version": "0.4.0-alpha.0",
-        "date": "2026-09-19",
-        "summary": "Setup names every other credential directory that still holds a stored key — with the account it can spend from — BEFORE the key is minted or anything is…; --unwire refuses to destroy a directory's key material unless the identity probe says there is nothing to preserve (#3123, owner option c): ok (active)…; --doctor…",
+        "summary": "--doctor no longer needs --runtime: the argument parser used to refuse a flagless --doctor before the doctor ran, which left record resolution reachable only by library callers. (+2 more in the changelog)",
         "action_required": false
       }
     ]
@@ -112,19 +88,13 @@ export const CLIENT_RELEASES: Readonly<Record<PublishedClientPackage, ClientRele
       {
         "version": "0.5.0-alpha.1",
         "date": "2026-09-25",
-        "summary": "Client identity (#3303, epic #3302)",
+        "summary": "Client identity. Every Haven API request the CLI makes carries X-Haven-Client: @haven_ai/cli/<version> (CLI_CLIENT_IDENTITY), so the backend can tell an outdated CLI what to run.",
         "action_required": false
       },
       {
         "version": "0.5.0-alpha.0",
         "date": "2026-09-25",
-        "summary": "activity list rows carry scope ({ source: 'wallet', filter } — --agent / --safe narrow the wallet feed, they do not make it the receipts view)…",
-        "action_required": false
-      },
-      {
-        "version": "0.4.0-alpha.0",
-        "date": "2026-09-19",
-        "summary": "No changes in this package.",
+        "summary": "activity list rows carry scope ({ source: 'wallet', filter } — --agent / --safe narrow the wallet feed, they do not make it the receipts view), timestampSource (which column produced timestamp) and, on x402-synthesized rows, the recorded nullable confirmedAt; a confirmed payment with no evidence row reports paymentProofStatus: null instead of a placeholder — the dashboard's transaction detail \"Proof\" row, which renders only a present value, disappears for such a payment rather than reading payment_confirmed; that is the fabricated field going away, not a regression.",
         "action_required": false
       }
     ]

@@ -11,7 +11,6 @@ covers:
   - scripts/release-bump.mjs
   - scripts/ci/qa-freshness.mjs
   - .github/workflows/publish.yml
-  - packages/core/src/client-releases.data.ts
 last-verified: "2026-09-26"
 ---
 
@@ -184,8 +183,8 @@ the epic when its last sub-issue lands on `dev`.
 > closed from the dev-merge.
 
 > **Re-verification (#3305):** coupled because `scripts/release-bump.mjs` is in
-> its `covers:`. The bump gains one owned file, the client release data
-> (`packages/core/src/client-releases.data.ts`), which it regenerates from the
+> its `covers:`. The bump gains one owned file, the client release data in
+> `@haven_ai/core`, which it regenerates from the
 > CHANGELOGs after stamping their headings. It refuses up front when that file
 > was hand-edited, and skips both steps for a snapshot. The release still happens
 > on a release branch into `dev` and publishes on the `dev → main` promotion, and

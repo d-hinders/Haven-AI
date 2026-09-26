@@ -567,6 +567,12 @@ test('a bump-only release diff still FAILS the strict gate — no shard, no gree
     'packages/mcp-server/src/server.ts',
     'packages/cli/src/commands.ts',
     'packages/sdk/src/client-identity.ts', // #3303: SDK_VERSION
+    'packages/core/src/client-releases.data.ts', // #3305: regenerated release data
+    'packages/sdk/CHANGELOG.md', // release heading (2026-09-14)
+    'packages/signer/CHANGELOG.md',
+    'packages/mcp/CHANGELOG.md',
+    'packages/connect/CHANGELOG.md',
+    'packages/cli/CHANGELOG.md',
     'docs/operations/mcp-runtime-compatibility.md',
   ].join(',')
 

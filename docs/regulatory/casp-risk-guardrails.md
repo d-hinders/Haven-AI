@@ -1146,7 +1146,8 @@ reckoning over **every path `release-bump.mjs` writes** — the six
 `SDK_VERSION`; the gate's verdict over the full set is unchanged),
 `connect/src/runtime-manifest.ts`, `sdk/src/connector-channel.ts`,
 `package-lock.json`, the manifest doc and `core/src/client-releases.data.ts`
-(#3305 added it; the verdict is unchanged, pinned by `coupling-gate.test.mjs`) —
+(#3305 added it; the gate's verdict over the full set is unchanged —
+`coupling-gate.test.mjs` includes it and pins that the CASP doc still blocks) —
 not over a sample:
 
 | doc | how a release satisfies it | what the GATE forces |

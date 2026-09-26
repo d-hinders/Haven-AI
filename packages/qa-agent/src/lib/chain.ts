@@ -10,6 +10,8 @@
  * mainnet address here would be a bug, not a configuration option.
  */
 
+import { ethers } from 'ethers'
+
 /**
  * The RPC node the harness OBSERVES through — the endpoint every on-chain
  * assertion in this suite reads (#2511).
@@ -60,3 +62,132 @@ export const ERC20_BALANCE_ABI = ['function balanceOf(address) view returns (uin
 
 /** USDC has 6 decimals; kept here so no caller re-derives it. */
 export const USDC_DECIMALS = 6
+
+// ── Reads the harness makes on the OBSERVER node (#3344) ─────────────────────
+//
+// Two gating legs used to claim an on-chain effect they never read from any
+// node: `within-budget-settle` trusted the payment record's `confirmed`, and
+// `delegation-lifecycle` trusted `revoked: true`. A backend defect that records
+// the state without the chain effect then still passed the harness that gates
+// promotion (#2968, #3294, #1754 are that class). These helpers read the chain
+// itself, on the harness's own node — never the backend's.
+
+
+/** DelegationManager on Base Sepolia (backend `rails/delegation-contracts.ts`). */
+export const DELEGATION_MANAGER_BASE_SEPOLIA = '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3'
+
+const DISABLED_DELEGATIONS_ABI = ['function disabledDelegations(bytes32) view returns (bool)'] as const
+const TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)')
+
+/** The observer node as an ethers provider. One per call: the harness is short-lived. */
+export function observerProvider(): ethers.JsonRpcProvider {
+  return new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC)
+}
+
+/** The minimal read surface these helpers use, so tests can pass a fake. */
+export interface ReceiptReader {
+  getTransactionReceipt(hash: string): Promise<ethers.TransactionReceipt | null>
+}
+
+/**
+ * Wait for a transaction receipt, tolerating an observer that has not yet
+ * indexed a just-mined tx. Returns null on timeout; the caller names the leg.
+ * The one copy (#3344) — two scenarios carried their own before.
+ */
+export async function waitForReceipt(
+  provider: ReceiptReader,
+  hash: string,
+  { timeoutMs, intervalMs = 3_000 }: { timeoutMs: number; intervalMs?: number },
+): Promise<ethers.TransactionReceipt | null> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const receipt = await provider.getTransactionReceipt(hash).catch(() => null)
+    if (receipt) return receipt
+    if (Date.now() >= deadline) return null
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+}
+
+/** Every USDC `Transfer` in a receipt, decoded. */
+export function usdcTransfers(receipt: Pick<ethers.TransactionReceipt, 'logs'>): Array<{ from: string; to: string; value: bigint }> {
+  const out: Array<{ from: string; to: string; value: bigint }> = []
+  for (const log of receipt.logs ?? []) {
+    if (log.address?.toLowerCase() !== SEPOLIA_USDC.toLowerCase()) continue
+    if (log.topics?.[0] !== TRANSFER_TOPIC || log.topics.length < 3) continue
+    out.push({
+      from: ethers.getAddress(ethers.dataSlice(log.topics[1], 12)),
+      to: ethers.getAddress(ethers.dataSlice(log.topics[2], 12)),
+      value: BigInt(log.data),
+    })
+  }
+  return out
+}
+
+/**
+ * Prove a settlement on the observer: the receipt exists, has status 1, and
+ * carries the exact USDC `Transfer(from → to, amount)`.
+ *
+ * `status` alone is not proof. On the delegation rail the tx hash Haven records
+ * is the ERC-4337 bundler transaction (`waitForUserOperationReceipt`), and a
+ * user operation whose inner call reverts still leaves that transaction at
+ * status 1. The Transfer log is the money moving.
+ */
+export async function proveUsdcTransfer(
+  txHash: string,
+  expected: { from: string; to: string; amount: bigint },
+  { timeoutMs, intervalMs, provider = observerProvider() }: { timeoutMs: number; intervalMs?: number; provider?: ReceiptReader },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const receipt = await waitForReceipt(provider, txHash, { timeoutMs, intervalMs })
+  if (!receipt) {
+    return { ok: false, error: `no receipt for ${txHash} on the observer node within ${Math.round(timeoutMs / 1000)}s (observer: ${describeObserverRpc()})` }
+  }
+  if (receipt.status !== 1) return { ok: false, error: `receipt ${txHash} has status ${receipt.status} on the observer node` }
+  const seen = usdcTransfers(receipt)
+  const match = seen.find(
+    (t) => t.from.toLowerCase() === expected.from.toLowerCase() && t.to.toLowerCase() === expected.to.toLowerCase() && t.value === expected.amount,
+  )
+  if (match) return { ok: true }
+  const saw = seen.length ? seen.map((t) => `${t.from}→${t.to} ${t.value}`).join(', ') : 'none'
+  return {
+    ok: false,
+    error:
+      `receipt ${txHash} (status 1) carries no USDC Transfer ${expected.from}→${expected.to} of ${expected.amount} ` +
+      `(USDC transfers in it: ${saw}) — a 4337 user operation whose inner call reverted still leaves the bundler tx at status 1`,
+  }
+}
+
+/** One read of `DelegationManager.disabledDelegations(hash)` at `latest` on the observer. */
+export function readDisabled(hash: string): Promise<boolean> {
+  return new ethers.Contract(DELEGATION_MANAGER_BASE_SEPOLIA, DISABLED_DELEGATIONS_ABI, observerProvider()).disabledDelegations(hash, {
+    blockTag: 'latest',
+  }) as Promise<boolean>
+}
+
+/**
+ * Wait until the DelegationManager reports a delegation hash as disabled, read
+ * at `latest` on the observer (which can lag the node the backend wrote to).
+ * `read` is injectable for tests; the default is the real contract read.
+ */
+export async function waitForDisabled(
+  delegationHash: string,
+  {
+    timeoutMs,
+    intervalMs = 3_000,
+    read = readDisabled,
+  }: { timeoutMs: number; intervalMs?: number; read?: (hash: string) => Promise<boolean> },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const deadline = Date.now() + timeoutMs
+  let last: string = 'no read yet'
+  for (;;) {
+    try {
+      if ((await read(delegationHash)) === true) return { ok: true }
+      last = 'disabledDelegations returned false'
+    } catch (err) {
+      last = `read failed: ${(err as Error)?.message ?? err}`
+    }
+    if (Date.now() >= deadline) {
+      return { ok: false, error: `delegation ${delegationHash} is not disabled on-chain after ${Math.round(timeoutMs / 1000)}s (${last}; observer: ${describeObserverRpc()})` }
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+}

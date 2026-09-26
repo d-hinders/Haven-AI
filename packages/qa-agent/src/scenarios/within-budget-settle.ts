@@ -18,11 +18,15 @@
 import { signUserOpTypedDataForDelegation } from '@haven_ai/sdk'
 import { HavenApi } from '../lib/haven-api.js'
 import { readOnchainBudget } from '../lib/delegation-budget.js'
+import { proveUsdcTransfer } from '../lib/chain.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 
 /** Small enough to be cheap against the standing 1 USDC/day budget. */
 const AMOUNT = '0.01'
 const AMOUNT_ATOMIC = 10_000n
+
+/** Mutable purely as a TEST SEAM, like the other legs' `TIMING`. */
+export const TIMING = { receiptWaitMs: 60_000, pollIntervalMs: 3_000 }
 
 export const withinBudgetSettle: Scenario = {
   name: 'within-budget-settle',
@@ -86,6 +90,22 @@ export const withinBudgetSettle: Scenario = {
       return fail(`payment ended '${settled.status}' (tx ${settled.tx_hash ?? 'none'}; ${settled.error_message ?? ''})`)
     }
 
-    return pass(`settled ${AMOUNT} USDC on-chain + receipt confirmed (tx ${settled.tx_hash})`)
+    // #3344: `confirmed` is the backend's word for it. Read the chain on the
+    // harness's OWN node: the exact USDC Transfer treasury → payee. The tx hash
+    // is the 4337 bundler transaction, so its status alone proves nothing.
+    const agent = await api.getAgent()
+    const treasury = agent.data.account_address
+    if (!agent.ok || !treasury) return fail(`could not resolve the paying treasury (GET /machine-payments/agent: HTTP ${agent.status})`)
+    const onchain = await proveUsdcTransfer(
+      settled.tx_hash,
+      { from: treasury, to: ctx.cfg.paymentTo, amount: AMOUNT_ATOMIC },
+      { timeoutMs: TIMING.receiptWaitMs, intervalMs: TIMING.pollIntervalMs },
+    )
+    if (!onchain.ok) return fail(`the backend reports 'confirmed', but the chain does not show it: ${onchain.error}`)
+
+    return pass(
+      `settled ${AMOUNT} USDC: the observer node shows the USDC Transfer ${treasury} → ${ctx.cfg.paymentTo} ` +
+        `of ${AMOUNT_ATOMIC} in tx ${settled.tx_hash}, and the receipt is confirmed`,
+    )
   },
 }

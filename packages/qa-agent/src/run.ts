@@ -42,7 +42,9 @@ import { runPreflight, formatPreflight } from './lib/preflight.js'
 //                           legacy raw-hash scheme. Also the suite's positive
 //                           control: the leg that proves the money path can
 //                           still say YES, which is what makes the two
-//                           refusals below mean anything.
+//                           refusals below mean anything. Since #3344 its YES
+//                           is read from the chain on the observer node (the
+//                           exact USDC Transfer), not taken from `confirmed`.
 //   over-budget-refused     renamed from `over-budget-queue`. The approval
 //                           QUEUE it asserted does not exist on this rail and
 //                           no longer exists anywhere (#1986/#1989); the

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describeObserverRpc } from './chain.js'
+import { ethers } from 'ethers'
+import { describeObserverRpc, proveUsdcTransfer, SEPOLIA_USDC, usdcTransfers, waitForDisabled, waitForReceipt } from './chain.js'
 
 /**
  * The observer-RPC announcement must never print the endpoint (#2511).
@@ -94,5 +95,90 @@ describe('describeObserverRpc (#2511)', () => {
     // And does not fire on the two legitimate, non-printing uses.
     expect(matches('const provider = new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC)')).toBe(false)
     expect(matches('chainRpcs: { 84532: BASE_SEPOLIA_RPC },')).toBe(false)
+  })
+})
+
+// ── #3344: the observer reads, against fake receipts ─────────────────────────
+const FROM = ethers.getAddress('0x' + 'aa'.repeat(20))
+const TO = ethers.getAddress('0x' + 'bb'.repeat(20))
+const TRANSFER = ethers.id('Transfer(address,address,uint256)')
+const transferLog = (token: string, from: string, to: string, value: bigint) => ({
+  address: token,
+  topics: [TRANSFER, ethers.zeroPadValue(from, 32), ethers.zeroPadValue(to, 32)],
+  data: ethers.toBeHex(value, 32),
+})
+const receipt = (status: number, logs: unknown[]) => ({ status, logs }) as unknown as ethers.TransactionReceipt
+const reader = (r: ethers.TransactionReceipt | null) => ({ getTransactionReceipt: async () => r })
+const expected = { from: FROM, to: TO, amount: 10_000n }
+const fast = { timeoutMs: 0, intervalMs: 1 }
+
+describe('proveUsdcTransfer (#3344)', () => {
+  it('passes only on status 1 AND the exact USDC Transfer (from, to, amount)', async () => {
+    const r = await proveUsdcTransfer('0xt', expected, { ...fast, provider: reader(receipt(1, [transferLog(SEPOLIA_USDC, FROM, TO, 10_000n)])) })
+    expect(r).toEqual({ ok: true })
+  })
+
+  it('FAILS on a missing receipt, naming the observer (an outage is not a Haven defect)', async () => {
+    const r = await proveUsdcTransfer('0xt', expected, { ...fast, provider: reader(null) })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/no receipt for 0xt on the observer node.*observer: /)
+  })
+
+  it('FAILS on status 0', async () => {
+    const r = await proveUsdcTransfer('0xt', expected, { ...fast, provider: reader(receipt(0, [transferLog(SEPOLIA_USDC, FROM, TO, 10_000n)])) })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/status 0/)
+  })
+
+  it('FAILS on status 1 without the Transfer — the 4337 inner-revert shape', async () => {
+    const r = await proveUsdcTransfer('0xt', expected, { ...fast, provider: reader(receipt(1, [])) })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/carries no USDC Transfer.*4337/)
+  })
+
+  it('FAILS when the Transfer is the wrong amount, the wrong payee, the wrong payer or the wrong token', async () => {
+    const other = ethers.getAddress('0x' + 'cc'.repeat(20))
+    for (const log of [
+      transferLog(SEPOLIA_USDC, FROM, TO, 9_999n),
+      transferLog(SEPOLIA_USDC, FROM, other, 10_000n),
+      transferLog(SEPOLIA_USDC, other, TO, 10_000n),
+      transferLog(other, FROM, TO, 10_000n),
+    ]) {
+      const r = await proveUsdcTransfer('0xt', expected, { ...fast, provider: reader(receipt(1, [log])) })
+      expect(r.ok).toBe(false)
+    }
+  })
+
+  it('usdcTransfers decodes addresses case-insensitively against USDC', () => {
+    const [t] = usdcTransfers(receipt(1, [transferLog(SEPOLIA_USDC.toLowerCase(), FROM, TO, 5n)]))
+    expect(t).toEqual({ from: FROM, to: TO, value: 5n })
+  })
+
+  it('waitForReceipt waits for a lagging observer instead of failing on the first miss', async () => {
+    let calls = 0
+    const lagging = { getTransactionReceipt: async () => (++calls < 3 ? null : receipt(1, [])) }
+    expect(await waitForReceipt(lagging, '0xt', { timeoutMs: 1_000, intervalMs: 1 })).not.toBeNull()
+    expect(calls).toBe(3)
+  })
+})
+
+describe('waitForDisabled (#3344)', () => {
+  it('passes once the flag reads true, polling past a lagging false', async () => {
+    let calls = 0
+    const r = await waitForDisabled('0xd', { timeoutMs: 1_000, intervalMs: 1, read: async () => ++calls >= 2 })
+    expect(r).toEqual({ ok: true })
+    expect(calls).toBe(2)
+  })
+
+  it('FAILS when the flag stays false past the deadline, naming the observer', async () => {
+    const r = await waitForDisabled('0xd', { ...fast, read: async () => false })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/0xd is not disabled on-chain.*returned false.*observer: /)
+  })
+
+  it('FAILS on a read that keeps throwing, with the reason', async () => {
+    const r = await waitForDisabled('0xd', { ...fast, read: async () => { throw new Error('rpc down') } })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/read failed: rpc down/)
   })
 })

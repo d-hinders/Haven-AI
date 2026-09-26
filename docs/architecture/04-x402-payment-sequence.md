@@ -2197,3 +2197,12 @@ rather than netted into a number the chain would not agree with.
 > change). The hosted server's suite pins the signer's declared shapes to the
 > hosted schemas. Scope of this note: those fields. Nothing else in this
 > document was re-verified.
+
+> **Re-verification (#3344, one observer-receipt helper, 2026-09-26):** this
+> diff touches `packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts` only
+> to replace its private copy of `waitForReceipt` with the harness's one shared
+> observer-receipt helper, called with the leg's own
+> `TIMING.receiptWaitMs` / `pollIntervalMs` (read per call, so the test seam is
+> unchanged). The leg's assertions, its reads and every payment step it drives
+> are unchanged; its suite passes unmodified. Scope of this note: that helper.
+> Nothing else in this document was re-verified.

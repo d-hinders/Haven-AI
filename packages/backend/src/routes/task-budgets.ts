@@ -33,12 +33,14 @@ import {
   buildTaskBudgetChild,
   buildTaskBudgetSignContext,
   checkRemainderForNewTaskBudget,
+  isTaskBudgetChildDisabledOnChain,
   prepareTaskBudgetClose,
   recoverTaskBudgetChildSigner,
   serializeClosePreparedUserOp,
   submitTaskBudgetClose,
 } from '../modules/task-budgets/index.js'
 import { redactVendorSecrets } from '../rails/execution-rail.js'
+import { SubmittedUserOpFailedError } from '../rails/delegation-rail.js'
 
 // `chain-sdk-not-in-routes`: no viem import here — a hex signature/address is
 // carried as a plain string and cast at the module boundary that DOES own
@@ -290,12 +292,27 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
         try {
           result = await submitTaskBudgetClose(agent, row, signature as Hex)
         } catch (err) {
-          // #3329 review finding A: the bundler rejecting a submit here
-          // almost always means the STORED op went stale (the delegate
-          // account's nonce moved, or the sponsorship window lapsed) — a
-          // 502 invites a retry of the exact bytes that will fail again.
-          // Name it: the agent's fix is to call /close again for a fresh
-          // prepare, not to resubmit.
+          // #3329 review finding N2(a): a failure BEFORE the op was sent
+          // (bundler rejected it) means nothing changed on-chain — the
+          // stored op is genuinely stale, so re-preparing is the fix.
+          // `SubmittedUserOpFailedError` names the OTHER case: the op MAY
+          // have landed (receipt wait errored/timed out, or it reverted).
+          // Re-preparing there risks looping 502 forever against an
+          // already-disabled child (`AlreadyDisabled`) — check first.
+          if (err instanceof SubmittedUserOpFailedError) {
+            const disabled = await isTaskBudgetChildDisabledOnChain(agent.chain_id, row.delegation_hash as Hex)
+            if (disabled) {
+              const closed = await markClosed(row.id, agent.id, null)
+              if (closed) {
+                return reply.send({ task_budget: toWire(closed, Math.floor(Date.now() / 1000)), status: 'closed' })
+              }
+            }
+            return reply.code(502).send({
+              error: 'The close UserOp was submitted but its outcome could not be confirmed — check again shortly.',
+              error_code: 'close_outcome_unconfirmed',
+              details: safeDetails(err),
+            })
+          }
           return reply.code(409).send({
             error: 'The stored close UserOp is stale — call /task-budgets/:id/close again for a fresh one, then submit that.',
             error_code: 'close_needs_reprepare',
@@ -323,6 +340,19 @@ export default async function taskBudgetRoutes(app: FastifyInstance): Promise<vo
     if (row.status === 'closed') return reply.code(409).send({ error: 'Task budget is already closed' })
 
     const nowSec = Math.floor(Date.now() / 1000)
+
+    // #3329 review finding N2(b): a PRIOR /submit on this 'closing' row may
+    // have sent a UserOp whose outcome we could not confirm (receipt wait
+    // errored or timed out) — it can be disabled on-chain ALREADY, in which
+    // case a fresh prepare reverts `AlreadyDisabled` and this route would
+    // 502 forever. Check first, and answer closed without ever preparing.
+    if (row.status === 'closing') {
+      const disabled = await isTaskBudgetChildDisabledOnChain(agent.chain_id, row.delegation_hash as Hex)
+      if (disabled) {
+        const closed = await markClosed(row.id, agent.id, null)
+        if (closed) return reply.send({ task_budget: toWire(closed, nowSec), status: 'closed' })
+      }
+    }
 
     // #3329 review finding A: a 'closing' row does NOT idempotently re-serve
     // the stored UserOp — that goes stale the moment the delegate account's

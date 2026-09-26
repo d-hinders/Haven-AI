@@ -18,6 +18,7 @@ import { buildRevocation, delegationSigningPayload, recoverDelegationSigner } fr
 import {
   createDelegationRail,
   delegationRailBundlerUrl,
+  readDisabledDelegationHashes,
   userOpTypedData,
   type PreparedRedemption,
   type RedemptionSubmitResult,
@@ -178,8 +179,11 @@ export interface CloseOutcome {
  * from the agent's own delegate account (owner decision #3329-2: close is
  * authority-reducing only, the delegate account's own on-chain call — never
  * a Haven signature). Trivial when the row is `pending` (never signed,
- * nothing on-chain) or `open` but already expired (the caveat already
- * refuses redemption; a revoke call would be pure overhead).
+ * nothing on-chain), or `open`/`closing` but already expired — #3329 review
+ * finding N2(c): a `closing` row's expiry is the CHILD's own spend caveat,
+ * unaffected by which status the close ended up in; once past it the child
+ * cannot be redeemed for spending either way, so a revoke call is equally
+ * pure overhead in both statuses.
  */
 export async function prepareTaskBudgetClose(
   agent: { chain_id: number; delegate_address: string },
@@ -187,7 +191,9 @@ export async function prepareTaskBudgetClose(
   nowSec: number,
 ): Promise<CloseOutcome> {
   if (row.status === 'pending') return { trivial: true }
-  if (row.status === 'open' && Number(row.expires_at) <= nowSec) return { trivial: true }
+  if ((row.status === 'open' || row.status === 'closing') && Number(row.expires_at) <= nowSec) {
+    return { trivial: true }
+  }
   const child = JSON.parse(row.delegation_json) as Delegation
   const revocation = buildRevocation(child, agent.chain_id)
   const rail = await createDelegationRail({
@@ -323,4 +329,21 @@ export async function submitTaskBudgetClose(
     },
     signature,
   )
+}
+
+/**
+ * #3329 review finding N2(b): whether this task budget's child is ALREADY
+ * disabled on-chain — the only trustworthy answer to "did a submitted-but-
+ * unconfirmed close UserOp land?" `readDisabledDelegationHashes` already
+ * requires two consecutive agreeing reads pinned to `finalized` before it
+ * will report true, so a false positive here (which would close the row
+ * without ever having disabled the child) is the same bar the delegation
+ * revoke-all healer holds itself to.
+ */
+export async function isTaskBudgetChildDisabledOnChain(
+  chainId: number,
+  delegationHash: Hex,
+): Promise<boolean> {
+  const disabled = await readDisabledDelegationHashes(chainId, [delegationHash])
+  return disabled.has(delegationHash)
 }

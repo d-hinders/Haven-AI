@@ -262,9 +262,23 @@ export async function selectDelegationForPayment(
  * and the redemption reverts. Selecting by hash cannot make that mistake:
  * it names the exact row, or none.
  */
+// #3329 review finding N5: the SAME validity window `SELECT_DELEGATION_FOR_
+// PAYMENT_SQL` enforces (#1698) — a not-yet-started or already-expired row
+// is "active" only in Haven's bookkeeping; the on-chain TimestampEnforcer
+// would revert redeeming it regardless. Excluding it here means a task
+// budget whose parent fell outside its window answers a clean 409 at THIS
+// lookup, not a gas-estimation revert three calls later. Owner decision
+// #3329 review N5: both "not found/not active" and "active but out of
+// window" collapse to the SAME null return and the SAME caller-side
+// `task_budget_parent_mismatch` refusal — the agent's fix is identical in
+// both cases (the referenced parent cannot currently authorize this task
+// budget), so a second error code would distinguish without changing what
+// anyone does about it.
 export const SELECT_ACTIVE_DELEGATION_BY_HASH_SQL = `SELECT delegation_hash, delegation_json, recipient_address, budget_atomic
      FROM agent_delegations
-     WHERE agent_id = $1 AND delegation_hash = $2 AND status = 'active'`
+     WHERE agent_id = $1 AND delegation_hash = $2 AND status = 'active'
+       AND start_date <= EXTRACT(EPOCH FROM NOW())
+       AND expires_at > EXTRACT(EPOCH FROM NOW())`
 
 export async function selectActiveDelegationByHash(
   agentId: string,

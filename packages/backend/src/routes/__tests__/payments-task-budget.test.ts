@@ -91,14 +91,26 @@ const BUDGET_DELEGATION: DbRoute = [
   () => ({ rows: [budgetRow()] }),
 ]
 // The ORDINARY (token, to) selection `prepareDelegationPayment` falls back
-// to when no task_budget_id resolves — a DIFFERENT (pinned) grant, so a
-// test can prove the by-hash selection is what actually wins.
+// to when no task_budget_id resolves — a DIFFERENT (pinned) grant with its
+// OWN delegator (nit from #3329 review: the two fixtures used to share
+// `budgetRow()`'s delegation_json, so the delegator assertion below was
+// vacuous — it would have passed even if the by-hash selection were never
+// used), so a test can prove the by-hash selection is what actually wins.
+const PINNED_DELEGATOR = '0x' + 'ee'.repeat(20)
 const PINNED_BUDGET_DELEGATION: DbRoute = [
   /SELECT delegation_hash, delegation_json, recipient_address, budget_atomic\s+FROM agent_delegations\s+WHERE agent_id = \$1\s+AND token_address/,
   () => ({
     rows: [
       budgetRow({
         delegation_hash: `0x${'99'.repeat(32)}`,
+        delegation_json: JSON.stringify({
+          delegate: DELEGATE_ACCOUNT,
+          delegator: PINNED_DELEGATOR,
+          authority: `0x${'ff'.repeat(32)}`,
+          caveats: [],
+          salt: '2',
+          signature: `0x${'cd'.repeat(65)}`,
+        }),
         recipient_address: RECIPIENT.toLowerCase(),
       }),
     ],
@@ -294,7 +306,8 @@ describe('POST /payments with task_budget_id (#3329)', () => {
     const chainArg = rail.prepareRedemption.mock.calls[0][0]
     // chainArg[1] is the parent budget delegation redeemed — must be the
     // task budget's OWN parent (delegator = AGENT.account_address, the open
-    // grant), never the pinned grant's shape (delegator would differ).
+    // grant), never the pinned grant's distinct delegator.
     expect(chainArg[1].delegator.toLowerCase()).toBe(AGENT.account_address.toLowerCase())
+    expect(chainArg[1].delegator.toLowerCase()).not.toBe(PINNED_DELEGATOR.toLowerCase())
   })
 })

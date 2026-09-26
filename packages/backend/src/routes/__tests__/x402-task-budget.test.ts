@@ -8,16 +8,19 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 
-const { mockQuery, mockSelect, mockCompute, mockCreateIntent, mockPrepareFunding, mockEnsureDeployed, mockReadRemaining } =
-  vi.hoisted(() => ({
-    mockQuery: vi.fn(),
-    mockSelect: vi.fn(),
-    mockCompute: vi.fn(),
-    mockCreateIntent: vi.fn(),
-    mockPrepareFunding: vi.fn(),
-    mockEnsureDeployed: vi.fn(),
-    mockReadRemaining: vi.fn(),
-  }))
+const {
+  mockQuery, mockSelect, mockSelectByHash, mockCompute, mockCreateIntent,
+  mockPrepareFunding, mockEnsureDeployed, mockReadRemaining,
+} = vi.hoisted(() => ({
+  mockQuery: vi.fn(),
+  mockSelect: vi.fn(),
+  mockSelectByHash: vi.fn(),
+  mockCompute: vi.fn(),
+  mockCreateIntent: vi.fn(),
+  mockPrepareFunding: vi.fn(),
+  mockEnsureDeployed: vi.fn(),
+  mockReadRemaining: vi.fn(),
+}))
 vi.mock('../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 
 import { privateKeyToAccount } from 'viem/accounts'
@@ -37,10 +40,12 @@ vi.mock('../../middleware/agentAuth.js', () => ({
 }))
 vi.mock('../../rails/delegation-authorization.js', () => ({
   selectDelegation: mockSelect,
-  // #3329 review finding E: the task-budget paths resolve their parent by
-  // hash now, not by (token, to) — same mock serves both in this file since
-  // it does not distinguish by argument.
-  selectDelegationByHash: mockSelect,
+  // #3329 review finding E2: a DISTINCT mock from the (token, to) one — a
+  // test can now prove the task-budget path uses the by-hash result and not
+  // whatever (token, to) happens to select (deleting the `budget =
+  // resolved.parentDelegation` reassignment in delegation-authorize.ts must
+  // go red here).
+  selectDelegationByHash: mockSelectByHash,
   prepareDelegationPayment: mockPrepareFunding,
 }))
 vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
@@ -64,6 +69,12 @@ const DELEGATE_ACCT = '0x' + 'dd'.repeat(20)
 const INTENT_ID = '33333333-3333-3333-3333-333333333333'
 const NOW = Math.floor(Date.now() / 1000)
 const BUDGET_HASH = `0x${'12'.repeat(32)}`
+// #3329 review finding E2: a distinct "wrong" parent — same token, and (for
+// the funding leg) the same `to` — that the by-hash selection must NEVER
+// return, so a mutant deleting the by-hash reassignment surfaces as this
+// delegator leaking into the redeemed chain.
+const WRONG_PARENT_HASH = `0x${'99'.repeat(32)}`
+const WRONG_DELEGATOR = '0x' + 'ee'.repeat(20)
 
 const signedBudget = {
   ...buildBudgetDelegation({
@@ -143,6 +154,7 @@ describe('x402 authorize with taskBudgetId (#3329)', () => {
   beforeEach(() => {
     mockQuery.mockReset()
     mockSelect.mockReset()
+    mockSelectByHash.mockReset()
     mockCompute.mockReset()
     mockCreateIntent.mockReset()
     mockPrepareFunding.mockReset()
@@ -151,7 +163,18 @@ describe('x402 authorize with taskBudgetId (#3329)', () => {
     mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
     mockCompute.mockResolvedValue(DELEGATE_ACCT)
     mockEnsureDeployed.mockResolvedValue({ address: DELEGATE_ACCT, alreadyDeployed: true })
+    // #3329 review finding E2: the (token, to) selection and the by-hash
+    // selection return DISTINGUISHABLE delegations — a wrong-parent grant
+    // that happens to also match (token, payTo), and the task budget's REAL
+    // parent (BUDGET_HASH) only reachable by hash. A test can then prove
+    // which one actually authorized the payment.
     mockSelect.mockResolvedValue({
+      delegation_hash: WRONG_PARENT_HASH,
+      delegation_json: JSON.stringify({ ...signedBudget, delegator: WRONG_DELEGATOR }),
+      recipient_address: null,
+      budget_atomic: '5000000',
+    })
+    mockSelectByHash.mockResolvedValue({
       delegation_hash: BUDGET_HASH,
       delegation_json: JSON.stringify(signedBudget),
       recipient_address: null,
@@ -202,10 +225,17 @@ describe('x402 authorize with taskBudgetId (#3329)', () => {
       taskBudgetId: 'tb-1',
       preparedUserOp: expect.any(String),
     }))
-    const call = mockCreateIntent.mock.calls[0][0] as { preparedUserOp: string }
+    const call = mockCreateIntent.mock.calls[0][0] as { preparedUserOp: string; budgetDelegationHash: string }
     const state = JSON.parse(call.preparedUserOp)
     expect(state.taskBudgetChild).toBeDefined()
     expect(state.taskBudgetChild.delegator).toBe(DELEGATE_ACCT) // self-delegated task child
+    // #3329 review finding E2: the redeemed budget is the BY-HASH parent
+    // (BUDGET_HASH, `signedBudget`'s delegator) — never the (token, payTo)
+    // selection's wrong-parent grant (WRONG_PARENT_HASH/WRONG_DELEGATOR),
+    // even though the mocked (token, payTo) selection would also resolve.
+    expect(state.budget.delegator.toLowerCase()).not.toBe(WRONG_DELEGATOR.toLowerCase())
+    expect(call.budgetDelegationHash).toBe(BUDGET_HASH)
+    expect(call.budgetDelegationHash).not.toBe(WRONG_PARENT_HASH)
   })
 
   it('3009 funding leg happy path: threads the task budget child and persists task_budget_id', async () => {

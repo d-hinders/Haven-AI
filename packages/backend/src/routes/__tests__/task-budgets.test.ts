@@ -10,11 +10,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { privateKeyToAccount } from 'viem/accounts'
 
-const { mockQuery, mockCompute, mockReadRemaining, mockCreateRail } = vi.hoisted(() => ({
+const { mockQuery, mockCompute, mockReadRemaining, mockCreateRail, mockReadDisabled } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   mockCompute: vi.fn(),
   mockReadRemaining: vi.fn(),
   mockCreateRail: vi.fn(),
+  mockReadDisabled: vi.fn(),
 }))
 vi.mock('../../db.js', () => ({
   default: { query: (...a: unknown[]) => mockQuery(...a) },
@@ -42,6 +43,7 @@ vi.mock('../../rails/delegation-rail.js', async (importOriginal) => {
     ...actual,
     delegationRailBundlerUrl: () => 'https://bundler.example/x?apikey=SECRET',
     createDelegationRail: (...a: unknown[]) => mockCreateRail(...a),
+    readDisabledDelegationHashes: (...a: unknown[]) => mockReadDisabled(...a),
   }
 })
 
@@ -168,6 +170,8 @@ describe('task budgets API (#3329)', () => {
     mockReadRemaining.mockReset()
     mockReadRemaining.mockResolvedValue({ remainingAtomic: '5000000', fromChain: true })
     mockCreateRail.mockReset()
+    mockReadDisabled.mockReset()
+    mockReadDisabled.mockResolvedValue(new Set())
     app = Fastify({ logger: false })
     await app.register(taskBudgetRoutes, { prefix: '/task-budgets' })
   })
@@ -185,6 +189,23 @@ describe('task budgets API (#3329)', () => {
     expect(body.sign_data.signature_scheme).toBe('eip712_delegation')
     expect(body.next_action).toBe('sign_then_submit')
     expect(body.sign_data.typed_data.primaryType).toBe('Delegation')
+  })
+
+  it('#3329 review finding N4: the inserted row id IS the id the salt was derived from (mutant: a fresh randomUUID() at insert must go red)', async () => {
+    mockDb({ insertReturn: taskBudgetRow() })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/task-budgets',
+      payload: { token_address: USDC, max_amount_atomic: '1000000', ttl_seconds: 3600 },
+    })
+    expect(res.statusCode).toBe(201)
+    const insertCall = mockQuery.mock.calls.find((c) => /INSERT INTO agent_task_budgets/.test(String(c[0])))
+    expect(insertCall).toBeDefined()
+    const insertedId = (insertCall![1] as unknown[])[0] as string
+    const { taskBudgetSalt } = await import('../../modules/task-budgets/index.js')
+    const expectedSalt = BigInt(taskBudgetSalt(insertedId))
+    const body = res.json()
+    expect(BigInt(body.sign_data.typed_data.message.salt)).toBe(expectedSalt)
   })
 
   it('POST / refuses when the request exceeds the available (remaining minus reserved) budget', async () => {
@@ -337,5 +358,89 @@ describe('task budgets API (#3329)', () => {
 
     expect(res.statusCode).toBe(409)
     expect(res.json().error_code).toBe('close_needs_reprepare')
+  })
+
+  it('#3329 review finding N2(a,b): a POST-SEND submit failure checks disabledDelegations — disabled → 200 closed, not 409', async () => {
+    const { SubmittedUserOpFailedError } = await import('../../rails/delegation-rail.js')
+    mockCreateRail.mockResolvedValue({
+      delegateAccountAddress: DELEGATE_ACCOUNT,
+      prepareAccountCall: vi.fn(),
+      submitRedemption: vi.fn().mockRejectedValue(
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+      ),
+    })
+    const row = taskBudgetRow({ status: 'closing', prepared_user_op: JSON.stringify({ userOp: true }) })
+    mockReadDisabled.mockResolvedValue(new Set([row.delegation_hash]))
+    mockDb({ taskBudget: row, markClosedReturn: taskBudgetRow({ status: 'closed' }) })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/task-budgets/tb-1/submit',
+      payload: { signature: `0x${'ab'.repeat(65)}` },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().status).toBe('closed')
+  })
+
+  it('#3329 review finding N2(a,b): a POST-SEND submit failure with the child still NOT disabled 502s close_outcome_unconfirmed', async () => {
+    const { SubmittedUserOpFailedError } = await import('../../rails/delegation-rail.js')
+    mockCreateRail.mockResolvedValue({
+      delegateAccountAddress: DELEGATE_ACCOUNT,
+      prepareAccountCall: vi.fn(),
+      submitRedemption: vi.fn().mockRejectedValue(
+        new SubmittedUserOpFailedError('receipt wait timed out', `0x${'33'.repeat(32)}`),
+      ),
+    })
+    mockReadDisabled.mockResolvedValue(new Set())
+    mockDb({ taskBudget: taskBudgetRow({ status: 'closing', prepared_user_op: JSON.stringify({ userOp: true }) }) })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/task-budgets/tb-1/submit',
+      payload: { signature: `0x${'ab'.repeat(65)}` },
+    })
+
+    expect(res.statusCode).toBe(502)
+    expect(res.json().error_code).toBe('close_outcome_unconfirmed')
+  })
+
+  it('#3329 review finding N2(b): POST /:id/close on a CLOSING row whose child is ALREADY disabled closes without re-preparing', async () => {
+    const prepareAccountCall = vi.fn()
+    mockCreateRail.mockResolvedValue({
+      delegateAccountAddress: DELEGATE_ACCOUNT,
+      prepareAccountCall,
+      submitRedemption: vi.fn(),
+    })
+    const row = taskBudgetRow({ status: 'closing', prepared_user_op: JSON.stringify({ stale: true }) })
+    mockReadDisabled.mockResolvedValue(new Set([row.delegation_hash]))
+    mockDb({ taskBudget: row, markClosedReturn: taskBudgetRow({ status: 'closed' }) })
+
+    const res = await app.inject({ method: 'POST', url: '/task-budgets/tb-1/close' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().status).toBe('closed')
+    expect(prepareAccountCall).not.toHaveBeenCalled()
+  })
+
+  it('#3329 review finding N2(c): POST /:id/close on a CLOSING row past its expiry closes trivially, like an expired open row', async () => {
+    const prepareAccountCall = vi.fn()
+    mockCreateRail.mockResolvedValue({
+      delegateAccountAddress: DELEGATE_ACCOUNT,
+      prepareAccountCall,
+      submitRedemption: vi.fn(),
+    })
+    const row = taskBudgetRow({
+      status: 'closing',
+      expires_at: String(Math.floor(Date.now() / 1000) - 10),
+      prepared_user_op: JSON.stringify({ stale: true }),
+    })
+    mockDb({ taskBudget: row, markClosedReturn: taskBudgetRow({ status: 'closed' }) })
+
+    const res = await app.inject({ method: 'POST', url: '/task-budgets/tb-1/close' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().status).toBe('closed')
+    expect(prepareAccountCall).not.toHaveBeenCalled()
   })
 })

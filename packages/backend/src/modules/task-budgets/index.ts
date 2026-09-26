@@ -20,6 +20,7 @@ export {
   buildTaskBudgetSignContext,
   checkRemainderForNewTaskBudget,
   checkTaskBudgetForPayment,
+  isTaskBudgetChildDisabledOnChain,
   prepareTaskBudgetClose,
   recoverTaskBudgetChildSigner,
   resolveTaskBudgetChildForPayment,

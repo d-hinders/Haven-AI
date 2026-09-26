@@ -172,6 +172,13 @@ describe('assertOwnTaskChild', () => {
     expect(() => assertOwnTaskChild(td, expected, delegateAddress)).toThrow(/domain name\/version/)
   })
 
+  it('refuses a domain.version that does not match the pinned DelegationManager version (#3329 round-2 nit)', () => {
+    const expected = defaultExpectation(ownAccount)
+    const td = buildTaskChildTypedData({ ownAccount, expiresAt: expected.expiresAt })
+    td.domain.version = '2'
+    expect(() => assertOwnTaskChild(td, expected, delegateAddress)).toThrow(/domain name\/version/)
+  })
+
   it('refuses EIP-712 type definitions that do not match the pinned Delegation/Caveat shape', () => {
     const expected = defaultExpectation(ownAccount)
     const td = buildTaskChildTypedData({ ownAccount, expiresAt: expected.expiresAt })
@@ -619,7 +626,7 @@ describe('hashDelegation pin (#3329)', () => {
   // #3329 should-fix: the kit is a devDependency-only import (never at SDK
   // runtime — see the file header) and takes ~1s cold. Loaded once in
   // `beforeAll`, not inside the `it` body, so only the FIRST run in this
-  // file pays the load cost; the 30s timeout stays on the `it` in case a
+  // file pays the load cost; the 30s timeout stays on `beforeAll` in case a
   // cold CI cache makes the module resolution itself slow.
   let kit: typeof import('@metamask/smart-accounts-kit/utils')
   beforeAll(async () => {

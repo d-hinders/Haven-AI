@@ -33,6 +33,7 @@ import {
 import {
   ACTIVATE_PENDING_DELEGATION_SQL,
   REPLACE_OTHER_ACTIVE_DELEGATIONS_IN_SLOT_SQL,
+  SELECT_ACTIVE_DELEGATION_BY_HASH_SQL,
   SELECT_DELEGATION_FOR_PAYMENT_SQL,
 } from '../src/infra/repositories/delegation-budgets.js'
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
@@ -609,6 +610,10 @@ const QUERIES: SmokeQuery[] = [
     sql: SELECT_DELEGATION_FOR_PAYMENT_SQL,
   },
   {
+    name: 'delegations: active selection by hash, windowed (#3329 review N5)',
+    sql: SELECT_ACTIVE_DELEGATION_BY_HASH_SQL,
+  },
+  {
     name: 'delegations: conditional activation (pending only)',
     sql: ACTIVATE_PENDING_DELEGATION_SQL,
   },
@@ -634,7 +639,7 @@ const QUERIES: SmokeQuery[] = [
     sql: MARK_TASK_BUDGET_OPEN_SQL,
   },
   {
-    name: 'task budgets: mark closing (open only, #3329)',
+    name: 'task budgets: mark closing (open or closing, #3329 review N2)',
     sql: MARK_TASK_BUDGET_CLOSING_SQL,
   },
   {

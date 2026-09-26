@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 function row(agentId: string, id: string) {
@@ -74,12 +74,19 @@ describe('useTaskBudgets (#3329)', () => {
     rerender({ agentId: 'agent-b' })
     await waitFor(() => expect(result.current.taskBudgets).toEqual([{ ...row('agent-b', 'b1') }]))
 
-    // Agent A's request finally resolves — it must not overwrite B's rows,
-    // and it must not resurrect after having been cleared on the switch.
+    // Agent A's request finally resolves — flush it fully inside `act` (not
+    // a couple of bare microtask ticks, which pass whether or not the write
+    // it guards against actually happens) so the assertion below observes
+    // whatever the hook's `.then` actually did with it.
     resolveA!({ task_budgets: [row('agent-a', 'a1')] })
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(result.current.taskBudgets).toEqual([{ ...row('agent-b', 'b1') }])
+    await act(async () => {
+      await pendingA
+    })
+    // It must not overwrite B's rows, and must not resurrect after having
+    // been cleared on the switch — `waitFor` polls, so a guard-less hook
+    // that applies A's write here fails (times out) rather than passing
+    // vacuously.
+    await waitFor(() => expect(result.current.taskBudgets).toEqual([{ ...row('agent-b', 'b1') }]))
   })
 
   it('clears the previous agent’s rows immediately on agentId change', async () => {

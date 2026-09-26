@@ -155,6 +155,29 @@ export interface RedemptionSubmitResult {
 }
 
 /**
+ * #3329 review finding N2: `submitRedemption` can fail in two phases, and a
+ * caller must never treat them alike. A failure BEFORE `sendUserOperation`
+ * resolves (bundler rejected it — bad nonce, stale signature) means the op
+ * never entered the mempool: nothing changed on-chain, safe to say "stale,
+ * re-prepare". A failure AFTER it resolves (the receipt wait errored or
+ * timed out, or the op landed but reverted) means the op MAY have been
+ * included — for a `disableDelegation` call that is NOT reversible by
+ * re-preparing: the child may already be disabled on-chain, and a caller
+ * that assumes otherwise will loop 502 forever (a fresh prepare reverts
+ * `AlreadyDisabled`). Thrown only for the post-send phase; `userOpHash` is
+ * always known at that point, so callers can check `disabledDelegations`
+ * (or transaction status) before deciding what to tell the agent.
+ */
+export class SubmittedUserOpFailedError extends Error {
+  readonly userOpHash: Hex
+  constructor(message: string, userOpHash: Hex) {
+    super(message)
+    this.name = 'SubmittedUserOpFailedError'
+    this.userOpHash = userOpHash
+  }
+}
+
+/**
  * The ONE call a redemption UserOp makes: `redeemDelegations` on the chain's
  * DelegationManager, redeeming exactly `[delegations]` (leaf first) in
  * `SingleDefault` mode against a single ERC-20 `transfer(to, amount)` on
@@ -351,12 +374,26 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
     prepared: PreparedRedemption,
     signature: Hex,
   ): Promise<RedemptionSubmitResult> {
+    // #3329 review finding N2: a throw HERE (bundler rejected the op) means
+    // it never entered the mempool — nothing on-chain changed.
     const userOpHash = await client.sendUserOperation({
       ...prepared.userOperation,
       signature,
     })
-    const receipt = await pimlico.waitForUserOperationReceipt({ hash: userOpHash })
-    if (!receipt.success) throw new Error('redemption UserOp included but reverted')
+    // Everything past this point is POST-SEND: a throw here means the op MAY
+    // have landed, and `SubmittedUserOpFailedError` says so explicitly.
+    let receipt: Awaited<ReturnType<typeof pimlico.waitForUserOperationReceipt>>
+    try {
+      receipt = await pimlico.waitForUserOperationReceipt({ hash: userOpHash })
+    } catch (err) {
+      throw new SubmittedUserOpFailedError(
+        `redemption UserOp ${userOpHash} was sent but its receipt could not be confirmed: ${err instanceof Error ? err.message : String(err)}`,
+        userOpHash,
+      )
+    }
+    if (!receipt.success) {
+      throw new SubmittedUserOpFailedError(`redemption UserOp ${userOpHash} included but reverted`, userOpHash)
+    }
     return {
       txHash: receipt.receipt.transactionHash,
       userOpHash,

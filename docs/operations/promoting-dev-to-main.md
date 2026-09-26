@@ -2,6 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - scripts/ci/rpc-conformance.mjs
   - .github/workflows/dev-gate.yml
   - .github/workflows/publish.yml
   - .github/workflows/qa-dev.yml

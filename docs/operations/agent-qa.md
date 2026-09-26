@@ -2,6 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - scripts/ci/rpc-conformance.mjs
   - .env.dev.example
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-failure-issue.mjs

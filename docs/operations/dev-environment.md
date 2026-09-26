@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 contract: true
 covers:
+  - scripts/ci/rpc-conformance.mjs
   - .github/workflows/dev-gate.yml
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-freshness.mjs

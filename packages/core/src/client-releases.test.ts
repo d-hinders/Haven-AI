@@ -29,8 +29,9 @@ describe('CLIENT_RELEASES (#3304)', () => {
   })
 
   // Never AHEAD of the package: a document announcing a version the source has
-  // not released would send agents after something that does not exist. Behind
-  // is tolerated until #3305 makes the bump write this file.
+  // not released would send agents after something that does not exist. Equal
+  // is what the bump writes (#3305); behind is tolerated so a package.json
+  // edited outside the bump does not break this unrelated test.
   it('never announces a version above the package.json version', () => {
     for (const pkg of PUBLISHED_CLIENT_PACKAGES) {
       expect(compareVersions(CLIENT_RELEASES[pkg].released_version, packageVersion(pkg)), pkg).toBeLessThanOrEqual(0)

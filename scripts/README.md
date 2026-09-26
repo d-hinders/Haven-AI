@@ -118,7 +118,7 @@ npm run release:bump -- prerelease --yes
 node scripts/release-bump.mjs "$(node scripts/release-snapshot-version.mjs "$(git rev-parse --short=7 HEAD)")" --yes --snapshot
 ```
 
-Everything that makes the bump atomic runs identically in both modes — the versions, the cross-package pins, the source constants, the runtime manifest, the ordered rebuild and the bundle verification. That is the whole reason the snapshot job reuses this script instead of setting versions by hand: the version lattice is not a list of numbers, and hand-setting it breaks the pins that make an installed snapshot internally consistent. What `--snapshot` changes is only the sign-off, which otherwise tells the operator to write a CASP shard and open a release PR — instructions with no tree to apply them to.
+Everything that makes the bump atomic runs identically in both modes — the versions, the cross-package pins, the source constants, the runtime manifest, the ordered rebuild and the bundle verification. That is the whole reason the snapshot job reuses this script instead of setting versions by hand: the version lattice is not a list of numbers, and hand-setting it breaks the pins that make an installed snapshot internally consistent. What `--snapshot` changes is the sign-off, which otherwise tells the operator to write a CASP shard and open a release PR — instructions with no tree to apply them to — and it skips the two documentary writes: the CHANGELOG heading and the client release data, with its hand-edit refusal (7a, 7b).
 
 The **version-shape check is bidirectional**, and the second half is the one that protects production:
 
@@ -174,8 +174,11 @@ The developer loop that *consumes* a snapshot — merge, wait for the run, poll 
      here, and goes red earlier in CI: `release-bump.test.mjs` runs the same
      comparison on every pull request. `node scripts/release-client-data.mjs --check`
      gives the same answer without a release, and `--write` regenerates.
-   - **The `**Update required**` marker.** A CHANGELOG bullet carrying it flags its
-     release `action_required`. `**BREAKING**` does not, because it means
+   - **The `**Update required**` marker.** Anywhere in a release's CHANGELOG section
+     (outside a code span) it flags that release `action_required`. Written any
+     other way — including "no update required" — it is refused, in CI for
+     `## Unreleased` and at bump time for a release; reword to "no update needed"
+     or quote it in a code span. `**BREAKING**` does not, because it means
      "updating may break you", not "you must update".
    - **Never `client-compat.ts`.** The enforced minimums are hand-edited by owner
      decision, and a release must not raise one as a side effect.

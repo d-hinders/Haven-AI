@@ -27,9 +27,10 @@
  * summary and `action_required`. The summary is the lead bullet's headline —
  * its opening bold span when it has one (the house style, e.g.
  * `**Client identity (#3303).**`), otherwise its first sentence — plus its next
- * sentence when both fit, then how many more changes the CHANGELOG lists. Whole
- * sentences only, never cut mid-clause; issue references stripped, since a
- * public reader cannot use them. It is "what changed, for deciding whether to
+ * sentence when both fit, then how many more changes the CHANGELOG lists.
+ * Never cut mid-clause (a headline over the limit is shortened only at a
+ * top-level `;`); issue references stripped, since a public reader cannot use
+ * them. It is "what changed, for deciding whether to
  * update", not the CHANGELOG; the CHANGELOG stays the record.
  *
  * ## The action-required marker
@@ -61,8 +62,8 @@ export const MAX_NOTES_PER_PACKAGE = 2
 
 /**
  * A summary grows by its lead bullet's second sentence only while it stays
- * within this many characters. Sentences are never cut: a single long
- * headline is served whole rather than broken mid-clause.
+ * within this many characters. Never cut mid-clause: a headline over it is
+ * shortened at a top-level `;`, otherwise served whole.
  */
 export const MAX_SUMMARY_CHARS = 300
 

@@ -1511,7 +1511,8 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > **Scope of this section:** written for #3272 and rewritten once for epic
 > #3284 (#3283, #3281) against the signer and SDK at those changes; #3375
 > (the epic's third slice) then updated the funding-leg pin and the two
-> residuals above.
+> residuals above. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3378, 2026-09-26):** `client.ts`'s `payX402Quote`
 > now forwards its options (`taskBudgetId`) to `authorizeX402`, as `fetch()`

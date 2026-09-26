@@ -2049,6 +2049,10 @@ estimation; nothing queues. Key separation for a *different* delegate is
    an erc7710 settlement child is built under the task child, so the
    permission context a merchant redeems is `[settlement, task, budget]`.
    Token, recipient pin and parent must match the row, else a structured 409.
+   On the EIP-3009 funding leg the pin is compared with the agent's own
+   delegate EOA — the leg's payee — so a task budget pinned to a merchant is
+   erc7710-only, exactly like a pinned budget delegation; the bridge answers
+   `task_budget_recipient_mismatch` (owner decision 2026-09-26, #3378).
 4. `POST /task-budgets/:id/close` on a live budget prepares a sponsored
    `disableDelegation(child)` UserOp **from the agent's own account** — the
    one new shape the signer learned, authority-reducing only

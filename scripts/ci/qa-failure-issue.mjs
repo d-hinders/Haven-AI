@@ -31,7 +31,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { byAttempt, scrub, scrubFull } from './qa-retry.mjs'
+import { byAttempt, scrubFull } from './qa-retry.mjs'
 
 export const LABEL = 'qa-failure'
 export const LABEL_COLOR = 'b60205'
@@ -118,25 +118,21 @@ function firstMatch(lines, patterns) {
  * Scrub BEFORE cutting: a cut can fall between a label and its value
  * (`Bearer <v>`, `"apiKey": "<v>"`), and a bare value is not recognisable as a
  * key. So a bounded window (±1000 characters; the scrub regexes backtrack on
- * pathological input) is scrubbed whole with a marker at the match, and the
- * excerpt is cut from the scrubbed text. Where the window itself cuts the
- * line, its first and last three whitespace tokens are dropped first: a label
- * and its value span at most three (`password = <v>`, `"apiKey": "<v>"`,
- * `Bearer <v>`), and scrubbing can shrink the text enough (URLs → `<url>`)
- * for the excerpt to reach the window's edge.
+ * pathological input) is scrubbed WHOLE, with a marker at the match, and only
+ * then trimmed and cut. Where the window itself cuts the line, the scrubbed
+ * text's first and last three whitespace tokens are dropped, one at a time,
+ * never past the marker: a label/value pair the window's edge splits lies
+ * within those three tokens (`password = <v>`, `Authorization : Bearer <v>`),
+ * and an intact pair is already `<redacted>` — so nothing that scrubbing
+ * recognised is ever uncovered by a trim.
  */
 export function excerpt(line, index, { before = 80, after = 160 } = {}) {
   const MARK = '\u0001'
   const a = Math.max(0, index - 1000)
   const b = Math.min(line.length, index + 1000)
-  let raw = `${line.slice(a, index)}${MARK}${line.slice(index, b)}`
-  const trim = (re) => {
-    const m = re.exec(raw)
-    if (m && !m[0].includes(MARK)) raw = raw.slice(0, m.index) + raw.slice(m.index + m[0].length)
-  }
-  if (a > 0) trim(/^\S*(\s+\S+){0,2}\s+/)
-  if (b < line.length) trim(/\s+(\S+\s+){0,2}\S*$/)
-  const scrubbed = scrubFull(raw)
+  let scrubbed = scrubFull(`${line.slice(a, index)}${MARK}${line.slice(index, b)}`)
+  if (a > 0) scrubbed = dropEdgeTokens(scrubbed, 'front', MARK)
+  if (b < line.length) scrubbed = dropEdgeTokens(scrubbed, 'back', MARK)
   const at = Math.max(0, scrubbed.indexOf(MARK)) // a marker swallowed into a <url> falls back to the start
   const text = scrubbed.replace(MARK, '')
   // Already scrubbed, so the cut needs no widening: it can no longer split a secret.
@@ -156,6 +152,30 @@ function noIssueRefs(text) {
   return text.replace(/#(\d)/g, '#\u2060$1')
 }
 
+/** Drop up to three whitespace tokens from one end of `text`, one at a time, never one holding `stop`. */
+export function dropEdgeTokens(text, end, stop = null) {
+  let t = text
+  for (let n = 0; n < 3; n++) {
+    const m = end === 'front' ? /^\S*\s+/.exec(t) : /\s+\S*$/.exec(t)
+    if (!m || (stop && m[0].includes(stop))) break
+    t = end === 'front' ? t.slice(m[0].length) : t.slice(0, t.length - m[0].length)
+  }
+  return t
+}
+
+/**
+ * `scrub` for a whole line: `qa-retry`'s `scrub` slices to 1024 characters
+ * BEFORE scrubbing, which can cut a labelled value below the 16 characters
+ * that mark it as a key and publish its first part. Here an over-long line is
+ * cut, its last three tokens dropped, then scrubbed whole and capped.
+ */
+export function scrubLine(text, max = 240) {
+  let t = String(text ?? '')
+  if (t.length > 2000) t = dropEdgeTokens(t.slice(0, 2000), 'back')
+  const s = scrubFull(t)
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
 /** Class and signature for one failing leg: its FAIL line plus continuation lines. */
 export function classifyLeg(lines) {
   for (const [cls, patterns] of [['provider', PROVIDER], ['harness', HARNESS], ['haven', HAVEN]]) {
@@ -163,10 +183,10 @@ export function classifyLeg(lines) {
     if (!hit) continue
     const found = excerpt(hit.line, hit.index)
     // A hit on a continuation line (`Status: 429`) keeps the step it belongs to.
-    const signature = hit.line === lines[0] ? found : `${scrub(lines[0] ?? '', 120)} → ${found}`
+    const signature = hit.line === lines[0] ? found : `${scrubLine(lines[0] ?? '', 120)} → ${found}`
     return { class: cls, signature: noIssueRefs(signature) }
   }
-  return { class: 'unclassified', signature: noIssueRefs(scrub(lines[0] ?? '', 240)) }
+  return { class: 'unclassified', signature: noIssueRefs(scrubLine(lines[0] ?? '', 240)) }
 }
 
 /**
@@ -183,12 +203,12 @@ export function classifyLog(text) {
   if (preflightAt !== -1) {
     // The resource lines that failed their floor say which one.
     const failing = lines.slice(0, preflightAt).filter((l) => /^\s+✗ /.test(l)).map((l) => l.trim())
-    return { runClass: 'preflight', signature: noIssueRefs(scrub(failing[0] ?? lines[preflightAt].trim(), 200)), legs: [] }
+    return { runClass: 'preflight', signature: noIssueRefs(scrubLine(failing[0] ?? lines[preflightAt].trim(), 200)), legs: [] }
   }
   // The harness itself crashed: run-level, no legs.
   const crashed = lines.find((l) => /^\s*✗ harness crashed:/.test(l))
   if (crashed) {
-    return { runClass: 'harness', signature: noIssueRefs(scrub(crashed.trim(), 240)), legs: [] }
+    return { runClass: 'harness', signature: noIssueRefs(scrubLine(crashed.trim(), 240)), legs: [] }
   }
   const legs = []
   for (let i = 0; i < lines.length; i++) {
@@ -204,7 +224,7 @@ export function classifyLog(text) {
     // No failing leg: strict mode refusing skipped legs, or Coverage completeness
     // finding the green-with-skips marker. The run-level line says why.
     const runLine = lines.find((l) => /^\s*✗ /.test(l)) ?? lines.find((l) => /green-with-skips:/.test(l))
-    return { runClass: 'unclassified', signature: runLine ? noIssueRefs(scrub(runLine.trim(), 200)) : null, legs }
+    return { runClass: 'unclassified', signature: runLine ? noIssueRefs(scrubLine(runLine.trim(), 200)) : null, legs }
   }
   if (counts.size === 1) return { runClass: legs[0].class, signature: legs[0].signature, legs }
   const summary = CLASSES.filter((c) => counts.has(c)).map((c) => `${c} ×${counts.get(c)}`).join(', ')

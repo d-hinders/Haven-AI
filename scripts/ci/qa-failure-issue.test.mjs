@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ISSUE_TITLE, LABEL, CLASSES, buildBody, buildComment, classifyLog, readFinalAttempt, upsertStandingIssue } from './qa-failure-issue.mjs'
+import { ISSUE_TITLE, LABEL, CLASSES, buildBody, buildComment, classifyLog, md, readFinalAttempt, upsertStandingIssue } from './qa-failure-issue.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./qa-failure-issue.mjs', import.meta.url))
 
@@ -300,6 +300,74 @@ describe('qa-failure-issue: failure classes (#3337)', () => {
       const [leg] = classifyLog(line).legs
       for (let i = 0; i + 8 <= SECRET.length; i++) assert.ok(!leg.signature.includes(SECRET.slice(i, i + 8)), `${label}: ${SECRET.slice(i, i + 8)}`)
     }
+  })
+
+  // Round 3: a single geometry proved nothing. Sweep the window's edge across
+  // EVERY character of each label/value shape, on both paths.
+  const V = 'SEKRETVALUE0123456789abcdef'
+  const SHAPES = [
+    `password=${V}`, `password = ${V}`, `zz password = ${V}`, `Authorization: Bearer ${V}`,
+    `Authorization : Bearer ${V}`, `x y Bearer ${V}`, `"password" : "${V}"`, `zz "password" : "${V}"`,
+    `zz yy "apiKey": "${V}"`,
+  ]
+  const leaks = (sig) => { for (let i = 0; i + 8 <= V.length; i++) if (sig.includes(V.slice(i, i + 8))) return V.slice(i, i + 8); return null }
+
+  test('excerpt: no cut position of the window\'s front edge uncovers a secret (every shape, every offset)', () => {
+    for (const shape of SHAPES) {
+      for (let c = 0; c <= shape.length; c++) {
+        // The window starts c characters into the shape; ~1000 characters of URL collapse to <url>.
+        const line = `• leg … FAIL — ${'f'.repeat(1500)} ${shape} https://example.com/${'a'.repeat(978 + c - shape.length)} no available upstreams tail`
+        const [leg] = classifyLog(line).legs
+        assert.equal(leg.class, 'provider')
+        assert.equal(leaks(leg.signature), null, `${shape} @${c}: ${leg.signature}`)
+      }
+    }
+  })
+
+  test('the edge trim never drops the match itself: a match inside the window\'s first token keeps its evidence', () => {
+    const [leg] = classifyLog(`• leg … FAIL — ${'f'.repeat(1500)}no available upstreams tail`).legs
+    assert.equal(leg.class, 'provider')
+    assert.match(leg.signature, /no available upstreams/)
+  })
+
+  test('whole-line paths: no cut position of the length bound uncovers a secret (every shape, every offset)', () => {
+    for (const shape of SHAPES) {
+      for (let c = 0; c <= shape.length; c++) {
+        // The 2000-character bound falls c characters into the shape (an unclassified leg).
+        const prefix = '• leg … FAIL — Could not deploy https://example.com/'
+        const line = `${prefix}${'u'.repeat(2000 - c - prefix.length - 1)} ${shape} tail`
+        assert.equal(2000 - line.indexOf(shape), c, 'geometry')
+        const [leg] = classifyLog(line).legs
+        assert.equal(leg.class, 'unclassified')
+        assert.equal(leaks(leg.signature), null, `${shape} @${c}: ${leg.signature}`)
+      }
+    }
+    // Round 3's P2 reproduction: a value just past scrub()'s old 1024-character slice.
+    const p2 = classifyLog(`• leg … FAIL — Could not deploy https://example.com/${'u'.repeat(950)} password=${V}\n| s`)
+    assert.equal(leaks(p2.legs[0].signature), null, p2.legs[0].signature)
+  })
+
+  test('markup is escaped everywhere a signature lands, and only classified legs are named in earlier attempts', () => {
+    assert.equal(md('a & <b>'), 'a &amp; &lt;b&gt;')
+    const logs = { 'qa-run.attempt-1.log': [PROVIDER_JSON_URL, MASKED_502].join('\n'), 'qa-run.attempt-2.log': MASKED_502 }
+    const r = readFinalAttempt(Object.keys(logs), (f) => logs[f])
+    const body = buildBody({ trigger: 'T', runUrl: 'U', when: 'W', classification: r })
+    const line = body.split('\n').find((l) => l.startsWith('Earlier attempt 1'))
+    assert.match(line, /`x402-delegation-3009-sweep` provider/)
+    assert.doesNotMatch(line, /`delegation-lifecycle`/) // unclassified legs are not named
+    assert.doesNotMatch(line, /[^`]<(url|redacted)>/)
+    // A single-class earlier attempt carries its leg's signature, markup escaped.
+    const single = { 'qa-run.attempt-1.log': PROVIDER_JSON_URL, 'qa-run.attempt-2.log': MASKED_502 }
+    const r1 = readFinalAttempt(Object.keys(single), (f) => single[f])
+    const line1 = buildBody({ trigger: 'T', runUrl: 'U', when: 'W', classification: r1 }).split('\n').find((l) => l.startsWith('Earlier attempt 1'))
+    assert.match(line1, /&lt;url&gt;/)
+  })
+
+  test('an excerpt marks both cut ends with an ellipsis and keeps the leg prefix', () => {
+    const [leg] = classifyLog(`${PROVIDER_BATCH_REAL_LENGTH} and then ${'z '.repeat(200)}`).legs
+    assert.match(leg.signature, /^• x402-delegation-3009-sweep … FAIL — … /)
+    assert.match(leg.signature, / …$/)
+    assert.ok(leg.signature.length <= 320)
   })
 
   test('the body escapes signature markup so <url> stays visible in the rendered issue', () => {

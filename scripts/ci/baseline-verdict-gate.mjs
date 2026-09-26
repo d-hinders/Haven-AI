@@ -628,10 +628,14 @@ export async function collect({ gh, repo, prNumber }) {
   // `gh` (ghRunner) is async and never rejects — execFileSync errors propagate
   // as a rejection, which the CLI boundary fails closed on.
   const run = async (args) => JSON.parse(await gh(['api', ...args, '--jq', '.'], { input: null }))
+  // GitHub's pulls/{n}/files entries name the file `filename`, never `path`
+  // (#3231 verification, PR #3362): reading `f.path` gave every PR zero PNGs
+  // and a vacuous pass. Normalised here, once, to the `{ path, status }` shape
+  // `evaluate` takes.
   const files = []
   for (let page = 1; ; page += 1) {
     const chunk = await run([`repos/${repo}/pulls/${prNumber}/files?per_page=100&page=${page}`])
-    files.push(...chunk)
+    files.push(...(chunk ?? []).map((f) => ({ path: f?.filename ?? null, status: f?.status ?? null })))
     if (!Array.isArray(chunk) || chunk.length < 100) break
   }
   const prJson = await run([`repos/${repo}/pulls/${prNumber}`])
@@ -698,7 +702,7 @@ export async function collect({ gh, repo, prNumber }) {
       draft: prJson.draft === true,
       headSha: prJson.head?.sha ?? null,
     },
-    files: files.map((f) => ({ path: f.path, status: f.status })),
+    files,
     declarationTexts: [prJson.body ?? '', ...commits],
     verdictTexts: [prJson.body ?? '', ...comments],
     lastTouch,

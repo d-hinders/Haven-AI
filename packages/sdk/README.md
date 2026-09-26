@@ -25,7 +25,8 @@ The package has three entries. `@haven_ai/sdk` is the full client. `@haven_ai/sd
 (#3173) is the ethers-free subset the local signer imports — error classes, the
 typed-next-step builder, the x402 message builders, viem-based key helpers, and
 (#3283) the signing-surface guard: `assertBoundDirectPaymentUserOp`, the
-redemption guard, `deriveDelegateAccountAddress` and `verifySettlementChild` —
+redemption guard, `deriveDelegateAccountAddress`, `verifySettlementChild` and
+(#3281) the funding-leg recipient pin `assertFundingLegPaysDelegate` —
 and loads in about a third of the time; use it when you need those helpers
 without the HTTP client. A class imported from either entry is the same class.
 `@haven_ai/sdk/test-support` (#3283) holds test fixture builders shared by

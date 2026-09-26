@@ -12,6 +12,8 @@ covers:
   - packages/sdk/src/userop-binding.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402-erc7710.ts
+  - packages/sdk/src/x402-funding-leg.ts
+  - packages/sdk/src/delegate-sweep.ts
   - packages/signer/src/tools.ts
   - packages/signer/src/core.ts
   - packages/backend/src/middleware/auth.ts
@@ -1373,11 +1375,12 @@ signer imports:
     #3329 — a two-link chain whose leaf is a task-budget child this account
     delegated to itself under that grant; in `SingleDefault` mode,
     canonically encoded at every level;
-  - **on the signer's x402 funding leg (#3281)**, its single execution is a
-    `transfer` of the quoted amount of the quoted token to this key's own
-    delegate EOA. That address is local, not from Haven. The SDK's own
-    funding leg (`signForData`) does not run this recipient pin yet; see the
-    epic's notes.
+  - **on an x402 funding leg**, its single execution is a `transfer` of the
+    quoted amount of the quoted token to this key's own delegate EOA. That
+    address is local, not from Haven. The signer checks it on its x402 arm
+    (#3281), against the Haven-signed expected context's asset and amount.
+    The SDK's own funding leg (`signForData`, #3375) checks it against the
+    402 option being paid, never against the `/x402` response.
 - **An erc7710 settlement child `Delegation`**, verified against an
   expectation Haven cannot rewrite: payee, amount, token, chain, and an expiry
   of at most 600 seconds. It must not be a ROOT delegation, and it must be
@@ -1425,6 +1428,10 @@ the settlement child's (malformed children included), is
 hash does not match. A settlement network the signer cannot map keeps its own
 `SIGNING_ERROR`, which asks for a signer update. In every
 case nothing is signed, audited or submitted.
+In the SDK, a funding-leg refusal (#3375) throws `HavenTypedDataRefusedError`
+before the funding leg is signed or posted to `/sign`. The EIP-3009 merchant
+header, minted in-process just before (#1521), is discarded and never returned;
+the funding intent stays `pending_signature` until it expires.
 The core's `signDelegationTypedData`, `HavenClient.sign(hash)` and the SDK's
 exported signing primitives stay verbatim, for embedders; the checks are in
 `haven_sign`, `signX402FundingTypedData` and `signForData`.
@@ -1435,17 +1442,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
    prepare payments the caveats allow, because preparing payments is what the
    agent delegated to Haven. For a pinned budget that means only the pinned
    recipient. For an open budget it means any recipient, up to the full period
-   budget, every period, until expiry or revocation. #3281's recipient pin
-   narrows this on the signer's x402 funding leg only: under a compromised
-   binding key, that leg can move budget only into the agent's own EOA. A
-   correctly shaped direct payment (`haven_sign` without an x402 context)
-   still pays whatever recipient the budget allows, by design.
+   budget, every period, until expiry or revocation. The funding-leg recipient
+   pin narrows this for the EIP-3009 bridge, on the signer's x402 arm (#3281)
+   and on the SDK's own funding leg (#3375): under a compromised Haven, a
+   funding leg can move budget only into the agent's own EOA. A correctly
+   shaped direct payment (`haven_sign` without an x402 context, or the SDK's
+   `pay()`) still pays whatever recipient the budget allows, by design.
 2. **Delegate-EOA balances.** The bridge's merchant header and
    `haven_sign_sweep_delegate` sign token authorisations over the delegate
    EOA's own transient balance. With no local account address configured, the
    sweep destination rests on Haven's binding signature alone, so a
-   compromised binding key could redirect such a balance. This is bounded by
-   the hot-delegate discipline (transient balances, sweep).
+   compromised binding key could redirect such a balance. The SDK's
+   `sweepDelegate()` has the same shape: it sends the delegate balance to
+   `getAgent().accountAddress`, which Haven's API serves (#3375 names it; it
+   does not close it). This is bounded by the hot-delegate discipline
+   (transient balances, sweep).
 
 **The blast-radius questions #3272 asked, and where each now stands:**
 
@@ -1498,7 +1509,9 @@ exported signing primitives stay verbatim, for embedders; the checks are in
   notes (`packages/signer/CHANGELOG.md`).
 
 > **Scope of this section:** written for #3272 and rewritten once for epic
-> #3284 (#3283, #3281) against the signer and SDK at those changes. The rest
+> #3284 (#3283, #3281) against the signer and SDK at those changes; #3375
+> (the epic's third slice) then updated the funding-leg pin and the two
+> residuals above. The rest
 > of this document was not re-read for it, and `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3267, 2026-09-24, the Safe-era identifier rename):**
